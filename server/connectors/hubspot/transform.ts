@@ -97,7 +97,7 @@ export function transformDeal(deal: HubSpotDeal, workspaceId: string): Normalize
     name: props.dealname ?? null,
     amount: parseNumber(props.amount),
     stage: props.dealstage ?? null,
-    close_date: props.closedate ?? null,
+    close_date: props.closedate && props.closedate !== '' ? props.closedate : null,
     owner: props.hubspot_owner_id ?? null,
     probability: parseNumber(props.hs_deal_stage_probability),
     forecast_category: null,

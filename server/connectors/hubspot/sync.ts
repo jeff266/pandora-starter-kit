@@ -10,164 +10,184 @@ import {
 } from './transform.js';
 import type { SyncResult } from '../_interface.js';
 
-async function upsertDeals(deals: NormalizedDeal[]): Promise<number> {
-  if (deals.length === 0) return 0;
+const BATCH_SIZE = 500;
 
-  const client = await getClient();
+async function upsertInBatches<T>(
+  items: T[],
+  upsertFn: (batch: T[]) => Promise<number>
+): Promise<number> {
   let stored = 0;
-  try {
-    await client.query('BEGIN');
+  for (let i = 0; i < items.length; i += BATCH_SIZE) {
+    const batch = items.slice(i, i + BATCH_SIZE);
+    stored += await upsertFn(batch);
+  }
+  return stored;
+}
 
-    for (const deal of deals) {
-      await client.query(
-        `INSERT INTO deals (
-          workspace_id, source, source_id, source_data,
-          name, amount, stage, close_date, owner,
-          probability, forecast_category, pipeline,
-          last_activity_date, custom_fields, created_at, updated_at
-        ) VALUES (
-          $1, $2, $3, $4,
-          $5, $6, $7, $8, $9,
-          $10, $11, $12,
-          $13, $14, NOW(), NOW()
-        )
-        ON CONFLICT (workspace_id, source, source_id) DO UPDATE SET
-          source_data = EXCLUDED.source_data,
-          name = EXCLUDED.name,
-          amount = EXCLUDED.amount,
-          stage = EXCLUDED.stage,
-          close_date = EXCLUDED.close_date,
-          owner = EXCLUDED.owner,
-          probability = EXCLUDED.probability,
-          forecast_category = EXCLUDED.forecast_category,
-          pipeline = EXCLUDED.pipeline,
-          last_activity_date = EXCLUDED.last_activity_date,
-          custom_fields = EXCLUDED.custom_fields,
-          updated_at = NOW()`,
-        [
-          deal.workspace_id, deal.source, deal.source_id, JSON.stringify(deal.source_data),
-          deal.name, deal.amount, deal.stage, deal.close_date, deal.owner,
-          deal.probability, deal.forecast_category, deal.pipeline,
-          deal.last_activity_date, JSON.stringify(deal.custom_fields),
-        ]
-      );
-      stored++;
+async function upsertDeals(deals: NormalizedDeal[]): Promise<number> {
+  return upsertInBatches(deals, async (batch) => {
+    if (batch.length === 0) return 0;
+
+    const client = await getClient();
+    let stored = 0;
+    try {
+      await client.query('BEGIN');
+
+      for (const deal of batch) {
+        await client.query(
+          `INSERT INTO deals (
+            workspace_id, source, source_id, source_data,
+            name, amount, stage, close_date, owner,
+            probability, forecast_category, pipeline,
+            last_activity_date, custom_fields, created_at, updated_at
+          ) VALUES (
+            $1, $2, $3, $4,
+            $5, $6, $7, $8, $9,
+            $10, $11, $12,
+            $13, $14, NOW(), NOW()
+          )
+          ON CONFLICT (workspace_id, source, source_id) DO UPDATE SET
+            source_data = EXCLUDED.source_data,
+            name = EXCLUDED.name,
+            amount = EXCLUDED.amount,
+            stage = EXCLUDED.stage,
+            close_date = EXCLUDED.close_date,
+            owner = EXCLUDED.owner,
+            probability = EXCLUDED.probability,
+            forecast_category = EXCLUDED.forecast_category,
+            pipeline = EXCLUDED.pipeline,
+            last_activity_date = EXCLUDED.last_activity_date,
+            custom_fields = EXCLUDED.custom_fields,
+            updated_at = NOW()`,
+          [
+            deal.workspace_id, deal.source, deal.source_id, JSON.stringify(deal.source_data),
+            deal.name, deal.amount, deal.stage, deal.close_date, deal.owner,
+            deal.probability, deal.forecast_category, deal.pipeline,
+            deal.last_activity_date, JSON.stringify(deal.custom_fields),
+          ]
+        );
+        stored++;
+      }
+
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
     }
 
-    await client.query('COMMIT');
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
-
-  return stored;
+    return stored;
+  });
 }
 
 async function upsertContacts(contacts: NormalizedContact[]): Promise<number> {
-  if (contacts.length === 0) return 0;
+  return upsertInBatches(contacts, async (batch) => {
+    if (batch.length === 0) return 0;
 
-  const client = await getClient();
-  let stored = 0;
-  try {
-    await client.query('BEGIN');
+    const client = await getClient();
+    let stored = 0;
+    try {
+      await client.query('BEGIN');
 
-    for (const contact of contacts) {
-      await client.query(
-        `INSERT INTO contacts (
-          workspace_id, source, source_id, source_data,
-          email, first_name, last_name, title, seniority,
-          department, lifecycle_stage, engagement_score,
-          phone, last_activity_date, custom_fields, created_at, updated_at
-        ) VALUES (
-          $1, $2, $3, $4,
-          $5, $6, $7, $8, $9,
-          $10, $11, $12,
-          $13, $14, $15, NOW(), NOW()
-        )
-        ON CONFLICT (workspace_id, source, source_id) DO UPDATE SET
-          source_data = EXCLUDED.source_data,
-          email = EXCLUDED.email,
-          first_name = EXCLUDED.first_name,
-          last_name = EXCLUDED.last_name,
-          title = EXCLUDED.title,
-          seniority = EXCLUDED.seniority,
-          department = EXCLUDED.department,
-          lifecycle_stage = EXCLUDED.lifecycle_stage,
-          engagement_score = EXCLUDED.engagement_score,
-          phone = EXCLUDED.phone,
-          last_activity_date = EXCLUDED.last_activity_date,
-          custom_fields = EXCLUDED.custom_fields,
-          updated_at = NOW()`,
-        [
-          contact.workspace_id, contact.source, contact.source_id, JSON.stringify(contact.source_data),
-          contact.email, contact.first_name, contact.last_name, contact.title, contact.seniority,
-          contact.department, contact.lifecycle_stage, contact.engagement_score,
-          contact.phone, contact.last_activity_date, JSON.stringify(contact.custom_fields),
-        ]
-      );
-      stored++;
+      for (const contact of batch) {
+        await client.query(
+          `INSERT INTO contacts (
+            workspace_id, source, source_id, source_data,
+            email, first_name, last_name, title, seniority,
+            department, lifecycle_stage, engagement_score,
+            phone, last_activity_date, custom_fields, created_at, updated_at
+          ) VALUES (
+            $1, $2, $3, $4,
+            $5, $6, $7, $8, $9,
+            $10, $11, $12,
+            $13, $14, $15, NOW(), NOW()
+          )
+          ON CONFLICT (workspace_id, source, source_id) DO UPDATE SET
+            source_data = EXCLUDED.source_data,
+            email = EXCLUDED.email,
+            first_name = EXCLUDED.first_name,
+            last_name = EXCLUDED.last_name,
+            title = EXCLUDED.title,
+            seniority = EXCLUDED.seniority,
+            department = EXCLUDED.department,
+            lifecycle_stage = EXCLUDED.lifecycle_stage,
+            engagement_score = EXCLUDED.engagement_score,
+            phone = EXCLUDED.phone,
+            last_activity_date = EXCLUDED.last_activity_date,
+            custom_fields = EXCLUDED.custom_fields,
+            updated_at = NOW()`,
+          [
+            contact.workspace_id, contact.source, contact.source_id, JSON.stringify(contact.source_data),
+            contact.email, contact.first_name, contact.last_name, contact.title, contact.seniority,
+            contact.department, contact.lifecycle_stage, contact.engagement_score,
+            contact.phone, contact.last_activity_date, JSON.stringify(contact.custom_fields),
+          ]
+        );
+        stored++;
+      }
+
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
     }
 
-    await client.query('COMMIT');
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
-
-  return stored;
+    return stored;
+  });
 }
 
 async function upsertAccounts(accounts: NormalizedAccount[]): Promise<number> {
-  if (accounts.length === 0) return 0;
+  return upsertInBatches(accounts, async (batch) => {
+    if (batch.length === 0) return 0;
 
-  const client = await getClient();
-  let stored = 0;
-  try {
-    await client.query('BEGIN');
+    const client = await getClient();
+    let stored = 0;
+    try {
+      await client.query('BEGIN');
 
-    for (const account of accounts) {
-      await client.query(
-        `INSERT INTO accounts (
-          workspace_id, source, source_id, source_data,
-          name, domain, industry, employee_count,
-          annual_revenue, owner, custom_fields, created_at, updated_at
-        ) VALUES (
-          $1, $2, $3, $4,
-          $5, $6, $7, $8,
-          $9, $10, $11, NOW(), NOW()
-        )
-        ON CONFLICT (workspace_id, source, source_id) DO UPDATE SET
-          source_data = EXCLUDED.source_data,
-          name = EXCLUDED.name,
-          domain = EXCLUDED.domain,
-          industry = EXCLUDED.industry,
-          employee_count = EXCLUDED.employee_count,
-          annual_revenue = EXCLUDED.annual_revenue,
-          owner = EXCLUDED.owner,
-          custom_fields = EXCLUDED.custom_fields,
-          updated_at = NOW()`,
-        [
-          account.workspace_id, account.source, account.source_id, JSON.stringify(account.source_data),
-          account.name, account.domain, account.industry, account.employee_count,
-          account.annual_revenue, account.owner, JSON.stringify(account.custom_fields),
-        ]
-      );
-      stored++;
+      for (const account of batch) {
+        await client.query(
+          `INSERT INTO accounts (
+            workspace_id, source, source_id, source_data,
+            name, domain, industry, employee_count,
+            annual_revenue, owner, custom_fields, created_at, updated_at
+          ) VALUES (
+            $1, $2, $3, $4,
+            $5, $6, $7, $8,
+            $9, $10, $11, NOW(), NOW()
+          )
+          ON CONFLICT (workspace_id, source, source_id) DO UPDATE SET
+            source_data = EXCLUDED.source_data,
+            name = EXCLUDED.name,
+            domain = EXCLUDED.domain,
+            industry = EXCLUDED.industry,
+            employee_count = EXCLUDED.employee_count,
+            annual_revenue = EXCLUDED.annual_revenue,
+            owner = EXCLUDED.owner,
+            custom_fields = EXCLUDED.custom_fields,
+            updated_at = NOW()`,
+          [
+            account.workspace_id, account.source, account.source_id, JSON.stringify(account.source_data),
+            account.name, account.domain, account.industry, account.employee_count,
+            account.annual_revenue, account.owner, JSON.stringify(account.custom_fields),
+          ]
+        );
+        stored++;
+      }
+
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
     }
 
-    await client.query('COMMIT');
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
-
-  return stored;
+    return stored;
+  });
 }
 
 export async function initialSync(
@@ -182,20 +202,18 @@ export async function initialSync(
   console.log(`[HubSpot Sync] Starting initial sync for workspace ${workspaceId}`);
 
   try {
-    const [rawDeals, rawContacts, rawCompanies] = await Promise.all([
-      client.getAllDeals(true).catch(err => {
-        errors.push(`Failed to fetch deals: ${err.message}`);
-        return [];
-      }),
-      client.getAllContacts(true).catch(err => {
-        errors.push(`Failed to fetch contacts: ${err.message}`);
-        return [];
-      }),
-      client.getAllCompanies(true).catch(err => {
-        errors.push(`Failed to fetch companies: ${err.message}`);
-        return [];
-      }),
-    ]);
+    let rawDeals: any[] = [];
+    let rawContacts: any[] = [];
+    let rawCompanies: any[] = [];
+
+    try { rawDeals = await client.getAllDeals(false); }
+    catch (err: any) { errors.push(`Failed to fetch deals: ${err.message}`); }
+
+    try { rawContacts = await client.getAllContacts(false); }
+    catch (err: any) { errors.push(`Failed to fetch contacts: ${err.message}`); }
+
+    try { rawCompanies = await client.getAllCompanies(false); }
+    catch (err: any) { errors.push(`Failed to fetch companies: ${err.message}`); }
 
     totalFetched = rawDeals.length + rawContacts.length + rawCompanies.length;
     console.log(`[HubSpot Sync] Fetched ${rawDeals.length} deals, ${rawContacts.length} contacts, ${rawCompanies.length} companies`);
@@ -206,14 +224,17 @@ export async function initialSync(
 
     const [dealsStored, contactsStored, accountsStored] = await Promise.all([
       upsertDeals(normalizedDeals).catch(err => {
+        console.error(`[HubSpot Sync] Failed to store deals:`, err.message);
         errors.push(`Failed to store deals: ${err.message}`);
         return 0;
       }),
       upsertContacts(normalizedContacts).catch(err => {
+        console.error(`[HubSpot Sync] Failed to store contacts:`, err.message);
         errors.push(`Failed to store contacts: ${err.message}`);
         return 0;
       }),
       upsertAccounts(normalizedAccounts).catch(err => {
+        console.error(`[HubSpot Sync] Failed to store accounts:`, err.message);
         errors.push(`Failed to store accounts: ${err.message}`);
         return 0;
       }),
