@@ -3,7 +3,7 @@
 ## Overview
 Pandora is a multi-tenant agent-based platform that helps RevOps teams analyze their GTM (Go-To-Market) data. It connects to CRM, call intelligence, task management, and document systems, normalizes data into 8 core entities, and runs AI-powered analyses.
 
-**Current State**: Session 5 — Context Layer. Workspace-scoped, versioned context with 5 JSONB sections (business_model, team_structure, goals_and_targets, definitions, operational_maturity). Onboarding endpoint populates context from structured answers.
+**Current State**: Session 6 — Computed Fields Engine. Batch computation of engagement_score, health_score, velocity_score, deal_risk across entities. Pipeline snapshot now reads defaults from context layer. days_in_stage/days_since_activity computed on read via SQL.
 
 **Version**: 0.1.0
 
@@ -39,9 +39,15 @@ pandora/
         schema-discovery.ts # Property enumeration, pipeline discovery, metadata storage
     context/
       index.ts            # Context layer DB functions (get/update sections, onboarding)
+    computed-fields/
+      engine.ts           # Batch computation orchestrator (deals, contacts, accounts)
+      deal-scores.ts      # velocity_score + deal_risk with risk factors
+      contact-scores.ts   # engagement_score from activity signals
+      account-scores.ts   # health_score from engagement, relationships, revenue
+      temporal-fields.ts  # SQL helpers for days_in_stage, days_since_activity (computed on read)
     schemas/              # Will hold entity definitions
     analysis/
-      pipeline-snapshot.ts # Pipeline metrics from normalized deals (SQL queries)
+      pipeline-snapshot.ts # Pipeline metrics from normalized deals (configurable stale threshold)
     utils/
       index.ts            # Barrel export for all utilities
       retry.ts            # Exponential backoff, paginated fetch, rate limiter
@@ -53,6 +59,7 @@ pandora/
     001_initial.sql       # Initial schema: workspaces, connections, 7 entity tables
     002_add_calls_table.sql # Adds calls table (8th entity)
     003_context_layer.sql # Context layer table (5 JSONB sections, versioned)
+    004_add_computed_field_columns.sql # Adds velocity_score, deal_risk, deal_risk_factors to deals
 ```
 
 ## Database Schema
@@ -64,7 +71,7 @@ All tables use UUID primary keys and include `workspace_id` for multi-tenant iso
 - `context_layer` — one per workspace, 5 JSONB sections (business_model, team_structure, goals_and_targets, definitions, operational_maturity), versioned
 
 **8 Entity tables** (all have `workspace_id`, `source`, `source_id`, `source_data JSONB`, `custom_fields JSONB`):
-- `deals` — CRM deals with amount, stage, pipeline, probability
+- `deals` — CRM deals with amount, stage, pipeline, probability, velocity_score, deal_risk, deal_risk_factors
 - `contacts` — people with email, title, seniority, engagement_score
 - `accounts` — companies with domain, industry, revenue, health_score
 - `activities` — emails, calls, meetings, notes (type + timestamp + associations)
@@ -113,6 +120,7 @@ All tables use UUID primary keys and include `workspace_id` for multi-tenant iso
 - `GET /api/workspaces/:id/context/:section` — One section (business_model, goals, definitions, etc.)
 - `PUT /api/workspaces/:id/context/:section` — Update one section
 - `POST /api/workspaces/:id/context/onboard` — Populate context from onboarding answers
+- `POST /api/workspaces/:id/actions/compute-fields` — Batch compute engagement, health, velocity, risk scores
 
 ## Scripts
 - `npm run dev` — Start dev server with hot reload (tsx watch)
@@ -131,7 +139,7 @@ All tables use UUID primary keys and include `workspace_id` for multi-tenant iso
 - **Session 3**: Port HubSpot connector (DONE)
 - **Session 4**: Pipeline snapshot → Slack (DONE)
 - **Session 5**: Context Layer (DONE)
-- **Session 6**: Computed fields engine
+- **Session 6**: Computed fields engine (DONE)
 - **Sessions 7-10**: Phase 2 (expanded connectors, sync orchestrator, query API)
 
 ## Key Reference Documents

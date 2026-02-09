@@ -27,7 +27,8 @@ export interface PipelineSnapshot {
 
 export async function generatePipelineSnapshot(
   workspaceId: string,
-  quota?: number
+  quota?: number,
+  staleDaysThreshold: number = 14
 ): Promise<PipelineSnapshot> {
   const [totalsResult, byStageResult, closingResult, staleResult] = await Promise.all([
     query<{ deal_count: string; total_amount: string; avg_amount: string }>(
@@ -76,9 +77,9 @@ export async function generatePipelineSnapshot(
         AND stage NOT IN ('closedwon', 'closedlost', 'closed won', 'closed lost')
         AND (
           last_activity_date IS NULL
-          OR last_activity_date < NOW() - INTERVAL '14 days'
+          OR last_activity_date < NOW() - INTERVAL '1 day' * $2
         )`,
-      [workspaceId]
+      [workspaceId, staleDaysThreshold]
     ),
   ]);
 
@@ -106,7 +107,7 @@ export async function generatePipelineSnapshot(
     staleDeals: {
       dealCount: parseInt(stale.deal_count, 10) || 0,
       totalAmount: parseFloat(stale.total_amount) || 0,
-      staleDaysThreshold: 14,
+      staleDaysThreshold,
     },
     coverageRatio: quota && quota > 0
       ? Math.round((totalPipeline / quota) * 100) / 100
