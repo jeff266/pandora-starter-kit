@@ -1,0 +1,838 @@
+Perfect! Here are all 5 utility files ready to attach to your Replit project.
+   You can copy these and paste them into Replit or share this with the Replit 
+  agent.                                                                       
+                                                                               
+  ---                                                                          
+  1. utils/retry.ts (275 lines)                                                
+                                                                               
+  // Retry Logic with Exponential Backoff                                      
+  // Extracted from Fireflies connector - this pattern should be used by ALL   
+  connectors                                                                   
+                                                                               
+  /**                                                                          
+   * Exponential backoff retry configuration                                   
+   */                                                                          
+  export interface RetryConfig {                                               
+    maxRetries: number; // Max number of retry attempts (default: 3)           
+    baseDelay: number; // Base delay in milliseconds (default: 1000 = 1 second)
+    maxDelay?: number; // Max delay cap in milliseconds (default: none)        
+    backoffFactor: number; // Exponential factor (default: 2 for doubling)     
+    onRetry?: (attempt: number, error: Error, delayMs: number) => void; //     
+  Callback on each retry                                                       
+  }                                                                            
+                                                                               
+  /**                                                                          
+   * Default retry configuration (Fireflies pattern: 1s, 2s, 4s)               
+   */                                                                          
+  export const DEFAULT_RETRY_CONFIG: RetryConfig = {                           
+    maxRetries: 3,                                                             
+    baseDelay: 1000, // 1 second                                               
+    backoffFactor: 2, // Double each time (1s → 2s → 4s)                       
+    onRetry: (attempt, error, delayMs) => {                                    
+      console.log(`[Retry] Attempt ${attempt} failed: ${error.message}.        
+  Retrying in ${delayMs}ms...`);                                               
+    },                                                                         
+  };                                                                           
+                                                                               
+  /**                                                                          
+   * Execute a function with exponential backoff retry logic                   
+   *                                                                           
+   * @param fn - Async function to execute                                     
+   * @param config - Retry configuration (optional)                            
+   * @returns Result of the function                                           
+   * @throws Error if all retries are exhausted                                
+   *                                                                           
+   * @example                                                                  
+   * ```typescript                                                             
+   * const data = await withRetry(                                             
+   *   async () => await fetchDataFromAPI(),                                   
+   *   { maxRetries: 3, baseDelay: 1000 }                                      
+   * );                                                                        
+   * ```                                                                       
+   */                                                                          
+  export async function withRetry<T>(                                          
+    fn: () => Promise<T>,                                                      
+    config: Partial<RetryConfig> = {}                                          
+  ): Promise<T> {                                                              
+    const cfg: RetryConfig = { ...DEFAULT_RETRY_CONFIG, ...config };           
+                                                                               
+    let lastError: Error | null = null;                                        
+                                                                               
+    for (let attempt = 1; attempt <= cfg.maxRetries + 1; attempt++) {          
+      try {                                                                    
+        return await fn();                                                     
+      } catch (error) {                                                        
+        lastError = error instanceof Error ? error : new Error(String(error)); 
+                                                                               
+        // If this was the last attempt, throw                                 
+        if (attempt > cfg.maxRetries) {                                        
+          throw lastError;                                                     
+        }                                                                      
+                                                                               
+        // Calculate exponential backoff delay: baseDelay * (backoffFactor ^   
+  (attempt - 1))                                                               
+        let delay = cfg.baseDelay * Math.pow(cfg.backoffFactor, attempt - 1);  
+                                                                               
+        // Cap delay if maxDelay is set                                        
+        if (cfg.maxDelay && delay > cfg.maxDelay) {                            
+          delay = cfg.maxDelay;                                                
+        }                                                                      
+                                                                               
+        // Call onRetry callback if provided                                   
+        if (cfg.onRetry) {                                                     
+          cfg.onRetry(attempt, lastError, delay);                              
+        }                                                                      
+                                                                               
+        // Wait before retrying                                                
+        await sleep(delay);                                                    
+      }                                                                        
+    }                                                                          
+                                                                               
+    // This should never be reached, but TypeScript requires it                
+    throw lastError || new Error('Retry failed');                              
+  }                                                                            
+                                                                               
+  /**                                                                          
+   * Paginated fetch with retry and consecutive error limit                    
+   * (Fireflies pattern - stops pagination if too many consecutive errors)     
+   *                                                                           
+   * @param fetchPage - Function that fetches a page of data                   
+   * @param options - Configuration options                                    
+   * @returns Array of all fetched results                                     
+   *                                                                           
+   * @example                                                                  
+   * ```typescript                                                             
+   * const results = await paginatedFetchWithRetry(                            
+   *   async (pageNum) => await api.getPage(pageNum),                          
+   *   {                                                                       
+   *     maxPages: 20,                                                         
+   *     consecutiveErrorLimit: 3,                                             
+   *     onProgress: (fetched) => console.log(`Fetched ${fetched} records`)    
+   *   }                                                                       
+   * );                                                                        
+   * ```                                                                       
+   */                                                                          
+  export async function paginatedFetchWithRetry<T>(                            
+    fetchPage: (pageNumber: number) => Promise<T[]>,                           
+    options: {                                                                 
+      maxPages?: number; // Safety limit (default: 20 = 1000 records if        
+  50/page)                                                                     
+      pageDelay?: number; // Delay between successful page fetches (default:   
+  200ms - be nice to API)                                                      
+      retryConfig?: Partial<RetryConfig>; // Retry config for each page fetch  
+      consecutiveErrorLimit?: number; // Stop if this many consecutive page    
+  fetches fail (default: 3)                                                    
+      onProgress?: (totalFetched: number, pageNumber: number) => void; //      
+  Progress callback                                                            
+    } = {}                                                                     
+  ): Promise<T[]> {                                                            
+    const {                                                                    
+      maxPages = 20,                                                           
+      pageDelay = 200,                                                         
+      retryConfig = {},                                                        
+      consecutiveErrorLimit = 3,                                               
+      onProgress,                                                              
+    } = options;                                                               
+                                                                               
+    const allResults: T[] = [];                                                
+    let pageNum = 0;                                                           
+    let consecutiveErrors = 0;                                                 
+                                                                               
+    while (pageNum < maxPages) {                                               
+      let pageResults: T[] | null = null;                                      
+                                                                               
+      try {                                                                    
+        // Fetch page with retry logic                                         
+        pageResults = await withRetry(                                         
+          async () => await fetchPage(pageNum),                                
+          retryConfig                                                          
+        );                                                                     
+                                                                               
+        consecutiveErrors = 0; // Reset on success                             
+      } catch (error) {                                                        
+        consecutiveErrors++;                                                   
+        console.error(                                                         
+          `[PaginatedFetch] Error fetching page ${pageNum} (consecutive errors:
+   ${consecutiveErrors}):`,                                                    
+          error instanceof Error ? error.message : error                       
+        );                                                                     
+                                                                               
+        // If we've hit the consecutive error limit, stop pagination           
+        if (consecutiveErrors >= consecutiveErrorLimit) {                      
+          console.error(                                                       
+            `[PaginatedFetch] Consecutive error limit                          
+  (${consecutiveErrorLimit}) reached. Stopping pagination with                 
+  ${allResults.length} results.`                                               
+          );                                                                   
+          break;                                                               
+        }                                                                      
+                                                                               
+        // Continue to next page (skip this failed page)                       
+        pageNum++;                                                             
+        continue;                                                              
+      }                                                                        
+                                                                               
+      // If page is null or empty, we've reached the end                       
+      if (!pageResults || pageResults.length === 0) {                          
+        console.log(`[PaginatedFetch] Reached end of data at page ${pageNum}`);
+        break;                                                                 
+      }                                                                        
+                                                                               
+      // Add results to collection                                             
+      allResults.push(...pageResults);                                         
+      pageNum++;                                                               
+                                                                               
+      // Call progress callback                                                
+      if (onProgress) {                                                        
+        onProgress(allResults.length, pageNum);                                
+      }                                                                        
+                                                                               
+      console.log(                                                             
+        `[PaginatedFetch] Fetched page ${pageNum}: ${pageResults.length}       
+  results (total: ${allResults.length})`                                       
+      );                                                                       
+                                                                               
+      // If page was smaller than expected (e.g., < 50 for APIs that return    
+  50/page),                                                                    
+      // we've likely reached the end                                          
+      // This check should be customized per API based on their page size      
+                                                                               
+      // Small delay between successful requests (be nice to API)              
+      if (pageNum < maxPages && pageResults.length > 0) {                      
+        await sleep(pageDelay);                                                
+      }                                                                        
+    }                                                                          
+                                                                               
+    console.log(`[PaginatedFetch] Pagination complete: ${allResults.length}    
+  total results`);                                                             
+    return allResults;                                                         
+  }                                                                            
+                                                                               
+  /**                                                                          
+   * Sleep for a specified number of milliseconds                              
+   */                                                                          
+  function sleep(ms: number): Promise<void> {                                  
+    return new Promise(resolve => setTimeout(resolve, ms));                    
+  }                                                                            
+                                                                               
+  /**                                                                          
+   * Rate limiter utility                                                      
+   * Ensures requests don't exceed a specified rate                            
+   */                                                                          
+  export class RateLimiter {                                                   
+    private queue: Array<() => void> = [];                                     
+    private tokens: number;                                                    
+    private lastRefill: number;                                                
+                                                                               
+    constructor(                                                               
+      private maxRequests: number, // Max requests per window                  
+      private windowMs: number // Time window in milliseconds                  
+    ) {                                                                        
+      this.tokens = maxRequests;                                               
+      this.lastRefill = Date.now();                                            
+    }                                                                          
+                                                                               
+    /**                                                                        
+     * Wait for a token to become available, then execute function             
+     */                                                                        
+    async execute<T>(fn: () => Promise<T>): Promise<T> {                       
+      await this.waitForToken();                                               
+      return fn();                                                             
+    }                                                                          
+                                                                               
+    private async waitForToken(): Promise<void> {                              
+      this.refillTokens();                                                     
+                                                                               
+      if (this.tokens > 0) {                                                   
+        this.tokens--;                                                         
+        return;                                                                
+      }                                                                        
+                                                                               
+      // Wait until tokens are available                                       
+      return new Promise(resolve => {                                          
+        this.queue.push(resolve);                                              
+        this.scheduleRefill();                                                 
+      });                                                                      
+    }                                                                          
+                                                                               
+    private refillTokens() {                                                   
+      const now = Date.now();                                                  
+      const elapsed = now - this.lastRefill;                                   
+                                                                               
+      if (elapsed >= this.windowMs) {                                          
+        this.tokens = this.maxRequests;                                        
+        this.lastRefill = now;                                                 
+                                                                               
+        // Process queued requests                                             
+        while (this.tokens > 0 && this.queue.length > 0) {                     
+          this.tokens--;                                                       
+          const resolve = this.queue.shift();                                  
+          if (resolve) resolve();                                              
+        }                                                                      
+      }                                                                        
+    }                                                                          
+                                                                               
+    private scheduleRefill() {                                                 
+      const now = Date.now();                                                  
+      const timeUntilRefill = this.windowMs - (now - this.lastRefill);         
+                                                                               
+      if (timeUntilRefill > 0) {                                               
+        setTimeout(() => {                                                     
+          this.refillTokens();                                                 
+        }, timeUntilRefill);                                                   
+      }                                                                        
+    }                                                                          
+  }                                                                            
+                                                                               
+  /**                                                                          
+   * Create a rate-limited version of a function                               
+   *                                                                           
+   * @example                                                                  
+   * ```typescript                                                             
+   * const rateLimiter = new RateLimiter(100, 10000); // 100 requests per 10   
+  seconds (HubSpot)                                                            
+   * const fetchWithLimit = (url: string) => rateLimiter.execute(() =>         
+  fetch(url));                                                                 
+   * ```                                                                       
+   */                                                                          
+                                                                               
+  ---                                                                          
+  2. utils/logger.ts (92 lines)                                                
+                                                                               
+  // Structured Logging Utility                                                
+  // Pattern extracted from RevOps Copilot                                     
+                                                                               
+  export type LogLevel = 'debug' | 'info' | 'warn' | 'error';                  
+                                                                               
+  export interface LogContext {                                                
+    [key: string]: any;                                                        
+  }                                                                            
+                                                                               
+  /**                                                                          
+   * Structured logger with context                                            
+   * Follows Copilot's pattern: [Prefix] Message                               
+   */                                                                          
+  export class Logger {                                                        
+    constructor(                                                               
+      private prefix: string,                                                  
+      private context: LogContext = {}                                         
+    ) {}                                                                       
+                                                                               
+    debug(message: string, context?: LogContext) {                             
+      this.log('debug', message, context);                                     
+    }                                                                          
+                                                                               
+    info(message: string, context?: LogContext) {                              
+      this.log('info', message, context);                                      
+    }                                                                          
+                                                                               
+    warn(message: string, context?: LogContext) {                              
+      this.log('warn', message, context);                                      
+    }                                                                          
+                                                                               
+    error(message: string, error?: Error, context?: LogContext) {              
+      const errorContext = error ? {                                           
+        error: error.message,                                                  
+        stack: error.stack,                                                    
+        ...context,                                                            
+      } : context;                                                             
+      this.log('error', message, errorContext);                                
+    }                                                                          
+                                                                               
+    private log(level: LogLevel, message: string, context?: LogContext) {      
+      const timestamp = new Date().toISOString();                              
+      const fullContext = { ...this.context, ...context };                     
+      const contextStr = Object.keys(fullContext).length > 0                   
+        ? ` ${JSON.stringify(fullContext)}`                                    
+        : '';                                                                  
+                                                                               
+      const formattedMessage = `[${this.prefix}] ${message}${contextStr}`;     
+                                                                               
+      switch (level) {                                                         
+        case 'debug':                                                          
+          console.debug(formattedMessage);                                     
+          break;                                                               
+        case 'info':                                                           
+          console.log(formattedMessage);                                       
+          break;                                                               
+        case 'warn':                                                           
+          console.warn(formattedMessage);                                      
+          break;                                                               
+        case 'error':                                                          
+          console.error(formattedMessage);                                     
+          break;                                                               
+      }                                                                        
+    }                                                                          
+  }                                                                            
+                                                                               
+  /**                                                                          
+   * Create a logger with prefix                                               
+   *                                                                           
+   * @example                                                                  
+   * const logger = createLogger('HubSpot');                                   
+   * logger.info('Starting sync', { workspaceId: '123' });                     
+   * // Output: [HubSpot] Starting sync {"workspaceId":"123"}                  
+   */                                                                          
+  export function createLogger(prefix: string, context?: LogContext): Logger { 
+    return new Logger(prefix, context);                                        
+  }                                                                            
+                                                                               
+  /**                                                                          
+   * Common logger instances for connectors                                    
+   */                                                                          
+  export const loggers = {                                                     
+    hubspot: createLogger('HubSpot'),                                          
+    gong: createLogger('Gong'),                                                
+    fireflies: createLogger('Fireflies'),                                      
+    monday: createLogger('Monday'),                                            
+    asana: createLogger('Asana'),                                              
+    googleDrive: createLogger('Google Drive'),                                 
+    sync: createLogger('Sync'),                                                
+    orchestrator: createLogger('Orchestrator'),                                
+  };                                                                           
+                                                                               
+  ---                                                                          
+  3. utils/date-helpers.ts (118 lines)                                         
+                                                                               
+  // Date/Time Helper Functions                                                
+  // Uses date-fns library (same as Copilot)                                   
+                                                                               
+  /**                                                                          
+   * Calculate days between two dates                                          
+   */                                                                          
+  export function daysBetween(date1: Date, date2: Date): number {              
+    const diffMs = Math.abs(date2.getTime() - date1.getTime());                
+    return Math.floor(diffMs / (1000 * 60 * 60 * 24));                         
+  }                                                                            
+                                                                               
+  /**                                                                          
+   * Get date N days ago                                                       
+   */                                                                          
+  export function daysAgo(days: number): Date {                                
+    const date = new Date();                                                   
+    date.setDate(date.getDate() - days);                                       
+    return date;                                                               
+  }                                                                            
+                                                                               
+  /**                                                                          
+   * Get start of today                                                        
+   */                                                                          
+  export function startOfToday(): Date {                                       
+    const date = new Date();                                                   
+    date.setHours(0, 0, 0, 0);                                                 
+    return date;                                                               
+  }                                                                            
+                                                                               
+  /**                                                                          
+   * Get start of week (Monday)                                                
+   */                                                                          
+  export function startOfWeek(date: Date = new Date()): Date {                 
+    const d = new Date(date);                                                  
+    const day = d.getDay();                                                    
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Adjust if Sunday 
+    d.setDate(diff);                                                           
+    d.setHours(0, 0, 0, 0);                                                    
+    return d;                                                                  
+  }                                                                            
+                                                                               
+  /**                                                                          
+   * Get start of month                                                        
+   */                                                                          
+  export function startOfMonth(date: Date = new Date()): Date {                
+    return new Date(date.getFullYear(), date.getMonth(), 1);                   
+  }                                                                            
+                                                                               
+  /**                                                                          
+   * Get start of quarter                                                      
+   */                                                                          
+  export function startOfQuarter(date: Date = new Date()): Date {              
+    const quarter = Math.floor(date.getMonth() / 3);                           
+    return new Date(date.getFullYear(), quarter * 3, 1);                       
+  }                                                                            
+                                                                               
+  /**                                                                          
+   * Format date as ISO string (for API calls)                                 
+   */                                                                          
+  export function toISOString(date: Date): string {                            
+    return date.toISOString();                                                 
+  }                                                                            
+                                                                               
+  /**                                                                          
+   * Parse ISO string to Date                                                  
+   */                                                                          
+  export function parseISO(isoString: string): Date {                          
+    return new Date(isoString);                                                
+  }                                                                            
+                                                                               
+  /**                                                                          
+   * Format date as YYYY-MM-DD                                                 
+   */                                                                          
+  export function formatDate(date: Date): string {                             
+    const year = date.getFullYear();                                           
+    const month = String(date.getMonth() + 1).padStart(2, '0');                
+    const day = String(date.getDate()).padStart(2, '0');                       
+    return `${year}-${month}-${day}`;                                          
+  }                                                                            
+                                                                               
+  /**                                                                          
+   * Parse epoch milliseconds to Date (Fireflies pattern)                      
+   */                                                                          
+  export function parseEpochMs(ms: string | number): Date {                    
+    const msNum = typeof ms === 'string' ? parseFloat(ms) : ms;                
+    return new Date(msNum);                                                    
+  }                                                                            
+                                                                               
+  /**                                                                          
+   * Check if date is in the past                                              
+   */                                                                          
+  export function isPast(date: Date): boolean {                                
+    return date.getTime() < Date.now();                                        
+  }                                                                            
+                                                                               
+  /**                                                                          
+   * Check if date is in the future                                            
+   */                                                                          
+  export function isFuture(date: Date): boolean {                              
+    return date.getTime() > Date.now();                                        
+  }                                                                            
+                                                                               
+  /**                                                                          
+   * Add days to a date                                                        
+   */                                                                          
+  export function addDays(date: Date, days: number): Date {                    
+    const result = new Date(date);                                             
+    result.setDate(result.getDate() + days);                                   
+    return result;                                                             
+  }                                                                            
+                                                                               
+  /**                                                                          
+   * Subtract days from a date                                                 
+   */                                                                          
+  export function subtractDays(date: Date, days: number): Date {               
+    return addDays(date, -days);                                               
+  }                                                                            
+                                                                               
+  ---                                                                          
+  4. utils/data-transforms.ts (123 lines)                                      
+                                                                               
+  // Data Transformation Helpers                                               
+                                                                               
+  /**                                                                          
+   * Extract approved field values from metadata JSONB                         
+   * SOURCE: server/agents/orchestrator.ts lines 20-38                         
+   */                                                                          
+  export function extractFieldValues<T extends Record<string, any>>(           
+    metadata: unknown,                                                         
+    approvedFieldNames: string[]                                               
+  ): T {                                                                       
+    if (!metadata || typeof metadata !== 'object') {                           
+      return {} as T;                                                          
+    }                                                                          
+                                                                               
+    const metadataObj = metadata as Record<string, unknown>;                   
+    const extractedValues: Record<string, unknown> = {};                       
+                                                                               
+    for (const fieldName of approvedFieldNames) {                              
+      const value = metadataObj[fieldName];                                    
+      if (value !== undefined && value !== null && value !== '') {             
+        extractedValues[fieldName] = value;                                    
+      }                                                                        
+    }                                                                          
+                                                                               
+    return extractedValues as T;                                               
+  }                                                                            
+                                                                               
+  /**                                                                          
+   * Safe number parsing                                                       
+   * HubSpot returns all values as strings, even numbers                       
+   */                                                                          
+  export function parseNumber(value: string | number | null | undefined):      
+  number | null {                                                              
+    if (value === null || value === undefined || value === '') return null;    
+    const num = typeof value === 'number' ? value : parseFloat(value);         
+    return isNaN(num) ? null : num;                                            
+  }                                                                            
+                                                                               
+  /**                                                                          
+   * Safe date parsing                                                         
+   */                                                                          
+  export function parseDate(value: string | Date | null | undefined): Date |   
+  null {                                                                       
+    if (!value) return null;                                                   
+    if (value instanceof Date) return value;                                   
+                                                                               
+    try {                                                                      
+      const date = new Date(value);                                            
+      return isNaN(date.getTime()) ? null : date;                              
+    } catch {                                                                  
+      return null;                                                             
+    }                                                                          
+  }                                                                            
+                                                                               
+  /**                                                                          
+   * Normalize email address                                                   
+   */                                                                          
+  export function normalizeEmail(email: string | null | undefined): string |   
+  null {                                                                       
+    if (!email) return null;                                                   
+    return email.toLowerCase().trim();                                         
+  }                                                                            
+                                                                               
+  /**                                                                          
+   * Normalize phone number (basic)                                            
+   */                                                                          
+  export function normalizePhone(phone: string | null | undefined): string |   
+  null {                                                                       
+    if (!phone) return null;                                                   
+    // Remove all non-digit characters                                         
+    return phone.replace(/\D/g, '');                                           
+  }                                                                            
+                                                                               
+  /**                                                                          
+   * Extract domain from email                                                 
+   */                                                                          
+  export function extractDomain(email: string): string | null {                
+    const match = email.match(/@(.+)$/);                                       
+    return match ? match[1].toLowerCase() : null;                              
+  }                                                                            
+                                                                               
+  /**                                                                          
+   * Deduplicate array by key                                                  
+   */                                                                          
+  export function deduplicateBy<T>(array: T[], keyFn: (item: T) => string): T[]
+   {                                                                           
+    const seen = new Set<string>();                                            
+    return array.filter(item => {                                              
+      const key = keyFn(item);                                                 
+      if (seen.has(key)) {                                                     
+        return false;                                                          
+      }                                                                        
+      seen.add(key);                                                           
+      return true;                                                             
+    });                                                                        
+  }                                                                            
+                                                                               
+  /**                                                                          
+   * Group array by key                                                        
+   */                                                                          
+  export function groupBy<T>(array: T[], keyFn: (item: T) => string):          
+  Record<string, T[]> {                                                        
+    const grouped: Record<string, T[]> = {};                                   
+    for (const item of array) {                                                
+      const key = keyFn(item);                                                 
+      if (!grouped[key]) {                                                     
+        grouped[key] = [];                                                     
+      }                                                                        
+      grouped[key].push(item);                                                 
+    }                                                                          
+    return grouped;                                                            
+  }                                                                            
+                                                                               
+  /**                                                                          
+   * Calculate percentage                                                      
+   */                                                                          
+  export function percentage(numerator: number, denominator: number, decimals =
+   2): number {                                                                
+    if (denominator === 0) return 0;                                           
+    return parseFloat(((numerator / denominator) * 100).toFixed(decimals));    
+  }                                                                            
+                                                                               
+  /**                                                                          
+   * Truncate string to max length                                             
+   */                                                                          
+  export function truncate(str: string, maxLength: number, suffix = '...'):    
+  string {                                                                     
+    if (str.length <= maxLength) return str;                                   
+    return str.substring(0, maxLength - suffix.length) + suffix;               
+  }                                                                            
+                                                                               
+  ---                                                                          
+  5. utils/llm-client.ts (166 lines)                                           
+                                                                               
+  // LLM Client Wrappers                                                       
+  // Extracted from RevOps Copilot (server/lib/deepseek-client.ts,             
+  server/agents/ai-providers.ts)                                               
+                                                                               
+  /**                                                                          
+   * DeepSeek Client (via Fireworks OpenAI-compatible API)                     
+   * SOURCE: server/lib/deepseek-client.ts                                     
+   */                                                                          
+                                                                               
+  export interface DeepSeekConfig {                                            
+    apiKey: string;                                                            
+    model?: string; // Default: 'accounts/fireworks/models/deepseek-v3'        
+    baseUrl?: string; // Default: 'https://api.fireworks.ai/inference/v1'      
+  }                                                                            
+                                                                               
+  export class DeepSeekClient {                                                
+    private apiKey: string;                                                    
+    private model: string;                                                     
+    private baseUrl: string;                                                   
+                                                                               
+    constructor(config: DeepSeekConfig) {                                      
+      this.apiKey = config.apiKey;                                             
+      this.model = config.model || 'accounts/fireworks/models/deepseek-v3';    
+      this.baseUrl = config.baseUrl || 'https://api.fireworks.ai/inference/v1';
+    }                                                                          
+                                                                               
+    async call(                                                                
+      systemPrompt: string,                                                    
+      userPrompt: string,                                                      
+      options?: {                                                              
+        temperature?: number;                                                  
+        maxTokens?: number;                                                    
+      }                                                                        
+    ): Promise<string> {                                                       
+      const response = await fetch(`${this.baseUrl}/chat/completions`, {       
+        method: 'POST',                                                        
+        headers: {                                                             
+          'Content-Type': 'application/json',                                  
+          'Authorization': `Bearer ${this.apiKey}`,                            
+        },                                                                     
+        body: JSON.stringify({                                                 
+          model: this.model,                                                   
+          messages: [                                                          
+            { role: 'system', content: systemPrompt },                         
+            { role: 'user', content: userPrompt },                             
+          ],                                                                   
+          temperature: options?.temperature || 0.7,                            
+          max_tokens: options?.maxTokens || 4096,                              
+        }),                                                                    
+      });                                                                      
+                                                                               
+      if (!response.ok) {                                                      
+        const error = await response.text();                                   
+        throw new Error(`DeepSeek API error: ${response.status} - ${error}`);  
+      }                                                                        
+                                                                               
+      const data = await response.json();                                      
+      return data.choices[0]?.message?.content || '';                          
+    }                                                                          
+                                                                               
+    /**                                                                        
+     * Call with JSON schema validation                                        
+     * Expects response to be valid JSON matching schema                       
+     */                                                                        
+    async callStructured<T>(                                                   
+      systemPrompt: string,                                                    
+      userPrompt: string,                                                      
+      schema: any, // JSON Schema                                              
+      options?: {                                                              
+        temperature?: number;                                                  
+        maxTokens?: number;                                                    
+      }                                                                        
+    ): Promise<T> {                                                            
+      const response = await this.call(systemPrompt, userPrompt, options);     
+      return this.parseJsonResponse<T>(response);                              
+    }                                                                          
+                                                                               
+    /**                                                                        
+     * Parse JSON from response                                                
+     * Handles markdown code blocks and raw JSON                               
+     * SOURCE: server/lib/deepseek-client.ts lines 45-60                       
+     */                                                                        
+    private parseJsonResponse<T>(text: string): T {                            
+      // Try to extract JSON from markdown code block first                    
+      const jsonMatch = text.match(/```json\n([\s\S]*?)\n```/);                
+      if (jsonMatch) {                                                         
+        return JSON.parse(jsonMatch[1]);                                       
+      }                                                                        
+                                                                               
+      // Try to extract from any code block                                    
+      const codeBlockMatch = text.match(/```\n([\s\S]*?)\n```/);               
+      if (codeBlockMatch) {                                                    
+        return JSON.parse(codeBlockMatch[1]);                                  
+      }                                                                        
+                                                                               
+      // Fallback to raw parse                                                 
+      return JSON.parse(text);                                                 
+    }                                                                          
+  }                                                                            
+                                                                               
+  /**                                                                          
+   * Claude Client (Anthropic API)                                             
+   * SOURCE: server/agents/ai-providers.ts                                     
+   */                                                                          
+                                                                               
+  export interface ClaudeConfig {                                              
+    apiKey: string;                                                            
+    model?: string; // Default: 'claude-sonnet-4-20250514'                     
+  }                                                                            
+                                                                               
+  export class ClaudeClient {                                                  
+    private apiKey: string;                                                    
+    private model: string;                                                     
+                                                                               
+    constructor(config: ClaudeConfig) {                                        
+      this.apiKey = config.apiKey;                                             
+      this.model = config.model || 'claude-sonnet-4-20250514';                 
+    }                                                                          
+                                                                               
+    async call(                                                                
+      systemPrompt: string,                                                    
+      userPrompt: string,                                                      
+      options?: {                                                              
+        temperature?: number;                                                  
+        maxTokens?: number;                                                    
+      }                                                                        
+    ): Promise<string> {                                                       
+      const response = await fetch('https://api.anthropic.com/v1/messages', {  
+        method: 'POST',                                                        
+        headers: {                                                             
+          'Content-Type': 'application/json',                                  
+          'x-api-key': this.apiKey,                                            
+          'anthropic-version': '2023-06-01',                                   
+        },                                                                     
+        body: JSON.stringify({                                                 
+          model: this.model,                                                   
+          system: systemPrompt,                                                
+          messages: [                                                          
+            { role: 'user', content: userPrompt },                             
+          ],                                                                   
+          temperature: options?.temperature || 0.7,                            
+          max_tokens: options?.maxTokens || 8192,                              
+        }),                                                                    
+      });                                                                      
+                                                                               
+      if (!response.ok) {                                                      
+        const error = await response.text();                                   
+        throw new Error(`Claude API error: ${response.status} - ${error}`);    
+      }                                                                        
+                                                                               
+      const data = await response.json();                                      
+      return data.content[0]?.text || '';                                      
+    }                                                                          
+  }                                                                            
+                                                                               
+  /**                                                                          
+   * Factory functions for easy instantiation                                  
+   */                                                                          
+                                                                               
+  export function createDeepSeekClient(apiKey: string, model?: string):        
+  DeepSeekClient {                                                             
+    return new DeepSeekClient({ apiKey, model });                              
+  }                                                                            
+                                                                               
+  export function createClaudeClient(apiKey: string, model?: string):          
+  ClaudeClient {                                                               
+    return new ClaudeClient({ apiKey, model });                                
+  }                                                                            
+                                                                               
+  ---                                                                          
+  Summary for Replit                                                           
+                                                                               
+  These are the 5 utility files extracted from RevOps Copilot:                 
+                                                                               
+  1. retry.ts - Exponential backoff (1s, 2s, 4s), paginated fetch with         
+  consecutive error limits, rate limiter                                       
+  2. logger.ts - Structured logging with context, prefixed loggers for each    
+  connector                                                                    
+  3. date-helpers.ts - Date manipulation functions (no date-fns dependency     
+  needed - pure JS)                                                            
+  4. data-transforms.ts - Field extraction, normalization, parsing helpers     
+  5. llm-client.ts - Claude and DeepSeek API wrappers (Replit should remove    
+  DeepSeek and use @anthropic-ai/sdk)                                          
+                                                                               
+  Note for Replit: Session 2 instructions say to update llm-client.ts to use   
+  Anthropic's official SDK and remove the DeepSeek client. Keep only Claude for
+   Pandora.                     
