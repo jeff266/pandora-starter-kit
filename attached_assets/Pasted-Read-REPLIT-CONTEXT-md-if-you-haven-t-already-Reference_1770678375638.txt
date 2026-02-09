@@ -1,0 +1,51 @@
+Read REPLIT_CONTEXT.md if you haven't already.
+
+Reference files:
+- pandora-starter-kit/connectors/gong/client.ts
+- pandora-starter-kit/connectors/gong/README.md
+- pandora-starter-kit/connectors/fireflies/client.ts
+- pandora-starter-kit/connectors/fireflies/README.md
+- pandora-starter-kit/utils/retry.ts (Fireflies uses this)
+
+Port both conversation connectors:
+
+server/connectors/gong/client.ts
+- Port the extracted Gong client
+- Add workspace_id throughout
+- Replace storage calls with database calls
+
+server/connectors/gong/transform.ts
+- transformGongCall(gongCall, workspaceId) → normalized Conversation record
+- Map: speakers → participants, transcript → transcript_text
+- Extract: topics, sentiment, competitor mentions from transcript via Claude
+  (or leave as TODO for now — raw transcript storage is fine for Phase 1)
+
+server/connectors/fireflies/client.ts
+- Port the extracted Fireflies client
+- PRESERVE the exponential backoff retry logic — this is battle-tested
+- PRESERVE the speaker consolidation logic
+- Add workspace_id throughout
+
+server/connectors/fireflies/transform.ts
+- transformFirefliesCall(ffCall, workspaceId) → normalized Conversation record
+- Map AI-generated summaries to our summary field
+- Map action items to our action_items jsonb
+
+For BOTH connectors, implement the PandoraConnector interface:
+- connect(credentials, workspaceId)
+- initialSync: pull all calls within a lookback period (default: 90 days)
+- incrementalSync: pull calls since lastSyncAt
+- health: check connection status
+
+Add API routes:
+- POST /api/workspaces/:id/connectors/gong/connect
+- POST /api/workspaces/:id/connectors/gong/sync
+- POST /api/workspaces/:id/connectors/fireflies/connect
+- POST /api/workspaces/:id/connectors/fireflies/sync
+
+EDGE CASES from READMEs:
+- Gong: Basic auth (base64 encoded), NOT Bearer token
+- Gong: Speaker attribution requires matching email to known contacts
+- Fireflies: GraphQL API, NOT REST
+- Fireflies: 3 retries with exponential backoff (1s, 2s, 4s), abort after 3 consecutive errors
+- Fireflies: Speakers may have multiple display names — consolidation logic handles this
