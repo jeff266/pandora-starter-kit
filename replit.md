@@ -3,7 +3,7 @@
 ## Overview
 Pandora is a multi-tenant agent-based platform that helps RevOps teams analyze their GTM (Go-To-Market) data. It connects to CRM, call intelligence, task management, and document systems, normalizes data into 8 core entities, and runs AI-powered analyses.
 
-**Current State**: Session 0 — Scaffolding complete. Express API server running with PostgreSQL database, all entity tables created, health endpoint working.
+**Current State**: Session 2 — Utilities ported. Express API server running with PostgreSQL database, all entity tables created, shared utilities (retry, logger, date helpers, data transforms, Claude client) in place.
 
 **Version**: 0.1.0
 
@@ -29,7 +29,13 @@ pandora/
     connectors/           # Will hold ported connectors (HubSpot, Gong, etc.)
     schemas/              # Will hold entity definitions
     analysis/             # Will hold analysis tools
-    utils/                # Will hold shared utilities
+    utils/
+      index.ts            # Barrel export for all utilities
+      retry.ts            # Exponential backoff, paginated fetch, rate limiter
+      logger.ts           # Structured logger with context and prefix
+      date-helpers.ts     # Date manipulation (daysBetween, startOfWeek, etc.)
+      data-transforms.ts  # Field extraction, normalization, parsing helpers
+      llm-client.ts       # Claude API client via @anthropic-ai/sdk
   migrations/
     001_initial.sql       # Initial schema: workspaces, connections, 7 entity tables
     002_add_calls_table.sql # Adds calls table (8th entity)
