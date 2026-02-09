@@ -1,6 +1,7 @@
 import { query } from '../db.js';
 
 export interface StageBreakdown {
+  pipeline: string;
   stage: string;
   deal_count: number;
   total_amount: number;
@@ -61,16 +62,17 @@ export async function generatePipelineSnapshot(
       [workspaceId]
     ),
 
-    query<{ stage: string; deal_count: string; total_amount: string }>(
+    query<{ pipeline: string; stage: string; deal_count: string; total_amount: string }>(
       `SELECT
+        COALESCE(pipeline, 'Unknown') AS pipeline,
         COALESCE(stage, 'Unknown') AS stage,
         COUNT(*)::text AS deal_count,
         COALESCE(SUM(amount), 0)::text AS total_amount
       FROM deals
       WHERE workspace_id = $1
         AND ${OPEN_FILTER}
-      GROUP BY stage
-      ORDER BY SUM(amount) DESC`,
+      GROUP BY pipeline, stage
+      ORDER BY pipeline, SUM(amount) DESC`,
       [workspaceId]
     ),
 
@@ -143,6 +145,7 @@ export async function generatePipelineSnapshot(
     dealCount: parseInt(totals.deal_count, 10) || 0,
     avgDealSize: Math.round(parseFloat(totals.avg_amount) || 0),
     byStage: byStageResult.rows.map(row => ({
+      pipeline: row.pipeline,
       stage: row.stage,
       deal_count: parseInt(row.deal_count, 10) || 0,
       total_amount: parseFloat(row.total_amount) || 0,

@@ -14,13 +14,6 @@ function formatFullCurrency(value: number): string {
   return `$${value.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
 }
 
-function formatStageName(stage: string): string {
-  return stage
-    .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, c => c.toUpperCase());
-}
-
 function formatPercent(value: number | null): string {
   if (value === null) return 'N/A';
   return `${value}%`;
@@ -96,20 +89,40 @@ export function formatPipelineSnapshot(
   });
 
   if (snapshot.byStage.length > 0) {
-    const stageLines = snapshot.byStage
-      .map(s => `  *${formatStageName(s.stage)}:* ${formatCurrency(s.total_amount)} (${s.deal_count} deals)`)
-      .join('\n');
+    const pipelineGroups = new Map<string, typeof snapshot.byStage>();
+    for (const s of snapshot.byStage) {
+      const key = s.pipeline || 'Unknown';
+      if (!pipelineGroups.has(key)) pipelineGroups.set(key, []);
+      pipelineGroups.get(key)!.push(s);
+    }
 
-    blocks.push(
-      { type: "divider" },
-      {
-        type: "section",
-        text: {
-          type: "mrkdwn",
-          text: `*By Stage:*\n${stageLines}`,
-        },
+    const singlePipeline = pipelineGroups.size === 1;
+
+    blocks.push({ type: "divider" });
+
+    for (const [pipelineName, stages] of pipelineGroups) {
+      const stageLines = stages
+        .map(s => `  *${s.stage}:* ${formatCurrency(s.total_amount)} (${s.deal_count} deals)`)
+        .join('\n');
+
+      if (singlePipeline) {
+        blocks.push({
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `*By Stage:*\n${stageLines}`,
+          },
+        });
+      } else {
+        blocks.push({
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `*${pipelineName}:*\n${stageLines}`,
+          },
+        });
       }
-    );
+    }
   }
 
   blocks.push(
