@@ -4,6 +4,7 @@ import { verifyConnection } from "./db.js";
 import healthRouter from "./routes/health.js";
 import workspacesRouter from "./routes/workspaces.js";
 import connectorsRouter from "./routes/connectors.js";
+import hubspotRouter from "./routes/hubspot.js";
 
 dotenv.config();
 
@@ -23,6 +24,7 @@ app.get("/", (_req, res) => {
 app.use("/health", healthRouter);
 app.use("/api/workspaces", workspacesRouter);
 app.use("/api/connectors", connectorsRouter);
+app.use("/api/workspaces", hubspotRouter);
 
 async function start(): Promise<void> {
   try {
