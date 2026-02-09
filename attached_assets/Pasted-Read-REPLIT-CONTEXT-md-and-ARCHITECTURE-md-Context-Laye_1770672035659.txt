@@ -1,0 +1,65 @@
+Read REPLIT_CONTEXT.md and ARCHITECTURE.md (Context Layer section) if you haven't.
+
+Build the Context Layer — this is what makes Pandora's agents smart about each client.
+
+Create table (add to a new migration 002_context_layer.sql):
+
+context_layer
+  - id (UUID, primary key)
+  - workspace_id (UUID, FK, not null, unique) — one context per workspace
+  - business_model (jsonb, default '{}')
+    Stores: gtm_motion, icp_description, acv_range, pricing_model, sales_cycle_days, target_market
+  - team_structure (jsonb, default '{}')
+    Stores: org_chart, roles, stakeholders, routing_rules
+  - goals_and_targets (jsonb, default '{}')
+    Stores: quotas (per rep, per team), kpi_targets, pipeline_coverage_target, 
+    conversion_targets (by stage), revenue_target, thresholds (stale_deal_days, 
+    at_risk_amount, alert_triggers)
+  - definitions (jsonb, default '{}')
+    Stores: stage_definitions (what each stage means), qualified_definition, 
+    methodology, terminology_map (client-specific language), 
+    stage_mapping (their stage names → universal stages)
+  - operational_maturity (jsonb, default '{}')
+    Stores: process_documentation (1-5), data_hygiene (1-5), 
+    forecasting_sophistication (1-5), tech_integration (1-5), 
+    team_specialization (1-5), operating_rhythms (1-5), overall_score, notes
+  - version (integer, default 1) — increment on each update
+  - updated_at (timestamptz)
+  - updated_by (text)
+
+Create:
+
+server/context/index.ts
+- getContext(workspaceId): returns full context layer
+- getBusinessContext(workspaceId): returns just business_model
+- getGoals(workspaceId): returns just goals_and_targets
+- getDefinitions(workspaceId): returns just definitions
+- getMaturity(workspaceId): returns just operational_maturity
+- updateContext(workspaceId, section, data): partial update of one section
+- getContextVersion(workspaceId): returns current version number
+
+These are the "context tools" that agents and skills will call.
+For now they're just database functions. Later they become tool definitions in the agent framework.
+
+API routes:
+
+server/routes/context.ts
+- GET /api/workspaces/:id/context — full context
+- GET /api/workspaces/:id/context/:section — one section (business_model, goals, definitions, etc.)
+- PUT /api/workspaces/:id/context/:section — update one section
+- GET /api/workspaces/:id/context/version — current version
+
+Also create a simple onboarding endpoint:
+- POST /api/workspaces/:id/context/onboard
+- Accepts answers to the key questions:
+  - GTM motion (PLG, enterprise, hybrid)
+  - Average deal size
+  - Sales cycle length
+  - What stages mean "qualified"
+  - Stale deal threshold (days)
+  - Pipeline coverage target (multiple of quota)
+  - Revenue target
+- Populates business_model, goals_and_targets, and definitions from the answers
+- This replaces the onboarding UI flow from Copilot
+
+The context layer is workspace-scoped and versioned so we can track when definitions change.
