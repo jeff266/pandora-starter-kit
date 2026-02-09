@@ -1,0 +1,46 @@
+Read REPLIT_CONTEXT_ADDENDUM.md first — it contains decisions that override parts of REPLIT_CONTEXT.md. Then read REPLIT_CONTEXT.md and ARCHITECTURE.md. These are the source of truth for this project.
+
+Reference files:
+- pandora-starter-kit/connectors/monday/README.md
+- pandora-starter-kit/connectors/monday/copilot-source.ts (the original Monday adapter from Copilot)
+- pandora-starter-kit/connectors/asana/README.md (partial — fetchTasks not implemented)
+- pandora-starter-kit/connectors/google-drive/client.ts
+- pandora-starter-kit/connectors/google-drive/README.md
+
+Port Monday.com:
+
+server/connectors/monday/client.ts
+- Port from pandora-starter-kit/connectors/monday/copilot-source.ts
+- Port the GraphQL queries, board/group/item management
+- PRESERVE status label mapping logic (must match board's exact labels)
+- Add workspace_id throughout
+- Replace db.query.clientIntegrations with our pg-based credential lookup from connector_configs
+- Implement BOTH read (fetchTasks) and write (createTask, updateTask)
+
+server/connectors/monday/transform.ts
+- transformMondayItem(item, workspaceId) → normalized Task record
+- Map status labels to normalized: open, in_progress, blocked, completed
+
+Port Google Drive:
+
+server/connectors/google-drive/client.ts
+- Port from starter kit
+- OAuth token refresh logic
+- MIME type handling (Docs→text, Sheets→CSV, text→raw)
+
+server/connectors/google-drive/transform.ts
+- transformDriveFile(file, workspaceId) → normalized Document record
+- Auto-detect doc_type from filename and mime_type
+- content_text populated from extracted text
+
+Skip Asana for now — it's incomplete in Copilot (fetchTasks not implemented).
+We'll build it fresh when needed. Monday.com covers the task management use case.
+
+Add API routes for both connectors following the same pattern as HubSpot and Gong.
+
+EDGE CASES:
+- Monday: API key goes in Authorization header raw (NOT "Bearer {key}")
+- Monday: GraphQL API, queries structured differently from REST
+- Monday: Status labels are board-specific — "Working on it" vs "In Progress" etc.
+- Google Drive: Access tokens expire after ~1 hour, must check before each request
+- Google Drive: Google Docs/Sheets use export endpoint, regular files use download endpoint

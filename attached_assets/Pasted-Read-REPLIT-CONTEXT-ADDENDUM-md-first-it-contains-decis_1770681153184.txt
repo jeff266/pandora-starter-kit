@@ -1,0 +1,65 @@
+Read REPLIT_CONTEXT_ADDENDUM.md first — it contains decisions that override parts of REPLIT_CONTEXT.md. Then read REPLIT_CONTEXT.md and ARCHITECTURE.md. These are the source of truth for this project.
+
+Claude Code has built the adapter architecture. These files are now in the project:
+
+- server/connectors/adapters/types.ts (4 category adapter interfaces)
+- server/connectors/adapters/registry.ts (adapter registry)
+- server/connectors/monday/client.ts (Monday.com API client)
+- server/connectors/monday/adapter.ts (TaskAdapter implementation)
+- server/connectors/google-drive/client.ts (Google Drive API client)
+- server/connectors/google-drive/adapter.ts (DocumentAdapter implementation)
+- server/connectors/adapters/README.md (pattern documentation)
+- server/connectors/adapters/REFACTOR_NOTES.md (migration notes for existing connectors)
+
+Read all of those files first.
+
+Your job is to WIRE THEM INTO THE PROJECT:
+
+1. Database credential lookup:
+   - Monday adapter and Google Drive adapter need to read credentials from connector_configs table
+   - Create server/connectors/adapters/credentials.ts:
+     - getCredentials(workspaceId, connectorType): fetches from connector_configs
+     - storeCredentials(workspaceId, connectorType, credentials): upserts to connector_configs
+     - updateSyncStatus(workspaceId, connectorType, status, lastError?): updates status and last_sync_at
+   - Wire this into both adapters' connect/disconnect/health methods
+
+2. Sync integration:
+   - Both adapters need to write to normalized tables after transform
+   - Monday adapter → upserts to tasks table (workspace_id + source + source_id unique constraint)
+   - Google Drive adapter → upserts to documents table (same unique constraint)
+   - Wire the sync methods: initialSync and incrementalSync should:
+     a. Get credentials from connector_configs
+     b. Fetch raw records via client
+     c. Transform each via adapter.transformTask / adapter.transformDocument
+     d. Upsert to database
+     e. Update sync_log
+     f. Update connector_configs.last_sync_at
+
+3. API routes:
+   
+   server/routes/connectors.ts (extend existing):
+   - POST /api/workspaces/:id/connectors/monday/connect — store API key + board ID
+   - POST /api/workspaces/:id/connectors/monday/sync — trigger sync
+   - GET /api/workspaces/:id/connectors/monday/health — check status
+   - POST /api/workspaces/:id/connectors/google-drive/connect — store OAuth credentials
+   - POST /api/workspaces/:id/connectors/google-drive/sync — trigger sync
+   - GET /api/workspaces/:id/connectors/google-drive/health — check status
+
+4. Registry initialization:
+   - In server/index.ts, call registerAllAdapters() on startup
+   - Log: "Registered {N} adapters: hubspot, gong, fireflies, monday, google_drive"
+
+5. Update sync orchestrator (server/sync/orchestrator.ts if it exists, or create it):
+   - When syncing a workspace, use the adapter registry to find all connected adapters
+   - For each connected adapter: check connector_configs, run appropriate sync
+   - This replaces any hardcoded connector-specific sync logic
+
+6. Install any missing packages:
+   - googleapis (for Google Drive client)
+   - Nothing needed for Monday (uses native fetch)
+
+DO NOT modify the adapter files Claude Code created unless there are TypeScript 
+compilation errors. If there are type mismatches, fix the WIRING code to match 
+the adapter interfaces, not the other way around.
+
+Test that the project compiles cleanly after wiring everything up.
