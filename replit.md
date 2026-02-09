@@ -3,7 +3,7 @@
 ## Overview
 Pandora is a multi-tenant agent-based platform that helps RevOps teams analyze their GTM (Go-To-Market) data. It connects to CRM, call intelligence, task management, and document systems, normalizes data into 8 core entities, and runs AI-powered analyses.
 
-**Current State**: Session 4 — Pipeline snapshot → Slack. Full end-to-end data pipeline: HubSpot → PostgreSQL → metrics → Slack. Query normalized deals, calculate pipeline metrics, format as Block Kit, post via webhook.
+**Current State**: Session 5 — Context Layer. Workspace-scoped, versioned context with 5 JSONB sections (business_model, team_structure, goals_and_targets, definitions, operational_maturity). Onboarding endpoint populates context from structured answers.
 
 **Version**: 0.1.0
 
@@ -27,6 +27,7 @@ pandora/
       workspaces.ts       # Workspace CRUD (placeholder)
       connectors.ts       # Connector management (placeholder)
       hubspot.ts          # HubSpot connector API routes (connect, sync, health, discover-schema)
+      context.ts          # Context layer CRUD + onboarding endpoint
     connectors/
       _interface.ts       # PandoraConnector interface + shared types (Connection, SyncResult, etc.)
       hubspot/
@@ -36,6 +37,8 @@ pandora/
         transform.ts      # HubSpot → normalized DB records (deals, contacts, accounts)
         sync.ts           # initialSync, incrementalSync, backfillSync with DB upserts
         schema-discovery.ts # Property enumeration, pipeline discovery, metadata storage
+    context/
+      index.ts            # Context layer DB functions (get/update sections, onboarding)
     schemas/              # Will hold entity definitions
     analysis/
       pipeline-snapshot.ts # Pipeline metrics from normalized deals (SQL queries)
@@ -49,6 +52,7 @@ pandora/
   migrations/
     001_initial.sql       # Initial schema: workspaces, connections, 7 entity tables
     002_add_calls_table.sql # Adds calls table (8th entity)
+    003_context_layer.sql # Context layer table (5 JSONB sections, versioned)
 ```
 
 ## Database Schema
@@ -57,6 +61,7 @@ All tables use UUID primary keys and include `workspace_id` for multi-tenant iso
 **Core tables**:
 - `workspaces` — tenant isolation
 - `connections` — workspace-scoped connector credentials (status, credentials JSONB, sync_cursor JSONB, last_sync_at)
+- `context_layer` — one per workspace, 5 JSONB sections (business_model, team_structure, goals_and_targets, definitions, operational_maturity), versioned
 
 **8 Entity tables** (all have `workspace_id`, `source`, `source_id`, `source_data JSONB`, `custom_fields JSONB`):
 - `deals` — CRM deals with amount, stage, pipeline, probability
@@ -103,6 +108,11 @@ All tables use UUID primary keys and include `workspace_id` for multi-tenant iso
 - `GET /api/workspaces/:id/connectors/hubspot/health` — Check connector health
 - `POST /api/workspaces/:id/connectors/hubspot/discover-schema` — Discover HubSpot schema
 - `POST /api/workspaces/:id/actions/pipeline-snapshot` — Generate pipeline metrics, optionally post to Slack
+- `GET /api/workspaces/:id/context` — Full context layer
+- `GET /api/workspaces/:id/context/version` — Current context version
+- `GET /api/workspaces/:id/context/:section` — One section (business_model, goals, definitions, etc.)
+- `PUT /api/workspaces/:id/context/:section` — Update one section
+- `POST /api/workspaces/:id/context/onboard` — Populate context from onboarding answers
 
 ## Scripts
 - `npm run dev` — Start dev server with hot reload (tsx watch)
@@ -120,7 +130,7 @@ All tables use UUID primary keys and include `workspace_id` for multi-tenant iso
 - **Session 2**: Port utilities (DONE)
 - **Session 3**: Port HubSpot connector (DONE)
 - **Session 4**: Pipeline snapshot → Slack (DONE)
-- **Session 5**: Context Layer
+- **Session 5**: Context Layer (DONE)
 - **Session 6**: Computed fields engine
 - **Sessions 7-10**: Phase 2 (expanded connectors, sync orchestrator, query API)
 
