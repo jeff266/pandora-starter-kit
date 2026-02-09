@@ -3,7 +3,7 @@
 ## Overview
 Pandora is a multi-tenant agent-based platform that helps RevOps teams analyze their GTM (Go-To-Market) data. It connects to CRM, call intelligence, task management, and document systems, normalizes data into 8 core entities, and runs AI-powered analyses.
 
-**Current State**: Session 7 — Pipeline Metrics + Slack Output. Enhanced pipeline snapshot with win rate, new deals this week, configurable quota (default $1M). Slack webhook integration with detailed (Block Kit) and compact (one-liner) formats. Closed deal detection uses both text-based stage matching and probability-based fallback for numeric HubSpot stage IDs. Pipeline snapshot now groups stages by pipeline name to disambiguate duplicate stage names across pipelines (e.g., "📝 Proposal" in New Business vs "📑 Proposal" in Renewal).
+**Current State**: Session 8 — Conversation Connectors (Gong + Fireflies). Both connectors implement PandoraConnector interface, sync call metadata into the conversations table. "Essential properties only" principle: initial sync fetches metadata + summaries, transcripts fetched on demand to avoid huge payloads.
 
 **Version**: 0.1.0
 
@@ -27,6 +27,8 @@ pandora/
       workspaces.ts       # Workspace CRUD (placeholder)
       connectors.ts       # Connector management (placeholder)
       hubspot.ts          # HubSpot connector API routes (connect, sync, health, discover-schema)
+      gong.ts             # Gong connector API routes (connect, sync, health)
+      fireflies.ts        # Fireflies connector API routes (connect, sync, health)
       context.ts          # Context layer CRUD + onboarding endpoint
     connectors/
       _interface.ts       # PandoraConnector interface + shared types (Connection, SyncResult, etc.)
@@ -37,6 +39,18 @@ pandora/
         transform.ts      # HubSpot → normalized DB records (deals, contacts, accounts)
         sync.ts           # initialSync, incrementalSync, backfillSync with DB upserts
         schema-discovery.ts # Property enumeration, pipeline discovery, metadata storage
+      gong/
+        index.ts          # GongConnector class implementing PandoraConnector
+        client.ts         # Gong API client (Basic auth, cursor pagination, rate limiter)
+        types.ts          # Gong API response interfaces
+        transform.ts      # GongCall → normalized conversations record (metadata only)
+        sync.ts           # initialSync (90-day lookback), incrementalSync
+      fireflies/
+        index.ts          # FirefliesConnector class implementing PandoraConnector
+        client.ts         # Fireflies GraphQL client (lightweight + full queries, retry logic)
+        types.ts          # Fireflies API response interfaces
+        transform.ts      # FirefliesTranscript → normalized conversations record
+        sync.ts           # initialSync (90-day lookback), incrementalSync
     context/
       index.ts            # Context layer DB functions (get/update sections, onboarding)
     computed-fields/
@@ -105,6 +119,47 @@ All tables use UUID primary keys and include `workspace_id` for multi-tenant iso
 - Association backfill for deals missing contact/company links
 - Rate limit awareness: 100 requests per 10 seconds for OAuth apps
 
+## Gong Connector
+
+**Architecture**:
+- `client.ts` — Gong REST API client with Basic auth (base64-encoded accessKey:secret), cursor-based pagination, rate limiter (100 req/min via RateLimiter)
+- `transform.ts` — Maps GongCall to normalized conversations record (metadata only, transcript_text = null)
+- `sync.ts` — Two sync modes:
+  - `initialSync` — 90-day lookback, fetches all calls (metadata only, no transcripts)
+  - `incrementalSync` — Fetches calls since last sync date
+
+**Essential properties only**:
+- Initial sync fetches call metadata (title, duration, participants, direction, scope)
+- Transcripts fetched on demand via `getTranscripts(callIds[])` or `getCallWithTranscript(callId)`
+- Upsert uses COALESCE to preserve existing transcript_text if already populated
+
+**Edge cases preserved**:
+- Basic auth: `accessKey:secret` format, NOT Bearer token
+- Speaker attribution: speakerId in transcript segments mapped to party names via `formatTranscriptAsText()`
+- Transcript batching: up to 100 callIds per request
+
+## Fireflies Connector
+
+**Architecture**:
+- `client.ts` — Fireflies GraphQL client with Bearer auth, two query variants (lightweight + full), paginated fetch with retry
+- `transform.ts` — Maps FirefliesTranscript to normalized conversations record, extracts AI summaries
+- `sync.ts` — Two sync modes:
+  - `initialSync` — 90-day lookback, fetches all transcripts (metadata + summaries, no sentences)
+  - `incrementalSync` — Fetches transcripts since last sync date
+
+**Essential properties only**:
+- Lightweight GraphQL query for sync: metadata + summaries, NO sentences field
+- Full GraphQL query for on-demand: includes sentences with speaker attribution and timestamps
+- This avoids massive payloads — Fireflies sentences can be huge (full sentence-level data)
+
+**Edge cases preserved**:
+- GraphQL API, NOT REST
+- Offset-based pagination (skip parameter), max 50 per page
+- Client-side date filtering (API doesn't support afterDate natively)
+- Exponential backoff retry: 1s → 2s → 4s, max 3 retries per page
+- Consecutive error limit: stops pagination after 3 consecutive failures
+- Speaker consolidation: groups consecutive sentences by same speaker for readability
+
 ## API Endpoints
 - `GET /` — Server info (name, version, description)
 - `GET /health` — Health check with DB verification (status, timestamp, version)
@@ -114,6 +169,14 @@ All tables use UUID primary keys and include `workspace_id` for multi-tenant iso
 - `POST /api/workspaces/:id/connectors/hubspot/sync` — Trigger sync (mode: initial/incremental/backfill)
 - `GET /api/workspaces/:id/connectors/hubspot/health` — Check connector health
 - `POST /api/workspaces/:id/connectors/hubspot/discover-schema` — Discover HubSpot schema
+- `POST /api/workspaces/:id/connectors/gong/connect` — Connect Gong with Basic auth (apiKey = accessKey:secret)
+- `POST /api/workspaces/:id/connectors/gong/sync` — Trigger Gong sync (mode: initial/incremental)
+- `POST /api/workspaces/:id/connectors/gong/transcript/:sourceId` — Fetch transcript on demand, store in DB
+- `GET /api/workspaces/:id/connectors/gong/health` — Check Gong connector health
+- `POST /api/workspaces/:id/connectors/fireflies/connect` — Connect Fireflies with API key
+- `POST /api/workspaces/:id/connectors/fireflies/sync` — Trigger Fireflies sync (mode: initial/incremental)
+- `POST /api/workspaces/:id/connectors/fireflies/transcript/:sourceId` — Fetch full transcript on demand, store in DB
+- `GET /api/workspaces/:id/connectors/fireflies/health` — Check Fireflies connector health
 - `POST /api/workspaces/:id/actions/pipeline-snapshot` — Generate pipeline metrics, optionally post to Slack
 - `GET /api/workspaces/:id/context` — Full context layer
 - `GET /api/workspaces/:id/context/version` — Current context version
@@ -140,7 +203,9 @@ All tables use UUID primary keys and include `workspace_id` for multi-tenant iso
 - **Session 4**: Pipeline snapshot → Slack (DONE)
 - **Session 5**: Context Layer (DONE)
 - **Session 6**: Computed fields engine (DONE)
-- **Sessions 7-10**: Phase 2 (expanded connectors, sync orchestrator, query API)
+- **Session 7**: Pipeline metrics enhancements + Slack pipeline grouping (DONE)
+- **Session 8**: Gong + Fireflies conversation connectors (DONE)
+- **Sessions 9-10**: Phase 2 (sync orchestrator, query API, transcript enrichment)
 
 ## Key Reference Documents
 - `REPLIT_CONTEXT.md` — Full project context and phase planning

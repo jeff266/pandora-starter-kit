@@ -5,6 +5,8 @@ import healthRouter from "./routes/health.js";
 import workspacesRouter from "./routes/workspaces.js";
 import connectorsRouter from "./routes/connectors.js";
 import hubspotRouter from "./routes/hubspot.js";
+import gongRouter from "./routes/gong.js";
+import firefliesRouter from "./routes/fireflies.js";
 import actionsRouter from "./routes/actions.js";
 import contextRouter from "./routes/context.js";
 
@@ -27,6 +29,8 @@ app.use("/health", healthRouter);
 app.use("/api/workspaces", workspacesRouter);
 app.use("/api/connectors", connectorsRouter);
 app.use("/api/workspaces", hubspotRouter);
+app.use("/api/workspaces", gongRouter);
+app.use("/api/workspaces", firefliesRouter);
 app.use("/api/workspaces", actionsRouter);
 app.use("/api/workspaces", contextRouter);
 
