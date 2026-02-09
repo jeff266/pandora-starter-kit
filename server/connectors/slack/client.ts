@@ -21,6 +21,29 @@ function formatStageName(stage: string): string {
     .replace(/\b\w/g, c => c.toUpperCase());
 }
 
+function formatPercent(value: number | null): string {
+  if (value === null) return 'N/A';
+  return `${value}%`;
+}
+
+export function formatPipelineOneLiner(
+  snapshot: PipelineSnapshot,
+): string {
+  const parts: string[] = [
+    `Pipeline: ${formatCurrency(snapshot.totalPipeline)}`,
+  ];
+
+  if (snapshot.coverageRatio !== null) {
+    parts[0] += ` (${snapshot.coverageRatio}x coverage)`;
+  }
+
+  parts.push(`Win Rate: ${formatPercent(snapshot.winRate.rate)}`);
+  parts.push(`${snapshot.newDealsThisWeek.dealCount} new deals this week`);
+  parts.push(`Avg deal: ${formatCurrency(snapshot.avgDealSize)}`);
+
+  return parts.join(' | ');
+}
+
 export function formatPipelineSnapshot(
   snapshot: PipelineSnapshot,
   workspaceName: string
@@ -57,6 +80,20 @@ export function formatPipelineSnapshot(
       },
     });
   }
+
+  blocks.push({
+    type: "section",
+    fields: [
+      {
+        type: "mrkdwn",
+        text: `*Win Rate:* ${formatPercent(snapshot.winRate.rate)} (${snapshot.winRate.won}W / ${snapshot.winRate.lost}L)`,
+      },
+      {
+        type: "mrkdwn",
+        text: `*New This Week:* ${snapshot.newDealsThisWeek.dealCount} deals (${formatCurrency(snapshot.newDealsThisWeek.totalAmount)})`,
+      },
+    ],
+  });
 
   if (snapshot.byStage.length > 0) {
     const stageLines = snapshot.byStage
@@ -95,12 +132,15 @@ export function formatPipelineSnapshot(
   return blocks;
 }
 
-export async function postToSlack(webhookUrl: string, blocks: any[]): Promise<{ ok: boolean; error?: string }> {
+export async function postToSlack(
+  webhookUrl: string,
+  payload: { blocks?: any[]; text?: string }
+): Promise<{ ok: boolean; error?: string }> {
   try {
     const response = await fetch(webhookUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ blocks }),
+      body: JSON.stringify(payload),
     });
 
     if (!response.ok) {

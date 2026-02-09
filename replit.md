@@ -3,7 +3,7 @@
 ## Overview
 Pandora is a multi-tenant agent-based platform that helps RevOps teams analyze their GTM (Go-To-Market) data. It connects to CRM, call intelligence, task management, and document systems, normalizes data into 8 core entities, and runs AI-powered analyses.
 
-**Current State**: Session 6 — Computed Fields Engine. Batch computation of engagement_score, health_score, velocity_score, deal_risk across entities. Pipeline snapshot now reads defaults from context layer. days_in_stage/days_since_activity computed on read via SQL.
+**Current State**: Session 7 — Pipeline Metrics + Slack Output. Enhanced pipeline snapshot with win rate, new deals this week, configurable quota (default $1M). Slack webhook integration with detailed (Block Kit) and compact (one-liner) formats. Closed deal detection uses both text-based stage matching and probability-based fallback for numeric HubSpot stage IDs.
 
 **Version**: 0.1.0
 

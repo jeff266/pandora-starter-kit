@@ -23,14 +23,32 @@ export interface PipelineSnapshot {
     staleDaysThreshold: number;
   };
   coverageRatio: number | null;
+  winRate: {
+    rate: number | null;
+    won: number;
+    lost: number;
+  };
+  newDealsThisWeek: {
+    dealCount: number;
+    totalAmount: number;
+  };
 }
+
+const CLOSED_WON_FILTER = `(LOWER(stage) LIKE '%won%' OR probability = 1.0)`;
+const CLOSED_LOST_FILTER = `(LOWER(stage) LIKE '%lost%' OR (probability = 0.0 AND LOWER(stage) NOT LIKE '%won%'))`;
+const CLOSED_FILTER = `(${CLOSED_WON_FILTER} OR ${CLOSED_LOST_FILTER})`;
+const OPEN_FILTER = `NOT ${CLOSED_FILTER}`;
+
+const DEFAULT_QUOTA = 1_000_000;
 
 export async function generatePipelineSnapshot(
   workspaceId: string,
   quota?: number,
   staleDaysThreshold: number = 14
 ): Promise<PipelineSnapshot> {
-  const [totalsResult, byStageResult, closingResult, staleResult] = await Promise.all([
+  const effectiveQuota = quota ?? DEFAULT_QUOTA;
+
+  const [totalsResult, byStageResult, closingResult, staleResult, winRateResult, newDealsResult] = await Promise.all([
     query<{ deal_count: string; total_amount: string; avg_amount: string }>(
       `SELECT
         COUNT(*)::text AS deal_count,
@@ -38,7 +56,7 @@ export async function generatePipelineSnapshot(
         COALESCE(AVG(amount), 0)::text AS avg_amount
       FROM deals
       WHERE workspace_id = $1
-        AND stage NOT IN ('closedwon', 'closedlost', 'closed won', 'closed lost')
+        AND ${OPEN_FILTER}
         AND amount IS NOT NULL`,
       [workspaceId]
     ),
@@ -50,7 +68,7 @@ export async function generatePipelineSnapshot(
         COALESCE(SUM(amount), 0)::text AS total_amount
       FROM deals
       WHERE workspace_id = $1
-        AND stage NOT IN ('closedwon', 'closedlost', 'closed won', 'closed lost')
+        AND ${OPEN_FILTER}
       GROUP BY stage
       ORDER BY SUM(amount) DESC`,
       [workspaceId]
@@ -62,7 +80,7 @@ export async function generatePipelineSnapshot(
         COALESCE(SUM(amount), 0)::text AS total_amount
       FROM deals
       WHERE workspace_id = $1
-        AND stage NOT IN ('closedwon', 'closedlost', 'closed won', 'closed lost')
+        AND ${OPEN_FILTER}
         AND close_date IS NOT NULL
         AND date_trunc('month', close_date) = date_trunc('month', CURRENT_DATE)`,
       [workspaceId]
@@ -74,20 +92,49 @@ export async function generatePipelineSnapshot(
         COALESCE(SUM(amount), 0)::text AS total_amount
       FROM deals
       WHERE workspace_id = $1
-        AND stage NOT IN ('closedwon', 'closedlost', 'closed won', 'closed lost')
+        AND ${OPEN_FILTER}
         AND (
           last_activity_date IS NULL
           OR last_activity_date < NOW() - INTERVAL '1 day' * $2
         )`,
       [workspaceId, staleDaysThreshold]
     ),
+
+    query<{ won: string; lost: string }>(
+      `SELECT
+        COALESCE(SUM(CASE WHEN ${CLOSED_WON_FILTER} THEN 1 ELSE 0 END), 0)::text AS won,
+        COALESCE(SUM(CASE WHEN ${CLOSED_LOST_FILTER} THEN 1 ELSE 0 END), 0)::text AS lost
+      FROM deals
+      WHERE workspace_id = $1
+        AND ${CLOSED_FILTER}`,
+      [workspaceId]
+    ),
+
+    query<{ deal_count: string; total_amount: string }>(
+      `SELECT
+        COUNT(*)::text AS deal_count,
+        COALESCE(SUM(amount), 0)::text AS total_amount
+      FROM deals
+      WHERE workspace_id = $1
+        AND (
+          (source_data->'properties'->>'createdate') IS NOT NULL
+          AND (source_data->'properties'->>'createdate')::timestamptz >= NOW() - INTERVAL '7 days'
+        )`,
+      [workspaceId]
+    ),
   ]);
 
   const totals = totalsResult.rows[0];
   const closing = closingResult.rows[0];
   const stale = staleResult.rows[0];
+  const winRateRow = winRateResult.rows[0];
+  const newDeals = newDealsResult.rows[0];
 
   const totalPipeline = parseFloat(totals.total_amount) || 0;
+
+  const won = parseInt(winRateRow.won, 10) || 0;
+  const lost = parseInt(winRateRow.lost, 10) || 0;
+  const totalClosed = won + lost;
 
   return {
     workspaceId,
@@ -109,8 +156,19 @@ export async function generatePipelineSnapshot(
       totalAmount: parseFloat(stale.total_amount) || 0,
       staleDaysThreshold,
     },
-    coverageRatio: quota && quota > 0
-      ? Math.round((totalPipeline / quota) * 100) / 100
+    coverageRatio: effectiveQuota > 0
+      ? Math.round((totalPipeline / effectiveQuota) * 100) / 100
       : null,
+    winRate: {
+      rate: totalClosed > 0
+        ? Math.round((won / totalClosed) * 10000) / 100
+        : null,
+      won,
+      lost,
+    },
+    newDealsThisWeek: {
+      dealCount: parseInt(newDeals.deal_count, 10) || 0,
+      totalAmount: parseFloat(newDeals.total_amount) || 0,
+    },
   };
 }
