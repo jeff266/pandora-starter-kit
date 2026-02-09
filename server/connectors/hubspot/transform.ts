@@ -1,5 +1,6 @@
 import type { HubSpotDeal, HubSpotContact, HubSpotCompany } from './types.js';
 import { parseNumber, parseDate, normalizeEmail, normalizePhone } from '../../utils/data-transforms.js';
+import { sanitizeDate, sanitizeNumber, sanitizeText } from '../../utils/hubspot-sanitize.js';
 
 export interface NormalizedDeal {
   workspace_id: string;
@@ -94,15 +95,15 @@ export function transformDeal(deal: HubSpotDeal, workspaceId: string): Normalize
       properties: props,
       associations: deal.associations,
     },
-    name: props.dealname ?? null,
-    amount: parseNumber(props.amount),
-    stage: props.dealstage ?? null,
-    close_date: props.closedate && props.closedate !== '' ? props.closedate : null,
-    owner: props.hubspot_owner_id ?? null,
-    probability: parseNumber(props.hs_deal_stage_probability),
+    name: sanitizeText(props.dealname),
+    amount: sanitizeNumber(props.amount),
+    stage: sanitizeText(props.dealstage),
+    close_date: sanitizeDate(props.closedate),
+    owner: sanitizeText(props.hubspot_owner_id),
+    probability: sanitizeNumber(props.hs_deal_stage_probability),
     forecast_category: null,
-    pipeline: props.pipeline ?? null,
-    last_activity_date: parseDate(props.notes_last_updated),
+    pipeline: sanitizeText(props.pipeline),
+    last_activity_date: parseDate(sanitizeDate(props.notes_last_updated)),
     custom_fields: extractCustomFields(props, CORE_DEAL_FIELDS),
   };
 }
@@ -118,22 +119,24 @@ export function transformContact(contact: HubSpotContact, workspaceId: string): 
       properties: props,
       associations: contact.associations,
     },
-    email: normalizeEmail(props.email),
-    first_name: props.firstname ?? null,
-    last_name: props.lastname ?? null,
-    title: props.jobtitle ?? null,
+    email: normalizeEmail(sanitizeText(props.email)),
+    first_name: sanitizeText(props.firstname),
+    last_name: sanitizeText(props.lastname),
+    title: sanitizeText(props.jobtitle),
     seniority: null,
     department: null,
-    lifecycle_stage: props.lifecyclestage ?? null,
-    engagement_score: parseNumber(props.hubspotscore),
-    phone: normalizePhone(props.phone),
-    last_activity_date: parseDate(props.lastmodifieddate),
+    lifecycle_stage: sanitizeText(props.lifecyclestage),
+    engagement_score: sanitizeNumber(props.hubspotscore),
+    phone: normalizePhone(sanitizeText(props.phone)),
+    last_activity_date: parseDate(sanitizeDate(props.lastmodifieddate)),
     custom_fields: extractCustomFields(props, CORE_CONTACT_FIELDS),
   };
 }
 
 export function transformCompany(company: HubSpotCompany, workspaceId: string): NormalizedAccount {
   const props = company.properties;
+
+  const employeeCount = sanitizeNumber(props.numberofemployees);
 
   return {
     workspace_id: workspaceId,
@@ -142,13 +145,11 @@ export function transformCompany(company: HubSpotCompany, workspaceId: string): 
     source_data: {
       properties: props,
     },
-    name: props.name ?? null,
-    domain: props.domain ?? null,
-    industry: props.industry ?? null,
-    employee_count: parseNumber(props.numberofemployees) !== null
-      ? Math.round(parseNumber(props.numberofemployees)!)
-      : null,
-    annual_revenue: parseNumber(props.annualrevenue),
+    name: sanitizeText(props.name),
+    domain: sanitizeText(props.domain),
+    industry: sanitizeText(props.industry),
+    employee_count: employeeCount !== null ? Math.round(employeeCount) : null,
+    annual_revenue: sanitizeNumber(props.annualrevenue),
     owner: null,
     custom_fields: extractCustomFields(props, CORE_COMPANY_FIELDS),
   };

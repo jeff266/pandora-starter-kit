@@ -9,6 +9,7 @@ import {
   type NormalizedAccount,
 } from './transform.js';
 import type { SyncResult } from '../_interface.js';
+import { transformWithErrorCapture } from '../../utils/sync-helpers.js';
 
 const BATCH_SIZE = 500;
 
@@ -218,9 +219,42 @@ export async function initialSync(
     totalFetched = rawDeals.length + rawContacts.length + rawCompanies.length;
     console.log(`[HubSpot Sync] Fetched ${rawDeals.length} deals, ${rawContacts.length} contacts, ${rawCompanies.length} companies`);
 
-    const normalizedDeals = rawDeals.map(d => transformDeal(d, workspaceId));
-    const normalizedContacts = rawContacts.map(c => transformContact(c, workspaceId));
-    const normalizedAccounts = rawCompanies.map(c => transformCompany(c, workspaceId));
+    // Transform with per-record error capture
+    const dealTransformResult = transformWithErrorCapture(
+      rawDeals,
+      (d) => transformDeal(d, workspaceId),
+      'HubSpot Deals',
+      (d) => d.id
+    );
+
+    const contactTransformResult = transformWithErrorCapture(
+      rawContacts,
+      (c) => transformContact(c, workspaceId),
+      'HubSpot Contacts',
+      (c) => c.id
+    );
+
+    const accountTransformResult = transformWithErrorCapture(
+      rawCompanies,
+      (c) => transformCompany(c, workspaceId),
+      'HubSpot Companies',
+      (c) => c.id
+    );
+
+    // Log transform failures
+    if (dealTransformResult.failed.length > 0) {
+      errors.push(`Deal transform failures: ${dealTransformResult.failed.length} records`);
+    }
+    if (contactTransformResult.failed.length > 0) {
+      errors.push(`Contact transform failures: ${contactTransformResult.failed.length} records`);
+    }
+    if (accountTransformResult.failed.length > 0) {
+      errors.push(`Account transform failures: ${accountTransformResult.failed.length} records`);
+    }
+
+    const normalizedDeals = dealTransformResult.succeeded;
+    const normalizedContacts = contactTransformResult.succeeded;
+    const normalizedAccounts = accountTransformResult.succeeded;
 
     const [dealsStored, contactsStored, accountsStored] = await Promise.all([
       upsertDeals(normalizedDeals).catch(err => {
@@ -328,18 +362,42 @@ export async function incrementalSync(
     totalFetched = rawDeals.length + rawContacts.length + rawCompanies.length;
     console.log(`[HubSpot Sync] Incremental: ${rawDeals.length} deals, ${rawContacts.length} contacts, ${rawCompanies.length} companies modified since ${since.toISOString()}`);
 
-    const normalizedDeals = rawDeals.map(d => transformDeal(
-      { id: d.id, properties: d.properties as any } as any,
-      workspaceId
-    ));
-    const normalizedContacts = rawContacts.map(c => transformContact(
-      { id: c.id, properties: c.properties as any } as any,
-      workspaceId
-    ));
-    const normalizedAccounts = rawCompanies.map(c => transformCompany(
-      { id: c.id, properties: c.properties as any } as any,
-      workspaceId
-    ));
+    // Transform with per-record error capture
+    const dealTransformResult = transformWithErrorCapture(
+      rawDeals,
+      (d) => transformDeal({ id: d.id, properties: d.properties as any } as any, workspaceId),
+      'HubSpot Deals (Incremental)',
+      (d) => d.id
+    );
+
+    const contactTransformResult = transformWithErrorCapture(
+      rawContacts,
+      (c) => transformContact({ id: c.id, properties: c.properties as any } as any, workspaceId),
+      'HubSpot Contacts (Incremental)',
+      (c) => c.id
+    );
+
+    const accountTransformResult = transformWithErrorCapture(
+      rawCompanies,
+      (c) => transformCompany({ id: c.id, properties: c.properties as any } as any, workspaceId),
+      'HubSpot Companies (Incremental)',
+      (c) => c.id
+    );
+
+    // Log transform failures
+    if (dealTransformResult.failed.length > 0) {
+      errors.push(`Deal transform failures: ${dealTransformResult.failed.length} records`);
+    }
+    if (contactTransformResult.failed.length > 0) {
+      errors.push(`Contact transform failures: ${contactTransformResult.failed.length} records`);
+    }
+    if (accountTransformResult.failed.length > 0) {
+      errors.push(`Account transform failures: ${accountTransformResult.failed.length} records`);
+    }
+
+    const normalizedDeals = dealTransformResult.succeeded;
+    const normalizedContacts = contactTransformResult.succeeded;
+    const normalizedAccounts = accountTransformResult.succeeded;
 
     const [dealsStored, contactsStored, accountsStored] = await Promise.all([
       upsertDeals(normalizedDeals).catch(err => { errors.push(`Failed to store deals: ${err.message}`); return 0; }),

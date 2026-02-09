@@ -9,6 +9,7 @@ import type {
   HubSpotSearchResponse,
   HubSpotPropertiesResponse,
 } from './types.js';
+import { hubspotFetch, hubspotSearchFetch } from '../../utils/throttle.js';
 
 export class HubSpotClient {
   private baseUrl = "https://api.hubapi.com";
@@ -18,9 +19,13 @@ export class HubSpotClient {
     this.accessToken = accessToken;
   }
 
-  private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  private async request<T>(endpoint: string, options: RequestInit = {}, useSearchApi: boolean = false): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`;
-    const response = await fetch(url, {
+
+    // Choose throttled fetcher based on API type
+    const throttledFetch = useSearchApi ? hubspotSearchFetch : hubspotFetch;
+
+    const response = await throttledFetch(url, {
       ...options,
       headers: {
         "Authorization": `Bearer ${this.accessToken}`,
@@ -252,7 +257,8 @@ export class HubSpotClient {
         {
           method: "POST",
           body: JSON.stringify({ limit: 1 }),
-        }
+        },
+        true // Use Search API throttle
       );
       return response.total;
     } catch (error) {
@@ -279,7 +285,8 @@ export class HubSpotClient {
             }],
             limit: 1,
           }),
-        }
+        },
+        true // Use Search API throttle
       );
       return response.total;
     } catch (error) {
@@ -317,7 +324,8 @@ export class HubSpotClient {
             properties: [propertyName, "createdate"],
             limit: sampleSize,
           }),
-        }
+        },
+        true // Use Search API throttle
       );
 
       const actualSampleSize = response.results.length;
@@ -400,7 +408,8 @@ export class HubSpotClient {
           limit,
           ...(after ? { after } : {}),
         }),
-      }
+      },
+      true // Use Search API throttle
     );
   }
 
