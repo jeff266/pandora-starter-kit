@@ -1,0 +1,63 @@
+Read REPLIT_CONTEXT.md if you haven't already.
+
+This is the most important session. HubSpot is the first connector and the template for all others.
+
+Reference files:
+- pandora-starter-kit/connectors/hubspot/client.ts (519 lines, the crown jewel)
+- pandora-starter-kit/connectors/hubspot/README.md (edge cases documented)
+- pandora-starter-kit/connectors/_interface.ts (standard interface)
+
+Create:
+
+server/connectors/_interface.ts
+- Copy the PandoraConnector interface from the starter kit
+- Make sure all type definitions are clean
+
+server/connectors/hubspot/client.ts
+- Port the extracted HubSpot client
+- Ensure workspace_id is threaded through every function
+- Replace any TODO storage calls with actual database calls using our pg client from server/db.ts
+- Keep ALL edge case handling (fill rate fallback, property limiting to 100, etc.)
+
+server/connectors/hubspot/sync.ts
+- initialSync: Use the HubSpot CRM API to pull all deals, contacts, companies
+- incrementalSync: Pull records modified since lastSyncAt using lastmodifieddate filter
+- backfillSync: Pull associations (deal→contact, deal→company) that export misses
+
+server/connectors/hubspot/schema-discovery.ts
+- Enumerate all properties on deal, contact, company objects
+- Capture pipeline configurations (stages, probabilities, display order)
+- Store results in connector_configs.metadata
+
+server/connectors/hubspot/transform.ts
+- transformDeal(hubspotDeal, workspaceId) → normalized Deal record for our deals table
+- transformContact(hubspotContact, workspaceId) → normalized Contact record
+- transformCompany(hubspotCompany, workspaceId) → normalized Account record
+- Use field mappings from pandora-starter-kit/schemas/field-mappings.ts as defaults
+- Preserve original data in source_data jsonb column
+
+server/connectors/hubspot/types.ts
+- TypeScript interfaces for HubSpot API responses
+- Reference pandora-starter-kit/schemas/connector-schemas.ts
+
+server/connectors/hubspot/index.ts
+- Export a class that implements PandoraConnector interface
+- Wire up connect, disconnect, discoverSchema, initialSync, incrementalSync, backfillSync, health
+
+CRITICAL from the README:
+- HubSpot limits properties to 100 per request — the client handles this by selecting the most important
+- Export API is faster for initial load but LOSES associations — that's why backfillSync exists
+- Property fill rate calculation has a fast path (use search API count) with sample fallback
+- Rate limit: 100 requests per 10 seconds for OAuth apps
+- Auth: OAuth Bearer token, NOT API key
+
+Add API routes:
+- POST /api/workspaces/:id/connectors/hubspot/connect — store credentials
+- POST /api/workspaces/:id/connectors/hubspot/sync — trigger sync
+- GET /api/workspaces/:id/connectors/hubspot/health — check status
+- POST /api/workspaces/:id/connectors/hubspot/discover-schema — run schema discovery
+
+After this session, we should be able to:
+1. Connect a HubSpot instance to a workspace
+2. Run initial sync that pulls deals, contacts, companies into normalized tables
+3. See the data in PostgreSQL

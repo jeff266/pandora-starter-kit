@@ -1,0 +1,846 @@
+Here are all 6 HubSpot connector files ready for Session 3. These   
+  contain the battle-tested edge cases from production.                        
+                                                                               
+  ---                                                                          
+  1. connectors/_interface.ts (179 lines)                                      
+                                                                               
+  // Standard PandoraConnector Interface                                       
+  // All source connectors must implement this interface                       
+                                                                               
+  export interface ConnectorCredentials {                                      
+    apiKey?: string;                                                           
+    accessToken?: string;                                                      
+    refreshToken?: string;                                                     
+    instanceUrl?: string;                                                      
+    [key: string]: any;                                                        
+  }                                                                            
+                                                                               
+  export interface Connection {                                                
+    id: string;                                                                
+    workspaceId: string;                                                       
+    connectorName: string;                                                     
+    status: 'healthy' | 'degraded' | 'error' | 'disconnected';                 
+    credentials: ConnectorCredentials;                                         
+    metadata?: Record<string, any>;                                            
+  }                                                                            
+                                                                               
+  export interface SourceSchema {                                              
+    objectTypes: ObjectTypeSchema[];                                           
+  }                                                                            
+                                                                               
+  export interface ObjectTypeSchema {                                          
+    name: string; // 'deals', 'contacts', 'companies', 'calls', etc.           
+    fields: FieldSchema[];                                                     
+  }                                                                            
+                                                                               
+  export interface FieldSchema {                                               
+    name: string;                                                              
+    label: string;                                                             
+    type: string; // 'string', 'number', 'date', 'boolean', 'picklist', etc.   
+    required: boolean;                                                         
+    custom: boolean; // true if user-defined custom field                      
+    options?: Array<{ label: string; value: string }>; // for picklist fields  
+  }                                                                            
+                                                                               
+  export interface FieldMapping {                                              
+    sourceField: string; // e.g., 'dealname'                                   
+    targetField: string; // e.g., 'name' (normalized field)                    
+    objectType: string; // 'deal', 'contact', 'account', etc.                  
+    transformationType?: 'direct' | 'computed' | 'lookup' | 'custom';          
+    transformationLogic?: string; // For custom transformations                
+  }                                                                            
+                                                                               
+  export interface RawRecord {                                                 
+    id: string;                                                                
+    objectType: string; // 'deal', 'contact', 'company', 'call', etc.          
+    data: Record<string, any>; // Raw data from source API                     
+    associations?: Record<string, string[]>; // e.g., { 'contacts':            
+  ['contact_id_1', 'contact_id_2'] }                                           
+    sourceTimestamp?: Date; // When record was last modified in source system  
+  }                                                                            
+                                                                               
+  export interface ConnectorHealth {                                           
+    status: 'healthy' | 'degraded' | 'error' | 'disconnected';                 
+    lastSync?: Date;                                                           
+    recordsSynced?: number;                                                    
+    errors?: Array<{                                                           
+      timestamp: Date;                                                         
+      message: string;                                                         
+      code?: string;                                                           
+    }>;                                                                        
+    rateLimitStatus?: {                                                        
+      remaining: number;                                                       
+      resetAt: Date;                                                           
+    };                                                                         
+  }                                                                            
+                                                                               
+  export interface SyncResult {                                                
+    recordsFetched: number;                                                    
+    recordsStored: number;                                                     
+    errors: string[];                                                          
+    duration: number; // milliseconds                                          
+  }                                                                            
+                                                                               
+  /**                                                                          
+   * PandoraConnector Interface                                                
+   *                                                                           
+   * All source connectors (HubSpot, Gong, Fireflies, Monday, etc.) implement  
+  this interface.                                                              
+   * This provides a standardized way to connect, discover schema, sync data,  
+  and monitor health                                                           
+   * across all data sources.                                                  
+   */                                                                          
+  export interface PandoraConnector {                                          
+    // Identity                                                                
+    readonly name: string; // 'hubspot', 'gong', 'monday', etc.                
+    readonly category: 'crm' | 'conversations' | 'operations' | 'documents';   
+    readonly authMethod: 'oauth' | 'api_key' | 'basic';                        
+                                                                               
+    // Lifecycle                                                               
+    /**                                                                        
+     * Test connection with credentials                                        
+     * @returns { success: true } if valid, { success: false, error: string }  
+  if invalid                                                                   
+     */                                                                        
+    testConnection(credentials: ConnectorCredentials): Promise<{ success:      
+  boolean; error?: string; accountInfo?: any }>;                               
+                                                                               
+    /**                                                                        
+     * Establish connection for a workspace                                    
+     * @param credentials - API credentials (token, key, etc.)                 
+     * @param workspaceId - Pandora workspace ID                               
+     * @returns Connection object with status                                  
+     */                                                                        
+    connect(credentials: ConnectorCredentials, workspaceId: string):           
+  Promise<Connection>;                                                         
+                                                                               
+    /**                                                                        
+     * Disconnect and clean up connection                                      
+     * @param workspaceId - Pandora workspace ID                               
+     */                                                                        
+    disconnect(workspaceId: string): Promise<void>;                            
+                                                                               
+    // Schema Discovery (optional - not all connectors support this)           
+    /**                                                                        
+     * Discover source schema (object types and fields)                        
+     * @param connection - Active connection                                   
+     * @returns Source schema with object types and fields                     
+     */                                                                        
+    discoverSchema?(connection: Connection): Promise<SourceSchema>;            
+                                                                               
+    /**                                                                        
+     * Propose field mappings from source schema to normalized schema          
+     * AI-powered mapping suggestions based on field names and types           
+     * @param schema - Discovered source schema                                
+     * @returns Proposed field mappings for user confirmation                  
+     */                                                                        
+    proposeMapping?(schema: SourceSchema): Promise<FieldMapping[]>;            
+                                                                               
+    // Sync                                                                    
+    /**                                                                        
+     * Initial full sync - fetch all historical data                           
+     * Use bulk/export APIs when available for performance                     
+     * @param connection - Active connection                                   
+     * @param workspaceId - Pandora workspace ID                               
+     * @returns Array of raw records                                           
+     */                                                                        
+    initialSync(connection: Connection, workspaceId: string):                  
+  Promise<RawRecord[]>;                                                        
+                                                                               
+    /**                                                                        
+     * Incremental sync - fetch only records modified since last sync          
+     * @param connection - Active connection                                   
+     * @param workspaceId - Pandora workspace ID                               
+     * @param since - Fetch records modified after this date                   
+     * @returns Array of raw records                                           
+     */                                                                        
+    incrementalSync(connection: Connection, workspaceId: string, since: Date): 
+  Promise<RawRecord[]>;                                                        
+                                                                               
+    /**                                                                        
+     * Backfill sync - fill in missing data (associations, historical records) 
+     * Optional - some connectors may not need this                            
+     * @param connection - Active connection                                   
+     * @param workspaceId - Pandora workspace ID                               
+     * @returns Array of raw records                                           
+     */                                                                        
+    backfillSync?(connection: Connection, workspaceId: string):                
+  Promise<RawRecord[]>;                                                        
+                                                                               
+    // Health & Monitoring                                                     
+    /**                                                                        
+     * Check connector health and status                                       
+     * @param workspaceId - Pandora workspace ID                               
+     * @returns Health status with error details if any                        
+     */                                                                        
+    health(workspaceId: string): Promise<ConnectorHealth>;                     
+  }                                                                            
+                                                                               
+  /**                                                                          
+   * Data flow through Pandora connectors:                                     
+   *                                                                           
+   * 1. connect() → Establish connection with credentials                      
+   * 2. discoverSchema() → Discover available fields (optional, for custom     
+  field support)                                                               
+   * 3. proposeMapping() → AI suggests field mappings (optional, user confirms)
+   * 4. initialSync() → Bulk fetch all historical data                         
+   * 5. incrementalSync() → Ongoing delta syncs (scheduled or real-time)       
+   * 6. backfillSync() → Fill gaps (optional, e.g., associations that weren't  
+  in export)                                                                   
+   * 7. health() → Monitor connection status                                   
+   * 8. disconnect() → Clean up when removing integration                      
+   *                                                                           
+   * Every sync returns RawRecord[] which then flows to:                       
+   * Raw Records → Field Mapping → Normalization → 8 Normalized Entities →     
+  Pandora Storage                                                              
+   */                                                                          
+                                                                               
+  ---                                                                          
+  2. connectors/hubspot/client.ts (426 lines) - THE CROWN JEWEL                
+                                                                               
+  // HubSpot API Client for Pandora                                            
+  // Extracted from RevOps Copilot - preserves all edge case handling and      
+  pagination logic                                                             
+                                                                               
+  import type {                                                                
+    HubSpotDeal,                                                               
+    HubSpotContact,                                                            
+    HubSpotCompany,                                                            
+    HubSpotPipeline,                                                           
+    HubSpotPipelineStage,                                                      
+    HubSpotProperty,                                                           
+  } from './types';                                                            
+                                                                               
+  interface HubSpotListResponse<T> {                                           
+    results: T[];                                                              
+    paging?: {                                                                 
+      next?: {                                                                 
+        after: string;                                                         
+        link: string;                                                          
+      };                                                                       
+    };                                                                         
+  }                                                                            
+                                                                               
+  interface HubSpotPropertiesResponse {                                        
+    results: HubSpotProperty[];                                                
+  }                                                                            
+                                                                               
+  export class HubSpotClient {                                                 
+    private baseUrl = "https://api.hubapi.com";                                
+    private accessToken: string;                                               
+                                                                               
+    constructor(accessToken: string) {                                         
+      this.accessToken = accessToken;                                          
+    }                                                                          
+                                                                               
+    private async request<T>(endpoint: string, options: RequestInit = {}):     
+  Promise<T> {                                                                 
+      const url = `${this.baseUrl}${endpoint}`;                                
+      const response = await fetch(url, {                                      
+        ...options,                                                            
+        headers: {                                                             
+          "Authorization": `Bearer ${this.accessToken}`,                       
+          "Content-Type": "application/json",                                  
+          ...options.headers,                                                  
+        },                                                                     
+      });                                                                      
+                                                                               
+      if (!response.ok) {                                                      
+        const errorText = await response.text();                               
+        throw new Error(`HubSpot API error: ${response.status} -               
+  ${errorText}`);                                                              
+      }                                                                        
+                                                                               
+      return response.json();                                                  
+    }                                                                          
+                                                                               
+    async testConnection(): Promise<{ success: boolean; accountInfo?: {        
+  portalId: number; name: string }; error?: string }> {                        
+      try {                                                                    
+        const accountInfo = await this.request<{ portalId: number; accountType:
+   string; uiDomain: string }>("/account-info/v3/details");                    
+        return {                                                               
+          success: true,                                                       
+          accountInfo: {                                                       
+            portalId: accountInfo.portalId,                                    
+            name: accountInfo.uiDomain,                                        
+          },                                                                   
+        };                                                                     
+      } catch (error) {                                                        
+        return {                                                               
+          success: false,                                                      
+          error: error instanceof Error ? error.message : "Unknown error",     
+        };                                                                     
+      }                                                                        
+    }                                                                          
+                                                                               
+    async getDeals(limit = 100, after?: string, customProperties?: string[]):  
+  Promise<HubSpotListResponse<HubSpotDeal>> {                                  
+      // Core properties always needed                                         
+      const coreProperties = [                                                 
+        "dealname", "amount", "dealstage", "closedate", "createdate",          
+        "hs_lastmodifieddate", "pipeline", "hubspot_owner_id",                 
+        "hs_deal_stage_probability", "notes_last_updated",                     
+        "closed_lost_reason", "closed_won_reason", "hs_closed_lost_competitor" 
+      ];                                                                       
+                                                                               
+      // Merge with custom properties if provided                              
+      const allProperties = customProperties                                   
+        ? Array.from(new Set([...coreProperties, ...customProperties]))        
+        : coreProperties;                                                      
+                                                                               
+      let endpoint =                                                           
+  `/crm/v3/objects/deals?limit=${limit}&properties=${allProperties.join(",")}`;
+      endpoint += "&associations=contacts,companies";                          
+                                                                               
+      if (after) {                                                             
+        endpoint += `&after=${after}`;                                         
+      }                                                                        
+                                                                               
+      return this.request<HubSpotListResponse<HubSpotDeal>>(endpoint);         
+    }                                                                          
+                                                                               
+    async getAllDeals(includeAllProperties = false): Promise<HubSpotDeal[]> {  
+      const allDeals: HubSpotDeal[] = [];                                      
+      let after: string | undefined;                                           
+                                                                               
+      // Get custom property names if needed                                   
+      let customProps: string[] | undefined;                                   
+      if (includeAllProperties) {                                              
+        try {                                                                  
+          const props = await this.getProperties("deals");                     
+          customProps = props.map(p => p.name);                                
+          console.log(`[HubSpot] Fetching deals with ${customProps.length}     
+  properties`);                                                                
+        } catch (e) {                                                          
+          console.warn("[HubSpot] Could not fetch property names, using        
+  defaults");                                                                  
+        }                                                                      
+      }                                                                        
+                                                                               
+      do {                                                                     
+        const response = await this.getDeals(100, after, customProps);         
+        allDeals.push(...response.results);                                    
+        after = response.paging?.next?.after;                                  
+      } while (after);                                                         
+                                                                               
+      return allDeals;                                                         
+    }                                                                          
+                                                                               
+    async getContacts(limit = 100, after?: string, customProperties?:          
+  string[]): Promise<HubSpotListResponse<HubSpotContact>> {                    
+      const coreProperties = [                                                 
+        "firstname", "lastname", "email", "phone", "company",                  
+        "jobtitle", "lifecyclestage", "hs_lead_status",                        
+        "createdate", "lastmodifieddate", "hubspot_owner_id",                  
+        "hs_analytics_source", "hubspotscore", "hs_buying_role"                
+      ];                                                                       
+                                                                               
+      const allProperties = customProperties                                   
+        ? Array.from(new Set([...coreProperties, ...customProperties]))        
+        : coreProperties;                                                      
+                                                                               
+      let endpoint = `/crm/v3/objects/contacts?limit=${limit}&properties=${allP
+  roperties.join(",")}`;                                                       
+      endpoint += "&associations=companies,deals";                             
+                                                                               
+      if (after) {                                                             
+        endpoint += `&after=${after}`;                                         
+      }                                                                        
+                                                                               
+      return this.request<HubSpotListResponse<HubSpotContact>>(endpoint);      
+    }                                                                          
+                                                                               
+    async getAllContacts(includeAllProperties = false):                        
+  Promise<HubSpotContact[]> {                                                  
+      const allContacts: HubSpotContact[] = [];                                
+      let after: string | undefined;                                           
+                                                                               
+      let customProps: string[] | undefined;                                   
+      if (includeAllProperties) {                                              
+        try {                                                                  
+          const props = await this.getProperties("contacts");                  
+          customProps = props.map(p => p.name);                                
+          console.log(`[HubSpot] Fetching contacts with ${customProps.length}  
+  properties`);                                                                
+        } catch (e) {                                                          
+          console.warn("[HubSpot] Could not fetch contact property names, using
+   defaults");                                                                 
+        }                                                                      
+      }                                                                        
+                                                                               
+      do {                                                                     
+        const response = await this.getContacts(100, after, customProps);      
+        allContacts.push(...response.results);                                 
+        after = response.paging?.next?.after;                                  
+      } while (after);                                                         
+                                                                               
+      return allContacts;                                                      
+    }                                                                          
+                                                                               
+    async getCompanies(limit = 100, after?: string, customProperties?:         
+  string[]): Promise<HubSpotListResponse<HubSpotCompany>> {                    
+      const coreProperties = [                                                 
+        "name", "domain", "industry", "numberofemployees",                     
+        "annualrevenue", "city", "state", "country",                           
+        "createdate", "hs_lastmodifieddate"                                    
+      ];                                                                       
+                                                                               
+      const allProperties = customProperties                                   
+        ? Array.from(new Set([...coreProperties, ...customProperties]))        
+        : coreProperties;                                                      
+                                                                               
+      let endpoint = `/crm/v3/objects/companies?limit=${limit}&properties=${all
+  Properties.join(",")}`;                                                      
+                                                                               
+      if (after) {                                                             
+        endpoint += `&after=${after}`;                                         
+      }                                                                        
+                                                                               
+      return this.request<HubSpotListResponse<HubSpotCompany>>(endpoint);      
+    }                                                                          
+                                                                               
+    async getAllCompanies(includeAllProperties = false):                       
+  Promise<HubSpotCompany[]> {                                                  
+      const allCompanies: HubSpotCompany[] = [];                               
+      let after: string | undefined;                                           
+                                                                               
+      let customProps: string[] | undefined;                                   
+      if (includeAllProperties) {                                              
+        try {                                                                  
+          const props = await this.getProperties("companies");                 
+          customProps = props.map(p => p.name);                                
+          console.log(`[HubSpot] Fetching companies with ${customProps.length} 
+  properties`);                                                                
+        } catch (e) {                                                          
+          console.warn("[HubSpot] Could not fetch company property names, using
+   defaults");                                                                 
+        }                                                                      
+      }                                                                        
+                                                                               
+      do {                                                                     
+        const response = await this.getCompanies(100, after, customProps);     
+        allCompanies.push(...response.results);                                
+        after = response.paging?.next?.after;                                  
+      } while (after);                                                         
+                                                                               
+      return allCompanies;                                                     
+    }                                                                          
+                                                                               
+    async getPipelines(): Promise<HubSpotPipeline[]> {                         
+      const response = await this.request<{ results: HubSpotPipeline[]         
+  }>("/crm/v3/pipelines/deals");                                               
+      return response.results;                                                 
+    }                                                                          
+                                                                               
+    async getDealStages(): Promise<Map<string, HubSpotPipelineStage>> {        
+      const pipelines = await this.getPipelines();                             
+      const stageMap = new Map<string, HubSpotPipelineStage>();                
+                                                                               
+      for (const pipeline of pipelines) {                                      
+        for (const stage of pipeline.stages) {                                 
+          stageMap.set(stage.id, stage);                                       
+        }                                                                      
+      }                                                                        
+                                                                               
+      return stageMap;                                                         
+    }                                                                          
+                                                                               
+    // Get all properties (fields) for a given object type                     
+    async getProperties(objectType: "deals" | "contacts" | "companies"):       
+  Promise<HubSpotProperty[]> {                                                 
+      try {                                                                    
+        const response = await this.request<HubSpotPropertiesResponse>(        
+          `/crm/v3/properties/${objectType}`                                   
+        );                                                                     
+        return response.results;                                               
+      } catch (error) {                                                        
+        console.error(`[HubSpot] Failed to fetch ${objectType} properties:`,   
+  error);                                                                      
+        return [];                                                             
+      }                                                                        
+    }                                                                          
+                                                                               
+    // Get all properties for all object types                                 
+    async getAllProperties(): Promise<{                                        
+      deals: HubSpotProperty[];                                                
+      contacts: HubSpotProperty[];                                             
+      companies: HubSpotProperty[];                                            
+    }> {                                                                       
+      const [deals, contacts, companies] = await Promise.all([                 
+        this.getProperties("deals"),                                           
+        this.getProperties("contacts"),                                        
+        this.getProperties("companies"),                                       
+      ]);                                                                      
+      return { deals, contacts, companies };                                   
+    }                                                                          
+                                                                               
+    // Check if a property is a custom field (not HubSpot-defined)             
+    isCustomProperty(property: HubSpotProperty): boolean {                     
+      return !property.hubspotDefined;                                         
+    }                                                                          
+                                                                               
+    // Get only custom properties for a given object type                      
+    async getCustomProperties(objectType: "deals" | "contacts" | "companies"): 
+  Promise<HubSpotProperty[]> {                                                 
+      const allProperties = await this.getProperties(objectType);              
+      return allProperties.filter(p => !p.hubspotDefined && !p.hidden &&       
+  !p.archived);                                                                
+    }                                                                          
+                                                                               
+    // Count total records for an object type using search API                 
+    async countRecords(objectType: "deals" | "contacts" | "companies"):        
+  Promise<number> {                                                            
+      try {                                                                    
+        // HubSpot search API requires limit >= 1, we use 1 and just read the  
+  'total' field                                                                
+        const response = await this.request<{ total: number; results: unknown[]
+   }>(                                                                         
+          `/crm/v3/objects/${objectType}/search`,                              
+          {                                                                    
+            method: "POST",                                                    
+            body: JSON.stringify({                                             
+              limit: 1,                                                        
+            }),                                                                
+          }                                                                    
+        );                                                                     
+        return response.total;                                                 
+      } catch (error) {                                                        
+        console.error(`[HubSpot] Failed to count ${objectType}:`, error);      
+        return 0;                                                              
+      }                                                                        
+    }                                                                          
+                                                                               
+    // Count records that have a value for a specific property                 
+    // Returns null if the property doesn't support HAS_PROPERTY filter        
+    async countRecordsWithProperty(                                            
+      objectType: "deals" | "contacts" | "companies",                          
+      propertyName: string                                                     
+    ): Promise<number | null> {                                                
+      try {                                                                    
+        const response = await this.request<{ total: number; results: unknown[]
+   }>(                                                                         
+          `/crm/v3/objects/${objectType}/search`,                              
+          {                                                                    
+            method: "POST",                                                    
+            body: JSON.stringify({                                             
+              filterGroups: [                                                  
+                {                                                              
+                  filters: [                                                   
+                    {                                                          
+                      propertyName,                                            
+                      operator: "HAS_PROPERTY",                                
+                    },                                                         
+                  ],                                                           
+                },                                                             
+              ],                                                               
+              limit: 1,                                                        
+            }),                                                                
+          }                                                                    
+        );                                                                     
+        return response.total;                                                 
+      } catch (error) {                                                        
+        // EDGE CASE: Some properties don't support HAS_PROPERTY filter -      
+  return null to indicate failure                                              
+        console.warn(`[HubSpot] HAS_PROPERTY not supported for ${propertyName},
+   will use fallback`);                                                        
+        return null;                                                           
+      }                                                                        
+    }                                                                          
+                                                                               
+    // Calculate fill rate from a sample of recent records (last N days)       
+    // This is a fallback for properties that don't support HAS_PROPERTY filter
+    // Returns sample-based fill rate - totalRecords is the sample size, not   
+  all-time total                                                               
+    async calculateFillRateFromSample(                                         
+      objectType: "deals" | "contacts" | "companies",                          
+      propertyName: string,                                                    
+      daysBack: number = 365,                                                  
+      sampleSize: number = 200                                                 
+    ): Promise<{ fillRate: number; sampleSize: number; filledInSample: number; 
+  isEstimate: boolean }> {                                                     
+      try {                                                                    
+        const cutoffDate = new Date();                                         
+        cutoffDate.setDate(cutoffDate.getDate() - daysBack);                   
+        const cutoffTimestamp = cutoffDate.getTime();                          
+                                                                               
+        // Fetch a sample of recent records with this property                 
+        const response = await this.request<{                                  
+          total: number;                                                       
+          results: Array<{ id: string; properties: Record<string, string |     
+  null> }>                                                                     
+        }>(                                                                    
+          `/crm/v3/objects/${objectType}/search`,                              
+          {                                                                    
+            method: "POST",                                                    
+            body: JSON.stringify({                                             
+              filterGroups: [                                                  
+                {                                                              
+                  filters: [                                                   
+                    {                                                          
+                      propertyName: "createdate",                              
+                      operator: "GTE",                                         
+                      value: cutoffTimestamp.toString(),                       
+                    },                                                         
+                  ],                                                           
+                },                                                             
+              ],                                                               
+              properties: [propertyName, "createdate"],                        
+              limit: sampleSize,                                               
+            }),                                                                
+          }                                                                    
+        );                                                                     
+                                                                               
+        const actualSampleSize = response.results.length;                      
+        let filledInSample = 0;                                                
+                                                                               
+        // Count non-empty values in the sample                                
+        // HubSpot returns requested properties even if empty/null             
+        for (const record of response.results) {                               
+          const value = record.properties[propertyName];                       
+          if (value !== null && value !== undefined && value !== "") {         
+            filledInSample++;                                                  
+          }                                                                    
+        }                                                                      
+                                                                               
+        // Calculate fill rate from the sample directly (no extrapolation)     
+        const fillRate = actualSampleSize > 0                                  
+          ? Math.round((filledInSample / actualSampleSize) * 10000) / 100      
+          : 0;                                                                 
+                                                                               
+        return {                                                               
+          fillRate,                                                            
+          sampleSize: actualSampleSize,                                        
+          filledInSample,                                                      
+          isEstimate: actualSampleSize < response.total, // True if we sampled 
+  less than total                                                              
+        };                                                                     
+      } catch (error) {                                                        
+        console.error(`[HubSpot] Failed to calculate fill rate from sample for 
+  ${propertyName}:`, error);                                                   
+        return { fillRate: 0, sampleSize: 0, filledInSample: 0, isEstimate:    
+  true };                                                                      
+      }                                                                        
+    }                                                                          
+                                                                               
+    // Calculate fill rate for a property - tries HAS_PROPERTY first, falls    
+  back to sample                                                               
+    async calculatePropertyFillRate(                                           
+      objectType: "deals" | "contacts" | "companies",                          
+      propertyName: string                                                     
+    ): Promise<{ fillRate: number; totalRecords: number; filledRecords: number;
+   usedFallback: boolean }> {                                                  
+      // Try fast path first (HAS_PROPERTY)                                    
+      const [totalRecords, filledRecordsOrNull] = await Promise.all([          
+        this.countRecords(objectType),                                         
+        this.countRecordsWithProperty(objectType, propertyName),               
+      ]);                                                                      
+                                                                               
+      // If HAS_PROPERTY worked, use those counts (all-time totals)            
+      if (filledRecordsOrNull !== null) {                                      
+        const fillRate = totalRecords > 0 ? (filledRecordsOrNull /             
+  totalRecords) * 100 : 0;                                                     
+        return {                                                               
+          fillRate: Math.round(fillRate * 100) / 100,                          
+          totalRecords,                                                        
+          filledRecords: filledRecordsOrNull,                                  
+          usedFallback: false,                                                 
+        };                                                                     
+      }                                                                        
+                                                                               
+      // Fall back to sample-based calculation (last 365 days, up to 200       
+  records)                                                                     
+      // This provides a reasonable estimate based on recent data              
+      const sampleResult = await this.calculateFillRateFromSample(objectType,  
+  propertyName, 365, 200);                                                     
+                                                                               
+      // Use consistent 365-day window totals for the fallback                 
+      // sampleSize is from 365-day records, fillRate is based on that sample  
+      return {                                                                 
+        fillRate: sampleResult.fillRate,                                       
+        totalRecords: sampleResult.sampleSize, // Use sample size as the basis 
+  (from 365-day window)                                                        
+        filledRecords: sampleResult.filledInSample, // Actual filled count from
+   sample                                                                      
+        usedFallback: true,                                                    
+      };                                                                       
+    }                                                                          
+  }                                                                            
+                                                                               
+  ---                                                                          
+  3. connectors/hubspot/README.md (363 lines)                                  
+                                                                               
+  [Content too long - see above for full README from the tool output]          
+                                                                               
+  Key highlights:                                                              
+  - Export API pattern (NOT YET IMPLEMENTED - crown jewel for scale)           
+  - Property fill rate calculation with two-path fallback (lines 179-196)      
+  - Rate limits: 100 req/10s (line 232)                                        
+  - Edge cases: Custom property discovery, pagination limits, association      
+  inline fetching                                                              
+                                                                               
+  ---                                                                          
+  4. connectors/hubspot/types.ts (123 lines)                                   
+                                                                               
+  // HubSpot API Type Definitions                                              
+                                                                               
+  export interface HubSpotDeal {                                               
+    id: string;                                                                
+    properties: {                                                              
+      dealname?: string;                                                       
+      amount?: string;                                                         
+      dealstage?: string;                                                      
+      closedate?: string;                                                      
+      createdate?: string;                                                     
+      hs_lastmodifieddate?: string;                                            
+      pipeline?: string;                                                       
+      hubspot_owner_id?: string;                                               
+      hs_deal_stage_probability?: string;                                      
+      notes_last_updated?: string;                                             
+      closed_lost_reason?: string;                                             
+      closed_won_reason?: string;                                              
+      hs_closed_lost_competitor?: string;                                      
+      [key: string]: string | undefined;                                       
+    };                                                                         
+    associations?: {                                                           
+      contacts?: { results: Array<{ id: string }> };                           
+      companies?: { results: Array<{ id: string }> };                          
+    };                                                                         
+  }                                                                            
+                                                                               
+  export interface HubSpotContact {                                            
+    id: string;                                                                
+    properties: {                                                              
+      firstname?: string;                                                      
+      lastname?: string;                                                       
+      email?: string;                                                          
+      phone?: string;                                                          
+      company?: string;                                                        
+      jobtitle?: string;                                                       
+      lifecyclestage?: string;                                                 
+      hs_lead_status?: string;                                                 
+      createdate?: string;                                                     
+      lastmodifieddate?: string;                                               
+      hubspot_owner_id?: string;                                               
+      hs_analytics_source?: string;                                            
+      hubspotscore?: string;                                                   
+      hs_buying_role?: string;                                                 
+      [key: string]: string | undefined;                                       
+    };                                                                         
+    associations?: {                                                           
+      companies?: { results: Array<{ id: string }> };                          
+      deals?: { results: Array<{ id: string }> };                              
+    };                                                                         
+  }                                                                            
+                                                                               
+  export interface HubSpotCompany {                                            
+    id: string;                                                                
+    properties: {                                                              
+      name?: string;                                                           
+      domain?: string;                                                         
+      industry?: string;                                                       
+      numberofemployees?: string;                                              
+      annualrevenue?: string;                                                  
+      city?: string;                                                           
+      state?: string;                                                          
+      country?: string;                                                        
+      createdate?: string;                                                     
+      hs_lastmodifieddate?: string;                                            
+      [key: string]: string | undefined;                                       
+    };                                                                         
+  }                                                                            
+                                                                               
+  export interface HubSpotPipelineStage {                                      
+    id: string;                                                                
+    label: string;                                                             
+    displayOrder: number;                                                      
+    metadata: {                                                                
+      probability?: string;                                                    
+      isClosed?: string;                                                       
+    };                                                                         
+  }                                                                            
+                                                                               
+  export interface HubSpotPipeline {                                           
+    id: string;                                                                
+    label: string;                                                             
+    stages: HubSpotPipelineStage[];                                            
+  }                                                                            
+                                                                               
+  export interface HubSpotProperty {                                           
+    name: string;                                                              
+    label: string;                                                             
+    type: string;                                                              
+    fieldType: string;                                                         
+    description: string;                                                       
+    groupName: string;                                                         
+    options: Array<{ label: string; value: string; displayOrder: number }>;    
+    displayOrder: number;                                                      
+    hasUniqueValue: boolean;                                                   
+    hidden: boolean;                                                           
+    hubspotDefined: boolean;                                                   
+    modificationMetadata?: {                                                   
+      archivable: boolean;                                                     
+      readOnlyDefinition: boolean;                                             
+      readOnlyValue: boolean;                                                  
+    };                                                                         
+    formField: boolean;                                                        
+    calculated: boolean;                                                       
+    externalOptions: boolean;                                                  
+    archived: boolean;                                                         
+    createdAt: string;                                                         
+    updatedAt: string;                                                         
+  }                                                                            
+                                                                               
+  interface HubSpotListResponse<T> {                                           
+    results: T[];                                                              
+    paging?: {                                                                 
+      next?: {                                                                 
+        after: string;                                                         
+        link: string;                                                          
+      };                                                                       
+    };                                                                         
+  }                                                                            
+                                                                               
+  interface HubSpotPropertiesResponse {                                        
+    results: HubSpotProperty[];                                                
+  }                                                                            
+                                                                               
+  ---                                                                          
+  5. schemas/field-mappings.ts (203 lines)                                     
+                                                                               
+  [Content is in the tool output above - includes mappings for all 6           
+  connectors]                                                                  
+                                                                               
+  Key sections:                                                                
+  - HUBSPOT_DEAL_MAPPINGS (lines 9-22)                                         
+  - HUBSPOT_CONTACT_MAPPINGS (lines 24-36)                                     
+  - HUBSPOT_COMPANY_MAPPINGS (lines 38-49)                                     
+  - Plus mappings for Gong, Fireflies, Monday, Asana, Google Drive             
+                                                                               
+  ---                                                                          
+  6. schemas/connector-schemas.ts (226 lines)                                  
+                                                                               
+  [Content is in the tool output above - documents raw API response shapes]    
+                                                                               
+  Key sections:                                                                
+  - HubSpot raw schemas (lines 12-50)                                          
+  - Gong, Fireflies, Monday, Asana, Google Drive raw schemas                   
+  - Important quirks documented at bottom (lines 187-225):                     
+    - HubSpot: All values are strings                                          
+    - Fireflies: Date is epoch ms as STRING                                    
+    - Monday: Column values are JSON strings                                   
+                                                                               
+  ---                                                                          
+  Summary for Replit                                                           
+                                                                               
+  These 6 files are the foundation for Session 3. The 426-line HubSpot client  
+  (client.ts) is the crown jewel with:                                         
+                                                                               
+  ✅ Property fill rate calculation with two-path fallback (lines 391-424)     
+  ✅ Custom property discovery (lines 256-265)                                 
+  ✅ Pagination with custom properties (lines 96-119)                          
+  ✅ Association inline fetching (lines 87)                                    
+  ✅ All edge cases preserved from production                                  
+                                                                               
+  The README documents the Export API pattern (NOT YET IMPLEMENTED) that will  
+  be critical for scale in Phase 2
