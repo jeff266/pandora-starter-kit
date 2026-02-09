@@ -3,7 +3,7 @@
 ## Overview
 Pandora is a multi-tenant agent-based platform that helps RevOps teams analyze their GTM (Go-To-Market) data. It connects to CRM, call intelligence, task management, and document systems, normalizes data into 8 core entities, and runs AI-powered analyses.
 
-**Current State**: Session 3 — HubSpot connector ported. Full CRM sync pipeline: connect → fetch → transform → upsert. All edge cases preserved (pagination, fill rate fast path + sample fallback, property limiting).
+**Current State**: Session 4 — Pipeline snapshot → Slack. Full end-to-end data pipeline: HubSpot → PostgreSQL → metrics → Slack. Query normalized deals, calculate pipeline metrics, format as Block Kit, post via webhook.
 
 **Version**: 0.1.0
 
@@ -37,7 +37,8 @@ pandora/
         sync.ts           # initialSync, incrementalSync, backfillSync with DB upserts
         schema-discovery.ts # Property enumeration, pipeline discovery, metadata storage
     schemas/              # Will hold entity definitions
-    analysis/             # Will hold analysis tools
+    analysis/
+      pipeline-snapshot.ts # Pipeline metrics from normalized deals (SQL queries)
     utils/
       index.ts            # Barrel export for all utilities
       retry.ts            # Exponential backoff, paginated fetch, rate limiter
@@ -101,6 +102,7 @@ All tables use UUID primary keys and include `workspace_id` for multi-tenant iso
 - `POST /api/workspaces/:id/connectors/hubspot/sync` — Trigger sync (mode: initial/incremental/backfill)
 - `GET /api/workspaces/:id/connectors/hubspot/health` — Check connector health
 - `POST /api/workspaces/:id/connectors/hubspot/discover-schema` — Discover HubSpot schema
+- `POST /api/workspaces/:id/actions/pipeline-snapshot` — Generate pipeline metrics, optionally post to Slack
 
 ## Scripts
 - `npm run dev` — Start dev server with hot reload (tsx watch)
@@ -117,7 +119,7 @@ All tables use UUID primary keys and include `workspace_id` for multi-tenant iso
 - **Session 1**: Database schema refinement + seed data (DONE)
 - **Session 2**: Port utilities (DONE)
 - **Session 3**: Port HubSpot connector (DONE)
-- **Session 4**: Pipeline snapshot → Slack
+- **Session 4**: Pipeline snapshot → Slack (DONE)
 - **Session 5**: Context Layer
 - **Session 6**: Computed fields engine
 - **Sessions 7-10**: Phase 2 (expanded connectors, sync orchestrator, query API)
