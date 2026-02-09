@@ -7,9 +7,31 @@ import {
   type NormalizedDeal,
   type NormalizedContact,
   type NormalizedAccount,
+  type DealTransformOptions,
 } from './transform.js';
 import type { SyncResult } from '../_interface.js';
 import { transformWithErrorCapture } from '../../utils/sync-helpers.js';
+
+async function buildStageMaps(client: HubSpotClient): Promise<DealTransformOptions> {
+  const stageMap = new Map<string, string>();
+  const pipelineMap = new Map<string, string>();
+
+  try {
+    const pipelines = await client.getPipelines();
+    for (const pipeline of pipelines) {
+      pipelineMap.set(pipeline.id, pipeline.label);
+      for (const stage of pipeline.stages) {
+        stageMap.set(stage.id, stage.label);
+      }
+    }
+    console.log(`[HubSpot Sync] Built stage map: ${stageMap.size} stages across ${pipelineMap.size} pipelines`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    console.warn(`[HubSpot Sync] Failed to fetch pipelines for stage resolution: ${msg}`);
+  }
+
+  return { stageMap, pipelineMap };
+}
 
 const BATCH_SIZE = 500;
 
@@ -203,6 +225,8 @@ export async function initialSync(
   console.log(`[HubSpot Sync] Starting initial sync for workspace ${workspaceId}`);
 
   try {
+    const dealOptions = await buildStageMaps(client);
+
     let rawDeals: any[] = [];
     let rawContacts: any[] = [];
     let rawCompanies: any[] = [];
@@ -222,7 +246,7 @@ export async function initialSync(
     // Transform with per-record error capture
     const dealTransformResult = transformWithErrorCapture(
       rawDeals,
-      (d) => transformDeal(d, workspaceId),
+      (d) => transformDeal(d, workspaceId, dealOptions),
       'HubSpot Deals',
       (d) => d.id
     );
@@ -305,6 +329,8 @@ export async function incrementalSync(
 
   console.log(`[HubSpot Sync] Starting incremental sync for workspace ${workspaceId} since ${since.toISOString()}`);
 
+  const dealOptions = await buildStageMaps(hubspotClient);
+
   const dealProps = [
     "dealname", "amount", "dealstage", "closedate", "createdate",
     "hs_lastmodifieddate", "pipeline", "hubspot_owner_id",
@@ -365,7 +391,7 @@ export async function incrementalSync(
     // Transform with per-record error capture
     const dealTransformResult = transformWithErrorCapture(
       rawDeals,
-      (d) => transformDeal({ id: d.id, properties: d.properties as any } as any, workspaceId),
+      (d) => transformDeal({ id: d.id, properties: d.properties as any } as any, workspaceId, dealOptions),
       'HubSpot Deals (Incremental)',
       (d) => d.id
     );

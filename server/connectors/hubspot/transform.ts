@@ -84,8 +84,38 @@ function extractCustomFields(
   return custom;
 }
 
-export function transformDeal(deal: HubSpotDeal, workspaceId: string): NormalizedDeal {
+export interface DealTransformOptions {
+  stageMap?: Map<string, string>;
+  pipelineMap?: Map<string, string>;
+}
+
+export function transformDeal(
+  deal: HubSpotDeal,
+  workspaceId: string,
+  options?: DealTransformOptions
+): NormalizedDeal {
   const props = deal.properties;
+
+  const rawStage = sanitizeText(props.dealstage);
+  const rawPipeline = sanitizeText(props.pipeline);
+
+  let resolvedStage = rawStage;
+  if (rawStage && options?.stageMap) {
+    const label = options.stageMap.get(rawStage);
+    if (label) {
+      resolvedStage = label;
+    } else {
+      console.warn(`[HubSpot Transform] Unknown stage ID: ${rawStage} for deal ${deal.id}`);
+    }
+  }
+
+  let resolvedPipeline = rawPipeline;
+  if (rawPipeline && options?.pipelineMap) {
+    const label = options.pipelineMap.get(rawPipeline);
+    if (label) {
+      resolvedPipeline = label;
+    }
+  }
 
   return {
     workspace_id: workspaceId,
@@ -97,12 +127,12 @@ export function transformDeal(deal: HubSpotDeal, workspaceId: string): Normalize
     },
     name: sanitizeText(props.dealname),
     amount: sanitizeNumber(props.amount),
-    stage: sanitizeText(props.dealstage),
+    stage: resolvedStage,
     close_date: sanitizeDate(props.closedate),
     owner: sanitizeText(props.hubspot_owner_id),
     probability: sanitizeNumber(props.hs_deal_stage_probability),
     forecast_category: null,
-    pipeline: sanitizeText(props.pipeline),
+    pipeline: resolvedPipeline,
     last_activity_date: parseDate(sanitizeDate(props.notes_last_updated)),
     custom_fields: extractCustomFields(props, CORE_DEAL_FIELDS),
   };
