@@ -467,7 +467,8 @@ export async function dealThreadingAnalysis(workspaceId: string): Promise<Thread
     LEFT JOIN accounts a ON d.account_id = a.id AND a.workspace_id = $1
     LEFT JOIN contacts pc ON d.contact_id = pc.id AND pc.workspace_id = $1
     WHERE d.workspace_id = $1
-      AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+      AND (d.stage_normalized IS NULL
+           OR d.stage_normalized NOT IN ('closed_won', 'closed_lost'))
     ORDER BY d.amount DESC
   `, [workspaceId]);
 
@@ -638,7 +639,8 @@ export async function enrichCriticalDeals(
         WHERE d2.account_id = d.account_id 
           AND d2.workspace_id = $1
           AND d2.id != d.id
-          AND d2.stage_normalized NOT IN ('closed_won', 'closed_lost')
+          AND (d2.stage_normalized IS NULL
+               OR d2.stage_normalized NOT IN ('closed_won', 'closed_lost'))
       ) as other_open_deals_at_account,
       (
         SELECT act.type
