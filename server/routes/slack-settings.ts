@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import pool from '../db.js';
-import { testSlackWebhook } from '../connectors/slack/client.js';
+import { testSlackWebhook, getSlackWebhook } from '../connectors/slack/client.js';
 
 const router = Router();
 
@@ -41,18 +41,14 @@ router.post('/:id/settings/slack/test', async (req, res) => {
   try {
     const { id } = req.params;
 
-    const ws = await pool.query(
-      `SELECT settings->>'slack_webhook_url' AS webhook_url FROM workspaces WHERE id = $1`,
-      [id]
-    );
-
+    const ws = await pool.query('SELECT id FROM workspaces WHERE id = $1', [id]);
     if (ws.rows.length === 0) {
       return res.status(404).json({ error: 'Workspace not found' });
     }
 
-    const webhookUrl = ws.rows[0].webhook_url;
-    if (!webhookUrl || typeof webhookUrl !== 'string') {
-      return res.status(400).json({ error: 'No Slack webhook URL configured for this workspace' });
+    const webhookUrl = await getSlackWebhook(id);
+    if (!webhookUrl) {
+      return res.status(400).json({ error: 'No Slack webhook URL configured. Set SLACK_WEBHOOK secret or save a URL via POST /:id/settings/slack' });
     }
 
     const result = await testSlackWebhook(webhookUrl);

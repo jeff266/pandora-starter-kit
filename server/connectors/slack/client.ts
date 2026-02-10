@@ -227,9 +227,26 @@ export async function getSlackWebhook(workspaceId: string): Promise<string | nul
     `SELECT settings->>'slack_webhook_url' AS webhook_url FROM workspaces WHERE id = $1`,
     [workspaceId]
   );
-  if (result.rows.length === 0) return null;
-  const url = result.rows[0].webhook_url;
-  return typeof url === 'string' ? url : null;
+  if (result.rows.length > 0) {
+    const url = result.rows[0].webhook_url;
+    if (typeof url === 'string' && url.startsWith('https://hooks.slack.com/')) {
+      return url;
+    }
+  }
+
+  const envWebhook = process.env.SLACK_WEBHOOK;
+  if (envWebhook && envWebhook.startsWith('https://hooks.slack.com/')) {
+    if (result.rows.length > 0) {
+      await pool.query(
+        `UPDATE workspaces SET settings = jsonb_set(COALESCE(settings, '{}'::jsonb), '{slack_webhook_url}', to_jsonb($2::text)) WHERE id = $1`,
+        [workspaceId, envWebhook]
+      );
+      console.log(`[slack] Saved SLACK_WEBHOOK env secret to workspace ${workspaceId} settings`);
+    }
+    return envWebhook;
+  }
+
+  return null;
 }
 
 export async function testSlackWebhook(
