@@ -54,7 +54,7 @@ export function formatForSlack(result: SkillResult, skill: SkillDefinition): Sla
   // Output content
   if (typeof result.output === 'string') {
     // Text output - split into sections if it has headers
-    const sections = parseTextIntoSections(result.output);
+    const sections = parseTextIntoSections(markdownToSlack(result.output));
     for (const section of sections) {
       blocks.push({
         type: 'section',
@@ -120,9 +120,13 @@ export function formatPipelineHygiene(result: SkillResult, skill?: SkillDefiniti
 
   blocks.push({ type: 'divider' });
 
-  // Parse output into sections
+  // Parse output into sections and convert Markdown to Slack format
   const output = typeof result.output === 'string' ? result.output : JSON.stringify(result.output);
-  const reportSections = parsePipelineHygieneReport(output);
+  const rawSections = parsePipelineHygieneReport(output);
+  const reportSections: PipelineHygieneSections = {};
+  for (const [key, value] of Object.entries(rawSections)) {
+    (reportSections as any)[key] = value ? markdownToSlack(value) : value;
+  }
 
   // 1. PIPELINE HEALTH - Compact metrics with trend indicators
   if (reportSections.pipelineHealth) {
@@ -240,7 +244,7 @@ export function formatDealRiskReview(result: SkillResult): SlackBlock[] {
   blocks.push({ type: 'divider' });
 
   // Generic parsing for now
-  const output = typeof result.output === 'string' ? result.output : JSON.stringify(result.output);
+  const output = markdownToSlack(typeof result.output === 'string' ? result.output : JSON.stringify(result.output));
   const sections = parseSectionsFromMarkdown(output);
 
   for (const section of sections) {
@@ -304,12 +308,11 @@ export function formatWeeklyRecap(result: SkillResult): SlackBlock[] {
 
   blocks.push({ type: 'divider' });
 
-  const output = typeof result.output === 'string' ? result.output : JSON.stringify(result.output);
+  const output = markdownToSlack(typeof result.output === 'string' ? result.output : JSON.stringify(result.output));
   const sections = parseSectionsFromMarkdown(output);
 
   for (const section of sections) {
     if (section.title) {
-      // Use different formatting for each major section
       const emoji = getSectionEmoji(section.title);
       blocks.push({
         type: 'section',
@@ -342,6 +345,20 @@ export function formatWeeklyRecap(result: SkillResult): SlackBlock[] {
   });
 
   return blocks;
+}
+
+// ============================================================================
+// Markdown → Slack mrkdwn Conversion
+// ============================================================================
+
+function markdownToSlack(text: string): string {
+  let result = text;
+  result = result.replace(/\*\*(.+?)\*\*/g, '*$1*');
+  result = result.replace(/^### (.+)$/gm, '*$1*');
+  result = result.replace(/^## (.+)$/gm, '*$1*');
+  result = result.replace(/^# (.+)$/gm, '*$1*');
+  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<$2|$1>');
+  return result;
 }
 
 // ============================================================================
