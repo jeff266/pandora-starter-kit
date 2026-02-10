@@ -643,17 +643,17 @@ export async function enrichCriticalDeals(
                OR d2.stage_normalized NOT IN ('closed_won', 'closed_lost'))
       ) as other_open_deals_at_account,
       (
-        SELECT act.type
+        SELECT act.activity_type
         FROM activities act
         WHERE act.deal_id = d.id AND act.workspace_id = $1
-        ORDER BY act.date DESC
+        ORDER BY act.timestamp DESC
         LIMIT 1
       ) as most_recent_activity_type,
       (
-        SELECT act.date
+        SELECT act.timestamp
         FROM activities act
         WHERE act.deal_id = d.id AND act.workspace_id = $1
-        ORDER BY act.date DESC
+        ORDER BY act.timestamp DESC
         LIMIT 1
       ) as most_recent_activity_date
     FROM deals d
