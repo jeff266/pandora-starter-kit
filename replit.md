@@ -26,6 +26,7 @@ Pandora is built on Node.js 20 with TypeScript 5+, utilizing Express.js for its 
 -   **Upsert Pattern:** `ON CONFLICT DO UPDATE` is used across all entity tables to efficiently manage data synchronization.
 -   **On-Demand Transcript Fetching:** Transcripts for calls are fetched only when needed to optimize data storage and API calls.
 -   **API Design:** RESTful API endpoints for managing workspaces, connectors, context layers, and triggering actions.
+-   **Sync Infrastructure:** SyncScheduler (node-cron 2 AM UTC daily), sync orchestrator, sync_log table for history tracking. Manual sync via POST returns 202 Accepted and runs async. HubSpot association backfill runs post-sync when `usedExportApi` flag is set in sync_cursor metadata.
 
 **Technology Choices:**
 -   **Runtime:** Node.js 20

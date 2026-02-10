@@ -9,9 +9,11 @@ import gongRouter from "./routes/gong.js";
 import firefliesRouter from "./routes/fireflies.js";
 import actionsRouter from "./routes/actions.js";
 import contextRouter from "./routes/context.js";
+import syncRouter from "./routes/sync.js";
 import { getAdapterRegistry } from "./connectors/adapters/registry.js";
 import { MondayTaskAdapter } from "./connectors/monday/adapter.js";
 import { GoogleDriveDocumentAdapter } from "./connectors/google-drive/adapter.js";
+import { startScheduler } from "./sync/scheduler.js";
 
 dotenv.config();
 
@@ -36,6 +38,7 @@ app.use("/api/workspaces", firefliesRouter);
 app.use("/api/workspaces", connectorsRouter);
 app.use("/api/workspaces", actionsRouter);
 app.use("/api/workspaces", contextRouter);
+app.use("/api/workspaces", syncRouter);
 
 function registerAdapters(): void {
   const registry = getAdapterRegistry();
@@ -57,6 +60,7 @@ async function start(): Promise<void> {
   }
 
   registerAdapters();
+  startScheduler();
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`[server] Pandora v0.1.0 listening on port ${PORT}`);
