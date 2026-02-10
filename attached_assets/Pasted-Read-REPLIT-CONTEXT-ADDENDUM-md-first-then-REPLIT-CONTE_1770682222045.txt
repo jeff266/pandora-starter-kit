@@ -1,0 +1,62 @@
+Read REPLIT_CONTEXT_ADDENDUM.md first, then REPLIT_CONTEXT.md.
+
+The sync orchestrator (server/sync/orchestrator.ts) is already built and working. 
+Build the three remaining pieces:
+
+1. server/sync/scheduler.ts
+
+Install node-cron package.
+
+Create a SyncScheduler class:
+- start(): registers a cron job at "0 2 * * *" (2 AM UTC daily)
+- stop(): cancels the cron job
+- The job:
+  a. Query all workspaces that have at least one row in connector_configs with status = 'connected'
+  b. For each workspace, call the sync orchestrator's syncWorkspace() 
+  c. Run workspaces SEQUENTIALLY (not parallel) to avoid hammering external APIs
+  d. Log start/end for each workspace: "[Scheduler] Syncing workspace {name} ({id})..."
+  e. Log summary when done: "[Scheduler] Daily sync complete: {N} workspaces, {duration}ms"
+  f. Catch errors per workspace — one failure doesn't stop the others
+
+Initialize the scheduler in server/index.ts on startup. Log: "[Scheduler] Daily sync scheduled for 2:00 AM UTC"
+
+2. server/sync/backfill.ts
+
+HubSpot-specific association backfill:
+- backfillHubSpotAssociations(workspaceId: string): Promise<BackfillResult>
+- Gets HubSpot credentials from connector_configs
+- For each deal in the deals table (where source = 'hubspot'):
+  a. Fetch associations from HubSpot API: GET /crm/v3/objects/deals/{dealId}/associations/contacts
+  b. Fetch associations: GET /crm/v3/objects/deals/{dealId}/associations/companies
+  c. Match contact source_ids to our contacts table → update deal's contact associations
+  d. Match company source_ids to our accounts table → update deal's account_id
+- Batch the API calls (don't fetch one deal at a time — use HubSpot batch read endpoint if available)
+- Log: "[Backfill] Updated associations for {N} deals in workspace {id}"
+- Return: { dealsProcessed, contactLinksCreated, accountLinksCreated, errors }
+
+Wire into the scheduler: after incremental sync, if connector_type = 'hubspot' 
+and connector_configs.metadata has { usedExportApi: true }, run backfill.
+
+3. server/routes/sync.ts
+
+Three endpoints:
+
+POST /api/workspaces/:id/sync
+- Trigger manual sync for the workspace
+- Run async (return 202 Accepted immediately, sync runs in background)
+- Response: { syncId, status: "started", message: "Sync initiated for {N} connectors" }
+- Optional body: { connectorType?: string } to sync just one connector
+
+GET /api/workspaces/:id/sync/status
+- Query connector_configs for the workspace
+- For each connected connector: name, status, last_sync_at, last_error
+- Also check if a sync is currently running (check sync_log for status = 'running')
+- Response: { isRunning, connectors: [...], lastFullSync }
+
+GET /api/workspaces/:id/sync/history
+- Query sync_log table for this workspace
+- Default: last 20 entries, ordered by started_at desc
+- Query params: ?limit=20&connector=hubspot
+- Response: { entries: [{ id, connector_type, sync_type, status, records_synced, duration_ms, started_at, completed_at, errors }] }
+
+Register these routes in server/index.ts.
