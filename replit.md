@@ -38,7 +38,10 @@ Pandora is built on Node.js 20 with TypeScript 5+, utilizing Express.js for its 
 -   **Tool Definitions:** 30+ tools in `server/skills/tool-definitions.ts` wrapping query layer + compute functions. `workspaceId` injected from execution context (never in tool params).
 -   **Built-in Skills:** `pipeline-hygiene` (pipeline quality analysis), `deal-risk-review` (deal risk assessment), `weekly-recap` (leadership report).
 -   **Skill Routes:** `GET /:id/skills` (list), `POST /:id/skills/:skillId/run` (execute), `GET /:id/skills/:skillId/runs` (history), `GET /:id/skills/:skillId/runs/:runId` (detail).
--   **Prompt Safety:** Template renderer limits arrays to 20 summarized items and truncates objects >8KB to stay within Claude's context window.
+-   **Three-Phase Pattern:** Skills follow COMPUTE → CLASSIFY → SYNTHESIZE. Compute steps pre-aggregate raw data into compact summaries using shared utilities (`server/analysis/aggregations.ts`). Claude receives structured summaries (~4K tokens), never raw arrays.
+-   **Aggregation Utilities:** `aggregateBy`, `bucketByThreshold`, `topNWithSummary`, `summarizeDeals` in `server/analysis/aggregations.ts`. Shared across all skills.
+-   **Token Guardrails:** Runtime validates input size before Claude/DeepSeek steps — warns >8K tokens, aborts >20K tokens. DeepSeek arrays capped at 30 items.
+-   **Prompt Safety:** Template renderer limits arrays to 20 summarized items and truncates objects >8KB as fallback safety net.
 -   **Model:** `claude-sonnet-4-5` via Replit AI integration (no date suffix — integration requirement).
 
 **Technology Choices:**
