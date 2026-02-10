@@ -222,16 +222,21 @@ export async function postToSlack(
   }
 }
 
+function sanitizeWebhookUrl(raw: string): string {
+  return raw.replace(/^["']+|["']+$/g, '').trim();
+}
+
 export async function getSlackWebhook(workspaceId: string): Promise<string | null> {
   const result = await pool.query(
     `SELECT settings->>'slack_webhook_url' AS webhook_url FROM workspaces WHERE id = $1`,
     [workspaceId]
   );
-  if (result.rows.length > 0) {
-    const url = result.rows[0].webhook_url;
-    if (typeof url === 'string' && url.startsWith('https://hooks.slack.com/') && url.length > 60) {
+  if (result.rows.length > 0 && result.rows[0].webhook_url) {
+    const url = sanitizeWebhookUrl(result.rows[0].webhook_url);
+    if (url.startsWith('https://hooks.slack.com/') && url.length > 60) {
       return url;
     }
+    console.warn(`[slack] Invalid webhook URL for workspace ${workspaceId}: ${url.slice(0, 40)}...`);
   }
 
   const envWebhook = process.env.SLACK_WEBHOOK;
