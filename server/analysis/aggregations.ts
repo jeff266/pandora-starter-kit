@@ -439,11 +439,11 @@ export async function dealThreadingAnalysis(workspaceId: string): Promise<Thread
         SELECT COUNT(DISTINCT contact_id)
         FROM (
           -- Primary contact
-          SELECT d.contact_id
+          SELECT d.contact_id::text
           WHERE d.contact_id IS NOT NULL
           UNION
           -- Contacts from activities
-          SELECT act.contact_id
+          SELECT act.contact_id::text
           FROM activities act
           WHERE act.deal_id = d.id AND act.workspace_id = $1 AND act.contact_id IS NOT NULL
           UNION
@@ -617,11 +617,11 @@ export async function enrichCriticalDeals(
         SELECT COUNT(DISTINCT contact_id)
         FROM (
           -- Primary contact
-          SELECT d.contact_id
+          SELECT d.contact_id::text
           WHERE d.contact_id IS NOT NULL
           UNION
           -- Contacts from activities
-          SELECT act.contact_id
+          SELECT act.contact_id::text
           FROM activities act
           WHERE act.deal_id = d.id AND act.workspace_id = $1 AND act.contact_id IS NOT NULL
           UNION
