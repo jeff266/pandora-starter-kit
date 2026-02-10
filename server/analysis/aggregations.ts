@@ -436,18 +436,25 @@ export async function dealThreadingAnalysis(workspaceId: string): Promise<Thread
       pc.title as primary_contact_title,
       pc.seniority as primary_contact_seniority,
       (
-        SELECT COUNT(DISTINCT contact_email)
+        SELECT COUNT(DISTINCT contact_id)
         FROM (
-          SELECT COALESCE(c1.email, '') as contact_email
-          FROM contacts c1
-          WHERE c1.id = d.contact_id AND c1.workspace_id = $1
+          -- Primary contact
+          SELECT d.contact_id
+          WHERE d.contact_id IS NOT NULL
           UNION
-          SELECT COALESCE(c2.email, '') as contact_email
+          -- Contacts from activities
+          SELECT act.contact_id
           FROM activities act
-          INNER JOIN contacts c2 ON act.contact_id = c2.id AND act.workspace_id = $1
-          WHERE act.deal_id = d.id AND act.workspace_id = $1 AND c2.email IS NOT NULL AND c2.email != ''
-        ) contacts
-        WHERE contact_email != ''
+          WHERE act.deal_id = d.id AND act.workspace_id = $1 AND act.contact_id IS NOT NULL
+          UNION
+          -- Contacts from HubSpot associations (source_data JSONB)
+          SELECT (assoc->>'id')::text as contact_id
+          FROM jsonb_array_elements(
+            COALESCE(d.source_data->'associations'->'contacts'->'results', '[]'::jsonb)
+          ) as assoc
+          WHERE assoc->>'type' = 'deal_to_contact'
+        ) all_contacts
+        WHERE contact_id IS NOT NULL
       ) as contact_count,
       (
         SELECT STRING_AGG(DISTINCT COALESCE(c3.first_name || ' ' || c3.last_name, ''), ', ')
@@ -544,12 +551,18 @@ export async function dealThreadingAnalysis(workspaceId: string): Promise<Thread
   // Identify critical and warning deals
   const criticalStages = ['evaluation', 'decision', 'proposal', 'negotiation'];
   const criticalDeals = singleThreaded
-    .filter(d => criticalStages.includes(d.stage.toLowerCase()) || d.amount > avgDealSize)
+    .filter(d => {
+      const stage = d.stage ? d.stage.toLowerCase() : '';
+      return criticalStages.includes(stage) || d.amount > avgDealSize;
+    })
     .sort((a, b) => b.amount - a.amount)
     .slice(0, 15);
 
   const warningDeals = singleThreaded
-    .filter(d => !criticalStages.includes(d.stage.toLowerCase()) && d.amount <= avgDealSize)
+    .filter(d => {
+      const stage = d.stage ? d.stage.toLowerCase() : '';
+      return !criticalStages.includes(stage) && d.amount <= avgDealSize;
+    })
     .sort((a, b) => b.amount - a.amount)
     .slice(0, 15);
 
@@ -601,18 +614,25 @@ export async function enrichCriticalDeals(
       pc.title as primary_contact_title,
       pc.seniority as primary_contact_seniority,
       (
-        SELECT COUNT(DISTINCT contact_email)
+        SELECT COUNT(DISTINCT contact_id)
         FROM (
-          SELECT COALESCE(c1.email, '') as contact_email
-          FROM contacts c1
-          WHERE c1.id = d.contact_id AND c1.workspace_id = $1
+          -- Primary contact
+          SELECT d.contact_id
+          WHERE d.contact_id IS NOT NULL
           UNION
-          SELECT COALESCE(c2.email, '') as contact_email
+          -- Contacts from activities
+          SELECT act.contact_id
           FROM activities act
-          INNER JOIN contacts c2 ON act.contact_id = c2.id AND act.workspace_id = $1
-          WHERE act.deal_id = d.id AND act.workspace_id = $1
-        ) contacts
-        WHERE contact_email != ''
+          WHERE act.deal_id = d.id AND act.workspace_id = $1 AND act.contact_id IS NOT NULL
+          UNION
+          -- Contacts from HubSpot associations (source_data JSONB)
+          SELECT (assoc->>'id')::text as contact_id
+          FROM jsonb_array_elements(
+            COALESCE(d.source_data->'associations'->'contacts'->'results', '[]'::jsonb)
+          ) as assoc
+          WHERE assoc->>'type' = 'deal_to_contact'
+        ) all_contacts
+        WHERE contact_id IS NOT NULL
       ) as contact_count,
       (
         SELECT STRING_AGG(DISTINCT COALESCE(c3.first_name || ' ' || c3.last_name, ''), ', ')

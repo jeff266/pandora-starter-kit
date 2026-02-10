@@ -1122,8 +1122,28 @@ const dealThreadingAnalysisTool: ToolDefinition = {
     required: [],
   },
   execute: async (params, context) => {
-    return safeExecute('dealThreadingAnalysis', () =>
-      dealThreadingAnalysis(context.workspaceId), params);
+    return safeExecute('dealThreadingAnalysis', async () => {
+      const [threadingData, nameMap] = await Promise.all([
+        dealThreadingAnalysis(context.workspaceId),
+        resolveOwnerNames(context.workspaceId),
+      ]);
+
+      // Map owner IDs to names in all sections
+      const mapOwner = (owner: string) => resolveOwnerName(owner, nameMap);
+
+      return {
+        summary: threadingData.summary,
+        byStage: threadingData.byStage,
+        byOwner: Object.fromEntries(
+          Object.entries(threadingData.byOwner).map(([owner, stats]) => [
+            mapOwner(owner),
+            stats,
+          ])
+        ),
+        criticalDeals: threadingData.criticalDeals.map(d => ({ ...d, owner: mapOwner(d.owner) })),
+        warningDeals: threadingData.warningDeals.map(d => ({ ...d, owner: mapOwner(d.owner) })),
+      };
+    }, params);
   },
 };
 
@@ -1158,7 +1178,16 @@ const enrichCriticalDealsTool: ToolDefinition = {
         return [];
       }
 
-      return enrichCriticalDeals(context.workspaceId, dealIds);
+      const [enrichedDeals, nameMap] = await Promise.all([
+        enrichCriticalDeals(context.workspaceId, dealIds),
+        resolveOwnerNames(context.workspaceId),
+      ]);
+
+      // Map owner IDs to names
+      return enrichedDeals.map(d => ({
+        ...d,
+        owner: resolveOwnerName(d.owner, nameMap),
+      }));
     }, params);
   },
 };
