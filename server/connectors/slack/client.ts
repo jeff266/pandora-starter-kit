@@ -229,7 +229,7 @@ export async function getSlackWebhook(workspaceId: string): Promise<string | nul
   );
   if (result.rows.length > 0) {
     const url = result.rows[0].webhook_url;
-    if (typeof url === 'string' && url.startsWith('https://hooks.slack.com/')) {
+    if (typeof url === 'string' && url.startsWith('https://hooks.slack.com/') && url.length > 60) {
       return url;
     }
   }
