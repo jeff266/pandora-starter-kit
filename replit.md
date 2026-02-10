@@ -32,11 +32,21 @@ Pandora is built on Node.js 20 with TypeScript 5+, utilizing Express.js for its 
 -   **Slack Output Layer:** General-purpose Slack Block Kit client (`server/connectors/slack/client.ts`) with formatting helpers (header, section, divider, fields, context) and `buildMessage` assembler. Webhook URL stored in `workspace.settings.slack_webhook_url`. Routes: `POST /:id/settings/slack` (save), `POST /:id/settings/slack/test` (test).
 -   **Webhook Endpoints:** Inbound n8n webhook routes (`server/routes/webhooks.ts`): `POST /api/webhooks/skills/:skillId/trigger` (queues skill run), `GET /api/webhooks/skills/:skillId/runs/:runId` (run status), `POST /api/webhooks/events` (event ingestion for sync_completed, deal_stage_changed, new_conversation). Skill runtime will pick up queued runs when wired in.
 
+**Skill Framework (Phase 3):**
+-   **Registry + Runtime:** `SkillRegistry` singleton manages skill definitions; `SkillRuntime` executes steps in dependency order (topological sort).
+-   **Three-Tier AI:** `compute` (deterministic query functions), `deepseek` (Fireworks API, not yet wired), `claude` (Anthropic via Replit AI integration).
+-   **Tool Definitions:** 30+ tools in `server/skills/tool-definitions.ts` wrapping query layer + compute functions. `workspaceId` injected from execution context (never in tool params).
+-   **Built-in Skills:** `pipeline-hygiene` (pipeline quality analysis), `deal-risk-review` (deal risk assessment), `weekly-recap` (leadership report).
+-   **Skill Routes:** `GET /:id/skills` (list), `POST /:id/skills/:skillId/run` (execute), `GET /:id/skills/:skillId/runs` (history), `GET /:id/skills/:skillId/runs/:runId` (detail).
+-   **Prompt Safety:** Template renderer limits arrays to 20 summarized items and truncates objects >8KB to stay within Claude's context window.
+-   **Model:** `claude-sonnet-4-5` via Replit AI integration (no date suffix — integration requirement).
+
 **Technology Choices:**
 -   **Runtime:** Node.js 20
 -   **Language:** TypeScript 5+ (strict mode, ESM)
 -   **Framework:** Express.js
 -   **Database:** PostgreSQL (Neon) with `pg` client
+-   **AI:** Anthropic Claude via Replit AI integration (`AI_INTEGRATIONS_ANTHROPIC_API_KEY`)
 -   **Dev Tools:** tsx, dotenv
 
 ## External Dependencies
