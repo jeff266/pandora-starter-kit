@@ -126,38 +126,19 @@ export function formatPipelineHygiene(result: SkillResult, skill?: SkillDefiniti
 
   // 1. PIPELINE HEALTH - Compact metrics with trend indicators
   if (reportSections.pipelineHealth) {
-    blocks.push({
-      type: 'section',
-      text: {
-        type: 'mrkdwn',
-        text: `*📊 Pipeline Health*\n${reportSections.pipelineHealth}`,
-      },
-    });
+    appendSectionBlocks(blocks, '📊 Pipeline Health', reportSections.pipelineHealth, 2800);
   }
 
   // 2. STALE DEAL CRISIS - Highlighted if severe
   if (reportSections.staleDeals) {
     const isCritical = reportSections.staleDeals.toLowerCase().includes('critical');
     const emoji = isCritical ? '🚨' : '⚠️';
-
-    blocks.push({
-      type: 'section',
-      text: {
-        type: 'mrkdwn',
-        text: `*${emoji} Stale Deals*\n${reportSections.staleDeals}`,
-      },
-    });
+    appendSectionBlocks(blocks, `${emoji} Stale Deals`, reportSections.staleDeals, 2800);
   }
 
   // 3. CLOSING SOON - Important for near-term focus
   if (reportSections.closingSoon) {
-    blocks.push({
-      type: 'section',
-      text: {
-        type: 'mrkdwn',
-        text: `*📅 Closing This Period*\n${reportSections.closingSoon}`,
-      },
-    });
+    appendSectionBlocks(blocks, '📅 Closing This Period', reportSections.closingSoon, 2800);
   }
 
   // 4. REP PERFORMANCE - Collapsed to avoid wall of text
@@ -166,7 +147,7 @@ export function formatPipelineHygiene(result: SkillResult, skill?: SkillDefiniti
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: `*👥 Rep Performance*\n${truncateSection(reportSections.repPerformance, 400)}`,
+        text: `*👥 Rep Performance*\n${truncateSection(reportSections.repPerformance, 800)}`,
       },
     });
   }
@@ -214,10 +195,19 @@ export function formatPipelineHygiene(result: SkillResult, skill?: SkillDefiniti
     elements: [
       {
         type: 'mrkdwn',
-        text: `⏱ ${formatDuration(result.totalDuration_ms)} | 💰 ${result.totalTokenUsage.claude}k Claude tokens | Run \`${result.runId.slice(0, 8)}\``,
+        text: `⏱ ${formatDuration(result.totalDuration_ms)} | 💰 ${formatTokenCount(result.totalTokenUsage.claude)} Claude + ${formatTokenCount(result.totalTokenUsage.deepseek)} DeepSeek | Run \`${result.runId.slice(0, 8)}\``,
       },
     ],
   });
+
+  if (blocks.length > 48) {
+    const trimmed = blocks.slice(0, 47);
+    trimmed.push({
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: '_Message truncated — view full report in Pandora_' }],
+    });
+    return trimmed;
+  }
 
   return blocks;
 }
@@ -369,6 +359,59 @@ function getStatusEmoji(status: string): string {
     default:
       return '🔵';
   }
+}
+
+function appendSectionBlocks(blocks: SlackBlock[], title: string, content: string, maxChars: number): void {
+  const fullText = `*${title}*\n${content}`;
+  if (fullText.length <= maxChars) {
+    blocks.push({
+      type: 'section',
+      text: { type: 'mrkdwn', text: fullText },
+    });
+    return;
+  }
+
+  blocks.push({
+    type: 'section',
+    text: { type: 'mrkdwn', text: `*${title}*` },
+  });
+
+  const chunks = splitAtParagraphs(content, maxChars);
+  for (const chunk of chunks) {
+    blocks.push({
+      type: 'section',
+      text: { type: 'mrkdwn', text: chunk },
+    });
+  }
+}
+
+function splitAtParagraphs(text: string, maxChars: number): string[] {
+  const paragraphs = text.split(/\n\n+/);
+  const chunks: string[] = [];
+  let current = '';
+
+  for (const para of paragraphs) {
+    if (current.length + para.length + 2 > maxChars) {
+      if (current) chunks.push(current.trim());
+      if (para.length > maxChars) {
+        chunks.push(truncateSection(para, maxChars));
+      } else {
+        current = para;
+      }
+    } else {
+      current += (current ? '\n\n' : '') + para;
+    }
+  }
+
+  if (current.trim()) chunks.push(current.trim());
+  return chunks.length > 0 ? chunks : [truncateSection(text, maxChars)];
+}
+
+function formatTokenCount(tokens: number): string {
+  if (tokens >= 1000) {
+    return `${(tokens / 1000).toFixed(1)}k`;
+  }
+  return `${tokens}`;
 }
 
 function formatDuration(ms: number): string {
@@ -536,23 +579,41 @@ function parsePipelineHygieneReport(text: string): PipelineHygieneSections {
     }
 
     // Check for markdown headers (## SECTION NAME)
-    const headerMatch = line.match(/^#{1,3}\s+(.+)$/);
+    const headerMatch = line.match(/^(#{1,3})\s+(.+)$/);
     if (headerMatch) {
-      if (currentSection) {
-        sections[currentSection] = currentContent.join('\n').trim();
-      }
+      const level = headerMatch[1].length;
+      const title = headerMatch[2].trim().toUpperCase();
 
-      const title = headerMatch[1].trim().toUpperCase();
-      currentSection = null;
+      let matchedSection: keyof PipelineHygieneSections | null = null;
       for (const [key, value] of Object.entries(sectionMapping)) {
         if (title.includes(key)) {
-          currentSection = value;
+          matchedSection = value;
           break;
         }
       }
 
-      currentContent = [];
-      continue;
+      if (matchedSection) {
+        if (currentSection) {
+          sections[currentSection] = currentContent.join('\n').trim();
+        }
+        currentSection = matchedSection;
+        currentContent = [];
+        continue;
+      }
+
+      if (level >= 3 && currentSection) {
+        currentContent.push(line);
+        continue;
+      }
+
+      if (level <= 2 && !matchedSection) {
+        if (currentSection) {
+          sections[currentSection] = currentContent.join('\n').trim();
+          currentSection = null;
+          currentContent = [];
+        }
+        continue;
+      }
     }
 
     // Accumulate content
