@@ -8,6 +8,7 @@ import { getSkillRegistry as _getSkillRegistry } from './registry.js';
 import { pipelineHygieneSkill } from './library/pipeline-hygiene.js';
 import { dealRiskReviewSkill } from './library/deal-risk-review.js';
 import { weeklyRecapSkill } from './library/weekly-recap.js';
+import { singleThreadAlertSkill } from './library/single-thread-alert.js';
 
 // Types
 export type {
@@ -56,6 +57,7 @@ export {
 export { pipelineHygieneSkill } from './library/pipeline-hygiene.js';
 export { dealRiskReviewSkill } from './library/deal-risk-review.js';
 export { weeklyRecapSkill } from './library/weekly-recap.js';
+export { singleThreadAlertSkill } from './library/single-thread-alert.js';
 
 // Formatters
 export {
@@ -89,6 +91,7 @@ export function registerBuiltInSkills(): void {
   registry.register(pipelineHygieneSkill);
   registry.register(dealRiskReviewSkill);
   registry.register(weeklyRecapSkill);
+  registry.register(singleThreadAlertSkill);
 
   console.log('[Skills] Registered all built-in skills');
 }

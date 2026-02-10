@@ -23,6 +23,8 @@ export function formatForSlack(result: SkillResult, skill: SkillDefinition): Sla
     return formatWeeklyRecap(result);
   } else if (skill.slackTemplate === 'deal-risk-review') {
     return formatDealRiskReview(result);
+  } else if (skill.slackTemplate === 'single-thread-alert') {
+    return formatSingleThreadAlert(result);
   }
 
   // Generic formatter fallback
@@ -274,6 +276,79 @@ export function formatDealRiskReview(result: SkillResult): SlackBlock[] {
       {
         type: 'mrkdwn',
         text: `⏱ ${formatDuration(result.totalDuration_ms)}`,
+      },
+    ],
+  });
+
+  return blocks;
+}
+
+/**
+ * Single-Thread Alert specific formatter
+ */
+export function formatSingleThreadAlert(result: SkillResult): SlackBlock[] {
+  const blocks: SlackBlock[] = [];
+
+  blocks.push({
+    type: 'header',
+    text: {
+      type: 'plain_text',
+      text: '🔗 Single-Thread Risk Alert',
+      emoji: true,
+    },
+  });
+
+  blocks.push({
+    type: 'context',
+    elements: [
+      {
+        type: 'mrkdwn',
+        text: `<!date^${Math.floor(result.completedAt.getTime() / 1000)}^{date_short_pretty} at {time}|${result.completedAt.toISOString()}>`,
+      },
+    ],
+  });
+
+  blocks.push({ type: 'divider' });
+
+  // Parse output into sections
+  const output = markdownToSlack(typeof result.output === 'string' ? result.output : JSON.stringify(result.output));
+  const sections = parseSectionsFromMarkdown(output);
+
+  for (const section of sections) {
+    if (section.title) {
+      // Add emoji based on section
+      let emoji = '📊';
+      const lower = section.title.toLowerCase();
+      if (lower.includes('team')) emoji = '👥';
+      if (lower.includes('rep')) emoji = '🎯';
+      if (lower.includes('critical')) emoji = '🚨';
+      if (lower.includes('action')) emoji = '⚡';
+
+      blocks.push({
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `${emoji} *${section.title}*\n${section.content}`,
+        },
+      });
+    } else {
+      blocks.push({
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: section.content,
+        },
+      });
+    }
+  }
+
+  blocks.push({ type: 'divider' });
+  blocks.push({
+    type: 'context',
+    elements: [
+      {
+        type: 'mrkdwn',
+        text: `⏱ ${formatDuration(result.totalDuration_ms)} | 💰 ${formatTokenCount(result.totalTokenUsage.claude)}k Claude`,
       },
     ],
   });

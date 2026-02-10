@@ -28,6 +28,8 @@ import {
   pickClosingSoonFields,
   resolveTimeWindows,
   comparePeriods,
+  dealThreadingAnalysis,
+  enrichCriticalDeals,
   type TimeConfig,
   type TimeWindows,
 } from '../analysis/aggregations.js';
@@ -1110,6 +1112,57 @@ const calculateOutputBudget: ToolDefinition = {
   },
 };
 
+const dealThreadingAnalysisTool: ToolDefinition = {
+  name: 'dealThreadingAnalysis',
+  description: 'Analyze deal pipeline for single-threaded risk by counting unique contacts per deal.',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('dealThreadingAnalysis', () =>
+      dealThreadingAnalysis(context.workspaceId), params);
+  },
+};
+
+const enrichCriticalDealsTool: ToolDefinition = {
+  name: 'enrichCriticalDeals',
+  description: 'Enrich critical single-threaded deals with expansion opportunities and account context.',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {
+      dealIds: {
+        type: 'array',
+        description: 'Array of deal IDs to enrich (optional, auto-reads from threading_data)',
+        items: { type: 'string' },
+      },
+    },
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('enrichCriticalDeals', async () => {
+      // Auto-extract dealIds from threading_data if not provided
+      let dealIds = params.dealIds || [];
+
+      if (dealIds.length === 0) {
+        const threadingData = (context.stepResults as any).threading_data;
+        if (threadingData?.criticalDeals) {
+          dealIds = threadingData.criticalDeals.map((d: any) => d.dealId);
+        }
+      }
+
+      if (dealIds.length === 0) {
+        return [];
+      }
+
+      return enrichCriticalDeals(context.workspaceId, dealIds);
+    }, params);
+  },
+};
+
 // ============================================================================
 // Tool Registry
 // ============================================================================
@@ -1153,6 +1206,8 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['resolveTimeWindows', resolveTimeWindowsTool],
   ['gatherPeriodComparison', gatherPeriodComparison],
   ['calculateOutputBudget', calculateOutputBudget],
+  ['dealThreadingAnalysis', dealThreadingAnalysisTool],
+  ['enrichCriticalDeals', enrichCriticalDealsTool],
 ]);
 
 // ============================================================================

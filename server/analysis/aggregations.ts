@@ -1,3 +1,5 @@
+import { query } from '../db.js';
+
 interface GroupStats {
   count: number;
   totalValue: number;
@@ -367,4 +369,315 @@ export function comparePeriods(
       calculateDelta('medianValue', current.medianValue, previous.medianValue),
     ],
   };
+}
+
+// ============================================================================
+// Deal Threading Analysis
+// ============================================================================
+
+export interface ThreadingDeal {
+  dealId: string;
+  dealName: string;
+  amount: number;
+  stage: string;
+  owner: string;
+  contactCount: number;
+  contactNames: string[];
+  primaryContactName: string | null;
+  primaryContactTitle: string | null;
+  primaryContactSeniority: string | null;
+  daysInStage: number;
+  lastActivityDate: string | null;
+  accountName: string | null;
+  accountId: string | null;
+}
+
+export interface ThreadingAnalysis {
+  summary: {
+    totalOpenDeals: number;
+    singleThreaded: { count: number; value: number };
+    doubleThreaded: { count: number; value: number };
+    multiThreaded: { count: number; value: number };
+    singleThreadedPctOfPipeline: number;
+    avgDealSize: number;
+  };
+  byStage: Record<string, { count: number; value: number }>;
+  byOwner: Record<string, { totalDeals: number; singleThreaded: number; pct: number }>;
+  criticalDeals: ThreadingDeal[];
+  warningDeals: ThreadingDeal[];
+}
+
+export interface EnrichedDeal extends ThreadingDeal {
+  totalContactsAtAccount: number;
+  otherOpenDealsAtAccount: number;
+  mostRecentActivityType: string | null;
+  mostRecentActivityDate: string | null;
+}
+
+// ============================================================================
+// Deal Threading Analysis Implementation
+// ============================================================================
+
+export async function dealThreadingAnalysis(workspaceId: string): Promise<ThreadingAnalysis> {
+  // Get all open deals with contact counts
+  const dealsResult = await query(`
+    SELECT 
+      d.id as deal_id,
+      d.name as deal_name,
+      d.amount,
+      d.stage_normalized as stage,
+      d.owner,
+      d.days_in_stage,
+      d.last_activity_date,
+      d.account_id,
+      COALESCE(a.name, '') as account_name,
+      COALESCE(pc.email, '') as primary_contact_email,
+      COALESCE(pc.first_name || ' ' || pc.last_name, '') as primary_contact_name,
+      pc.title as primary_contact_title,
+      pc.seniority as primary_contact_seniority,
+      (
+        SELECT COUNT(DISTINCT contact_email)
+        FROM (
+          SELECT COALESCE(c1.email, '') as contact_email
+          FROM contacts c1
+          WHERE c1.id = d.contact_id AND c1.workspace_id = $1
+          UNION
+          SELECT COALESCE(c2.email, '') as contact_email
+          FROM activities act
+          INNER JOIN contacts c2 ON act.contact_id = c2.id AND act.workspace_id = $1
+          WHERE act.deal_id = d.id AND act.workspace_id = $1 AND c2.email IS NOT NULL AND c2.email != ''
+        ) contacts
+        WHERE contact_email != ''
+      ) as contact_count,
+      (
+        SELECT STRING_AGG(DISTINCT COALESCE(c3.first_name || ' ' || c3.last_name, ''), ', ')
+        FROM (
+          SELECT c1.first_name, c1.last_name
+          FROM contacts c1
+          WHERE c1.id = d.contact_id AND c1.workspace_id = $1
+          UNION
+          SELECT c2.first_name, c2.last_name
+          FROM activities act
+          INNER JOIN contacts c2 ON act.contact_id = c2.id AND act.workspace_id = $1
+          WHERE act.deal_id = d.id AND act.workspace_id = $1
+          LIMIT 5
+        ) c3
+      ) as contact_names
+    FROM deals d
+    LEFT JOIN accounts a ON d.account_id = a.id AND a.workspace_id = $1
+    LEFT JOIN contacts pc ON d.contact_id = pc.id AND pc.workspace_id = $1
+    WHERE d.workspace_id = $1
+      AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+    ORDER BY d.amount DESC
+  `, [workspaceId]);
+
+  const deals: ThreadingDeal[] = dealsResult.rows.map((row: any) => ({
+    dealId: row.deal_id,
+    dealName: row.deal_name || 'Unnamed Deal',
+    amount: parseFloat(row.amount) || 0,
+    stage: row.stage || 'Unknown',
+    owner: row.owner || 'Unassigned',
+    contactCount: parseInt(row.contact_count, 10) || 0,
+    contactNames: (row.contact_names || '').split(', ').filter((n: string) => n),
+    primaryContactName: row.primary_contact_name || null,
+    primaryContactTitle: row.primary_contact_title || null,
+    primaryContactSeniority: row.primary_contact_seniority || null,
+    daysInStage: parseInt(row.days_in_stage, 10) || 0,
+    lastActivityDate: row.last_activity_date || null,
+    accountName: row.account_name || null,
+    accountId: row.account_id || null,
+  }));
+
+  // Calculate summary stats
+  const totalOpenDeals = deals.length;
+  const avgDealSize = totalOpenDeals > 0 
+    ? Math.round(deals.reduce((sum, d) => sum + d.amount, 0) / totalOpenDeals)
+    : 0;
+
+  const singleThreaded = deals.filter(d => d.contactCount <= 1);
+  const doubleThreaded = deals.filter(d => d.contactCount === 2);
+  const multiThreaded = deals.filter(d => d.contactCount >= 3);
+
+  const singleThreadedValue = singleThreaded.reduce((sum, d) => sum + d.amount, 0);
+  const totalPipelineValue = deals.reduce((sum, d) => sum + d.amount, 0);
+  const singleThreadedPct = totalPipelineValue > 0 
+    ? Math.round((singleThreadedValue / totalPipelineValue) * 100)
+    : 0;
+
+  // Group by stage
+  const byStage: Record<string, { count: number; value: number }> = {};
+  for (const deal of singleThreaded) {
+    if (!byStage[deal.stage]) {
+      byStage[deal.stage] = { count: 0, value: 0 };
+    }
+    byStage[deal.stage].count++;
+    byStage[deal.stage].value += deal.amount;
+  }
+
+  // Round stage values
+  for (const stage of Object.keys(byStage)) {
+    byStage[stage].value = Math.round(byStage[stage].value);
+  }
+
+  // Group by owner
+  const ownerStats: Record<string, { totalDeals: number; singleThreaded: number }> = {};
+  for (const deal of deals) {
+    if (!ownerStats[deal.owner]) {
+      ownerStats[deal.owner] = { totalDeals: 0, singleThreaded: 0 };
+    }
+    ownerStats[deal.owner].totalDeals++;
+    if (deal.contactCount <= 1) {
+      ownerStats[deal.owner].singleThreaded++;
+    }
+  }
+
+  const byOwner: Record<string, { totalDeals: number; singleThreaded: number; pct: number }> = {};
+  for (const [owner, stats] of Object.entries(ownerStats)) {
+    byOwner[owner] = {
+      totalDeals: stats.totalDeals,
+      singleThreaded: stats.singleThreaded,
+      pct: stats.totalDeals > 0 ? Math.round((stats.singleThreaded / stats.totalDeals) * 100) : 0,
+    };
+  }
+
+  // Identify critical and warning deals
+  const criticalStages = ['evaluation', 'decision', 'proposal', 'negotiation'];
+  const criticalDeals = singleThreaded
+    .filter(d => criticalStages.includes(d.stage.toLowerCase()) || d.amount > avgDealSize)
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, 15);
+
+  const warningDeals = singleThreaded
+    .filter(d => !criticalStages.includes(d.stage.toLowerCase()) && d.amount <= avgDealSize)
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, 15);
+
+  return {
+    summary: {
+      totalOpenDeals,
+      singleThreaded: {
+        count: singleThreaded.length,
+        value: Math.round(singleThreadedValue),
+      },
+      doubleThreaded: {
+        count: doubleThreaded.length,
+        value: Math.round(doubleThreaded.reduce((sum, d) => sum + d.amount, 0)),
+      },
+      multiThreaded: {
+        count: multiThreaded.length,
+        value: Math.round(multiThreaded.reduce((sum, d) => sum + d.amount, 0)),
+      },
+      singleThreadedPctOfPipeline: singleThreadedPct,
+      avgDealSize,
+    },
+    byStage,
+    byOwner,
+    criticalDeals,
+    warningDeals,
+  };
+}
+
+export async function enrichCriticalDeals(
+  workspaceId: string,
+  dealIds: string[]
+): Promise<EnrichedDeal[]> {
+  if (dealIds.length === 0) {
+    return [];
+  }
+
+  const result = await query(`
+    SELECT 
+      d.id as deal_id,
+      d.name as deal_name,
+      d.amount,
+      d.stage_normalized as stage,
+      d.owner,
+      d.days_in_stage,
+      d.last_activity_date,
+      d.account_id,
+      COALESCE(a.name, '') as account_name,
+      COALESCE(pc.first_name || ' ' || pc.last_name, '') as primary_contact_name,
+      pc.title as primary_contact_title,
+      pc.seniority as primary_contact_seniority,
+      (
+        SELECT COUNT(DISTINCT contact_email)
+        FROM (
+          SELECT COALESCE(c1.email, '') as contact_email
+          FROM contacts c1
+          WHERE c1.id = d.contact_id AND c1.workspace_id = $1
+          UNION
+          SELECT COALESCE(c2.email, '') as contact_email
+          FROM activities act
+          INNER JOIN contacts c2 ON act.contact_id = c2.id AND act.workspace_id = $1
+          WHERE act.deal_id = d.id AND act.workspace_id = $1
+        ) contacts
+        WHERE contact_email != ''
+      ) as contact_count,
+      (
+        SELECT STRING_AGG(DISTINCT COALESCE(c3.first_name || ' ' || c3.last_name, ''), ', ')
+        FROM (
+          SELECT c1.first_name, c1.last_name
+          FROM contacts c1
+          WHERE c1.id = d.contact_id AND c1.workspace_id = $1
+          UNION
+          SELECT c2.first_name, c2.last_name
+          FROM activities act
+          INNER JOIN contacts c2 ON act.contact_id = c2.id AND act.workspace_id = $1
+          WHERE act.deal_id = d.id AND act.workspace_id = $1
+          LIMIT 5
+        ) c3
+      ) as contact_names,
+      (
+        SELECT COUNT(*)
+        FROM contacts c
+        WHERE c.account_id = d.account_id AND c.workspace_id = $1
+      ) as total_contacts_at_account,
+      (
+        SELECT COUNT(*)
+        FROM deals d2
+        WHERE d2.account_id = d.account_id 
+          AND d2.workspace_id = $1
+          AND d2.id != d.id
+          AND d2.stage_normalized NOT IN ('closed_won', 'closed_lost')
+      ) as other_open_deals_at_account,
+      (
+        SELECT act.type
+        FROM activities act
+        WHERE act.deal_id = d.id AND act.workspace_id = $1
+        ORDER BY act.date DESC
+        LIMIT 1
+      ) as most_recent_activity_type,
+      (
+        SELECT act.date
+        FROM activities act
+        WHERE act.deal_id = d.id AND act.workspace_id = $1
+        ORDER BY act.date DESC
+        LIMIT 1
+      ) as most_recent_activity_date
+    FROM deals d
+    LEFT JOIN accounts a ON d.account_id = a.id AND a.workspace_id = $1
+    LEFT JOIN contacts pc ON d.contact_id = pc.id AND pc.workspace_id = $1
+    WHERE d.workspace_id = $1 AND d.id = ANY($2)
+  `, [workspaceId, dealIds]);
+
+  return result.rows.map((row: any) => ({
+    dealId: row.deal_id,
+    dealName: row.deal_name || 'Unnamed Deal',
+    amount: parseFloat(row.amount) || 0,
+    stage: row.stage || 'Unknown',
+    owner: row.owner || 'Unassigned',
+    contactCount: parseInt(row.contact_count, 10) || 0,
+    contactNames: (row.contact_names || '').split(', ').filter((n: string) => n),
+    primaryContactName: row.primary_contact_name || null,
+    primaryContactTitle: row.primary_contact_title || null,
+    primaryContactSeniority: row.primary_contact_seniority || null,
+    daysInStage: parseInt(row.days_in_stage, 10) || 0,
+    lastActivityDate: row.last_activity_date || null,
+    accountName: row.account_name || null,
+    accountId: row.account_id || null,
+    totalContactsAtAccount: parseInt(row.total_contacts_at_account, 10) || 0,
+    otherOpenDealsAtAccount: parseInt(row.other_open_deals_at_account, 10) || 0,
+    mostRecentActivityType: row.most_recent_activity_type || null,
+    mostRecentActivityDate: row.most_recent_activity_date || null,
+  }));
 }
