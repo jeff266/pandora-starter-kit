@@ -77,10 +77,10 @@ async function loadConfig(workspaceId: string): Promise<LLMConfig> {
     const defaultConfig: LLMConfig = {
       providers: {},
       routing: {
-        extract: 'fireworks/deepseek-v3',
+        extract: 'fireworks/deepseek-v3-0324',
         reason: 'anthropic/claude-sonnet-4-20250514',
         generate: 'anthropic/claude-sonnet-4-20250514',
-        classify: 'fireworks/deepseek-v3',
+        classify: 'fireworks/deepseek-v3-0324',
       },
       default_token_budget: 50000,
       tokens_used_this_month: 0,
@@ -391,8 +391,7 @@ async function trackUsage(workspaceId: string, tokens: number): Promise<void> {
   try {
     await query(
       `UPDATE llm_configs
-       SET tokens_used_this_month = tokens_used_this_month + $2,
-           updated_at = NOW(),
+       SET updated_at = NOW(),
            budget_reset_at = CASE
              WHEN budget_reset_at <= NOW()
              THEN date_trunc('month', NOW()) + INTERVAL '1 month'

@@ -181,7 +181,7 @@ router.get('/:workspaceId/skills/:skillId/runs/:runId', async (req, res) => {
 
     const result = await query(
       `SELECT * FROM skill_runs
-       WHERE workspace_id = $1 AND skill_id = $2 AND (run_id = $3 OR id::text = $3)`,
+       WHERE workspace_id = $1 AND skill_id = $2 AND (run_id = $3 OR id::text = $3::text)`,
       [workspaceId, skillId, runId]
     );
 

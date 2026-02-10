@@ -3,10 +3,10 @@ CREATE TABLE IF NOT EXISTS llm_configs (
   workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   providers JSONB NOT NULL DEFAULT '{}',
   routing JSONB NOT NULL DEFAULT '{
-    "extract": "fireworks/deepseek-v3",
+    "extract": "fireworks/deepseek-v3-0324",
     "reason": "anthropic/claude-sonnet-4-20250514",
     "generate": "anthropic/claude-sonnet-4-20250514",
-    "classify": "fireworks/deepseek-v3"
+    "classify": "fireworks/deepseek-v3-0324"
   }',
   default_token_budget INTEGER NOT NULL DEFAULT 50000,
   tokens_used_this_month INTEGER NOT NULL DEFAULT 0,
