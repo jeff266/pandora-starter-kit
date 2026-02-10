@@ -26,6 +26,7 @@ Pandora is built on Node.js 20 with TypeScript 5+, utilizing Express.js for its 
 -   **No `raw_records` table:** Raw API data is stored within the `source_data JSONB` column of each entity table.
 -   **Upsert Pattern:** `ON CONFLICT DO UPDATE` is used across all entity tables to efficiently manage data synchronization.
 -   **On-Demand Transcript Fetching:** Transcripts for calls are fetched only when needed to optimize data storage and API calls.
+-   **Owner Name Resolution:** `getOwners()` tries `/crm/v3/owners` first; on 403/MISSING_SCOPES, falls back to `/settings/v3/users` (Settings/Users API). Owner map cached in `workspace.settings.owner_map` with 30min in-memory TTL.
 -   **API Design:** RESTful API endpoints for managing workspaces, connectors, context layers, and triggering actions.
 -   **Sync Infrastructure:** SyncScheduler (node-cron 2 AM UTC daily), sync orchestrator, sync_log table for history tracking. Manual sync via POST returns 202 Accepted and runs async. HubSpot association backfill runs post-sync when `usedExportApi` flag is set in sync_cursor metadata.
 -   **Query Layer:** 7 query modules in `server/tools/` (deals, contacts, accounts, activities, conversations, tasks, documents) with dynamic parameterized SQL, workspace scoping, sort whitelisting, and pagination. Barrel-exported from `server/tools/index.ts`. REST endpoints in `server/routes/data.ts` map all query functions to GET endpoints under `/api/workspaces/:id/`.

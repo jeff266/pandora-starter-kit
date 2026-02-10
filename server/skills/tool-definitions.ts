@@ -18,6 +18,7 @@ import * as taskTools from '../tools/task-query.js';
 import * as documentTools from '../tools/document-query.js';
 import { generatePipelineSnapshot } from '../analysis/pipeline-snapshot.js';
 import { computeFields } from '../computed-fields/engine.js';
+import { resolveOwnerNames, resolveOwnerName } from '../utils/owner-resolver.js';
 import {
   aggregateBy,
   bucketByThreshold,
@@ -689,9 +690,14 @@ const aggregateStaleDeals: ToolDefinition = {
     return safeExecute('aggregateStaleDeals', async () => {
       const staleDays = params.staleDays || 14;
       const topN = params.topN || 20;
-      const deals = await dealTools.getStaleDeals(context.workspaceId, staleDays);
+      const [deals, nameMap] = await Promise.all([
+        dealTools.getStaleDeals(context.workspaceId, staleDays),
+        resolveOwnerNames(context.workspaceId),
+      ]);
 
-      const staleItems = deals.map(pickStaleDealFields);
+      const staleItems = deals.map(pickStaleDealFields).map(d => ({
+        ...d, owner: resolveOwnerName(d.owner, nameMap),
+      }));
       const summary = summarizeDeals(deals);
       const avgDaysStale = staleItems.length > 0
         ? Math.round(staleItems.reduce((s, d) => s + d.daysStale, 0) / staleItems.length)
@@ -743,8 +749,13 @@ const aggregateClosingSoon: ToolDefinition = {
       const startDate = new Date();
       const endDate = new Date(Date.now() + daysAhead * 24 * 60 * 60 * 1000);
 
-      const deals = await dealTools.getDealsClosingInRange(context.workspaceId, startDate, endDate);
-      const closingItems = deals.map(pickClosingSoonFields);
+      const [deals, nameMap] = await Promise.all([
+        dealTools.getDealsClosingInRange(context.workspaceId, startDate, endDate),
+        resolveOwnerNames(context.workspaceId),
+      ]);
+      const closingItems = deals.map(pickClosingSoonFields).map(d => ({
+        ...d, owner: resolveOwnerName(d.owner, nameMap),
+      }));
       const summary = summarizeDeals(deals);
 
       const { topItems, remaining } = topNWithSummary(
@@ -776,15 +787,19 @@ const computeOwnerPerformance: ToolDefinition = {
     return safeExecute('computeOwnerPerformance', async () => {
       const staleDays = params.staleDays || 14;
 
-      const allDealsResult = await dealTools.queryDeals(context.workspaceId, { limit: 5000 });
+      const [allDealsResult, staleDeals, nameMap] = await Promise.all([
+        dealTools.queryDeals(context.workspaceId, { limit: 5000 }),
+        dealTools.getStaleDeals(context.workspaceId, staleDays),
+        resolveOwnerNames(context.workspaceId),
+      ]);
+
       const allDeals = allDealsResult.deals || [];
-      const staleDeals = await dealTools.getStaleDeals(context.workspaceId, staleDays);
       const dateTo = new Date();
       const dateFrom = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
       const activityData = await activityTools.getActivitySummary(context.workspaceId, dateFrom, dateTo);
 
       const staleSet = new Set(staleDeals.map((d: any) => d.id));
-      const ownerMap: Record<string, {
+      const ownerStats: Record<string, {
         openDeals: number;
         pipelineValue: number;
         staleDeals: number;
@@ -794,28 +809,30 @@ const computeOwnerPerformance: ToolDefinition = {
       }> = {};
 
       for (const deal of allDeals) {
-        const owner = (deal as any).owner || 'Unassigned';
-        if (!ownerMap[owner]) {
-          ownerMap[owner] = { openDeals: 0, pipelineValue: 0, staleDeals: 0, staleValue: 0, activityCount: 0, staleRate: 0 };
+        const rawOwner = (deal as any).owner;
+        const owner = resolveOwnerName(rawOwner, nameMap);
+        if (!ownerStats[owner]) {
+          ownerStats[owner] = { openDeals: 0, pipelineValue: 0, staleDeals: 0, staleValue: 0, activityCount: 0, staleRate: 0 };
         }
-        ownerMap[owner].openDeals++;
-        ownerMap[owner].pipelineValue += parseFloat((deal as any).amount) || 0;
+        ownerStats[owner].openDeals++;
+        ownerStats[owner].pipelineValue += parseFloat((deal as any).amount) || 0;
         if (staleSet.has((deal as any).id)) {
-          ownerMap[owner].staleDeals++;
-          ownerMap[owner].staleValue += parseFloat((deal as any).amount) || 0;
+          ownerStats[owner].staleDeals++;
+          ownerStats[owner].staleValue += parseFloat((deal as any).amount) || 0;
         }
       }
 
       if (Array.isArray(activityData)) {
         for (const row of activityData) {
-          const owner = (row as any).owner || (row as any).rep || 'Unknown';
-          if (ownerMap[owner]) {
-            ownerMap[owner].activityCount = parseInt((row as any).count || (row as any).total || '0', 10);
+          const rawOwner = (row as any).owner || (row as any).rep;
+          const owner = resolveOwnerName(rawOwner, nameMap);
+          if (ownerStats[owner]) {
+            ownerStats[owner].activityCount = parseInt((row as any).count || (row as any).total || '0', 10);
           }
         }
       }
 
-      for (const stats of Object.values(ownerMap)) {
+      for (const stats of Object.values(ownerStats)) {
         stats.pipelineValue = Math.round(stats.pipelineValue);
         stats.staleValue = Math.round(stats.staleValue);
         stats.staleRate = stats.openDeals > 0
@@ -823,7 +840,7 @@ const computeOwnerPerformance: ToolDefinition = {
           : 0;
       }
 
-      const sorted = Object.entries(ownerMap)
+      const sorted = Object.entries(ownerStats)
         .sort(([, a], [, b]) => b.staleRate - a.staleRate)
         .map(([owner, stats]) => ({ owner, ...stats }));
 

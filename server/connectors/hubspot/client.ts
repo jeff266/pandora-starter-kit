@@ -413,6 +413,71 @@ export class HubSpotClient {
     );
   }
 
+  async getOwners(): Promise<Array<{ id: string; firstName: string; lastName: string; email: string }>> {
+    try {
+      return await this.getOwnersViaOwnersApi();
+    } catch (error: any) {
+      if (error?.message?.includes('403') || error?.message?.includes('MISSING_SCOPES')) {
+        console.log('[HubSpot] Owners API scope unavailable, falling back to Settings/Users API');
+        return await this.getOwnersViaUsersApi();
+      }
+      throw error;
+    }
+  }
+
+  private async getOwnersViaOwnersApi(): Promise<Array<{ id: string; firstName: string; lastName: string; email: string }>> {
+    const owners: Array<{ id: string; firstName: string; lastName: string; email: string }> = [];
+    let after: string | undefined;
+
+    do {
+      let endpoint = '/crm/v3/owners?limit=100';
+      if (after) endpoint += `&after=${after}`;
+
+      const response = await this.request<{
+        results: Array<{ id: string; firstName: string; lastName: string; email: string }>;
+        paging?: { next?: { after: string } };
+      }>(endpoint);
+
+      owners.push(...response.results);
+      after = response.paging?.next?.after;
+    } while (after);
+
+    return owners;
+  }
+
+  private async getOwnersViaUsersApi(): Promise<Array<{ id: string; firstName: string; lastName: string; email: string }>> {
+    const users: Array<{ id: string; firstName: string; lastName: string; email: string }> = [];
+    let after: string | undefined;
+
+    do {
+      let endpoint = '/settings/v3/users?limit=100';
+      if (after) endpoint += `&after=${after}`;
+
+      const response = await this.request<{
+        results: Array<{ id: string; email: string; firstName?: string; lastName?: string }>;
+        paging?: { next?: { after: string } };
+      }>(endpoint);
+
+      for (const user of response.results) {
+        const firstName = user.firstName || '';
+        const lastName = user.lastName || '';
+        const fullName = `${firstName} ${lastName}`.trim();
+        if (fullName && fullName !== ' ') {
+          users.push({
+            id: user.id,
+            firstName,
+            lastName,
+            email: user.email,
+          });
+        }
+      }
+      after = response.paging?.next?.after;
+    } while (after);
+
+    console.log(`[HubSpot] Resolved ${users.length} users via Settings/Users API`);
+    return users;
+  }
+
   async getAssociations(
     fromObjectType: string,
     toObjectType: string,
