@@ -1,4 +1,12 @@
 import type { PipelineSnapshot } from '../../analysis/pipeline-snapshot.js';
+import pool from '../../db.js';
+
+export interface SlackBlock {
+  type: string;
+  text?: { type: string; text: string };
+  fields?: { type: string; text: string }[];
+  elements?: { type: string; text: string }[];
+}
 
 function formatCurrency(value: number): string {
   if (value >= 1_000_000) {
@@ -17,6 +25,70 @@ function formatFullCurrency(value: number): string {
 function formatPercent(value: number | null): string {
   if (value === null) return 'N/A';
   return `${value}%`;
+}
+
+export function formatHeader(text: string): SlackBlock {
+  return {
+    type: 'header',
+    text: { type: 'plain_text', text },
+  };
+}
+
+export function formatSection(text: string): SlackBlock {
+  return {
+    type: 'section',
+    text: { type: 'mrkdwn', text },
+  };
+}
+
+export function formatDivider(): SlackBlock {
+  return { type: 'divider' };
+}
+
+export function formatFields(fields: { label: string; value: string }[]): SlackBlock {
+  return {
+    type: 'section',
+    fields: fields.map(f => ({
+      type: 'mrkdwn',
+      text: `*${f.label}:* ${f.value}`,
+    })),
+  };
+}
+
+export function formatContext(text: string): SlackBlock {
+  return {
+    type: 'context',
+    elements: [{ type: 'mrkdwn', text }],
+  };
+}
+
+export function buildMessage(options: {
+  header?: string;
+  sections: string[];
+  fields?: { label: string; value: string }[];
+  footer?: string;
+}): SlackBlock[] {
+  const blocks: SlackBlock[] = [];
+
+  if (options.header) {
+    blocks.push(formatHeader(options.header));
+  }
+
+  for (const section of options.sections) {
+    blocks.push(formatSection(section));
+  }
+
+  if (options.fields && options.fields.length > 0) {
+    blocks.push(formatDivider());
+    blocks.push(formatFields(options.fields));
+  }
+
+  if (options.footer) {
+    blocks.push(formatDivider());
+    blocks.push(formatContext(options.footer));
+  }
+
+  return blocks;
 }
 
 export function formatPipelineOneLiner(
@@ -40,53 +112,36 @@ export function formatPipelineOneLiner(
 export function formatPipelineSnapshot(
   snapshot: PipelineSnapshot,
   workspaceName: string
-): any[] {
+): SlackBlock[] {
   const dateStr = new Date(snapshot.generatedAt).toLocaleDateString('en-US', {
     month: 'long',
     day: 'numeric',
     year: 'numeric',
   });
 
-  const blocks: any[] = [
-    {
-      type: "header",
-      text: {
-        type: "plain_text",
-        text: `Pipeline Snapshot | ${workspaceName} | ${dateStr}`,
-      },
-    },
-    {
-      type: "section",
-      text: {
-        type: "mrkdwn",
-        text: `*Total Pipeline:* ${formatFullCurrency(snapshot.totalPipeline)} (${snapshot.dealCount} deals)\n*Avg Deal Size:* ${formatFullCurrency(snapshot.avgDealSize)}`,
-      },
-    },
+  const blocks: SlackBlock[] = [
+    formatHeader(`Pipeline Snapshot | ${workspaceName} | ${dateStr}`),
+    formatSection(
+      `*Total Pipeline:* ${formatFullCurrency(snapshot.totalPipeline)} (${snapshot.dealCount} deals)\n*Avg Deal Size:* ${formatFullCurrency(snapshot.avgDealSize)}`
+    ),
   ];
 
   if (snapshot.coverageRatio !== null) {
-    blocks.push({
-      type: "section",
-      text: {
-        type: "mrkdwn",
-        text: `*Pipeline Coverage:* ${snapshot.coverageRatio}x`,
-      },
-    });
+    blocks.push(formatSection(`*Pipeline Coverage:* ${snapshot.coverageRatio}x`));
   }
 
-  blocks.push({
-    type: "section",
-    fields: [
+  blocks.push(
+    formatFields([
       {
-        type: "mrkdwn",
-        text: `*Win Rate:* ${formatPercent(snapshot.winRate.rate)} (${snapshot.winRate.won}W / ${snapshot.winRate.lost}L)`,
+        label: 'Win Rate',
+        value: `${formatPercent(snapshot.winRate.rate)} (${snapshot.winRate.won}W / ${snapshot.winRate.lost}L)`,
       },
       {
-        type: "mrkdwn",
-        text: `*New This Week:* ${snapshot.newDealsThisWeek.dealCount} deals (${formatCurrency(snapshot.newDealsThisWeek.totalAmount)})`,
+        label: 'New This Week',
+        value: `${snapshot.newDealsThisWeek.dealCount} deals (${formatCurrency(snapshot.newDealsThisWeek.totalAmount)})`,
       },
-    ],
-  });
+    ])
+  );
 
   if (snapshot.byStage.length > 0) {
     const pipelineGroups = new Map<string, typeof snapshot.byStage>();
@@ -98,7 +153,7 @@ export function formatPipelineSnapshot(
 
     const singlePipeline = pipelineGroups.size === 1;
 
-    blocks.push({ type: "divider" });
+    blocks.push(formatDivider());
 
     for (const [pipelineName, stages] of pipelineGroups) {
       const stageLines = stages
@@ -106,48 +161,47 @@ export function formatPipelineSnapshot(
         .join('\n');
 
       if (singlePipeline) {
-        blocks.push({
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: `*By Stage:*\n${stageLines}`,
-          },
-        });
+        blocks.push(formatSection(`*By Stage:*\n${stageLines}`));
       } else {
-        blocks.push({
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: `*${pipelineName}:*\n${stageLines}`,
-          },
-        });
+        blocks.push(formatSection(`*${pipelineName}:*\n${stageLines}`));
       }
     }
   }
 
+  blocks.push(formatDivider());
   blocks.push(
-    { type: "divider" },
-    {
-      type: "section",
-      fields: [
-        {
-          type: "mrkdwn",
-          text: `*Closing This Month:*\n${formatCurrency(snapshot.closingThisMonth.totalAmount)} (${snapshot.closingThisMonth.dealCount} deals)`,
-        },
-        {
-          type: "mrkdwn",
-          text: `*Stale Deals (${snapshot.staleDeals.staleDaysThreshold}+ days):*\n${snapshot.staleDeals.dealCount} deals worth ${formatCurrency(snapshot.staleDeals.totalAmount)}`,
-        },
-      ],
-    }
+    formatFields([
+      {
+        label: 'Closing This Month',
+        value: `${formatCurrency(snapshot.closingThisMonth.totalAmount)} (${snapshot.closingThisMonth.dealCount} deals)`,
+      },
+      {
+        label: `Stale Deals (${snapshot.staleDeals.staleDaysThreshold}+ days)`,
+        value: `${snapshot.staleDeals.dealCount} deals worth ${formatCurrency(snapshot.staleDeals.totalAmount)}`,
+      },
+    ])
   );
 
   return blocks;
 }
 
+export async function postBlocks(
+  webhookUrl: string,
+  blocks: SlackBlock[]
+): Promise<{ ok: boolean; error?: string }> {
+  return postToSlack(webhookUrl, { blocks });
+}
+
+export async function postText(
+  webhookUrl: string,
+  text: string
+): Promise<{ ok: boolean; error?: string }> {
+  return postToSlack(webhookUrl, { text });
+}
+
 export async function postToSlack(
   webhookUrl: string,
-  payload: { blocks?: any[]; text?: string }
+  payload: { blocks?: SlackBlock[]; text?: string }
 ): Promise<{ ok: boolean; error?: string }> {
   try {
     const response = await fetch(webhookUrl, {
@@ -166,4 +220,25 @@ export async function postToSlack(
     const message = error instanceof Error ? error.message : 'Unknown error';
     return { ok: false, error: message };
   }
+}
+
+export async function getSlackWebhook(workspaceId: string): Promise<string | null> {
+  const result = await pool.query(
+    `SELECT settings->>'slack_webhook_url' AS webhook_url FROM workspaces WHERE id = $1`,
+    [workspaceId]
+  );
+  if (result.rows.length === 0) return null;
+  const url = result.rows[0].webhook_url;
+  return typeof url === 'string' ? url : null;
+}
+
+export async function testSlackWebhook(
+  webhookUrl: string
+): Promise<{ ok: boolean; error?: string }> {
+  const blocks = buildMessage({
+    header: 'Pandora Connection Test',
+    sections: ['Your Slack webhook is connected and working.'],
+    footer: `Tested at ${new Date().toISOString()}`,
+  });
+  return postBlocks(webhookUrl, blocks);
 }

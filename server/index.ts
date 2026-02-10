@@ -11,6 +11,8 @@ import actionsRouter from "./routes/actions.js";
 import contextRouter from "./routes/context.js";
 import syncRouter from "./routes/sync.js";
 import dataRouter from "./routes/data.js";
+import slackSettingsRouter from "./routes/slack-settings.js";
+import webhooksRouter from "./routes/webhooks.js";
 import { getAdapterRegistry } from "./connectors/adapters/registry.js";
 import { MondayTaskAdapter } from "./connectors/monday/adapter.js";
 import { GoogleDriveDocumentAdapter } from "./connectors/google-drive/adapter.js";
@@ -41,6 +43,8 @@ app.use("/api/workspaces", actionsRouter);
 app.use("/api/workspaces", contextRouter);
 app.use("/api/workspaces", syncRouter);
 app.use("/api/workspaces", dataRouter);
+app.use("/api/workspaces", slackSettingsRouter);
+app.use("/api/webhooks", webhooksRouter);
 
 function registerAdapters(): void {
   const registry = getAdapterRegistry();

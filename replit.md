@@ -29,6 +29,8 @@ Pandora is built on Node.js 20 with TypeScript 5+, utilizing Express.js for its 
 -   **API Design:** RESTful API endpoints for managing workspaces, connectors, context layers, and triggering actions.
 -   **Sync Infrastructure:** SyncScheduler (node-cron 2 AM UTC daily), sync orchestrator, sync_log table for history tracking. Manual sync via POST returns 202 Accepted and runs async. HubSpot association backfill runs post-sync when `usedExportApi` flag is set in sync_cursor metadata.
 -   **Query Layer:** 7 query modules in `server/tools/` (deals, contacts, accounts, activities, conversations, tasks, documents) with dynamic parameterized SQL, workspace scoping, sort whitelisting, and pagination. Barrel-exported from `server/tools/index.ts`. REST endpoints in `server/routes/data.ts` map all query functions to GET endpoints under `/api/workspaces/:id/`.
+-   **Slack Output Layer:** General-purpose Slack Block Kit client (`server/connectors/slack/client.ts`) with formatting helpers (header, section, divider, fields, context) and `buildMessage` assembler. Webhook URL stored in `workspace.settings.slack_webhook_url`. Routes: `POST /:id/settings/slack` (save), `POST /:id/settings/slack/test` (test).
+-   **Webhook Endpoints:** Inbound n8n webhook routes (`server/routes/webhooks.ts`): `POST /api/webhooks/skills/:skillId/trigger` (queues skill run), `GET /api/webhooks/skills/:skillId/runs/:runId` (run status), `POST /api/webhooks/events` (event ingestion for sync_completed, deal_stage_changed, new_conversation). Skill runtime will pick up queued runs when wired in.
 
 **Technology Choices:**
 -   **Runtime:** Node.js 20
@@ -48,13 +50,14 @@ Pandora is built on Node.js 20 with TypeScript 5+, utilizing Express.js for its 
 -   **Anthropic AI (Claude):** Utilized via `@anthropic-ai/sdk` for LLM-based analyses within the platform.
 
 ## Database Migrations
-Six migrations applied in sequence:
+Seven migrations applied in sequence:
 1. `001_initial.sql` — All 8 entity tables, workspaces, connections
 2. `002_add_calls_table.sql` — Calls entity
 3. `003_context_layer.sql` — Context layer table
 4. `004_add_computed_field_columns.sql` — velocity_score, deal_risk, deal_risk_factors on deals
 5. `005_sync_log.sql` — Sync log table
 6. `006_schema_cleanup.sql` — stage_normalized + health_score on deals, title on conversations
+7. `007_skill_runs.sql` — Skill runs table for tracking AI skill executions (status, params, result, token_usage, steps)
 
 ## Smoke Test
 Run `npm run smoke-test` to validate the full pipeline end-to-end with synthetic data (24 tests covering all query functions, computed fields, and pipeline snapshot). Use `--keep` flag to preserve test data for inspection.
