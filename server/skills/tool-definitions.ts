@@ -19,6 +19,14 @@ import * as documentTools from '../tools/document-query.js';
 import { generatePipelineSnapshot } from '../analysis/pipeline-snapshot.js';
 import { computeFields } from '../computed-fields/engine.js';
 import {
+  aggregateBy,
+  bucketByThreshold,
+  topNWithSummary,
+  summarizeDeals,
+  pickStaleDealFields,
+  pickClosingSoonFields,
+} from '../analysis/aggregations.js';
+import {
   getBusinessContext as fetchBusinessContext,
   getGoals,
   getDefinitions as fetchDefinitions,
@@ -657,6 +665,169 @@ const refreshComputedFields: ToolDefinition = {
 };
 
 // ============================================================================
+// Aggregation Tools (for three-phase skill pattern)
+// ============================================================================
+
+const aggregateStaleDeals: ToolDefinition = {
+  name: 'aggregateStaleDeals',
+  description: 'Get stale deals pre-aggregated into summary, severity buckets, per-owner breakdown, and top N deals. Designed for LLM consumption.',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {
+      staleDays: { type: 'number', description: 'Days without activity to consider stale (default from context)' },
+      topN: { type: 'number', description: 'Number of top deals to include (default 20)' },
+    },
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('aggregateStaleDeals', async () => {
+      const staleDays = params.staleDays || 14;
+      const topN = params.topN || 20;
+      const deals = await dealTools.getStaleDeals(context.workspaceId, staleDays);
+
+      const staleItems = deals.map(pickStaleDealFields);
+      const summary = summarizeDeals(deals);
+      const avgDaysStale = staleItems.length > 0
+        ? Math.round(staleItems.reduce((s, d) => s + d.daysStale, 0) / staleItems.length)
+        : 0;
+
+      const bySeverity = bucketByThreshold(
+        staleItems,
+        d => d.daysStale,
+        d => d.amount,
+        [7, 14, 30],
+        ['watch', 'warning', 'serious', 'critical']
+      );
+
+      const byOwner = aggregateBy(staleItems, d => d.owner, d => d.amount);
+      const byStage = aggregateBy(staleItems, d => d.stage, d => d.amount);
+
+      const { topItems, remaining } = topNWithSummary(
+        staleItems, topN, d => d.amount, d => d.amount
+      );
+
+      return {
+        summary: { total: summary.total, totalValue: summary.totalValue, avgDaysStale },
+        bySeverity,
+        byOwner,
+        byStage,
+        topDeals: topItems,
+        remaining,
+      };
+    }, params);
+  },
+};
+
+const aggregateClosingSoon: ToolDefinition = {
+  name: 'aggregateClosingSoon',
+  description: 'Get deals closing in a date range, pre-aggregated into summary and top N deals for LLM consumption.',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {
+      daysAhead: { type: 'number', description: 'Days ahead to look (default 30)' },
+      topN: { type: 'number', description: 'Number of top deals to include (default 10)' },
+    },
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('aggregateClosingSoon', async () => {
+      const daysAhead = params.daysAhead || 30;
+      const topN = params.topN || 10;
+      const startDate = new Date();
+      const endDate = new Date(Date.now() + daysAhead * 24 * 60 * 60 * 1000);
+
+      const deals = await dealTools.getDealsClosingInRange(context.workspaceId, startDate, endDate);
+      const closingItems = deals.map(pickClosingSoonFields);
+      const summary = summarizeDeals(deals);
+
+      const { topItems, remaining } = topNWithSummary(
+        closingItems, topN, d => d.amount, d => d.amount
+      );
+
+      return {
+        summary: { total: summary.total, totalValue: summary.totalValue },
+        byStage: summary.byStage,
+        topDeals: topItems,
+        remaining,
+      };
+    }, params);
+  },
+};
+
+const computeOwnerPerformance: ToolDefinition = {
+  name: 'computeOwnerPerformance',
+  description: 'Compute per-rep performance summary: open deals, pipeline value, stale deals, activity count, stale rate.',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {
+      staleDays: { type: 'number', description: 'Stale threshold in days (default 14)' },
+    },
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('computeOwnerPerformance', async () => {
+      const staleDays = params.staleDays || 14;
+
+      const allDealsResult = await dealTools.queryDeals(context.workspaceId, { limit: 5000 });
+      const allDeals = allDealsResult.deals || [];
+      const staleDeals = await dealTools.getStaleDeals(context.workspaceId, staleDays);
+      const dateTo = new Date();
+      const dateFrom = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      const activityData = await activityTools.getActivitySummary(context.workspaceId, dateFrom, dateTo);
+
+      const staleSet = new Set(staleDeals.map((d: any) => d.id));
+      const ownerMap: Record<string, {
+        openDeals: number;
+        pipelineValue: number;
+        staleDeals: number;
+        staleValue: number;
+        activityCount: number;
+        staleRate: number;
+      }> = {};
+
+      for (const deal of allDeals) {
+        const owner = (deal as any).owner || 'Unassigned';
+        if (!ownerMap[owner]) {
+          ownerMap[owner] = { openDeals: 0, pipelineValue: 0, staleDeals: 0, staleValue: 0, activityCount: 0, staleRate: 0 };
+        }
+        ownerMap[owner].openDeals++;
+        ownerMap[owner].pipelineValue += parseFloat((deal as any).amount) || 0;
+        if (staleSet.has((deal as any).id)) {
+          ownerMap[owner].staleDeals++;
+          ownerMap[owner].staleValue += parseFloat((deal as any).amount) || 0;
+        }
+      }
+
+      if (Array.isArray(activityData)) {
+        for (const row of activityData) {
+          const owner = (row as any).owner || (row as any).rep || 'Unknown';
+          if (ownerMap[owner]) {
+            ownerMap[owner].activityCount = parseInt((row as any).count || (row as any).total || '0', 10);
+          }
+        }
+      }
+
+      for (const stats of Object.values(ownerMap)) {
+        stats.pipelineValue = Math.round(stats.pipelineValue);
+        stats.staleValue = Math.round(stats.staleValue);
+        stats.staleRate = stats.openDeals > 0
+          ? Math.round((stats.staleDeals / stats.openDeals) * 100)
+          : 0;
+      }
+
+      const sorted = Object.entries(ownerMap)
+        .sort(([, a], [, b]) => b.staleRate - a.staleRate)
+        .map(([owner, stats]) => ({ owner, ...stats }));
+
+      return sorted;
+    }, params);
+  },
+};
+
+// ============================================================================
 // Tool Registry
 // ============================================================================
 
@@ -693,6 +864,9 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['getMaturityScores', getMaturityScores],
   ['computePipelineCoverage', computePipelineCoverage],
   ['refreshComputedFields', refreshComputedFields],
+  ['aggregateStaleDeals', aggregateStaleDeals],
+  ['aggregateClosingSoon', aggregateClosingSoon],
+  ['computeOwnerPerformance', computeOwnerPerformance],
 ]);
 
 // ============================================================================

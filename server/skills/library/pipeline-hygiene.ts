@@ -1,171 +1,157 @@
-/**
- * Pipeline Hygiene Check Skill
- *
- * Analyzes deal pipeline for data quality issues, stale deals, missing fields,
- * and risk signals. Produces actionable recommendations.
- *
- * Runs: Monday 8 AM (cron) + on demand
- * Output: Slack formatted message
- * Tier: Mixed (compute for data gathering, Claude for analysis)
- */
-
 import type { SkillDefinition } from '../types.js';
 
 export const pipelineHygieneSkill: SkillDefinition = {
   id: 'pipeline-hygiene',
   name: 'Pipeline Hygiene Check',
   description: 'Analyzes deal pipeline for data quality issues, stale deals, missing fields, and risk signals. Produces actionable recommendations.',
-  version: '1.0.0',
+  version: '2.0.0',
   category: 'pipeline',
   tier: 'mixed',
 
   requiredTools: [
-    'queryDeals',
+    'computePipelineCoverage',
     'getDealsByStage',
-    'getStaleDeals',
-    'getPipelineSummary',
+    'aggregateStaleDeals',
+    'aggregateClosingSoon',
     'getActivitySummary',
-    'getDealsClosingInRange',
+    'computeOwnerPerformance',
+    'queryDeals',
+    'getDeal',
   ],
 
   requiredContext: ['business_model', 'goals_and_targets', 'definitions'],
 
   steps: [
-    // Step 1: Gather pipeline summary
     {
-      id: 'gather-pipeline-data',
-      name: 'Gather Pipeline Summary',
+      id: 'gather-pipeline-summary',
+      name: 'Pipeline Summary',
       tier: 'compute',
       computeFn: 'computePipelineCoverage',
       computeArgs: {},
       outputKey: 'pipeline_summary',
     },
 
-    // Step 2: Gather stage breakdown
     {
       id: 'gather-stage-breakdown',
-      name: 'Gather Stage Breakdown',
+      name: 'Stage Breakdown',
       tier: 'compute',
       computeFn: 'getDealsByStage',
       computeArgs: {},
       outputKey: 'stage_breakdown',
     },
 
-    // Step 3: Gather stale deals
     {
-      id: 'gather-stale-deals',
-      name: 'Gather Stale Deals',
+      id: 'aggregate-stale-deals',
+      name: 'Aggregate Stale Deals',
       tier: 'compute',
-      computeFn: 'getStaleDeals',
-      computeArgs: {},
-      outputKey: 'stale_deals',
+      computeFn: 'aggregateStaleDeals',
+      computeArgs: { topN: 20 },
+      outputKey: 'stale_deals_agg',
     },
 
-    // Step 4: Gather deals closing soon
     {
-      id: 'gather-closing-soon',
-      name: 'Gather Deals Closing in Next 30 Days',
+      id: 'aggregate-closing-soon',
+      name: 'Aggregate Deals Closing Soon',
       tier: 'compute',
-      computeFn: 'getDealsClosingInRange',
-      computeArgs: {
-        startDate: new Date().toISOString(),
-        endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-      },
-      outputKey: 'closing_soon',
+      computeFn: 'aggregateClosingSoon',
+      computeArgs: { daysAhead: 30, topN: 10 },
+      outputKey: 'closing_soon_agg',
     },
 
-    // Step 5: Gather recent activity
     {
       id: 'gather-activity',
-      name: 'Gather Recent Activity Summary',
+      name: 'Activity Summary (7 days)',
       tier: 'compute',
       computeFn: 'getActivitySummary',
       computeArgs: { days: 7 },
       outputKey: 'recent_activity',
     },
 
-    // Step 6: Analyze hygiene with Claude
     {
-      id: 'analyze-hygiene',
-      name: 'Analyze Pipeline Hygiene',
+      id: 'compute-owner-performance',
+      name: 'Owner Performance Summary',
+      tier: 'compute',
+      computeFn: 'computeOwnerPerformance',
+      computeArgs: {},
+      outputKey: 'owner_performance',
+    },
+
+    {
+      id: 'synthesize-hygiene-report',
+      name: 'Synthesize Pipeline Hygiene Report',
       tier: 'claude',
       dependsOn: [
-        'gather-pipeline-data',
+        'gather-pipeline-summary',
         'gather-stage-breakdown',
-        'gather-stale-deals',
-        'gather-closing-soon',
+        'aggregate-stale-deals',
+        'aggregate-closing-soon',
         'gather-activity',
+        'compute-owner-performance',
       ],
-      claudeTools: ['queryDeals', 'getDealsClosingInRange', 'getDeal'],
-      maxToolCalls: 5,
-      claudePrompt: `You have pipeline data for this workspace. Analyze it for hygiene issues.
+      claudeTools: ['queryDeals', 'getDeal'],
+      maxToolCalls: 3,
+      claudePrompt: `You have pre-analyzed pipeline data for this workspace. All raw data has been aggregated into structured summaries — work from these summaries, not raw records.
 
-Their targets:
-- Pipeline coverage target: {{goals_and_targets.pipeline_coverage_target}}x
-- Revenue target: ${'$'}{{goals_and_targets.revenue_target}}
-- Stale deal threshold: {{goals_and_targets.thresholds.stale_deal_days}} days
-- Sales cycle: {{business_model.sales_cycle_days}} days
-
-Pipeline Summary:
+PIPELINE SUMMARY:
 {{pipeline_summary}}
 
-Stage Breakdown:
+STAGE BREAKDOWN:
 {{stage_breakdown}}
 
-Stale Deals ({{stale_deals.length}} deals):
-{{stale_deals}}
+STALE DEALS (aggregated — summary + severity buckets + top 20 by amount):
+{{stale_deals_agg}}
 
-Closing in 30 Days:
-{{closing_soon}}
+DEALS CLOSING IN 30 DAYS (aggregated — summary + top 10 by amount):
+{{closing_soon_agg}}
 
-Activity Last 7 Days:
+ACTIVITY LAST 7 DAYS:
 {{recent_activity}}
+
+OWNER PERFORMANCE (sorted by stale rate):
+{{owner_performance}}
 
 Produce a Pipeline Hygiene Report with these sections:
 
-1. COVERAGE STATUS
-   - Current coverage ratio vs target
-   - Gap in dollars (how much more pipeline needed to hit target)
-   - Assessment: on track, at risk, or critical
+1. PIPELINE HEALTH
+   - Coverage ratio vs {{goals_and_targets.pipeline_coverage_target}}x target
+   - Gap in dollars vs ${'$'}{{goals_and_targets.revenue_target}} revenue target
+   - Win rate trend and deal flow assessment
 
-2. PIPELINE QUALITY
-   - Stage distribution assessment (healthy balance or bottlenecks?)
-   - Identify stages where deals are stuck
-   - Velocity concerns (deals sitting too long in early stages)
-
-3. STALE DEALS
-   - List each stale deal with: name, amount, days stale, current stage
-   - Recommended action for each (re-engage, disqualify, or escalate)
+2. STALE DEAL CRISIS
+   - Severity breakdown: how many critical (30+ days), serious, warning, watch
    - Total value at risk from stale deals
+   - Which stages have the most stale deals (pattern detection)
+   - Which reps have the worst stale rates (name them)
+   - Root cause patterns from the top 20 deals (rep neglect, prospect stalled, data hygiene, etc.)
 
-4. AT-RISK DEALS
-   - Deals closing within 30 days with low activity or missing data
-   - List name, amount, close date, and specific risk factor
-   - Recommended immediate actions
+3. CLOSING THIS MONTH
+   - Total deals and value closing in 30 days
+   - Which of the top deals look at risk (low health score, high risk, wrong stage)
+   - Readiness assessment: realistic vs aspirational close dates
 
-5. DATA QUALITY
-   - Count of deals missing critical fields: amount, close date, owner
-   - Impact on forecast accuracy
-   - Specific deals to fix (if < 10, list them; otherwise give count)
+4. REP PERFORMANCE
+   - Who's executing well (low stale rate, high activity)
+   - Who needs coaching (high stale rate, low activity)
+   - Activity patterns and pipeline distribution
 
-6. TOP 3 ACTIONS
-   - Ranked by impact (revenue at risk or forecast accuracy)
-   - Each action should be specific and assignable
-   - Include expected outcome for each
+5. TOP 3 ACTIONS
+   - Ranked by revenue impact
+   - Each action must name specific deals or reps
+   - Include expected outcome if action is taken this week
 
-Be specific. Use actual deal names and dollar amounts. Don't generalize.
-Format as clear sections with bullet points.`,
+Be direct. Use actual deal names, dollar amounts, and rep names from the data. No generic advice.
+If you need to drill into a specific deal, use the available tools — but prefer the pre-analyzed summaries.`,
       outputKey: 'hygiene_report',
     },
   ],
 
   schedule: {
-    cron: '0 8 * * 1', // Monday 8 AM
+    cron: '0 8 * * 1',
     trigger: 'on_demand',
   },
 
   outputFormat: 'slack',
   slackTemplate: 'pipeline-hygiene',
 
-  estimatedDuration: '2m',
+  estimatedDuration: '1m',
 };

@@ -234,10 +234,45 @@ export class SkillRuntime {
     }
   }
 
-  /**
-   * Execute a single step
-   */
+  private estimateTokens(text: string): number {
+    return Math.ceil(text.length / 4);
+  }
+
+  private validateInputSize(step: SkillStep, context: SkillExecutionContext): void {
+    if (step.tier === 'compute') return;
+
+    const prompt = step.tier === 'claude' ? step.claudePrompt : step.deepseekPrompt;
+    if (!prompt) return;
+
+    const rendered = this.renderTemplate(prompt, context);
+    const estimatedTokens = this.estimateTokens(rendered);
+
+    if (step.tier === 'deepseek') {
+      for (const [key, value] of Object.entries(context.stepResults)) {
+        if (Array.isArray(value) && value.length > 30) {
+          throw new Error(
+            `DeepSeek step '${step.id}' receives array '${key}' with ${value.length} items (max 30). Add a compute step to filter/rank before classification.`
+          );
+        }
+      }
+    }
+
+    if (estimatedTokens > 20000) {
+      throw new Error(
+        `${step.tier} step '${step.id}' input exceeds 20K token limit (${estimatedTokens} estimated). Add more compute aggregation steps to reduce data volume.`
+      );
+    }
+
+    if (estimatedTokens > 8000) {
+      console.warn(
+        `[Skill Runtime] WARNING: ${step.tier} step '${step.id}' input is ${estimatedTokens} estimated tokens (target <8K). Consider adding more compute aggregation.`
+      );
+    }
+  }
+
   private async executeStep(step: SkillStep, context: SkillExecutionContext): Promise<any> {
+    this.validateInputSize(step, context);
+
     switch (step.tier) {
       case 'compute':
         return this.executeComputeStep(step, context);
