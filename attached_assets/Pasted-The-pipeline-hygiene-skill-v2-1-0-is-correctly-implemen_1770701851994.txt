@@ -1,0 +1,67 @@
+The pipeline-hygiene skill v2.1.0 is correctly implemented
+   in commit 7db185a with the three-phase pattern:          
+                                                            
+  ✓ Steps 1-6: COMPUTE tier (aggregations)                  
+  ✓ Step 7: DeepSeek tier (classify-deal-issues) - properly 
+  inserted                                                  
+  ✓ Step 8: Claude tier (synthesize-hygiene-report) -       
+  depends on classifications                                
+                                                            
+  The file structure in                                     
+  server/skills/library/pipeline-hygiene.ts:80-130 shows the
+   DeepSeek classification step that analyzes top 30 deals  
+  for root causes (rep_neglect, prospect_stalled,           
+  data_hygiene, etc.) and outputs structured JSON with      
+  confidence scores and suggested actions.                  
+                                                            
+  Why Replit doesn't see it:                                
+                                                            
+  Replit's Node.js process is likely running with the old   
+  skill definition cached in memory. The skill registry     
+  loads definitions at startup, so they need to:            
+                                                            
+  1. Verify they've pulled: git log --oneline -1 should show
+   7db185a                                                  
+  2. Restart their Node.js server process - this is the key 
+  step                                                      
+  3. The SkillRegistry will reload the updated              
+  pipeline-hygiene.ts on restart                            
+                                                            
+  The code is production-ready. The issue is                
+  environment-specific, not a code problem.                 
+                                                            
+✻ Sautéed for 2m 16s                                        
+                                                            
+[Image #1]                                                  
+                                                            
+⏺ Perfect! Replit's git repository is on the correct commit 
+  (7db185a). The issue is confirmed: Replit's Node.js       
+  process needs to restart to reload the updated skill      
+  definition.                                               
+                                                            
+  In Replit, do one of these:                               
+                                                            
+  1. Kill and restart the Node.js process:                  
+    - In Replit's Shell tab, press Ctrl+C to stop the       
+  running server                                            
+    - Run npm start (or whatever command starts your server)
+  2. Or use Replit's restart button:                        
+    - Click the "Stop" button in Replit's top bar           
+    - Click "Run" to start fresh                            
+  3. Or force-reload the skill registry:                    
+    - If your server exposes an admin endpoint, you could   
+  reload skills without full restart                        
+    - Otherwise, full restart is cleanest                   
+                                                            
+  Why this happened:                                        
+                                                            
+  When Node.js imported                                     
+  server/skills/library/pipeline-hygiene.ts at startup, it  
+  cached the module in memory. Even though git pulled the   
+  new file, Node.js is still using the old cached version.  
+  Restarting the process forces Node.js to re-import all    
+  modules from disk.                                        
+                                                            
+  Once restarted, the SkillRegistry will load v2.1.0 with   
+  the DeepSeek classification step, and Replit should       
+  correctly see the three-phase pattern.    
