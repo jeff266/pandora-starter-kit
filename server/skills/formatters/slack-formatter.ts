@@ -13,9 +13,19 @@ interface SlackBlock {
 }
 
 /**
- * Generic Slack formatter
+ * Generic Slack formatter with skill-specific routing
  */
 export function formatForSlack(result: SkillResult, skill: SkillDefinition): SlackBlock[] {
+  // Route to skill-specific formatter if template is defined
+  if (skill.slackTemplate === 'pipeline-hygiene') {
+    return formatPipelineHygiene(result, skill);
+  } else if (skill.slackTemplate === 'weekly-recap') {
+    return formatWeeklyRecap(result);
+  } else if (skill.slackTemplate === 'deal-risk-review') {
+    return formatDealRiskReview(result);
+  }
+
+  // Generic formatter fallback
   const blocks: SlackBlock[] = [];
 
   // Header
@@ -82,16 +92,147 @@ export function formatForSlack(result: SkillResult, skill: SkillDefinition): Sla
 }
 
 /**
- * Pipeline Hygiene specific formatter
+ * Pipeline Hygiene specific formatter with rich visual elements
  */
-export function formatPipelineHygiene(result: SkillResult): SlackBlock[] {
+export function formatPipelineHygiene(result: SkillResult, skill?: SkillDefinition): SlackBlock[] {
+  const blocks: SlackBlock[] = [];
+
+  // Header
+  blocks.push({
+    type: 'header',
+    text: {
+      type: 'plain_text',
+      text: '🔍 Pipeline Hygiene Check',
+      emoji: true,
+    },
+  });
+
+  // Timestamp and status
+  blocks.push({
+    type: 'context',
+    elements: [
+      {
+        type: 'mrkdwn',
+        text: `${getStatusEmoji(result.status)} Completed <!date^${Math.floor(result.completedAt.getTime() / 1000)}^{date_short_pretty} at {time}|${result.completedAt.toISOString()}>`,
+      },
+    ],
+  });
+
+  blocks.push({ type: 'divider' });
+
+  // Parse output into sections
+  const output = typeof result.output === 'string' ? result.output : JSON.stringify(result.output);
+  const reportSections = parsePipelineHygieneReport(output);
+
+  // 1. PIPELINE HEALTH - Compact metrics with trend indicators
+  if (reportSections.pipelineHealth) {
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*📊 Pipeline Health*\n${reportSections.pipelineHealth}`,
+      },
+    });
+  }
+
+  // 2. STALE DEAL CRISIS - Highlighted if severe
+  if (reportSections.staleDeals) {
+    const isCritical = reportSections.staleDeals.toLowerCase().includes('critical');
+    const emoji = isCritical ? '🚨' : '⚠️';
+
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*${emoji} Stale Deals*\n${reportSections.staleDeals}`,
+      },
+    });
+  }
+
+  // 3. CLOSING SOON - Important for near-term focus
+  if (reportSections.closingSoon) {
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*📅 Closing This Period*\n${reportSections.closingSoon}`,
+      },
+    });
+  }
+
+  // 4. REP PERFORMANCE - Collapsed to avoid wall of text
+  if (reportSections.repPerformance) {
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*👥 Rep Performance*\n${truncateSection(reportSections.repPerformance, 400)}`,
+      },
+    });
+  }
+
+  blocks.push({ type: 'divider' });
+
+  // 5. TOP 3 ACTIONS - Most prominent, actionable
+  if (reportSections.topActions) {
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: '*🎯 Top 3 Actions*',
+      },
+    });
+
+    const actions = parseTopActions(reportSections.topActions);
+    for (const action of actions) {
+      blocks.push({
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: action,
+        },
+      });
+    }
+  }
+
+  // Any other sections (summary, intro, etc.)
+  if (reportSections.other && reportSections.other.trim()) {
+    blocks.push({ type: 'divider' });
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: reportSections.other,
+      },
+    });
+  }
+
+  // Footer
+  blocks.push({ type: 'divider' });
+  blocks.push({
+    type: 'context',
+    elements: [
+      {
+        type: 'mrkdwn',
+        text: `⏱ ${formatDuration(result.totalDuration_ms)} | 💰 ${result.totalTokenUsage.claude}k Claude tokens | Run \`${result.runId.slice(0, 8)}\``,
+      },
+    ],
+  });
+
+  return blocks;
+}
+
+/**
+ * Deal Risk Review specific formatter
+ */
+export function formatDealRiskReview(result: SkillResult): SlackBlock[] {
   const blocks: SlackBlock[] = [];
 
   blocks.push({
     type: 'header',
     text: {
       type: 'plain_text',
-      text: '🔍 Pipeline Hygiene Check',
+      text: '🎯 Deal Risk Review',
       emoji: true,
     },
   });
@@ -108,7 +249,7 @@ export function formatPipelineHygiene(result: SkillResult): SlackBlock[] {
 
   blocks.push({ type: 'divider' });
 
-  // Parse output into sections
+  // Generic parsing for now
   const output = typeof result.output === 'string' ? result.output : JSON.stringify(result.output);
   const sections = parseSectionsFromMarkdown(output);
 
@@ -133,13 +274,12 @@ export function formatPipelineHygiene(result: SkillResult): SlackBlock[] {
   }
 
   blocks.push({ type: 'divider' });
-
   blocks.push({
     type: 'context',
     elements: [
       {
         type: 'mrkdwn',
-        text: `⏱ ${formatDuration(result.totalDuration_ms)} | 🎯 ${result.totalTokenUsage.claude} Claude tokens`,
+        text: `⏱ ${formatDuration(result.totalDuration_ms)}`,
       },
     ],
   });
@@ -342,4 +482,162 @@ function getSectionEmoji(title: string): string {
   if (lower.includes('call') || lower.includes('theme')) return '🎙️';
   if (lower.includes('priority') || lower.includes('next')) return '🎯';
   return '📌';
+}
+
+/**
+ * Parse pipeline hygiene report into structured sections
+ */
+interface PipelineHygieneSections {
+  pipelineHealth?: string;
+  staleDeals?: string;
+  closingSoon?: string;
+  repPerformance?: string;
+  topActions?: string;
+  other?: string;
+}
+
+function parsePipelineHygieneReport(text: string): PipelineHygieneSections {
+  const sections: PipelineHygieneSections = {};
+  const lines = text.split('\n');
+
+  let currentSection: keyof PipelineHygieneSections | null = null;
+  let currentContent: string[] = [];
+
+  const sectionMapping: Record<string, keyof PipelineHygieneSections> = {
+    'PIPELINE HEALTH': 'pipelineHealth',
+    'STALE DEAL': 'staleDeals',
+    'CLOSING': 'closingSoon',
+    'REP PERFORMANCE': 'repPerformance',
+    'TOP 3 ACTION': 'topActions',
+    'TOP ACTION': 'topActions',
+  };
+
+  for (const line of lines) {
+    // Check for numbered section headers (1. SECTION NAME, 2. SECTION NAME)
+    const numberedMatch = line.match(/^(\d+)\.\s+([A-Z\s&]+)$/);
+    if (numberedMatch) {
+      // Save previous section
+      if (currentSection) {
+        sections[currentSection] = currentContent.join('\n').trim();
+      }
+
+      // Identify new section
+      const title = numberedMatch[2].trim();
+      currentSection = null;
+      for (const [key, value] of Object.entries(sectionMapping)) {
+        if (title.includes(key)) {
+          currentSection = value;
+          break;
+        }
+      }
+
+      currentContent = [];
+      continue;
+    }
+
+    // Check for markdown headers (## SECTION NAME)
+    const headerMatch = line.match(/^#{1,3}\s+(.+)$/);
+    if (headerMatch) {
+      if (currentSection) {
+        sections[currentSection] = currentContent.join('\n').trim();
+      }
+
+      const title = headerMatch[1].trim().toUpperCase();
+      currentSection = null;
+      for (const [key, value] of Object.entries(sectionMapping)) {
+        if (title.includes(key)) {
+          currentSection = value;
+          break;
+        }
+      }
+
+      currentContent = [];
+      continue;
+    }
+
+    // Accumulate content
+    if (currentSection) {
+      currentContent.push(line);
+    } else {
+      // Content before first section or unmatched content
+      if (!sections.other) sections.other = '';
+      sections.other += line + '\n';
+    }
+  }
+
+  // Save last section
+  if (currentSection && currentContent.length > 0) {
+    sections[currentSection] = currentContent.join('\n').trim();
+  }
+
+  return sections;
+}
+
+/**
+ * Parse top 3 actions into separate bullet points
+ */
+function parseTopActions(text: string): string[] {
+  const actions: string[] = [];
+  const lines = text.split('\n');
+
+  let currentAction: string[] = [];
+
+  for (const line of lines) {
+    // Check for action headers (Action 1:, Action 2:, - Action 1:, etc.)
+    const actionMatch = line.match(/^[-•*]?\s*(?:Action\s+)?(\d+)[:.]\s*(.+)$/i);
+    if (actionMatch) {
+      // Save previous action
+      if (currentAction.length > 0) {
+        actions.push(currentAction.join('\n'));
+      }
+
+      // Start new action with emoji number
+      const actionNum = actionMatch[1];
+      const emoji = ['1️⃣', '2️⃣', '3️⃣'][parseInt(actionNum) - 1] || '▪️';
+      currentAction = [`${emoji} ${actionMatch[2]}`];
+      continue;
+    }
+
+    // Accumulate continuation lines (indented or bulleted sub-items)
+    if (currentAction.length > 0 && line.trim()) {
+      currentAction.push(line);
+    }
+  }
+
+  // Save last action
+  if (currentAction.length > 0) {
+    actions.push(currentAction.join('\n'));
+  }
+
+  // If no structured actions found, split by double newline or numbered list
+  if (actions.length === 0 && text.trim()) {
+    const fallbackActions = text.split(/\n\n+/).filter(s => s.trim());
+    return fallbackActions.slice(0, 3).map((action, i) => {
+      const emoji = ['1️⃣', '2️⃣', '3️⃣'][i] || '▪️';
+      return `${emoji} ${action.trim()}`;
+    });
+  }
+
+  return actions.slice(0, 3);
+}
+
+/**
+ * Truncate section content to max length with ellipsis
+ */
+function truncateSection(text: string, maxLength: number): string {
+  if (text.length <= maxLength) {
+    return text;
+  }
+
+  // Try to truncate at sentence boundary
+  const truncated = text.slice(0, maxLength);
+  const lastPeriod = truncated.lastIndexOf('.');
+  const lastNewline = truncated.lastIndexOf('\n');
+  const breakPoint = Math.max(lastPeriod, lastNewline);
+
+  if (breakPoint > maxLength * 0.7) {
+    return text.slice(0, breakPoint + 1) + '\n_...see full report for details_';
+  }
+
+  return truncated + '...\n_...see full report for details_';
 }
