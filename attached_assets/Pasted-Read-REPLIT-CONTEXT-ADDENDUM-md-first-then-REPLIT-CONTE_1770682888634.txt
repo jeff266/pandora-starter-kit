@@ -1,0 +1,161 @@
+Read REPLIT_CONTEXT_ADDENDUM.md first, then REPLIT_CONTEXT.md.
+
+Build the query layer — these are the functions that agents and skills will call 
+to access normalized data. Every function is workspace-scoped. Every query uses 
+parameterized SQL.
+
+1. server/tools/deal-query.ts
+
+queryDeals(workspaceId, filters): flexible deal querying
+  Filters (all optional):
+  - stage: string | string[] (match stage_normalized)
+  - owner: string (owner_email or owner_name)
+  - closeDateFrom / closeDateTo: Date
+  - amountMin / amountMax: number
+  - healthScoreMin / healthScoreMax: number
+  - daysInStageGt: number
+  - daysSinceActivityGt: number
+  - pipelineName: string
+  - search: string (ILIKE on deal name)
+  - sortBy: 'amount' | 'close_date' | 'health_score' | 'days_in_stage' | 'created_at' (default: close_date)
+  - sortDir: 'asc' | 'desc' (default: asc)
+  - limit: number (default: 50, max: 200)
+  - offset: number (default: 0)
+  Returns: { deals: Deal[], total: number, limit, offset }
+
+getDeal(workspaceId, dealId): single deal with all fields
+
+getDealsByStage(workspaceId): 
+  SELECT stage_normalized, COUNT(*), SUM(amount), AVG(amount)
+  GROUP BY stage_normalized
+  Returns: { stages: { stage, count, totalAmount, avgAmount }[] }
+
+getStaleDeals(workspaceId, daysSinceActivity?: number):
+  Default 14 days. Returns deals sorted by staleness descending.
+
+getDealsClosingInRange(workspaceId, startDate, endDate):
+  Deals with close_date in range, sorted by amount desc.
+
+getPipelineSummary(workspaceId):
+  Total pipeline value, deal count, avg deal size, median deal size,
+  weighted pipeline (amount × probability if available),
+  deals by forecast_category.
+
+2. server/tools/contact-query.ts
+
+queryContacts(workspaceId, filters):
+  Filters: email, accountId, owner, seniority, department, 
+  lastActivityAfter, search (ILIKE on name/email), sortBy, limit, offset
+  Returns: { contacts: Contact[], total, limit, offset }
+
+getContact(workspaceId, contactId): single contact
+
+getContactsForDeal(workspaceId, dealId):
+  Join through deal associations or activities to find related contacts.
+  Returns contacts sorted by seniority.
+
+getStakeholderMap(workspaceId, accountId):
+  All contacts for an account, grouped by seniority level.
+  Returns: { account, stakeholders: { seniority: string, contacts: Contact[] }[] }
+
+3. server/tools/account-query.ts
+
+queryAccounts(workspaceId, filters):
+  Filters: domain, industry, owner, employeeCountMin/Max, revenueMin/Max,
+  search, sortBy, limit, offset
+
+getAccount(workspaceId, accountId):
+  Single account WITH summary stats:
+  - openDealCount, openDealValue (from deals table)
+  - contactCount (from contacts table)
+  - recentActivityCount (activities in last 30 days)
+
+getAccountHealth(workspaceId, accountId):
+  Aggregate health across all open deals for this account.
+  Returns: { account, deals: Deal[], avgHealthScore, totalPipeline, oldestStaleDate }
+
+4. server/tools/activity-query.ts
+
+queryActivities(workspaceId, filters):
+  Filters: activityType, dealId, contactId, accountId, 
+  dateFrom/dateTo, actorEmail, sortBy (default: timestamp desc), limit, offset
+
+getActivityTimeline(workspaceId, dealId):
+  All activities for a deal, chronological. Include activity_type icons in response
+  for easy rendering.
+
+getActivitySummary(workspaceId, dateFrom, dateTo):
+  Counts grouped by activity_type AND by actor_email.
+  Returns: { 
+    byType: { type, count }[], 
+    byRep: { name, email, emails, calls, meetings, total }[],
+    totalActivities 
+  }
+
+5. server/tools/conversation-query.ts
+
+queryConversations(workspaceId, filters):
+  Filters: dealId, accountId, dateFrom/dateTo, source (gong/fireflies),
+  search (ILIKE on title/transcript_text), sortBy (default: call_date desc), limit, offset
+
+getConversation(workspaceId, conversationId):
+  Full record including transcript_text, summary, action_items, sentiment.
+
+getRecentCallsForDeal(workspaceId, dealId, limit?):
+  Default 5. Returns most recent conversations linked to a deal.
+
+getCallInsights(workspaceId, dateFrom, dateTo):
+  Aggregate: total calls, avg duration, top objections, top competitor mentions,
+  avg sentiment score.
+
+6. server/tools/task-query.ts
+
+queryTasks(workspaceId, filters):
+  Filters: status, assigneeEmail, dealId, accountId, priority,
+  dueDateFrom/dueDateTo, overdue (boolean), createdByAgent (boolean),
+  search, sortBy, limit, offset
+
+getOverdueTasks(workspaceId):
+  Tasks where due_date < now AND status NOT IN ('completed').
+  Sorted by due_date asc (most overdue first).
+
+getTaskSummary(workspaceId):
+  Counts by status, counts by priority, overdue count.
+
+7. server/tools/document-query.ts
+
+queryDocuments(workspaceId, filters):
+  Filters: docType, dealId, accountId, mimeType, modifiedAfter,
+  search (ILIKE on title/content_text), sortBy, limit, offset
+
+getDocument(workspaceId, documentId):
+  Full record including content_text.
+
+getDocumentsForDeal(workspaceId, dealId):
+  All documents linked to a deal, sorted by last_modified desc.
+
+8. server/tools/index.ts
+
+Barrel export for all query modules.
+
+9. API Routes — server/routes/data.ts
+
+Wire each query module to REST endpoints:
+- GET /api/workspaces/:id/deals (+ /deals/:dealId, /deals/by-stage, /deals/stale, /deals/pipeline-summary)
+- GET /api/workspaces/:id/contacts (+ /contacts/:contactId, /contacts/for-deal/:dealId, /contacts/stakeholder-map/:accountId)
+- GET /api/workspaces/:id/accounts (+ /accounts/:accountId, /accounts/:accountId/health)
+- GET /api/workspaces/:id/activities (+ /activities/timeline/:dealId, /activities/summary)
+- GET /api/workspaces/:id/conversations (+ /conversations/:conversationId, /conversations/for-deal/:dealId, /conversations/insights)
+- GET /api/workspaces/:id/tasks (+ /tasks/overdue, /tasks/summary)
+- GET /api/workspaces/:id/documents (+ /documents/:documentId, /documents/for-deal/:dealId)
+
+All query params passed as URL query parameters. All responses follow the pattern:
+{ data: [...], total?: number, limit?: number, offset?: number }
+
+IMPORTANT:
+- Every SQL query MUST include WHERE workspace_id = $1 as the first condition
+- Use parameterized queries everywhere — never interpolate user input into SQL
+- All list endpoints support pagination (limit/offset)
+- Return 404 for single-resource endpoints when not found
+- These functions will become Claude tool definitions in Phase 3 — design them 
+  to be self-describing (clear param names, typed returns)
