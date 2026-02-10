@@ -12,11 +12,14 @@ import contextRouter from "./routes/context.js";
 import syncRouter from "./routes/sync.js";
 import dataRouter from "./routes/data.js";
 import slackSettingsRouter from "./routes/slack-settings.js";
+import skillsRouter from "./routes/skills.js";
 import webhooksRouter from "./routes/webhooks.js";
 import { getAdapterRegistry } from "./connectors/adapters/registry.js";
 import { MondayTaskAdapter } from "./connectors/monday/adapter.js";
 import { GoogleDriveDocumentAdapter } from "./connectors/google-drive/adapter.js";
 import { startScheduler } from "./sync/scheduler.js";
+import { registerBuiltInSkills } from "./skills/index.js";
+import { getSkillRegistry } from "./skills/registry.js";
 
 dotenv.config();
 
@@ -44,6 +47,7 @@ app.use("/api/workspaces", contextRouter);
 app.use("/api/workspaces", syncRouter);
 app.use("/api/workspaces", dataRouter);
 app.use("/api/workspaces", slackSettingsRouter);
+app.use("/api/workspaces", skillsRouter);
 app.use("/api/webhooks", webhooksRouter);
 
 function registerAdapters(): void {
@@ -53,6 +57,15 @@ function registerAdapters(): void {
   const stats = registry.getStats();
   console.log(
     `[server] Registered ${stats.total} adapters: ${stats.sourceTypes.join(', ')}`
+  );
+}
+
+function registerSkills(): void {
+  registerBuiltInSkills();
+  const registry = getSkillRegistry();
+  const stats = registry.getStats();
+  console.log(
+    `[server] Registered ${stats.total} skills: ${Object.entries(stats.byCategory).map(([k, v]) => `${k}(${v})`).join(', ')}`
   );
 }
 
@@ -66,6 +79,7 @@ async function start(): Promise<void> {
   }
 
   registerAdapters();
+  registerSkills();
   startScheduler();
 
   app.listen(PORT, "0.0.0.0", () => {

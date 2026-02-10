@@ -143,7 +143,7 @@ export class SkillRuntime {
     };
 
     // Log to skill_runs table
-    await this.logSkillRun(runId, skillId, workspaceId, 'running');
+    await this.logSkillRun(runId, skill.id, workspaceId, 'running');
 
     // Execute steps
     const stepResults: SkillStepResult[] = [];

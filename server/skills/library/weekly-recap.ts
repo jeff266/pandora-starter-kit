@@ -175,7 +175,7 @@ Return JSON with:
       maxToolCalls: 5,
       claudePrompt: `Write a weekly pipeline recap for leadership.
 
-Revenue Target: ${{goals_and_targets.revenue_target}}
+Revenue Target: ${'$'}{{goals_and_targets.revenue_target}}
 Sales Cycle: {{business_model.sales_cycle_days}} days
 
 This Week's Numbers:

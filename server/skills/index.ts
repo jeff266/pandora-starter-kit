@@ -4,6 +4,11 @@
  * Central export point for the entire skill framework.
  */
 
+import { getSkillRegistry as _getSkillRegistry } from './registry.js';
+import { pipelineHygieneSkill } from './library/pipeline-hygiene.js';
+import { dealRiskReviewSkill } from './library/deal-risk-review.js';
+import { weeklyRecapSkill } from './library/weekly-recap.js';
+
 // Types
 export type {
   AITier,
@@ -78,7 +83,7 @@ export {
  * Register all built-in skills
  */
 export function registerBuiltInSkills(): void {
-  const registry = getSkillRegistry();
+  const registry = _getSkillRegistry();
 
   // Register skills
   registry.register(pipelineHygieneSkill);

@@ -11,6 +11,7 @@ import {
   type NormalizedDocument,
   type SyncResult,
 } from '../connectors/adapters/types.js';
+import { emitSyncCompleted } from './post-sync-events.js';
 
 interface OrchestratorResult {
   connector: string;
@@ -119,6 +120,13 @@ export async function syncWorkspace(
         message,
       });
     }
+  }
+
+  const hasSuccess = results.some(r => r.status === 'success');
+  if (hasSuccess) {
+    emitSyncCompleted(workspaceId, results).catch(err => {
+      console.error('[Orchestrator] Post-sync event failed:', err);
+    });
   }
 
   return results;

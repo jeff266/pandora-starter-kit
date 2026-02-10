@@ -19,10 +19,10 @@ import * as documentTools from '../tools/document-query.js';
 import { generatePipelineSnapshot } from '../analysis/pipeline-snapshot.js';
 import { computeFields } from '../computed-fields/engine.js';
 import {
-  getBusinessContext,
+  getBusinessContext as fetchBusinessContext,
   getGoals,
-  getDefinitions,
-  getMaturity,
+  getDefinitions as fetchDefinitions,
+  getMaturity as fetchMaturity,
   getContext,
 } from '../context/index.js';
 
@@ -567,7 +567,7 @@ const getBusinessContext: ToolDefinition = {
   },
   execute: async (params, context) => {
     return safeExecute('getBusinessContext', () =>
-      getBusinessContext(context.workspaceId), params);
+      fetchBusinessContext(context.workspaceId), params);
   },
 };
 
@@ -597,7 +597,7 @@ const getDefinitions: ToolDefinition = {
   },
   execute: async (params, context) => {
     return safeExecute('getDefinitions', () =>
-      getDefinitions(context.workspaceId), params);
+      fetchDefinitions(context.workspaceId), params);
   },
 };
 
@@ -612,7 +612,7 @@ const getMaturityScores: ToolDefinition = {
   },
   execute: async (params, context) => {
     return safeExecute('getMaturityScores', () =>
-      getMaturity(context.workspaceId), params);
+      fetchMaturity(context.workspaceId), params);
   },
 };
 

@@ -102,7 +102,7 @@ export const pipelineHygieneSkill: SkillDefinition = {
 
 Their targets:
 - Pipeline coverage target: {{goals_and_targets.pipeline_coverage_target}}x
-- Revenue target: ${{goals_and_targets.revenue_target}}
+- Revenue target: ${'$'}{{goals_and_targets.revenue_target}}
 - Stale deal threshold: {{goals_and_targets.thresholds.stale_deal_days}} days
 - Sales cycle: {{business_model.sales_cycle_days}} days
 
