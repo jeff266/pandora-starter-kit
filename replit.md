@@ -49,7 +49,7 @@ Pandora is built on Node.js 20 with TypeScript 5+, utilizing Express.js for its 
 -   **Language:** TypeScript 5+ (strict mode, ESM)
 -   **Framework:** Express.js
 -   **Database:** PostgreSQL (Neon) with `pg` client
--   **AI:** Anthropic Claude via Replit AI integration (`AI_INTEGRATIONS_ANTHROPIC_API_KEY`)
+-   **AI:** LLM Router with capability-based routing: Anthropic Claude (`AI_INTEGRATIONS_ANTHROPIC_API_KEY`) for reason/generate, Fireworks DeepSeek (`FIREWORKS_API_KEY`) for extract/classify
 -   **Dev Tools:** tsx, dotenv
 
 ## External Dependencies
@@ -60,10 +60,11 @@ Pandora is built on Node.js 20 with TypeScript 5+, utilizing Express.js for its 
 -   **Fireflies API:** Integrated for conversation intelligence, offering transcripts and summaries via a GraphQL API. Uses API key authentication.
 -   **Monday.com API:** Integrated for task management, enabling reading and writing of tasks.
 -   **Google Drive API:** Integrated for document management, supporting content export and extraction. Uses OAuth2.
--   **Anthropic AI (Claude):** Utilized via `@anthropic-ai/sdk` for LLM-based analyses within the platform.
+-   **Anthropic AI (Claude):** Utilized via `@anthropic-ai/sdk` for reasoning and generation within the platform.
+-   **Fireworks AI (DeepSeek V3):** Used for classification and extraction via OpenAI-compatible API (`deepseek-v3-0324` model).
 
 ## Database Migrations
-Seven migrations applied in sequence:
+Eight migrations applied in sequence:
 1. `001_initial.sql` — All 8 entity tables, workspaces, connections
 2. `002_add_calls_table.sql` — Calls entity
 3. `003_context_layer.sql` — Context layer table
@@ -71,6 +72,7 @@ Seven migrations applied in sequence:
 5. `005_sync_log.sql` — Sync log table
 6. `006_schema_cleanup.sql` — stage_normalized + health_score on deals, title on conversations
 7. `007_skill_runs.sql` — Skill runs table for tracking AI skill executions (status, params, result, token_usage, steps)
+8. `008_llm_config.sql` — LLM config table: per-workspace routing, provider config, token budget tracking with monthly reset
 
 ## Smoke Test
 Run `npm run smoke-test` to validate the full pipeline end-to-end with synthetic data (24 tests covering all query functions, computed fields, and pipeline snapshot). Use `--keep` flag to preserve test data for inspection.
