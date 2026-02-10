@@ -12,7 +12,7 @@ const router = Router();
 router.post('/:workspaceId/skills/:skillId/run', async (req, res) => {
   try {
     const { workspaceId, skillId } = req.params;
-    const { params } = req.body;
+    const { params } = req.body || {};
 
     const ws = await query('SELECT id, name FROM workspaces WHERE id = $1', [workspaceId]);
     if (ws.rows.length === 0) {
