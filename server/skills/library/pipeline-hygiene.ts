@@ -3,29 +3,52 @@ import type { SkillDefinition } from '../types.js';
 export const pipelineHygieneSkill: SkillDefinition = {
   id: 'pipeline-hygiene',
   name: 'Pipeline Hygiene Check',
-  description: 'Analyzes deal pipeline for data quality issues, stale deals, missing fields, and risk signals. Produces actionable recommendations.',
-  version: '2.1.0',
+  description: 'Analyzes deal pipeline for data quality issues, stale deals, missing fields, and risk signals. Produces actionable recommendations with time-scoped analysis and dynamic report sizing.',
+  version: '2.2.0',
   category: 'pipeline',
   tier: 'mixed',
 
   requiredTools: [
+    'resolveTimeWindows',
     'computePipelineCoverage',
     'getDealsByStage',
     'aggregateStaleDeals',
     'aggregateClosingSoon',
     'getActivitySummary',
     'computeOwnerPerformance',
+    'gatherPeriodComparison',
+    'calculateOutputBudget',
     'queryDeals',
     'getDeal',
   ],
 
   requiredContext: ['business_model', 'goals_and_targets', 'definitions'],
 
+  timeConfig: {
+    analysisWindow: 'current_quarter',
+    changeWindow: 'since_last_run',
+    trendComparison: 'previous_period',
+  },
+
   steps: [
+    {
+      id: 'resolve-time-windows',
+      name: 'Resolve Time Windows',
+      tier: 'compute',
+      computeFn: 'resolveTimeWindows',
+      computeArgs: {
+        analysisWindow: 'current_quarter',
+        changeWindow: 'since_last_run',
+        trendComparison: 'previous_period',
+      },
+      outputKey: 'time_windows',
+    },
+
     {
       id: 'gather-pipeline-summary',
       name: 'Pipeline Summary',
       tier: 'compute',
+      dependsOn: ['resolve-time-windows'],
       computeFn: 'computePipelineCoverage',
       computeArgs: {},
       outputKey: 'pipeline_summary',
@@ -74,6 +97,16 @@ export const pipelineHygieneSkill: SkillDefinition = {
       computeFn: 'computeOwnerPerformance',
       computeArgs: {},
       outputKey: 'owner_performance',
+    },
+
+    {
+      id: 'gather-period-comparison',
+      name: 'Period-over-Period Comparison',
+      tier: 'compute',
+      dependsOn: ['resolve-time-windows'],
+      computeFn: 'gatherPeriodComparison',
+      computeArgs: {},
+      outputKey: 'period_comparison',
     },
 
     {
@@ -130,21 +163,43 @@ Return valid JSON array with one object per deal:
     },
 
     {
+      id: 'calculate-output-budget',
+      name: 'Calculate Report Complexity Budget',
+      tier: 'compute',
+      dependsOn: ['classify-deal-issues', 'gather-pipeline-summary', 'gather-period-comparison'],
+      computeFn: 'calculateOutputBudget',
+      computeArgs: {},
+      outputKey: 'output_budget',
+    },
+
+    {
       id: 'synthesize-hygiene-report',
       name: 'Synthesize Pipeline Hygiene Report',
       tier: 'claude',
       dependsOn: [
+        'resolve-time-windows',
         'gather-pipeline-summary',
         'gather-stage-breakdown',
         'aggregate-stale-deals',
         'aggregate-closing-soon',
         'gather-activity',
         'compute-owner-performance',
+        'gather-period-comparison',
         'classify-deal-issues',
+        'calculate-output-budget',
       ],
       claudeTools: ['queryDeals', 'getDeal'],
       maxToolCalls: 3,
       claudePrompt: `You have pre-analyzed pipeline data for this workspace. All raw data has been aggregated into structured summaries, and deals have been classified by root cause. Work from these summaries and classifications, not raw records.
+
+TIME SCOPE:
+- Analysis period: {{time_windows.analysisRange.start}} to {{time_windows.analysisRange.end}}
+- Changes since: {{time_windows.changeRange.start}} ({{time_windows.config.changeWindow}})
+- Compared to: {{time_windows.previousPeriodRange.start}} to {{time_windows.previousPeriodRange.end}}
+- Last run: {{time_windows.lastRunAt}}
+
+PERIOD-OVER-PERIOD COMPARISON:
+{{period_comparison}}
 
 PIPELINE SUMMARY:
 {{pipeline_summary}}
@@ -158,7 +213,7 @@ STALE DEALS (aggregated — summary + severity buckets + top 20 by amount):
 DEALS CLOSING IN 30 DAYS (aggregated — summary + top 10 by amount):
 {{closing_soon_agg}}
 
-ACTIVITY LAST 7 DAYS:
+ACTIVITY (change window):
 {{recent_activity}}
 
 OWNER PERFORMANCE (sorted by stale rate):
@@ -167,12 +222,19 @@ OWNER PERFORMANCE (sorted by stale rate):
 DEAL CLASSIFICATIONS (AI-analyzed root causes for top 30 deals):
 {{deal_classifications}}
 
-Produce a Pipeline Hygiene Report with these sections:
+REPORT PARAMETERS:
+- Depth: {{output_budget.reportDepth}}
+- Word budget: {{output_budget.wordBudget}} words maximum
+- Complexity: {{output_budget.complexityScore}} (reasoning: {{output_budget.reasoning}})
+
+Produce a Pipeline Hygiene Report with these sections. IMPORTANT: Stay within your word budget. If pipeline is healthy with no significant changes, say so briefly and stop.
+
+If this is NOT the first run (lastRunAt exists), LEAD with what CHANGED since last run before covering current state.
 
 1. PIPELINE HEALTH
-   - Coverage ratio vs {{goals_and_targets.pipeline_coverage_target}}x target
+   - Coverage ratio vs {{goals_and_targets.pipeline_coverage_target}}x target (include period-over-period delta)
    - Gap in dollars vs ${'$'}{{goals_and_targets.revenue_target}} revenue target
-   - Win rate trend and deal flow assessment
+   - Win rate trend and deal flow assessment (reference period comparison deltas)
 
 2. STALE DEAL CRISIS
    - Severity breakdown: how many critical (30+ days), serious, warning, watch
@@ -200,7 +262,13 @@ Produce a Pipeline Hygiene Report with these sections:
 
 Be direct. Use actual deal names, dollar amounts, and rep names from the data and classifications. No generic advice.
 The classifications provide specific root causes and actions for each top deal — reference these directly.
-If you need to drill into a specific deal for more detail, use the available tools — but prefer the pre-analyzed summaries and classifications.`,
+If you need to drill into a specific deal for more detail, use the available tools — but prefer the pre-analyzed summaries and classifications.
+
+WORD BUDGET ENFORCEMENT:
+- {{output_budget.reportDepth}} report: {{output_budget.wordBudget}} words max
+- minimal: Skip sections with no issues. Lead with "Pipeline healthy" if applicable.
+- standard: Cover only sections with actionable items.
+- detailed: Full coverage with specific examples and root cause analysis.`,
       outputKey: 'hygiene_report',
     },
   ],

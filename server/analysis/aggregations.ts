@@ -212,3 +212,159 @@ export function pickClosingSoonFields(deal: any): ClosingSoonItem {
     dealRisk: deal.deal_risk != null ? parseFloat(deal.deal_risk) : null,
   };
 }
+
+// ============================================================================
+// Time Window Resolution
+// ============================================================================
+
+export interface TimeWindows {
+  analysisRange: { start: Date; end: Date };
+  changeRange: { start: Date; end: Date };
+  previousPeriodRange: { start: Date; end: Date } | null;
+  lastRunAt: Date | null;
+}
+
+export interface TimeConfig {
+  analysisWindow: 'current_quarter' | 'current_month' | 'trailing_90d' | 'trailing_30d' | 'all_time';
+  changeWindow: 'since_last_run' | 'last_7d' | 'last_14d' | 'last_30d';
+  trendComparison: 'previous_period' | 'same_period_last_quarter' | 'none';
+}
+
+function getQuarterBounds(date: Date): { start: Date; end: Date } {
+  const month = date.getMonth();
+  const year = date.getFullYear();
+  const quarterStartMonth = Math.floor(month / 3) * 3;
+  const start = new Date(year, quarterStartMonth, 1);
+  const end = new Date(year, quarterStartMonth + 3, 0, 23, 59, 59);
+  return { start, end };
+}
+
+function getMonthBounds(date: Date): { start: Date; end: Date } {
+  const year = date.getFullYear();
+  const month = date.getMonth();
+  const start = new Date(year, month, 1);
+  const end = new Date(year, month + 1, 0, 23, 59, 59);
+  return { start, end };
+}
+
+export function resolveTimeWindows(
+  config: TimeConfig,
+  lastRunAt: Date | null,
+  now: Date = new Date()
+): TimeWindows {
+  // Resolve analysis range
+  let analysisRange: { start: Date; end: Date };
+  switch (config.analysisWindow) {
+    case 'current_quarter':
+      analysisRange = getQuarterBounds(now);
+      break;
+    case 'current_month':
+      analysisRange = getMonthBounds(now);
+      break;
+    case 'trailing_90d':
+      analysisRange = {
+        start: new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000),
+        end: now,
+      };
+      break;
+    case 'trailing_30d':
+      analysisRange = {
+        start: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000),
+        end: now,
+      };
+      break;
+    case 'all_time':
+    default:
+      analysisRange = {
+        start: new Date('2000-01-01'),
+        end: now,
+      };
+  }
+
+  // Resolve change range
+  let changeRange: { start: Date; end: Date };
+  if (config.changeWindow === 'since_last_run' && lastRunAt) {
+    changeRange = { start: lastRunAt, end: now };
+  } else {
+    const days =
+      config.changeWindow === 'last_30d' ? 30 :
+      config.changeWindow === 'last_14d' ? 14 : 7;
+    changeRange = {
+      start: new Date(now.getTime() - days * 24 * 60 * 60 * 1000),
+      end: now,
+    };
+  }
+
+  // Resolve previous period range
+  let previousPeriodRange: { start: Date; end: Date } | null = null;
+  if (config.trendComparison === 'previous_period') {
+    const duration = analysisRange.end.getTime() - analysisRange.start.getTime();
+    previousPeriodRange = {
+      start: new Date(analysisRange.start.getTime() - duration),
+      end: new Date(analysisRange.start.getTime() - 1),
+    };
+  } else if (config.trendComparison === 'same_period_last_quarter') {
+    const startDate = new Date(analysisRange.start);
+    startDate.setMonth(startDate.getMonth() - 3);
+    const endDate = new Date(analysisRange.end);
+    endDate.setMonth(endDate.getMonth() - 3);
+    previousPeriodRange = { start: startDate, end: endDate };
+  }
+
+  return {
+    analysisRange,
+    changeRange,
+    previousPeriodRange,
+    lastRunAt,
+  };
+}
+
+// ============================================================================
+// Period Comparison
+// ============================================================================
+
+export interface PeriodComparison {
+  current: DealSummary;
+  previous: DealSummary | null;
+  deltas: Array<{
+    field: string;
+    current: number;
+    previous: number;
+    delta: number;
+    percentChange: number;
+    direction: 'up' | 'down' | 'flat';
+  }>;
+}
+
+export function comparePeriods(
+  current: DealSummary,
+  previous: DealSummary | null
+): PeriodComparison {
+  if (!previous) {
+    return { current, previous: null, deltas: [] };
+  }
+
+  const calculateDelta = (field: string, curr: number, prev: number) => {
+    const delta = curr - prev;
+    const percentChange = prev !== 0 ? (delta / prev) * 100 : 0;
+    return {
+      field,
+      current: curr,
+      previous: prev,
+      delta,
+      percentChange: Math.round(percentChange * 10) / 10,
+      direction: delta > 0 ? 'up' as const : delta < 0 ? 'down' as const : 'flat' as const,
+    };
+  };
+
+  return {
+    current,
+    previous,
+    deltas: [
+      calculateDelta('totalValue', current.totalValue, previous.totalValue),
+      calculateDelta('total', current.total, previous.total),
+      calculateDelta('avgValue', current.avgValue, previous.avgValue),
+      calculateDelta('medianValue', current.medianValue, previous.medianValue),
+    ],
+  };
+}

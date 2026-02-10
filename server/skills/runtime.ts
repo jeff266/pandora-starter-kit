@@ -55,12 +55,20 @@ export class SkillRuntime {
     console.log(`[Skill Runtime] Starting ${skill.id} for workspace ${workspaceId}, runId: ${runId}`);
 
     const contextData = await getContext(workspaceId);
+
+    // Merge skill timeConfig with runtime overrides from params
+    const mergedTimeConfig = {
+      ...skill.timeConfig,
+      ...params?.timeConfig,
+    };
+
     const businessContext = {
       business_model: contextData?.business_model || {},
       team_structure: contextData?.team_structure || {},
       goals_and_targets: contextData?.goals_and_targets || {},
       definitions: contextData?.definitions || {},
       operational_maturity: contextData?.operational_maturity || {},
+      timeConfig: mergedTimeConfig,
     };
 
     const context: SkillExecutionContext = {

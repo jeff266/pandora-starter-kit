@@ -25,6 +25,10 @@ import {
   summarizeDeals,
   pickStaleDealFields,
   pickClosingSoonFields,
+  resolveTimeWindows,
+  comparePeriods,
+  type TimeConfig,
+  type TimeWindows,
 } from '../analysis/aggregations.js';
 import {
   getBusinessContext as fetchBusinessContext,
@@ -33,6 +37,7 @@ import {
   getMaturity as fetchMaturity,
   getContext,
 } from '../context/index.js';
+import { query } from '../db.js';
 
 // ============================================================================
 // Helper: Safe Tool Execution
@@ -827,6 +832,242 @@ const computeOwnerPerformance: ToolDefinition = {
   },
 };
 
+const resolveTimeWindowsTool: ToolDefinition = {
+  name: 'resolveTimeWindows',
+  description: 'Resolve time windows for skill execution based on timeConfig and last run timestamp.',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {
+      analysisWindow: {
+        type: 'string',
+        description: 'Analysis window mode',
+        enum: ['current_quarter', 'current_month', 'trailing_90d', 'trailing_30d', 'all_time'],
+      },
+      changeWindow: {
+        type: 'string',
+        description: 'Change detection window',
+        enum: ['since_last_run', 'last_7d', 'last_14d', 'last_30d'],
+      },
+      trendComparison: {
+        type: 'string',
+        description: 'Period comparison mode',
+        enum: ['previous_period', 'same_period_last_quarter', 'none'],
+      },
+    },
+    required: ['analysisWindow', 'changeWindow', 'trendComparison'],
+  },
+  execute: async (params, context) => {
+    return safeExecute('resolveTimeWindows', async () => {
+      // Use merged timeConfig from context (skill defaults + runtime overrides)
+      const contextTimeConfig = (context.businessContext as any).timeConfig || {};
+      const config: TimeConfig = {
+        analysisWindow: params.analysisWindow || contextTimeConfig.analysisWindow || 'current_quarter',
+        changeWindow: params.changeWindow || contextTimeConfig.changeWindow || 'last_7d',
+        trendComparison: params.trendComparison || contextTimeConfig.trendComparison || 'previous_period',
+      };
+
+      // Query last successful run
+      const lastRunResult = await query(
+        `SELECT completed_at
+         FROM skill_runs
+         WHERE workspace_id = $1
+           AND skill_id = $2
+           AND status = 'completed'
+         ORDER BY completed_at DESC
+         LIMIT 1`,
+        [context.workspaceId, context.skillId]
+      );
+
+      const lastRunAt = lastRunResult.rows[0]?.completed_at || null;
+
+      const windows = resolveTimeWindows(config, lastRunAt);
+
+      return {
+        analysisRange: {
+          start: windows.analysisRange.start.toISOString(),
+          end: windows.analysisRange.end.toISOString(),
+        },
+        changeRange: {
+          start: windows.changeRange.start.toISOString(),
+          end: windows.changeRange.end.toISOString(),
+        },
+        previousPeriodRange: windows.previousPeriodRange
+          ? {
+              start: windows.previousPeriodRange.start.toISOString(),
+              end: windows.previousPeriodRange.end.toISOString(),
+            }
+          : null,
+        lastRunAt: lastRunAt ? new Date(lastRunAt).toISOString() : null,
+        config,
+      };
+    }, params);
+  },
+};
+
+const gatherPeriodComparison: ToolDefinition = {
+  name: 'gatherPeriodComparison',
+  description: 'Compare pipeline metrics between current and previous period using resolved time windows.',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {
+      currentStart: { type: 'string', description: 'Current period start (ISO date, optional if time_windows in context)' },
+      currentEnd: { type: 'string', description: 'Current period end (ISO date, optional if time_windows in context)' },
+      previousStart: { type: 'string', description: 'Previous period start (ISO date, optional)' },
+      previousEnd: { type: 'string', description: 'Previous period end (ISO date, optional)' },
+    },
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('gatherPeriodComparison', async () => {
+      // Read from time_windows step result if available
+      const timeWindows = (context.stepResults as any).time_windows;
+
+      const currentStart = params.currentStart
+        ? new Date(params.currentStart)
+        : timeWindows?.analysisRange?.start
+        ? new Date(timeWindows.analysisRange.start)
+        : new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+
+      const currentEnd = params.currentEnd
+        ? new Date(params.currentEnd)
+        : timeWindows?.analysisRange?.end
+        ? new Date(timeWindows.analysisRange.end)
+        : new Date();
+
+      const currentDeals = await dealTools.getDealsClosingInRange(
+        context.workspaceId,
+        currentStart,
+        currentEnd
+      );
+      const currentSummary = summarizeDeals(currentDeals);
+
+      const previousStart = params.previousStart
+        ? new Date(params.previousStart)
+        : timeWindows?.previousPeriodRange?.start
+        ? new Date(timeWindows.previousPeriodRange.start)
+        : null;
+
+      const previousEnd = params.previousEnd
+        ? new Date(params.previousEnd)
+        : timeWindows?.previousPeriodRange?.end
+        ? new Date(timeWindows.previousPeriodRange.end)
+        : null;
+
+      if (!previousStart || !previousEnd) {
+        return comparePeriods(currentSummary, null);
+      }
+
+      const previousDeals = await dealTools.getDealsClosingInRange(
+        context.workspaceId,
+        previousStart,
+        previousEnd
+      );
+      const previousSummary = summarizeDeals(previousDeals);
+
+      return comparePeriods(currentSummary, previousSummary);
+    }, params);
+  },
+};
+
+const calculateOutputBudget: ToolDefinition = {
+  name: 'calculateOutputBudget',
+  description: 'Calculate dynamic word budget and report depth based on issue complexity from step results.',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {
+      issueCount: { type: 'number', description: 'Number of classified issues (optional, auto-detected from deal_classifications)' },
+      rootCauseCategories: { type: 'number', description: 'Number of distinct root cause types (optional, auto-detected)' },
+      problemReps: { type: 'number', description: 'Number of reps with issues (optional, auto-detected)' },
+      coverageGap: { type: 'boolean', description: 'Whether coverage is below target (optional, auto-detected)' },
+      negativeTrend: { type: 'boolean', description: 'Whether trend is negative (optional, auto-detected)' },
+      firstRun: { type: 'boolean', description: 'Whether this is the first run (optional, auto-detected)' },
+    },
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('calculateOutputBudget', async () => {
+      // Auto-detect from step results if not provided
+      const dealClassifications = (context.stepResults as any).deal_classifications || [];
+      const periodComparison = (context.stepResults as any).period_comparison;
+      const pipelineSummary = (context.stepResults as any).pipeline_summary;
+      const goalsAndTargets = (context.businessContext as any).goals_and_targets || {};
+
+      const issueCount = params.issueCount ?? dealClassifications.length;
+
+      const rootCauseCategories = params.rootCauseCategories ??
+        new Set(dealClassifications.map((d: any) => d.root_cause)).size;
+
+      const problemReps = params.problemReps ??
+        new Set(dealClassifications.map((d: any) => d.owner || d.dealOwner)).size;
+
+      const targetCoverage = goalsAndTargets.pipeline_coverage_target || 3;
+      const currentCoverage = pipelineSummary?.coverage_ratio || 0;
+      const coverageGap = params.coverageGap ?? (currentCoverage < targetCoverage);
+
+      const negativeTrend = params.negativeTrend ??
+        (periodComparison?.deltas?.find((d: any) => d.field === 'totalValue')?.direction === 'down');
+
+      const firstRun = params.firstRun ?? (periodComparison?.previous === null);
+
+      let complexity = 0;
+      let reasoning: string[] = [];
+
+      if (issueCount >= 15) {
+        complexity += 2;
+        reasoning.push(`High issue count (${issueCount})`);
+      } else if (issueCount >= 5) {
+        complexity += 1;
+        reasoning.push(`Moderate issue count (${issueCount})`);
+      }
+
+      if (rootCauseCategories >= 3) {
+        complexity += 1;
+        reasoning.push(`Multiple root cause categories (${rootCauseCategories})`);
+      }
+
+      if (problemReps >= 3) {
+        complexity += 1;
+        reasoning.push(`Multiple reps with issues (${problemReps})`);
+      }
+
+      if (coverageGap) {
+        complexity += 1;
+        reasoning.push('Coverage below target');
+      }
+
+      if (negativeTrend) {
+        complexity += 1;
+        reasoning.push('Negative period-over-period trend');
+      }
+
+      let wordBudget: number;
+      let reportDepth: 'minimal' | 'standard' | 'detailed';
+
+      if (complexity === 0 && !firstRun) {
+        wordBudget = 300;
+        reportDepth = 'minimal';
+        reasoning.push('Pipeline healthy, minimal report');
+      } else if (complexity <= 2) {
+        wordBudget = 600;
+        reportDepth = 'standard';
+      } else {
+        wordBudget = 1000;
+        reportDepth = 'detailed';
+      }
+
+      return {
+        wordBudget,
+        reportDepth,
+        complexityScore: complexity,
+        reasoning: reasoning.join('; '),
+      };
+    }, params);
+  },
+};
+
 // ============================================================================
 // Tool Registry
 // ============================================================================
@@ -867,6 +1108,9 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['aggregateStaleDeals', aggregateStaleDeals],
   ['aggregateClosingSoon', aggregateClosingSoon],
   ['computeOwnerPerformance', computeOwnerPerformance],
+  ['resolveTimeWindows', resolveTimeWindowsTool],
+  ['gatherPeriodComparison', gatherPeriodComparison],
+  ['calculateOutputBudget', calculateOutputBudget],
 ]);
 
 // ============================================================================
