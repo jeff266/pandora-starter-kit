@@ -29,12 +29,23 @@ const DEFAULT_STAGE_NORMALIZED_MAP: Record<string, string> = {
   contractsent: 'negotiation',
   closedwon: 'closed_won',
   closedlost: 'closed_lost',
+  intro: 'awareness',
+  engaged: 'qualification',
+  proposal: 'negotiation',
+  contract: 'negotiation',
+  won: 'closed_won',
+  lost: 'closed_lost',
+  debook: 'closed_lost',
+  notstarted: 'awareness',
+  renewalprep: 'evaluation',
+  scopeoptions: 'evaluation',
+  scopeandoptions: 'evaluation',
 };
 
 function normalizeStage(rawStage: string | null): string | null {
   if (!rawStage) return null;
-  const key = rawStage.toLowerCase().replace(/[\s_-]/g, '');
-  return DEFAULT_STAGE_NORMALIZED_MAP[key] ?? 'awareness';
+  const cleaned = rawStage.replace(/[^\p{L}\p{N}]/gu, '').toLowerCase();
+  return DEFAULT_STAGE_NORMALIZED_MAP[cleaned] ?? 'awareness';
 }
 
 export interface NormalizedContact {
@@ -146,7 +157,7 @@ export function transformDeal(
     name: sanitizeText(props.dealname),
     amount: sanitizeNumber(props.amount),
     stage: resolvedStage,
-    stage_normalized: normalizeStage(rawStage),
+    stage_normalized: normalizeStage(resolvedStage),
     close_date: sanitizeDate(props.closedate),
     owner: sanitizeText(props.hubspot_owner_id),
     probability: sanitizeNumber(props.hs_deal_stage_probability),

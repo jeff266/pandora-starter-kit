@@ -77,11 +77,17 @@ router.post('/:workspaceId/skills/:skillId/run', async (req, res) => {
       if (webhookUrl) {
         try {
           const blocks = formatForSlack(result, skill);
-          await postBlocks(webhookUrl, blocks);
-          console.log(`[skills] Posted ${skillId} result to Slack for workspace ${workspaceId}`);
+          const slackResult = await postBlocks(webhookUrl, blocks);
+          if (slackResult.ok) {
+            console.log(`[skills] Posted ${skillId} result to Slack for workspace ${workspaceId}`);
+          } else {
+            console.error(`[skills] Slack post failed for ${skillId}:`, slackResult.error);
+          }
         } catch (slackErr) {
-          console.error('[skills] Slack post failed:', slackErr);
+          console.error('[skills] Slack post error:', slackErr);
         }
+      } else {
+        console.warn(`[skills] No Slack webhook configured for workspace ${workspaceId}, skipping post`);
       }
     }
 

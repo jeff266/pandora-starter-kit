@@ -245,25 +245,19 @@ export function formatDealRiskReview(result: SkillResult): SlackBlock[] {
 
   blocks.push({ type: 'divider' });
 
-  // Generic parsing for now
-  const output = markdownToSlack(typeof result.output === 'string' ? result.output : JSON.stringify(result.output));
-  const sections = parseSectionsFromMarkdown(output);
+  const rawOutput = typeof result.output === 'string' ? result.output : JSON.stringify(result.output);
+  const sections = parseSectionsFromMarkdown(rawOutput);
 
   for (const section of sections) {
+    const content = markdownToSlack(section.content);
     if (section.title) {
+      appendSectionBlocks(blocks, `*${section.title}*`, content, 2800);
+    } else if (content.trim()) {
       blocks.push({
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `*${section.title}*\n${section.content}`,
-        },
-      });
-    } else {
-      blocks.push({
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: section.content,
+          text: truncateSection(content, 2800),
         },
       });
     }
@@ -310,33 +304,27 @@ export function formatSingleThreadAlert(result: SkillResult): SlackBlock[] {
 
   blocks.push({ type: 'divider' });
 
-  // Parse output into sections
-  const output = markdownToSlack(typeof result.output === 'string' ? result.output : JSON.stringify(result.output));
-  const sections = parseSectionsFromMarkdown(output);
+  const rawOutput = typeof result.output === 'string' ? result.output : JSON.stringify(result.output);
+  const sections = parseSectionsFromMarkdown(rawOutput);
 
   for (const section of sections) {
+    const content = markdownToSlack(section.content);
     if (section.title) {
-      // Add emoji based on section
       let emoji = '📊';
       const lower = section.title.toLowerCase();
       if (lower.includes('team')) emoji = '👥';
       if (lower.includes('rep')) emoji = '🎯';
       if (lower.includes('critical')) emoji = '🚨';
       if (lower.includes('action')) emoji = '⚡';
+      if (lower.includes('situation') || lower.includes('overview')) emoji = '🔴';
 
+      appendSectionBlocks(blocks, `${emoji} ${section.title}`, content, 2800);
+    } else if (content.trim()) {
       blocks.push({
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `${emoji} *${section.title}*\n${section.content}`,
-        },
-      });
-    } else {
-      blocks.push({
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: section.content,
+          text: truncateSection(content, 2800),
         },
       });
     }
@@ -352,6 +340,15 @@ export function formatSingleThreadAlert(result: SkillResult): SlackBlock[] {
       },
     ],
   });
+
+  if (blocks.length > 48) {
+    const trimmed = blocks.slice(0, 47);
+    trimmed.push({
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: '_Message truncated — view full report in Pandora_' }],
+    });
+    return trimmed;
+  }
 
   return blocks;
 }
@@ -383,25 +380,20 @@ export function formatWeeklyRecap(result: SkillResult): SlackBlock[] {
 
   blocks.push({ type: 'divider' });
 
-  const output = markdownToSlack(typeof result.output === 'string' ? result.output : JSON.stringify(result.output));
-  const sections = parseSectionsFromMarkdown(output);
+  const rawOutput = typeof result.output === 'string' ? result.output : JSON.stringify(result.output);
+  const sections = parseSectionsFromMarkdown(rawOutput);
 
   for (const section of sections) {
+    const content = markdownToSlack(section.content);
     if (section.title) {
       const emoji = getSectionEmoji(section.title);
+      appendSectionBlocks(blocks, `${emoji} ${section.title}`, content, 2800);
+    } else if (content.trim()) {
       blocks.push({
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `${emoji} *${section.title}*\n${section.content}`,
-        },
-      });
-    } else {
-      blocks.push({
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: section.content,
+          text: truncateSection(content, 2800),
         },
       });
     }
@@ -558,8 +550,11 @@ function parseSectionsFromMarkdown(text: string): Section[] {
   let currentSection: Section | null = null;
 
   for (const line of lines) {
-    // Check for numbered headers (1. HEADER, 2. HEADER)
-    const numberedHeaderMatch = line.match(/^(\d+)\.\s+([A-Z\s&]+)$/);
+    if (line.match(/^-{3,}$/)) {
+      continue;
+    }
+
+    const numberedHeaderMatch = line.match(/^(?:#{1,3}\s+)?(\d+)\.\s+(.+)$/);
     if (numberedHeaderMatch) {
       if (currentSection) {
         sections.push(currentSection);
@@ -571,7 +566,6 @@ function parseSectionsFromMarkdown(text: string): Section[] {
       continue;
     }
 
-    // Check for markdown headers (## HEADER)
     const headerMatch = line.match(/^#{1,3}\s+(.+)$/);
     if (headerMatch) {
       if (currentSection) {
@@ -584,11 +578,9 @@ function parseSectionsFromMarkdown(text: string): Section[] {
       continue;
     }
 
-    // Add line to current section
     if (currentSection) {
       currentSection.content += line + '\n';
     } else {
-      // Content before first header
       if (line.trim()) {
         if (sections.length === 0 || sections[sections.length - 1].title) {
           sections.push({ content: line + '\n' });
