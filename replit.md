@@ -27,6 +27,7 @@ Pandora is built on Node.js 20 with TypeScript 5+, utilizing Express.js for its 
 -   **On-Demand Transcript Fetching:** Transcripts for calls are fetched only when needed to optimize data storage and API calls.
 -   **API Design:** RESTful API endpoints for managing workspaces, connectors, context layers, and triggering actions.
 -   **Sync Infrastructure:** SyncScheduler (node-cron 2 AM UTC daily), sync orchestrator, sync_log table for history tracking. Manual sync via POST returns 202 Accepted and runs async. HubSpot association backfill runs post-sync when `usedExportApi` flag is set in sync_cursor metadata.
+-   **Query Layer:** 7 query modules in `server/tools/` (deals, contacts, accounts, activities, conversations, tasks, documents) with dynamic parameterized SQL, workspace scoping, sort whitelisting, and pagination. Barrel-exported from `server/tools/index.ts`. REST endpoints in `server/routes/data.ts` map all query functions to GET endpoints under `/api/workspaces/:id/`.
 
 **Technology Choices:**
 -   **Runtime:** Node.js 20
