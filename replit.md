@@ -74,5 +74,10 @@ Eight migrations applied in sequence:
 7. `007_skill_runs.sql` — Skill runs table for tracking AI skill executions (status, params, result, token_usage, steps)
 8. `008_llm_config.sql` — LLM config table: per-workspace routing, provider config, token budget tracking with monthly reset
 
+## DeepSeek Response Handling
+DeepSeek sometimes returns objects instead of arrays (e.g., `{ classifications: [...] }` instead of `[...]`). Two-layer defense:
+1. **Runtime normalization** (`runtime.ts`): When `deepseekSchema.type === 'array'` but response is an object, unwraps by selecting the largest array value.
+2. **Tool validation** (`tool-definitions.ts`): `calculateOutputBudget` validates classification items have expected fields (`dealName`, `root_cause`, `suggested_action`) before accepting.
+
 ## Smoke Test
 Run `npm run smoke-test` to validate the full pipeline end-to-end with synthetic data (24 tests covering all query functions, computed fields, and pipeline snapshot). Use `--keep` flag to preserve test data for inspection.

@@ -989,11 +989,36 @@ const calculateOutputBudget: ToolDefinition = {
   },
   execute: async (params, context) => {
     return safeExecute('calculateOutputBudget', async () => {
-      // Auto-detect from step results if not provided
-      const dealClassifications = (context.stepResults as any).deal_classifications || [];
+      const rawClassifications = (context.stepResults as any).deal_classifications;
       const periodComparison = (context.stepResults as any).period_comparison;
       const pipelineSummary = (context.stepResults as any).pipeline_summary;
       const goalsAndTargets = (context.businessContext as any).goals_and_targets || {};
+
+      let dealClassifications: any[] = [];
+      if (Array.isArray(rawClassifications)) {
+        dealClassifications = rawClassifications;
+      } else if (rawClassifications && typeof rawClassifications === 'object') {
+        const isClassification = (item: any) =>
+          item && typeof item === 'object' && ('dealName' in item || 'root_cause' in item || 'suggested_action' in item);
+
+        const arrayKeys = Object.keys(rawClassifications).filter(k => Array.isArray(rawClassifications[k]));
+        const classificationKey = arrayKeys.find(k =>
+          rawClassifications[k].length > 0 && isClassification(rawClassifications[k][0])
+        );
+        if (classificationKey) {
+          dealClassifications = rawClassifications[classificationKey];
+          console.log(`[calculateOutputBudget] Unwrapped deal_classifications from key '${classificationKey}' (${dealClassifications.length} items)`);
+        } else {
+          console.warn(`[calculateOutputBudget] deal_classifications is object with no valid classification array. Keys: ${Object.keys(rawClassifications).join(', ')}. Treating as empty.`);
+        }
+      } else if (typeof rawClassifications === 'string') {
+        try {
+          const parsed = JSON.parse(rawClassifications);
+          dealClassifications = Array.isArray(parsed) ? parsed : [];
+        } catch {
+          console.warn(`[calculateOutputBudget] deal_classifications is unparseable string, treating as empty`);
+        }
+      }
 
       const issueCount = params.issueCount ?? dealClassifications.length;
 

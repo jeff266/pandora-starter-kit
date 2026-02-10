@@ -289,9 +289,27 @@ export class SkillRuntime {
 
       if (step.deepseekSchema && response.content) {
         try {
-          return JSON.parse(response.content);
+          let parsed = JSON.parse(response.content);
+          const expectedType = step.deepseekSchema.type;
+
+          if (expectedType === 'array' && !Array.isArray(parsed) && typeof parsed === 'object') {
+            const arrayValues = Object.entries(parsed)
+              .filter(([, v]) => Array.isArray(v))
+              .sort(([, a], [, b]) => (b as any[]).length - (a as any[]).length);
+            if (arrayValues.length > 0) {
+              const [key, arr] = arrayValues[0];
+              console.log(`[LLM Step] ${step.id} unwrapped object to array via key '${key}' (${(arr as any[]).length} items)`);
+              parsed = arr;
+            } else {
+              console.warn(`[LLM Step] ${step.id} expected array but got object with no array values`);
+            }
+          }
+
+          const shape = Array.isArray(parsed) ? `array[${parsed.length}]` : typeof parsed;
+          console.log(`[LLM Step] ${step.id} parsed JSON: ${shape}`);
+          return parsed;
         } catch {
-          console.warn(`[LLM Step] Failed to parse JSON from ${capability}, returning raw text`);
+          console.warn(`[LLM Step] Failed to parse JSON from ${capability}, returning raw text (${response.content.length} chars)`);
           return response.content;
         }
       }
