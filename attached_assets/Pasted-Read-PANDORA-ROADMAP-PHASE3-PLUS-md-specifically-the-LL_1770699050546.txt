@@ -1,0 +1,98 @@
+Read PANDORA_ROADMAP_PHASE3_PLUS.md — specifically the "LLM Router" section.
+
+Replace the hardcoded Claude/DeepSeek calls with a capability-based router.
+
+## Step 1: LLM Config Table
+
+Create migration 003_llm_config.sql:
+
+llm_configs
+  - id (UUID, primary key)
+  - workspace_id (UUID, FK to workspaces, unique)
+  - providers (jsonb) — keys per provider, enabled/disabled
+  - routing (jsonb) — capability → provider/model mapping
+  - default_token_budget (integer, default 50000) — monthly budget per workspace
+  - tokens_used_this_month (integer, default 0)
+  - budget_reset_at (timestamptz)
+  - created_at, updated_at
+
+Default routing (inserted when workspace is created):
+{
+  "providers": {},
+  "routing": {
+    "extract": "fireworks/deepseek-v3",
+    "reason": "anthropic/claude-sonnet-4-20250514",
+    "generate": "anthropic/claude-sonnet-4-20250514",
+    "classify": "fireworks/deepseek-v3"
+  }
+}
+
+When providers is empty, use Pandora's platform keys (from env vars).
+When a user adds their own key, their key is used instead.
+
+## Step 2: Update llm-client.ts
+
+Replace callClaude() and callDeepSeek() with:
+
+  llmRouter.call(workspaceId, capability, { messages, tools?, schema?, maxTokens? })
+
+The router:
+1. Loads workspace's llm_config from DB (cache in memory, refresh every 5 min)
+2. Resolves capability → provider/model from routing config
+3. Checks if workspace has a key for that provider, else use platform key
+4. Formats the request for the target provider's API:
+   - Anthropic: messages API with tool_use
+   - OpenAI/Fireworks: chat completions with function calling
+   - Google: Gemini generateContent
+5. Normalizes the response to a common shape:
+   { content: string, toolCalls?: ToolCall[], usage: { input, output } }
+6. Tracks token usage in llm_configs.tokens_used_this_month
+7. Returns normalized response
+
+CRITICAL: The tool_use format differs between providers.
+- Anthropic: tool_use content blocks in assistant message
+- OpenAI: function_call / tool_calls in assistant message
+- Gemini: functionCall in parts
+
+The router must translate your tool definitions into each provider's format
+and translate tool results back. This is the hardest part.
+
+For Phase 3, support TWO providers:
+- Anthropic (Claude) — for reason + generate capabilities
+- Fireworks (DeepSeek) — for extract + classify capabilities
+
+Add OpenAI and Gemini support in Phase 4 when users actually need it.
+
+## Step 3: Update Skill Runtime
+
+The runtime currently calls llm functions directly.
+Update it to call llmRouter.call() instead.
+
+Each SkillStep declares a capability instead of a provider:
+- COMPUTE steps: unchanged (no LLM)
+- DEEPSEEK steps become: capability = 'extract'
+- CLAUDE steps become: capability = 'reason'
+
+The runtime passes the capability to the router. The router picks the provider.
+
+## Step 4: API Routes for LLM Config
+
+POST /api/workspaces/:id/llm/config
+  - Set provider keys and routing overrides
+  - Validate keys by making a test call to each provider
+  - Store encrypted (at minimum, don't log keys)
+
+GET /api/workspaces/:id/llm/config
+  - Return routing config and provider status (connected/not connected)
+  - NEVER return API keys in response — just { provider: "anthropic", connected: true }
+
+GET /api/workspaces/:id/llm/usage
+  - Return token usage this month, budget remaining, per-skill breakdown
+
+## Step 5: Validate
+
+1. Run pipeline-hygiene skill — should work exactly as before (uses platform keys)
+2. Add an OpenAI key to a workspace's config
+3. Change routing.reason to "openai/gpt-4o"
+4. Run pipeline-hygiene again — Claude step should now use GPT-4o
+5. Check token tracking — usage should be logged
