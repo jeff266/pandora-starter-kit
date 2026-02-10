@@ -19,7 +19,7 @@ Pandora is built on Node.js 20 with TypeScript 5+, utilizing Express.js for its 
 -   **Data Normalization:** Data from all sources is normalized into 8 core entities: `deals`, `contacts`, `accounts`, `activities`, `conversations`, `tasks`, `calls`, and `documents`.
 -   **Context Layer:** A `context_layer` table, unique per workspace, stores critical business context in 5 JSONB sections, allowing for personalized AI analysis.
 -   **Computed Fields Engine:** A batch computation orchestrator calculates various scores (e.g., `velocity_score`, `deal_risk`, `engagement_score`, `health_score`) to enrich entity data. `health_score = 100 - deal_risk` (simple inversion for now; will become composite formula later).
--   **Stage Normalization:** `stage_normalized` column on deals maps raw CRM stages to universal values: `awareness`, `qualification`, `evaluation`, `decision`, `negotiation`, `closed_won`, `closed_lost`. HubSpot defaults hardcoded; per-workspace override via context_layer planned.
+-   **Stage Normalization:** `stage_normalized` column on deals maps raw CRM stages to universal values: `awareness`, `qualification`, `evaluation`, `decision`, `negotiation`, `closed_won`, `closed_lost`. Transform uses resolved stage labels (not numeric HubSpot IDs) with Unicode-aware emoji stripping. Handles custom pipeline labels (e.g., "👋 Intro" → awareness, "✅ Engaged" → qualification, "💻 Renewal Prep" → evaluation). Per-workspace override via context_layer planned.
 
 **Key Design Decisions:**
 -   **No ORM:** Direct `pg` client usage with raw SQL for maximum control and performance.
