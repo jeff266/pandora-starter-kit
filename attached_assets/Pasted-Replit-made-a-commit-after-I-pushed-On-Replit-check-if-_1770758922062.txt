@@ -1,0 +1,81 @@
+Replit made a commit after I pushed. On Replit, check if the    
+  file actually exists:                                           
+                                                                  
+  # Check if file exists                                          
+  ls -la server/skills/library/                                   
+                                                                  
+  # If single-thread-alert.ts is missing, you need to merge       
+  git log --oneline --graph --all -5                              
+                                                                  
+  # Merge the GitHub changes properly                             
+  git pull origin main --no-rebase                                
+                                                                  
+  If that shows a merge conflict or the file is missing:          
+                                                                  
+  # Get back to the GitHub state                                  
+  git fetch origin                                                
+  git checkout 3af4f59  # The single-thread-alert commit          
+  ls server/skills/library/single-thread-alert.ts  # Should exist 
+  now                                                             
+                                                                  
+  # Then go back to main and merge properly                       
+  git checkout main                                               
+  git merge 3af4f59                                               
+                                                                  
+  Most likely: Replit's commit a648ac4 was made on a different    
+  branch or the file is there but the server just needs           
+  restarting.                                                     
+                                                                  
+  Quick test - does this work?                                    
+  cat server/skills/library/single-thread-alert.ts | head -5      
+                                                                  
+  If that shows the file, then it exists and you just need to     
+  restart the Node.js server. If it says "No such file", then we  
+  have a git issue to fix.                                        
+                                                                  
+  What does ls server/skills/library/ show?                       
+                                                                  
+❯ ~/workspace$   ls -la server/skills/library/                    
+                                                                  
+  total 36                                                        
+  drwxr-xr-x 1 runner runner  150 Feb 10 21:20 .                  
+  drwxr-xr-x 1 runner runner  166 Feb 10 21:20 ..                 
+  -rw-r--r-- 1 runner runner 5257 Feb 10 03:39                    
+  deal-risk-review.ts                                             
+  -rw-r--r-- 1 runner runner 9952 Feb 10 06:59                    
+  pipeline-hygiene.ts                                             
+  -rw-r--r-- 1 runner runner 6775 Feb 10 21:20                    
+  single-thread-alert.ts                                          
+  -rw-r--r-- 1 runner runner 6557 Feb 10 03:57                    
+  weekly-recap.ts                                                 
+  ~/workspace$                                                    
+                                                                  
+⏺ The file exists! (6775 bytes, right there in the directory)     
+                                                                  
+  The problem is just that the Node.js server hasn't restarted to 
+  reload the registry. The skill module is cached in memory.      
+                                                                  
+  On Replit, restart your server:                                 
+                                                                  
+  1. In the Console tab: Press Ctrl+C to stop the server          
+  2. Click the green "Run" button to start it again               
+  3. Watch for: [Skills] Registered all built-in skills           
+                                                                  
+  Then verify it worked:                                          
+  curl http://localhost:3000/api/workspaces | head -20            
+  # Copy a workspace ID from the response                         
+                                                                  
+  curl                                                            
+  http://localhost:3000/api/workspaces/YOUR_WORKSPACE_ID/skills   
+  # Should now show all 4 skills including "single-thread-alert"  
+                                                                  
+  Then run the skill:                                             
+  curl -X POST http://localhost:3000/api/workspaces/YOUR_WORKSPACE
+  _ID/skills/single-thread-alert/run \                            
+    -H "Content-Type: application/json" \                         
+    -d '{}'                                                       
+                                                                  
+  The file is there (I can see it: single-thread-alert.ts in the  
+  listing). You just need to restart the Node server so it loads  
+  the new skill from disk into the registry. That's the only      
+  missing step!   
