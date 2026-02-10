@@ -30,7 +30,7 @@ export class ClaudeClient {
       ...(baseURL ? { baseURL } : {}),
     });
 
-    this.model = config.model || "claude-sonnet-4-5-20250514";
+    this.model = config.model || "claude-sonnet-4-5";
   }
 
   async call(

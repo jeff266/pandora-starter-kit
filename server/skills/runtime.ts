@@ -550,16 +550,44 @@ Important:
   }
 
   /**
-   * Stringify value for template rendering
+   * Stringify value for template rendering (with size limits for prompt safety)
    */
   private stringify(value: any): string {
     if (value === null || value === undefined) return '';
     if (typeof value === 'string') return value;
     if (typeof value === 'number') return String(value);
     if (typeof value === 'boolean') return String(value);
-    if (Array.isArray(value)) return JSON.stringify(value, null, 2);
-    if (typeof value === 'object') return JSON.stringify(value, null, 2);
+    if (Array.isArray(value)) {
+      const summarized = value.slice(0, 20).map(item => this.summarizeItem(item));
+      const json = JSON.stringify(summarized, null, 2);
+      if (value.length > 20) {
+        return `${json}\n... and ${value.length - 20} more items (${value.length} total)`;
+      }
+      return json;
+    }
+    if (typeof value === 'object') {
+      const json = JSON.stringify(value, null, 2);
+      if (json.length > 8000) {
+        return json.slice(0, 8000) + '\n... [truncated]';
+      }
+      return json;
+    }
     return String(value);
+  }
+
+  private summarizeItem(item: any): any {
+    if (typeof item !== 'object' || item === null) return item;
+    const summary: any = {};
+    const keepFields = ['name', 'deal_name', 'id', 'amount', 'stage', 'stage_normalized', 'close_date', 'owner', 'deal_risk', 'health_score', 'velocity_score', 'days_in_stage', 'last_activity_date', 'total', 'count', 'type'];
+    for (const key of keepFields) {
+      if (key in item) summary[key] = item[key];
+    }
+    if (Object.keys(summary).length === 0) {
+      for (const [k, v] of Object.entries(item).slice(0, 8)) {
+        summary[k] = typeof v === 'object' ? '[object]' : v;
+      }
+    }
+    return summary;
   }
 
   /**

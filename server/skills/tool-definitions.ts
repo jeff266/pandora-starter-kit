@@ -355,8 +355,11 @@ const getActivitySummary: ToolDefinition = {
     required: [],
   },
   execute: async (params, context) => {
+    const days = params.days || 7;
+    const dateTo = new Date();
+    const dateFrom = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
     return safeExecute('getActivitySummary', () =>
-      activityTools.getActivitySummary(context.workspaceId, params.days), params);
+      activityTools.getActivitySummary(context.workspaceId, dateFrom, dateTo), params);
   },
 };
 
