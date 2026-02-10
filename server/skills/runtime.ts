@@ -293,13 +293,45 @@ export class SkillRuntime {
           const expectedType = step.deepseekSchema.type;
 
           if (expectedType === 'array' && !Array.isArray(parsed) && typeof parsed === 'object') {
+            const expectedFields = step.deepseekSchema.items?.required as string[] | undefined;
             const arrayValues = Object.entries(parsed)
-              .filter(([, v]) => Array.isArray(v))
-              .sort(([, a], [, b]) => (b as any[]).length - (a as any[]).length);
-            if (arrayValues.length > 0) {
-              const [key, arr] = arrayValues[0];
-              console.log(`[LLM Step] ${step.id} unwrapped object to array via key '${key}' (${(arr as any[]).length} items)`);
-              parsed = arr;
+              .filter(([, v]) => Array.isArray(v) && (v as any[]).length > 0);
+
+            let bestKey: string | null = null;
+            let bestArr: any[] = [];
+
+            if (expectedFields && expectedFields.length > 0 && arrayValues.length > 0) {
+              let bestScore = -1;
+              for (const [key, arr] of arrayValues) {
+                const sample = (arr as any[])[0];
+                if (sample && typeof sample === 'object') {
+                  const matchCount = expectedFields.filter(f => f in sample).length;
+                  if (matchCount > bestScore) {
+                    bestScore = matchCount;
+                    bestKey = key;
+                    bestArr = arr as any[];
+                  }
+                }
+              }
+            }
+
+            if (!bestKey && arrayValues.length > 0) {
+              arrayValues.sort(([, a], [, b]) => (b as any[]).length - (a as any[]).length);
+              bestKey = arrayValues[0][0];
+              bestArr = arrayValues[0][1] as any[];
+            }
+
+            if (bestKey) {
+              console.log(`[LLM Step] ${step.id} unwrapped object to array via key '${bestKey}' (${bestArr.length} items)`);
+              parsed = bestArr;
+            } else if (expectedFields && expectedFields.length > 0) {
+              const matchCount = expectedFields.filter(f => f in parsed).length;
+              if (matchCount >= Math.ceil(expectedFields.length / 2)) {
+                console.log(`[LLM Step] ${step.id} wrapped single object as array (matched ${matchCount}/${expectedFields.length} expected fields)`);
+                parsed = [parsed];
+              } else {
+                console.warn(`[LLM Step] ${step.id} expected array but got object (keys: ${Object.keys(parsed).slice(0, 5).join(', ')})`);
+              }
             } else {
               console.warn(`[LLM Step] ${step.id} expected array but got object with no array values`);
             }
@@ -493,7 +525,7 @@ Important:
   private summarizeItem(item: any): any {
     if (typeof item !== 'object' || item === null) return item;
     const summary: any = {};
-    const keepFields = ['name', 'deal_name', 'id', 'amount', 'stage', 'stage_normalized', 'close_date', 'owner', 'deal_risk', 'health_score', 'velocity_score', 'days_in_stage', 'last_activity_date', 'total', 'count', 'type'];
+    const keepFields = ['name', 'deal_name', 'dealName', 'dealId', 'id', 'amount', 'stage', 'stage_normalized', 'close_date', 'owner', 'deal_risk', 'health_score', 'velocity_score', 'days_in_stage', 'last_activity_date', 'total', 'count', 'type', 'risk_level', 'likely_cause', 'has_expansion_contacts', 'recommended_action', 'root_cause', 'suggested_action', 'contactCount', 'contactNames'];
     for (const key of keepFields) {
       if (key in item) summary[key] = item[key];
     }
