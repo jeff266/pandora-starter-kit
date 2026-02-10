@@ -18,7 +18,8 @@ Pandora is built on Node.js 20 with TypeScript 5+, utilizing Express.js for its 
 -   **Universal Adapter Pattern:** Connectors for various platforms (CRM, Conversation, Task, Document) adhere to a universal adapter interface, managed by an `AdapterRegistry` singleton. This allows for standardized data ingestion and processing.
 -   **Data Normalization:** Data from all sources is normalized into 8 core entities: `deals`, `contacts`, `accounts`, `activities`, `conversations`, `tasks`, `calls`, and `documents`.
 -   **Context Layer:** A `context_layer` table, unique per workspace, stores critical business context in 5 JSONB sections, allowing for personalized AI analysis.
--   **Computed Fields Engine:** A batch computation orchestrator calculates various scores (e.g., `velocity_score`, `deal_risk`, `engagement_score`, `health_score`) to enrich entity data.
+-   **Computed Fields Engine:** A batch computation orchestrator calculates various scores (e.g., `velocity_score`, `deal_risk`, `engagement_score`, `health_score`) to enrich entity data. `health_score = 100 - deal_risk` (simple inversion for now; will become composite formula later).
+-   **Stage Normalization:** `stage_normalized` column on deals maps raw CRM stages to universal values: `awareness`, `qualification`, `evaluation`, `decision`, `negotiation`, `closed_won`, `closed_lost`. HubSpot defaults hardcoded; per-workspace override via context_layer planned.
 
 **Key Design Decisions:**
 -   **No ORM:** Direct `pg` client usage with raw SQL for maximum control and performance.
@@ -45,3 +46,15 @@ Pandora is built on Node.js 20 with TypeScript 5+, utilizing Express.js for its 
 -   **Monday.com API:** Integrated for task management, enabling reading and writing of tasks.
 -   **Google Drive API:** Integrated for document management, supporting content export and extraction. Uses OAuth2.
 -   **Anthropic AI (Claude):** Utilized via `@anthropic-ai/sdk` for LLM-based analyses within the platform.
+
+## Database Migrations
+Six migrations applied in sequence:
+1. `001_initial.sql` — All 8 entity tables, workspaces, connections
+2. `002_add_calls_table.sql` — Calls entity
+3. `003_context_layer.sql` — Context layer table
+4. `004_add_computed_field_columns.sql` — velocity_score, deal_risk, deal_risk_factors on deals
+5. `005_sync_log.sql` — Sync log table
+6. `006_schema_cleanup.sql` — stage_normalized + health_score on deals, title on conversations
+
+## Smoke Test
+Run `npm run smoke-test` to validate the full pipeline end-to-end with synthetic data (24 tests covering all query functions, computed fields, and pipeline snapshot). Use `--keep` flag to preserve test data for inspection.

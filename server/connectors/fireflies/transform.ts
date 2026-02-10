@@ -6,6 +6,7 @@ export interface NormalizedConversation {
   source: string;
   source_id: string;
   source_data: Record<string, any>;
+  title: string | null;
   call_date: Date | null;
   duration_seconds: number | null;
   participants: any[];
@@ -33,6 +34,7 @@ export function transformFirefliesTranscript(transcript: FirefliesTranscript, wo
     source: 'fireflies',
     source_id: transcript.id,
     source_data: sourceData,
+    title: transcript.title || null,
     call_date: parseFirefliesDate(transcript),
     duration_seconds: transcript.duration || null,
     participants,

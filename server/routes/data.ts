@@ -108,6 +108,7 @@ router.get('/:id/deals', async (req: Request, res: Response): Promise<void> => {
     const q = req.query;
     const result = await queryDeals(req.params.id, {
       stage: q.stage as string | string[] | undefined,
+      stageNormalized: q.stageNormalized as string | string[] | undefined,
       owner: q.owner as string | undefined,
       closeDateFrom: parseDate(q.closeDateFrom),
       closeDateTo: parseDate(q.closeDateTo),

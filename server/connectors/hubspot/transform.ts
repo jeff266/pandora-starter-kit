@@ -10,6 +10,7 @@ export interface NormalizedDeal {
   name: string | null;
   amount: number | null;
   stage: string | null;
+  stage_normalized: string | null;
   close_date: string | null;
   owner: string | null;
   probability: number | null;
@@ -17,6 +18,23 @@ export interface NormalizedDeal {
   pipeline: string | null;
   last_activity_date: Date | null;
   custom_fields: Record<string, any>;
+}
+
+// TODO: Allow per-workspace override via context_layer.definitions.stage_mapping
+const DEFAULT_STAGE_NORMALIZED_MAP: Record<string, string> = {
+  appointmentscheduled: 'qualification',
+  qualifiedtobuy: 'qualification',
+  presentationscheduled: 'evaluation',
+  decisionmakerboughtin: 'evaluation',
+  contractsent: 'negotiation',
+  closedwon: 'closed_won',
+  closedlost: 'closed_lost',
+};
+
+function normalizeStage(rawStage: string | null): string | null {
+  if (!rawStage) return null;
+  const key = rawStage.toLowerCase().replace(/[\s_-]/g, '');
+  return DEFAULT_STAGE_NORMALIZED_MAP[key] ?? 'awareness';
 }
 
 export interface NormalizedContact {
@@ -128,6 +146,7 @@ export function transformDeal(
     name: sanitizeText(props.dealname),
     amount: sanitizeNumber(props.amount),
     stage: resolvedStage,
+    stage_normalized: normalizeStage(rawStage),
     close_date: sanitizeDate(props.closedate),
     owner: sanitizeText(props.hubspot_owner_id),
     probability: sanitizeNumber(props.hs_deal_stage_probability),

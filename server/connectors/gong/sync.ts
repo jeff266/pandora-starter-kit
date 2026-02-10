@@ -22,7 +22,7 @@ async function upsertConversations(conversations: NormalizedConversation[]): Pro
         await client.query(
           `INSERT INTO conversations (
             workspace_id, source, source_id, source_data,
-            call_date, duration_seconds, participants,
+            title, call_date, duration_seconds, participants,
             transcript_text, summary,
             action_items, objections,
             sentiment_score, talk_listen_ratio,
@@ -30,15 +30,16 @@ async function upsertConversations(conversations: NormalizedConversation[]): Pro
             custom_fields, created_at, updated_at
           ) VALUES (
             $1, $2, $3, $4,
-            $5, $6, $7,
-            $8, $9,
-            $10, $11,
-            $12, $13,
-            $14, $15,
-            $16, NOW(), NOW()
+            $5, $6, $7, $8,
+            $9, $10,
+            $11, $12,
+            $13, $14,
+            $15, $16,
+            $17, NOW(), NOW()
           )
           ON CONFLICT (workspace_id, source, source_id) DO UPDATE SET
             source_data = EXCLUDED.source_data,
+            title = EXCLUDED.title,
             call_date = EXCLUDED.call_date,
             duration_seconds = EXCLUDED.duration_seconds,
             participants = EXCLUDED.participants,
@@ -54,7 +55,7 @@ async function upsertConversations(conversations: NormalizedConversation[]): Pro
             updated_at = NOW()`,
           [
             conv.workspace_id, conv.source, conv.source_id, JSON.stringify(conv.source_data),
-            conv.call_date, conv.duration_seconds, JSON.stringify(conv.participants),
+            conv.title, conv.call_date, conv.duration_seconds, JSON.stringify(conv.participants),
             conv.transcript_text, conv.summary,
             JSON.stringify(conv.action_items), JSON.stringify(conv.objections),
             conv.sentiment_score, conv.talk_listen_ratio ? JSON.stringify(conv.talk_listen_ratio) : null,

@@ -5,6 +5,7 @@ export interface NormalizedConversation {
   source: string;
   source_id: string;
   source_data: Record<string, any>;
+  title: string | null;
   call_date: Date | null;
   duration_seconds: number | null;
   participants: any[];
@@ -44,6 +45,7 @@ export function transformGongCall(call: GongCall, workspaceId: string): Normaliz
       primaryUserId: call.primaryUserId,
       parties: call.parties,
     },
+    title: call.title || null,
     call_date: call.started ? new Date(call.started) : null,
     duration_seconds: call.duration || null,
     participants,

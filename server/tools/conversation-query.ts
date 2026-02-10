@@ -6,6 +6,7 @@ export interface Conversation {
   source: string;
   source_id: string;
   source_data: Record<string, unknown>;
+  title: string;
   call_date: string;
   duration_seconds: number;
   participants: unknown[];
@@ -39,7 +40,7 @@ export interface ConversationFilters {
 
 const LIST_COLUMNS = [
   'id', 'workspace_id', 'source', 'source_id', 'source_data',
-  'call_date', 'duration_seconds', 'participants',
+  'title', 'call_date', 'duration_seconds', 'participants',
   'deal_id', 'account_id',
   'summary', 'action_items', 'objections',
   'sentiment_score', 'talk_listen_ratio', 'topics', 'competitor_mentions',
@@ -84,7 +85,7 @@ function buildWhereClause(workspaceId: string, filters: ConversationFilters) {
   }
 
   if (filters.search !== undefined) {
-    conditions.push(`(summary ILIKE $${idx} OR transcript_text ILIKE $${idx})`);
+    conditions.push(`(title ILIKE $${idx} OR summary ILIKE $${idx} OR transcript_text ILIKE $${idx})`);
     params.push(`%${filters.search}%`);
     idx++;
   }

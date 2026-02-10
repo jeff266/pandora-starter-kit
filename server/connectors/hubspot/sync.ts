@@ -60,20 +60,21 @@ async function upsertDeals(deals: NormalizedDeal[]): Promise<number> {
         await client.query(
           `INSERT INTO deals (
             workspace_id, source, source_id, source_data,
-            name, amount, stage, close_date, owner,
+            name, amount, stage, stage_normalized, close_date, owner,
             probability, forecast_category, pipeline,
             last_activity_date, custom_fields, created_at, updated_at
           ) VALUES (
             $1, $2, $3, $4,
-            $5, $6, $7, $8, $9,
-            $10, $11, $12,
-            $13, $14, NOW(), NOW()
+            $5, $6, $7, $8, $9, $10,
+            $11, $12, $13,
+            $14, $15, NOW(), NOW()
           )
           ON CONFLICT (workspace_id, source, source_id) DO UPDATE SET
             source_data = EXCLUDED.source_data,
             name = EXCLUDED.name,
             amount = EXCLUDED.amount,
             stage = EXCLUDED.stage,
+            stage_normalized = EXCLUDED.stage_normalized,
             close_date = EXCLUDED.close_date,
             owner = EXCLUDED.owner,
             probability = EXCLUDED.probability,
@@ -84,7 +85,7 @@ async function upsertDeals(deals: NormalizedDeal[]): Promise<number> {
             updated_at = NOW()`,
           [
             deal.workspace_id, deal.source, deal.source_id, JSON.stringify(deal.source_data),
-            deal.name, deal.amount, deal.stage, deal.close_date, deal.owner,
+            deal.name, deal.amount, deal.stage, deal.stage_normalized, deal.close_date, deal.owner,
             deal.probability, deal.forecast_category, deal.pipeline,
             deal.last_activity_date, JSON.stringify(deal.custom_fields),
           ]

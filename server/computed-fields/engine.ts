@@ -83,14 +83,16 @@ async function computeDeals(
       const activity = activityMap.get(deal.id);
       const scores = computeDealScores(deal, config, activity);
 
+      const healthScore = Math.round((100 - scores.dealRisk) * 100) / 100;
       await client.query(
         `UPDATE deals
          SET velocity_score = $2,
              deal_risk = $3,
              deal_risk_factors = $4,
+             health_score = $5,
              updated_at = NOW()
          WHERE id = $1`,
-        [deal.id, scores.velocityScore, scores.dealRisk, JSON.stringify(scores.riskFactors)]
+        [deal.id, scores.velocityScore, scores.dealRisk, JSON.stringify(scores.riskFactors), healthScore]
       );
       updated++;
     }

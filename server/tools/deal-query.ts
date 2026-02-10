@@ -9,6 +9,7 @@ export interface Deal {
   name: string;
   amount: number;
   stage: string;
+  stage_normalized: string;
   close_date: string;
   owner: string;
   account_id: string;
@@ -24,10 +25,12 @@ export interface Deal {
   velocity_score: number;
   deal_risk: number;
   deal_risk_factors: Record<string, unknown>;
+  health_score: number;
 }
 
 export interface DealFilters {
   stage?: string | string[];
+  stageNormalized?: string | string[];
   owner?: string;
   closeDateFrom?: Date;
   closeDateTo?: Date;
@@ -39,7 +42,7 @@ export interface DealFilters {
   daysSinceActivityGt?: number;
   pipelineName?: string;
   search?: string;
-  sortBy?: 'amount' | 'close_date' | 'deal_risk' | 'days_in_stage' | 'created_at';
+  sortBy?: 'amount' | 'close_date' | 'deal_risk' | 'health_score' | 'days_in_stage' | 'created_at';
   sortDir?: 'asc' | 'desc';
   limit?: number;
   offset?: number;
@@ -58,6 +61,18 @@ function buildWhereClause(workspaceId: string, filters: DealFilters) {
     } else {
       conditions.push(`stage = $${idx}`);
       params.push(filters.stage);
+      idx++;
+    }
+  }
+
+  if (filters.stageNormalized !== undefined) {
+    if (Array.isArray(filters.stageNormalized)) {
+      conditions.push(`stage_normalized = ANY($${idx})`);
+      params.push(filters.stageNormalized);
+      idx++;
+    } else {
+      conditions.push(`stage_normalized = $${idx}`);
+      params.push(filters.stageNormalized);
       idx++;
     }
   }
@@ -131,7 +146,7 @@ function buildWhereClause(workspaceId: string, filters: DealFilters) {
   return { where: conditions.join(' AND '), params, idx };
 }
 
-const VALID_SORT_COLUMNS = new Set(['amount', 'close_date', 'deal_risk', 'days_in_stage', 'created_at']);
+const VALID_SORT_COLUMNS = new Set(['amount', 'close_date', 'deal_risk', 'health_score', 'days_in_stage', 'created_at']);
 
 export async function queryDeals(workspaceId: string, filters: DealFilters): Promise<{ deals: Deal[]; total: number; limit: number; offset: number }> {
   const { where, params, idx } = buildWhereClause(workspaceId, filters);
@@ -164,14 +179,15 @@ export async function getDeal(workspaceId: string, dealId: string): Promise<Deal
   return result.rows[0] ?? null;
 }
 
-export async function getDealsByStage(workspaceId: string): Promise<{ stages: { stage: string; count: number; totalAmount: number; avgAmount: number }[] }> {
-  const result = await query<{ stage: string; count: string; total_amount: string; avg_amount: string }>(
-    `SELECT stage, COUNT(*) AS count, SUM(amount) AS total_amount, AVG(amount) AS avg_amount FROM deals WHERE workspace_id = $1 GROUP BY stage`,
+export async function getDealsByStage(workspaceId: string): Promise<{ stages: { stage: string; stage_normalized: string; count: number; totalAmount: number; avgAmount: number }[] }> {
+  const result = await query<{ stage: string; stage_normalized: string; count: string; total_amount: string; avg_amount: string }>(
+    `SELECT COALESCE(stage_normalized, 'unknown') AS stage_normalized, stage, COUNT(*) AS count, SUM(amount) AS total_amount, AVG(amount) AS avg_amount FROM deals WHERE workspace_id = $1 GROUP BY stage_normalized, stage ORDER BY stage_normalized, stage`,
     [workspaceId],
   );
   return {
     stages: result.rows.map((r) => ({
       stage: r.stage,
+      stage_normalized: r.stage_normalized,
       count: parseInt(r.count, 10),
       totalAmount: parseFloat(r.total_amount) || 0,
       avgAmount: parseFloat(r.avg_amount) || 0,
