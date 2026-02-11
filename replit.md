@@ -66,7 +66,7 @@ Pandora is built on Node.js 20 with TypeScript 5+, utilizing Express.js for its 
 -   **Fireworks AI (DeepSeek V3):** Used for classification and extraction via OpenAI-compatible API (`deepseek-v3-0324` model).
 
 ## Database Migrations
-Eight migrations applied in sequence:
+Ten migrations applied in sequence:
 1. `001_initial.sql` — All 8 entity tables, workspaces, connections
 2. `002_add_calls_table.sql` — Calls entity
 3. `003_context_layer.sql` — Context layer table
@@ -75,6 +75,20 @@ Eight migrations applied in sequence:
 6. `006_schema_cleanup.sql` — stage_normalized + health_score on deals, title on conversations
 7. `007_skill_runs.sql` — Skill runs table for tracking AI skill executions (status, params, result, token_usage, steps)
 8. `008_llm_config.sql` — LLM config table: per-workspace routing, provider config, token budget tracking with monthly reset
+9. `009_async_jobs.sql` — Jobs table for background job queue (status, payload, progress, timeout_ms, retry tracking)
+10. `010_webhooks.sql` — webhook_url + webhook_secret columns on workspaces for sync progress notifications
+
+## Sync Hardening
+15 features across 3 tiers, tested and validated:
+- **Async Queue:** Salesforce/universal sync returns 202 immediately, jobs processed in background with polling
+- **Duplicate Prevention:** Checks for both `running` AND `pending` syncs before allowing new sync
+- **Stale Lock Cleanup:** Syncs stuck > 1 hour auto-failed with error logged to `errors` JSONB column
+- **Incremental Sync:** Auto-detects mode based on `last_sync_at` watermark. Salesforce uses `SystemModstamp >= watermark`
+- **Rate Limiting:** Gong 100/min, Monday 60/min with exponential backoff on 429 (2s→4s→8s, max 3 attempts)
+- **Job Timeout:** Default 10 minutes, configurable per job via `timeout_ms`
+- **Per-Record Error Capture:** `transformWithErrorCapture` wraps each record; bad records logged, good records proceed
+- **Deduplication:** Database-enforced via unique index on `(workspace_id, source, source_id)`
+- **Progress Webhooks:** HMAC-signed (SHA-256) notifications for sync.progress, sync.completed, sync.failed. Routes: PUT/GET/DELETE `/:id/webhook`, POST `/:id/webhook/test`
 
 ## DeepSeek Response Handling
 DeepSeek sometimes returns objects instead of arrays (e.g., `{ classifications: [...] }` instead of `[...]`). Two-layer defense:

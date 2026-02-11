@@ -24,7 +24,7 @@ router.post('/:id/sync', async (req: Request, res: Response): Promise<void> => {
     await query(
       `UPDATE sync_log
        SET status = 'failed',
-           error = 'Sync timed out (exceeded 1 hour)',
+           errors = '["Sync timed out (exceeded 1 hour)"]'::jsonb,
            completed_at = NOW()
        WHERE workspace_id = $1
          AND status = 'running'
@@ -34,13 +34,13 @@ router.post('/:id/sync', async (req: Request, res: Response): Promise<void> => {
 
     const runningResult = await query<{ id: string }>(
       `SELECT id FROM sync_log
-       WHERE workspace_id = $1 AND status = 'running'
+       WHERE workspace_id = $1 AND status IN ('running', 'pending')
        LIMIT 1`,
       [workspaceId]
     );
 
     if (runningResult.rows.length > 0) {
-      res.status(409).json({ error: 'Sync already running for this workspace' });
+      res.status(409).json({ error: 'Sync already in progress for this workspace' });
       return;
     }
 

@@ -26,7 +26,7 @@ router.post('/:workspaceId/connectors/salesforce/sync', async (req, res) => {
     await query(
       `UPDATE sync_log
        SET status = 'failed',
-           error = 'Sync timed out (exceeded 1 hour)',
+           errors = '["Sync timed out (exceeded 1 hour)"]'::jsonb,
            completed_at = NOW()
        WHERE workspace_id = $1
          AND connector_type = 'salesforce'
@@ -35,17 +35,17 @@ router.post('/:workspaceId/connectors/salesforce/sync', async (req, res) => {
       [workspaceId]
     );
 
-    // Check for running sync (prevent duplicates)
+    // Check for running or pending sync (prevent duplicates)
     const runningResult = await query(
       `SELECT id FROM sync_log
-       WHERE workspace_id = $1 AND connector_type = 'salesforce' AND status = 'running'
+       WHERE workspace_id = $1 AND connector_type = 'salesforce' AND status IN ('running', 'pending')
        LIMIT 1`,
       [workspaceId]
     );
 
     if (runningResult.rows.length > 0) {
       res.status(409).json({
-        error: 'Salesforce sync already running for this workspace',
+        error: 'Salesforce sync already in progress for this workspace',
         syncId: runningResult.rows[0].id
       });
       return;
@@ -66,6 +66,23 @@ router.post('/:workspaceId/connectors/salesforce/sync', async (req, res) => {
     credentials.clientId = process.env.SALESFORCE_CLIENT_ID;
     credentials.clientSecret = process.env.SALESFORCE_CLIENT_SECRET;
 
+    // Auto-detect mode: incremental if last_sync_at exists, unless explicitly set
+    const requestedMode = req.body?.mode;
+    let syncMode: 'full' | 'incremental' = 'full';
+    if (requestedMode === 'incremental' || requestedMode === 'full') {
+      syncMode = requestedMode;
+    } else {
+      // Auto-detect: use incremental if we have a watermark
+      const watermarkResult = await query(
+        `SELECT last_sync_at FROM connections
+         WHERE workspace_id = $1 AND connector_name = 'salesforce' AND last_sync_at IS NOT NULL`,
+        [workspaceId]
+      );
+      if (watermarkResult.rows.length > 0) {
+        syncMode = 'incremental';
+      }
+    }
+
     // Create background job
     const jobQueue = getJobQueue();
     const jobId = await jobQueue.createJob({
@@ -74,6 +91,7 @@ router.post('/:workspaceId/connectors/salesforce/sync', async (req, res) => {
       payload: {
         credentials,
         syncLogId,
+        mode: syncMode,
       },
       priority: 1, // Manual syncs get higher priority
     });
@@ -85,7 +103,8 @@ router.post('/:workspaceId/connectors/salesforce/sync', async (req, res) => {
       syncId: syncLogId,
       jobId,
       status: 'queued',
-      message: 'Salesforce sync queued',
+      mode: syncMode,
+      message: `Salesforce ${syncMode} sync queued`,
       statusUrl: `/api/workspaces/${workspaceId}/sync/jobs/${jobId}`,
     });
   } catch (error) {

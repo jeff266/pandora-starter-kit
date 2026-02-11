@@ -54,13 +54,13 @@ export class SyncScheduler {
         // Check if sync already running for this workspace
         const runningResult = await query<{ id: string }>(
           `SELECT id FROM sync_log
-           WHERE workspace_id = $1 AND status = 'running'
+           WHERE workspace_id = $1 AND status IN ('running', 'pending')
            LIMIT 1`,
           [ws.id]
         );
 
         if (runningResult.rows.length > 0) {
-          console.log(`[Scheduler] Skipping ${ws.name} — sync already running`);
+          console.log(`[Scheduler] Skipping ${ws.name} — sync already in progress`);
           continue;
         }
 
