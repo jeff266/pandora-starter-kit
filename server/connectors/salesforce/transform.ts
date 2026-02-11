@@ -6,6 +6,12 @@
 
 import { createLogger } from '../../utils/logger.js';
 const logger = createLogger('Salesforce');
+import {
+  sanitizeDate as sanitizeDateField,
+  sanitizeNumber,
+  sanitizeInteger,
+  sanitizeText as sanitizeTextField,
+} from '../../utils/field-sanitizer.js';
 import type {
   SalesforceOpportunity,
   SalesforceContact,
@@ -100,14 +106,19 @@ function sanitizeText(value: unknown, maxLength: number = 10000): string | null 
 }
 
 /**
- * Sanitize date field - handle empty strings that would crash PostgreSQL
+ * Sanitize date field - validates date string, converts empty string to null
  */
 function sanitizeDate(value: unknown): string | null {
-  if (value === null || value === undefined || value === '') {
+  const sanitized = sanitizeDateField(value);
+  // field-sanitizer returns string | Date | null
+  // For Salesforce, we want string format for database
+  if (sanitized === null) {
     return null;
   }
-
-  return String(value);
+  if (sanitized instanceof Date) {
+    return sanitized.toISOString().split('T')[0]; // YYYY-MM-DD format
+  }
+  return sanitized; // Already a valid date string
 }
 
 /**
@@ -295,12 +306,12 @@ export function transformOpportunity(
     source_id: opp.Id,
     source_data: opp as unknown as Record<string, any>,
     name: sanitizeText(opp.Name, 255),
-    amount: opp.Amount,
+    amount: sanitizeNumber(opp.Amount), // FIX: empty string would crash PostgreSQL
     stage: opp.StageName,
     stage_normalized: stageNormalized,
     close_date: sanitizeDate(opp.CloseDate),
     owner: opp.Owner?.Email || opp.Owner?.Name || opp.OwnerId,
-    probability: opp.Probability,
+    probability: sanitizeNumber(opp.Probability), // FIX: empty string would crash PostgreSQL
     forecast_category: forecastCategory,
     pipeline: null,
     last_activity_date: null,
@@ -354,8 +365,8 @@ export function transformAccount(
     name: sanitizeText(account.Name, 255),
     domain: extractDomain(account.Website),
     industry: sanitizeText(account.Industry, 100),
-    employee_count: account.NumberOfEmployees,
-    annual_revenue: account.AnnualRevenue,
+    employee_count: sanitizeInteger(account.NumberOfEmployees), // FIX: empty string would crash PostgreSQL
+    annual_revenue: sanitizeNumber(account.AnnualRevenue), // FIX: empty string would crash PostgreSQL
     owner: account.Owner?.Email || account.Owner?.Name || account.OwnerId,
     custom_fields: {},
   };

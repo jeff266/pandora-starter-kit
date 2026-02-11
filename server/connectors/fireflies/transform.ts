@@ -1,5 +1,6 @@
 import type { FirefliesTranscript } from './types.js';
 import { parseFirefliesDate } from './client.js';
+import { sanitizeInteger } from '../../utils/field-sanitizer.js';
 
 export interface NormalizedConversation {
   workspace_id: string;
@@ -36,7 +37,7 @@ export function transformFirefliesTranscript(transcript: FirefliesTranscript, wo
     source_data: sourceData,
     title: transcript.title || null,
     call_date: parseFirefliesDate(transcript),
-    duration_seconds: transcript.duration != null ? Math.round(transcript.duration) : null,
+    duration_seconds: sanitizeInteger(transcript.duration), // FIX: empty string would become 0 with Math.round
     participants,
     transcript_text: null,
     summary: transcript.summary?.overview || null,

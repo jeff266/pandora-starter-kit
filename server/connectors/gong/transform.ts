@@ -1,4 +1,5 @@
 import type { GongCall, GongUser } from './types.js';
+import { sanitizeInteger } from '../../utils/field-sanitizer.js';
 
 export interface NormalizedConversation {
   workspace_id: string;
@@ -78,7 +79,7 @@ export function transformGongCall(call: GongCall, workspaceId: string, userMap?:
     },
     title: call.title || null,
     call_date: call.started ? new Date(call.started) : null,
-    duration_seconds: call.duration != null ? Math.round(call.duration) : null,
+    duration_seconds: sanitizeInteger(call.duration), // FIX: empty string would become 0 with Math.round
     participants,
     transcript_text: null,
     summary: null,

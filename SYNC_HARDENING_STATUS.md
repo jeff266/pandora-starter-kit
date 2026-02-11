@@ -10,11 +10,11 @@
 |--------|------|--------|-------|
 | 1 | Audit Current Sync State | ✅ COMPLETE | Report: SYNC_AUDIT_REPORT.md |
 | 2 | Build Throttled Fetchers | ✅ COMPLETE | Already implemented in throttle.ts |
-| 3 | Add Retry-on-429 | ✅ COMPLETE | fetchWithRateLimitRetry exists |
-| 4 | Wire Incremental Sync | 🔄 IN PROGRESS | Verifying implementation |
-| 5 | Background Job Pattern | ⏳ PENDING | Need to verify |
-| 6 | Empty String Sanitizer | ⏳ PENDING | HubSpot done, need others |
-| 7 | Verification Script | ⏳ PENDING | Final step |
+| 3 | Add Retry-on-429 | ✅ COMPLETE | Integrated at throttle.ts:77 |
+| 4 | Wire Incremental Sync | ✅ COMPLETE | Verified default path |
+| 5 | Background Job Pattern | ✅ COMPLETE | Verified 202 + progress |
+| 6 | Empty String Sanitizer | ✅ COMPLETE | Fixed 6 bugs across all connectors |
+| 7 | Verification Script | ✅ COMPLETE | 53 tests, all passing |
 
 ---
 
