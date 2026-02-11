@@ -139,6 +139,7 @@ export async function linkConversationsToDeals(
   const links: DealConversationLink[] = [];
 
   // Step 1: Direct links (conversation.deal_id matches)
+  // Exclude internal meetings from all linking
   const directResult = await query<{ deal_id: string; conversation_ids: string[] }>(
     `SELECT
        deal_id,
@@ -147,6 +148,7 @@ export async function linkConversationsToDeals(
      WHERE workspace_id = $1
        AND deal_id = ANY($2)
        AND deal_id IS NOT NULL
+       AND (is_internal IS NULL OR is_internal = FALSE)
      GROUP BY deal_id`,
     [workspaceId, dealIds]
   );
@@ -179,6 +181,7 @@ export async function linkConversationsToDeals(
          AND d.id = ANY($2)
          AND d.account_id IS NOT NULL
          AND c.deal_id IS NULL
+         AND (c.is_internal IS NULL OR c.is_internal = FALSE)
        GROUP BY d.id`,
       [workspaceId, dealsWithoutDirectLinks]
     );
@@ -213,6 +216,7 @@ export async function linkConversationsToDeals(
          AND d.id = ANY($2)
          AND ct.email IS NOT NULL
          AND c.participants::text ILIKE '%' || ct.email || '%'
+         AND (c.is_internal IS NULL OR c.is_internal = FALSE)
        GROUP BY d.id
        HAVING COUNT(DISTINCT c.id) <= 20`,
       [workspaceId, dealsStillWithoutLinks]
@@ -443,6 +447,7 @@ export async function computeConversationCoverage(
   }
 
   // Count closed-won deals with conversations (direct or fuzzy)
+  // Exclude internal meetings from coverage calculation
   const coveredResult = await query<{ covered: number }>(
     `SELECT COUNT(DISTINCT d.id)::int as covered
      FROM deals d
@@ -452,14 +457,18 @@ export async function computeConversationCoverage(
          -- Direct link
          EXISTS (
            SELECT 1 FROM conversations c
-           WHERE c.workspace_id = d.workspace_id AND c.deal_id = d.id
+           WHERE c.workspace_id = d.workspace_id
+             AND c.deal_id = d.id
+             AND (c.is_internal IS NULL OR c.is_internal = FALSE)
          )
          -- Fuzzy link via account
          OR (
            d.account_id IS NOT NULL AND
            EXISTS (
              SELECT 1 FROM conversations c
-             WHERE c.workspace_id = d.workspace_id AND c.account_id = d.account_id
+             WHERE c.workspace_id = d.workspace_id
+               AND c.account_id = d.account_id
+               AND (c.is_internal IS NULL OR c.is_internal = FALSE)
            )
          )
        )`,
