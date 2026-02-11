@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import { query } from '../db.js';
 import { syncWorkspace } from './orchestrator.js';
 import { backfillHubSpotAssociations } from './backfill.js';
+import { getJobQueue } from '../jobs/queue.js';
 
 export class SyncScheduler {
   private task: cron.ScheduledTask | null = null;
@@ -27,8 +28,6 @@ export class SyncScheduler {
   }
 
   async runDailySync(): Promise<void> {
-    const overallStart = Date.now();
-
     const workspacesResult = await query<{ id: string; name: string }>(
       `SELECT DISTINCT w.id, w.name
        FROM workspaces w
@@ -44,75 +43,56 @@ export class SyncScheduler {
       return;
     }
 
-    console.log(`[Scheduler] Starting daily sync for ${workspaces.length} workspace(s)`);
+    console.log(`[Scheduler] Queueing daily sync jobs for ${workspaces.length} workspace(s)`);
 
-    let completed = 0;
+    const jobQueue = getJobQueue();
+    const jobIds: string[] = [];
 
+    // Create jobs for all workspaces (fire-and-forget, non-blocking)
     for (const ws of workspaces) {
-      console.log(`[Scheduler] Syncing workspace ${ws.name} (${ws.id})...`);
-      const wsStart = Date.now();
-
-      const logResult = await query<{ id: string }>(
-        `INSERT INTO sync_log (workspace_id, connector_type, sync_type, status, started_at)
-         VALUES ($1, 'all', 'scheduled', 'running', NOW())
-         RETURNING id`,
-        [ws.id]
-      );
-      const syncLogId = logResult.rows[0].id;
-
       try {
-        const results = await syncWorkspace(ws.id);
+        // Check if sync already running for this workspace
+        const runningResult = await query<{ id: string }>(
+          `SELECT id FROM sync_log
+           WHERE workspace_id = $1 AND status = 'running'
+           LIMIT 1`,
+          [ws.id]
+        );
 
-        const successCount = results.filter((r) => r.status === 'success').length;
-        const errorCount = results.filter((r) => r.status === 'error').length;
-        const duration = Date.now() - wsStart;
+        if (runningResult.rows.length > 0) {
+          console.log(`[Scheduler] Skipping ${ws.name} — sync already running`);
+          continue;
+        }
 
-        const totalRecords = results.reduce((sum, r) => {
-          if (!r.counts) return sum;
-          return sum + Object.values(r.counts).reduce((s, c) => s + c.dbInserted, 0);
-        }, 0);
+        // Create sync_log entry
+        const logResult = await query<{ id: string }>(
+          `INSERT INTO sync_log (workspace_id, connector_type, sync_type, status, started_at)
+           VALUES ($1, 'all', 'scheduled', 'pending', NOW())
+           RETURNING id`,
+          [ws.id]
+        );
+        const syncLogId = logResult.rows[0].id;
 
-        const errors = results.filter((r) => r.status === 'error').map((r) => r.message || 'Unknown');
-
-        await query(
-          `UPDATE sync_log
-           SET status = $1, records_synced = $2, errors = $3,
-               duration_ms = $4, completed_at = NOW()
-           WHERE id = $5`,
-          [
-            errorCount > 0 ? 'completed_with_errors' : 'completed',
-            totalRecords,
-            JSON.stringify(errors),
-            duration,
+        // Create background job
+        const jobId = await jobQueue.createJob({
+          workspaceId: ws.id,
+          jobType: 'sync',
+          payload: {
+            connectorType: undefined, // sync all connectors
             syncLogId,
-          ]
-        );
+          },
+          priority: 0, // Scheduled syncs have normal priority
+        });
 
-        console.log(
-          `[Scheduler] Workspace ${ws.name} done in ${duration}ms — ` +
-          `${successCount} synced, ${errorCount} errors`
-        );
-
-        await runPostSyncBackfill(ws.id);
-
-        completed++;
+        jobIds.push(jobId);
+        console.log(`[Scheduler] Queued sync job for ${ws.name} (job: ${jobId})`);
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
-        console.error(`[Scheduler] Workspace ${ws.name} (${ws.id}) failed: ${msg}`);
-
-        await query(
-          `UPDATE sync_log
-           SET status = 'failed', errors = $1, duration_ms = $2, completed_at = NOW()
-           WHERE id = $3`,
-          [JSON.stringify([msg]), Date.now() - wsStart, syncLogId]
-        ).catch(() => {});
+        console.error(`[Scheduler] Failed to queue job for ${ws.name}: ${msg}`);
       }
     }
 
-    const totalDuration = Date.now() - overallStart;
-    console.log(
-      `[Scheduler] Daily sync complete: ${completed}/${workspaces.length} workspaces, ${totalDuration}ms`
-    );
+    console.log(`[Scheduler] Daily sync jobs queued: ${jobIds.length}/${workspaces.length} workspaces`);
   }
 }
 

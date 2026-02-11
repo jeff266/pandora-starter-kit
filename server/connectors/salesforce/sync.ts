@@ -302,17 +302,37 @@ async function updateContactAccountIds(
   }
 }
 
-export async function syncSalesforce(workspaceId: string, credentials: {
-  accessToken: string;
-  refreshToken: string;
-  instanceUrl: string;
-  clientId: string;
-  clientSecret: string;
-}): Promise<SyncResult> {
+export async function syncSalesforce(
+  workspaceId: string,
+  credentials: {
+    accessToken: string;
+    refreshToken: string;
+    instanceUrl: string;
+    clientId: string;
+    clientSecret: string;
+  },
+  mode: 'full' | 'incremental' = 'full'
+): Promise<SyncResult> {
   const startTime = Date.now();
   const errors: string[] = [];
 
-  logger.info('Starting Salesforce sync', { workspaceId });
+  logger.info('Starting Salesforce sync', { workspaceId, mode });
+
+  // Get watermark for incremental sync
+  let watermark: string | null = null;
+  if (mode === 'incremental') {
+    const connResult = await query<{ last_sync_at: Date | null }>(
+      `SELECT last_sync_at FROM connections
+       WHERE workspace_id = $1 AND connector_name = 'salesforce'`,
+      [workspaceId]
+    );
+    if (connResult.rows[0]?.last_sync_at) {
+      watermark = connResult.rows[0].last_sync_at.toISOString();
+      logger.info('Incremental sync watermark', { watermark });
+    } else {
+      logger.info('No watermark found, falling back to full sync');
+    }
+  }
 
   const client = new SalesforceClient({
     accessToken: credentials.accessToken,
@@ -341,7 +361,7 @@ export async function syncSalesforce(workspaceId: string, credentials: {
         instanceUrl: refreshed.instanceUrl,
       });
 
-      return runSync(refreshedClient, workspaceId, startTime, errors);
+      return runSync(refreshedClient, workspaceId, startTime, errors, watermark);
     }
 
     return {
@@ -355,14 +375,15 @@ export async function syncSalesforce(workspaceId: string, credentials: {
     };
   }
 
-  return runSync(client, workspaceId, startTime, errors);
+  return runSync(client, workspaceId, startTime, errors, watermark);
 }
 
 async function runSync(
   client: SalesforceClient,
   workspaceId: string,
   startTime: number,
-  errors: string[]
+  errors: string[],
+  watermark: string | null = null
 ): Promise<SyncResult> {
   let stageMap = new Map<string, SalesforceStage>();
   try {
@@ -396,18 +417,25 @@ async function runSync(
 
   logger.info('Record counts', { opportunities: oppCount, contacts: contactCount, accounts: accountCount });
 
+  // Build WHERE clause for incremental sync
+  const whereClause = watermark ? `SystemModstamp >= ${watermark}` : undefined;
+  if (whereClause) {
+    logger.info('Using incremental WHERE clause', { whereClause });
+  }
+
   let rawAccounts: any[] = [];
   let rawContacts: any[] = [];
   let rawOpportunities: any[] = [];
 
   try {
     if (accountCount < 10000) {
-      rawAccounts = await client.getAccounts();
+      rawAccounts = await client.getAccounts(undefined, whereClause);
     } else {
       try {
-        rawAccounts = await client.bulkQuery('SELECT Id, Name, Website, Industry, NumberOfEmployees, AnnualRevenue, OwnerId, BillingCity, BillingState, BillingCountry, Type, CreatedDate, LastModifiedDate, SystemModstamp FROM Account');
+        const bulkWhere = watermark ? ` WHERE SystemModstamp >= ${watermark}` : '';
+        rawAccounts = await client.bulkQuery(`SELECT Id, Name, Website, Industry, NumberOfEmployees, AnnualRevenue, OwnerId, BillingCity, BillingState, BillingCountry, Type, CreatedDate, LastModifiedDate, SystemModstamp FROM Account${bulkWhere}`);
       } catch {
-        rawAccounts = await client.getAccounts();
+        rawAccounts = await client.getAccounts(undefined, whereClause);
       }
     }
   } catch (err: any) {
@@ -416,12 +444,13 @@ async function runSync(
 
   try {
     if (contactCount < 10000) {
-      rawContacts = await client.getContacts();
+      rawContacts = await client.getContacts(undefined, whereClause);
     } else {
       try {
-        rawContacts = await client.bulkQuery('SELECT Id, FirstName, LastName, Email, Phone, Title, Department, AccountId, OwnerId, LeadSource, CreatedDate, LastModifiedDate, SystemModstamp FROM Contact');
+        const bulkWhere = watermark ? ` WHERE SystemModstamp >= ${watermark}` : '';
+        rawContacts = await client.bulkQuery(`SELECT Id, FirstName, LastName, Email, Phone, Title, Department, AccountId, OwnerId, LeadSource, CreatedDate, LastModifiedDate, SystemModstamp FROM Contact${bulkWhere}`);
       } catch {
-        rawContacts = await client.getContacts();
+        rawContacts = await client.getContacts(undefined, whereClause);
       }
     }
   } catch (err: any) {
@@ -430,12 +459,13 @@ async function runSync(
 
   try {
     if (oppCount < 10000) {
-      rawOpportunities = await client.getOpportunities();
+      rawOpportunities = await client.getOpportunities(undefined, whereClause);
     } else {
       try {
-        rawOpportunities = await client.bulkQuery('SELECT Id, Name, Amount, StageName, CloseDate, Probability, ForecastCategoryName, OwnerId, AccountId, Type, LeadSource, IsClosed, IsWon, Description, NextStep, CreatedDate, LastModifiedDate, SystemModstamp FROM Opportunity');
+        const bulkWhere = watermark ? ` WHERE SystemModstamp >= ${watermark}` : '';
+        rawOpportunities = await client.bulkQuery(`SELECT Id, Name, Amount, StageName, CloseDate, Probability, ForecastCategoryName, OwnerId, AccountId, Type, LeadSource, IsClosed, IsWon, Description, NextStep, CreatedDate, LastModifiedDate, SystemModstamp FROM Opportunity${bulkWhere}`);
       } catch {
-        rawOpportunities = await client.getOpportunities();
+        rawOpportunities = await client.getOpportunities(undefined, whereClause);
       }
     }
   } catch (err: any) {
@@ -528,6 +558,16 @@ async function runSync(
     contactsStored,
     dealsStored,
     errors: errors.length,
+  });
+
+  // Update watermark for next incremental sync
+  await query(
+    `UPDATE connections
+     SET last_sync_at = NOW()
+     WHERE workspace_id = $1 AND connector_name = 'salesforce'`,
+    [workspaceId]
+  ).catch(err => {
+    logger.error('Failed to update last_sync_at watermark', err);
   });
 
   return {

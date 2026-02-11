@@ -14,6 +14,8 @@
  * - Item = task/work item
  */
 
+import { RateLimiter } from '../../utils/retry.js';
+
 export interface MondayCredentials {
   apiKey: string;
 }
@@ -56,6 +58,7 @@ export interface UpdateItemInput {
 
 export class MondayClient {
   private readonly apiUrl = 'https://api.monday.com/v2';
+  private rateLimiter = new RateLimiter(60, 60_000); // 60 requests per minute
 
   /**
    * Execute a GraphQL query against Monday.com API
@@ -64,26 +67,28 @@ export class MondayClient {
     credentials: MondayCredentials,
     query: string
   ): Promise<T> {
-    const response = await fetch(this.apiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': credentials.apiKey, // API key goes directly, not "Bearer {key}"
-      },
-      body: JSON.stringify({ query }),
+    return this.rateLimiter.execute(async () => {
+      const response = await fetch(this.apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': credentials.apiKey, // API key goes directly, not "Bearer {key}"
+        },
+        body: JSON.stringify({ query }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Monday.com HTTP error: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+
+      if (data.errors && data.errors.length > 0) {
+        throw new Error(`Monday.com API error: ${JSON.stringify(data.errors)}`);
+      }
+
+      return data.data as T;
     });
-
-    if (!response.ok) {
-      throw new Error(`Monday.com HTTP error: ${response.status} ${response.statusText}`);
-    }
-
-    const data = await response.json();
-
-    if (data.errors && data.errors.length > 0) {
-      throw new Error(`Monday.com API error: ${JSON.stringify(data.errors)}`);
-    }
-
-    return data.data as T;
   }
 
   /**

@@ -20,6 +20,18 @@ router.post('/:id/sync', async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
+    // Check for stale locks (syncs stuck in 'running' for > 1 hour)
+    await query(
+      `UPDATE sync_log
+       SET status = 'failed',
+           error = 'Sync timed out (exceeded 1 hour)',
+           completed_at = NOW()
+       WHERE workspace_id = $1
+         AND status = 'running'
+         AND started_at < NOW() - INTERVAL '1 hour'`,
+      [workspaceId]
+    );
+
     const runningResult = await query<{ id: string }>(
       `SELECT id FROM sync_log
        WHERE workspace_id = $1 AND status = 'running'

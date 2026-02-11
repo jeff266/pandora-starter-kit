@@ -6,6 +6,7 @@
 
 import { query, getClient } from '../db.js';
 import { syncWorkspace } from '../sync/orchestrator.js';
+import { syncSalesforce } from '../connectors/salesforce/sync.js';
 import pRetry from 'p-retry';
 
 // ============================================================================
@@ -247,6 +248,8 @@ export class JobQueue {
     switch (job.job_type) {
       case 'sync':
         return await this.handleSyncJob(job);
+      case 'salesforce_sync':
+        return await this.handleSalesforceSyncJob(job);
       default:
         throw new Error(`Unknown job type: ${job.job_type}`);
     }
@@ -304,6 +307,62 @@ export class JobQueue {
       results,
       totalRecords,
       errors,
+    };
+  }
+
+  private async handleSalesforceSyncJob(job: Job): Promise<any> {
+    const { credentials, syncLogId, mode = 'full' } = job.payload;
+
+    // Update progress: Starting
+    await this.updateProgress(job.id, {
+      current: 0,
+      total: 100,
+      message: `Initializing Salesforce sync (${mode})...`,
+    });
+
+    const result = await syncSalesforce(job.workspace_id, credentials, mode);
+
+    const totalRecords = result.accounts.stored + result.contacts.stored + result.deals.stored;
+
+    // Update progress: Completed
+    await this.updateProgress(job.id, {
+      current: 100,
+      total: 100,
+      message: 'Salesforce sync completed',
+    });
+
+    // Update sync_log table
+    await query(
+      `UPDATE sync_log
+       SET status = $1, records_synced = $2, errors = $3,
+           duration_ms = $4, completed_at = NOW()
+       WHERE id = $5`,
+      [
+        result.success ? 'completed' : 'completed_with_errors',
+        totalRecords,
+        JSON.stringify(result.errors || []),
+        result.duration,
+        syncLogId,
+      ]
+    ).catch(() => {});
+
+    // Update connection status (last_sync_at already updated by sync function)
+    await query(
+      `UPDATE connections
+       SET status = 'synced'
+       WHERE workspace_id = $1 AND connector_name = 'salesforce'`,
+      [job.workspace_id]
+    ).catch(() => {});
+
+    return {
+      success: result.success,
+      totalRecords,
+      accounts: result.accounts,
+      contacts: result.contacts,
+      deals: result.deals,
+      computedFields: result.computedFields,
+      duration: result.duration,
+      errors: result.errors,
     };
   }
 }
