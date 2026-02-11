@@ -1213,12 +1213,14 @@ const dataQualityAuditTool: ToolDefinition = {
       // Map owner IDs to names in owner breakdown
       const mapOwner = (owner: string) => resolveOwnerName(owner, nameMap);
 
+      const filteredOwners = qualityData.ownerBreakdown
+        .map(ob => ({ ...ob, owner: mapOwner(ob.owner) }))
+        .filter(ob => ob.avgCompleteness < 80 || ob.criticalIssues > 5)
+        .slice(0, 15);
+
       return {
         ...qualityData,
-        ownerBreakdown: qualityData.ownerBreakdown.map(ob => ({
-          ...ob,
-          owner: mapOwner(ob.owner),
-        })),
+        ownerBreakdown: filteredOwners,
         worstOffenders: qualityData.worstOffenders.map(wo => ({
           ...wo,
           owner: mapOwner(wo.owner),
@@ -1393,6 +1395,53 @@ const enrichWorstOffenders: ToolDefinition = {
   },
 };
 
+const summarizeForClaude: ToolDefinition = {
+  name: 'summarizeForClaude',
+  description: 'Pre-summarize quality metrics into compact text for Claude prompt, replacing raw arrays with one-liners.',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('summarizeForClaude', async () => {
+      const metrics = (context.stepResults as any).quality_metrics;
+      if (!metrics) return { summary: 'No quality metrics available.' };
+
+      const summarizeEntity = (entity: string, data: any) => {
+        const criticalFields = data.fieldCompleteness.filter((f: any) => f.isCritical);
+        const avgCritical = criticalFields.length > 0
+          ? Math.round(criticalFields.reduce((s: number, f: any) => s + f.fillRate, 0) / criticalFields.length)
+          : 100;
+        const worstFields = [...criticalFields]
+          .sort((a: any, b: any) => a.fillRate - b.fillRate)
+          .slice(0, 3)
+          .map((f: any) => `${f.field} ${f.fillRate}%`)
+          .join(', ');
+
+        const issueLines: string[] = [];
+        for (const [key, val] of Object.entries(data.issues)) {
+          if ((val as number) > 0) {
+            issueLines.push(`${key}: ${val}`);
+          }
+        }
+        const issueStr = issueLines.length > 0 ? issueLines.join(', ') : 'none';
+
+        return `${entity}: ${data.total} records, ${avgCritical}% critical completeness (worst: ${worstFields}). Issues: ${issueStr}`;
+      };
+
+      const dealsSummary = summarizeEntity('Deals', metrics.byEntity.deals);
+      const contactsSummary = summarizeEntity('Contacts', metrics.byEntity.contacts);
+      const accountsSummary = summarizeEntity('Accounts', metrics.byEntity.accounts);
+
+      return {
+        entitySummaries: `${dealsSummary}\n${contactsSummary}\n${accountsSummary}`,
+      };
+    }, params);
+  },
+};
+
 // ============================================================================
 // Tool Registry
 // ============================================================================
@@ -1441,6 +1490,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['dataQualityAudit', dataQualityAuditTool],
   ['gatherQualityTrend', gatherQualityTrend],
   ['enrichWorstOffenders', enrichWorstOffenders],
+  ['summarizeForClaude', summarizeForClaude],
 ]);
 
 // ============================================================================

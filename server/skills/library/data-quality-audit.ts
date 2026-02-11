@@ -14,8 +14,7 @@ export const dataQualityAuditSkill: SkillDefinition = {
     'gatherQualityTrend',
     'enrichWorstOffenders',
     'calculateOutputBudget',
-    'queryDeals',
-    'queryContacts',
+    'summarizeForClaude',
   ],
 
   requiredContext: ['business_model', 'goals_and_targets', 'definitions'],
@@ -148,6 +147,16 @@ Each classification object should have:
     },
 
     {
+      id: 'summarize-for-claude',
+      name: 'Summarize Metrics for Claude',
+      tier: 'compute',
+      dependsOn: ['gather-quality-metrics'],
+      computeFn: 'summarizeForClaude',
+      computeArgs: {},
+      outputKey: 'quality_summary',
+    },
+
+    {
       id: 'synthesize-quality-report',
       name: 'Synthesize Quality Report',
       tier: 'claude',
@@ -155,12 +164,10 @@ Each classification object should have:
         'resolve-time-windows',
         'gather-quality-metrics',
         'gather-quality-trend',
-        'enrich-worst-offenders',
         'classify-quality-patterns',
         'calculate-output-budget',
+        'summarize-for-claude',
       ],
-      claudeTools: ['queryDeals', 'queryContacts'],
-      maxToolCalls: 5,
       claudePrompt: `You are a RevOps operations analyst auditing CRM data quality for {{business_model.company_name}}.
 
 TIME SCOPE:
@@ -173,17 +180,7 @@ Critical field completeness: {{quality_metrics.overall.criticalFieldCompleteness
 Total records audited: {{quality_metrics.overall.totalRecords}}
 
 BY ENTITY:
-Deals: {{quality_metrics.byEntity.deals.total}} total
-  Field completeness: {{quality_metrics.byEntity.deals.fieldCompleteness}}
-  Issues: {{quality_metrics.byEntity.deals.issues}}
-
-Contacts: {{quality_metrics.byEntity.contacts.total}} total
-  Field completeness: {{quality_metrics.byEntity.contacts.fieldCompleteness}}
-  Issues: {{quality_metrics.byEntity.contacts.issues}}
-
-Accounts: {{quality_metrics.byEntity.accounts.total}} total
-  Field completeness: {{quality_metrics.byEntity.accounts.fieldCompleteness}}
-  Issues: {{quality_metrics.byEntity.accounts.issues}}
+{{quality_summary.entitySummaries}}
 
 TREND (vs last audit):
 {{quality_trend}}
@@ -206,7 +203,7 @@ Produce a Data Quality Audit Report. Include:
 2. TOP 3 RISKS
    - Specific problems that affect other analyses
    - Example: "47 deals worth $2.1M have no close date — forecasting is unreliable"
-   - Include dollar amounts and record counts
+   - Include dollar amounts and record counts from the entity summaries
 
 3. PER-REP DATA QUALITY PATTERNS
    - Use classifications to identify reps needing coaching
@@ -229,13 +226,7 @@ RULES:
 - Every action must be specific enough to execute this week
 - If data quality is actually good (>90% critical completeness), say so briefly and focus on the few remaining gaps
 - Keep response under {{output_budget.wordBudget}} words
-
-WORD BUDGET ENFORCEMENT:
-- minimal: If >90% critical completeness, say "data quality looks healthy" and list top 3 remaining gaps
-- standard: Cover only sections with actionable items
-- detailed: Full coverage with specific examples and rep-by-rep breakdown
-
-If you need to drill into specific deals or contacts for more context, use the available tools.`,
+- Do NOT request additional data via tools — all data you need is provided above`,
       outputKey: 'quality_report',
     },
   ],
