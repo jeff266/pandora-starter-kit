@@ -17,6 +17,7 @@ import webhooksRouter from "./routes/webhooks.js";
 import llmConfigRouter from "./routes/llm-config.js";
 import salesforceAuthRouter from "./routes/salesforce-auth.js";
 import salesforceSyncRouter from "./routes/salesforce-sync.js";
+import webhookConfigRouter from "./routes/webhook-config.js";
 import { getAdapterRegistry } from "./connectors/adapters/registry.js";
 import { MondayTaskAdapter } from "./connectors/monday/adapter.js";
 import { GoogleDriveDocumentAdapter } from "./connectors/google-drive/adapter.js";
@@ -57,6 +58,7 @@ app.use("/api/workspaces", llmConfigRouter);
 app.use("/api/webhooks", webhooksRouter);
 app.use("/api/auth/salesforce", salesforceAuthRouter);
 app.use("/api/workspaces", salesforceSyncRouter);
+app.use("/api/workspaces", webhookConfigRouter);
 
 function registerAdapters(): void {
   const registry = getAdapterRegistry();

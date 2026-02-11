@@ -5,6 +5,7 @@ import type { NormalizedDeal, NormalizedContact, NormalizedAccount } from './tra
 import type { SalesforceStage } from './types.js';
 import { createLogger } from '../../utils/logger.js';
 import { computeFields } from '../../computed-fields/engine.js';
+import { transformWithErrorCapture } from '../../utils/sync-helpers.js';
 
 const logger = createLogger('SalesforceSync');
 
@@ -478,32 +479,36 @@ async function runSync(
     opportunities: rawOpportunities.length,
   });
 
-  const normalizedAccounts: NormalizedAccount[] = [];
-  for (const acc of rawAccounts) {
-    try {
-      normalizedAccounts.push(transformAccount(acc, workspaceId));
-    } catch (err: any) {
-      errors.push(`Account transform error (${acc.Id}): ${err.message}`);
-    }
-  }
+  // Transform with per-record error capture
+  const accountResult = transformWithErrorCapture(
+    rawAccounts,
+    (acc) => transformAccount(acc, workspaceId),
+    'Salesforce Accounts',
+    (acc) => acc.Id
+  );
 
-  const normalizedContacts: NormalizedContact[] = [];
-  for (const con of rawContacts) {
-    try {
-      normalizedContacts.push(transformContact(con, workspaceId));
-    } catch (err: any) {
-      errors.push(`Contact transform error (${con.Id}): ${err.message}`);
-    }
-  }
+  const contactResult = transformWithErrorCapture(
+    rawContacts,
+    (con) => transformContact(con, workspaceId),
+    'Salesforce Contacts',
+    (con) => con.Id
+  );
 
-  const normalizedDeals: NormalizedDeal[] = [];
-  for (const opp of rawOpportunities) {
-    try {
-      normalizedDeals.push(transformOpportunity(opp, workspaceId, stageMap));
-    } catch (err: any) {
-      errors.push(`Opportunity transform error (${opp.Id}): ${err.message}`);
-    }
-  }
+  const dealResult = transformWithErrorCapture(
+    rawOpportunities,
+    (opp) => transformOpportunity(opp, workspaceId, stageMap),
+    'Salesforce Opportunities',
+    (opp) => opp.Id
+  );
+
+  // Collect transform errors
+  accountResult.failed.forEach(f => errors.push(`Account: ${f.error} (${f.recordId})`));
+  contactResult.failed.forEach(f => errors.push(`Contact: ${f.error} (${f.recordId})`));
+  dealResult.failed.forEach(f => errors.push(`Opportunity: ${f.error} (${f.recordId})`));
+
+  const normalizedAccounts = accountResult.succeeded;
+  const normalizedContacts = contactResult.succeeded;
+  const normalizedDeals = dealResult.succeeded;
 
   const accountsStored = await upsertAccounts(normalizedAccounts).catch(err => {
     errors.push(`Failed to store accounts: ${err.message}`);

@@ -8,6 +8,7 @@ import { query, getClient } from '../db.js';
 import { syncWorkspace } from '../sync/orchestrator.js';
 import { syncSalesforce } from '../connectors/salesforce/sync.js';
 import pRetry from 'p-retry';
+import { notifyProgress, notifyCompleted, notifyFailed } from '../utils/webhook-notifier.js';
 
 // ============================================================================
 // Types
@@ -118,6 +119,12 @@ export class JobQueue {
        WHERE id = $2`,
       [JSON.stringify(progress), jobId]
     );
+
+    // Send webhook notification (fire-and-forget)
+    const job = await this.getJob(jobId);
+    if (job) {
+      notifyProgress(job.workspace_id, jobId, job.job_type, progress);
+    }
   }
 
   private async markRunning(jobId: string): Promise<void> {
@@ -136,6 +143,12 @@ export class JobQueue {
        WHERE id = $2`,
       [JSON.stringify(result), jobId]
     );
+
+    // Send webhook notification (fire-and-forget)
+    const job = await this.getJob(jobId);
+    if (job) {
+      notifyCompleted(job.workspace_id, jobId, job.job_type, result);
+    }
   }
 
   private async markFailed(jobId: string, error: string): Promise<void> {
@@ -145,6 +158,12 @@ export class JobQueue {
        WHERE id = $2`,
       [error, jobId]
     );
+
+    // Send webhook notification (fire-and-forget)
+    const job = await this.getJob(jobId);
+    if (job) {
+      notifyFailed(job.workspace_id, jobId, job.job_type, error);
+    }
   }
 
   async cancelJob(jobId: string): Promise<boolean> {
