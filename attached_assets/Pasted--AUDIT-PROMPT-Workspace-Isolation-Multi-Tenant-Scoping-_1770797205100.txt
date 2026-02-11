@@ -1,0 +1,150 @@
+# AUDIT PROMPT: Workspace Isolation & Multi-Tenant Scoping
+
+## Context
+
+Paste this into Replit. A production bug was found where the cross-entity 
+linker attempted to match Gong conversations from one workspace (Frontera 
+Health) against HubSpot contacts from a different workspace (Growthbook). 
+This is a multi-tenant isolation failure — in production with real 
+customers, this would leak data between organizations.
+
+This audit checks EVERY database query in the codebase for proper 
+workspace_id scoping. Do NOT fix anything yet — just report findings.
+
+---
+
+## PROMPT
+
+```
+CRITICAL AUDIT: Multi-tenant workspace isolation.
+
+A production bug was discovered where the cross-entity linker matched 
+data across workspace boundaries. This audit must verify that EVERY 
+database query in the codebase properly scopes to workspace_id.
+
+In a multi-tenant platform, a missing workspace_id filter is equivalent 
+to a data breach. Treat every finding as severity: critical.
+
+Scan the ENTIRE codebase and produce a report with these sections:
+
+--- SECTION 1: CROSS-ENTITY LINKER ---
+
+File: server/linker/entity-linker.ts (or wherever the linker lives)
+
+For EVERY SQL query in the linker, verify:
+- Does it include WHERE workspace_id = $1 (or equivalent)?
+- When it joins across tables (e.g., conversations JOIN contacts), 
+  does EVERY table in the join have workspace_id scoped?
+- When it looks up deals by account_id, is workspace_id included?
+
+Specifically check these operations:
+1. Tier 1: Contact email lookup — does it scope contacts to the SAME 
+   workspace as the conversations being linked?
+2. Tier 2: source_data CRM ID lookup — when resolving a deal by 
+   source_id, is it scoped to workspace?
+3. Tier 3: Deal inference — when counting open deals at an account, 
+   is both the account AND deals query workspace-scoped?
+4. The UPDATE statements — do they include workspace_id in the WHERE?
+
+Flag EVERY query that is missing workspace_id scoping, even if it 
+"works" because it's called with the right data today.
+
+--- SECTION 2: QUERY LAYER (TOOLS) ---
+
+Files: server/tools/*.ts (deal-query, contact-query, account-query, 
+activity-query, conversation-query, etc.)
+
+For EVERY exported function:
+- Does it take workspaceId as a parameter?
+- Does EVERY query inside it filter by workspace_id?
+- If it joins tables, is workspace_id on EVERY table in the join?
+- If it uses subqueries, is workspace_id in the subquery?
+
+--- SECTION 3: CONNECTORS ---
+
+Files: server/connectors/*/sync.ts, server/connectors/*/client.ts
+
+For each connector (HubSpot, Gong, Fireflies, Monday, Google Drive):
+- When INSERTing/UPSERTing records, is workspace_id always set?
+- When querying for existing records (for upsert matching), is 
+  workspace_id in the WHERE?
+- When reading connector_configs, is workspace_id scoped?
+
+--- SECTION 4: SYNC ORCHESTRATOR ---
+
+File: server/sync/orchestrator.ts (or equivalent)
+
+- When it queries connector_configs to find what to sync, does it 
+  filter by workspace_id?
+- When it triggers the linker after sync, does it pass the correct 
+  workspace_id (not a hardcoded or global one)?
+- When it logs to sync_log, is workspace_id set?
+
+--- SECTION 5: API ROUTES ---
+
+Files: All route handlers that touch the database.
+
+For EVERY route that uses :workspaceId or :id as a URL parameter:
+- Does it extract the workspace ID from the URL?
+- Does it pass it to EVERY downstream function?
+- Is there any route that queries data WITHOUT workspace scoping?
+
+Also check: are there any routes that DON'T take a workspace ID but 
+should? (e.g., a global search endpoint that returns data across 
+workspaces)
+
+--- SECTION 6: COMPUTED FIELDS ---
+
+Files: server/computed-fields/*.ts or wherever computed fields run.
+
+- When computing health_score, engagement_score, days_in_stage, etc., 
+  are the underlying queries workspace-scoped?
+- When the computed fields engine refreshes after sync, does it scope 
+  to the workspace that just synced?
+
+--- SECTION 7: SALES ROSTER ---
+
+File: wherever the GET /api/workspaces/:id/sales-roster endpoint lives.
+
+- Does it only read connector_configs for the specified workspace?
+- Could it accidentally merge tracked users from another workspace?
+
+--- SECTION 8: TRACKED USERS & USER DIRECTORY ---
+
+Files: server/connectors/shared/tracked-users.ts (or equivalent)
+
+- getTrackedUsers: workspace-scoped?
+- setTrackedUsers: workspace-scoped?
+- getDirectory: workspace-scoped?
+- Any function that could accidentally read/write another workspace's 
+  tracked users?
+
+--- OUTPUT FORMAT ---
+
+Write the report to WORKSPACE_ISOLATION_AUDIT.md in the project root.
+
+For each section, produce a table:
+
+| File | Function/Query | workspace_id scoped? | Severity | Notes |
+|------|---------------|---------------------|----------|-------|
+
+Severity levels:
+- CRITICAL: Query can return or modify data from wrong workspace
+- WARNING: workspace_id is present but could be bypassed (e.g., 
+  optional parameter, default value, or only on some branches)
+- OK: Properly scoped
+
+At the end of the report, include:
+1. CRITICAL FINDINGS: List every query that is missing workspace_id 
+   scoping, with exact file path and line number
+2. ROOT CAUSE ANALYSIS: For the specific linker bug (Frontera Gong 
+   matched against Growthbook HubSpot), identify exactly which query 
+   or logic path allowed this to happen
+3. RECOMMENDED FIXES: For each critical finding, describe the fix 
+   (usually: add WHERE workspace_id = $1)
+4. PREVENTION: Suggest a pattern or utility to prevent future 
+   workspace leaks (e.g., a query builder that requires workspace_id, 
+   a test that scans for queries missing workspace_id, etc.)
+
+Do NOT change any code in this prompt — audit and report only.
+```
