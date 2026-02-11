@@ -59,7 +59,7 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
     VALUES ('$WORKSPACE_ID', 'Q1 2026', 'quarterly', '2026-01-01', '2026-03-31', 1000000)
     ON CONFLICT (workspace_id, start_date, period_type) DO UPDATE SET team_quota = 1000000
     RETURNING id;
-  " | xargs)
+  " | tail -1 | xargs)
 
   echo "  Created period: $PERIOD_ID"
 
