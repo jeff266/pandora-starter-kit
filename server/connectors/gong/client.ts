@@ -47,23 +47,44 @@ export class GongClient {
 
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     return this.rateLimiter.execute(async () => {
-      const url = `${this.baseUrl}${endpoint}`;
-      const response = await fetch(url, {
-        ...options,
-        headers: {
-          "Authorization": this.getAuthHeader(),
-          "Content-Type": "application/json",
-          ...options.headers,
-        },
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Gong API error: ${response.status} - ${errorText}`);
-      }
-
-      return response.json() as T;
+      return this.requestWithRetry<T>(endpoint, options);
     });
+  }
+
+  private async requestWithRetry<T>(
+    endpoint: string,
+    options: RequestInit = {},
+    attempt = 1,
+    maxAttempts = 3
+  ): Promise<T> {
+    const url = `${this.baseUrl}${endpoint}`;
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        "Authorization": this.getAuthHeader(),
+        "Content-Type": "application/json",
+        ...options.headers,
+      },
+    });
+
+    // Handle 429 rate limit with exponential backoff
+    if (response.status === 429 && attempt < maxAttempts) {
+      const retryAfter = response.headers.get('Retry-After');
+      const delayMs = retryAfter
+        ? parseInt(retryAfter) * 1000
+        : Math.pow(2, attempt) * 1000; // Exponential backoff: 2s, 4s, 8s
+
+      console.warn(`[Gong Client] Rate limited (429), retrying in ${delayMs}ms (attempt ${attempt}/${maxAttempts})`);
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+      return this.requestWithRetry<T>(endpoint, options, attempt + 1, maxAttempts);
+    }
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Gong API error: ${response.status} - ${errorText}`);
+    }
+
+    return response.json() as T;
   }
 
   async testConnection(): Promise<{ success: boolean; error?: string; accountInfo?: any }> {

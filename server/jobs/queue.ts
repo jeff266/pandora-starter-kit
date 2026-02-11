@@ -212,27 +212,31 @@ export class JobQueue {
   }
 
   private async executeJob(job: Job): Promise<void> {
-    console.log(`[JobQueue] Executing job ${job.id} (${job.job_type}, attempt ${job.attempts + 1}/${job.max_attempts})`);
+    console.log(`[JobQueue] Executing job ${job.id} (${job.job_type}, attempt ${job.attempts + 1}/${job.max_attempts}, timeout: ${job.timeout_ms}ms)`);
 
     await this.markRunning(job.id);
 
     try {
-      // Use p-retry for automatic retries with exponential backoff
-      const result = await pRetry(
-        async () => {
-          return await this.runJobHandler(job);
-        },
-        {
-          retries: job.max_attempts - 1,
-          onFailedAttempt: (error) => {
-            console.warn(`[JobQueue] Job ${job.id} attempt ${error.attemptNumber} failed:`, error.message);
-            this.updateProgress(job.id, {
-              current: 0,
-              total: 0,
-              message: `Retry ${error.attemptNumber}/${job.max_attempts}: ${error.message}`,
-            }).catch(() => {});
+      // Wrap execution with timeout enforcement
+      const result = await this.withTimeout(
+        pRetry(
+          async () => {
+            return await this.runJobHandler(job);
           },
-        }
+          {
+            retries: job.max_attempts - 1,
+            onFailedAttempt: (error) => {
+              console.warn(`[JobQueue] Job ${job.id} attempt ${error.attemptNumber} failed:`, error.message);
+              this.updateProgress(job.id, {
+                current: 0,
+                total: 0,
+                message: `Retry ${error.attemptNumber}/${job.max_attempts}: ${error.message}`,
+              }).catch(() => {});
+            },
+          }
+        ),
+        job.timeout_ms,
+        `Job ${job.id} exceeded timeout of ${job.timeout_ms}ms`
       );
 
       await this.markCompleted(job.id, result);
@@ -242,6 +246,19 @@ export class JobQueue {
       await this.markFailed(job.id, message);
       console.error(`[JobQueue] Job ${job.id} failed after ${job.max_attempts} attempts:`, message);
     }
+  }
+
+  private async withTimeout<T>(
+    promise: Promise<T>,
+    timeoutMs: number,
+    timeoutMessage: string
+  ): Promise<T> {
+    return Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+      }),
+    ]);
   }
 
   private async runJobHandler(job: Job): Promise<any> {

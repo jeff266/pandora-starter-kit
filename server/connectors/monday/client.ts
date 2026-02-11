@@ -68,27 +68,48 @@ export class MondayClient {
     query: string
   ): Promise<T> {
     return this.rateLimiter.execute(async () => {
-      const response = await fetch(this.apiUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': credentials.apiKey, // API key goes directly, not "Bearer {key}"
-        },
-        body: JSON.stringify({ query }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Monday.com HTTP error: ${response.status} ${response.statusText}`);
-      }
-
-      const data = await response.json();
-
-      if (data.errors && data.errors.length > 0) {
-        throw new Error(`Monday.com API error: ${JSON.stringify(data.errors)}`);
-      }
-
-      return data.data as T;
+      return this.graphqlWithRetry<T>(credentials, query);
     });
+  }
+
+  private async graphqlWithRetry<T>(
+    credentials: MondayCredentials,
+    query: string,
+    attempt = 1,
+    maxAttempts = 3
+  ): Promise<T> {
+    const response = await fetch(this.apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': credentials.apiKey, // API key goes directly, not "Bearer {key}"
+      },
+      body: JSON.stringify({ query }),
+    });
+
+    // Handle 429 rate limit with exponential backoff
+    if (response.status === 429 && attempt < maxAttempts) {
+      const retryAfter = response.headers.get('Retry-After');
+      const delayMs = retryAfter
+        ? parseInt(retryAfter) * 1000
+        : Math.pow(2, attempt) * 1000; // Exponential backoff: 2s, 4s, 8s
+
+      console.warn(`[Monday Client] Rate limited (429), retrying in ${delayMs}ms (attempt ${attempt}/${maxAttempts})`);
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+      return this.graphqlWithRetry<T>(credentials, query, attempt + 1, maxAttempts);
+    }
+
+    if (!response.ok) {
+      throw new Error(`Monday.com HTTP error: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+
+    if (data.errors && data.errors.length > 0) {
+      throw new Error(`Monday.com API error: ${JSON.stringify(data.errors)}`);
+    }
+
+    return data.data as T;
   }
 
   /**
