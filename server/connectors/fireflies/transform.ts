@@ -36,7 +36,7 @@ export function transformFirefliesTranscript(transcript: FirefliesTranscript, wo
     source_data: sourceData,
     title: transcript.title || null,
     call_date: parseFirefliesDate(transcript),
-    duration_seconds: transcript.duration || null,
+    duration_seconds: transcript.duration != null ? Math.round(transcript.duration) : null,
     participants,
     transcript_text: null,
     summary: transcript.summary?.overview || null,
