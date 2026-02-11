@@ -96,6 +96,8 @@ When Claude's synthesize step hits `maxToolCalls` limit, the runtime makes one f
 - The `coverageByRepTool` maps `quotaConfig.teamQuota` → `quotas.team` before passing to the aggregation function.
 - All open deals with NULL `forecast_category` are counted as pipeline (not commit or best_case).
 - Validated with real data: 2,744 tokens (Claude 2,011 + DeepSeek 733), 44s duration.
+- `excluded_owners` array in context_layer `definitions` JSONB filters system/team accounts from coverage and quality queries. Both `coverageByRepTool` and `repPipelineQualityTool` read it from `context.businessContext.definitions.excluded_owners`.
+- `resolveTimeWindows` returns `analysisRange.quarter` label (e.g., "Q1 2026") via `formatQuarterLabel()` helper.
 
 ## Smoke Test
 Run `npm run smoke-test` to validate the full pipeline end-to-end with synthetic data (24 tests covering all query functions, computed fields, and pipeline snapshot). Use `--keep` flag to preserve test data for inspection.
