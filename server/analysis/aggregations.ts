@@ -1202,3 +1202,295 @@ export async function dataQualityAudit(workspaceId: string): Promise<DataQuality
     ownerBreakdown,
   };
 }
+
+// ============================================================================
+// Pipeline Coverage by Rep
+// ============================================================================
+
+interface RepCoverage {
+  name: string;
+  email: string;
+  quota: number | null;
+  pipeline: number;
+  commit: number;
+  bestCase: number;
+  closedWon: number;
+  remaining: number | null;
+  coverageRatio: number | null;
+  gap: number | null;
+  dealCount: number;
+  avgDealSize: number;
+  staleDeals: number;
+  staleDealValue: number;
+  status: 'on_track' | 'at_risk' | 'behind' | 'unknown';
+}
+
+export interface CoverageByRep {
+  team: {
+    totalQuota: number | null;
+    totalPipeline: number;
+    totalCommit: number;
+    totalBestCase: number;
+    closedWon: number;
+    coverageRatio: number | null;
+    coverageTarget: number;
+    gap: number | null;
+    daysInQuarter: number;
+    daysElapsed: number;
+    daysRemaining: number;
+    requiredWeeklyPipelineGen: number | null;
+    dealCount: number;
+    avgDealSize: number;
+  };
+  reps: RepCoverage[];
+}
+
+export async function coverageByRep(
+  workspaceId: string,
+  quarterStart: Date,
+  quarterEnd: Date,
+  quotas?: { team?: number; byRep?: Record<string, number> },
+  coverageTarget: number = 3.0
+): Promise<CoverageByRep> {
+  // Get rep-level aggregations
+  const repsResult = await query(`
+    SELECT
+      COALESCE(owner_name, 'Unassigned') as rep_name,
+      COALESCE(owner_email, 'unassigned') as rep_email,
+      COUNT(*) FILTER (WHERE stage_normalized NOT IN ('closed_won', 'closed_lost')) as open_deals,
+      COALESCE(SUM(amount) FILTER (WHERE stage_normalized NOT IN ('closed_won', 'closed_lost')), 0) as pipeline,
+      COALESCE(SUM(amount) FILTER (WHERE forecast_category = 'commit' AND stage_normalized NOT IN ('closed_won', 'closed_lost')), 0) as commit_value,
+      COALESCE(SUM(amount) FILTER (WHERE forecast_category = 'best_case' AND stage_normalized NOT IN ('closed_won', 'closed_lost')), 0) as best_case_value,
+      COUNT(*) FILTER (WHERE stage_normalized = 'closed_won') as won_count,
+      COALESCE(SUM(amount) FILTER (WHERE stage_normalized = 'closed_won'), 0) as closed_won,
+      COUNT(*) FILTER (WHERE days_since_activity > 14 AND stage_normalized NOT IN ('closed_won', 'closed_lost')) as stale_deals,
+      COALESCE(SUM(amount) FILTER (WHERE days_since_activity > 14 AND stage_normalized NOT IN ('closed_won', 'closed_lost')), 0) as stale_value
+    FROM deals
+    WHERE workspace_id = $1
+      AND (
+        (close_date BETWEEN $2 AND $3) OR
+        (stage_normalized = 'closed_won' AND close_date BETWEEN $2 AND $3)
+      )
+    GROUP BY owner_name, owner_email
+    ORDER BY pipeline DESC
+  `, [workspaceId, quarterStart, quarterEnd]);
+
+  // Build rep coverage objects
+  const reps: RepCoverage[] = repsResult.rows.map((row: any) => {
+    const repEmail = row.rep_email;
+    const quota = quotas?.byRep?.[repEmail] ?? null;
+    const pipeline = parseFloat(row.pipeline) || 0;
+    const closedWon = parseFloat(row.closed_won) || 0;
+    const dealCount = parseInt(row.open_deals, 10) || 0;
+    const avgDealSize = dealCount > 0 ? Math.round(pipeline / dealCount) : 0;
+
+    const remaining = quota !== null ? quota - closedWon : null;
+    const coverageRatio = remaining !== null && remaining > 0 ? pipeline / remaining : null;
+
+    // Calculate gap to hit coverage target
+    const gap = quota !== null && remaining !== null && remaining > 0
+      ? Math.max(0, (remaining * coverageTarget) - pipeline)
+      : null;
+
+    // Determine status
+    let status: RepCoverage['status'];
+    if (quota === null) {
+      status = 'unknown';
+    } else if (coverageRatio !== null) {
+      if (coverageRatio >= coverageTarget) {
+        status = 'on_track';
+      } else if (coverageRatio >= coverageTarget * 0.6) {
+        status = 'at_risk';
+      } else {
+        status = 'behind';
+      }
+    } else {
+      status = 'unknown';
+    }
+
+    return {
+      name: row.rep_name,
+      email: repEmail,
+      quota,
+      pipeline,
+      commit: parseFloat(row.commit_value) || 0,
+      bestCase: parseFloat(row.best_case_value) || 0,
+      closedWon,
+      remaining,
+      coverageRatio,
+      gap,
+      dealCount,
+      avgDealSize,
+      staleDeals: parseInt(row.stale_deals, 10) || 0,
+      staleDealValue: parseFloat(row.stale_value) || 0,
+      status,
+    };
+  });
+
+  // Calculate team totals
+  const totalPipeline = reps.reduce((sum, r) => sum + r.pipeline, 0);
+  const totalCommit = reps.reduce((sum, r) => sum + r.commit, 0);
+  const totalBestCase = reps.reduce((sum, r) => sum + r.bestCase, 0);
+  const totalClosedWon = reps.reduce((sum, r) => sum + r.closedWon, 0);
+  const totalDealCount = reps.reduce((sum, r) => sum + r.dealCount, 0);
+  const avgDealSize = totalDealCount > 0 ? Math.round(totalPipeline / totalDealCount) : 0;
+
+  const totalQuota = quotas?.team ?? null;
+  const teamRemaining = totalQuota !== null ? totalQuota - totalClosedWon : null;
+  const coverageRatio = teamRemaining !== null && teamRemaining > 0
+    ? totalPipeline / teamRemaining
+    : null;
+
+  const gap = totalQuota !== null && teamRemaining !== null && teamRemaining > 0
+    ? Math.max(0, (teamRemaining * coverageTarget) - totalPipeline)
+    : null;
+
+  // Calculate quarter timing
+  const now = new Date();
+  const qStart = quarterStart.getTime();
+  const qEnd = quarterEnd.getTime();
+  const nowTime = now.getTime();
+
+  const daysInQuarter = Math.ceil((qEnd - qStart) / (1000 * 60 * 60 * 24));
+  const daysElapsed = Math.ceil((nowTime - qStart) / (1000 * 60 * 60 * 24));
+  const daysRemaining = Math.max(0, Math.ceil((qEnd - nowTime) / (1000 * 60 * 60 * 24)));
+
+  const weeksRemaining = daysRemaining / 7;
+  const requiredWeeklyPipelineGen = gap !== null && weeksRemaining > 0
+    ? Math.round(gap / weeksRemaining)
+    : null;
+
+  return {
+    team: {
+      totalQuota,
+      totalPipeline: Math.round(totalPipeline),
+      totalCommit: Math.round(totalCommit),
+      totalBestCase: Math.round(totalBestCase),
+      closedWon: Math.round(totalClosedWon),
+      coverageRatio,
+      coverageTarget,
+      gap: gap !== null ? Math.round(gap) : null,
+      daysInQuarter,
+      daysElapsed,
+      daysRemaining,
+      requiredWeeklyPipelineGen,
+      dealCount: totalDealCount,
+      avgDealSize,
+    },
+    reps,
+  };
+}
+
+export interface CoverageTrendDelta {
+  name: string;
+  email: string;
+  coverageChange: number | null;
+  pipelineChange: number;
+  statusChange: string | null;
+}
+
+export async function coverageTrend(
+  workspaceId: string,
+  currentReps: RepCoverage[],
+  previousRunResult: any
+): Promise<{ isFirstRun: boolean; repDeltas: CoverageTrendDelta[] }> {
+  if (!previousRunResult?.coverage_data?.reps) {
+    return { isFirstRun: true, repDeltas: [] };
+  }
+
+  const previousReps = previousRunResult.coverage_data.reps;
+  const prevRepMap = new Map(previousReps.map((r: any) => [r.email, r]));
+
+  const repDeltas: CoverageTrendDelta[] = currentReps.map(curr => {
+    const prev = prevRepMap.get(curr.email);
+
+    if (!prev) {
+      return {
+        name: curr.name,
+        email: curr.email,
+        coverageChange: null,
+        pipelineChange: curr.pipeline,
+        statusChange: null,
+      };
+    }
+
+    const coverageChange = curr.coverageRatio !== null && prev.coverageRatio !== null
+      ? curr.coverageRatio - prev.coverageRatio
+      : null;
+
+    const pipelineChange = curr.pipeline - (prev.pipeline || 0);
+
+    const statusChange = prev.status !== curr.status
+      ? `${prev.status} → ${curr.status}`
+      : null;
+
+    return {
+      name: curr.name,
+      email: curr.email,
+      coverageChange,
+      pipelineChange,
+      statusChange,
+    };
+  });
+
+  return {
+    isFirstRun: false,
+    repDeltas: repDeltas.filter(d => d.coverageChange !== null || d.pipelineChange !== 0),
+  };
+}
+
+export interface RepPipelineQuality {
+  email: string;
+  earlyStageCount: number;
+  lateStageCount: number;
+  earlyStageValue: number;
+  lateStageValue: number;
+  earlyPct: number;
+  qualityFlag: 'early_heavy' | 'balanced' | 'late_heavy';
+}
+
+export async function repPipelineQuality(
+  workspaceId: string,
+  quarterStart: Date,
+  quarterEnd: Date
+): Promise<RepPipelineQuality[]> {
+  const result = await query(`
+    SELECT
+      COALESCE(owner_email, 'unassigned') as rep_email,
+      COUNT(*) FILTER (WHERE stage_normalized IN ('awareness', 'qualification')) as early_stage,
+      COUNT(*) FILTER (WHERE stage_normalized IN ('evaluation', 'decision', 'negotiation')) as late_stage,
+      COALESCE(SUM(amount) FILTER (WHERE stage_normalized IN ('awareness', 'qualification')), 0) as early_value,
+      COALESCE(SUM(amount) FILTER (WHERE stage_normalized IN ('evaluation', 'decision', 'negotiation')), 0) as late_value
+    FROM deals
+    WHERE workspace_id = $1
+      AND stage_normalized NOT IN ('closed_won', 'closed_lost')
+      AND close_date BETWEEN $2 AND $3
+    GROUP BY owner_email
+  `, [workspaceId, quarterStart, quarterEnd]);
+
+  return result.rows.map((row: any) => {
+    const earlyValue = parseFloat(row.early_value) || 0;
+    const lateValue = parseFloat(row.late_value) || 0;
+    const totalValue = earlyValue + lateValue;
+    const earlyPct = totalValue > 0 ? Math.round((earlyValue / totalValue) * 100) : 0;
+
+    let qualityFlag: RepPipelineQuality['qualityFlag'];
+    if (earlyPct > 70) {
+      qualityFlag = 'early_heavy';
+    } else if (earlyPct < 30) {
+      qualityFlag = 'late_heavy';
+    } else {
+      qualityFlag = 'balanced';
+    }
+
+    return {
+      email: row.rep_email,
+      earlyStageCount: parseInt(row.early_stage, 10) || 0,
+      lateStageCount: parseInt(row.late_stage, 10) || 0,
+      earlyStageValue: Math.round(earlyValue),
+      lateStageValue: Math.round(lateValue),
+      earlyPct,
+      qualityFlag,
+    };
+  });
+}

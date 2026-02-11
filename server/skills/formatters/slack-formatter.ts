@@ -27,6 +27,8 @@ export function formatForSlack(result: SkillResult, skill: SkillDefinition): Sla
     return formatSingleThreadAlert(result);
   } else if (skill.slackTemplate === 'data-quality-audit') {
     return formatDataQualityAudit(result);
+  } else if (skill.slackTemplate === 'pipeline-coverage') {
+    return formatPipelineCoverage(result);
   }
 
   // Generic formatter fallback
@@ -394,6 +396,82 @@ export function formatDataQualityAudit(result: SkillResult): SlackBlock[] {
       if (lower.includes('risk')) emoji = '⚠️';
       if (lower.includes('rep') || lower.includes('pattern')) emoji = '👤';
       if (lower.includes('trend')) emoji = '📈';
+      if (lower.includes('action')) emoji = '⚡';
+
+      appendSectionBlocks(blocks, `${emoji} ${section.title}`, content, 2800);
+    } else if (content.trim()) {
+      blocks.push({
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: truncateSection(content, 2800),
+        },
+      });
+    }
+  }
+
+  blocks.push({ type: 'divider' });
+  blocks.push({
+    type: 'context',
+    elements: [
+      {
+        type: 'mrkdwn',
+        text: `⏱ ${formatDuration(result.totalDuration_ms)} | 💰 ${formatTokenCount(result.totalTokenUsage.claude)}k Claude`,
+      },
+    ],
+  });
+
+  if (blocks.length > 48) {
+    const trimmed = blocks.slice(0, 47);
+    trimmed.push({
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: '_Message truncated — view full report in Pandora_' }],
+    });
+    return trimmed;
+  }
+
+  return blocks;
+}
+
+/**
+ * Pipeline Coverage specific formatter
+ */
+export function formatPipelineCoverage(result: SkillResult): SlackBlock[] {
+  const blocks: SlackBlock[] = [];
+
+  blocks.push({
+    type: 'header',
+    text: {
+      type: 'plain_text',
+      text: '🎯 Pipeline Coverage by Rep',
+      emoji: true,
+    },
+  });
+
+  blocks.push({
+    type: 'context',
+    elements: [
+      {
+        type: 'mrkdwn',
+        text: `<!date^${Math.floor(result.completedAt.getTime() / 1000)}^{date_short_pretty} at {time}|${result.completedAt.toISOString()}>`,
+      },
+    ],
+  });
+
+  blocks.push({ type: 'divider' });
+
+  const rawOutput = typeof result.output === 'string' ? result.output : JSON.stringify(result.output);
+  const sections = parseSectionsFromMarkdown(rawOutput);
+
+  for (const section of sections) {
+    const content = markdownToSlack(section.content);
+    if (section.title) {
+      let emoji = '📊';
+      const lower = section.title.toLowerCase();
+      if (lower.includes('headline') || lower.includes('team')) emoji = '🎯';
+      if (lower.includes('gap') || lower.includes('coverage')) emoji = '📈';
+      if (lower.includes('at-risk') || lower.includes('rep')) emoji = '⚠️';
+      if (lower.includes('quality')) emoji = '🔍';
       if (lower.includes('action')) emoji = '⚡';
 
       appendSectionBlocks(blocks, `${emoji} ${section.title}`, content, 2800);

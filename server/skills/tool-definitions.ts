@@ -31,9 +31,14 @@ import {
   dealThreadingAnalysis,
   enrichCriticalDeals,
   dataQualityAudit,
+  coverageByRep,
+  coverageTrend,
+  repPipelineQuality,
   type TimeConfig,
   type TimeWindows,
   type DataQualityAudit,
+  type CoverageByRep,
+  type RepCoverage,
 } from '../analysis/aggregations.js';
 import {
   getBusinessContext as fetchBusinessContext,
@@ -1397,7 +1402,7 @@ const enrichWorstOffenders: ToolDefinition = {
 
 const summarizeForClaude: ToolDefinition = {
   name: 'summarizeForClaude',
-  description: 'Pre-summarize quality metrics into compact text for Claude prompt, replacing raw arrays with one-liners.',
+  description: 'Pre-summarize metrics into compact text for Claude prompt, replacing raw arrays with one-liners.',
   tier: 'compute',
   parameters: {
     type: 'object',
@@ -1406,38 +1411,379 @@ const summarizeForClaude: ToolDefinition = {
   },
   execute: async (params, context) => {
     return safeExecute('summarizeForClaude', async () => {
-      const metrics = (context.stepResults as any).quality_metrics;
-      if (!metrics) return { summary: 'No quality metrics available.' };
+      // Detect which skill is running based on context
+      const skillId = context.skillId;
 
-      const summarizeEntity = (entity: string, data: any) => {
-        const criticalFields = data.fieldCompleteness.filter((f: any) => f.isCritical);
-        const avgCritical = criticalFields.length > 0
-          ? Math.round(criticalFields.reduce((s: number, f: any) => s + f.fillRate, 0) / criticalFields.length)
-          : 100;
-        const worstFields = [...criticalFields]
-          .sort((a: any, b: any) => a.fillRate - b.fillRate)
-          .slice(0, 3)
-          .map((f: any) => `${f.field} ${f.fillRate}%`)
-          .join(', ');
+      // Handle data-quality-audit
+      if (skillId === 'data-quality-audit') {
+        const metrics = (context.stepResults as any).quality_metrics;
+        if (!metrics) return { summary: 'No quality metrics available.' };
 
-        const issueLines: string[] = [];
-        for (const [key, val] of Object.entries(data.issues)) {
-          if ((val as number) > 0) {
-            issueLines.push(`${key}: ${val}`);
+        const summarizeEntity = (entity: string, data: any) => {
+          const criticalFields = data.fieldCompleteness.filter((f: any) => f.isCritical);
+          const avgCritical = criticalFields.length > 0
+            ? Math.round(criticalFields.reduce((s: number, f: any) => s + f.fillRate, 0) / criticalFields.length)
+            : 100;
+          const worstFields = [...criticalFields]
+            .sort((a: any, b: any) => a.fillRate - b.fillRate)
+            .slice(0, 3)
+            .map((f: any) => `${f.field} ${f.fillRate}%`)
+            .join(', ');
+
+          const issueLines: string[] = [];
+          for (const [key, val] of Object.entries(data.issues)) {
+            if ((val as number) > 0) {
+              issueLines.push(`${key}: ${val}`);
+            }
           }
+          const issueStr = issueLines.length > 0 ? issueLines.join(', ') : 'none';
+
+          return `${entity}: ${data.total} records, ${avgCritical}% critical completeness (worst: ${worstFields}). Issues: ${issueStr}`;
+        };
+
+        const dealsSummary = summarizeEntity('Deals', metrics.byEntity.deals);
+        const contactsSummary = summarizeEntity('Contacts', metrics.byEntity.contacts);
+        const accountsSummary = summarizeEntity('Accounts', metrics.byEntity.accounts);
+
+        return {
+          entitySummaries: `${dealsSummary}\n${contactsSummary}\n${accountsSummary}`,
+        };
+      }
+
+      // Handle pipeline-coverage
+      if (skillId === 'pipeline-coverage') {
+        const coverageData = (context.stepResults as any).coverage_data;
+        const quotaConfig = (context.stepResults as any).quota_config;
+        const trend = (context.stepResults as any).coverage_trend;
+        const quality = (context.stepResults as any).pipeline_quality;
+        const riskClassifications = (context.stepResults as any).rep_risk_classifications;
+
+        if (!coverageData) return { summary: 'No coverage data available.' };
+
+        const team = coverageData.team;
+
+        // Quota note
+        let quotaNote = '';
+        if (quotaConfig.source === 'none') {
+          quotaNote = '⚠️ No quotas configured in context layer. Showing absolute pipeline numbers only. Configure quotas in goals_and_targets for coverage analysis.';
+        } else if (quotaConfig.source === 'revenue_target') {
+          quotaNote = `Using revenue target as team quota: $${(team.totalQuota || 0).toLocaleString()}`;
+        } else {
+          quotaNote = `Team quota: $${(team.totalQuota || 0).toLocaleString()} | Coverage target: ${team.coverageTarget}x`;
         }
-        const issueStr = issueLines.length > 0 ? issueLines.join(', ') : 'none';
 
-        return `${entity}: ${data.total} records, ${avgCritical}% critical completeness (worst: ${worstFields}). Issues: ${issueStr}`;
-      };
+        // Team summary
+        const coverageRatioStr = team.coverageRatio !== null ? `${team.coverageRatio.toFixed(1)}x` : 'N/A';
+        const gapStr = team.gap !== null ? `$${team.gap.toLocaleString()}` : 'N/A';
+        const weeklyGenStr = team.requiredWeeklyPipelineGen !== null ? `$${team.requiredWeeklyPipelineGen.toLocaleString()}` : 'N/A';
 
-      const dealsSummary = summarizeEntity('Deals', metrics.byEntity.deals);
-      const contactsSummary = summarizeEntity('Contacts', metrics.byEntity.contacts);
-      const accountsSummary = summarizeEntity('Accounts', metrics.byEntity.accounts);
+        const teamSummary = `Pipeline: $${team.totalPipeline.toLocaleString()} (${team.dealCount} deals, avg $${team.avgDealSize.toLocaleString()})
+Closed Won: $${team.closedWon.toLocaleString()}
+Coverage: ${coverageRatioStr} (target: ${team.coverageTarget}x)
+Gap to target: ${gapStr}
+Days in quarter: ${team.daysInQuarter} (${team.daysElapsed} elapsed, ${team.daysRemaining} remaining)
+Required weekly pipeline gen: ${weeklyGenStr}`;
+
+        // Rep table (limit to 15 reps)
+        const reps = coverageData.reps.slice(0, 15);
+        const repLines = reps.map((r: any) => {
+          const coverage = r.coverageRatio !== null ? r.coverageRatio.toFixed(1) + 'x' : 'N/A';
+          const quota = r.quota !== null ? `$${Math.round(r.quota / 1000)}K` : 'N/A';
+          const pipeline = `$${Math.round(r.pipeline / 1000)}K`;
+          const status = r.status;
+          const statusEmoji = status === 'on_track' ? '✅' : status === 'at_risk' ? '⚠️' : status === 'behind' ? '🔴' : '❓';
+          return `${statusEmoji} ${r.name} | ${pipeline} pipeline | ${coverage} coverage | Quota: ${quota}`;
+        });
+
+        const remainingCount = coverageData.reps.length - 15;
+        if (remainingCount > 0) {
+          repLines.push(`... and ${remainingCount} more reps`);
+        }
+
+        const repTable = repLines.join('\n');
+
+        // Quality flags
+        const qualityMap = new Map(quality.map((q: any) => [q.email, q]));
+        const earlyHeavyReps = coverageData.reps
+          .filter((r: any) => {
+            const q = qualityMap.get(r.email);
+            return q && q.qualityFlag === 'early_heavy';
+          })
+          .map((r: any) => r.name);
+
+        const qualityFlags = earlyHeavyReps.length > 0
+          ? `${earlyHeavyReps.length} reps have >70% of pipeline in early stages: ${earlyHeavyReps.join(', ')}`
+          : 'All reps have balanced stage distribution';
+
+        // Trend
+        let trendStr = '';
+        if (trend.isFirstRun) {
+          trendStr = 'First run — no previous data for comparison';
+        } else if (trend.repDeltas.length === 0) {
+          trendStr = 'No significant changes since last week';
+        } else {
+          const topChanges = trend.repDeltas
+            .sort((a: any, b: any) => Math.abs(b.coverageChange || 0) - Math.abs(a.coverageChange || 0))
+            .slice(0, 5);
+          const changeLines = topChanges.map((d: any) => {
+            const coverageChange = d.coverageChange !== null ? `${d.coverageChange > 0 ? '+' : ''}${d.coverageChange.toFixed(1)}x` : '';
+            const pipelineChange = `$${Math.round(d.pipelineChange / 1000)}K`;
+            return `${d.name}: ${coverageChange} coverage, ${pipelineChange} pipeline`;
+          });
+          trendStr = 'Week-over-week changes:\n' + changeLines.join('\n');
+        }
+
+        // Risk classifications
+        let riskStr = '';
+        if (riskClassifications.skipped) {
+          riskStr = 'No at-risk reps identified';
+        } else if (riskClassifications.classifications.length === 0) {
+          riskStr = 'All reps are on track';
+        } else {
+          const classLines = riskClassifications.classifications.map((c: any) => {
+            return `${c.name} (${c.risk_level}): ${c.root_cause} — ${c.recommended_intervention}`;
+          });
+          riskStr = classLines.join('\n');
+        }
+
+        return {
+          quotaNote,
+          teamSummary,
+          repTable,
+          qualityFlags,
+          trend: trendStr,
+          riskClassifications: riskStr,
+        };
+      }
+
+      return { summary: 'Unsupported skill for summarization' };
+    }, params);
+  },
+};
+
+const checkQuotaConfig: ToolDefinition = {
+  name: 'checkQuotaConfig',
+  description: 'Check workspace for quota configuration in context layer',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('checkQuotaConfig', async () => {
+      const goals = await getGoals(context.workspaceId);
+
+      const quotas = (goals as any).quotas;
+      const teamQuota = quotas?.team ?? null;
+      const repQuotas = quotas?.byRep ?? null;
+      const coverageTarget = (goals as any).pipeline_coverage_target ?? 3.0;
+      const revenueTarget = (goals as any).revenue_target ?? null;
+
+      const hasQuotas = teamQuota !== null || repQuotas !== null;
+      const hasRepQuotas = repQuotas !== null && Object.keys(repQuotas).length > 0;
+
+      let source: 'quotas' | 'revenue_target' | 'none';
+      if (hasQuotas) {
+        source = 'quotas';
+      } else if (revenueTarget !== null) {
+        source = 'revenue_target';
+      } else {
+        source = 'none';
+      }
 
       return {
-        entitySummaries: `${dealsSummary}\n${contactsSummary}\n${accountsSummary}`,
+        hasQuotas,
+        hasRepQuotas,
+        teamQuota,
+        repQuotas,
+        coverageTarget,
+        source,
       };
+    }, params);
+  },
+};
+
+const coverageByRepTool: ToolDefinition = {
+  name: 'coverageByRep',
+  description: 'Calculate pipeline coverage by rep for a quarter',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {
+      quarterStart: {
+        type: 'string',
+        description: 'Quarter start date (ISO format)',
+      },
+      quarterEnd: {
+        type: 'string',
+        description: 'Quarter end date (ISO format)',
+      },
+      quotas: {
+        type: 'object',
+        description: 'Optional quota configuration',
+      },
+      coverageTarget: {
+        type: 'number',
+        description: 'Coverage target multiple (default 3.0)',
+      },
+    },
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('coverageByRep', async () => {
+      // Auto-extract from step results if not provided
+      const timeWindows = (context.stepResults as any).time_windows;
+      const quotaConfig = (context.stepResults as any).quota_config;
+
+      const quarterStart = params.quarterStart
+        ? new Date(params.quarterStart)
+        : new Date(timeWindows.analysisRange.start);
+
+      const quarterEnd = params.quarterEnd
+        ? new Date(params.quarterEnd)
+        : new Date(timeWindows.analysisRange.end);
+
+      const quotas = params.quotas ?? quotaConfig;
+      const coverageTarget = params.coverageTarget ?? quotaConfig?.coverageTarget ?? 3.0;
+
+      return await coverageByRep(
+        context.workspaceId,
+        quarterStart,
+        quarterEnd,
+        quotas,
+        coverageTarget
+      );
+    }, params);
+  },
+};
+
+const coverageTrendTool: ToolDefinition = {
+  name: 'coverageTrend',
+  description: 'Compare current coverage to previous run',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('coverageTrend', async () => {
+      const currentCoverage = (context.stepResults as any).coverage_data;
+
+      // Load previous run
+      const previousRun = await query(
+        `SELECT result FROM skill_runs
+         WHERE workspace_id = $1 AND skill_id = 'pipeline-coverage' AND status = 'completed'
+         ORDER BY completed_at DESC
+         LIMIT 1`,
+        [context.workspaceId]
+      );
+
+      if (previousRun.rows.length === 0) {
+        return { isFirstRun: true, repDeltas: [] };
+      }
+
+      return await coverageTrend(
+        context.workspaceId,
+        currentCoverage.reps,
+        previousRun.rows[0].result
+      );
+    }, params);
+  },
+};
+
+const repPipelineQualityTool: ToolDefinition = {
+  name: 'repPipelineQuality',
+  description: 'Analyze stage distribution of each reps pipeline',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {
+      quarterStart: {
+        type: 'string',
+        description: 'Quarter start date (ISO format)',
+      },
+      quarterEnd: {
+        type: 'string',
+        description: 'Quarter end date (ISO format)',
+      },
+    },
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('repPipelineQuality', async () => {
+      const timeWindows = (context.stepResults as any).time_windows;
+
+      const quarterStart = params.quarterStart
+        ? new Date(params.quarterStart)
+        : new Date(timeWindows.analysisRange.start);
+
+      const quarterEnd = params.quarterEnd
+        ? new Date(params.quarterEnd)
+        : new Date(timeWindows.analysisRange.end);
+
+      return await repPipelineQuality(context.workspaceId, quarterStart, quarterEnd);
+    }, params);
+  },
+};
+
+const prepareAtRiskReps: ToolDefinition = {
+  name: 'prepareAtRiskReps',
+  description: 'Filter and prepare at-risk reps for DeepSeek classification',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('prepareAtRiskReps', async () => {
+      const coverageData = (context.stepResults as any).coverage_data;
+      const quality = (context.stepResults as any).pipeline_quality;
+      const trend = (context.stepResults as any).coverage_trend;
+
+      if (!coverageData?.reps) {
+        return [];
+      }
+
+      // Build quality and trend maps
+      const qualityMap = new Map(quality.map((q: any) => [q.email, q]));
+      const trendMap = new Map(
+        (trend.repDeltas || []).map((d: any) => [d.email, d])
+      );
+
+      // Filter at-risk reps
+      const atRiskReps = coverageData.reps
+        .filter((r: any) => {
+          const isAtRisk = r.status === 'at_risk' || r.status === 'behind';
+          const hasUnknownWithPipeline = r.status === 'unknown' && r.pipeline > 0;
+          return isAtRisk || hasUnknownWithPipeline;
+        })
+        .slice(0, 10) // Cap at 10 reps
+        .map((r: any) => {
+          const q = qualityMap.get(r.email);
+          const t = trendMap.get(r.email);
+
+          return {
+            name: r.name,
+            email: r.email,
+            quota: r.quota,
+            pipeline: r.pipeline,
+            coverageRatio: r.coverageRatio,
+            gap: r.gap,
+            status: r.status,
+            staleDeals: r.staleDeals,
+            staleDealValue: r.staleDealValue,
+            dealCount: r.dealCount,
+            qualityFlag: q?.qualityFlag || 'balanced',
+            earlyPct: q?.earlyPct || 0,
+            coverageChange: t?.coverageChange || null,
+            pipelineChange: t?.pipelineChange || 0,
+          };
+        });
+
+      return atRiskReps;
     }, params);
   },
 };
@@ -1491,6 +1837,11 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['gatherQualityTrend', gatherQualityTrend],
   ['enrichWorstOffenders', enrichWorstOffenders],
   ['summarizeForClaude', summarizeForClaude],
+  ['checkQuotaConfig', checkQuotaConfig],
+  ['coverageByRep', coverageByRepTool],
+  ['coverageTrend', coverageTrendTool],
+  ['repPipelineQuality', repPipelineQualityTool],
+  ['prepareAtRiskReps', prepareAtRiskReps],
 ]);
 
 // ============================================================================
