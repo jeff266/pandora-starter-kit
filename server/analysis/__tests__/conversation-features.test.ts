@@ -37,7 +37,7 @@ import { query } from '../../db.js';
 
 describe('conversation-features', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
   });
 
   describe('linkConversationsToDeals', () => {
@@ -56,6 +56,9 @@ describe('conversation-features', () => {
       } as any);
 
       // Fuzzy account query (none found)
+      vi.mocked(query).mockResolvedValueOnce({ rows: [] } as any);
+
+      // Fuzzy contact query (none found)
       vi.mocked(query).mockResolvedValueOnce({ rows: [] } as any);
 
       const result = await linkConversationsToDeals('workspace-1', ['deal-1', 'deal-2', 'deal-3']);

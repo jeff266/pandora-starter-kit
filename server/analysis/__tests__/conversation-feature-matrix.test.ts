@@ -115,7 +115,7 @@ describe('conversation-feature-matrix', () => {
 
       expect(result.has_conversation_data).toBe(true);
       expect(result.call_count).toBe(5);
-      expect(result.avg_duration_minutes).toBe(30);
+      expect(result.avg_call_duration_minutes).toBe(30);
       expect(result.avg_sentiment_score).toBe(0.6);
       expect(result.unique_participants).toBe(6);
       expect(result.champion_signal_count).toBe(1);

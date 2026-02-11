@@ -166,6 +166,7 @@ export async function linkConversationsToDeals(
 
   // Step 2: Fuzzy links via account_id (for deals without direct links)
   const dealsWithoutDirectLinks = dealIds.filter(id => !directMap.has(id));
+  let fuzzyAccountRows: { deal_id: string; conversation_ids: string[] }[] = [];
 
   if (dealsWithoutDirectLinks.length > 0) {
     const fuzzyAccountResult = await query<{ deal_id: string; conversation_ids: string[] }>(
@@ -182,7 +183,9 @@ export async function linkConversationsToDeals(
       [workspaceId, dealsWithoutDirectLinks]
     );
 
-    for (const row of fuzzyAccountResult.rows) {
+    fuzzyAccountRows = fuzzyAccountResult.rows;
+
+    for (const row of fuzzyAccountRows) {
       links.push({
         deal_id: row.deal_id,
         conversation_ids: row.conversation_ids,
@@ -194,11 +197,11 @@ export async function linkConversationsToDeals(
   // Step 3: Fuzzy links via contacts (for deals still without links)
   // This is more expensive, so only do it for deals that still need conversations
   const dealsStillWithoutLinks = dealsWithoutDirectLinks.filter(
-    id => !fuzzyAccountResult.rows.some(r => r.deal_id === id)
+    id => !fuzzyAccountRows.some(r => r.deal_id === id)
   );
+  let fuzzyContactRows: { deal_id: string; conversation_ids: string[] }[] = [];
 
   if (dealsStillWithoutLinks.length > 0) {
-    // Match conversations to deals via shared contact emails in participants
     const fuzzyContactResult = await query<{ deal_id: string; conversation_ids: string[] }>(
       `SELECT
          d.id as deal_id,
@@ -215,7 +218,9 @@ export async function linkConversationsToDeals(
       [workspaceId, dealsStillWithoutLinks]
     );
 
-    for (const row of fuzzyContactResult.rows) {
+    fuzzyContactRows = fuzzyContactResult.rows;
+
+    for (const row of fuzzyContactRows) {
       links.push({
         deal_id: row.deal_id,
         conversation_ids: row.conversation_ids,
@@ -228,8 +233,8 @@ export async function linkConversationsToDeals(
     workspaceId,
     totalDeals: dealIds.length,
     directLinks: directResult.rows.length,
-    fuzzyAccountLinks: fuzzyAccountResult.rows.length,
-    fuzzyContactLinks: fuzzyContactResult.rows.length,
+    fuzzyAccountLinks: fuzzyAccountRows.length,
+    fuzzyContactLinks: fuzzyContactRows.length,
   });
 
   return links;
