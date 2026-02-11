@@ -1,0 +1,182 @@
+✅ Forecast Roll-up Assessment Tools Ready                               
+                                                                           
+  Pushed to GitHub: 3 files, 638 lines                                     
+                                                                           
+  ---                                                                      
+  What I Created                                                           
+                                                                           
+  1. Automated Shell Script (scripts/assess-forecast-rollup.sh)            
+                                                                           
+  One-command assessment that captures everything:                         
+  ./scripts/assess-forecast-rollup.sh > FORECAST_ROLLUP_ASSESSMENT.md      
+                                                                           
+  Captures:                                                                
+  - Category distribution (commit/best_case/pipeline spread)               
+  - Quota status (does quota data exist?)                                  
+  - Recent skill runs (last 5 forecast runs)                               
+  - Latest skill result JSON and output text                               
+                                                                           
+  2. Manual SQL Queries (scripts/assess-forecast-rollup.sql)               
+                                                                           
+  Step-by-step queries if you prefer manual execution:                     
+  - 7 comprehensive queries                                                
+  - Covers all assessment areas                                            
+  - Includes analysis for each query                                       
+                                                                           
+  3. Assessment Template (FORECAST_ROLLUP_ASSESSMENT_TEMPLATE.md)          
+                                                                           
+  Structured report with:                                                  
+  - Placeholders for query results                                         
+  - Analysis criteria for each section                                     
+  - Red flags to watch for                                                 
+  - Production readiness checklist                                         
+                                                                           
+  ---                                                                      
+  How to Run on Replit                                                     
+                                                                           
+  Option A: Automated (Recommended)                                        
+                                                                           
+  # Pull the tools                                                         
+  git pull origin main                                                     
+                                                                           
+  # Make script executable                                                 
+  chmod +x scripts/assess-forecast-rollup.sh                               
+                                                                           
+  # Run assessment                                                         
+  ./scripts/assess-forecast-rollup.sh > FORECAST_ROLLUP_ASSESSMENT.md      
+                                                                           
+  # Review the report                                                      
+  cat FORECAST_ROLLUP_ASSESSMENT.md                                        
+                                                                           
+  # Push results to GitHub                                                 
+  git add FORECAST_ROLLUP_ASSESSMENT.md                                    
+  git commit -m "Forecast roll-up assessment results"                      
+  git push origin main                                                     
+                                                                           
+  Option B: Manual Queries                                                 
+                                                                           
+  # Pull the tools                                                         
+  git pull origin main                                                     
+                                                                           
+  # Run queries manually                                                   
+  psql $DATABASE_URL -f scripts/assess-forecast-rollup.sql                 
+                                                                           
+  # Copy FORECAST_ROLLUP_ASSESSMENT_TEMPLATE.md to                         
+  FORECAST_ROLLUP_ASSESSMENT.md                                            
+  cp FORECAST_ROLLUP_ASSESSMENT_TEMPLATE.md FORECAST_ROLLUP_ASSESSMENT.md  
+                                                                           
+  # Edit the file and paste query results into each section                
+  # Then push to GitHub                                                    
+                                                                           
+  ---                                                                      
+  What Gets Assessed                                                       
+                                                                           
+  1. Category Distribution (Query 1)                                       
+                                                                           
+  -- Shows how deals are spread across forecast categories                 
+  SELECT forecast_category, COUNT(*), SUM(amount), AVG(probability)        
+  FROM deals WHERE...                                                      
+                                                                           
+  Red Flags:                                                               
+  - 90%+ deals in ONE category → thresholds need adjustment                
+  - 0 commit deals but many best_case → commit threshold too high          
+  - 70%+ not_forecasted → stale deal cleanup needed                        
+                                                                           
+  2. Scenario Spread (From skill result JSON)                              
+                                                                           
+  Bear: $600K, Base: $700K, Bull: $800K                                    
+  Spread: ($800K - $600K) / $1M quota = 20%                                
+                                                                           
+  Red Flags:                                                               
+  - Spread < 10% → scenarios too homogeneous                               
+  - Bear ≈ Bull → category buckets have similar values                     
+                                                                           
+  3. By-Rep Breakdown (From skill result JSON)                             
+                                                                           
+  John Doe: on_track                                                       
+  Jane Smith: at_risk                                                      
+  Bob Johnson: off_track                                                   
+                                                                           
+  Red Flags:                                                               
+  - ALL reps same status → thresholds too loose/tight                      
+  - 80%+ "off_track" → thresholds too aggressive                           
+                                                                           
+  4. Week-over-Week Delta (Compare previous run)                           
+                                                                           
+  Commit: $90K → $100K (+$10K, +11%)                                       
+  3 deals moved from pipeline to best_case                                 
+                                                                           
+  Red Flags:                                                               
+  - All categories < 2% change → stagnant pipeline                         
+  - Commit decreased but closedWon didn't increase → slippage              
+                                                                           
+  5. Synthesized Output (Claude narrative)                                 
+                                                                           
+  # Forecast Roll-up: Week of Feb 11, 2026                                 
+  You're at 65% of quota...                                                
+                                                                           
+  Red Flags:                                                               
+  - Generic phrases without specifics                                      
+  - No actionable recommendations                                          
+  - No mention of specific reps/deals                                      
+                                                                           
+  6. Quota Status (Query 2)                                                
+                                                                           
+  SELECT COUNT(*) FROM quota_periods...                                    
+  SELECT COUNT(*) FROM rep_quotas...                                       
+                                                                           
+  Impact:                                                                  
+  - No quotas → Skill runs in degraded mode (no attainment %)              
+  - With quotas → Full insights ("John is at 85% of quota")                
+                                                                           
+  ---                                                                      
+  Production Readiness Criteria                                            
+                                                                           
+  The assessment will determine:                                           
+                                                                           
+  ✅ Production Ready if:                                                  
+  - Category distribution is reasonable (not 90% in one bucket)            
+  - Scenario spread is >= 10% (bear-bull range)                            
+  - Rep statuses are mixed (not all same)                                  
+  - Output narrative is specific and actionable                            
+  - Skill runs successfully in <30 seconds                                 
+                                                                           
+  🟡 Needs Tuning if:                                                      
+  - Thresholds need adjustment (commit threshold too high/low)             
+  - Bucket distribution is suboptimal                                      
+  - Works but output could be better                                       
+                                                                           
+  🔴 Not Ready if:                                                         
+  - Skill crashes or times out                                             
+  - Categories are heavily skewed                                          
+  - Output is generic filler                                               
+  - Data quality issues                                                    
+                                                                           
+  ---                                                                      
+  Expected Timeline                                                        
+                                                                           
+  1. Pull tools on Replit (1 min)                                          
+  2. Run assessment script (2 min) - captures all data                     
+  3. Review results (10 min) - analyze the output                          
+  4. Fill in template (5 min) - if using manual queries                    
+  5. Push to GitHub (1 min)                                                
+                                                                           
+  Total: ~20 minutes                                                       
+                                                                           
+  ---                                                                      
+  Next Steps                                                               
+                                                                           
+  1. Pull the assessment tools on Replit:                                  
+  cd ~/workspace                                                           
+  git pull origin main                                                     
+  2. Run the assessment:                                                   
+  chmod +x scripts/assess-forecast-rollup.sh                               
+  ./scripts/assess-forecast-rollup.sh > FORECAST_ROLLUP_ASSESSMENT.md      
+  3. Review and push results:                                              
+  cat FORECAST_ROLLUP_ASSESSMENT.md  # Review the report                   
+  git add FORECAST_ROLLUP_ASSESSMENT.md                                    
+  git commit -m "Forecast roll-up assessment results"                      
+  git push origin main                                                     
+                                                                           
+  Once you push the completed assessment, I'll review it and tell you      
+  whether the skill is production-ready or what tuning is needed! 
