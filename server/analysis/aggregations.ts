@@ -703,3 +703,502 @@ export async function enrichCriticalDeals(
     mostRecentActivityDate: row.most_recent_activity_date || null,
   }));
 }
+
+// ============================================================================
+// Data Quality Audit
+// ============================================================================
+
+interface FieldCompleteness {
+  field: string;
+  filled: number;
+  total: number;
+  fillRate: number;
+  isCritical: boolean;
+}
+
+interface EntityQualityMetrics {
+  total: number;
+  fieldCompleteness: FieldCompleteness[];
+  issues: Record<string, number>;
+}
+
+interface WorstOffender {
+  entity: 'deal' | 'contact' | 'account';
+  id: string;
+  name: string;
+  owner: string;
+  missingFields: string[];
+  completeness: number;
+  impact: 'high' | 'medium' | 'low';
+}
+
+interface OwnerQualityBreakdown {
+  owner: string;
+  totalRecords: number;
+  avgCompleteness: number;
+  criticalIssues: number;
+}
+
+export interface DataQualityAudit {
+  overall: {
+    totalRecords: number;
+    overallCompleteness: number;
+    criticalFieldCompleteness: number;
+  };
+  byEntity: {
+    deals: EntityQualityMetrics;
+    contacts: EntityQualityMetrics;
+    accounts: EntityQualityMetrics;
+  };
+  worstOffenders: WorstOffender[];
+  ownerBreakdown: OwnerQualityBreakdown[];
+}
+
+export async function dataQualityAudit(workspaceId: string): Promise<DataQualityAudit> {
+  // Critical fields defaults (TODO: check context layer for quality_critical_fields)
+  const criticalFields = {
+    deals: ['amount', 'stage', 'close_date', 'owner', 'account_id'],
+    contacts: ['email', 'first_name', 'last_name', 'account_id'],
+    accounts: ['name', 'domain'],
+  };
+
+  // ===== DEALS ANALYSIS =====
+  const dealsFieldStats = await query(`
+    SELECT
+      COUNT(*) as total,
+      COUNT(amount) as amount_filled,
+      COUNT(stage_normalized) as stage_filled,
+      COUNT(close_date) as close_date_filled,
+      COUNT(owner) as owner_filled,
+      COUNT(account_id) as account_id_filled,
+      COUNT(name) as name_filled
+    FROM deals
+    WHERE workspace_id = $1
+  `, [workspaceId]);
+
+  const dealsIssues = await query(`
+    SELECT
+      COUNT(*) FILTER (WHERE amount IS NULL) as missing_amount,
+      COUNT(*) FILTER (WHERE close_date IS NULL) as missing_close_date,
+      COUNT(*) FILTER (WHERE owner IS NULL) as missing_owner,
+      COUNT(*) FILTER (WHERE stage_normalized IS NULL) as missing_stage,
+      COUNT(*) FILTER (WHERE account_id IS NULL) as missing_account,
+      COUNT(*) FILTER (WHERE amount = 0 OR amount IS NULL AND (stage_normalized IS NULL OR stage_normalized NOT IN ('closed_won', 'closed_lost'))) as zero_amount,
+      COUNT(*) FILTER (WHERE close_date < CURRENT_DATE AND (stage_normalized IS NULL OR stage_normalized NOT IN ('closed_won', 'closed_lost'))) as close_date_in_past,
+      (
+        SELECT COUNT(*)
+        FROM (
+          SELECT LOWER(name), account_id, COUNT(*) as cnt
+          FROM deals
+          WHERE workspace_id = $1 AND account_id IS NOT NULL
+          GROUP BY LOWER(name), account_id
+          HAVING COUNT(*) > 1
+        ) dupes
+      ) as duplicate_suspects
+    FROM deals
+    WHERE workspace_id = $1
+  `, [workspaceId]);
+
+  const dealsTotal = parseInt(dealsFieldStats.rows[0].total, 10) || 0;
+  const dealsFieldCompleteness: FieldCompleteness[] = [
+    {
+      field: 'amount',
+      filled: parseInt(dealsFieldStats.rows[0].amount_filled, 10) || 0,
+      total: dealsTotal,
+      fillRate: dealsTotal > 0 ? Math.round(((parseInt(dealsFieldStats.rows[0].amount_filled, 10) || 0) / dealsTotal) * 100) : 0,
+      isCritical: criticalFields.deals.includes('amount'),
+    },
+    {
+      field: 'stage',
+      filled: parseInt(dealsFieldStats.rows[0].stage_filled, 10) || 0,
+      total: dealsTotal,
+      fillRate: dealsTotal > 0 ? Math.round(((parseInt(dealsFieldStats.rows[0].stage_filled, 10) || 0) / dealsTotal) * 100) : 0,
+      isCritical: criticalFields.deals.includes('stage'),
+    },
+    {
+      field: 'close_date',
+      filled: parseInt(dealsFieldStats.rows[0].close_date_filled, 10) || 0,
+      total: dealsTotal,
+      fillRate: dealsTotal > 0 ? Math.round(((parseInt(dealsFieldStats.rows[0].close_date_filled, 10) || 0) / dealsTotal) * 100) : 0,
+      isCritical: criticalFields.deals.includes('close_date'),
+    },
+    {
+      field: 'owner',
+      filled: parseInt(dealsFieldStats.rows[0].owner_filled, 10) || 0,
+      total: dealsTotal,
+      fillRate: dealsTotal > 0 ? Math.round(((parseInt(dealsFieldStats.rows[0].owner_filled, 10) || 0) / dealsTotal) * 100) : 0,
+      isCritical: criticalFields.deals.includes('owner'),
+    },
+    {
+      field: 'account_id',
+      filled: parseInt(dealsFieldStats.rows[0].account_id_filled, 10) || 0,
+      total: dealsTotal,
+      fillRate: dealsTotal > 0 ? Math.round(((parseInt(dealsFieldStats.rows[0].account_id_filled, 10) || 0) / dealsTotal) * 100) : 0,
+      isCritical: criticalFields.deals.includes('account_id'),
+    },
+    {
+      field: 'name',
+      filled: parseInt(dealsFieldStats.rows[0].name_filled, 10) || 0,
+      total: dealsTotal,
+      fillRate: dealsTotal > 0 ? Math.round(((parseInt(dealsFieldStats.rows[0].name_filled, 10) || 0) / dealsTotal) * 100) : 0,
+      isCritical: false,
+    },
+  ];
+
+  // ===== CONTACTS ANALYSIS =====
+  const contactsFieldStats = await query(`
+    SELECT
+      COUNT(*) as total,
+      COUNT(email) as email_filled,
+      COUNT(first_name) as first_name_filled,
+      COUNT(last_name) as last_name_filled,
+      COUNT(title) as title_filled,
+      COUNT(account_id) as account_id_filled
+    FROM contacts
+    WHERE workspace_id = $1
+  `, [workspaceId]);
+
+  const contactsIssues = await query(`
+    SELECT
+      COUNT(*) FILTER (WHERE email IS NULL) as missing_email,
+      COUNT(*) FILTER (WHERE first_name IS NULL AND last_name IS NULL) as missing_name,
+      COUNT(*) FILTER (WHERE title IS NULL) as missing_title,
+      COUNT(*) FILTER (WHERE account_id IS NULL) as missing_account,
+      (
+        SELECT COUNT(*)
+        FROM (
+          SELECT email, COUNT(*) as cnt
+          FROM contacts
+          WHERE workspace_id = $1 AND email IS NOT NULL
+          GROUP BY email
+          HAVING COUNT(*) > 1
+        ) dupes
+      ) as duplicate_suspects
+    FROM contacts
+    WHERE workspace_id = $1
+  `, [workspaceId]);
+
+  const contactsTotal = parseInt(contactsFieldStats.rows[0].total, 10) || 0;
+  const contactsFieldCompleteness: FieldCompleteness[] = [
+    {
+      field: 'email',
+      filled: parseInt(contactsFieldStats.rows[0].email_filled, 10) || 0,
+      total: contactsTotal,
+      fillRate: contactsTotal > 0 ? Math.round(((parseInt(contactsFieldStats.rows[0].email_filled, 10) || 0) / contactsTotal) * 100) : 0,
+      isCritical: criticalFields.contacts.includes('email'),
+    },
+    {
+      field: 'first_name',
+      filled: parseInt(contactsFieldStats.rows[0].first_name_filled, 10) || 0,
+      total: contactsTotal,
+      fillRate: contactsTotal > 0 ? Math.round(((parseInt(contactsFieldStats.rows[0].first_name_filled, 10) || 0) / contactsTotal) * 100) : 0,
+      isCritical: criticalFields.contacts.includes('first_name'),
+    },
+    {
+      field: 'last_name',
+      filled: parseInt(contactsFieldStats.rows[0].last_name_filled, 10) || 0,
+      total: contactsTotal,
+      fillRate: contactsTotal > 0 ? Math.round(((parseInt(contactsFieldStats.rows[0].last_name_filled, 10) || 0) / contactsTotal) * 100) : 0,
+      isCritical: criticalFields.contacts.includes('last_name'),
+    },
+    {
+      field: 'title',
+      filled: parseInt(contactsFieldStats.rows[0].title_filled, 10) || 0,
+      total: contactsTotal,
+      fillRate: contactsTotal > 0 ? Math.round(((parseInt(contactsFieldStats.rows[0].title_filled, 10) || 0) / contactsTotal) * 100) : 0,
+      isCritical: false,
+    },
+    {
+      field: 'account_id',
+      filled: parseInt(contactsFieldStats.rows[0].account_id_filled, 10) || 0,
+      total: contactsTotal,
+      fillRate: contactsTotal > 0 ? Math.round(((parseInt(contactsFieldStats.rows[0].account_id_filled, 10) || 0) / contactsTotal) * 100) : 0,
+      isCritical: criticalFields.contacts.includes('account_id'),
+    },
+  ];
+
+  // ===== ACCOUNTS ANALYSIS =====
+  const accountsFieldStats = await query(`
+    SELECT
+      COUNT(*) as total,
+      COUNT(name) as name_filled,
+      COUNT(domain) as domain_filled,
+      COUNT(industry) as industry_filled,
+      COUNT(employee_count) as employee_count_filled,
+      COUNT(owner) as owner_filled
+    FROM accounts
+    WHERE workspace_id = $1
+  `, [workspaceId]);
+
+  const accountsIssues = await query(`
+    SELECT
+      COUNT(*) FILTER (WHERE domain IS NULL) as missing_domain,
+      COUNT(*) FILTER (WHERE industry IS NULL) as missing_industry,
+      (
+        SELECT COUNT(*)
+        FROM accounts a
+        WHERE a.workspace_id = $1
+          AND NOT EXISTS (
+            SELECT 1 FROM deals d WHERE d.account_id = a.id AND d.workspace_id = $1
+          )
+      ) as no_deals,
+      (
+        SELECT COUNT(*)
+        FROM accounts a
+        WHERE a.workspace_id = $1
+          AND NOT EXISTS (
+            SELECT 1 FROM contacts c WHERE c.account_id = a.id AND c.workspace_id = $1
+          )
+      ) as no_contacts
+    FROM accounts
+    WHERE workspace_id = $1
+  `, [workspaceId]);
+
+  const accountsTotal = parseInt(accountsFieldStats.rows[0].total, 10) || 0;
+  const accountsFieldCompleteness: FieldCompleteness[] = [
+    {
+      field: 'name',
+      filled: parseInt(accountsFieldStats.rows[0].name_filled, 10) || 0,
+      total: accountsTotal,
+      fillRate: accountsTotal > 0 ? Math.round(((parseInt(accountsFieldStats.rows[0].name_filled, 10) || 0) / accountsTotal) * 100) : 0,
+      isCritical: criticalFields.accounts.includes('name'),
+    },
+    {
+      field: 'domain',
+      filled: parseInt(accountsFieldStats.rows[0].domain_filled, 10) || 0,
+      total: accountsTotal,
+      fillRate: accountsTotal > 0 ? Math.round(((parseInt(accountsFieldStats.rows[0].domain_filled, 10) || 0) / accountsTotal) * 100) : 0,
+      isCritical: criticalFields.accounts.includes('domain'),
+    },
+    {
+      field: 'industry',
+      filled: parseInt(accountsFieldStats.rows[0].industry_filled, 10) || 0,
+      total: accountsTotal,
+      fillRate: accountsTotal > 0 ? Math.round(((parseInt(accountsFieldStats.rows[0].industry_filled, 10) || 0) / accountsTotal) * 100) : 0,
+      isCritical: false,
+    },
+    {
+      field: 'employee_count',
+      filled: parseInt(accountsFieldStats.rows[0].employee_count_filled, 10) || 0,
+      total: accountsTotal,
+      fillRate: accountsTotal > 0 ? Math.round(((parseInt(accountsFieldStats.rows[0].employee_count_filled, 10) || 0) / accountsTotal) * 100) : 0,
+      isCritical: false,
+    },
+    {
+      field: 'owner',
+      filled: parseInt(accountsFieldStats.rows[0].owner_filled, 10) || 0,
+      total: accountsTotal,
+      fillRate: accountsTotal > 0 ? Math.round(((parseInt(accountsFieldStats.rows[0].owner_filled, 10) || 0) / accountsTotal) * 100) : 0,
+      isCritical: false,
+    },
+  ];
+
+  // ===== WORST OFFENDERS =====
+  const worstOffendersResult = await query(`
+    SELECT * FROM (
+      -- Deals with missing critical fields
+      SELECT
+        'deal' as entity,
+        d.id::text,
+        d.name as record_name,
+        COALESCE(d.owner, 'Unassigned') as owner,
+        d.amount,
+        ARRAY_REMOVE(ARRAY[
+          CASE WHEN d.amount IS NULL THEN 'amount' END,
+          CASE WHEN d.stage_normalized IS NULL THEN 'stage' END,
+          CASE WHEN d.close_date IS NULL THEN 'close_date' END,
+          CASE WHEN d.owner IS NULL THEN 'owner' END,
+          CASE WHEN d.account_id IS NULL THEN 'account_id' END
+        ], NULL) as missing_fields,
+        (5 - (
+          CASE WHEN d.amount IS NULL THEN 1 ELSE 0 END +
+          CASE WHEN d.stage_normalized IS NULL THEN 1 ELSE 0 END +
+          CASE WHEN d.close_date IS NULL THEN 1 ELSE 0 END +
+          CASE WHEN d.owner IS NULL THEN 1 ELSE 0 END +
+          CASE WHEN d.account_id IS NULL THEN 1 ELSE 0 END
+        )) * 20 as completeness,
+        CASE
+          WHEN d.amount > 50000 THEN 'high'
+          WHEN d.amount > 10000 THEN 'medium'
+          ELSE 'low'
+        END as impact
+      FROM deals d
+      WHERE d.workspace_id = $1
+        AND (d.amount IS NULL OR d.stage_normalized IS NULL OR d.close_date IS NULL
+             OR d.owner IS NULL OR d.account_id IS NULL)
+
+      UNION ALL
+
+      -- Contacts with missing critical fields
+      SELECT
+        'contact' as entity,
+        c.id::text,
+        COALESCE(c.email, c.first_name || ' ' || c.last_name, 'Unnamed') as record_name,
+        'N/A' as owner,
+        0 as amount,
+        ARRAY_REMOVE(ARRAY[
+          CASE WHEN c.email IS NULL THEN 'email' END,
+          CASE WHEN c.first_name IS NULL THEN 'first_name' END,
+          CASE WHEN c.last_name IS NULL THEN 'last_name' END,
+          CASE WHEN c.account_id IS NULL THEN 'account_id' END
+        ], NULL) as missing_fields,
+        (4 - (
+          CASE WHEN c.email IS NULL THEN 1 ELSE 0 END +
+          CASE WHEN c.first_name IS NULL THEN 1 ELSE 0 END +
+          CASE WHEN c.last_name IS NULL THEN 1 ELSE 0 END +
+          CASE WHEN c.account_id IS NULL THEN 1 ELSE 0 END
+        )) * 25 as completeness,
+        'medium' as impact
+      FROM contacts c
+      WHERE c.workspace_id = $1
+        AND (c.email IS NULL OR c.first_name IS NULL OR c.last_name IS NULL OR c.account_id IS NULL)
+
+      UNION ALL
+
+      -- Accounts with missing critical fields
+      SELECT
+        'account' as entity,
+        a.id::text,
+        COALESCE(a.name, 'Unnamed') as record_name,
+        'N/A' as owner,
+        0 as amount,
+        ARRAY_REMOVE(ARRAY[
+          CASE WHEN a.name IS NULL THEN 'name' END,
+          CASE WHEN a.domain IS NULL THEN 'domain' END
+        ], NULL) as missing_fields,
+        (2 - (
+          CASE WHEN a.name IS NULL THEN 1 ELSE 0 END +
+          CASE WHEN a.domain IS NULL THEN 1 ELSE 0 END
+        )) * 50 as completeness,
+        'medium' as impact
+      FROM accounts a
+      WHERE a.workspace_id = $1
+        AND (a.name IS NULL OR a.domain IS NULL)
+    ) all_offenders
+    ORDER BY
+      CASE impact WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+      completeness ASC,
+      amount DESC
+    LIMIT 20
+  `, [workspaceId]);
+
+  const worstOffenders: WorstOffender[] = worstOffendersResult.rows.map((row: any) => ({
+    entity: row.entity,
+    id: row.id,
+    name: row.record_name || 'Unnamed',
+    owner: row.owner || 'Unassigned',
+    missingFields: row.missing_fields || [],
+    completeness: parseInt(row.completeness, 10) || 0,
+    impact: row.impact,
+  }));
+
+  // ===== OWNER BREAKDOWN =====
+  const ownerBreakdownResult = await query(`
+    SELECT
+      owner,
+      total_records,
+      critical_issues,
+      CASE
+        WHEN total_records > 0 THEN ROUND(((total_records - critical_issues)::numeric / total_records) * 100)
+        ELSE 100
+      END as avg_completeness
+    FROM (
+      SELECT
+        COALESCE(owner, 'Unassigned') as owner,
+        COUNT(*) as total_records,
+        SUM(
+          CASE WHEN amount IS NULL THEN 1 ELSE 0 END +
+          CASE WHEN stage_normalized IS NULL THEN 1 ELSE 0 END +
+          CASE WHEN close_date IS NULL THEN 1 ELSE 0 END +
+          CASE WHEN account_id IS NULL THEN 1 ELSE 0 END
+        ) as critical_issues
+      FROM deals
+      WHERE workspace_id = $1
+      GROUP BY owner
+    ) owner_stats
+    ORDER BY critical_issues DESC, total_records DESC
+  `, [workspaceId]);
+
+  const ownerBreakdown: OwnerQualityBreakdown[] = ownerBreakdownResult.rows.map((row: any) => ({
+    owner: row.owner || 'Unassigned',
+    totalRecords: parseInt(row.total_records, 10) || 0,
+    avgCompleteness: parseInt(row.avg_completeness, 10) || 0,
+    criticalIssues: parseInt(row.critical_issues, 10) || 0,
+  }));
+
+  // ===== OVERALL METRICS =====
+  const totalRecords = dealsTotal + contactsTotal + accountsTotal;
+
+  // Calculate overall completeness (weighted average across all fields)
+  const dealsCriticalCompleteness = dealsFieldCompleteness
+    .filter(f => f.isCritical)
+    .reduce((sum, f) => sum + f.fillRate, 0) / dealsFieldCompleteness.filter(f => f.isCritical).length;
+
+  const contactsCriticalCompleteness = contactsFieldCompleteness
+    .filter(f => f.isCritical)
+    .reduce((sum, f) => sum + f.fillRate, 0) / contactsFieldCompleteness.filter(f => f.isCritical).length;
+
+  const accountsCriticalCompleteness = accountsFieldCompleteness
+    .filter(f => f.isCritical)
+    .reduce((sum, f) => sum + f.fillRate, 0) / accountsFieldCompleteness.filter(f => f.isCritical).length;
+
+  const criticalFieldCompleteness = Math.round(
+    (dealsCriticalCompleteness + contactsCriticalCompleteness + accountsCriticalCompleteness) / 3
+  );
+
+  const allFieldsCompleteness = [
+    ...dealsFieldCompleteness,
+    ...contactsFieldCompleteness,
+    ...accountsFieldCompleteness,
+  ];
+  const overallCompleteness = Math.round(
+    allFieldsCompleteness.reduce((sum, f) => sum + f.fillRate, 0) / allFieldsCompleteness.length
+  );
+
+  return {
+    overall: {
+      totalRecords,
+      overallCompleteness,
+      criticalFieldCompleteness,
+    },
+    byEntity: {
+      deals: {
+        total: dealsTotal,
+        fieldCompleteness: dealsFieldCompleteness,
+        issues: {
+          missingAmount: parseInt(dealsIssues.rows[0].missing_amount, 10) || 0,
+          missingCloseDate: parseInt(dealsIssues.rows[0].missing_close_date, 10) || 0,
+          missingOwner: parseInt(dealsIssues.rows[0].missing_owner, 10) || 0,
+          missingStage: parseInt(dealsIssues.rows[0].missing_stage, 10) || 0,
+          missingAccount: parseInt(dealsIssues.rows[0].missing_account, 10) || 0,
+          zeroAmount: parseInt(dealsIssues.rows[0].zero_amount, 10) || 0,
+          closeDateInPast: parseInt(dealsIssues.rows[0].close_date_in_past, 10) || 0,
+          duplicateSuspects: parseInt(dealsIssues.rows[0].duplicate_suspects, 10) || 0,
+        },
+      },
+      contacts: {
+        total: contactsTotal,
+        fieldCompleteness: contactsFieldCompleteness,
+        issues: {
+          missingEmail: parseInt(contactsIssues.rows[0].missing_email, 10) || 0,
+          missingName: parseInt(contactsIssues.rows[0].missing_name, 10) || 0,
+          missingTitle: parseInt(contactsIssues.rows[0].missing_title, 10) || 0,
+          missingAccount: parseInt(contactsIssues.rows[0].missing_account, 10) || 0,
+          duplicateSuspects: parseInt(contactsIssues.rows[0].duplicate_suspects, 10) || 0,
+        },
+      },
+      accounts: {
+        total: accountsTotal,
+        fieldCompleteness: accountsFieldCompleteness,
+        issues: {
+          missingDomain: parseInt(accountsIssues.rows[0].missing_domain, 10) || 0,
+          missingIndustry: parseInt(accountsIssues.rows[0].missing_industry, 10) || 0,
+          noDeals: parseInt(accountsIssues.rows[0].no_deals, 10) || 0,
+          noContacts: parseInt(accountsIssues.rows[0].no_contacts, 10) || 0,
+        },
+      },
+    },
+    worstOffenders,
+    ownerBreakdown,
+  };
+}

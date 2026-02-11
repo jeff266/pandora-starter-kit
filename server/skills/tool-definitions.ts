@@ -30,8 +30,10 @@ import {
   comparePeriods,
   dealThreadingAnalysis,
   enrichCriticalDeals,
+  dataQualityAudit,
   type TimeConfig,
   type TimeWindows,
+  type DataQualityAudit,
 } from '../analysis/aggregations.js';
 import {
   getBusinessContext as fetchBusinessContext,
@@ -1192,6 +1194,205 @@ const enrichCriticalDealsTool: ToolDefinition = {
   },
 };
 
+const dataQualityAuditTool: ToolDefinition = {
+  name: 'dataQualityAudit',
+  description: 'Run a comprehensive data quality audit across deals, contacts, and accounts.',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('dataQualityAudit', async () => {
+      const [qualityData, nameMap] = await Promise.all([
+        dataQualityAudit(context.workspaceId),
+        resolveOwnerNames(context.workspaceId),
+      ]);
+
+      // Map owner IDs to names in owner breakdown
+      const mapOwner = (owner: string) => resolveOwnerName(owner, nameMap);
+
+      return {
+        ...qualityData,
+        ownerBreakdown: qualityData.ownerBreakdown.map(ob => ({
+          ...ob,
+          owner: mapOwner(ob.owner),
+        })),
+        worstOffenders: qualityData.worstOffenders.map(wo => ({
+          ...wo,
+          owner: mapOwner(wo.owner),
+        })),
+      };
+    }, params);
+  },
+};
+
+const gatherQualityTrend: ToolDefinition = {
+  name: 'gatherQualityTrend',
+  description: 'Compare current data quality metrics against the previous audit run to identify trends.',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('gatherQualityTrend', async () => {
+      // Load previous run's result from skill_runs table
+      const previousRun = await query(
+        `SELECT result FROM skill_runs
+         WHERE workspace_id = $1 AND skill_id = 'data-quality-audit' AND status = 'completed'
+         ORDER BY completed_at DESC
+         LIMIT 1`,
+        [context.workspaceId]
+      );
+
+      if (previousRun.rows.length === 0) {
+        return { isFirstRun: true };
+      }
+
+      const previousResult = previousRun.rows[0].result;
+      const currentMetrics = (context.stepResults as any).quality_metrics;
+
+      if (!previousResult?.quality_metrics || !currentMetrics) {
+        return { isFirstRun: true };
+      }
+
+      const prev = previousResult.quality_metrics;
+      const curr = currentMetrics;
+
+      const overallDelta = curr.overall.overallCompleteness - prev.overall.overallCompleteness;
+      const criticalDelta = curr.overall.criticalFieldCompleteness - prev.overall.criticalFieldCompleteness;
+
+      // Compare field fill rates
+      const improved: Array<{ entity: string; field: string; delta: number }> = [];
+      const declined: Array<{ entity: string; field: string; delta: number }> = [];
+
+      for (const entity of ['deals', 'contacts', 'accounts'] as const) {
+        const prevFields = prev.byEntity[entity].fieldCompleteness;
+        const currFields = curr.byEntity[entity].fieldCompleteness;
+
+        for (const currField of currFields) {
+          const prevField = prevFields.find((f: any) => f.field === currField.field);
+          if (prevField) {
+            const delta = currField.fillRate - prevField.fillRate;
+            if (delta > 0) {
+              improved.push({ entity, field: currField.field, delta });
+            } else if (delta < 0) {
+              declined.push({ entity, field: currField.field, delta });
+            }
+          }
+        }
+      }
+
+      // Calculate net change in total issues
+      const prevIssues = Object.values(prev.byEntity.deals.issues).reduce((a: number, b: any) => a + b, 0) +
+                         Object.values(prev.byEntity.contacts.issues).reduce((a: number, b: any) => a + b, 0) +
+                         Object.values(prev.byEntity.accounts.issues).reduce((a: number, b: any) => a + b, 0);
+      const currIssues = Object.values(curr.byEntity.deals.issues).reduce((a: number, b: any) => a + b, 0) +
+                         Object.values(curr.byEntity.contacts.issues).reduce((a: number, b: any) => a + b, 0) +
+                         Object.values(curr.byEntity.accounts.issues).reduce((a: number, b: any) => a + b, 0);
+      const newIssuesDelta = currIssues - prevIssues;
+
+      return {
+        isFirstRun: false,
+        overallDelta: Math.round(overallDelta),
+        criticalDelta: Math.round(criticalDelta),
+        improved: improved.sort((a, b) => b.delta - a.delta),
+        declined: declined.sort((a, b) => a.delta - b.delta),
+        newIssuesDelta,
+      };
+    }, params);
+  },
+};
+
+const enrichWorstOffenders: ToolDefinition = {
+  name: 'enrichWorstOffenders',
+  description: 'Enrich worst offender records with additional context (deal close dates, contact deal counts, account value).',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('enrichWorstOffenders', async () => {
+      const qualityMetrics = (context.stepResults as any).quality_metrics;
+      if (!qualityMetrics?.worstOffenders) {
+        return [];
+      }
+
+      const worstOffenders = qualityMetrics.worstOffenders.slice(0, 20);
+
+      // Enrich each offender with contextual data
+      const enriched = await Promise.all(
+        worstOffenders.map(async (offender: any) => {
+          if (offender.entity === 'deal') {
+            // Add days_until_close, stage, forecast status
+            const dealResult = await query(
+              `SELECT close_date, stage_normalized, amount
+               FROM deals
+               WHERE id = $1 AND workspace_id = $2`,
+              [offender.id, context.workspaceId]
+            );
+
+            if (dealResult.rows.length > 0) {
+              const deal = dealResult.rows[0];
+              const closeDate = deal.close_date ? new Date(deal.close_date) : null;
+              const daysUntilClose = closeDate
+                ? Math.floor((closeDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+                : null;
+
+              return {
+                ...offender,
+                daysUntilClose,
+                stage: deal.stage_normalized || 'Unknown',
+                inCommitForecast: daysUntilClose !== null && daysUntilClose <= 30,
+              };
+            }
+          } else if (offender.entity === 'contact') {
+            // Add number of associated deals
+            const dealsResult = await query(
+              `SELECT COUNT(*) as deal_count
+               FROM deals d
+               WHERE d.contact_id = $1 AND d.workspace_id = $2`,
+              [offender.id, context.workspaceId]
+            );
+
+            return {
+              ...offender,
+              associatedDeals: parseInt(dealsResult.rows[0]?.deal_count, 10) || 0,
+            };
+          } else if (offender.entity === 'account') {
+            // Add total deal value and contact count
+            const accountResult = await query(
+              `SELECT
+                 COALESCE(SUM(d.amount), 0) as total_deal_value,
+                 (SELECT COUNT(*) FROM contacts c WHERE c.account_id = $1 AND c.workspace_id = $2) as contact_count
+               FROM deals d
+               WHERE d.account_id = $1 AND d.workspace_id = $2`,
+              [offender.id, context.workspaceId]
+            );
+
+            if (accountResult.rows.length > 0) {
+              return {
+                ...offender,
+                totalDealValue: Math.round(parseFloat(accountResult.rows[0].total_deal_value) || 0),
+                contactCount: parseInt(accountResult.rows[0].contact_count, 10) || 0,
+              };
+            }
+          }
+
+          return offender;
+        })
+      );
+
+      return enriched;
+    }, params);
+  },
+};
+
 // ============================================================================
 // Tool Registry
 // ============================================================================
@@ -1237,6 +1438,9 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['calculateOutputBudget', calculateOutputBudget],
   ['dealThreadingAnalysis', dealThreadingAnalysisTool],
   ['enrichCriticalDeals', enrichCriticalDealsTool],
+  ['dataQualityAudit', dataQualityAuditTool],
+  ['gatherQualityTrend', gatherQualityTrend],
+  ['enrichWorstOffenders', enrichWorstOffenders],
 ]);
 
 // ============================================================================
