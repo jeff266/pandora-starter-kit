@@ -1,0 +1,33 @@
+What Was Pushed                                                   
+                                                                    
+  Commit: 9b3ae10 - Add conversation intelligence for ICP Discovery 
+                                                                    
+  13 files changed, 5,492 insertions (+5,490 net)                   
+                                                                    
+  Core Implementation (4 files, ~2,000 lines)                       
+                                                                    
+  - conversation-features.ts - Linking, aggregation, coverage       
+  calculation                                                       
+  - conversation-classifier.ts - DeepSeek classification &          
+  aggregation                                                       
+  - conversation-feature-matrix.ts - Feature columns & importance   
+  analysis                                                          
+  - conversation-intelligence-demo.ts - Working demo with mock data 
+                                                                    
+  Tests (4 files, ~1,200 lines)                                     
+                                                                    
+  - conversation-features.test.ts - 15+ tests                       
+  - conversation-classifier.test.ts - 12+ tests                     
+  - conversation-feature-matrix.test.ts - 20+ tests                 
+  - __tests__/README.md - Test documentation                        
+                                                                    
+  Documentation (3 files, ~2,000 lines)                             
+                                                                    
+  - CONVERSATION_INTELLIGENCE_README.md - Complete usage guide      
+  - CONVERSATION_INTELLIGENCE_SUMMARY.md - Implementation overview  
+  - TEST_IMPLEMENTATION_SUMMARY.md - Test coverage details          
+                                                                    
+  Configuration (2 files)                                           
+                                                                    
+  - vitest.config.ts - Test runner setup                            
+  - package.json - Added test scripts & dependencies  
