@@ -133,7 +133,7 @@ router.get("/callback", async (req: Request, res: Response) => {
       let workspaceId: string;
       if (workspaceResult.rows.length === 0) {
         const createResult = await query(
-          `INSERT INTO workspaces (name, settings) VALUES ('Imubit', '{}') RETURNING id`
+          `INSERT INTO workspaces (name, slug, settings) VALUES ('Imubit', 'imubit', '{}') RETURNING id`
         );
         workspaceId = createResult.rows[0].id;
       } else {
@@ -153,8 +153,13 @@ router.get("/callback", async (req: Request, res: Response) => {
       );
 
       logger.info("Stored Salesforce connection", { workspaceId });
-    } catch (storeErr) {
-      logger.error("Failed to store connection", { error: storeErr });
+    } catch (storeErr: any) {
+      logger.error("Failed to store connection", {
+        message: storeErr?.message,
+        code: storeErr?.code,
+        detail: storeErr?.detail,
+        stack: storeErr?.stack?.split('\n').slice(0, 3).join(' | '),
+      });
     }
 
     res.json({
