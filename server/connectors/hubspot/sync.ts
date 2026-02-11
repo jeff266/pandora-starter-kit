@@ -34,6 +34,27 @@ async function buildStageMaps(client: HubSpotClient): Promise<DealTransformOptio
   return { stageMap, pipelineMap };
 }
 
+async function getForecastThresholds(workspaceId: string): Promise<{ commit_threshold: number; best_case_threshold: number }> {
+  try {
+    const result = await query<{ commit_threshold: number; best_case_threshold: number }>(
+      `SELECT commit_threshold, best_case_threshold
+       FROM forecast_thresholds
+       WHERE workspace_id = $1`,
+      [workspaceId]
+    );
+
+    if (result.rows.length > 0) {
+      return result.rows[0];
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    console.warn(`[HubSpot Sync] Failed to fetch forecast thresholds: ${msg}`);
+  }
+
+  // Default thresholds
+  return { commit_threshold: 90, best_case_threshold: 60 };
+}
+
 async function buildOwnerMap(client: HubSpotClient): Promise<Map<string, string>> {
   const ownerMap = new Map<string, string>();
   try {
@@ -347,11 +368,13 @@ export async function initialSync(
   console.log(`[HubSpot Sync] Starting initial sync for workspace ${workspaceId}`);
 
   try {
-    const [dealOptions, ownerMap] = await Promise.all([
+    const [dealOptions, ownerMap, forecastThresholds] = await Promise.all([
       buildStageMaps(client),
       buildOwnerMap(client),
+      getForecastThresholds(workspaceId),
     ]);
     dealOptions.ownerMap = ownerMap;
+    dealOptions.forecastThresholds = forecastThresholds;
     const contactOptions: ContactTransformOptions = { ownerMap };
 
     let rawDeals: any[] = [];
@@ -479,11 +502,13 @@ export async function incrementalSync(
 
   console.log(`[HubSpot Sync] Starting incremental sync for workspace ${workspaceId} since ${since.toISOString()}`);
 
-  const [dealOptions, ownerMap] = await Promise.all([
+  const [dealOptions, ownerMap, forecastThresholds] = await Promise.all([
     buildStageMaps(hubspotClient),
     buildOwnerMap(hubspotClient),
+    getForecastThresholds(workspaceId),
   ]);
   dealOptions.ownerMap = ownerMap;
+  dealOptions.forecastThresholds = forecastThresholds;
   const contactOptions: ContactTransformOptions = { ownerMap };
 
   const dealProps = [

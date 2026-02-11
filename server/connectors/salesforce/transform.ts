@@ -36,6 +36,7 @@ export interface NormalizedDeal {
   owner: string | null;
   probability: number | null;
   forecast_category: string | null;
+  forecast_category_source: 'native' | 'derived' | null;
   pipeline: string | null;
   last_activity_date: Date | null;
   custom_fields: Record<string, any>;
@@ -313,6 +314,7 @@ export function transformOpportunity(
     owner: opp.Owner?.Email || opp.Owner?.Name || opp.OwnerId,
     probability: sanitizeNumber(opp.Probability), // FIX: empty string would crash PostgreSQL
     forecast_category: forecastCategory,
+    forecast_category_source: forecastCategory ? 'native' : null, // Salesforce uses native ForecastCategoryName
     pipeline: null,
     last_activity_date: null,
     custom_fields: customFields,

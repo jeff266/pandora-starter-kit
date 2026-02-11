@@ -183,4 +183,75 @@ router.post('/:workspaceId/context/onboard', async (req: Request<WorkspaceParams
   }
 });
 
+// ============================================================================
+// Forecast Thresholds API
+// ============================================================================
+
+router.get('/:workspaceId/forecast-thresholds', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    if (!(await validateWorkspace(req.params.workspaceId, res))) return;
+
+    const result = await query<{ commit_threshold: number; best_case_threshold: number }>(
+      `SELECT commit_threshold, best_case_threshold
+       FROM forecast_thresholds
+       WHERE workspace_id = $1`,
+      [req.params.workspaceId]
+    );
+
+    if (result.rows.length === 0) {
+      // Return defaults if not set
+      res.json({ commit_threshold: 90, best_case_threshold: 60 });
+    } else {
+      res.json(result.rows[0]);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[Context] Get forecast thresholds error:', message);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.put('/:workspaceId/forecast-thresholds', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    if (!(await validateWorkspace(req.params.workspaceId, res))) return;
+
+    const { commit_threshold, best_case_threshold } = req.body;
+
+    // Validate inputs
+    if (
+      typeof commit_threshold !== 'number' ||
+      typeof best_case_threshold !== 'number' ||
+      commit_threshold < 0 || commit_threshold > 100 ||
+      best_case_threshold < 0 || best_case_threshold > 100 ||
+      commit_threshold < best_case_threshold
+    ) {
+      res.status(400).json({
+        error: 'Invalid thresholds. Must be numbers 0-100, with commit >= best_case'
+      });
+      return;
+    }
+
+    await query(
+      `INSERT INTO forecast_thresholds (workspace_id, commit_threshold, best_case_threshold, updated_at)
+       VALUES ($1, $2, $3, NOW())
+       ON CONFLICT (workspace_id)
+       DO UPDATE SET
+         commit_threshold = $2,
+         best_case_threshold = $3,
+         updated_at = NOW()`,
+      [req.params.workspaceId, commit_threshold, best_case_threshold]
+    );
+
+    res.json({
+      success: true,
+      commit_threshold,
+      best_case_threshold
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[Context] Update forecast thresholds error:', message);
+    res.status(500).json({ error: message });
+  }
+});
+
 export default router;

@@ -15,6 +15,7 @@ export interface NormalizedDeal {
   owner: string | null;
   probability: number | null;
   forecast_category: string | null;
+  forecast_category_source: 'native' | 'derived' | null;
   pipeline: string | null;
   last_activity_date: Date | null;
   custom_fields: Record<string, any>;
@@ -120,6 +121,10 @@ export interface DealTransformOptions {
   stageMap?: Map<string, string>;
   pipelineMap?: Map<string, string>;
   ownerMap?: Map<string, string>;
+  forecastThresholds?: {
+    commit_threshold: number;    // Default: 90
+    best_case_threshold: number; // Default: 60
+  };
 }
 
 export interface ContactTransformOptions {
@@ -137,6 +142,91 @@ function extractCompanyAssociationId(associations: any): string | null {
 function resolveOwnerName(ownerId: string | null, ownerMap?: Map<string, string>): string | null {
   if (!ownerId || !ownerMap) return ownerId;
   return ownerMap.get(ownerId) ?? ownerId;
+}
+
+/**
+ * Normalize forecast category value from HubSpot custom property
+ */
+function normalizeForecastCategory(value: string): string | null {
+  if (!value) return null;
+
+  const normalized = value.toLowerCase().trim();
+
+  // Map common variations to standard values
+  switch (normalized) {
+    case 'commit':
+    case 'committed':
+      return 'commit';
+    case 'best case':
+    case 'bestcase':
+    case 'best_case':
+      return 'best_case';
+    case 'pipeline':
+      return 'pipeline';
+    case 'closed':
+    case 'closed won':
+    case 'closedwon':
+    case 'closed_won':
+      return 'closed';
+    case 'omitted':
+      return 'pipeline';
+    default:
+      // Return as-is if it looks reasonable, null otherwise
+      return /^[a-z_]+$/.test(normalized) ? normalized : null;
+  }
+}
+
+/**
+ * Derive forecast_category from deal stage probability
+ *
+ * @param probability - Deal stage probability (0-100)
+ * @param thresholds - Workspace-specific thresholds (default: commit >= 90, best_case >= 60)
+ * @returns Derived forecast category
+ */
+function deriveForecastCategoryFromProbability(
+  probability: number | null,
+  thresholds?: { commit_threshold: number; best_case_threshold: number }
+): string | null {
+  if (probability === null || probability === undefined) {
+    return 'pipeline';
+  }
+
+  const commitThreshold = thresholds?.commit_threshold ?? 90;
+  const bestCaseThreshold = thresholds?.best_case_threshold ?? 60;
+
+  if (probability >= commitThreshold) {
+    return 'commit';
+  }
+  if (probability >= bestCaseThreshold) {
+    return 'best_case';
+  }
+  return 'pipeline';
+}
+
+/**
+ * Determine forecast_category with fallback strategy:
+ * 1. Check for custom HubSpot property (forecast_category or hs_forecast_category)
+ * 2. Fallback to deriving from probability
+ *
+ * @returns { category, source } where source is 'native' or 'derived'
+ */
+function resolveForecastCategory(
+  props: Record<string, any>,
+  probability: number | null,
+  thresholds?: { commit_threshold: number; best_case_threshold: number }
+): { category: string | null; source: 'native' | 'derived' | null } {
+  // Check for custom property first (native)
+  const customForecastCategory = props.forecast_category || props.hs_forecast_category;
+  if (customForecastCategory) {
+    const normalized = normalizeForecastCategory(sanitizeText(customForecastCategory));
+    if (normalized) {
+      return { category: normalized, source: 'native' };
+    }
+  }
+
+  // Fallback to deriving from probability
+  const derived = deriveForecastCategoryFromProbability(probability, thresholds);
+  return { category: derived, source: derived ? 'derived' : null };
 }
 
 export function transformDeal(
@@ -177,6 +267,14 @@ export function transformDeal(
     }
   }
 
+  // Resolve forecast_category with fallback strategy
+  const probability = sanitizeNumber(props.hs_deal_stage_probability);
+  const forecastCategoryResolved = resolveForecastCategory(
+    props,
+    probability,
+    options?.forecastThresholds
+  );
+
   return {
     workspace_id: workspaceId,
     source: "hubspot",
@@ -191,8 +289,9 @@ export function transformDeal(
     stage_normalized: normalizeStage(resolvedStage),
     close_date: sanitizeDate(props.closedate),
     owner: resolveOwnerName(sanitizeText(props.hubspot_owner_id), options?.ownerMap),
-    probability: sanitizeNumber(props.hs_deal_stage_probability),
-    forecast_category: null,
+    probability,
+    forecast_category: forecastCategoryResolved.category,
+    forecast_category_source: forecastCategoryResolved.source,
     pipeline: resolvedPipeline,
     last_activity_date: parseDate(sanitizeDate(props.notes_last_updated)),
     custom_fields: extractCustomFields(props, CORE_DEAL_FIELDS),

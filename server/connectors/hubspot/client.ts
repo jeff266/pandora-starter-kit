@@ -68,6 +68,8 @@ export class HubSpotClient {
       "hs_lastmodifieddate", "pipeline", "hubspot_owner_id",
       "hs_deal_stage_probability", "notes_last_updated",
       "closed_lost_reason", "closed_won_reason", "hs_closed_lost_competitor",
+      // Forecast category properties (custom properties, may not exist)
+      "forecast_category", "hs_forecast_category",
     ];
 
     const allProperties = customProperties
