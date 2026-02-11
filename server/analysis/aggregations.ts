@@ -321,6 +321,11 @@ export function resolveTimeWindows(
   };
 }
 
+export function formatQuarterLabel(date: Date): string {
+  const q = Math.floor(date.getMonth() / 3) + 1;
+  return `Q${q} ${date.getFullYear()}`;
+}
+
 // ============================================================================
 // Period Comparison
 // ============================================================================
@@ -1250,9 +1255,17 @@ export async function coverageByRep(
   quarterStart: Date,
   quarterEnd: Date,
   quotas?: { team?: number; byRep?: Record<string, number> },
-  coverageTarget: number = 3.0
+  coverageTarget: number = 3.0,
+  excludedOwners?: string[]
 ): Promise<CoverageByRep> {
-  // Get rep-level aggregations
+  const params: any[] = [workspaceId, quarterStart, quarterEnd];
+  let excludeClause = '';
+  if (excludedOwners && excludedOwners.length > 0) {
+    const placeholders = excludedOwners.map((_, i) => `$${params.length + i + 1}`).join(', ');
+    excludeClause = `AND (owner IS NULL OR owner NOT IN (${placeholders}))`;
+    params.push(...excludedOwners);
+  }
+
   const repsResult = await query(`
     SELECT
       COALESCE(owner, 'Unassigned') as rep_name,
@@ -1271,9 +1284,10 @@ export async function coverageByRep(
         (close_date BETWEEN $2 AND $3) OR
         (stage_normalized = 'closed_won' AND close_date BETWEEN $2 AND $3)
       )
+      ${excludeClause}
     GROUP BY owner
     ORDER BY pipeline DESC
-  `, [workspaceId, quarterStart, quarterEnd]);
+  `, params);
 
   // Build rep coverage objects
   const reps: RepCoverage[] = repsResult.rows.map((row: any) => {
@@ -1452,8 +1466,17 @@ export interface RepPipelineQuality {
 export async function repPipelineQuality(
   workspaceId: string,
   quarterStart: Date,
-  quarterEnd: Date
+  quarterEnd: Date,
+  excludedOwners?: string[]
 ): Promise<RepPipelineQuality[]> {
+  const params: any[] = [workspaceId, quarterStart, quarterEnd];
+  let excludeClause = '';
+  if (excludedOwners && excludedOwners.length > 0) {
+    const placeholders = excludedOwners.map((_, i) => `$${params.length + i + 1}`).join(', ');
+    excludeClause = `AND (owner IS NULL OR owner NOT IN (${placeholders}))`;
+    params.push(...excludedOwners);
+  }
+
   const result = await query(`
     SELECT
       COALESCE(owner, 'unassigned') as rep_email,
@@ -1465,8 +1488,9 @@ export async function repPipelineQuality(
     WHERE workspace_id = $1
       AND stage_normalized NOT IN ('closed_won', 'closed_lost')
       AND close_date BETWEEN $2 AND $3
+      ${excludeClause}
     GROUP BY owner
-  `, [workspaceId, quarterStart, quarterEnd]);
+  `, params);
 
   return result.rows.map((row: any) => {
     const earlyValue = parseFloat(row.early_value) || 0;

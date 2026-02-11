@@ -27,6 +27,7 @@ import {
   pickStaleDealFields,
   pickClosingSoonFields,
   resolveTimeWindows,
+  formatQuarterLabel,
   comparePeriods,
   dealThreadingAnalysis,
   enrichCriticalDeals,
@@ -913,6 +914,7 @@ const resolveTimeWindowsTool: ToolDefinition = {
         analysisRange: {
           start: windows.analysisRange.start.toISOString(),
           end: windows.analysisRange.end.toISOString(),
+          quarter: formatQuarterLabel(windows.analysisRange.start),
         },
         changeRange: {
           start: windows.changeRange.start.toISOString(),
@@ -1651,12 +1653,17 @@ const coverageByRepTool: ToolDefinition = {
         byRep: quotaConfig.repQuotas ?? null,
       } : undefined);
 
+      const excludedOwners = (context.businessContext as any)?.excluded_owners
+        ?? (context.businessContext as any)?.definitions?.excluded_owners
+        ?? [];
+
       return await coverageByRep(
         context.workspaceId,
         quarterStart,
         quarterEnd,
         quotas,
-        coverageTarget
+        coverageTarget,
+        excludedOwners.length > 0 ? excludedOwners : undefined
       );
     }, params);
   },
@@ -1727,7 +1734,16 @@ const repPipelineQualityTool: ToolDefinition = {
         ? new Date(params.quarterEnd)
         : new Date(timeWindows.analysisRange.end);
 
-      return await repPipelineQuality(context.workspaceId, quarterStart, quarterEnd);
+      const excludedOwners = (context.businessContext as any)?.excluded_owners
+        ?? (context.businessContext as any)?.definitions?.excluded_owners
+        ?? [];
+
+      return await repPipelineQuality(
+        context.workspaceId,
+        quarterStart,
+        quarterEnd,
+        excludedOwners.length > 0 ? excludedOwners : undefined
+      );
     }, params);
   },
 };
