@@ -1,0 +1,17 @@
+Good first run — the analysis is actionable and the structure is clean. Three things jump out:
+
+**Token usage: 33.2K is 3.7x over budget.** The target was 9K. This means either the compute steps are passing too much data to Claude, or the DeepSeek classification step is bloated. Check the skill_runs result JSON — look at each step's output size. My bet is the worst offenders list or the owner breakdown isn't being capped properly before hitting the LLM steps. This is the exact problem the Skill Design Guide warns about.
+
+**The "100% of accounts have zero associations" is almost certainly a Pandora bug, not a CRM bug.** HubSpot stores associations in the API response, but your transform step likely isn't populating `account_id` on deals and contacts in the normalized tables. Check your `transformDeal` and `transformContact` functions — are they mapping `associations.companies.results[0].id` to `account_id`? If those FK columns are all NULL in PostgreSQL, the audit correctly reports zero associations but the root cause is your ETL, not the customer's data hygiene.
+
+Quick way to verify:
+```sql
+SELECT COUNT(*) FROM deals WHERE workspace_id = 'YOUR_ID' AND account_id IS NOT NULL;
+SELECT COUNT(*) FROM contacts WHERE workspace_id = 'YOUR_ID' AND account_id IS NOT NULL;
+```
+
+If both return 0, it's a transform bug. If they return partial numbers, it's real CRM data.
+
+**The 342 unassigned deals might be the same class of bug.** HubSpot stores owners as `hubspot_owner_id` (a numeric ID), not an email. Your transform needs to resolve that ID to an owner name/email via the HubSpot owners API. If the transform just maps `properties.hubspot_owner_id` directly to `owner_email`, it'll be NULL or a numeric string that doesn't match.
+
+The analysis quality itself is strong — the health grade, risk prioritization, and action items are exactly what a RevOps lead would want. Fix the two data pipeline issues (account associations + owner resolution) and the audit output will be dramatically more accurate. Then re-run and you'll see the real data quality picture.
