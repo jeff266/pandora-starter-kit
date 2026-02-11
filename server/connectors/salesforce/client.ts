@@ -6,7 +6,8 @@
  */
 
 import { withRetry } from '../../utils/retry.js';
-import { logger } from '../../utils/logger.js';
+import { createLogger } from '../../utils/logger.js';
+const logger = createLogger('Salesforce');
 import type {
   SalesforceQueryResult,
   SalesforceOpportunity,

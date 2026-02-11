@@ -4,7 +4,8 @@
  * Maps Salesforce objects to normalized entities
  */
 
-import { logger } from '../../utils/logger.js';
+import { createLogger } from '../../utils/logger.js';
+const logger = createLogger('Salesforce');
 import type {
   SalesforceOpportunity,
   SalesforceContact,

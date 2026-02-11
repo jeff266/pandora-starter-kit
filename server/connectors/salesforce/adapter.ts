@@ -9,7 +9,8 @@ import { transformOpportunity, transformContact, transformAccount } from './tran
 import type { NormalizedDeal, NormalizedContact, NormalizedAccount } from './transform.js';
 import type { SalesforceStage, SalesforceCredentials } from './types.js';
 import type { CRMAdapter, SyncResult } from '../adapters/types.js';
-import { logger } from '../../utils/logger.js';
+import { createLogger } from '../../utils/logger.js';
+const logger = createLogger('Salesforce');
 import { query } from '../../db.js';
 
 // ============================================================================
