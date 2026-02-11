@@ -1,0 +1,77 @@
+Successfully built and pushed the pipeline-coverage skill. Here's 
+  what was implemented:                                             
+                                                                    
+  Architecture                                                      
+                                                                    
+  9-step pipeline following the exact pattern from pipeline-hygiene 
+  and data-quality-audit:                                           
+                                                                    
+  1. resolve-time-windows (COMPUTE) - Resolve quarter dates and time
+   ranges                                                           
+  2. check-quota-config (COMPUTE) - Read quotas from context layer  
+  3. gather-coverage-data (COMPUTE) - SQL-first coverage calculation
+   by rep                                                           
+  4. gather-coverage-trend (COMPUTE) - Compare vs previous run      
+  5. gather-rep-pipeline-quality (COMPUTE) - Analyze early vs late  
+  stage distribution                                                
+  6. prepare-at-risk-reps (COMPUTE) - Filter and cap at-risk reps to
+   10 max                                                           
+  7. classify-rep-risk (DEEPSEEK) - Classify root causes            
+  (insufficient_prospecting, poor_conversion, deal_slippage,        
+  quota_mismatch, ramping, pipeline_quality)                        
+  8. calculate-output-budget (COMPUTE) - Dynamic word budgets       
+  9. synthesize-coverage-report (CLAUDE) - Strategic synthesis with 
+  specific rep actions                                              
+                                                                    
+  Key Features                                                      
+                                                                    
+  SQL-first aggregation:                                            
+  - All coverage calculations in PostgreSQL using FILTER clauses    
+  - No loading deals into memory                                    
+  - Handles NULL forecast_category (treats as pipeline)             
+  - Groups NULL owner as "Unassigned"                               
+                                                                    
+  Graceful degradation:                                             
+  - Works without quotas configured                                 
+  - Shows absolute pipeline numbers with note: "⚠️ Configure quotas 
+  for coverage analysis"                                            
+  - Falls back to revenue_target if quotas.team not set             
+                                                                    
+  Intelligent filtering:                                            
+  - Only sends at-risk/behind reps to DeepSeek (max 10)             
+  - Skips DeepSeek entirely if all reps on track                    
+  - Includes quality flags and trend data in classification         
+                                                                    
+  Rep status logic:                                                 
+  - on_track: coverage ≥ target (3.0x default)                      
+  - at_risk: coverage ≥ 60% of target                               
+  - behind: coverage < 60% of target                                
+  - unknown: no quota configured                                    
+                                                                    
+  Extended Tools                                                    
+                                                                    
+  summarizeForClaude now handles both:                              
+  - data-quality-audit (entity summaries)                           
+  - pipeline-coverage (team summary, rep table, quality flags,      
+  trend, risk classifications)                                      
+                                                                    
+  Testing                                                           
+                                                                    
+  On Replit, after pulling and restarting:                          
+                                                                    
+  curl -X POST "http://localhost:3000/api/workspaces/YOUR_WORKSPACE_
+  ID/skills/pipeline-coverage/run"                                  
+                                                                    
+  Expected output:                                                  
+  - Team headline: on track / at risk / behind verdict              
+  - Coverage gap: $ needed, weekly run rate required                
+  - At-risk reps: specific actions per rep                          
+  - Pipeline quality concerns: reps with >70% early-stage pipeline  
+  - Top 3 actions ranked by revenue impact                          
+                                                                    
+  Token budget: Target 8,500 total                                  
+  - Compute: 0 tokens                                               
+  - DeepSeek: ~1,500 tokens (max 10 reps)                           
+  - Claude: ~4,000 tokens (pre-summarized text)                     
+                                                                    
+  Schedule: Monday 8 AM + on_demand    
