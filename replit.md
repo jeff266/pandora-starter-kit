@@ -37,7 +37,7 @@ Pandora is built on Node.js 20 with TypeScript 5+, utilizing Express.js for its 
 -   **Registry + Runtime:** `SkillRegistry` singleton manages skill definitions; `SkillRuntime` executes steps in dependency order (topological sort).
 -   **Three-Tier AI:** `compute` (deterministic query functions), `deepseek` (Fireworks API, not yet wired), `claude` (Anthropic via Replit AI integration).
 -   **Tool Definitions:** 30+ tools in `server/skills/tool-definitions.ts` wrapping query layer + compute functions. `workspaceId` injected from execution context (never in tool params).
--   **Built-in Skills:** `pipeline-hygiene` (pipeline quality analysis), `deal-risk-review` (deal risk assessment), `weekly-recap` (leadership report).
+-   **Built-in Skills:** `pipeline-hygiene` (pipeline quality analysis), `deal-risk-review` (deal risk assessment), `weekly-recap` (leadership report), `single-thread-alert` (single-threaded deal detection), `data-quality-audit` (field completeness grading), `pipeline-coverage` (per-rep coverage vs quota).
 -   **Skill Routes:** `GET /:id/skills` (list), `POST /:id/skills/:skillId/run` (execute), `GET /:id/skills/:skillId/runs` (history), `GET /:id/skills/:skillId/runs/:runId` (detail).
 -   **Three-Phase Pattern:** Skills follow COMPUTE → CLASSIFY → SYNTHESIZE. Compute steps pre-aggregate raw data into compact summaries using shared utilities (`server/analysis/aggregations.ts`). Claude receives structured summaries (~4K tokens), never raw arrays.
 -   **Aggregation Utilities:** `aggregateBy`, `bucketByThreshold`, `topNWithSummary`, `summarizeDeals` in `server/analysis/aggregations.ts`. Shared across all skills.
@@ -88,6 +88,14 @@ When Claude's synthesize step hits `maxToolCalls` limit, the runtime makes one f
 - Connection status must be `connected`, `synced`, or `error` for universal sync; HubSpot connector uses `healthy`/`connected`
 - To force full re-sync: clear `sync_cursor` on the connection, then POST to the HubSpot sync route with `{"mode": "initial"}`
 - FK resolution runs post-upsert: maps HubSpot company/contact source_ids to Pandora account_id/contact_id UUIDs
+
+## Pipeline Coverage Notes
+- `coverageByRep`, `repPipelineQuality` SQL queries group by `owner` column (not owner_name/owner_email — those don't exist on the deals table).
+- Stale deals calculated via `last_activity_date < NOW() - INTERVAL '14 days'` (no `days_since_activity` column).
+- `checkQuotaConfig` reads `goals.quotas.team` first, falls back to `goals.quarterly_quota` for team quota.
+- The `coverageByRepTool` maps `quotaConfig.teamQuota` → `quotas.team` before passing to the aggregation function.
+- All open deals with NULL `forecast_category` are counted as pipeline (not commit or best_case).
+- Validated with real data: 2,744 tokens (Claude 2,011 + DeepSeek 733), 44s duration.
 
 ## Smoke Test
 Run `npm run smoke-test` to validate the full pipeline end-to-end with synthetic data (24 tests covering all query functions, computed fields, and pipeline snapshot). Use `--keep` flag to preserve test data for inspection.
