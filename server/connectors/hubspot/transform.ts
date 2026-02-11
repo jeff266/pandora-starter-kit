@@ -170,6 +170,10 @@ function normalizeForecastCategory(value: string): string | null {
       return 'closed';
     case 'omitted':
       return 'pipeline';
+    case 'not forecasted':
+    case 'not_forecasted':
+    case 'notforecasted':
+      return 'not_forecasted';
     default:
       // Return as-is if it looks reasonable, null otherwise
       return /^[a-z_]+$/.test(normalized) ? normalized : null;
