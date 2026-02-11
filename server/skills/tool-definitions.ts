@@ -1464,9 +1464,9 @@ const summarizeForClaude: ToolDefinition = {
 
         // Quota note
         let quotaNote = '';
-        if (quotaConfig.source === 'none') {
+        if (quotaConfig?.source === 'none') {
           quotaNote = '⚠️ No quotas configured in context layer. Showing absolute pipeline numbers only. Configure quotas in goals_and_targets for coverage analysis.';
-        } else if (quotaConfig.source === 'revenue_target') {
+        } else if (quotaConfig?.source === 'revenue_target') {
           quotaNote = `Using revenue target as team quota: $${(team.totalQuota || 0).toLocaleString()}`;
         } else {
           quotaNote = `Team quota: $${(team.totalQuota || 0).toLocaleString()} | Coverage target: ${team.coverageTarget}x`;
@@ -1575,7 +1575,7 @@ const checkQuotaConfig: ToolDefinition = {
       const goals = await getGoals(context.workspaceId);
 
       const quotas = (goals as any).quotas;
-      const teamQuota = quotas?.team ?? null;
+      const teamQuota = quotas?.team ?? (goals as any).quarterly_quota ?? null;
       const repQuotas = quotas?.byRep ?? null;
       const coverageTarget = (goals as any).pipeline_coverage_target ?? 3.0;
       const revenueTarget = (goals as any).revenue_target ?? null;
@@ -1644,8 +1644,12 @@ const coverageByRepTool: ToolDefinition = {
         ? new Date(params.quarterEnd)
         : new Date(timeWindows.analysisRange.end);
 
-      const quotas = params.quotas ?? quotaConfig;
       const coverageTarget = params.coverageTarget ?? quotaConfig?.coverageTarget ?? 3.0;
+
+      const quotas = params.quotas ?? (quotaConfig ? {
+        team: quotaConfig.teamQuota ?? null,
+        byRep: quotaConfig.repQuotas ?? null,
+      } : undefined);
 
       return await coverageByRep(
         context.workspaceId,

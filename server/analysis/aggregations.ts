@@ -1255,23 +1255,23 @@ export async function coverageByRep(
   // Get rep-level aggregations
   const repsResult = await query(`
     SELECT
-      COALESCE(owner_name, 'Unassigned') as rep_name,
-      COALESCE(owner_email, 'unassigned') as rep_email,
+      COALESCE(owner, 'Unassigned') as rep_name,
+      COALESCE(owner, 'unassigned') as rep_email,
       COUNT(*) FILTER (WHERE stage_normalized NOT IN ('closed_won', 'closed_lost')) as open_deals,
       COALESCE(SUM(amount) FILTER (WHERE stage_normalized NOT IN ('closed_won', 'closed_lost')), 0) as pipeline,
       COALESCE(SUM(amount) FILTER (WHERE forecast_category = 'commit' AND stage_normalized NOT IN ('closed_won', 'closed_lost')), 0) as commit_value,
       COALESCE(SUM(amount) FILTER (WHERE forecast_category = 'best_case' AND stage_normalized NOT IN ('closed_won', 'closed_lost')), 0) as best_case_value,
       COUNT(*) FILTER (WHERE stage_normalized = 'closed_won') as won_count,
       COALESCE(SUM(amount) FILTER (WHERE stage_normalized = 'closed_won'), 0) as closed_won,
-      COUNT(*) FILTER (WHERE days_since_activity > 14 AND stage_normalized NOT IN ('closed_won', 'closed_lost')) as stale_deals,
-      COALESCE(SUM(amount) FILTER (WHERE days_since_activity > 14 AND stage_normalized NOT IN ('closed_won', 'closed_lost')), 0) as stale_value
+      COUNT(*) FILTER (WHERE last_activity_date < NOW() - INTERVAL '14 days' AND stage_normalized NOT IN ('closed_won', 'closed_lost')) as stale_deals,
+      COALESCE(SUM(amount) FILTER (WHERE last_activity_date < NOW() - INTERVAL '14 days' AND stage_normalized NOT IN ('closed_won', 'closed_lost')), 0) as stale_value
     FROM deals
     WHERE workspace_id = $1
       AND (
         (close_date BETWEEN $2 AND $3) OR
         (stage_normalized = 'closed_won' AND close_date BETWEEN $2 AND $3)
       )
-    GROUP BY owner_name, owner_email
+    GROUP BY owner
     ORDER BY pipeline DESC
   `, [workspaceId, quarterStart, quarterEnd]);
 
@@ -1456,7 +1456,7 @@ export async function repPipelineQuality(
 ): Promise<RepPipelineQuality[]> {
   const result = await query(`
     SELECT
-      COALESCE(owner_email, 'unassigned') as rep_email,
+      COALESCE(owner, 'unassigned') as rep_email,
       COUNT(*) FILTER (WHERE stage_normalized IN ('awareness', 'qualification')) as early_stage,
       COUNT(*) FILTER (WHERE stage_normalized IN ('evaluation', 'decision', 'negotiation')) as late_stage,
       COALESCE(SUM(amount) FILTER (WHERE stage_normalized IN ('awareness', 'qualification')), 0) as early_value,
@@ -1465,7 +1465,7 @@ export async function repPipelineQuality(
     WHERE workspace_id = $1
       AND stage_normalized NOT IN ('closed_won', 'closed_lost')
       AND close_date BETWEEN $2 AND $3
-    GROUP BY owner_email
+    GROUP BY owner
   `, [workspaceId, quarterStart, quarterEnd]);
 
   return result.rows.map((row: any) => {
