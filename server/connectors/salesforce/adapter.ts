@@ -174,42 +174,59 @@ export class SalesforceAdapter implements CRMAdapter {
   }> {
     const client = await this.createClientWithRefresh(credentials, workspaceId);
 
+    // Get stage metadata (needed for deal transformation)
+    let stageMap = new Map<string, SalesforceStage>();
     try {
-      // Get stage metadata first (needed for deal transformation)
       const stages = await client.getOpportunityStages();
-      const stageMap = new Map(stages.map(s => [s.ApiName, s]));
+      stageMap = new Map(stages.map(s => [s.ApiName, s]));
+    } catch (error) {
+      logger.warn('[Salesforce Adapter] Failed to fetch stage metadata, continuing without stage normalization', { error });
+    }
 
-      // Get record counts to decide sync strategy
+    // Get record counts to decide sync strategy
+    let oppCount = 0;
+    let contactCount = 0;
+    let accountCount = 0;
+
+    try {
       const [oppCountResult, contactCountResult, accountCountResult] = await Promise.all([
         client.query<{ expr0: number }>('SELECT COUNT() FROM Opportunity'),
         client.query<{ expr0: number }>('SELECT COUNT() FROM Contact'),
         client.query<{ expr0: number }>('SELECT COUNT() FROM Account'),
       ]);
 
-      const oppCount = oppCountResult.records[0]?.expr0 || 0;
-      const contactCount = contactCountResult.records[0]?.expr0 || 0;
-      const accountCount = accountCountResult.records[0]?.expr0 || 0;
-
-      logger.info('[Salesforce Adapter] Starting initial sync', {
-        opportunities: oppCount,
-        contacts: contactCount,
-        accounts: accountCount,
-      });
-
-      // Sync accounts first (needed for FK resolution)
-      const accounts = await this.syncAccounts(client, workspaceId, accountCount);
-
-      // Sync contacts second
-      const contacts = await this.syncContacts(client, workspaceId, contactCount);
-
-      // Sync opportunities last
-      const deals = await this.syncOpportunities(client, workspaceId, oppCount, stageMap);
-
-      return { deals, contacts, accounts };
+      oppCount = oppCountResult.records[0]?.expr0 || 0;
+      contactCount = contactCountResult.records[0]?.expr0 || 0;
+      accountCount = accountCountResult.records[0]?.expr0 || 0;
     } catch (error) {
-      logger.error('[Salesforce Adapter] Initial sync failed', { error });
-      throw error;
+      logger.warn('[Salesforce Adapter] Failed to get record counts, will attempt sync anyway', { error });
     }
+
+    logger.info('[Salesforce Adapter] Starting initial sync', {
+      opportunities: oppCount,
+      contacts: contactCount,
+      accounts: accountCount,
+    });
+
+    // Sync accounts first (needed for FK resolution)
+    const accounts = await this.syncAccounts(client, workspaceId, accountCount);
+
+    // Sync contacts second
+    const contacts = await this.syncContacts(client, workspaceId, contactCount);
+
+    // Sync opportunities last
+    const deals = await this.syncOpportunities(client, workspaceId, oppCount, stageMap);
+
+    logger.info('[Salesforce Adapter] Initial sync completed', {
+      accountsSucceeded: accounts.succeeded.length,
+      accountsFailed: accounts.failed.length,
+      contactsSucceeded: contacts.succeeded.length,
+      contactsFailed: contacts.failed.length,
+      dealsSucceeded: deals.succeeded.length,
+      dealsFailed: deals.failed.length,
+    });
+
+    return { deals, contacts, accounts };
   }
 
   // ==========================================================================
@@ -348,17 +365,32 @@ export class SalesforceAdapter implements CRMAdapter {
     count: number,
     stageMap: Map<string, SalesforceStage>
   ): Promise<SyncResult<NormalizedDeal>> {
+    let rawOpportunities: any[] = [];
+
     try {
-      const rawOpportunities =
-        count < 10000
-          ? await client.getOpportunities()
-          : await client.bulkQuery('SELECT Id, Name, Amount, StageName, CloseDate, Probability, ForecastCategoryName, OwnerId, AccountId, Type, LeadSource, IsClosed, IsWon, Description, NextStep, CreatedDate, LastModifiedDate, SystemModstamp FROM Opportunity');
+      if (count < 10000) {
+        // Use REST API for smaller datasets
+        rawOpportunities = await client.getOpportunities();
+      } else {
+        // Try Bulk API first for large datasets
+        try {
+          logger.info('[Salesforce Adapter] Using Bulk API for opportunities', { count });
+          rawOpportunities = await client.bulkQuery('SELECT Id, Name, Amount, StageName, CloseDate, Probability, ForecastCategoryName, OwnerId, AccountId, Type, LeadSource, IsClosed, IsWon, Description, NextStep, CreatedDate, LastModifiedDate, SystemModstamp FROM Opportunity');
+        } catch (bulkError) {
+          // Fallback to REST API if Bulk API fails
+          logger.warn('[Salesforce Adapter] Bulk API failed, falling back to REST API', {
+            error: bulkError instanceof Error ? bulkError.message : String(bulkError),
+            count,
+          });
+          rawOpportunities = await client.getOpportunities();
+        }
+      }
 
       return this.transformAndCollect(rawOpportunities, workspaceId, (opp) =>
         transformOpportunity(opp, workspaceId, stageMap)
       );
     } catch (error) {
-      logger.error('[Salesforce Adapter] Opportunity sync failed', { error });
+      logger.error('[Salesforce Adapter] Opportunity sync failed completely', { error });
       return { succeeded: [], failed: [], totalAttempted: 0 };
     }
   }
@@ -368,17 +400,32 @@ export class SalesforceAdapter implements CRMAdapter {
     workspaceId: string,
     count: number
   ): Promise<SyncResult<NormalizedContact>> {
+    let rawContacts: any[] = [];
+
     try {
-      const rawContacts =
-        count < 10000
-          ? await client.getContacts()
-          : await client.bulkQuery('SELECT Id, FirstName, LastName, Email, Phone, Title, Department, AccountId, OwnerId, LeadSource, CreatedDate, LastModifiedDate, SystemModstamp FROM Contact');
+      if (count < 10000) {
+        // Use REST API for smaller datasets
+        rawContacts = await client.getContacts();
+      } else {
+        // Try Bulk API first for large datasets
+        try {
+          logger.info('[Salesforce Adapter] Using Bulk API for contacts', { count });
+          rawContacts = await client.bulkQuery('SELECT Id, FirstName, LastName, Email, Phone, Title, Department, AccountId, OwnerId, LeadSource, CreatedDate, LastModifiedDate, SystemModstamp FROM Contact');
+        } catch (bulkError) {
+          // Fallback to REST API if Bulk API fails
+          logger.warn('[Salesforce Adapter] Bulk API failed, falling back to REST API', {
+            error: bulkError instanceof Error ? bulkError.message : String(bulkError),
+            count,
+          });
+          rawContacts = await client.getContacts();
+        }
+      }
 
       return this.transformAndCollect(rawContacts, workspaceId, (contact) =>
         transformContact(contact, workspaceId)
       );
     } catch (error) {
-      logger.error('[Salesforce Adapter] Contact sync failed', { error });
+      logger.error('[Salesforce Adapter] Contact sync failed completely', { error });
       return { succeeded: [], failed: [], totalAttempted: 0 };
     }
   }
@@ -388,17 +435,32 @@ export class SalesforceAdapter implements CRMAdapter {
     workspaceId: string,
     count: number
   ): Promise<SyncResult<NormalizedAccount>> {
+    let rawAccounts: any[] = [];
+
     try {
-      const rawAccounts =
-        count < 10000
-          ? await client.getAccounts()
-          : await client.bulkQuery('SELECT Id, Name, Website, Industry, NumberOfEmployees, AnnualRevenue, OwnerId, BillingCity, BillingState, BillingCountry, Type, CreatedDate, LastModifiedDate, SystemModstamp FROM Account');
+      if (count < 10000) {
+        // Use REST API for smaller datasets
+        rawAccounts = await client.getAccounts();
+      } else {
+        // Try Bulk API first for large datasets
+        try {
+          logger.info('[Salesforce Adapter] Using Bulk API for accounts', { count });
+          rawAccounts = await client.bulkQuery('SELECT Id, Name, Website, Industry, NumberOfEmployees, AnnualRevenue, OwnerId, BillingCity, BillingState, BillingCountry, Type, CreatedDate, LastModifiedDate, SystemModstamp FROM Account');
+        } catch (bulkError) {
+          // Fallback to REST API if Bulk API fails
+          logger.warn('[Salesforce Adapter] Bulk API failed, falling back to REST API', {
+            error: bulkError instanceof Error ? bulkError.message : String(bulkError),
+            count,
+          });
+          rawAccounts = await client.getAccounts();
+        }
+      }
 
       return this.transformAndCollect(rawAccounts, workspaceId, (account) =>
         transformAccount(account, workspaceId)
       );
     } catch (error) {
-      logger.error('[Salesforce Adapter] Account sync failed', { error });
+      logger.error('[Salesforce Adapter] Account sync failed completely', { error });
       return { succeeded: [], failed: [], totalAttempted: 0 };
     }
   }
