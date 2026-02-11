@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import crypto from "crypto";
 import { createLogger } from "../utils/logger.js";
+import { query } from "../db.js";
 
 const logger = createLogger("SalesforceAuth");
 const router = Router();
@@ -123,6 +124,38 @@ router.get("/callback", async (req: Request, res: Response) => {
       token_type: tokenData.token_type,
       scope: tokenData.scope,
     });
+
+    try {
+      let workspaceResult = await query(
+        `SELECT id FROM workspaces WHERE name = 'Imubit' LIMIT 1`
+      );
+
+      let workspaceId: string;
+      if (workspaceResult.rows.length === 0) {
+        const createResult = await query(
+          `INSERT INTO workspaces (name, settings) VALUES ('Imubit', '{}') RETURNING id`
+        );
+        workspaceId = createResult.rows[0].id;
+      } else {
+        workspaceId = workspaceResult.rows[0].id;
+      }
+
+      await query(
+        `INSERT INTO connector_configs (workspace_id, source, credentials, status, created_at, updated_at)
+         VALUES ($1, 'salesforce', $2, 'connected', NOW(), NOW())
+         ON CONFLICT (workspace_id, source) DO UPDATE SET
+           credentials = $2, status = 'connected', updated_at = NOW()`,
+        [workspaceId, JSON.stringify({
+          accessToken: tokenData.access_token,
+          refreshToken: tokenData.refresh_token,
+          instanceUrl: tokenData.instance_url,
+        })]
+      );
+
+      logger.info("Stored Salesforce connection", { workspaceId });
+    } catch (storeErr) {
+      logger.error("Failed to store connection", { error: storeErr });
+    }
 
     res.json({
       message: "Salesforce OAuth successful",
