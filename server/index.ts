@@ -57,6 +57,7 @@ app.use("/api/workspaces", syncRouter);
 app.use("/api/workspaces", dataRouter);
 app.use("/api/workspaces", slackSettingsRouter);
 app.use("/api/workspaces", skillsRouter);
+app.use("/api", skillsRouter);
 app.use("/api/workspaces", llmConfigRouter);
 app.use("/api/webhooks", webhooksRouter);
 app.use("/api/auth/salesforce", salesforceAuthRouter);

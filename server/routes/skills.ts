@@ -9,100 +9,116 @@ import type { SkillResult } from '../skills/types.js';
 
 const router = Router();
 
+async function handleSkillRun(workspaceId: string, skillId: string, params: any, res: any) {
+  const ws = await query('SELECT id, name FROM workspaces WHERE id = $1', [workspaceId]);
+  if (ws.rows.length === 0) {
+    return res.status(404).json({ error: 'Workspace not found' });
+  }
+
+  const registry = getSkillRegistry();
+  const skill = registry.get(skillId);
+  if (!skill) {
+    return res.status(404).json({ error: `Skill not found: ${skillId}` });
+  }
+
+  const runtime = getSkillRuntime();
+
+  let result: SkillResult;
+  try {
+    result = await runtime.executeSkill(skill, workspaceId, params);
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    return res.status(500).json({ error: `Skill execution failed: ${errorMsg}` });
+  }
+
+  try {
+    await query(
+      `INSERT INTO skill_runs (run_id, workspace_id, skill_id, status, trigger_type, params, result, output, output_text, steps, token_usage, duration_ms, error, started_at, completed_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+       ON CONFLICT (run_id) DO UPDATE SET
+         status = EXCLUDED.status,
+         result = EXCLUDED.result,
+         output = EXCLUDED.output,
+         output_text = EXCLUDED.output_text,
+         steps = EXCLUDED.steps,
+         token_usage = EXCLUDED.token_usage,
+         duration_ms = EXCLUDED.duration_ms,
+         error = EXCLUDED.error,
+         completed_at = EXCLUDED.completed_at`,
+      [
+        result.runId,
+        workspaceId,
+        skillId,
+        result.status,
+        'manual',
+        JSON.stringify(params || {}),
+        result.stepData ? JSON.stringify(result.stepData) : (result.output ? JSON.stringify(result.output) : null),
+        result.output ? JSON.stringify(result.output) : null,
+        typeof result.output === 'string' ? result.output : null,
+        JSON.stringify(result.steps),
+        JSON.stringify(result.totalTokenUsage),
+        result.totalDuration_ms,
+        result.errors && result.errors.length > 0 ? result.errors.map(e => `${e.step}: ${e.error}`).join('; ') : null,
+        result.completedAt,
+        result.completedAt,
+      ]
+    );
+  } catch (logErr) {
+    console.error('[skills] Failed to log skill run:', logErr);
+  }
+
+  if (skill.outputFormat === 'slack') {
+    const webhookUrl = await getSlackWebhook(workspaceId);
+    if (webhookUrl) {
+      try {
+        const blocks = formatForSlack(result, skill);
+        const slackResult = await postBlocks(webhookUrl, blocks);
+        if (slackResult.ok) {
+          console.log(`[skills] Posted ${skillId} result to Slack for workspace ${workspaceId}`);
+        } else {
+          console.error(`[skills] Slack post failed for ${skillId}:`, slackResult.error);
+        }
+      } catch (slackErr) {
+        console.error('[skills] Slack post error:', slackErr);
+      }
+    } else {
+      console.warn(`[skills] No Slack webhook configured for workspace ${workspaceId}, skipping post`);
+    }
+  }
+
+  const outputPreview = typeof result.output === 'string'
+    ? result.output.slice(0, 500)
+    : result.output
+      ? JSON.stringify(result.output).slice(0, 500)
+      : null;
+
+  return res.json({
+    runId: result.runId,
+    status: result.status,
+    duration_ms: result.totalDuration_ms,
+    output_preview: outputPreview,
+  });
+}
+
+router.post('/skills/:skillId/run', async (req, res) => {
+  try {
+    const { skillId } = req.params;
+    const { workspaceId, params } = req.body || {};
+    if (!workspaceId) {
+      return res.status(400).json({ error: 'workspaceId is required in request body' });
+    }
+    return await handleSkillRun(workspaceId, skillId, params, res);
+  } catch (err) {
+    console.error('[skills] Error running skill:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 router.post('/:workspaceId/skills/:skillId/run', async (req, res) => {
   try {
     const { workspaceId, skillId } = req.params;
     const { params } = req.body || {};
-
-    const ws = await query('SELECT id, name FROM workspaces WHERE id = $1', [workspaceId]);
-    if (ws.rows.length === 0) {
-      return res.status(404).json({ error: 'Workspace not found' });
-    }
-
-    const registry = getSkillRegistry();
-    const skill = registry.get(skillId);
-    if (!skill) {
-      return res.status(404).json({ error: `Skill not found: ${skillId}` });
-    }
-
-    const runtime = getSkillRuntime();
-    const startTime = Date.now();
-
-    let result: SkillResult;
-    try {
-      result = await runtime.executeSkill(skill, workspaceId, params);
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      return res.status(500).json({ error: `Skill execution failed: ${errorMsg}` });
-    }
-
-    try {
-      await query(
-        `INSERT INTO skill_runs (run_id, workspace_id, skill_id, status, trigger_type, params, result, output, output_text, steps, token_usage, duration_ms, error, started_at, completed_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-         ON CONFLICT (run_id) DO UPDATE SET
-           status = EXCLUDED.status,
-           result = EXCLUDED.result,
-           output = EXCLUDED.output,
-           output_text = EXCLUDED.output_text,
-           steps = EXCLUDED.steps,
-           token_usage = EXCLUDED.token_usage,
-           duration_ms = EXCLUDED.duration_ms,
-           error = EXCLUDED.error,
-           completed_at = EXCLUDED.completed_at`,
-        [
-          result.runId,
-          workspaceId,
-          skillId,
-          result.status,
-          'manual',
-          JSON.stringify(params || {}),
-          result.stepData ? JSON.stringify(result.stepData) : (result.output ? JSON.stringify(result.output) : null),
-          result.output ? JSON.stringify(result.output) : null,
-          typeof result.output === 'string' ? result.output : null,
-          JSON.stringify(result.steps),
-          JSON.stringify(result.totalTokenUsage),
-          result.totalDuration_ms,
-          result.errors && result.errors.length > 0 ? result.errors.map(e => `${e.step}: ${e.error}`).join('; ') : null,
-          result.completedAt,
-          result.completedAt,
-        ]
-      );
-    } catch (logErr) {
-      console.error('[skills] Failed to log skill run:', logErr);
-    }
-
-    if (skill.outputFormat === 'slack') {
-      const webhookUrl = await getSlackWebhook(workspaceId);
-      if (webhookUrl) {
-        try {
-          const blocks = formatForSlack(result, skill);
-          const slackResult = await postBlocks(webhookUrl, blocks);
-          if (slackResult.ok) {
-            console.log(`[skills] Posted ${skillId} result to Slack for workspace ${workspaceId}`);
-          } else {
-            console.error(`[skills] Slack post failed for ${skillId}:`, slackResult.error);
-          }
-        } catch (slackErr) {
-          console.error('[skills] Slack post error:', slackErr);
-        }
-      } else {
-        console.warn(`[skills] No Slack webhook configured for workspace ${workspaceId}, skipping post`);
-      }
-    }
-
-    const outputPreview = typeof result.output === 'string'
-      ? result.output.slice(0, 500)
-      : result.output
-        ? JSON.stringify(result.output).slice(0, 500)
-        : null;
-
-    return res.json({
-      runId: result.runId,
-      status: result.status,
-      duration_ms: result.totalDuration_ms,
-      output_preview: outputPreview,
-    });
+    return await handleSkillRun(workspaceId, skillId, params, res);
   } catch (err) {
     console.error('[skills] Error running skill:', err);
     return res.status(500).json({ error: 'Internal server error' });
