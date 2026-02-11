@@ -18,9 +18,11 @@ import llmConfigRouter from "./routes/llm-config.js";
 import { getAdapterRegistry } from "./connectors/adapters/registry.js";
 import { MondayTaskAdapter } from "./connectors/monday/adapter.js";
 import { GoogleDriveDocumentAdapter } from "./connectors/google-drive/adapter.js";
+import { salesforceAdapter } from "./connectors/salesforce/adapter.js";
 import { startScheduler } from "./sync/scheduler.js";
 import { registerBuiltInSkills } from "./skills/index.js";
 import { getSkillRegistry } from "./skills/registry.js";
+import { startJobQueue } from "./jobs/queue.js";
 
 dotenv.config();
 
@@ -56,6 +58,7 @@ function registerAdapters(): void {
   const registry = getAdapterRegistry();
   registry.register(new MondayTaskAdapter());
   registry.register(new GoogleDriveDocumentAdapter());
+  registry.register(salesforceAdapter);
   const stats = registry.getStats();
   console.log(
     `[server] Registered ${stats.total} adapters: ${stats.sourceTypes.join(', ')}`
@@ -82,6 +85,7 @@ async function start(): Promise<void> {
 
   registerAdapters();
   registerSkills();
+  startJobQueue();
   startScheduler();
 
   app.listen(PORT, "0.0.0.0", () => {
