@@ -73,8 +73,8 @@ export function createThrottledFetcher(config: ThrottleConfig) {
     // Record this request timestamp
     timestamps.push(Date.now());
 
-    // Execute the fetch
-    return fetch(url, options);
+    // Execute the fetch with 429 retry safety net
+    return fetchWithRateLimitRetry(() => fetch(url, options), 3);
   };
 }
 
