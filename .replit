@@ -33,3 +33,8 @@ outputType = "console"
 [[ports]]
 localPort = 3000
 externalPort = 3000
+
+[userenv]
+
+[userenv.shared]
+SALESFORCE_CALLBACK_URL = "https://2249ba4a-228b-47b6-989b-1bd765452af0-00-zmr8y6ngsujl.janeway.replit.dev/api/auth/salesforce/callback"
