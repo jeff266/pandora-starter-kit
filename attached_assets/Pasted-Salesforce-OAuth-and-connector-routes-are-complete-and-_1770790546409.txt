@@ -1,0 +1,100 @@
+Salesforce OAuth and connector routes are complete and   
+  pushed to GitHub.                                                 
+                                                                    
+  ✅ Implementation Complete                                        
+                                                                    
+  Commit: 5f0ffdd - feat: complete Salesforce OAuth and connector   
+  routes                                                            
+                                                                    
+  What Was Built                                                    
+                                                                    
+  1. OAuth Flow with PKCE ✅                                        
+                                                                    
+  Routes:                                                           
+  - GET /api/auth/salesforce/authorize?workspaceId={id}             
+    - Generates code_verifier (96 bytes, base64url)                 
+    - Creates code_challenge (SHA-256, S256)                        
+    - Stores in memory with 10min TTL                               
+    - Redirects to login.salesforce.com                             
+  - GET /api/auth/salesforce/callback                               
+    - Exchanges code for tokens                                     
+    - Stores in connections table                                   
+    - Redirects to /workspaces/{id}/connectors                      
+                                                                    
+  Fixed: Removed hardcoded workspace, now accepts via query param   
+                                                                    
+  2. Token Refresh Utility ✅                                       
+                                                                    
+  File: server/utils/salesforce-token-refresh.ts                    
+                                                                    
+  Functions:                                                        
+  - getFreshCredentials(workspaceId) - Auto-refresh if > 90 min old 
+  - refreshToken(workspaceId, credentials) - Force refresh          
+  - testCredentials(credentials) - Validate token                   
+                                                                    
+  3. Connector Routes ✅                                            
+                                                                    
+  File: server/routes/salesforce-sync.ts                            
+                                                                    
+  All routes follow HubSpot pattern:                                
+  Route: /:workspaceId/connectors/salesforce/test                   
+  Method: POST                                                      
+  Purpose: Test connection                                          
+  ────────────────────────────────────────                          
+  Route: /:workspaceId/connectors/salesforce/sync                   
+  Method: POST                                                      
+  Purpose: Trigger sync (202 async)                                 
+  ────────────────────────────────────────                          
+  Route: /:workspaceId/connectors/salesforce/discover-schema        
+  Method: POST                                                      
+  Purpose: Get object metadata                                      
+  ────────────────────────────────────────                          
+  Route: /:workspaceId/connectors/salesforce/health                 
+  Method: GET                                                       
+  Purpose: Connection status                                        
+  ────────────────────────────────────────                          
+  Route: /:workspaceId/connectors/salesforce/disconnect             
+  Method: DELETE                                                    
+  Purpose: Clear credentials                                        
+  All routes use fresh credentials with auto-refresh                
+                                                                    
+  4. Integration ✅                                                 
+                                                                    
+  - Adapter already registered in index.ts                          
+  - Orchestrator picks it up automatically                          
+  - Uses async job queue pattern                                    
+  - Incremental sync auto-detected                                  
+                                                                    
+  Environment Variables Needed                                      
+                                                                    
+  Add to .env:                                                      
+  SALESFORCE_CLIENT_ID=<from Connected App>                         
+  SALESFORCE_CLIENT_SECRET=<from Connected App>                     
+  SALESFORCE_CALLBACK_URL=https://<your-domain>/api/auth/salesforce/
+  callback                                                          
+                                                                    
+  Next Steps                                                        
+                                                                    
+  1. Set up Connected App in Salesforce:                            
+    - Go to Setup → App Manager → New Connected App                 
+    - Enable OAuth Settings                                         
+    - Callback URL: your SALESFORCE_CALLBACK_URL                    
+    - Scopes: api refresh_token offline_access id                   
+    - Enable PKCE (S256)                                            
+    - Copy Client ID and Secret to .env                             
+  2. Test the Flow:                                                 
+  # Start OAuth                                                     
+  GET http://localhost:3000/api/auth/salesforce/authorize?workspaceI
+  d={id}                                                            
+                                                                    
+  # After callback, test connection                                 
+  POST http://localhost:3000/api/workspaces/{id}/connectors/salesfor
+  ce/test                                                           
+                                                                    
+  # Trigger sync                                                    
+  POST http://localhost:3000/api/workspaces/{id}/connectors/salesfor
+  ce/sync                                                           
+  3. The orchestrator will automatically include Salesforce when    
+  running workspace syncs since the adapter is registered!          
+                                                                    
+  All done! 🚀           

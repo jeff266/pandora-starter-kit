@@ -1,0 +1,103 @@
+Pull latest from GitHub. Claude Code built the Salesforce connector in 
+server/connectors/salesforce/ (client.ts, types.ts, transform.ts, adapter.ts).
+It needs OAuth routes and sync wiring to work.
+
+Read the existing HubSpot OAuth and connector routes for the pattern to follow.
+Then build the Salesforce equivalent:
+
+## 1. OAuth Flow with PKCE
+
+GET /api/auth/salesforce/authorize?workspaceId=X
+- Generate a random code_verifier (43-128 chars, base64url)
+- Derive code_challenge = base64url(sha256(code_verifier))
+- Store code_verifier + workspaceId in session or a short-lived DB row (5 min TTL)
+- Redirect to: https://login.salesforce.com/services/oauth2/authorize
+  - response_type=code
+  - client_id=SALESFORCE_CLIENT_ID (env var)
+  - redirect_uri=SALESFORCE_CALLBACK_URL (env var)
+  - scope=api refresh_token offline_access id
+  - code_challenge=<generated>
+  - code_challenge_method=S256
+  - state=workspaceId (or signed token containing workspaceId)
+
+GET /api/auth/salesforce/callback
+- Extract code and state from query params
+- Recover code_verifier and workspaceId from session/DB
+- POST to https://login.salesforce.com/services/oauth2/token:
+  - grant_type=authorization_code
+  - code=<from callback>
+  - client_id=SALESFORCE_CLIENT_ID
+  - client_secret=SALESFORCE_CLIENT_SECRET
+  - redirect_uri=SALESFORCE_CALLBACK_URL
+  - code_verifier=<recovered>
+- Response contains: access_token, refresh_token, instance_url, issued_at
+- Upsert into connector_configs:
+  - workspace_id from state
+  - connector_type = 'salesforce'
+  - auth_method = 'oauth'
+  - credentials = { accessToken, refreshToken, instanceUrl, issuedAt }
+  - status = 'connected'
+- Redirect to app (e.g., /workspaces/:id/connectors or wherever makes sense)
+
+## 2. Token Refresh
+
+Create a utility function refreshSalesforceToken(connectorConfigId):
+- Read current credentials from connector_configs
+- POST to https://login.salesforce.com/services/oauth2/token:
+  - grant_type=refresh_token
+  - refresh_token=<stored>
+  - client_id=SALESFORCE_CLIENT_ID
+  - client_secret=SALESFORCE_CLIENT_SECRET
+- Update connector_configs with new access_token and issued_at
+- Return the new access_token
+
+Call this before any Salesforce API operation if the token is older than 
+90 minutes (they expire at ~2 hours). The Salesforce adapter's sync methods 
+should get fresh credentials from connector_configs each time they run.
+
+## 3. Connector API Routes (same pattern as HubSpot)
+
+POST /api/workspaces/:id/connectors/salesforce/test
+- Get credentials from connector_configs
+- Refresh token if needed
+- Call adapter.testConnection()
+- Return result
+
+POST /api/workspaces/:id/connectors/salesforce/sync
+- Get credentials from connector_configs
+- Refresh token if needed
+- Trigger sync (use the async pattern if it exists — return 202 with syncId)
+- Adapter handles initial vs incremental based on last_sync_at
+
+POST /api/workspaces/:id/connectors/salesforce/discover-schema
+- Call adapter.discoverSchema()
+- Store results in connector_configs.metadata
+
+GET /api/workspaces/:id/connectors/salesforce/health
+- Return connector status, last_sync_at, last_error
+
+DELETE /api/workspaces/:id/connectors/salesforce/disconnect
+- Clear credentials from connector_configs
+- Set status = 'disconnected'
+
+## 4. Wire into Sync Orchestrator
+
+Update the sync orchestrator so when it runs syncWorkspace(), it checks 
+for a Salesforce connector_config alongside HubSpot and runs both if connected.
+The adapter is already registered in the adapter registry — the orchestrator 
+should pick it up by connector_type.
+
+## 5. Environment Variables
+
+Add to .env:
+- SALESFORCE_CLIENT_ID=<from Connected App>
+- SALESFORCE_CLIENT_SECRET=<from Connected App>  
+- SALESFORCE_CALLBACK_URL=https://<your-replit-url>/api/auth/salesforce/callback
+
+Both orgs are production Salesforce — use login.salesforce.com for ALL 
+token endpoints, never test.salesforce.com.
+
+## What NOT to do
+- Do NOT modify any files in server/connectors/salesforce/ — they're complete
+- Do NOT change the adapter interface or types
+- Do follow the exact same patterns as HubSpot routes
