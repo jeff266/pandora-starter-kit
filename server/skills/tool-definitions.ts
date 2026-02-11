@@ -1572,7 +1572,7 @@ Required weekly pipeline gen: ${weeklyGenStr}`;
 
 const checkQuotaConfig: ToolDefinition = {
   name: 'checkQuotaConfig',
-  description: 'Check workspace for quota configuration in context layer',
+  description: 'Check workspace for quota configuration from quota tables or context layer',
   tier: 'compute',
   parameters: {
     type: 'object',
@@ -1581,8 +1581,60 @@ const checkQuotaConfig: ToolDefinition = {
   },
   execute: async (params, context) => {
     return safeExecute('checkQuotaConfig', async () => {
-      const goals = await getGoals(context.workspaceId);
+      const activePeriod = await query<{
+        id: string;
+        name: string;
+        period_type: string;
+        start_date: string;
+        end_date: string;
+        team_quota: number;
+      }>(
+        `SELECT id, name, period_type, start_date, end_date, team_quota
+         FROM quota_periods
+         WHERE workspace_id = $1
+           AND start_date <= CURRENT_DATE
+           AND end_date >= CURRENT_DATE
+         ORDER BY start_date DESC
+         LIMIT 1`,
+        [context.workspaceId]
+      );
 
+      if (activePeriod.rows.length > 0) {
+        const period = activePeriod.rows[0];
+        const repRows = await query<{ rep_name: string; quota_amount: number }>(
+          `SELECT rep_name, quota_amount FROM rep_quotas WHERE period_id = $1 ORDER BY rep_name`,
+          [period.id]
+        );
+
+        const repQuotas: Record<string, number> = {};
+        for (const r of repRows.rows) {
+          repQuotas[r.rep_name] = Number(r.quota_amount);
+        }
+
+        const teamQuota = Number(period.team_quota);
+        const hasRepQuotas = Object.keys(repQuotas).length > 0;
+
+        const goals = await getGoals(context.workspaceId);
+        const coverageTarget = (goals as any).pipeline_coverage_target ?? 3.0;
+
+        return {
+          hasQuotas: true,
+          hasRepQuotas,
+          teamQuota,
+          repQuotas: hasRepQuotas ? repQuotas : null,
+          coverageTarget,
+          source: 'quotas' as const,
+          period: {
+            id: period.id,
+            name: period.name,
+            type: period.period_type,
+            startDate: period.start_date,
+            endDate: period.end_date,
+          },
+        };
+      }
+
+      const goals = await getGoals(context.workspaceId);
       const quotas = (goals as any).quotas;
       const teamQuota = quotas?.team ?? (goals as any).quarterly_quota ?? null;
       const repQuotas = quotas?.byRep ?? null;
