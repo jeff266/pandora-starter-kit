@@ -1,0 +1,32 @@
+ After Quota Setup: Re-run Forecast Skill                                 
+                                                                           
+  # Run the forecast-rollup skill with quotas configured                   
+  curl -X POST http://localhost:3000/api/skills/forecast-rollup/run \      
+    -H "Content-Type: application/json" \                                  
+    -d '{"workspaceId": "4160191d-73bc-414b-97dd-5a1853190378"}'           
+                                                                           
+  # Wait 30 seconds for completion                                         
+  sleep 30                                                                 
+                                                                           
+  # View the updated narrative with attainment insights                    
+  psql $DATABASE_URL -c "                                                  
+    SELECT output_text                                                     
+    FROM skill_runs                                                        
+    WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'            
+      AND skill_id = 'forecast-rollup'                                     
+    ORDER BY created_at DESC                                               
+    LIMIT 1;                                                               
+  "                                                                        
+                                                                           
+  Expected Output Changes                                                  
+                                                                           
+  Before (no quotas):                                                      
+  "Unable to assess quota attainment — no quota configured"                
+                                                                           
+  After (with quotas):                                                     
+  "Nate Phillips: $295K closed of $1M quota (30% attainment) - off track,  
+  needs $700K more"                                                        
+  "Sara Bollman: $132K closed of $800K quota (17% attainment) - off track, 
+  needs $668K more"                                                        
+  "Team: $430K of $2.8M quota (15% attainment) - significantly behind pace 
+  for Q1"                
