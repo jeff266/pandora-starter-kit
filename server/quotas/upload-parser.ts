@@ -6,7 +6,7 @@
 
 import * as XLSX from 'xlsx';
 import { v4 as uuidv4 } from 'uuid';
-import { getLLMResponse } from '../ai/router.js';
+import { callLLM } from '../utils/llm-router.js';
 import { query } from '../db.js';
 
 export interface ParsedQuotaFile {
@@ -181,11 +181,10 @@ Respond with ONLY a JSON object:
   "notes": "All rows appear to be Q1 2026 quarterly quotas. No email column found."
 }`;
 
-  const response = await getLLMResponse({
-    prompt,
-    capability: 'classify',
-    workspaceId,
-    outputFormat: 'json',
+  const response = await callLLM(workspaceId, 'classify', {
+    messages: [{ role: 'user', content: prompt }],
+    maxTokens: 4096,
+    temperature: 0.1,
   });
 
   try {
