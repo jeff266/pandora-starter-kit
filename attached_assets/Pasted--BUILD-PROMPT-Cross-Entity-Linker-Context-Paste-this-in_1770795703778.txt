@@ -1,0 +1,251 @@
+# BUILD PROMPT: Cross-Entity Linker
+
+## Context
+
+Paste this into Replit. This builds the async linker that connects 
+conversations (from Gong/Fireflies) to deals, contacts, and accounts 
+in the normalized tables. Without this, conversation data is siloed — 
+skills can't answer "show me all calls related to this deal" or 
+"which deals have gone quiet (no recent calls)."
+
+---
+
+## PROMPT
+
+```
+Read REPLIT_CONTEXT.md and SYNC_AUDIT_REPORT.md if they exist.
+
+Build a cross-entity linker that resolves foreign key relationships 
+between conversations and other normalized entities (contacts, accounts, 
+deals). This runs as an async batch job AFTER sync completes — it is 
+NOT part of the sync/transform pipeline.
+
+--- DESIGN PRINCIPLES ---
+
+1. NEVER overwrite existing links. Only populate NULL foreign keys.
+   This makes the job idempotent and safe to re-run.
+2. Incremental scope: only process unlinked records, not the full table.
+3. Multi-tier matching: start with cheap/high-confidence, escalate to 
+   expensive/lower-confidence only when needed.
+4. Auditable: store HOW each link was created so we can measure accuracy 
+   and debug bad matches.
+
+--- DATABASE MIGRATION ---
+
+Create a new migration that adds linking metadata to the conversations table:
+
+ALTER TABLE conversations 
+  ADD COLUMN IF NOT EXISTS linked_at timestamptz,
+  ADD COLUMN IF NOT EXISTS link_method text;
+  -- link_method values: 'email_match', 'crm_native', 'deal_inference', 'manual'
+
+Also add indexes to support the linker queries:
+
+CREATE INDEX IF NOT EXISTS idx_conversations_unlinked 
+  ON conversations (workspace_id) 
+  WHERE deal_id IS NULL AND account_id IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_contacts_email 
+  ON contacts (workspace_id, email) 
+  WHERE email IS NOT NULL;
+
+--- CORE MODULE ---
+
+Create server/linker/entity-linker.ts
+
+Export async function linkConversations(workspaceId: string): Promise<LinkResult>
+
+LinkResult shape:
+{
+  processed: number,       // total unlinked conversations examined
+  linked: {
+    tier1_email: number,   // linked via participant email match
+    tier2_native: number,  // linked via CRM IDs in source_data
+    tier3_inferred: number // linked via single-deal-at-account
+  },
+  stillUnlinked: number,   // couldn't resolve
+  errors: string[],        // any failures during processing
+  durationMs: number
+}
+
+--- TIER 1: EMAIL MATCH (run first, resolves ~60-70%) ---
+
+1. Query all unlinked conversations for this workspace:
+   SELECT id, participants, source_data 
+   FROM conversations 
+   WHERE workspace_id = $1 
+     AND (deal_id IS NULL OR account_id IS NULL)
+     AND linked_at IS NULL
+
+2. For each conversation, extract participant emails from the 
+   participants JSONB array. The shape varies by source:
+   - Gong: participants may have { name, email, speakerId }
+   - Fireflies: participants may have { name, email }
+   - Handle both formats, skip entries without email
+
+3. Batch-query contacts table for all extracted emails:
+   SELECT id, email, account_id 
+   FROM contacts 
+   WHERE workspace_id = $1 
+     AND email = ANY($2::text[])
+   
+   Build a Map<email, { contactId, accountId }> for fast lookup.
+
+4. For each conversation with email matches:
+   - Set account_id from the matched contact's account_id
+     (prefer external participant's account over internal rep's account)
+   - To distinguish internal vs external: check if the email domain 
+     matches the workspace's own domain. If you can't determine this, 
+     prefer the FIRST non-null account_id found.
+   - Set linked_at = now(), link_method = 'email_match'
+
+5. Batch UPDATE conversations using a single query per batch:
+   Use a VALUES list or unnest pattern for efficiency — do NOT 
+   update one row at a time.
+
+--- TIER 2: NATIVE CRM LINKS (run second, catches CRM-connected instances) ---
+
+1. Query still-unlinked conversations that have source_data populated:
+   SELECT id, source, source_data 
+   FROM conversations 
+   WHERE workspace_id = $1 
+     AND account_id IS NULL 
+     AND linked_at IS NULL
+     AND source_data IS NOT NULL
+
+2. Check source_data JSONB for CRM references:
+   - Gong: look for source_data->'context'->'crmContext' or similar 
+     (Gong stores HubSpot/Salesforce deal IDs if the customer has 
+     their CRM integration enabled)
+   - Fireflies: look for source_data->'app_integrations' or 
+     'crm_data' fields
+   
+   The exact paths depend on what each API returns. Log what you find 
+   in source_data so we can refine the extraction logic later.
+
+3. If a CRM deal ID or account ID is found:
+   - Look up the corresponding record in our deals/accounts table 
+     by source_id
+   - If found, set the foreign key
+   - Set link_method = 'crm_native'
+
+--- TIER 3: DEAL INFERENCE (run last, resolves single-deal accounts) ---
+
+1. Query conversations that now have account_id but still no deal_id:
+   SELECT c.id, c.account_id, c.call_date
+   FROM conversations c
+   WHERE c.workspace_id = $1 
+     AND c.account_id IS NOT NULL 
+     AND c.deal_id IS NULL
+     AND c.linked_at IS NULL
+
+2. For each account_id, count open deals:
+   SELECT id, name, stage 
+   FROM deals 
+   WHERE workspace_id = $1 
+     AND account_id = $2 
+     AND stage_normalized NOT IN ('closed_won', 'closed_lost')
+
+3. Linking logic:
+   - If exactly 1 open deal at the account → link it. 
+     Set link_method = 'deal_inference'
+   - If 0 open deals → leave deal_id NULL (account link is still valuable)
+   - If 2+ open deals → leave deal_id NULL (ambiguous, don't guess)
+     Log these as "ambiguous" in the result for potential future 
+     LLM-assisted resolution
+
+4. Batch update as in Tier 1.
+
+--- TRIGGER INTEGRATION ---
+
+Wire the linker to run automatically after sync completes.
+
+Find the sync orchestrator (server/sync/orchestrator.ts or equivalent).
+After a successful sync for any connector, add:
+
+  // Run linker after sync if conversation-related data changed
+  if (['gong', 'fireflies', 'hubspot', 'salesforce'].includes(connectorType)) {
+    // Fire and forget — don't block the sync response
+    linkConversations(workspaceId)
+      .then(result => {
+        console.log(`[Linker] ${workspaceId}: ${result.linked.tier1_email + result.linked.tier2_native + result.linked.tier3_inferred} linked, ${result.stillUnlinked} unlinked (${result.durationMs}ms)`);
+      })
+      .catch(err => {
+        console.error(`[Linker] ${workspaceId} failed:`, err.message);
+      });
+  }
+
+Note: HubSpot/Salesforce syncs trigger the linker too, because new 
+contacts with email addresses can resolve previously-unlinked conversations.
+
+--- API ROUTE ---
+
+Add a manual trigger endpoint:
+
+POST /api/workspaces/:id/linker/run
+- Calls linkConversations(workspaceId)
+- Returns the LinkResult
+- Useful for testing and for re-running after data fixes
+
+GET /api/workspaces/:id/linker/status  
+- Returns summary of current linking state:
+  SELECT 
+    COUNT(*) as total_conversations,
+    COUNT(*) FILTER (WHERE deal_id IS NOT NULL) as linked_to_deal,
+    COUNT(*) FILTER (WHERE account_id IS NOT NULL) as linked_to_account,
+    COUNT(*) FILTER (WHERE linked_at IS NULL AND deal_id IS NULL AND account_id IS NULL) as fully_unlinked,
+    COUNT(*) FILTER (WHERE link_method = 'email_match') as via_email,
+    COUNT(*) FILTER (WHERE link_method = 'crm_native') as via_crm,
+    COUNT(*) FILTER (WHERE link_method = 'deal_inference') as via_inference
+  FROM conversations 
+  WHERE workspace_id = $1
+
+--- LOGGING ---
+
+Add a linker entry to sync_log after each run:
+- connector_type = 'linker'
+- sync_type = 'link'
+- records_synced = total linked this run
+- Include tier breakdown in the errors/metadata jsonb column
+
+--- TESTING ---
+
+After building, test with:
+1. Hit POST /api/workspaces/:id/linker/run for a workspace that has 
+   both conversation data (Gong/Fireflies) and CRM data (HubSpot)
+2. Check the LinkResult — Tier 1 should resolve some if participant 
+   emails match contacts in the contacts table
+3. Hit GET /api/workspaces/:id/linker/status to see the breakdown
+4. Verify idempotency: run it again, linked counts should be 0 
+   (everything already linked)
+5. Spot-check 3-5 linked conversations in the DB — do the account/deal 
+   associations make sense?
+
+--- EDGE CASES ---
+
+- Participants with no email: skip gracefully, don't error
+- Contacts with no account_id: email matches but can't resolve account — 
+  log but don't link (contact exists but isn't associated to a company)
+- Conversations with 0 participants: skip (shouldn't happen but protect against it)
+- source_data is null or empty object: Tier 2 skips cleanly
+- Multiple contacts at same account in same call: that's fine, 
+  they all point to the same account_id
+- Workspace with no CRM data yet: Tier 1 finds 0 matches, returns 
+  quickly with stillUnlinked = processed. No errors.
+```
+
+---
+
+## What This Enables
+
+Once the linker is running, these queries become possible:
+
+- "All calls related to Deal X" → conversations WHERE deal_id = X
+- "Deals with no recent calls" → deals LEFT JOIN conversations, 
+  filter WHERE latest call_date > 14 days ago (or NULL)
+- "Account engagement score" → count + recency of conversations per account
+- "Single-thread detection" → conversations grouped by deal, 
+  check if only 1 unique participant across all calls
+
+These are the data foundations for Pipeline Hygiene, Single-Thread Alert, 
+and Deal Risk skills.
