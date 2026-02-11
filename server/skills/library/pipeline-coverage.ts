@@ -14,6 +14,7 @@ export const pipelineCoverageSkill: SkillDefinition = {
     'coverageByRep',
     'coverageTrend',
     'repPipelineQuality',
+    'getCWDByRep',
     'prepareAtRiskReps',
     'calculateOutputBudget',
     'summarizeForClaude',
@@ -71,6 +72,16 @@ export const pipelineCoverageSkill: SkillDefinition = {
     },
 
     {
+      id: 'gather-cwd-by-rep',
+      name: 'Gather Conversations Without Deals by Rep',
+      tier: 'compute',
+      dependsOn: ['resolve-time-windows'],
+      computeFn: 'getCWDByRep',
+      computeArgs: { daysBack: 90 },
+      outputKey: 'cwd_by_rep',
+    },
+
+    {
       id: 'gather-rep-pipeline-quality',
       name: 'Gather Rep Pipeline Quality',
       tier: 'compute',
@@ -84,7 +95,7 @@ export const pipelineCoverageSkill: SkillDefinition = {
       id: 'prepare-at-risk-reps',
       name: 'Prepare At-Risk Reps Data',
       tier: 'compute',
-      dependsOn: ['gather-coverage-data', 'gather-rep-pipeline-quality', 'gather-coverage-trend'],
+      dependsOn: ['gather-coverage-data', 'gather-rep-pipeline-quality', 'gather-coverage-trend', 'gather-cwd-by-rep'],
       computeFn: 'prepareAtRiskReps',
       computeArgs: {},
       outputKey: 'at_risk_reps',
@@ -99,7 +110,7 @@ export const pipelineCoverageSkill: SkillDefinition = {
 
 For each underperforming rep, classify their coverage risk:
 1. risk_level: one of [critical, concerning, watch]
-2. root_cause: one of [insufficient_prospecting, poor_conversion, deal_slippage, quota_mismatch, ramping, pipeline_quality]
+2. root_cause: one of [insufficient_prospecting, poor_conversion, deal_slippage, quota_mismatch, ramping, pipeline_quality, active_not_logging]
 3. recommended_intervention: one specific, actionable recommendation
 
 Definitions:
@@ -109,6 +120,9 @@ Definitions:
 - quota_mismatch: quota may be unrealistic given territory/segment
 - ramping: rep is new, building pipeline from scratch
 - pipeline_quality: pipeline exists but concentrated in early stages with low probability
+- active_not_logging: rep has low pipeline coverage BUT high CWD count (≥3 conversations without deals) — different intervention than 'insufficient_prospecting'
+
+IMPORTANT: If a rep has ≤2x coverage AND ≥3 conversations_without_deals_count, use 'active_not_logging' as the root cause instead of 'insufficient_prospecting'
 
 Context:
 - Quarter: Q{{time_windows.analysisRange.quarter}} ({{coverage_data.team.daysElapsed}} days elapsed, {{coverage_data.team.daysRemaining}} remaining)
@@ -143,7 +157,7 @@ Each classification should be:
                 risk_level: { type: 'string', enum: ['critical', 'concerning', 'watch'] },
                 root_cause: {
                   type: 'string',
-                  enum: ['insufficient_prospecting', 'poor_conversion', 'deal_slippage', 'quota_mismatch', 'ramping', 'pipeline_quality'],
+                  enum: ['insufficient_prospecting', 'poor_conversion', 'deal_slippage', 'quota_mismatch', 'ramping', 'pipeline_quality', 'active_not_logging'],
                 },
                 recommended_intervention: { type: 'string' },
               },
@@ -161,7 +175,7 @@ Each classification should be:
       id: 'calculate-output-budget',
       name: 'Calculate Report Complexity Budget',
       tier: 'compute',
-      dependsOn: ['gather-coverage-data', 'classify-rep-risk'],
+      dependsOn: ['gather-coverage-data', 'classify-rep-risk', 'gather-cwd-by-rep'],
       computeFn: 'calculateOutputBudget',
       computeArgs: {},
       outputKey: 'output_budget',
@@ -171,7 +185,7 @@ Each classification should be:
       id: 'summarize-for-claude',
       name: 'Summarize for Claude',
       tier: 'compute',
-      dependsOn: ['gather-coverage-data', 'gather-coverage-trend', 'gather-rep-pipeline-quality', 'classify-rep-risk'],
+      dependsOn: ['gather-coverage-data', 'gather-coverage-trend', 'gather-rep-pipeline-quality', 'classify-rep-risk', 'gather-cwd-by-rep'],
       computeFn: 'summarizeForClaude',
       computeArgs: {},
       outputKey: 'coverage_summary',
@@ -187,6 +201,7 @@ Each classification should be:
         'gather-coverage-data',
         'gather-coverage-trend',
         'gather-rep-pipeline-quality',
+        'gather-cwd-by-rep',
         'classify-rep-risk',
         'calculate-output-budget',
         'summarize-for-claude',
@@ -210,6 +225,9 @@ WEEK-OVER-WEEK TREND:
 AT-RISK REP ANALYSIS:
 {{coverage_summary.riskClassifications}}
 
+SHADOW PIPELINE (Conversations Without Deals):
+{{cwd_by_rep}}
+
 REPORT PARAMETERS:
 - Word budget: {{output_budget.wordBudget}} words maximum
 - Report depth: {{output_budget.reportDepth}}
@@ -230,6 +248,8 @@ Produce a Pipeline Coverage Report. Include:
    - Specific actions per rep from classifications
    - Example: "Mike needs 3 new qualified opportunities worth $150K by end of month"
    - Include their current coverage, gap, and recommended intervention
+   - If rep has conversations_without_deals_count > 0, mention shadow pipeline:
+     Example: "Sara shows 1.2x coverage, but has 3 untracked demo conversations at [accounts]. If these convert to deals, true coverage may be closer to 2.0x. Priority: create deals for demo conversations."
 
 4. PIPELINE QUALITY CONCERNS
    - Flag reps with early-stage-heavy pipeline (>70% in awareness/qualification)

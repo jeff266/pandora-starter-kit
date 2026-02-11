@@ -13,6 +13,8 @@ export const dataQualityAuditSkill: SkillDefinition = {
     'dataQualityAudit',
     'gatherQualityTrend',
     'enrichWorstOffenders',
+    'checkWorkspaceHasConversations',
+    'auditConversationDealCoverage',
     'calculateOutputBudget',
     'summarizeForClaude',
   ],
@@ -59,6 +61,25 @@ export const dataQualityAuditSkill: SkillDefinition = {
     },
 
     {
+      id: 'check-conversation-data',
+      name: 'Check Conversation Data Availability',
+      tier: 'compute',
+      computeFn: 'checkWorkspaceHasConversations',
+      computeArgs: {},
+      outputKey: 'has_conversation_data',
+    },
+
+    {
+      id: 'audit-conversation-deal-coverage',
+      name: 'Audit Conversation Deal Coverage (CWD)',
+      tier: 'compute',
+      dependsOn: ['check-conversation-data'],
+      computeFn: 'auditConversationDealCoverage',
+      computeArgs: { daysBack: 90 },
+      outputKey: 'cwd_data',
+    },
+
+    {
       id: 'enrich-worst-offenders',
       name: 'Enrich Worst Offenders',
       tier: 'compute',
@@ -72,7 +93,7 @@ export const dataQualityAuditSkill: SkillDefinition = {
       id: 'classify-quality-patterns',
       name: 'Classify Quality Patterns (DeepSeek)',
       tier: 'deepseek',
-      dependsOn: ['gather-quality-metrics', 'enrich-worst-offenders'],
+      dependsOn: ['gather-quality-metrics', 'enrich-worst-offenders', 'audit-conversation-deal-coverage'],
       deepseekPrompt: `You are a CRM operations analyst reviewing data quality patterns.
 
 For each rep/owner below, classify their data quality pattern:
@@ -97,16 +118,52 @@ OWNER DATA QUALITY:
 TOP PROBLEM RECORDS:
 {{enriched_offenders}}
 
-Respond with ONLY a JSON object: { "classifications": [...] }
+{{#if cwd_data.has_conversation_data}}
+CONVERSATION COVERAGE GAPS (CWD):
+Total CWD: {{cwd_data.summary.total_cwd}}
+By severity: High={{cwd_data.summary.by_severity.high}}, Medium={{cwd_data.summary.by_severity.medium}}, Low={{cwd_data.summary.by_severity.low}}
 
-Each classification object should have:
+Top high-severity examples:
+{{cwd_data.top_examples}}
+
+For each high-severity CWD, classify:
+- root_cause: one of [deal_not_created, deal_linking_gap, disqualified_unlogged]
+- urgency: one of [immediate, this_week, backlog]
+- recommended_action: specific action for this conversation
+
+Definitions:
+- deal_not_created: demo/meeting happened, rep didn't create the deal
+- deal_linking_gap: deal may exist but linker couldn't connect conversation to it
+- disqualified_unlogged: prospect was disqualified but not marked in CRM
+
+Urgency:
+- immediate: high severity, demo call with no deal, 7+ days old
+- this_week: medium severity, recent call or account has other deals
+- backlog: low severity, short call, old, or ambiguous
+{{/if}}
+
+Respond with ONLY a JSON object: { "classifications": [...], "cwd_classifications": [...] }
+
+Each data quality classification object should have:
 {
   "owner": "owner name",
   "pattern": "systematic_neglect | specific_field_gap | new_rep_onboarding | process_not_enforced | tool_issue | acceptable",
   "worst_field": "field name",
   "severity": "critical | moderate | minor",
   "recommended_fix": "training | required_field_enforcement | bulk_cleanup | process_change | tool_config"
-}`,
+}
+
+{{#if cwd_data.has_conversation_data}}
+Each CWD classification object should have:
+{
+  "conversation_title": "title",
+  "account_name": "account name",
+  "rep_name": "rep name",
+  "root_cause": "deal_not_created | deal_linking_gap | disqualified_unlogged",
+  "recommended_action": "specific action",
+  "urgency": "immediate | this_week | backlog"
+}
+{{/if}}`,
       deepseekSchema: {
         type: 'object',
         properties: {
@@ -130,6 +187,24 @@ Each classification object should have:
               required: ['owner', 'pattern', 'worst_field', 'severity', 'recommended_fix'],
             },
           },
+          cwd_classifications: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                conversation_title: { type: 'string' },
+                account_name: { type: 'string' },
+                rep_name: { type: 'string' },
+                root_cause: {
+                  type: 'string',
+                  enum: ['deal_not_created', 'deal_linking_gap', 'disqualified_unlogged'],
+                },
+                recommended_action: { type: 'string' },
+                urgency: { type: 'string', enum: ['immediate', 'this_week', 'backlog'] },
+              },
+              required: ['conversation_title', 'account_name', 'rep_name', 'root_cause', 'recommended_action', 'urgency'],
+            },
+          },
         },
         required: ['classifications'],
       },
@@ -140,7 +215,7 @@ Each classification object should have:
       id: 'calculate-output-budget',
       name: 'Calculate Report Complexity Budget',
       tier: 'compute',
-      dependsOn: ['classify-quality-patterns', 'gather-quality-metrics'],
+      dependsOn: ['classify-quality-patterns', 'gather-quality-metrics', 'audit-conversation-deal-coverage'],
       computeFn: 'calculateOutputBudget',
       computeArgs: {},
       outputKey: 'output_budget',
@@ -164,6 +239,7 @@ Each classification object should have:
         'resolve-time-windows',
         'gather-quality-metrics',
         'gather-quality-trend',
+        'audit-conversation-deal-coverage',
         'classify-quality-patterns',
         'calculate-output-budget',
         'summarize-for-claude',
@@ -187,6 +263,17 @@ TREND (vs last audit):
 
 OWNER PATTERNS (from automated classification):
 {{quality_classifications}}
+
+{{#if cwd_data.has_conversation_data}}
+CONVERSATION COVERAGE GAPS:
+- {{cwd_data.summary.total_cwd}} external conversations in the last 90 days have no associated deal
+- By severity: {{cwd_data.summary.by_severity.high}} high, {{cwd_data.summary.by_severity.medium}} medium, {{cwd_data.summary.by_severity.low}} low
+- By rep: {{cwd_data.summary.by_rep}}
+- Estimated pipeline gap: {{cwd_data.summary.estimated_pipeline_gap}}
+
+Top issues classified:
+{{quality_classifications.cwd_classifications}}
+{{/if}}
 
 REPORT PARAMETERS:
 - Depth: {{output_budget.reportDepth}}
@@ -220,6 +307,15 @@ Produce a Data Quality Audit Report. Include:
    - Each action must have clear owner and timeline
    - Focus on critical fields that affect pipeline analysis, forecasting, and deal health scoring
    - Example: "Action 1: Enforce required close_date field for all open deals (47 deals, $2.1M). Owner: Sales Ops. Timeline: This week."
+
+{{#if cwd_data.has_conversation_data}}
+6. CONVERSATION COVERAGE GAPS
+   - Include this section if CWD data exists
+   - For each high-severity item, name the rep, account, call type, and recommended action
+   - If you see a pattern across a single rep (e.g., multiple demo calls with no deals created), call that out as a process gap
+   - Estimate untracked pipeline based on high-severity CWD count
+   - Example: "Sara Bollman: Precious Care ABA (Clinical Demo, 47 min, Jan 15) — no deal exists at this account. Likely missing deal creation."
+{{/if}}
 
 RULES:
 - Use specific numbers, dollar amounts, and rep names

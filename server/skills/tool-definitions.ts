@@ -49,6 +49,13 @@ import {
   getContext,
 } from '../context/index.js';
 import { query } from '../db.js';
+import {
+  findConversationsWithoutDeals,
+  getTopCWDConversations,
+  getCWDByRep,
+  type ConversationWithoutDeal,
+  type CWDResult,
+} from '../analysis/conversation-without-deals.js';
 
 // ============================================================================
 // Helper: Safe Tool Execution
@@ -1762,16 +1769,18 @@ const prepareAtRiskReps: ToolDefinition = {
       const coverageData = (context.stepResults as any).coverage_data;
       const quality = (context.stepResults as any).pipeline_quality;
       const trend = (context.stepResults as any).coverage_trend;
+      const cwdByRep = (context.stepResults as any).cwd_by_rep || [];
 
       if (!coverageData?.reps) {
         return [];
       }
 
-      // Build quality and trend maps
+      // Build quality, trend, and CWD maps
       const qualityMap = new Map(quality.map((q: any) => [q.email, q]));
       const trendMap = new Map(
         (trend.repDeltas || []).map((d: any) => [d.email, d])
       );
+      const cwdMap = new Map(cwdByRep.map((c: any) => [c.email, c]));
 
       // Filter at-risk reps
       const atRiskReps = coverageData.reps
@@ -1784,6 +1793,7 @@ const prepareAtRiskReps: ToolDefinition = {
         .map((r: any) => {
           const q = qualityMap.get(r.email);
           const t = trendMap.get(r.email);
+          const cwd = cwdMap.get(r.email);
 
           return {
             name: r.name,
@@ -1800,10 +1810,109 @@ const prepareAtRiskReps: ToolDefinition = {
             earlyPct: q?.earlyPct || 0,
             coverageChange: t?.coverageChange || null,
             pipelineChange: t?.pipelineChange || 0,
+            conversations_without_deals_count: cwd?.cwd_count || 0,
+            cwd_accounts: cwd?.cwd_accounts || [],
           };
         });
 
       return atRiskReps;
+    }, params);
+  },
+};
+
+// ============================================================================
+// CWD (Conversations Without Deals) Tools
+// ============================================================================
+
+const checkWorkspaceHasConversations: ToolDefinition = {
+  name: 'checkWorkspaceHasConversations',
+  description: 'Check if workspace has conversation data (Gong/Fireflies connectors active)',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('checkWorkspaceHasConversations', async () => {
+      const result = await query(
+        `SELECT EXISTS(
+          SELECT 1 FROM conversations
+          WHERE workspace_id = $1
+          LIMIT 1
+        ) as has_conversations`,
+        [context.workspaceId]
+      );
+      return result.rows[0]?.has_conversations || false;
+    }, params);
+  },
+};
+
+const auditConversationDealCoverage: ToolDefinition = {
+  name: 'auditConversationDealCoverage',
+  description: 'Find conversations linked to accounts but not deals (CWD), with severity classification and account enrichment',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {
+      daysBack: {
+        type: 'number',
+        description: 'Number of days to look back (default: 90)',
+      },
+    },
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('auditConversationDealCoverage', async () => {
+      const daysBack = (params as any).daysBack || 90;
+
+      // Get full CWD result
+      const cwdResult = await findConversationsWithoutDeals(context.workspaceId, daysBack);
+
+      // Get top 5 high-severity examples for DeepSeek classification
+      const topExamples = getTopCWDConversations(cwdResult.conversations, 5);
+
+      return {
+        has_conversation_data: true,
+        summary: cwdResult.summary,
+        top_examples: topExamples,
+      };
+    }, params);
+  },
+};
+
+const getCWDByRepTool: ToolDefinition = {
+  name: 'getCWDByRep',
+  description: 'Get CWD (Conversations Without Deals) aggregated by rep for shadow pipeline analysis',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {
+      daysBack: {
+        type: 'number',
+        description: 'Number of days to look back (default: 90)',
+      },
+    },
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('getCWDByRep', async () => {
+      const daysBack = (params as any).daysBack || 90;
+
+      // Get full CWD result
+      const cwdResult = await findConversationsWithoutDeals(context.workspaceId, daysBack);
+
+      // Aggregate by rep
+      const byRepMap = getCWDByRep(cwdResult.conversations);
+
+      // Convert Map to array for easier consumption in skills
+      return Array.from(byRepMap.entries()).map(([email, data]) => ({
+        email,
+        rep_name: data.rep_name,
+        cwd_count: data.cwd_count,
+        high_severity_count: data.high_severity_count,
+        cwd_accounts: data.conversations.map(c => c.account_name),
+      }));
     }, params);
   },
 };
@@ -1862,6 +1971,9 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['coverageTrend', coverageTrendTool],
   ['repPipelineQuality', repPipelineQualityTool],
   ['prepareAtRiskReps', prepareAtRiskReps],
+  ['checkWorkspaceHasConversations', checkWorkspaceHasConversations],
+  ['auditConversationDealCoverage', auditConversationDealCoverage],
+  ['getCWDByRep', getCWDByRepTool],
 ]);
 
 // ============================================================================
