@@ -200,6 +200,9 @@ export interface SkillResult {
   /** Per-step execution details */
   steps: SkillStepResult[];
 
+  /** All step results keyed by outputKey (for structured data persistence) */
+  stepData?: Record<string, any>;
+
   /** Total execution time */
   totalDuration_ms: number;
 

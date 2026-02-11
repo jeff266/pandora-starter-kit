@@ -57,7 +57,7 @@ router.post('/:workspaceId/skills/:skillId/run', async (req, res) => {
           result.status,
           'manual',
           JSON.stringify(params || {}),
-          result.output ? JSON.stringify(result.output) : null,
+          result.stepData ? JSON.stringify(result.stepData) : (result.output ? JSON.stringify(result.output) : null),
           result.output ? JSON.stringify(result.output) : null,
           typeof result.output === 'string' ? result.output : null,
           JSON.stringify(result.steps),

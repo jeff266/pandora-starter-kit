@@ -1918,6 +1918,318 @@ const getCWDByRepTool: ToolDefinition = {
 };
 
 // ============================================================================
+// Forecast Roll-up Tools
+// ============================================================================
+
+const forecastRollup: ToolDefinition = {
+  name: 'forecastRollup',
+  description: 'Aggregate deals by forecast_category into team totals, bear/base/bull scenarios, and per-rep breakdown. Only includes forecasted pipelines.',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('forecastRollup', async () => {
+      const nameMap = await resolveOwnerNames(context.workspaceId);
+
+      const teamResult = await query(
+        `SELECT
+          forecast_category,
+          COUNT(*) AS deal_count,
+          COALESCE(SUM(amount), 0) AS total_amount,
+          COALESCE(SUM(amount * COALESCE(probability, 0)), 0) AS weighted_amount
+        FROM deals
+        WHERE workspace_id = $1
+          AND forecast_category IS NOT NULL
+          AND stage_normalized NOT IN ('closed_lost')
+        GROUP BY forecast_category`,
+        [context.workspaceId]
+      );
+
+      const categories: Record<string, { count: number; amount: number; weighted: number }> = {
+        closed: { count: 0, amount: 0, weighted: 0 },
+        commit: { count: 0, amount: 0, weighted: 0 },
+        best_case: { count: 0, amount: 0, weighted: 0 },
+        pipeline: { count: 0, amount: 0, weighted: 0 },
+        not_forecasted: { count: 0, amount: 0, weighted: 0 },
+      };
+
+      for (const row of teamResult.rows) {
+        const cat = row.forecast_category as string;
+        if (categories[cat]) {
+          categories[cat] = {
+            count: Number(row.deal_count),
+            amount: Number(row.total_amount),
+            weighted: Number(row.weighted_amount),
+          };
+        }
+      }
+
+      const closedWon = categories.closed.amount;
+      const commit = categories.commit.amount;
+      const bestCase = categories.best_case.amount;
+      const pipelineAmt = categories.pipeline.amount;
+
+      const bearCase = closedWon + commit;
+      const baseCase = closedWon + commit + bestCase;
+      const bullCase = closedWon + commit + bestCase + pipelineAmt;
+      const weightedForecast = closedWon + categories.commit.weighted + categories.best_case.weighted + categories.pipeline.weighted;
+
+      const repResult = await query(
+        `SELECT
+          owner,
+          forecast_category,
+          COUNT(*) AS deal_count,
+          COALESCE(SUM(amount), 0) AS total_amount
+        FROM deals
+        WHERE workspace_id = $1
+          AND forecast_category IS NOT NULL
+          AND stage_normalized NOT IN ('closed_lost')
+          AND owner IS NOT NULL
+        GROUP BY owner, forecast_category
+        ORDER BY owner`,
+        [context.workspaceId]
+      );
+
+      const repMap = new Map<string, {
+        closedWon: number; commit: number; bestCase: number; pipeline: number; notForecasted: number;
+        dealCount: number;
+      }>();
+
+      for (const row of repResult.rows) {
+        const ownerRaw = row.owner as string;
+        const owner = resolveOwnerName(ownerRaw, nameMap);
+        if (!repMap.has(owner)) {
+          repMap.set(owner, { closedWon: 0, commit: 0, bestCase: 0, pipeline: 0, notForecasted: 0, dealCount: 0 });
+        }
+        const rep = repMap.get(owner)!;
+        const amt = Number(row.total_amount);
+        const cnt = Number(row.deal_count);
+        rep.dealCount += cnt;
+
+        switch (row.forecast_category) {
+          case 'closed': rep.closedWon += amt; break;
+          case 'commit': rep.commit += amt; break;
+          case 'best_case': rep.bestCase += amt; break;
+          case 'pipeline': rep.pipeline += amt; break;
+          case 'not_forecasted': rep.notForecasted += amt; break;
+        }
+      }
+
+      const quotaConfig = (context.stepResults as any).quota_config;
+      const teamQuota = quotaConfig?.teamQuota ?? null;
+      const repQuotas = quotaConfig?.repQuotas ?? null;
+
+      const byRep = Array.from(repMap.entries()).map(([name, data]) => {
+        const repQuota = repQuotas?.[name] ?? null;
+        const repBear = data.closedWon + data.commit;
+        const attainment = repQuota ? repBear / repQuota : null;
+
+        let status: string | null = null;
+        if (attainment !== null) {
+          if (attainment >= 1.2) status = 'crushing';
+          else if (attainment >= 0.9) status = 'on_track';
+          else if (attainment >= 0.7) status = 'at_risk';
+          else if (attainment >= 0.5) status = 'behind';
+          else status = 'off_track';
+        }
+
+        return {
+          name,
+          closedWon: data.closedWon,
+          commit: data.commit,
+          bestCase: data.bestCase,
+          pipeline: data.pipeline,
+          notForecasted: data.notForecasted,
+          dealCount: data.dealCount,
+          bearCase: repBear,
+          quota: repQuota,
+          attainment,
+          status,
+        };
+      }).sort((a, b) => b.bearCase - a.bearCase);
+
+      return {
+        team: {
+          closedWon,
+          commit,
+          bestCase,
+          pipeline: pipelineAmt,
+          notForecasted: categories.not_forecasted.amount,
+          bearCase,
+          baseCase,
+          bullCase,
+          weightedForecast,
+          teamQuota,
+          attainment: teamQuota ? bearCase / teamQuota : null,
+        },
+        dealCount: {
+          closed: categories.closed.count,
+          commit: categories.commit.count,
+          bestCase: categories.best_case.count,
+          pipeline: categories.pipeline.count,
+          notForecasted: categories.not_forecasted.count,
+          total: Object.values(categories).reduce((s, c) => s + c.count, 0),
+        },
+        byRep,
+      };
+    }, params);
+  },
+};
+
+const forecastWoWDelta: ToolDefinition = {
+  name: 'forecastWoWDelta',
+  description: 'Compare current forecast roll-up to the most recent previous run for week-over-week delta analysis.',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('forecastWoWDelta', async () => {
+      const currentData = (context.stepResults as any).forecast_data;
+      if (!currentData?.team) {
+        return { available: false, reason: 'No current forecast data' };
+      }
+
+      const previousRun = await query(
+        `SELECT result, completed_at
+         FROM skill_runs
+         WHERE workspace_id = $1
+           AND skill_id = 'forecast-rollup'
+           AND status = 'completed'
+           AND run_id != $2
+         ORDER BY completed_at DESC
+         LIMIT 1`,
+        [context.workspaceId, context.runId]
+      );
+
+      if (previousRun.rows.length === 0) {
+        return { available: false, reason: 'First run - no previous data for comparison' };
+      }
+
+      const prevResult = previousRun.rows[0].result;
+      const prevDate = previousRun.rows[0].completed_at;
+
+      let prevTeam: any = null;
+      if (prevResult?.forecast_data?.team) {
+        prevTeam = prevResult.forecast_data.team;
+      } else if (prevResult?.team) {
+        prevTeam = prevResult.team;
+      }
+
+      if (!prevTeam) {
+        return { available: false, reason: 'Previous run result missing team data' };
+      }
+
+      const calcDelta = (current: number, previous: number) => {
+        const delta = current - previous;
+        const deltaPercent = previous !== 0 ? (delta / previous) * 100 : (current > 0 ? 100 : 0);
+        return {
+          from: previous,
+          to: current,
+          delta,
+          deltaPercent: Math.round(deltaPercent * 10) / 10,
+          direction: delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat',
+        };
+      };
+
+      return {
+        available: true,
+        previousRunDate: prevDate,
+        changes: {
+          closedWon: calcDelta(currentData.team.closedWon, prevTeam.closedWon ?? 0),
+          commit: calcDelta(currentData.team.commit, prevTeam.commit ?? 0),
+          bestCase: calcDelta(currentData.team.bestCase, prevTeam.bestCase ?? 0),
+          pipeline: calcDelta(currentData.team.pipeline, prevTeam.pipeline ?? 0),
+          bearCase: calcDelta(currentData.team.bearCase, prevTeam.bearCase ?? 0),
+          baseCase: calcDelta(currentData.team.baseCase, prevTeam.baseCase ?? 0),
+          bullCase: calcDelta(currentData.team.bullCase, prevTeam.bullCase ?? 0),
+        },
+      };
+    }, params);
+  },
+};
+
+const prepareForecastSummary: ToolDefinition = {
+  name: 'prepareForecastSummary',
+  description: 'Prepare a pre-formatted summary of forecast data for Claude narrative synthesis.',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('prepareForecastSummary', async () => {
+      const forecast = (context.stepResults as any).forecast_data;
+      const wow = (context.stepResults as any).wow_delta;
+      const quotaConfig = (context.stepResults as any).quota_config;
+
+      if (!forecast?.team) {
+        return { error: 'No forecast data available' };
+      }
+
+      const fmt = (n: number) => `$${(n || 0).toLocaleString('en-US')}`;
+      const team = forecast.team;
+
+      let teamSummary = `Closed Won: ${fmt(team.closedWon)} | Commit: ${fmt(team.commit)} | Best Case: ${fmt(team.bestCase)} | Pipeline: ${fmt(team.pipeline)}`;
+      teamSummary += `\nBear Case: ${fmt(team.bearCase)} | Base Case: ${fmt(team.baseCase)} | Bull Case: ${fmt(team.bullCase)}`;
+      teamSummary += `\nWeighted Forecast: ${fmt(team.weightedForecast)}`;
+      teamSummary += `\nSpread (Bull - Bear): ${fmt(team.bullCase - team.bearCase)}`;
+
+      if (team.teamQuota) {
+        const att = team.attainment ? `${(team.attainment * 100).toFixed(1)}%` : 'N/A';
+        teamSummary += `\nTeam Quota: ${fmt(team.teamQuota)} | Bear Attainment: ${att}`;
+      }
+
+      let quotaNote = '';
+      if (!quotaConfig?.hasQuotas) {
+        quotaNote = 'NOTE: No quota data configured. All analysis uses absolute amounts only. Attainment percentages and rep status are unavailable.';
+      } else if (!quotaConfig?.hasRepQuotas) {
+        quotaNote = 'NOTE: Team quota is set but per-rep quotas are not configured. Rep-level attainment is unavailable.';
+      }
+
+      const dealCounts = forecast.dealCount;
+      let countsLine = `Deals — Closed: ${dealCounts.closed} | Commit: ${dealCounts.commit} | Best Case: ${dealCounts.bestCase} | Pipeline: ${dealCounts.pipeline} | Not Forecasted: ${dealCounts.notForecasted} | Total: ${dealCounts.total}`;
+
+      const repRows = (forecast.byRep || []).map((r: any) => {
+        let line = `${r.name}: CW=${fmt(r.closedWon)} Commit=${fmt(r.commit)} BC=${fmt(r.bestCase)} Pipe=${fmt(r.pipeline)} (${r.dealCount} deals)`;
+        if (r.quota) {
+          line += ` | Quota: ${fmt(r.quota)} | Att: ${r.attainment ? (r.attainment * 100).toFixed(1) + '%' : 'N/A'} | Status: ${r.status || 'N/A'}`;
+        }
+        return line;
+      }).join('\n');
+
+      let wowSummary = '';
+      if (wow?.available && wow.changes) {
+        const c = wow.changes;
+        wowSummary = `Previous run: ${new Date(wow.previousRunDate).toLocaleDateString()}\n`;
+        wowSummary += `Closed Won: ${fmt(c.closedWon.from)} → ${fmt(c.closedWon.to)} (${c.closedWon.delta >= 0 ? '+' : ''}${fmt(c.closedWon.delta)}, ${c.closedWon.deltaPercent}%)\n`;
+        wowSummary += `Commit: ${fmt(c.commit.from)} → ${fmt(c.commit.to)} (${c.commit.delta >= 0 ? '+' : ''}${fmt(c.commit.delta)}, ${c.commit.deltaPercent}%)\n`;
+        wowSummary += `Best Case: ${fmt(c.bestCase.from)} → ${fmt(c.bestCase.to)} (${c.bestCase.delta >= 0 ? '+' : ''}${fmt(c.bestCase.delta)}, ${c.bestCase.deltaPercent}%)\n`;
+        wowSummary += `Pipeline: ${fmt(c.pipeline.from)} → ${fmt(c.pipeline.to)} (${c.pipeline.delta >= 0 ? '+' : ''}${fmt(c.pipeline.delta)}, ${c.pipeline.deltaPercent}%)\n`;
+        wowSummary += `Bear Case: ${fmt(c.bearCase.from)} → ${fmt(c.bearCase.to)} (${c.bearCase.delta >= 0 ? '+' : ''}${fmt(c.bearCase.delta)}, ${c.bearCase.deltaPercent}%)\n`;
+        wowSummary += `Base Case: ${fmt(c.baseCase.from)} → ${fmt(c.baseCase.to)} (${c.baseCase.delta >= 0 ? '+' : ''}${fmt(c.baseCase.delta)}, ${c.baseCase.deltaPercent}%)`;
+      } else {
+        wowSummary = wow?.reason || 'First run — no previous data for comparison.';
+      }
+
+      return {
+        quotaNote,
+        teamSummary,
+        dealCounts: countsLine,
+        repTable: repRows || 'No rep data available.',
+        wowSummary,
+      };
+    }, params);
+  },
+};
+
+// ============================================================================
 // Tool Registry
 // ============================================================================
 
@@ -1974,6 +2286,9 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['checkWorkspaceHasConversations', checkWorkspaceHasConversations],
   ['auditConversationDealCoverage', auditConversationDealCoverage],
   ['getCWDByRep', getCWDByRepTool],
+  ['forecastRollup', forecastRollup],
+  ['forecastWoWDelta', forecastWoWDelta],
+  ['prepareForecastSummary', prepareForecastSummary],
 ]);
 
 // ============================================================================

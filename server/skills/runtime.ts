@@ -145,6 +145,7 @@ export class SkillRuntime {
         output: finalOutput,
         outputFormat: skill.outputFormat,
         steps: stepResults,
+        stepData: context.stepResults,
         totalDuration_ms: Date.now() - startTime,
         totalTokenUsage: context.metadata.tokenUsage,
         completedAt: new Date(),
