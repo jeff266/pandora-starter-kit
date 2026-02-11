@@ -91,8 +91,8 @@ async function computeDeals(
              deal_risk_factors = $4,
              health_score = $5,
              updated_at = NOW()
-         WHERE id = $1`,
-        [deal.id, scores.velocityScore, scores.dealRisk, JSON.stringify(scores.riskFactors), healthScore]
+         WHERE id = $1 AND workspace_id = $6`,
+        [deal.id, scores.velocityScore, scores.dealRisk, JSON.stringify(scores.riskFactors), healthScore, workspaceId]
       );
       updated++;
     }
@@ -162,8 +162,8 @@ async function computeContacts(
       const score = computeContactEngagement(contact, activity);
 
       await client.query(
-        `UPDATE contacts SET engagement_score = $2, updated_at = NOW() WHERE id = $1`,
-        [contact.id, score]
+        `UPDATE contacts SET engagement_score = $2, updated_at = NOW() WHERE id = $1 AND workspace_id = $3`,
+        [contact.id, score, workspaceId]
       );
       updated++;
     }
@@ -249,8 +249,8 @@ async function computeAccounts(
       const score = computeAccountHealth(account, metrics);
 
       await client.query(
-        `UPDATE accounts SET health_score = $2, updated_at = NOW() WHERE id = $1`,
-        [account.id, score]
+        `UPDATE accounts SET health_score = $2, updated_at = NOW() WHERE id = $1 AND workspace_id = $3`,
+        [account.id, score, workspaceId]
       );
       updated++;
     }

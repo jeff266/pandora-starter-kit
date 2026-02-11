@@ -160,7 +160,7 @@ async function tier1EmailMatch(
   }
 
   if (updates.length > 0) {
-    await batchUpdateConversations(updates);
+    await batchUpdateConversations(workspaceId, updates);
     result.linked.tier1_email = updates.length;
   }
 
@@ -268,7 +268,7 @@ async function tier2NativeCRM(
   }
 
   if (updates.length > 0) {
-    await batchUpdateConversations(updates);
+    await batchUpdateConversations(workspaceId, updates);
     result.linked.tier2_native = updates.length;
   }
 
@@ -333,14 +333,14 @@ async function tier3DealInference(
   }
 
   if (updates.length > 0) {
-    await batchUpdateDealOnly(updates);
+    await batchUpdateDealOnly(workspaceId, updates);
     result.linked.tier3_inferred = updates.length;
   }
 
   return { examined: withAccount.rows.length };
 }
 
-async function batchUpdateConversations(updates: BatchUpdate[]): Promise<void> {
+async function batchUpdateConversations(workspaceId: string, updates: BatchUpdate[]): Promise<void> {
   const BATCH_SIZE = 500;
   for (let i = 0; i < updates.length; i += BATCH_SIZE) {
     const batch = updates.slice(i, i + BATCH_SIZE);
@@ -364,13 +364,14 @@ async function batchUpdateConversations(updates: BatchUpdate[]): Promise<void> {
           unnest($3::text[]) AS new_deal_id,
           unnest($4::text[]) AS method
       ) AS v
-      WHERE c.id = v.conv_id`,
-      [ids, accountIds, dealIds, methods]
+      WHERE c.id = v.conv_id
+        AND c.workspace_id = $5`,
+      [ids, accountIds, dealIds, methods, workspaceId]
     );
   }
 }
 
-async function batchUpdateDealOnly(updates: BatchUpdate[]): Promise<void> {
+async function batchUpdateDealOnly(workspaceId: string, updates: BatchUpdate[]): Promise<void> {
   const BATCH_SIZE = 500;
   for (let i = 0; i < updates.length; i += BATCH_SIZE) {
     const batch = updates.slice(i, i + BATCH_SIZE);
@@ -392,8 +393,9 @@ async function batchUpdateDealOnly(updates: BatchUpdate[]): Promise<void> {
           unnest($3::text[]) AS method
       ) AS v
       WHERE c.id = v.conv_id
+        AND c.workspace_id = $4
         AND c.deal_id IS NULL`,
-      [ids, dealIds, methods]
+      [ids, dealIds, methods, workspaceId]
     );
   }
 }

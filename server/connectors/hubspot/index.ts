@@ -46,8 +46,8 @@ export class HubSpotConnector implements PandoraConnector {
           status = 'healthy',
           error_message = NULL,
           updated_at = NOW()
-        WHERE id = $2`,
-        [JSON.stringify(credentials), connectionId]
+        WHERE id = $2 AND workspace_id = $3`,
+        [JSON.stringify(credentials), connectionId, workspaceId]
       );
     } else {
       const result = await query<{ id: string }>(
