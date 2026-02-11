@@ -37,8 +37,8 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 
 -- Index for job queue polling (get next pending job)
-CREATE INDEX IF NOT EXISTS idx_jobs_queue_poll ON jobs(status, priority DESC, created_at ASC)
-  WHERE status = 'pending' AND run_after <= NOW();
+CREATE INDEX IF NOT EXISTS idx_jobs_queue_poll ON jobs(status, priority DESC, run_after ASC, created_at ASC)
+  WHERE status = 'pending';
 
 -- Index for workspace job history
 CREATE INDEX IF NOT EXISTS idx_jobs_workspace ON jobs(workspace_id, created_at DESC);
