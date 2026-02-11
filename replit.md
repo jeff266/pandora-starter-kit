@@ -18,6 +18,7 @@ Pandora is built on Node.js 20 with TypeScript 5+, using Express.js and PostgreS
 -   **Universal Adapter Pattern:** Standardized data ingestion via connectors adhering to a universal adapter interface.
 -   **Data Normalization:** Data is transformed into 8 core entities: `deals`, `contacts`, `accounts`, `activities`, `conversations`, `tasks`, `calls`, and `documents`.
 -   **Context Layer:** A `context_layer` table, unique per workspace, stores business context in 5 JSONB sections for personalized AI analysis.
+-   **Quota System:** `quota_periods` and `rep_quotas` tables store team and per-rep quotas by period. `checkQuotaConfig` queries active period (date-bounded) first, falls back to context layer `goals_and_targets`. Quota data flows into forecast skill for attainment calculations.
 -   **Computed Fields Engine:** Orchestrates batch computations for scores like `velocity_score`, `deal_risk`, `engagement_score`, and `health_score`.
 -   **Stage Normalization:** `stage_normalized` column maps raw CRM stages to universal values (awareness, qualification, etc.) with specific transforms for HubSpot and Salesforce.
 -   **Skill Framework:** Features a registry and runtime for AI-powered skills following a COMPUTE → CLASSIFY → SYNTHESIZE pattern, utilizing a three-tier AI system (deterministic compute, DeepSeek for classify, Claude for synthesize).
