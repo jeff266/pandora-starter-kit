@@ -34,7 +34,7 @@ router.post('/:id/sync', async (req: Request, res: Response): Promise<void> => {
 
     const runningResult = await query<{ id: string }>(
       `SELECT id FROM sync_log
-       WHERE workspace_id = $1 AND status IN ('running', 'pending')
+       WHERE workspace_id = $1 AND status IN ('pending', 'running')
        LIMIT 1`,
       [workspaceId]
     );

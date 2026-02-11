@@ -35,10 +35,10 @@ router.post('/:workspaceId/connectors/salesforce/sync', async (req, res) => {
       [workspaceId]
     );
 
-    // Check for running or pending sync (prevent duplicates)
+    // Check for running sync (prevent duplicates)
     const runningResult = await query(
       `SELECT id FROM sync_log
-       WHERE workspace_id = $1 AND connector_type = 'salesforce' AND status IN ('running', 'pending')
+       WHERE workspace_id = $1 AND connector_type = 'salesforce' AND status IN ('pending', 'running')
        LIMIT 1`,
       [workspaceId]
     );
@@ -66,22 +66,15 @@ router.post('/:workspaceId/connectors/salesforce/sync', async (req, res) => {
     credentials.clientId = process.env.SALESFORCE_CLIENT_ID;
     credentials.clientSecret = process.env.SALESFORCE_CLIENT_SECRET;
 
-    // Auto-detect mode: incremental if last_sync_at exists, unless explicitly set
-    const requestedMode = req.body?.mode;
-    let syncMode: 'full' | 'incremental' = 'full';
-    if (requestedMode === 'incremental' || requestedMode === 'full') {
-      syncMode = requestedMode;
-    } else {
-      // Auto-detect: use incremental if we have a watermark
-      const watermarkResult = await query(
-        `SELECT last_sync_at FROM connections
-         WHERE workspace_id = $1 AND connector_name = 'salesforce' AND last_sync_at IS NOT NULL`,
-        [workspaceId]
-      );
-      if (watermarkResult.rows.length > 0) {
-        syncMode = 'incremental';
-      }
-    }
+    // Auto-detect sync mode based on last_sync_at watermark
+    const lastSyncResult = await query<{ last_sync_at: Date | null }>(
+      `SELECT last_sync_at FROM connections
+       WHERE workspace_id = $1 AND connector_name = 'salesforce'`,
+      [workspaceId]
+    );
+    const mode = lastSyncResult.rows[0]?.last_sync_at ? 'incremental' : 'full';
+
+    logger.info('Salesforce sync mode auto-detected', { workspaceId, mode, lastSyncAt: lastSyncResult.rows[0]?.last_sync_at });
 
     // Create background job
     const jobQueue = getJobQueue();
@@ -91,7 +84,7 @@ router.post('/:workspaceId/connectors/salesforce/sync', async (req, res) => {
       payload: {
         credentials,
         syncLogId,
-        mode: syncMode,
+        mode,
       },
       priority: 1, // Manual syncs get higher priority
     });
@@ -103,8 +96,7 @@ router.post('/:workspaceId/connectors/salesforce/sync', async (req, res) => {
       syncId: syncLogId,
       jobId,
       status: 'queued',
-      mode: syncMode,
-      message: `Salesforce ${syncMode} sync queued`,
+      message: 'Salesforce sync queued',
       statusUrl: `/api/workspaces/${workspaceId}/sync/jobs/${jobId}`,
     });
   } catch (error) {
