@@ -191,29 +191,30 @@ export function transformOpportunity(
   // Normalize stage using Salesforce metadata
   let stageNormalized: string | null = null;
 
-  if (stage) {
-    if (stage.IsClosed && stage.IsWon) {
-      stageNormalized = 'closed_won';
-    } else if (stage.IsClosed && !stage.IsWon) {
-      stageNormalized = 'closed_lost';
-    } else {
-      // Map ForecastCategoryName to normalized stages
-      switch (stage.ForecastCategoryName) {
-        case 'Omitted':
-          stageNormalized = 'awareness';
-          break;
-        case 'Pipeline':
-          stageNormalized = 'qualification';
-          break;
-        case 'Best Case':
-          stageNormalized = 'evaluation';
-          break;
-        case 'Commit':
-          stageNormalized = 'decision';
-          break;
-        default:
-          // Fallback: use SortOrder position
-          // Assume stages are ordered from early to late
+  const isClosed = stage ? stage.IsClosed : opp.IsClosed;
+  const isWon = stage ? stage.IsWon : opp.IsWon;
+  const forecastCat = stage ? stage.ForecastCategoryName : opp.ForecastCategoryName;
+
+  if (isClosed && isWon) {
+    stageNormalized = 'closed_won';
+  } else if (isClosed && !isWon) {
+    stageNormalized = 'closed_lost';
+  } else {
+    switch (forecastCat) {
+      case 'Omitted':
+        stageNormalized = 'awareness';
+        break;
+      case 'Pipeline':
+        stageNormalized = 'qualification';
+        break;
+      case 'Best Case':
+        stageNormalized = 'evaluation';
+        break;
+      case 'Commit':
+        stageNormalized = 'decision';
+        break;
+      default:
+        if (stage) {
           const totalStages = Array.from(stageMap.values()).filter(s => !s.IsClosed).length;
           const stagePosition = stage.SortOrder;
           const percentThrough = totalStages > 0 ? stagePosition / totalStages : 0;
@@ -225,7 +226,9 @@ export function transformOpportunity(
           } else {
             stageNormalized = 'decision';
           }
-      }
+        } else {
+          stageNormalized = 'qualification';
+        }
     }
   }
 
