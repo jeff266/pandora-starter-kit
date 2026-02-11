@@ -1,0 +1,227 @@
+Here's what to test in Replit to validate the merged features:    
+                                                                    
+  🧪 Testing Checklist                                              
+                                                                    
+  1. Database Migration (5 min)                                     
+                                                                    
+  Run the migration to create the jobs table:                       
+                                                                    
+  npm run migrate                                                   
+                                                                    
+  Expected output:                                                  
+  [migrate] Applied 009_async_jobs.sql                              
+  [migrate] All migrations applied                                  
+                                                                    
+  Verify the table exists:                                          
+  # In Replit Shell                                                 
+  psql $DATABASE_URL -c "\d jobs"                                   
+                                                                    
+  Should show the jobs table schema with columns: id, status,       
+  progress, result, etc.                                            
+                                                                    
+  ---                                                               
+  2. Start Server with Job Queue (2 min)                            
+                                                                    
+  npm run dev                                                       
+                                                                    
+  Look for these startup logs:                                      
+  [server] Database connection verified                             
+  [server] Registered 3 adapters: monday, google-drive, salesforce  
+  [JobQueue] Starting job queue (polling every 2000ms)  ← NEW!      
+  [Scheduler] Daily sync scheduled for 2:00 AM UTC                  
+  [server] Pandora v0.1.0 listening on port 3000                    
+                                                                    
+  If you see [JobQueue] Starting job queue, the async system is     
+  running! ✅                                                       
+                                                                    
+  ---                                                               
+  3. Test Async Sync Flow (10 min)                                  
+                                                                    
+  A. Trigger a sync job (non-blocking):                             
+                                                                    
+  In Replit, open a new Shell tab and run:                          
+                                                                    
+  # Replace {workspace-id} with your actual workspace ID            
+  curl -X POST                                                      
+  http://localhost:3000/api/workspaces/{workspace-id}/sync \        
+    -H "Content-Type: application/json" \                           
+    -d '{"connectorType": "hubspot"}'                               
+                                                                    
+  Expected response (202 Accepted):                                 
+  {                                                                 
+    "syncId": "uuid",                                               
+    "jobId": "uuid",                                                
+    "status": "queued",                                             
+    "message": "Sync queued for 1 connector(s)",                    
+    "statusUrl":                                                    
+  "/api/workspaces/{workspace-id}/sync/jobs/{job-uuid}"             
+  }                                                                 
+                                                                    
+  Note: The response should be immediate (< 100ms), not blocking!   
+                                                                    
+  B. Poll job status (see progress):                                
+                                                                    
+  Use the jobId from above:                                         
+                                                                    
+  curl http://localhost:3000/api/workspaces/{workspace-id}/sync/jobs
+  /{job-uuid}                                                       
+                                                                    
+  While running:                                                    
+  {                                                                 
+    "id": "job-uuid",                                               
+    "status": "running",                                            
+    "progress": {                                                   
+      "current": 0,                                                 
+      "total": 100,                                                 
+      "message": "Initializing sync..."                             
+    },                                                              
+    "attempts": 1,                                                  
+    "startedAt": "2026-02-11T..."                                   
+  }                                                                 
+                                                                    
+  When complete:                                                    
+  {                                                                 
+    "id": "job-uuid",                                               
+    "status": "completed",                                          
+    "result": {                                                     
+      "results": [...],                                             
+      "totalRecords": 12345,                                        
+      "errors": []                                                  
+    },                                                              
+    "completedAt": "2026-02-11T..."                                 
+  }                                                                 
+                                                                    
+  C. Check job history:                                             
+                                                                    
+  curl http://localhost:3000/api/workspaces/{workspace-id}/sync/jobs
+  ?limit=10                                                         
+                                                                    
+  Should show your recent jobs with status.                         
+                                                                    
+  ---                                                               
+  4. Test Pipeline Coverage with System Account Filtering (5 min)   
+                                                                    
+  Check if the skill is registered:                                 
+                                                                    
+  curl http://localhost:3000/api/workspaces/{workspace-id}/skills   
+                                                                    
+  Look for pipeline-coverage in the list.                           
+                                                                    
+  Test the aggregation directly (if you have SQL access):           
+                                                                    
+  -- In psql                                                        
+  SELECT * FROM deals                                               
+  WHERE workspace_id = 'your-workspace-id'                          
+    AND owner IS NOT NULL                                           
+  LIMIT 10;                                                         
+                                                                    
+  Note which owners exist (look for system accounts like            
+  "integration@...", "admin@...", etc.)                             
+                                                                    
+  Run pipeline coverage skill with exclusions:                      
+                                                                    
+  The skill should now filter out system accounts automatically.    
+  Check the skill execution logs to see if excluded owners are being
+   filtered.                                                        
+                                                                    
+  ---                                                               
+  5. Verify Salesforce Adapter Registration (1 min)                 
+                                                                    
+  curl                                                              
+  http://localhost:3000/api/workspaces/{workspace-id}/connectors    
+                                                                    
+  Expected: Should see salesforce in the available connectors list  
+  (even if not connected yet).                                      
+                                                                    
+  ---                                                               
+  6. Monitor Job Queue in Database (Optional)                       
+                                                                    
+  -- See all jobs                                                   
+  SELECT id, job_type, status,                                      
+         progress->>'message' as progress_msg,                      
+         attempts, created_at                                       
+  FROM jobs                                                         
+  ORDER BY created_at DESC                                          
+  LIMIT 10;                                                         
+                                                                    
+  -- Count by status                                                
+  SELECT status, COUNT(*)                                           
+  FROM jobs                                                         
+  GROUP BY status;                                                  
+                                                                    
+  ---                                                               
+  🎯 Success Criteria                                               
+                                                                    
+  After testing, you should see:                                    
+                                                                    
+  - ✅ Migration applied: jobs table exists                         
+  - ✅ Job queue running: Startup log shows [JobQueue] Starting...  
+  - ✅ Async sync works: POST /sync returns 202 immediately with    
+  jobId                                                             
+  - ✅ Progress tracking: Can poll job status and see progress      
+  updates                                                           
+  - ✅ Salesforce registered: Shows in connectors list              
+  - ✅ System account filtering: Pipeline coverage has              
+  excludedOwners parameter                                          
+                                                                    
+  ---                                                               
+  🚨 What to Watch For                                              
+                                                                    
+  Potential Issues:                                                 
+                                                                    
+  1. Migration fails: Check if Postgres is running and DATABASE_URL 
+  is set                                                            
+  2. Job queue doesn't start: Check server logs for errors in       
+  server/jobs/queue.ts                                              
+  3. Sync still blocks: Old code might be cached - restart server   
+  4. No progress updates: Job might complete too fast (< 2 seconds) 
+  - try with more data                                              
+                                                                    
+  ---                                                               
+  📝 Quick Test Script                                              
+                                                                    
+  Save this as test-async-sync.sh in Replit:                        
+                                                                    
+  #!/bin/bash                                                       
+                                                                    
+  WORKSPACE_ID="your-workspace-id-here"                             
+  BASE_URL="http://localhost:3000"                                  
+                                                                    
+  echo "1. Triggering async sync..."                                
+  RESPONSE=$(curl -s -X POST                                        
+  "$BASE_URL/api/workspaces/$WORKSPACE_ID/sync" \                   
+    -H "Content-Type: application/json" \                           
+    -d '{"connectorType": "hubspot"}')                              
+                                                                    
+  echo "$RESPONSE"                                                  
+                                                                    
+  JOB_ID=$(echo "$RESPONSE" | grep -o '"jobId":"[^"]*' | cut -d'"'  
+  -f4)                                                              
+  echo "Job ID: $JOB_ID"                                            
+                                                                    
+  echo ""                                                           
+  echo "2. Polling job status (5 times, 2s apart)..."               
+  for i in {1..5}; do                                               
+    echo "Poll #$i:"                                                
+    curl -s                                                         
+  "$BASE_URL/api/workspaces/$WORKSPACE_ID/sync/jobs/$JOB_ID" | jq   
+  '.status, .progress'                                              
+    sleep 2                                                         
+  done                                                              
+                                                                    
+  echo ""                                                           
+  echo "3. Final status:"                                           
+  curl -s "$BASE_URL/api/workspaces/$WORKSPACE_ID/sync/jobs/$JOB_ID"
+   | jq '.'                                                         
+                                                                    
+  Run it:                                                           
+  chmod +x test-async-sync.sh                                       
+  ./test-async-sync.sh                                              
+                                                                    
+  This will automatically trigger a sync, poll 5 times, and show the
+   final result.                                                    
+                                                                    
+  ---                                                               
+  What would you like to test first? I recommend starting with #1   
+  (migration) and #2 (start server) to verify the infrastructure is 
+  working.                    
