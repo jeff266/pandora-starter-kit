@@ -366,6 +366,84 @@ export async function updateConversationInternalStatus(
   );
 }
 
+export interface ClassifyBatchResult {
+  classified: number;
+  markedInternal: number;
+  markedExternal: number;
+  skipped: number;
+  durationMs: number;
+}
+
+/**
+ * Batch classify all unclassified conversations in a workspace
+ * and persist results. Designed to run post-sync after the linker.
+ */
+export async function classifyAndUpdateInternalStatus(
+  workspaceId: string
+): Promise<ClassifyBatchResult> {
+  const start = Date.now();
+
+  const unclassified = await query<{
+    id: string;
+    title: string | null;
+    participants: Participant[] | null;
+  }>(
+    `SELECT id, title, participants
+     FROM conversations
+     WHERE workspace_id = $1
+       AND internal_classification_reason IS NULL`,
+    [workspaceId]
+  );
+
+  if (unclassified.rows.length === 0) {
+    return { classified: 0, markedInternal: 0, markedExternal: 0, skipped: 0, durationMs: Date.now() - start };
+  }
+
+  logger.info('Classifying unclassified conversations', {
+    workspaceId,
+    count: unclassified.rows.length,
+  });
+
+  const conversations = unclassified.rows.map(r => ({
+    id: r.id,
+    title: r.title,
+    participants: Array.isArray(r.participants) ? r.participants : [],
+  }));
+
+  const classifications = await batchClassifyInternalMeetings(workspaceId, conversations);
+
+  let markedInternal = 0;
+  let markedExternal = 0;
+  let skipped = 0;
+
+  for (const [conversationId, classification] of classifications) {
+    await updateConversationInternalStatus(conversationId, classification);
+    if (classification.is_internal) {
+      markedInternal++;
+    } else {
+      markedExternal++;
+    }
+  }
+
+  skipped = conversations.length - classifications.size;
+
+  logger.info('Internal classification complete', {
+    workspaceId,
+    classified: classifications.size,
+    markedInternal,
+    markedExternal,
+    skipped,
+  });
+
+  return {
+    classified: classifications.size,
+    markedInternal,
+    markedExternal,
+    skipped,
+    durationMs: Date.now() - start,
+  };
+}
+
 /**
  * Get internal meeting statistics for a workspace
  */

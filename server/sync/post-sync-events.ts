@@ -1,6 +1,7 @@
 import { getSkillRegistry } from '../skills/registry.js';
 import { getSkillRuntime } from '../skills/runtime.js';
 import { linkConversations } from '../linker/entity-linker.js';
+import { classifyAndUpdateInternalStatus } from '../analysis/conversation-internal-filter.js';
 
 interface SyncResult {
   connector: string;
@@ -17,14 +18,25 @@ export async function emitSyncCompleted(
   console.log(`[PostSync] Sync completed for workspace ${workspaceId}, checking for triggered skills`);
 
   const connectorTypes = results.filter(r => r.status === 'success').map(r => r.connector);
+  const conversationSynced = connectorTypes.some(c => ['gong', 'fireflies'].includes(c));
   const linkerRelevant = connectorTypes.some(c => ['gong', 'fireflies', 'hubspot', 'salesforce'].includes(c));
+
   if (linkerRelevant) {
-    linkConversations(workspaceId)
-      .then(lr => {
-        const total = lr.linked.tier1_email + lr.linked.tier2_native + lr.linked.tier3_inferred;
-        console.log(`[Linker] Post-sync: ${total} linked, ${lr.stillUnlinked} unlinked (${lr.durationMs}ms)`);
+    try {
+      const lr = await linkConversations(workspaceId);
+      const total = lr.linked.tier1_email + lr.linked.tier2_native + lr.linked.tier3_inferred;
+      console.log(`[Linker] Post-sync: ${total} linked, ${lr.stillUnlinked} unlinked (${lr.durationMs}ms)`);
+    } catch (err) {
+      console.error(`[Linker] Post-sync failed:`, err instanceof Error ? err.message : err);
+    }
+  }
+
+  if (conversationSynced || linkerRelevant) {
+    classifyAndUpdateInternalStatus(workspaceId)
+      .then(stats => {
+        console.log(`[InternalFilter] Post-sync: ${stats.classified} classified, ${stats.markedInternal} internal (${stats.durationMs}ms)`);
       })
-      .catch(err => console.error(`[Linker] Post-sync failed:`, err instanceof Error ? err.message : err));
+      .catch(err => console.error(`[InternalFilter] Post-sync failed:`, err instanceof Error ? err.message : err));
   }
 
   const registry = getSkillRegistry();

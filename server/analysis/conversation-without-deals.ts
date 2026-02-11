@@ -142,10 +142,11 @@ export async function findConversationsWithoutDeals(
   const conversations: ConversationWithoutDeal[] = [];
 
   for (const row of result.rows) {
-    // Extract rep info from participants
     const participants = Array.isArray(row.participants) ? row.participants : [];
-    const internalParticipants = participants.filter((p: any) => p.is_internal === true);
-    const externalParticipants = participants.filter((p: any) => p.is_internal !== true);
+    const isInternal = (p: any) =>
+      p.is_internal === true || (typeof p.affiliation === 'string' && p.affiliation.toLowerCase() === 'internal');
+    const internalParticipants = participants.filter(isInternal);
+    const externalParticipants = participants.filter((p: any) => !isInternal(p));
 
     const repName = internalParticipants[0]?.name || null;
     const repEmail = internalParticipants[0]?.email || null;
