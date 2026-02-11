@@ -330,9 +330,9 @@ export async function syncSalesforce(workspaceId: string, credentials: {
       );
 
       await query(
-        `UPDATE connector_configs
+        `UPDATE connections
          SET credentials = credentials || $1::jsonb, updated_at = NOW()
-         WHERE workspace_id = $2 AND source = 'salesforce'`,
+         WHERE workspace_id = $2 AND connector_name = 'salesforce'`,
         [JSON.stringify({ accessToken: refreshed.accessToken, instanceUrl: refreshed.instanceUrl }), workspaceId]
       );
 

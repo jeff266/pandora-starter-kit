@@ -353,9 +353,9 @@ export class SalesforceAdapter implements CRMAdapter {
     updates: { accessToken: string; instanceUrl: string }
   ): Promise<void> {
     await query(
-      `UPDATE connector_configs
+      `UPDATE connections
        SET credentials = credentials || $1::jsonb
-       WHERE workspace_id = $2 AND source = 'salesforce'`,
+       WHERE workspace_id = $2 AND connector_name = 'salesforce'`,
       [JSON.stringify(updates), workspaceId]
     );
   }

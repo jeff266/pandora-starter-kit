@@ -141,9 +141,9 @@ router.get("/callback", async (req: Request, res: Response) => {
       }
 
       await query(
-        `INSERT INTO connector_configs (workspace_id, source, credentials, status, created_at, updated_at)
+        `INSERT INTO connections (workspace_id, connector_name, credentials, status, created_at, updated_at)
          VALUES ($1, 'salesforce', $2, 'connected', NOW(), NOW())
-         ON CONFLICT (workspace_id, source) DO UPDATE SET
+         ON CONFLICT (workspace_id, connector_name) DO UPDATE SET
            credentials = $2, status = 'connected', updated_at = NOW()`,
         [workspaceId, JSON.stringify({
           accessToken: tokenData.access_token,
