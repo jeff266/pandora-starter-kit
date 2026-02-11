@@ -42,7 +42,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_rep_quotas_unique_name_period
 
 -- Add comments
 COMMENT ON COLUMN rep_quotas.rep_email IS
-  'Email address for rep matching (preferred over name). Matches deals.owner_email when available.';
+  'Email address from quota upload. Note: deals table only has owner name, not email, so matching is by name only.';
 
 COMMENT ON COLUMN rep_quotas.source IS
   'Source of quota data: manual (UI), excel_upload, csv_upload, hubspot (Goals API), salesforce (Quota object)';
@@ -50,10 +50,11 @@ COMMENT ON COLUMN rep_quotas.source IS
 COMMENT ON COLUMN rep_quotas.upload_batch_id IS
   'Groups quotas from the same upload for batch operations (e.g., undo upload)';
 
--- Helper function to match rep email to deals
+-- Helper function to match rep to deals by name
+-- Note: deals table only has 'owner' (name), no owner_email column
 CREATE OR REPLACE FUNCTION match_rep_to_deals(
   p_workspace_id UUID,
-  p_rep_email TEXT,
+  p_rep_email TEXT,  -- Not used (kept for compatibility)
   p_rep_name TEXT
 )
 RETURNS TABLE (
@@ -62,37 +63,19 @@ RETURNS TABLE (
   deal_count INTEGER
 ) AS $$
 BEGIN
-  -- Try exact email match first
-  IF p_rep_email IS NOT NULL THEN
-    RETURN QUERY
-    SELECT
-      owner_email,
-      owner,
-      COUNT(*)::INTEGER as deal_count
-    FROM deals
-    WHERE workspace_id = p_workspace_id
-      AND owner_email = p_rep_email
-    GROUP BY owner_email, owner
-    LIMIT 1;
-
-    IF FOUND THEN
-      RETURN;
-    END IF;
-  END IF;
-
-  -- Fall back to fuzzy name match
+  -- Match by name only (deals table has no owner_email column)
   RETURN QUERY
   SELECT
-    owner_email,
-    owner,
+    NULL::TEXT as matched_email,  -- No email in deals table
+    owner as matched_name,
     COUNT(*)::INTEGER as deal_count
   FROM deals
   WHERE workspace_id = p_workspace_id
     AND LOWER(owner) = LOWER(p_rep_name)
-  GROUP BY owner_email, owner
+  GROUP BY owner
   LIMIT 1;
 END;
 $$ LANGUAGE plpgsql STABLE;
 
 COMMENT ON FUNCTION match_rep_to_deals IS
-  'Match uploaded rep to existing deal owners by email (preferred) or name (fallback)';
+  'Match uploaded rep to existing deal owners by name (deals table has no owner_email)';
