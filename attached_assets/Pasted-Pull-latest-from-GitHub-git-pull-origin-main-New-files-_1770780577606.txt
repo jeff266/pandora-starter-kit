@@ -1,0 +1,51 @@
+Pull latest from GitHub (git pull origin main). New files were pushed in server/connectors/salesforce/ — client.ts, types.ts, transform.ts, adapter.ts, README.md.
+
+Wire Salesforce into the app so we can test the OAuth connection:
+
+1. OAUTH ROUTES — Create server/routes/salesforce-auth.ts:
+
+   GET /api/auth/salesforce/authorize
+   - Reads SALESFORCE_CLIENT_ID and SALESFORCE_CALLBACK_URL from env
+   - Generates a PKCE code_verifier (random 128 chars) and code_challenge (SHA256 + base64url)
+   - Stores code_verifier in memory (simple Map keyed by state param) — we'll use DB sessions later
+   - Generates a random state param for CSRF protection
+   - Redirects to: https://login.salesforce.com/services/oauth2/authorize?
+       response_type=code
+       &client_id={SALESFORCE_CLIENT_ID}
+       &redirect_uri={SALESFORCE_CALLBACK_URL}
+       &scope=api refresh_token offline_access id
+       &state={state}
+       &code_challenge={code_challenge}
+       &code_challenge_method=S256
+
+   GET /api/auth/salesforce/callback
+   - Receives ?code={auth_code}&state={state}
+   - Retrieves code_verifier from memory using state
+   - POSTs to https://login.salesforce.com/services/oauth2/token with:
+       grant_type=authorization_code
+       &code={auth_code}
+       &client_id={SALESFORCE_CLIENT_ID}
+       &client_secret={SALESFORCE_CLIENT_SECRET}
+       &redirect_uri={SALESFORCE_CALLBACK_URL}
+       &code_verifier={code_verifier}
+   - Response contains: access_token, refresh_token, instance_url, id (user info URL)
+   - For now, just log the response and return it as JSON so we can verify it works
+   - DO NOT store tokens yet — just prove the flow works
+
+2. Register the routes in server/index.ts or wherever routes are mounted.
+
+3. Environment variables needed (already set):
+   - SALESFORCE_CLIENT_ID
+   - SALESFORCE_CLIENT_SECRET  
+   - SALESFORCE_CALLBACK_URL = https://2249ba4a-228b-47b6-989b-1bd765452af0-00-zmr8y6ngsujl.janeway.replit.dev:3000/api/auth/salesforce/callback
+
+4. IMPORTANT: Both Salesforce orgs use production login (login.salesforce.com, NOT test.salesforce.com). Both have Okta SSO but that doesn't affect the OAuth flow — Salesforce handles the SSO redirect internally.
+
+5. PKCE is REQUIRED — the External Client App has "Require Proof Key for Code Exchange" enabled. The code_challenge must use S256 method (SHA256 hash of code_verifier, base64url encoded).
+
+Test sequence:
+- Start server
+- Visit /api/auth/salesforce/authorize in browser
+- Should redirect to Salesforce login
+- After login + authorize, should redirect back to callback
+- Callback should display JSON with access_token, refresh_token, instance_url
