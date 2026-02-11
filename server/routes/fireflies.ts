@@ -3,6 +3,7 @@ import { query } from '../db.js';
 import { firefliesConnector } from '../connectors/fireflies/index.js';
 import { FirefliesClient, formatSentencesToTranscript } from '../connectors/fireflies/client.js';
 import type { Connection, ConnectorCredentials } from '../connectors/_interface.js';
+import { linkConversations } from '../linker/entity-linker.js';
 import {
   fetchAndStoreDirectory,
   getDirectory,
@@ -119,6 +120,13 @@ router.post('/:workspaceId/connectors/fireflies/sync', async (req: Request<Works
       mode,
       ...result,
     });
+
+    linkConversations(workspaceId)
+      .then(lr => {
+        const total = lr.linked.tier1_email + lr.linked.tier2_native + lr.linked.tier3_inferred;
+        console.log(`[Linker] Fireflies post-sync: ${total} linked, ${lr.stillUnlinked} unlinked (${lr.durationMs}ms)`);
+      })
+      .catch(err => console.error(`[Linker] Fireflies post-sync failed:`, err.message));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.error('[Fireflies Route] Sync error:', message);

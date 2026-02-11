@@ -3,6 +3,7 @@ import { query } from '../db.js';
 import { gongConnector } from '../connectors/gong/index.js';
 import { GongClient } from '../connectors/gong/client.js';
 import type { Connection, ConnectorCredentials } from '../connectors/_interface.js';
+import { linkConversations } from '../linker/entity-linker.js';
 import {
   fetchAndStoreDirectory,
   getDirectory,
@@ -124,6 +125,13 @@ router.post('/:workspaceId/connectors/gong/sync', async (req: Request<WorkspaceP
       mode,
       ...result,
     });
+
+    linkConversations(workspaceId)
+      .then(lr => {
+        const total = lr.linked.tier1_email + lr.linked.tier2_native + lr.linked.tier3_inferred;
+        console.log(`[Linker] Gong post-sync: ${total} linked, ${lr.stillUnlinked} unlinked (${lr.durationMs}ms)`);
+      })
+      .catch(err => console.error(`[Linker] Gong post-sync failed:`, err.message));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.error('[Gong Route] Sync error:', message);

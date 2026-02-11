@@ -36,6 +36,7 @@ Pandora is built on Node.js 20 with TypeScript 5+, using Express.js and PostgreS
 -   **Query Layer:** Seven query modules with dynamic parameterized SQL, workspace scoping, and pagination, exposed via REST endpoints.
 -   **Slack Output Layer:** General-purpose Slack Block Kit client with formatting helpers and skill-specific formatters for automated skill result posting.
 -   **Webhook Endpoints:** Inbound webhooks for skill triggers, run status, and event ingestion.
+-   **Cross-Entity Linker:** Post-sync batch job resolving conversation→contact→account→deal foreign keys via 3-tier matching (email match, CRM native IDs, single-deal inference). Idempotent, auditable via `link_method` column, fires automatically after Gong/Fireflies/HubSpot/Salesforce syncs.
 -   **LLM Integration:** Utilizes Anthropic Claude via Replit AI for reasoning/generation and Fireworks DeepSeek for extraction/classification, with token guardrails and prompt safety mechanisms.
 
 ## External Dependencies

@@ -1,5 +1,6 @@
 import { getSkillRegistry } from '../skills/registry.js';
 import { getSkillRuntime } from '../skills/runtime.js';
+import { linkConversations } from '../linker/entity-linker.js';
 
 interface SyncResult {
   connector: string;
@@ -14,6 +15,17 @@ export async function emitSyncCompleted(
   results: SyncResult[]
 ): Promise<void> {
   console.log(`[PostSync] Sync completed for workspace ${workspaceId}, checking for triggered skills`);
+
+  const connectorTypes = results.filter(r => r.status === 'success').map(r => r.connector);
+  const linkerRelevant = connectorTypes.some(c => ['gong', 'fireflies', 'hubspot', 'salesforce'].includes(c));
+  if (linkerRelevant) {
+    linkConversations(workspaceId)
+      .then(lr => {
+        const total = lr.linked.tier1_email + lr.linked.tier2_native + lr.linked.tier3_inferred;
+        console.log(`[Linker] Post-sync: ${total} linked, ${lr.stillUnlinked} unlinked (${lr.durationMs}ms)`);
+      })
+      .catch(err => console.error(`[Linker] Post-sync failed:`, err instanceof Error ? err.message : err));
+  }
 
   const registry = getSkillRegistry();
   const allSkills = registry.listAll();
