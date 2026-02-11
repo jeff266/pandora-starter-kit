@@ -131,6 +131,56 @@ export class GongClient {
     return allCalls;
   }
 
+  async getCallsExtensive(fromDate?: string, toDate?: string): Promise<GongCall[]> {
+    const allCalls: GongCall[] = [];
+    let cursor: string | undefined;
+
+    do {
+      const body: any = {
+        filter: {
+          ...(fromDate && { fromDateTime: fromDate }),
+          ...(toDate && { toDateTime: toDate }),
+          ...(cursor && { cursor }),
+        },
+        contentSelector: {
+          exposedFields: {
+            parties: true,
+          },
+        },
+      };
+
+      const response = await this.request<{ calls: any[]; records?: { cursor?: string } }>("/calls/extensive", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+
+      if (response.calls && response.calls.length > 0) {
+        for (const raw of response.calls) {
+          const meta = raw.metaData || {};
+          const normalized: GongCall = {
+            id: meta.id,
+            title: meta.title,
+            scheduled: meta.scheduled,
+            started: meta.started,
+            duration: meta.duration,
+            primaryUserId: meta.primaryUserId,
+            direction: meta.direction,
+            scope: meta.scope,
+            media: meta.media,
+            language: meta.language,
+            url: meta.url,
+            parties: raw.parties || [],
+          };
+          allCalls.push(normalized);
+        }
+      }
+      cursor = response.records?.cursor;
+      console.log(`[Gong Client] Fetched ${allCalls.length} calls (extensive) so far`);
+    } while (cursor);
+
+    return allCalls;
+  }
+
   async getTranscripts(callIds: string[]): Promise<GongTranscript[]> {
     const response = await this.request<GongTranscriptsResponse>("/calls/transcript", {
       method: "POST",

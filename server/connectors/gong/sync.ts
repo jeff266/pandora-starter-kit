@@ -1,6 +1,6 @@
 import { query, getClient } from '../../db.js';
 import { GongClient } from './client.js';
-import { transformGongCall, type NormalizedConversation } from './transform.js';
+import { transformGongCall, buildUserMap, type NormalizedConversation, type GongUserMap } from './transform.js';
 import type { SyncResult } from '../_interface.js';
 import { transformWithErrorCapture } from '../../utils/sync-helpers.js';
 
@@ -114,6 +114,16 @@ export async function initialSync(
   console.log(`[Gong Sync] Starting initial sync for workspace ${workspaceId} (lookback: ${days} days)`);
 
   try {
+    let userMap: GongUserMap = new Map();
+    try {
+      const users = await client.getAllUsers();
+      userMap = buildUserMap(users);
+      console.log(`[Gong Sync] Loaded ${userMap.size} users for participant enrichment`);
+    } catch (err: any) {
+      console.warn(`[Gong Sync] Failed to fetch users (participants will lack names): ${err.message}`);
+      errors.push(`User fetch warning: ${err.message}`);
+    }
+
     const lookbackDate = new Date();
     lookbackDate.setDate(lookbackDate.getDate() - days);
     const fromDate = lookbackDate.toISOString();
@@ -121,7 +131,7 @@ export async function initialSync(
     let rawCalls: any[] = [];
 
     try {
-      rawCalls = await client.getAllCalls(fromDate);
+      rawCalls = await client.getCallsExtensive(fromDate);
     } catch (err: any) {
       errors.push(`Failed to fetch calls: ${err.message}`);
     }
@@ -131,7 +141,7 @@ export async function initialSync(
 
     const transformResult = transformWithErrorCapture(
       rawCalls,
-      (call) => transformGongCall(call, workspaceId),
+      (call) => transformGongCall(call, workspaceId, userMap),
       'Gong Calls',
       (call) => call.id
     );
@@ -184,12 +194,22 @@ export async function incrementalSync(
   console.log(`[Gong Sync] Starting incremental sync for workspace ${workspaceId} since ${since.toISOString()}`);
 
   try {
+    let userMap: GongUserMap = new Map();
+    try {
+      const users = await client.getAllUsers();
+      userMap = buildUserMap(users);
+      console.log(`[Gong Sync] Loaded ${userMap.size} users for participant enrichment`);
+    } catch (err: any) {
+      console.warn(`[Gong Sync] Failed to fetch users (participants will lack names): ${err.message}`);
+      errors.push(`User fetch warning: ${err.message}`);
+    }
+
     const fromDate = since.toISOString();
 
     let rawCalls: any[] = [];
 
     try {
-      rawCalls = await client.getAllCalls(fromDate);
+      rawCalls = await client.getCallsExtensive(fromDate);
     } catch (err: any) {
       errors.push(`Failed to fetch calls: ${err.message}`);
     }
@@ -199,7 +219,7 @@ export async function incrementalSync(
 
     const transformResult = transformWithErrorCapture(
       rawCalls,
-      (call) => transformGongCall(call, workspaceId),
+      (call) => transformGongCall(call, workspaceId, userMap),
       'Gong Calls',
       (call) => call.id
     );
