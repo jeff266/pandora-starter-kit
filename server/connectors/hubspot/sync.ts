@@ -44,15 +44,18 @@ async function getForecastThresholds(workspaceId: string): Promise<{ commit_thre
     );
 
     if (result.rows.length > 0) {
-      return result.rows[0];
+      const row = result.rows[0];
+      return {
+        commit_threshold: row.commit_threshold > 1 ? row.commit_threshold / 100 : row.commit_threshold,
+        best_case_threshold: row.best_case_threshold > 1 ? row.best_case_threshold / 100 : row.best_case_threshold,
+      };
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
     console.warn(`[HubSpot Sync] Failed to fetch forecast thresholds: ${msg}`);
   }
 
-  // Default thresholds
-  return { commit_threshold: 90, best_case_threshold: 60 };
+  return { commit_threshold: 0.90, best_case_threshold: 0.60 };
 }
 
 async function buildOwnerMap(client: HubSpotClient): Promise<Map<string, string>> {

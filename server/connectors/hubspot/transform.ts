@@ -122,8 +122,8 @@ export interface DealTransformOptions {
   pipelineMap?: Map<string, string>;
   ownerMap?: Map<string, string>;
   forecastThresholds?: {
-    commit_threshold: number;    // Default: 90
-    best_case_threshold: number; // Default: 60
+    commit_threshold: number;    // Decimal 0-1 (e.g. 0.90). Normalized from DB percentages at read time.
+    best_case_threshold: number; // Decimal 0-1 (e.g. 0.60). Normalized from DB percentages at read time.
   };
 }
 
@@ -191,7 +191,7 @@ function normalizeForecastCategory(value: string): string | null {
  *   - 1.0                → closed (closed-won)
  *
  * @param probability - Deal stage probability as decimal (0.0 to 1.0)
- * @param thresholds - Workspace-specific thresholds (decimals, default: commit >= 0.90, best_case >= 0.60, pipeline > 0.10)
+ * @param thresholds - Workspace-specific thresholds (decimals, default: commit >= 0.90, best_case >= 0.60)
  */
 function deriveForecastCategoryFromProbability(
   probability: number | null,
