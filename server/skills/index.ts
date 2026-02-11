@@ -11,6 +11,7 @@ import { weeklyRecapSkill } from './library/weekly-recap.js';
 import { singleThreadAlertSkill } from './library/single-thread-alert.js';
 import { dataQualityAuditSkill } from './library/data-quality-audit.js';
 import { pipelineCoverageSkill } from './library/pipeline-coverage.js';
+import { forecastRollupSkill } from './library/forecast-rollup.js';
 
 // Types
 export type {
@@ -62,6 +63,7 @@ export { weeklyRecapSkill } from './library/weekly-recap.js';
 export { singleThreadAlertSkill } from './library/single-thread-alert.js';
 export { dataQualityAuditSkill } from './library/data-quality-audit.js';
 export { pipelineCoverageSkill } from './library/pipeline-coverage.js';
+export { forecastRollupSkill } from './library/forecast-rollup.js';
 
 // Formatters
 export {
@@ -98,6 +100,7 @@ export function registerBuiltInSkills(): void {
   registry.register(singleThreadAlertSkill);
   registry.register(dataQualityAuditSkill);
   registry.register(pipelineCoverageSkill);
+  registry.register(forecastRollupSkill);
 
   console.log('[Skills] Registered all built-in skills');
 }
