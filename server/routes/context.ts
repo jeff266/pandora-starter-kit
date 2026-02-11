@@ -254,4 +254,185 @@ router.put('/:workspaceId/forecast-thresholds', async (req: Request<WorkspacePar
   }
 });
 
+// ============================================================================
+// Quota Periods API
+// ============================================================================
+
+router.get('/:workspaceId/quotas/periods', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    if (!(await validateWorkspace(req.params.workspaceId, res))) return;
+
+    const result = await query<{
+      id: string;
+      name: string;
+      period_type: string;
+      start_date: string;
+      end_date: string;
+      team_quota: number;
+      created_at: string;
+    }>(
+      `SELECT id, name, period_type, start_date, end_date, team_quota, created_at
+       FROM quota_periods
+       WHERE workspace_id = $1
+       ORDER BY start_date DESC`,
+      [req.params.workspaceId]
+    );
+
+    res.json(result.rows);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[Context] Get quota periods error:', message);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.post('/:workspaceId/quotas/periods', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    if (!(await validateWorkspace(req.params.workspaceId, res))) return;
+
+    const { name, period_type, start_date, end_date, team_quota } = req.body;
+
+    // Validate inputs
+    if (!name || !period_type || !start_date || !end_date || team_quota === undefined) {
+      res.status(400).json({ error: 'Missing required fields' });
+      return;
+    }
+
+    if (!['monthly', 'quarterly', 'annual'].includes(period_type)) {
+      res.status(400).json({ error: 'Invalid period_type. Must be monthly, quarterly, or annual' });
+      return;
+    }
+
+    const result = await query<{ id: string }>(
+      `INSERT INTO quota_periods (workspace_id, name, period_type, start_date, end_date, team_quota)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id`,
+      [req.params.workspaceId, name, period_type, start_date, end_date, team_quota]
+    );
+
+    res.status(201).json({ id: result.rows[0].id, name, period_type, start_date, end_date, team_quota });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[Context] Create quota period error:', message);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.put('/:workspaceId/quotas/periods/:periodId', async (req: Request<WorkspaceParams & { periodId: string }>, res: Response) => {
+  try {
+    if (!(await validateWorkspace(req.params.workspaceId, res))) return;
+
+    const { name, period_type, start_date, end_date, team_quota } = req.body;
+
+    await query(
+      `UPDATE quota_periods
+       SET name = COALESCE($1, name),
+           period_type = COALESCE($2, period_type),
+           start_date = COALESCE($3, start_date),
+           end_date = COALESCE($4, end_date),
+           team_quota = COALESCE($5, team_quota),
+           updated_at = NOW()
+       WHERE id = $6 AND workspace_id = $7`,
+      [name, period_type, start_date, end_date, team_quota, req.params.periodId, req.params.workspaceId]
+    );
+
+    res.json({ success: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[Context] Update quota period error:', message);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.delete('/:workspaceId/quotas/periods/:periodId', async (req: Request<WorkspaceParams & { periodId: string }>, res: Response) => {
+  try {
+    if (!(await validateWorkspace(req.params.workspaceId, res))) return;
+
+    await query(
+      `DELETE FROM quota_periods WHERE id = $1 AND workspace_id = $2`,
+      [req.params.periodId, req.params.workspaceId]
+    );
+
+    res.json({ success: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[Context] Delete quota period error:', message);
+    res.status(500).json({ error: message });
+  }
+});
+
+// ============================================================================
+// Rep Quotas API
+// ============================================================================
+
+router.get('/:workspaceId/quotas/periods/:periodId/reps', async (req: Request<WorkspaceParams & { periodId: string }>, res: Response) => {
+  try {
+    if (!(await validateWorkspace(req.params.workspaceId, res))) return;
+
+    const result = await query<{
+      id: string;
+      rep_name: string;
+      quota_amount: number;
+    }>(
+      `SELECT rq.id, rq.rep_name, rq.quota_amount
+       FROM rep_quotas rq
+       JOIN quota_periods qp ON qp.id = rq.period_id
+       WHERE rq.period_id = $1 AND qp.workspace_id = $2
+       ORDER BY rq.rep_name`,
+      [req.params.periodId, req.params.workspaceId]
+    );
+
+    res.json(result.rows);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[Context] Get rep quotas error:', message);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.put('/:workspaceId/quotas/periods/:periodId/reps/:repName', async (req: Request<WorkspaceParams & { periodId: string; repName: string }>, res: Response) => {
+  try {
+    if (!(await validateWorkspace(req.params.workspaceId, res))) return;
+
+    const { quota_amount } = req.body;
+
+    if (quota_amount === undefined) {
+      res.status(400).json({ error: 'Missing quota_amount' });
+      return;
+    }
+
+    await query(
+      `INSERT INTO rep_quotas (period_id, rep_name, quota_amount)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (period_id, rep_name)
+       DO UPDATE SET quota_amount = $3, updated_at = NOW()`,
+      [req.params.periodId, req.params.repName, quota_amount]
+    );
+
+    res.json({ success: true, rep_name: req.params.repName, quota_amount });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[Context] Update rep quota error:', message);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.delete('/:workspaceId/quotas/periods/:periodId/reps/:repName', async (req: Request<WorkspaceParams & { periodId: string; repName: string }>, res: Response) => {
+  try {
+    if (!(await validateWorkspace(req.params.workspaceId, res))) return;
+
+    await query(
+      `DELETE FROM rep_quotas
+       WHERE period_id = $1 AND rep_name = $2`,
+      [req.params.periodId, req.params.repName]
+    );
+
+    res.json({ success: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[Context] Delete rep quota error:', message);
+    res.status(500).json({ error: message });
+  }
+});
+
 export default router;
