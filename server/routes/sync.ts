@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import { query } from '../db.js';
 import { syncWorkspace } from '../sync/orchestrator.js';
+import { getJobQueue } from '../jobs/queue.js';
 
 const router = Router();
 
@@ -49,54 +50,32 @@ router.post('/:id/sync', async (req: Request, res: Response): Promise<void> => {
 
     const syncLogResult = await query<{ id: string }>(
       `INSERT INTO sync_log (workspace_id, connector_type, sync_type, status, started_at)
-       VALUES ($1, $2, 'manual', 'running', NOW())
+       VALUES ($1, $2, 'manual', 'pending', NOW())
        RETURNING id`,
       [workspaceId, connectorType || 'all']
     );
 
-    const syncId = syncLogResult.rows[0].id;
+    const syncLogId = syncLogResult.rows[0].id;
 
-    res.status(202).json({
-      syncId,
-      status: 'started',
-      message: `Sync initiated for ${connectorCount} connector(s)`,
+    // Create background job instead of blocking
+    const jobQueue = getJobQueue();
+    const jobId = await jobQueue.createJob({
+      workspaceId,
+      jobType: 'sync',
+      payload: {
+        connectorType,
+        syncLogId,
+      },
+      priority: 1, // Manual syncs get higher priority than scheduled
     });
 
-    const startTime = Date.now();
-    try {
-      const results = await syncWorkspace(workspaceId, { connectors });
-
-      const totalRecords = results.reduce((sum, r) => {
-        if (!r.counts) return sum;
-        return sum + Object.values(r.counts).reduce((s, c) => s + c.dbInserted, 0);
-      }, 0);
-
-      const errors = results
-        .filter((r) => r.status === 'error')
-        .map((r) => r.message || 'Unknown error');
-
-      await query(
-        `UPDATE sync_log
-         SET status = $1, records_synced = $2, errors = $3,
-             duration_ms = $4, completed_at = NOW()
-         WHERE id = $5`,
-        [
-          errors.length > 0 ? 'completed_with_errors' : 'completed',
-          totalRecords,
-          JSON.stringify(errors),
-          Date.now() - startTime,
-          syncId,
-        ]
-      );
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      await query(
-        `UPDATE sync_log
-         SET status = 'failed', errors = $1, duration_ms = $2, completed_at = NOW()
-         WHERE id = $3`,
-        [JSON.stringify([msg]), Date.now() - startTime, syncId]
-      ).catch(() => {});
-    }
+    res.status(202).json({
+      syncId: syncLogId,
+      jobId,
+      status: 'queued',
+      message: `Sync queued for ${connectorCount} connector(s)`,
+      statusUrl: `/api/workspaces/${workspaceId}/sync/jobs/${jobId}`,
+    });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     console.error('[Sync API] Manual sync error:', msg);
@@ -155,6 +134,71 @@ router.get('/:id/sync/status', async (req: Request, res: Response): Promise<void
     const msg = error instanceof Error ? error.message : String(error);
     console.error('[Sync API] Status error:', msg);
     res.status(500).json({ error: 'Failed to fetch sync status' });
+  }
+});
+
+router.get('/:id/sync/jobs/:jobId', async (req: Request, res: Response): Promise<void> => {
+  const workspaceId = req.params.id;
+  const jobId = req.params.jobId;
+
+  try {
+    const jobQueue = getJobQueue();
+    const job = await jobQueue.getJob(jobId);
+
+    if (!job) {
+      res.status(404).json({ error: 'Job not found' });
+      return;
+    }
+
+    if (job.workspace_id !== workspaceId) {
+      res.status(403).json({ error: 'Job does not belong to this workspace' });
+      return;
+    }
+
+    res.json({
+      id: job.id,
+      status: job.status,
+      jobType: job.job_type,
+      progress: job.progress || null,
+      result: job.result || null,
+      error: job.error || null,
+      attempts: job.attempts,
+      maxAttempts: job.max_attempts,
+      createdAt: job.created_at,
+      startedAt: job.started_at,
+      completedAt: job.completed_at,
+    });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error('[Sync API] Job status error:', msg);
+    res.status(500).json({ error: 'Failed to fetch job status' });
+  }
+});
+
+router.get('/:id/sync/jobs', async (req: Request, res: Response): Promise<void> => {
+  const workspaceId = req.params.id;
+  const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
+
+  try {
+    const jobQueue = getJobQueue();
+    const jobs = await jobQueue.getJobsByWorkspace(workspaceId, limit);
+
+    res.json({
+      jobs: jobs.map(job => ({
+        id: job.id,
+        status: job.status,
+        jobType: job.job_type,
+        progress: job.progress || null,
+        error: job.error || null,
+        createdAt: job.created_at,
+        startedAt: job.started_at,
+        completedAt: job.completed_at,
+      })),
+    });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error('[Sync API] Jobs list error:', msg);
+    res.status(500).json({ error: 'Failed to fetch jobs' });
   }
 });
 

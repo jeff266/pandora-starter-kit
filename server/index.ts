@@ -22,6 +22,7 @@ import { salesforceAdapter } from "./connectors/salesforce/adapter.js";
 import { startScheduler } from "./sync/scheduler.js";
 import { registerBuiltInSkills } from "./skills/index.js";
 import { getSkillRegistry } from "./skills/registry.js";
+import { startJobQueue } from "./jobs/queue.js";
 
 dotenv.config();
 
@@ -84,6 +85,7 @@ async function start(): Promise<void> {
 
   registerAdapters();
   registerSkills();
+  startJobQueue();
   startScheduler();
 
   app.listen(PORT, "0.0.0.0", () => {
