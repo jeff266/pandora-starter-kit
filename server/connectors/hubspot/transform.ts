@@ -181,23 +181,32 @@ function normalizeForecastCategory(value: string): string | null {
 }
 
 /**
- * Derive forecast_category from deal stage probability
+ * Derive forecast_category from deal stage probability.
+ * Mirrors HubSpot's standard forecast bracket behavior:
+ *   - 0 or null          → not_forecasted (closed-lost or unknown)
+ *   - > 0 and <= 0.10    → not_forecasted (early-stage leads)
+ *   - > 0.10 and < 0.60  → pipeline
+ *   - >= 0.60 and < 0.90 → best_case
+ *   - >= 0.90 and < 1.0  → commit
+ *   - 1.0                → closed (closed-won)
  *
- * @param probability - Deal stage probability (0-100)
- * @param thresholds - Workspace-specific thresholds (default: commit >= 90, best_case >= 60)
- * @returns Derived forecast category
+ * @param probability - Deal stage probability as decimal (0.0 to 1.0)
+ * @param thresholds - Workspace-specific thresholds (decimals, default: commit >= 0.90, best_case >= 0.60, pipeline > 0.10)
  */
 function deriveForecastCategoryFromProbability(
   probability: number | null,
   thresholds?: { commit_threshold: number; best_case_threshold: number }
-): string | null {
-  if (probability === null || probability === undefined) {
-    return 'pipeline';
+): string {
+  if (probability === null || probability === undefined || probability === 0) {
+    return 'not_forecasted';
   }
 
-  const commitThreshold = thresholds?.commit_threshold ?? 90;
-  const bestCaseThreshold = thresholds?.best_case_threshold ?? 60;
+  const bestCaseThreshold = thresholds?.best_case_threshold ?? 0.60;
+  const commitThreshold = thresholds?.commit_threshold ?? 0.90;
 
+  if (probability >= 1.0) {
+    return 'closed';
+  }
   if (probability >= commitThreshold) {
     return 'commit';
   }
@@ -230,7 +239,7 @@ function resolveForecastCategory(
 
   // Fallback to deriving from probability
   const derived = deriveForecastCategoryFromProbability(probability, thresholds);
-  return { category: derived, source: derived ? 'derived' : null };
+  return { category: derived, source: 'derived' };
 }
 
 export function transformDeal(
