@@ -34,10 +34,16 @@ async function buildStageMaps(client: HubSpotClient): Promise<DealTransformOptio
   return { stageMap, pipelineMap };
 }
 
-async function getForecastThresholds(workspaceId: string): Promise<{ commit_threshold: number; best_case_threshold: number }> {
+interface ForecastConfig {
+  commit_threshold: number;
+  best_case_threshold: number;
+  forecasted_pipelines: string[] | null;
+}
+
+async function getForecastConfig(workspaceId: string): Promise<ForecastConfig> {
   try {
-    const result = await query<{ commit_threshold: number; best_case_threshold: number }>(
-      `SELECT commit_threshold, best_case_threshold
+    const result = await query<{ commit_threshold: number; best_case_threshold: number; forecasted_pipelines: string[] | null }>(
+      `SELECT commit_threshold, best_case_threshold, forecasted_pipelines
        FROM forecast_thresholds
        WHERE workspace_id = $1`,
       [workspaceId]
@@ -48,14 +54,15 @@ async function getForecastThresholds(workspaceId: string): Promise<{ commit_thre
       return {
         commit_threshold: row.commit_threshold > 1 ? row.commit_threshold / 100 : row.commit_threshold,
         best_case_threshold: row.best_case_threshold > 1 ? row.best_case_threshold / 100 : row.best_case_threshold,
+        forecasted_pipelines: row.forecasted_pipelines,
       };
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
-    console.warn(`[HubSpot Sync] Failed to fetch forecast thresholds: ${msg}`);
+    console.warn(`[HubSpot Sync] Failed to fetch forecast config: ${msg}`);
   }
 
-  return { commit_threshold: 0.90, best_case_threshold: 0.60 };
+  return { commit_threshold: 0.90, best_case_threshold: 0.60, forecasted_pipelines: null };
 }
 
 async function buildOwnerMap(client: HubSpotClient): Promise<Map<string, string>> {
@@ -372,13 +379,14 @@ export async function initialSync(
   console.log(`[HubSpot Sync] Starting initial sync for workspace ${workspaceId}`);
 
   try {
-    const [dealOptions, ownerMap, forecastThresholds] = await Promise.all([
+    const [dealOptions, ownerMap, forecastConfig] = await Promise.all([
       buildStageMaps(client),
       buildOwnerMap(client),
-      getForecastThresholds(workspaceId),
+      getForecastConfig(workspaceId),
     ]);
     dealOptions.ownerMap = ownerMap;
-    dealOptions.forecastThresholds = forecastThresholds;
+    dealOptions.forecastThresholds = forecastConfig;
+    dealOptions.forecastedPipelines = forecastConfig.forecasted_pipelines;
     const contactOptions: ContactTransformOptions = { ownerMap };
 
     let rawDeals: any[] = [];
@@ -506,13 +514,14 @@ export async function incrementalSync(
 
   console.log(`[HubSpot Sync] Starting incremental sync for workspace ${workspaceId} since ${since.toISOString()}`);
 
-  const [dealOptions, ownerMap, forecastThresholds] = await Promise.all([
+  const [dealOptions, ownerMap, forecastConfig] = await Promise.all([
     buildStageMaps(hubspotClient),
     buildOwnerMap(hubspotClient),
-    getForecastThresholds(workspaceId),
+    getForecastConfig(workspaceId),
   ]);
   dealOptions.ownerMap = ownerMap;
-  dealOptions.forecastThresholds = forecastThresholds;
+  dealOptions.forecastThresholds = forecastConfig;
+  dealOptions.forecastedPipelines = forecastConfig.forecasted_pipelines;
   const contactOptions: ContactTransformOptions = { ownerMap };
 
   const dealProps = [

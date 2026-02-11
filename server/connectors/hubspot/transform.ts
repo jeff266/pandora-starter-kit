@@ -125,6 +125,7 @@ export interface DealTransformOptions {
     commit_threshold: number;    // Decimal 0-1 (e.g. 0.90). Normalized from DB percentages at read time.
     best_case_threshold: number; // Decimal 0-1 (e.g. 0.60). Normalized from DB percentages at read time.
   };
+  forecastedPipelines?: string[] | null;
 }
 
 export interface ContactTransformOptions {
@@ -282,11 +283,19 @@ export function transformDeal(
 
   // Resolve forecast_category with fallback strategy
   const probability = sanitizeNumber(props.hs_deal_stage_probability);
-  const forecastCategoryResolved = resolveForecastCategory(
-    props,
-    probability,
-    options?.forecastThresholds
-  );
+
+  const forecastedPipelines = options?.forecastedPipelines;
+  const isPipelineForecasted = forecastedPipelines === null || forecastedPipelines === undefined
+    || forecastedPipelines.includes(resolvedPipeline ?? '');
+
+  let forecastCategory: string | null = null;
+  let forecastCategorySource: 'native' | 'derived' | null = null;
+
+  if (isPipelineForecasted) {
+    const resolved = resolveForecastCategory(props, probability, options?.forecastThresholds);
+    forecastCategory = resolved.category;
+    forecastCategorySource = resolved.source;
+  }
 
   return {
     workspace_id: workspaceId,
@@ -303,8 +312,8 @@ export function transformDeal(
     close_date: sanitizeDate(props.closedate),
     owner: resolveOwnerName(sanitizeText(props.hubspot_owner_id), options?.ownerMap),
     probability,
-    forecast_category: forecastCategoryResolved.category,
-    forecast_category_source: forecastCategoryResolved.source,
+    forecast_category: forecastCategory,
+    forecast_category_source: forecastCategorySource,
     pipeline: resolvedPipeline,
     last_activity_date: parseDate(sanitizeDate(props.notes_last_updated)),
     custom_fields: extractCustomFields(props, CORE_DEAL_FIELDS),
