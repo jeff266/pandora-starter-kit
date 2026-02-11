@@ -188,9 +188,19 @@ Respond with ONLY a JSON object:
   });
 
   try {
-    const classification = JSON.parse(response.content);
+    let content = response.content.trim();
+
+    // Extract JSON from markdown code fences if present
+    const jsonMatch = content.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+    if (jsonMatch) {
+      content = jsonMatch[1].trim();
+    }
+
+    const classification = JSON.parse(content);
     return classification as QuotaClassification;
   } catch (error) {
+    console.error('[QuotaUpload] AI response:', response.content);
+    console.error('[QuotaUpload] Parse error:', error);
     throw new Error('Failed to parse AI classification response. Please try again or specify columns manually.');
   }
 }
