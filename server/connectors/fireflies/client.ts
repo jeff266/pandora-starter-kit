@@ -71,6 +71,43 @@ query {
   }
 }`;
 
+const USERS_QUERY = `
+query {
+  users {
+    user_id
+    name
+    email
+    is_admin
+    integrations
+  }
+}`;
+
+const TRANSCRIPTS_BY_USER_QUERY = `
+query Transcripts($limit: Int, $skip: Int, $organizer_email: String) {
+  transcripts(limit: $limit, skip: $skip, organizer_email: $organizer_email) {
+    id
+    title
+    date
+    duration
+    transcript_url
+    audio_url
+    summary {
+      overview
+      action_items
+      keywords
+    }
+    participants
+    meeting_attendees {
+      name
+      email
+      displayName
+      phoneNumber
+    }
+    host_email
+    organizer_email
+  }
+}`;
+
 export function parseFirefliesDate(transcript: FirefliesTranscript): Date | null {
   if (!transcript.date) return null;
   const ms = Number(transcript.date);
@@ -153,6 +190,72 @@ export class FirefliesClient {
         error: error instanceof Error ? error.message : String(error),
       };
     }
+  }
+
+  async getUsers(): Promise<Array<{ user_id: string; name: string; email: string; is_admin: boolean }>> {
+    const data = await this.graphql<{
+      users: Array<{
+        user_id: string;
+        name: string;
+        email: string;
+        is_admin: boolean;
+        integrations: string[];
+      }>;
+    }>(USERS_QUERY);
+
+    const users = (data.users || [])
+      .filter(u => u.email)
+      .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+    return users;
+  }
+
+  async getTranscriptsByUser(options: {
+    organizerEmail: string;
+    afterDate?: Date;
+    limit?: number;
+  }): Promise<FirefliesTranscript[]> {
+    const allTranscripts: FirefliesTranscript[] = [];
+    const pageSize = options.limit ?? PAGE_SIZE;
+    let skip = 0;
+    let hasMore = true;
+
+    while (hasMore) {
+      const data = await this.graphql<{ transcripts: FirefliesTranscript[] }>(
+        TRANSCRIPTS_BY_USER_QUERY,
+        { limit: pageSize, skip, organizer_email: options.organizerEmail }
+      );
+
+      const transcripts = data.transcripts || [];
+      if (transcripts.length === 0) {
+        hasMore = false;
+        break;
+      }
+
+      if (options.afterDate) {
+        const afterMs = options.afterDate.getTime();
+        const filtered = transcripts.filter(t => {
+          const date = parseFirefliesDate(t);
+          return date !== null && date.getTime() >= afterMs;
+        });
+
+        allTranscripts.push(...filtered);
+
+        if (filtered.length < transcripts.length) {
+          hasMore = false;
+          break;
+        }
+      } else {
+        allTranscripts.push(...transcripts);
+      }
+
+      skip += pageSize;
+      if (transcripts.length < pageSize) {
+        hasMore = false;
+      }
+    }
+
+    return allTranscripts;
   }
 
   async getTranscriptsPage(options?: {

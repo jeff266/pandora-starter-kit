@@ -28,6 +28,10 @@ Pandora is built on Node.js 20 with TypeScript 5+, using Express.js and PostgreS
 -   **No `raw_records` table:** Raw API data is stored in a `source_data JSONB` column within entity tables.
 -   **Upsert Pattern:** `ON CONFLICT DO UPDATE` is used for efficient data synchronization.
 -   **On-Demand Transcript Fetching:** Call transcripts are fetched only when required to optimize storage.
+-   **Two-Step Conversation Connect Flow:** Connect credentials → fetch user directory → user selects tracked reps → sync ONLY their calls. Prevents ingesting irrelevant conversations (engineering standups, HR 1:1s).
+-   **Tracked Users in `connections.metadata`:** User directories and tracked user selections stored in `metadata JSONB` column on `connections` table. No new tables needed.
+-   **Per-User Filtered Sync:** Gong uses `primaryUserId` filter on `/v2/calls/extensive`, Fireflies uses `organizer_email` filter. Sequential per-user fetching respects rate limits.
+-   **Unified Sales Roster:** `GET /api/workspaces/:id/sales-roster` merges tracked users across all conversation connectors by email, used by skills for rep-level analysis.
 -   **API Design:** RESTful API for managing workspaces, connectors, and triggering actions.
 -   **Query Layer:** Seven query modules with dynamic parameterized SQL, workspace scoping, and pagination, exposed via REST endpoints.
 -   **Slack Output Layer:** General-purpose Slack Block Kit client with formatting helpers and skill-specific formatters for automated skill result posting.

@@ -131,7 +131,7 @@ export class GongClient {
     return allCalls;
   }
 
-  async getCallsExtensive(fromDate?: string, toDate?: string): Promise<GongCall[]> {
+  async getCallsExtensive(fromDate?: string, toDate?: string, primaryUserId?: string): Promise<GongCall[]> {
     const allCalls: GongCall[] = [];
     let cursor: string | undefined;
 
@@ -140,6 +140,7 @@ export class GongClient {
         filter: {
           ...(fromDate && { fromDateTime: fromDate }),
           ...(toDate && { toDateTime: toDate }),
+          ...(primaryUserId && { primaryUserId }),
           ...(cursor && { cursor }),
         },
         contentSelector: {

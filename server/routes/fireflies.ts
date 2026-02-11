@@ -3,6 +3,14 @@ import { query } from '../db.js';
 import { firefliesConnector } from '../connectors/fireflies/index.js';
 import { FirefliesClient, formatSentencesToTranscript } from '../connectors/fireflies/client.js';
 import type { Connection, ConnectorCredentials } from '../connectors/_interface.js';
+import {
+  fetchAndStoreDirectory,
+  getDirectory,
+  setTrackedUsers,
+  getTrackedUsers,
+  clearTrackedUsers,
+  type NormalizedUser,
+} from '../connectors/shared/tracked-users.js';
 
 const router = Router();
 
@@ -36,6 +44,7 @@ router.post('/:workspaceId/connectors/fireflies/connect', async (req: Request<Wo
         connectorName: connection.connectorName,
         status: connection.status,
       },
+      user_directory: connection.metadata?.user_directory,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
@@ -97,6 +106,14 @@ router.post('/:workspaceId/connectors/fireflies/sync', async (req: Request<Works
         break;
     }
 
+    if (result.errors.length > 0 && result.errors[0]?.includes('No tracked users configured')) {
+      res.status(400).json({
+        error: 'No tracked users configured',
+        action: `POST /api/workspaces/${workspaceId}/connectors/fireflies/users/track to select users`,
+      });
+      return;
+    }
+
     res.json({
       success: result.errors.length === 0,
       mode,
@@ -105,6 +122,147 @@ router.post('/:workspaceId/connectors/fireflies/sync', async (req: Request<Works
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.error('[Fireflies Route] Sync error:', message);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.get('/:workspaceId/connectors/fireflies/users', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    const workspaceId = req.params.workspaceId;
+
+    const dir = await getDirectory(workspaceId, 'fireflies');
+
+    if (dir) {
+      const fetchedAt = new Date(dir.fetchedAt);
+      const hoursAgo = (Date.now() - fetchedAt.getTime()) / (1000 * 60 * 60);
+
+      if (hoursAgo < 24) {
+        const tracked = await getTrackedUsers(workspaceId, 'fireflies');
+        res.json({
+          users: dir.users,
+          fetched_at: dir.fetchedAt,
+          tracked_users: tracked,
+        });
+        return;
+      }
+    }
+
+    const connResult = await query<{ credentials: any; status: string }>(
+      `SELECT credentials, status FROM connections
+       WHERE workspace_id = $1 AND connector_name = 'fireflies'`,
+      [workspaceId]
+    );
+
+    if (connResult.rows.length === 0) {
+      res.status(404).json({ error: 'Fireflies connection not found. Connect first.' });
+      return;
+    }
+
+    const conn = connResult.rows[0];
+    const client = new FirefliesClient(conn.credentials.apiKey);
+    const rawUsers = await client.getUsers();
+    const normalized: NormalizedUser[] = rawUsers
+      .map(u => ({
+        source_id: u.user_id,
+        name: u.name || u.email,
+        email: u.email,
+        role: u.is_admin ? 'admin' : 'member',
+        active: true,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    const directory = await fetchAndStoreDirectory(workspaceId, 'fireflies', normalized);
+    const tracked = await getTrackedUsers(workspaceId, 'fireflies');
+
+    res.json({
+      users: directory.users,
+      fetched_at: directory.fetched_at,
+      tracked_users: tracked,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[Fireflies Route] Get users error:', message);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.post('/:workspaceId/connectors/fireflies/users/refresh', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    const workspaceId = req.params.workspaceId;
+
+    const connResult = await query<{ credentials: any }>(
+      `SELECT credentials FROM connections
+       WHERE workspace_id = $1 AND connector_name = 'fireflies'`,
+      [workspaceId]
+    );
+
+    if (connResult.rows.length === 0) {
+      res.status(404).json({ error: 'Fireflies connection not found.' });
+      return;
+    }
+
+    const client = new FirefliesClient(connResult.rows[0].credentials.apiKey);
+    const rawUsers = await client.getUsers();
+    const normalized: NormalizedUser[] = rawUsers
+      .map(u => ({
+        source_id: u.user_id,
+        name: u.name || u.email,
+        email: u.email,
+        role: u.is_admin ? 'admin' : 'member',
+        active: true,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    const directory = await fetchAndStoreDirectory(workspaceId, 'fireflies', normalized);
+
+    res.json({
+      users: directory.users,
+      fetched_at: directory.fetched_at,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[Fireflies Route] Refresh users error:', message);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.post('/:workspaceId/connectors/fireflies/users/track', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    const workspaceId = req.params.workspaceId;
+    const { user_ids } = req.body as { user_ids?: string[] };
+
+    if (!user_ids || !Array.isArray(user_ids) || user_ids.length === 0) {
+      res.status(400).json({ error: 'user_ids array is required' });
+      return;
+    }
+
+    const tracked = await setTrackedUsers(workspaceId, 'fireflies', user_ids);
+    res.json({ tracked_users: tracked });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[Fireflies Route] Track users error:', message);
+    res.status(400).json({ error: message });
+  }
+});
+
+router.get('/:workspaceId/connectors/fireflies/users/track', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    const workspaceId = req.params.workspaceId;
+    const tracked = await getTrackedUsers(workspaceId, 'fireflies');
+    res.json({ tracked_users: tracked, count: tracked.length });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    res.status(500).json({ error: message });
+  }
+});
+
+router.delete('/:workspaceId/connectors/fireflies/users/track', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    const workspaceId = req.params.workspaceId;
+    await clearTrackedUsers(workspaceId, 'fireflies');
+    res.json({ success: true, message: 'All tracked users cleared' });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
     res.status(500).json({ error: message });
   }
 });

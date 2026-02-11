@@ -1,6 +1,7 @@
 import { query } from '../../db.js';
 import { GongClient } from './client.js';
 import { initialSync, incrementalSync } from './sync.js';
+import { fetchAndStoreDirectory, type NormalizedUser } from '../shared/tracked-users.js';
 import type {
   PandoraConnector,
   ConnectorCredentials,
@@ -57,13 +58,33 @@ export class GongConnector implements PandoraConnector {
       connectionId = result.rows[0].id;
     }
 
+    let userDirectory;
+    try {
+      const client = new GongClient(credentials.apiKey!);
+      const rawUsers = await client.getAllUsers();
+      const normalized: NormalizedUser[] = rawUsers
+        .filter(u => u.active)
+        .map(u => ({
+          source_id: u.id,
+          name: `${u.firstName} ${u.lastName}`.trim(),
+          email: u.emailAddress,
+          title: u.title,
+          active: u.active,
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      userDirectory = await fetchAndStoreDirectory(workspaceId, 'gong', normalized);
+      console.log(`[Gong] Fetched ${normalized.length} active users for directory`);
+    } catch (err: any) {
+      console.warn(`[Gong] Failed to fetch user directory on connect: ${err.message}`);
+    }
+
     return {
       id: connectionId,
       workspaceId,
       connectorName: 'gong',
       status: 'healthy',
       credentials,
-      metadata: testResult.accountInfo,
+      metadata: { ...testResult.accountInfo, user_directory: userDirectory },
     };
   }
 

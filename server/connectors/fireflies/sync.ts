@@ -3,8 +3,14 @@ import { FirefliesClient } from './client.js';
 import { transformFirefliesTranscript, type NormalizedConversation } from './transform.js';
 import type { SyncResult } from '../_interface.js';
 import { transformWithErrorCapture } from '../../utils/sync-helpers.js';
+import { getTrackedUsers, type TrackedUser } from '../shared/tracked-users.js';
 
 const BATCH_SIZE = 500;
+
+interface TrackedSyncResult extends SyncResult {
+  trackedUsers?: number;
+  byUser?: Array<{ name: string; calls: number }>;
+}
 
 async function upsertConversations(conversations: NormalizedConversation[]): Promise<number> {
   if (conversations.length === 0) return 0;
@@ -100,73 +106,104 @@ async function updateConnectionSyncStatus(
   );
 }
 
+async function syncForTrackedUsers(
+  client: FirefliesClient,
+  workspaceId: string,
+  trackedUsers: TrackedUser[],
+  afterDate: Date,
+  errors: string[]
+): Promise<{ totalFetched: number; totalStored: number; byUser: Array<{ name: string; calls: number }> }> {
+  let totalFetched = 0;
+  let totalStored = 0;
+  const byUser: Array<{ name: string; calls: number }> = [];
+  const seenIds = new Set<string>();
+
+  for (let i = 0; i < trackedUsers.length; i++) {
+    const user = trackedUsers[i];
+    console.log(`[Fireflies Sync] Syncing user ${i + 1}/${trackedUsers.length}: ${user.name} (${user.email})`);
+
+    try {
+      const rawTranscripts = await client.getTranscriptsByUser({
+        organizerEmail: user.email,
+        afterDate,
+      });
+
+      const newTranscripts = rawTranscripts.filter(t => !seenIds.has(t.id));
+      newTranscripts.forEach(t => seenIds.add(t.id));
+
+      totalFetched += newTranscripts.length;
+
+      const transformResult = transformWithErrorCapture(
+        newTranscripts,
+        (transcript) => transformFirefliesTranscript(transcript, workspaceId),
+        `Fireflies Transcripts (${user.name})`,
+        (transcript) => transcript.id
+      );
+
+      if (transformResult.failed.length > 0) {
+        errors.push(`${user.name}: ${transformResult.failed.length} transform failures`);
+      }
+
+      const stored = await upsertConversations(transformResult.succeeded);
+      totalStored += stored;
+      byUser.push({ name: user.name, calls: stored });
+
+      console.log(`[Fireflies Sync] ${user.name}: ${rawTranscripts.length} fetched (${newTranscripts.length} new), ${stored} stored`);
+    } catch (err: any) {
+      console.error(`[Fireflies Sync] Error syncing user ${user.name}: ${err.message}`);
+      errors.push(`${user.name}: ${err.message}`);
+      byUser.push({ name: user.name, calls: 0 });
+    }
+  }
+
+  return { totalFetched, totalStored, byUser };
+}
+
 export async function initialSync(
   client: FirefliesClient,
   workspaceId: string,
   options?: { lookbackDays?: number }
-): Promise<SyncResult> {
+): Promise<TrackedSyncResult> {
   const startTime = Date.now();
   const errors: string[] = [];
-  let totalFetched = 0;
-  let totalStored = 0;
 
   const days = options?.lookbackDays ?? 90;
   console.log(`[Fireflies Sync] Starting initial sync for workspace ${workspaceId} (lookback: ${days} days)`);
 
-  try {
-    const lookbackDate = new Date();
-    lookbackDate.setDate(lookbackDate.getDate() - days);
-
-    let rawTranscripts: any[] = [];
-
-    try {
-      rawTranscripts = await client.getAllTranscripts({ afterDate: lookbackDate });
-    } catch (err: any) {
-      errors.push(`Failed to fetch transcripts: ${err.message}`);
-    }
-
-    totalFetched = rawTranscripts.length;
-    console.log(`[Fireflies Sync] Fetched ${rawTranscripts.length} transcripts`);
-
-    const transformResult = transformWithErrorCapture(
-      rawTranscripts,
-      (transcript) => transformFirefliesTranscript(transcript, workspaceId),
-      'Fireflies Transcripts',
-      (transcript) => transcript.id
-    );
-
-    if (transformResult.failed.length > 0) {
-      errors.push(`Transcript transform failures: ${transformResult.failed.length} records`);
-    }
-
-    const normalizedConversations = transformResult.succeeded;
-
-    totalStored = await upsertConversations(normalizedConversations).catch(err => {
-      console.error(`[Fireflies Sync] Failed to store conversations:`, err.message);
-      errors.push(`Failed to store conversations: ${err.message}`);
-      return 0;
-    });
-
-    await updateConnectionSyncStatus(
-      workspaceId,
-      'fireflies',
-      totalStored,
-      errors.length > 0 ? errors.join('; ') : undefined
-    );
-
-    console.log(`[Fireflies Sync] Initial sync complete: ${totalStored} stored, ${errors.length} errors`);
-  } catch (error: any) {
-    console.error(`[Fireflies Sync] Initial sync failed:`, error.message);
-    errors.push(`Sync failed: ${error.message}`);
-
-    await updateConnectionSyncStatus(workspaceId, 'fireflies', 0, errors.join('; ')).catch(() => {});
+  const trackedUsers = await getTrackedUsers(workspaceId, 'fireflies');
+  if (trackedUsers.length === 0) {
+    return {
+      recordsFetched: 0,
+      recordsStored: 0,
+      errors: ['No tracked users configured for Fireflies. Select users before syncing.'],
+      duration: Date.now() - startTime,
+      trackedUsers: 0,
+    };
   }
 
+  console.log(`[Fireflies Sync] Filtering by ${trackedUsers.length} tracked users`);
+
+  const lookbackDate = new Date();
+  lookbackDate.setDate(lookbackDate.getDate() - days);
+
+  const result = await syncForTrackedUsers(client, workspaceId, trackedUsers, lookbackDate, errors);
+
+  await updateConnectionSyncStatus(
+    workspaceId,
+    'fireflies',
+    result.totalStored,
+    errors.length > 0 ? errors.join('; ') : undefined
+  );
+
+  console.log(`[Fireflies Sync] Initial sync complete: ${result.totalStored} stored across ${trackedUsers.length} users, ${errors.length} errors`);
+
   return {
-    recordsFetched: totalFetched,
-    recordsStored: totalStored,
+    recordsFetched: result.totalFetched,
+    recordsStored: result.totalStored,
     errors,
     duration: Date.now() - startTime,
+    trackedUsers: trackedUsers.length,
+    byUser: result.byUser,
   };
 }
 
@@ -174,64 +211,42 @@ export async function incrementalSync(
   client: FirefliesClient,
   workspaceId: string,
   since: Date
-): Promise<SyncResult> {
+): Promise<TrackedSyncResult> {
   const startTime = Date.now();
   const errors: string[] = [];
-  let totalFetched = 0;
-  let totalStored = 0;
 
   console.log(`[Fireflies Sync] Starting incremental sync for workspace ${workspaceId} since ${since.toISOString()}`);
 
-  try {
-    let rawTranscripts: any[] = [];
-
-    try {
-      rawTranscripts = await client.getAllTranscripts({ afterDate: since });
-    } catch (err: any) {
-      errors.push(`Failed to fetch transcripts: ${err.message}`);
-    }
-
-    totalFetched = rawTranscripts.length;
-    console.log(`[Fireflies Sync] Fetched ${rawTranscripts.length} transcripts since ${since.toISOString()}`);
-
-    const transformResult = transformWithErrorCapture(
-      rawTranscripts,
-      (transcript) => transformFirefliesTranscript(transcript, workspaceId),
-      'Fireflies Transcripts',
-      (transcript) => transcript.id
-    );
-
-    if (transformResult.failed.length > 0) {
-      errors.push(`Transcript transform failures: ${transformResult.failed.length} records`);
-    }
-
-    const normalizedConversations = transformResult.succeeded;
-
-    totalStored = await upsertConversations(normalizedConversations).catch(err => {
-      console.error(`[Fireflies Sync] Failed to store conversations:`, err.message);
-      errors.push(`Failed to store conversations: ${err.message}`);
-      return 0;
-    });
-
-    await updateConnectionSyncStatus(
-      workspaceId,
-      'fireflies',
-      totalStored,
-      errors.length > 0 ? errors.join('; ') : undefined
-    );
-
-    console.log(`[Fireflies Sync] Incremental sync complete: ${totalStored} stored, ${errors.length} errors`);
-  } catch (error: any) {
-    console.error(`[Fireflies Sync] Incremental sync failed:`, error.message);
-    errors.push(`Sync failed: ${error.message}`);
-
-    await updateConnectionSyncStatus(workspaceId, 'fireflies', 0, errors.join('; ')).catch(() => {});
+  const trackedUsers = await getTrackedUsers(workspaceId, 'fireflies');
+  if (trackedUsers.length === 0) {
+    return {
+      recordsFetched: 0,
+      recordsStored: 0,
+      errors: ['No tracked users configured for Fireflies. Select users before syncing.'],
+      duration: Date.now() - startTime,
+      trackedUsers: 0,
+    };
   }
 
+  console.log(`[Fireflies Sync] Filtering by ${trackedUsers.length} tracked users`);
+
+  const result = await syncForTrackedUsers(client, workspaceId, trackedUsers, since, errors);
+
+  await updateConnectionSyncStatus(
+    workspaceId,
+    'fireflies',
+    result.totalStored,
+    errors.length > 0 ? errors.join('; ') : undefined
+  );
+
+  console.log(`[Fireflies Sync] Incremental sync complete: ${result.totalStored} stored, ${errors.length} errors`);
+
   return {
-    recordsFetched: totalFetched,
-    recordsStored: totalStored,
+    recordsFetched: result.totalFetched,
+    recordsStored: result.totalStored,
     errors,
     duration: Date.now() - startTime,
+    trackedUsers: trackedUsers.length,
+    byUser: result.byUser,
   };
 }

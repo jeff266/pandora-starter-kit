@@ -3,6 +3,14 @@ import { query } from '../db.js';
 import { gongConnector } from '../connectors/gong/index.js';
 import { GongClient } from '../connectors/gong/client.js';
 import type { Connection, ConnectorCredentials } from '../connectors/_interface.js';
+import {
+  fetchAndStoreDirectory,
+  getDirectory,
+  setTrackedUsers,
+  getTrackedUsers,
+  clearTrackedUsers,
+  type NormalizedUser,
+} from '../connectors/shared/tracked-users.js';
 
 const router = Router();
 
@@ -41,6 +49,7 @@ router.post('/:workspaceId/connectors/gong/connect', async (req: Request<Workspa
         connectorName: connection.connectorName,
         status: connection.status,
       },
+      user_directory: connection.metadata?.user_directory,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
@@ -102,6 +111,14 @@ router.post('/:workspaceId/connectors/gong/sync', async (req: Request<WorkspaceP
         break;
     }
 
+    if (result.errors.length > 0 && result.errors[0]?.includes('No tracked users configured')) {
+      res.status(400).json({
+        error: 'No tracked users configured',
+        action: `POST /api/workspaces/${workspaceId}/connectors/gong/users/track to select users`,
+      });
+      return;
+    }
+
     res.json({
       success: result.errors.length === 0,
       mode,
@@ -110,6 +127,149 @@ router.post('/:workspaceId/connectors/gong/sync', async (req: Request<WorkspaceP
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.error('[Gong Route] Sync error:', message);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.get('/:workspaceId/connectors/gong/users', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    const workspaceId = req.params.workspaceId;
+
+    const dir = await getDirectory(workspaceId, 'gong');
+
+    if (dir) {
+      const fetchedAt = new Date(dir.fetchedAt);
+      const hoursAgo = (Date.now() - fetchedAt.getTime()) / (1000 * 60 * 60);
+
+      if (hoursAgo < 24) {
+        const tracked = await getTrackedUsers(workspaceId, 'gong');
+        res.json({
+          users: dir.users,
+          fetched_at: dir.fetchedAt,
+          tracked_users: tracked,
+        });
+        return;
+      }
+    }
+
+    const connResult = await query<{ credentials: any; status: string }>(
+      `SELECT credentials, status FROM connections
+       WHERE workspace_id = $1 AND connector_name = 'gong'`,
+      [workspaceId]
+    );
+
+    if (connResult.rows.length === 0) {
+      res.status(404).json({ error: 'Gong connection not found. Connect first.' });
+      return;
+    }
+
+    const conn = connResult.rows[0];
+    const client = new GongClient(conn.credentials.apiKey);
+    const rawUsers = await client.getAllUsers();
+    const normalized: NormalizedUser[] = rawUsers
+      .filter(u => u.active)
+      .map(u => ({
+        source_id: u.id,
+        name: `${u.firstName} ${u.lastName}`.trim(),
+        email: u.emailAddress,
+        title: u.title,
+        active: u.active,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    const directory = await fetchAndStoreDirectory(workspaceId, 'gong', normalized);
+    const tracked = await getTrackedUsers(workspaceId, 'gong');
+
+    res.json({
+      users: directory.users,
+      fetched_at: directory.fetched_at,
+      tracked_users: tracked,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[Gong Route] Get users error:', message);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.post('/:workspaceId/connectors/gong/users/refresh', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    const workspaceId = req.params.workspaceId;
+
+    const connResult = await query<{ credentials: any }>(
+      `SELECT credentials FROM connections
+       WHERE workspace_id = $1 AND connector_name = 'gong'`,
+      [workspaceId]
+    );
+
+    if (connResult.rows.length === 0) {
+      res.status(404).json({ error: 'Gong connection not found.' });
+      return;
+    }
+
+    const client = new GongClient(connResult.rows[0].credentials.apiKey);
+    const rawUsers = await client.getAllUsers();
+    const normalized: NormalizedUser[] = rawUsers
+      .filter(u => u.active)
+      .map(u => ({
+        source_id: u.id,
+        name: `${u.firstName} ${u.lastName}`.trim(),
+        email: u.emailAddress,
+        title: u.title,
+        active: u.active,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    const directory = await fetchAndStoreDirectory(workspaceId, 'gong', normalized);
+
+    res.json({
+      users: directory.users,
+      fetched_at: directory.fetched_at,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[Gong Route] Refresh users error:', message);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.post('/:workspaceId/connectors/gong/users/track', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    const workspaceId = req.params.workspaceId;
+    const { user_ids } = req.body as { user_ids?: string[] };
+
+    if (!user_ids || !Array.isArray(user_ids) || user_ids.length === 0) {
+      res.status(400).json({ error: 'user_ids array is required' });
+      return;
+    }
+
+    const tracked = await setTrackedUsers(workspaceId, 'gong', user_ids);
+    res.json({ tracked_users: tracked });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[Gong Route] Track users error:', message);
+    res.status(400).json({ error: message });
+  }
+});
+
+router.get('/:workspaceId/connectors/gong/users/track', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    const workspaceId = req.params.workspaceId;
+    const tracked = await getTrackedUsers(workspaceId, 'gong');
+    res.json({ tracked_users: tracked, count: tracked.length });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    res.status(500).json({ error: message });
+  }
+});
+
+router.delete('/:workspaceId/connectors/gong/users/track', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    const workspaceId = req.params.workspaceId;
+    await clearTrackedUsers(workspaceId, 'gong');
+    res.json({ success: true, message: 'All tracked users cleared' });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
     res.status(500).json({ error: message });
   }
 });

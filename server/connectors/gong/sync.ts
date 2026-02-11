@@ -3,8 +3,14 @@ import { GongClient } from './client.js';
 import { transformGongCall, buildUserMap, type NormalizedConversation, type GongUserMap } from './transform.js';
 import type { SyncResult } from '../_interface.js';
 import { transformWithErrorCapture } from '../../utils/sync-helpers.js';
+import { getTrackedUsers, type TrackedUser } from '../shared/tracked-users.js';
 
 const BATCH_SIZE = 500;
+
+interface TrackedSyncResult extends SyncResult {
+  trackedUsers?: number;
+  byUser?: Array<{ name: string; calls: number }>;
+}
 
 async function upsertConversations(conversations: NormalizedConversation[]): Promise<number> {
   if (conversations.length === 0) return 0;
@@ -100,84 +106,108 @@ async function updateConnectionSyncStatus(
   );
 }
 
+async function syncForTrackedUsers(
+  client: GongClient,
+  workspaceId: string,
+  trackedUsers: TrackedUser[],
+  fromDate: string,
+  userMap: GongUserMap,
+  errors: string[]
+): Promise<{ totalFetched: number; totalStored: number; byUser: Array<{ name: string; calls: number }> }> {
+  let totalFetched = 0;
+  let totalStored = 0;
+  const byUser: Array<{ name: string; calls: number }> = [];
+
+  for (let i = 0; i < trackedUsers.length; i++) {
+    const user = trackedUsers[i];
+    console.log(`[Gong Sync] Syncing user ${i + 1}/${trackedUsers.length}: ${user.name} (${user.source_id})`);
+
+    try {
+      const rawCalls = await client.getCallsExtensive(fromDate, undefined, user.source_id);
+      totalFetched += rawCalls.length;
+
+      const transformResult = transformWithErrorCapture(
+        rawCalls,
+        (call) => transformGongCall(call, workspaceId, userMap),
+        `Gong Calls (${user.name})`,
+        (call) => call.id
+      );
+
+      if (transformResult.failed.length > 0) {
+        errors.push(`${user.name}: ${transformResult.failed.length} transform failures`);
+      }
+
+      const stored = await upsertConversations(transformResult.succeeded);
+      totalStored += stored;
+      byUser.push({ name: user.name, calls: stored });
+
+      console.log(`[Gong Sync] ${user.name}: ${rawCalls.length} fetched, ${stored} stored`);
+    } catch (err: any) {
+      console.error(`[Gong Sync] Error syncing user ${user.name}: ${err.message}`);
+      errors.push(`${user.name}: ${err.message}`);
+      byUser.push({ name: user.name, calls: 0 });
+    }
+  }
+
+  return { totalFetched, totalStored, byUser };
+}
+
 export async function initialSync(
   client: GongClient,
   workspaceId: string,
   options?: { lookbackDays?: number }
-): Promise<SyncResult> {
+): Promise<TrackedSyncResult> {
   const startTime = Date.now();
   const errors: string[] = [];
-  let totalFetched = 0;
-  let totalStored = 0;
 
   const days = options?.lookbackDays ?? 90;
   console.log(`[Gong Sync] Starting initial sync for workspace ${workspaceId} (lookback: ${days} days)`);
 
-  try {
-    let userMap: GongUserMap = new Map();
-    try {
-      const users = await client.getAllUsers();
-      userMap = buildUserMap(users);
-      console.log(`[Gong Sync] Loaded ${userMap.size} users for participant enrichment`);
-    } catch (err: any) {
-      console.warn(`[Gong Sync] Failed to fetch users (participants will lack names): ${err.message}`);
-      errors.push(`User fetch warning: ${err.message}`);
-    }
-
-    const lookbackDate = new Date();
-    lookbackDate.setDate(lookbackDate.getDate() - days);
-    const fromDate = lookbackDate.toISOString();
-
-    let rawCalls: any[] = [];
-
-    try {
-      rawCalls = await client.getCallsExtensive(fromDate);
-    } catch (err: any) {
-      errors.push(`Failed to fetch calls: ${err.message}`);
-    }
-
-    totalFetched = rawCalls.length;
-    console.log(`[Gong Sync] Fetched ${rawCalls.length} calls`);
-
-    const transformResult = transformWithErrorCapture(
-      rawCalls,
-      (call) => transformGongCall(call, workspaceId, userMap),
-      'Gong Calls',
-      (call) => call.id
-    );
-
-    if (transformResult.failed.length > 0) {
-      errors.push(`Call transform failures: ${transformResult.failed.length} records`);
-    }
-
-    const normalizedConversations = transformResult.succeeded;
-
-    totalStored = await upsertConversations(normalizedConversations).catch(err => {
-      console.error(`[Gong Sync] Failed to store conversations:`, err.message);
-      errors.push(`Failed to store conversations: ${err.message}`);
-      return 0;
-    });
-
-    await updateConnectionSyncStatus(
-      workspaceId,
-      'gong',
-      totalStored,
-      errors.length > 0 ? errors.join('; ') : undefined
-    );
-
-    console.log(`[Gong Sync] Initial sync complete: ${totalStored} stored, ${errors.length} errors`);
-  } catch (error: any) {
-    console.error(`[Gong Sync] Initial sync failed:`, error.message);
-    errors.push(`Sync failed: ${error.message}`);
-
-    await updateConnectionSyncStatus(workspaceId, 'gong', 0, errors.join('; ')).catch(() => {});
+  const trackedUsers = await getTrackedUsers(workspaceId, 'gong');
+  if (trackedUsers.length === 0) {
+    return {
+      recordsFetched: 0,
+      recordsStored: 0,
+      errors: ['No tracked users configured for Gong. Select users before syncing.'],
+      duration: Date.now() - startTime,
+      trackedUsers: 0,
+    };
   }
 
+  console.log(`[Gong Sync] Filtering by ${trackedUsers.length} tracked users`);
+
+  let userMap: GongUserMap = new Map();
+  try {
+    const users = await client.getAllUsers();
+    userMap = buildUserMap(users);
+    console.log(`[Gong Sync] Loaded ${userMap.size} users for participant enrichment`);
+  } catch (err: any) {
+    console.warn(`[Gong Sync] Failed to fetch users (participants will lack names): ${err.message}`);
+    errors.push(`User fetch warning: ${err.message}`);
+  }
+
+  const lookbackDate = new Date();
+  lookbackDate.setDate(lookbackDate.getDate() - days);
+  const fromDate = lookbackDate.toISOString();
+
+  const result = await syncForTrackedUsers(client, workspaceId, trackedUsers, fromDate, userMap, errors);
+
+  await updateConnectionSyncStatus(
+    workspaceId,
+    'gong',
+    result.totalStored,
+    errors.length > 0 ? errors.join('; ') : undefined
+  );
+
+  console.log(`[Gong Sync] Initial sync complete: ${result.totalStored} stored across ${trackedUsers.length} users, ${errors.length} errors`);
+
   return {
-    recordsFetched: totalFetched,
-    recordsStored: totalStored,
+    recordsFetched: result.totalFetched,
+    recordsStored: result.totalStored,
     errors,
     duration: Date.now() - startTime,
+    trackedUsers: trackedUsers.length,
+    byUser: result.byUser,
   };
 }
 
@@ -185,76 +215,52 @@ export async function incrementalSync(
   client: GongClient,
   workspaceId: string,
   since: Date
-): Promise<SyncResult> {
+): Promise<TrackedSyncResult> {
   const startTime = Date.now();
   const errors: string[] = [];
-  let totalFetched = 0;
-  let totalStored = 0;
 
   console.log(`[Gong Sync] Starting incremental sync for workspace ${workspaceId} since ${since.toISOString()}`);
 
-  try {
-    let userMap: GongUserMap = new Map();
-    try {
-      const users = await client.getAllUsers();
-      userMap = buildUserMap(users);
-      console.log(`[Gong Sync] Loaded ${userMap.size} users for participant enrichment`);
-    } catch (err: any) {
-      console.warn(`[Gong Sync] Failed to fetch users (participants will lack names): ${err.message}`);
-      errors.push(`User fetch warning: ${err.message}`);
-    }
-
-    const fromDate = since.toISOString();
-
-    let rawCalls: any[] = [];
-
-    try {
-      rawCalls = await client.getCallsExtensive(fromDate);
-    } catch (err: any) {
-      errors.push(`Failed to fetch calls: ${err.message}`);
-    }
-
-    totalFetched = rawCalls.length;
-    console.log(`[Gong Sync] Fetched ${rawCalls.length} calls since ${fromDate}`);
-
-    const transformResult = transformWithErrorCapture(
-      rawCalls,
-      (call) => transformGongCall(call, workspaceId, userMap),
-      'Gong Calls',
-      (call) => call.id
-    );
-
-    if (transformResult.failed.length > 0) {
-      errors.push(`Call transform failures: ${transformResult.failed.length} records`);
-    }
-
-    const normalizedConversations = transformResult.succeeded;
-
-    totalStored = await upsertConversations(normalizedConversations).catch(err => {
-      console.error(`[Gong Sync] Failed to store conversations:`, err.message);
-      errors.push(`Failed to store conversations: ${err.message}`);
-      return 0;
-    });
-
-    await updateConnectionSyncStatus(
-      workspaceId,
-      'gong',
-      totalStored,
-      errors.length > 0 ? errors.join('; ') : undefined
-    );
-
-    console.log(`[Gong Sync] Incremental sync complete: ${totalStored} stored, ${errors.length} errors`);
-  } catch (error: any) {
-    console.error(`[Gong Sync] Incremental sync failed:`, error.message);
-    errors.push(`Sync failed: ${error.message}`);
-
-    await updateConnectionSyncStatus(workspaceId, 'gong', 0, errors.join('; ')).catch(() => {});
+  const trackedUsers = await getTrackedUsers(workspaceId, 'gong');
+  if (trackedUsers.length === 0) {
+    return {
+      recordsFetched: 0,
+      recordsStored: 0,
+      errors: ['No tracked users configured for Gong. Select users before syncing.'],
+      duration: Date.now() - startTime,
+      trackedUsers: 0,
+    };
   }
 
+  console.log(`[Gong Sync] Filtering by ${trackedUsers.length} tracked users`);
+
+  let userMap: GongUserMap = new Map();
+  try {
+    const users = await client.getAllUsers();
+    userMap = buildUserMap(users);
+  } catch (err: any) {
+    console.warn(`[Gong Sync] Failed to fetch users: ${err.message}`);
+    errors.push(`User fetch warning: ${err.message}`);
+  }
+
+  const fromDate = since.toISOString();
+  const result = await syncForTrackedUsers(client, workspaceId, trackedUsers, fromDate, userMap, errors);
+
+  await updateConnectionSyncStatus(
+    workspaceId,
+    'gong',
+    result.totalStored,
+    errors.length > 0 ? errors.join('; ') : undefined
+  );
+
+  console.log(`[Gong Sync] Incremental sync complete: ${result.totalStored} stored, ${errors.length} errors`);
+
   return {
-    recordsFetched: totalFetched,
-    recordsStored: totalStored,
+    recordsFetched: result.totalFetched,
+    recordsStored: result.totalStored,
     errors,
     duration: Date.now() - startTime,
+    trackedUsers: trackedUsers.length,
+    byUser: result.byUser,
   };
 }

@@ -1,6 +1,7 @@
 import { query } from '../../db.js';
 import { FirefliesClient } from './client.js';
 import { initialSync, incrementalSync } from './sync.js';
+import { fetchAndStoreDirectory, type NormalizedUser } from '../shared/tracked-users.js';
 import type {
   PandoraConnector,
   ConnectorCredentials,
@@ -57,13 +58,32 @@ export class FirefliesConnector implements PandoraConnector {
       connectionId = result.rows[0].id;
     }
 
+    let userDirectory;
+    try {
+      const client = new FirefliesClient(credentials.apiKey!);
+      const rawUsers = await client.getUsers();
+      const normalized: NormalizedUser[] = rawUsers
+        .map(u => ({
+          source_id: u.user_id,
+          name: u.name || u.email,
+          email: u.email,
+          role: u.is_admin ? 'admin' : 'member',
+          active: true,
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      userDirectory = await fetchAndStoreDirectory(workspaceId, 'fireflies', normalized);
+      console.log(`[Fireflies] Fetched ${normalized.length} users for directory`);
+    } catch (err: any) {
+      console.warn(`[Fireflies] Failed to fetch user directory on connect: ${err.message}`);
+    }
+
     return {
       id: connectionId,
       workspaceId,
       connectorName: 'fireflies',
       status: 'healthy',
       credentials,
-      metadata: testResult.accountInfo,
+      metadata: { ...testResult.accountInfo, user_directory: userDirectory },
     };
   }
 
