@@ -37,6 +37,8 @@ Pandora is built on Node.js 20 with TypeScript 5+, using Express.js and PostgreS
 -   **Slack Output Layer:** General-purpose Slack Block Kit client with formatting helpers and skill-specific formatters for automated skill result posting.
 -   **Webhook Endpoints:** Inbound webhooks for skill triggers, run status, and event ingestion.
 -   **Cross-Entity Linker:** Post-sync batch job resolving conversation→contact→account→deal foreign keys via 3-tier matching (email match, CRM native IDs, single-deal inference). Idempotent, auditable via `link_method` column, fires automatically after Gong/Fireflies/HubSpot/Salesforce syncs.
+-   **Internal Meeting Filter:** Post-sync classification of conversations as internal/external using dual-layer detection (participant domain check + title heuristics). Persists `is_internal` and `internal_classification_reason` on conversations table. Runs automatically after linker in post-sync flow.
+-   **CWD (Conversations Without Deals):** Detects external conversations linked to accounts but not deals, with severity classification, account enrichment, and rep attribution. Exposed via `GET /api/workspaces/:id/conversations-without-deals` and integrated into Data Quality Audit skill.
 -   **LLM Integration:** Utilizes Anthropic Claude via Replit AI for reasoning/generation and Fireworks DeepSeek for extraction/classification, with token guardrails and prompt safety mechanisms.
 
 ## External Dependencies
