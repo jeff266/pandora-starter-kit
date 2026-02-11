@@ -38,10 +38,10 @@ export const dealRiskReviewSkill: SkillDefinition = {
       tier: 'compute',
       computeFn: 'queryDeals',
       computeArgs: {
-        stageNormalized: 'open',
+        stageNormalized: ['awareness', 'qualification', 'evaluation', 'decision', 'negotiation'],
         sortBy: 'amount',
         sortDir: 'desc',
-        limit: 20, // Focus on top 20 deals by value
+        limit: 20,
       },
       outputKey: 'open_deals',
     },
