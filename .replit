@@ -22,17 +22,21 @@ args = "Pandora API"
 name = "Pandora API"
 author = "agent"
 
+[workflows.workflow.metadata]
+outputType = "webview"
+
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "npx tsx server/index.ts"
-waitForPort = 3000
-
-[workflows.workflow.metadata]
-outputType = "console"
+args = "PORT=5000 npx tsx server/index.ts"
+waitForPort = 5000
 
 [[ports]]
 localPort = 3000
 externalPort = 3000
+
+[[ports]]
+localPort = 5000
+externalPort = 80
 
 [userenv]
 
