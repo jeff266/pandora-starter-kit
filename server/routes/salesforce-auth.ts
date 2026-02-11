@@ -10,7 +10,7 @@ const LOGIN_URL = "https://login.salesforce.com";
 const AUTHORIZE_URL = `${LOGIN_URL}/services/oauth2/authorize`;
 const TOKEN_URL = `${LOGIN_URL}/services/oauth2/token`;
 
-const pendingFlows = new Map<string, { codeVerifier: string; createdAt: number }>();
+const pendingFlows = new Map<string, { codeVerifier: string; workspaceId: string; createdAt: number }>();
 
 setInterval(() => {
   const now = Date.now();
@@ -34,7 +34,14 @@ function generateCodeChallenge(verifier: string): string {
   return base64url(hash);
 }
 
-router.get("/authorize", (_req: Request, res: Response) => {
+router.get("/authorize", (req: Request, res: Response) => {
+  const workspaceId = req.query.workspaceId as string;
+
+  if (!workspaceId) {
+    res.status(400).json({ error: "workspaceId query parameter is required" });
+    return;
+  }
+
   const clientId = process.env.SALESFORCE_CLIENT_ID;
   const callbackUrl = process.env.SALESFORCE_CALLBACK_URL;
 
@@ -47,7 +54,7 @@ router.get("/authorize", (_req: Request, res: Response) => {
   const codeVerifier = generateCodeVerifier();
   const codeChallenge = generateCodeChallenge(codeVerifier);
 
-  pendingFlows.set(state, { codeVerifier, createdAt: Date.now() });
+  pendingFlows.set(state, { codeVerifier, workspaceId, createdAt: Date.now() });
 
   const params = new URLSearchParams({
     response_type: "code",
@@ -125,19 +132,19 @@ router.get("/callback", async (req: Request, res: Response) => {
       scope: tokenData.scope,
     });
 
+    const workspaceId = flow.workspaceId;
+
     try {
-      let workspaceResult = await query(
-        `SELECT id FROM workspaces WHERE name = 'Imubit' LIMIT 1`
+      // Verify workspace exists
+      const workspaceResult = await query(
+        `SELECT id FROM workspaces WHERE id = $1`,
+        [workspaceId]
       );
 
-      let workspaceId: string;
       if (workspaceResult.rows.length === 0) {
-        const createResult = await query(
-          `INSERT INTO workspaces (name, slug, settings) VALUES ('Imubit', 'imubit', '{}') RETURNING id`
-        );
-        workspaceId = createResult.rows[0].id;
-      } else {
-        workspaceId = workspaceResult.rows[0].id;
+        logger.error("Workspace not found", { workspaceId });
+        res.status(404).json({ error: "Workspace not found" });
+        return;
       }
 
       await query(
@@ -153,6 +160,10 @@ router.get("/callback", async (req: Request, res: Response) => {
       );
 
       logger.info("Stored Salesforce connection", { workspaceId });
+
+      // Redirect to workspace connectors page
+      res.redirect(`/workspaces/${workspaceId}/connectors`);
+      return;
     } catch (storeErr: any) {
       logger.error("Failed to store connection", {
         message: storeErr?.message,
@@ -160,6 +171,8 @@ router.get("/callback", async (req: Request, res: Response) => {
         detail: storeErr?.detail,
         stack: storeErr?.stack?.split('\n').slice(0, 3).join(' | '),
       });
+      res.status(500).json({ error: "Failed to store connection" });
+      return;
     }
 
     res.json({

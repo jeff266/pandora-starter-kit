@@ -2,6 +2,9 @@ import { Router } from 'express';
 import { query } from '../db.js';
 import { getJobQueue } from '../jobs/queue.js';
 import { createLogger } from '../utils/logger.js';
+import { salesforceAdapter } from '../connectors/salesforce/adapter.js';
+import { getFreshCredentials } from '../utils/salesforce-token-refresh.js';
+import type { Connection } from '../connectors/_interface.js';
 
 const router = Router();
 const logger = createLogger('SalesforceSync');
@@ -61,8 +64,8 @@ router.post('/:workspaceId/connectors/salesforce/sync', async (req, res) => {
 
     const syncLogId = syncLogResult.rows[0].id;
 
-    // Get credentials with client ID/secret
-    const credentials = connResult.rows[0].credentials;
+    // Get fresh credentials (auto-refresh if needed)
+    const credentials = await getFreshCredentials(workspaceId);
     credentials.clientId = process.env.SALESFORCE_CLIENT_ID;
     credentials.clientSecret = process.env.SALESFORCE_CLIENT_SECRET;
 
@@ -103,6 +106,159 @@ router.post('/:workspaceId/connectors/salesforce/sync', async (req, res) => {
     logger.error('Failed to queue Salesforce sync', { error });
     res.status(500).json({
       error: 'Failed to queue sync',
+      message: (error as Error).message
+    });
+  }
+});
+
+// Test connection
+router.post('/:workspaceId/connectors/salesforce/test', async (req, res) => {
+  const { workspaceId } = req.params;
+
+  try {
+    const connResult = await query<{ id: string; status: string }>(
+      `SELECT id, status FROM connections
+       WHERE workspace_id = $1 AND connector_name = 'salesforce'`,
+      [workspaceId]
+    );
+
+    if (connResult.rows.length === 0) {
+      res.status(404).json({ error: 'Salesforce connection not found. Connect first.' });
+      return;
+    }
+
+    const conn = connResult.rows[0];
+
+    // Get fresh credentials (auto-refresh if needed)
+    const credentials = await getFreshCredentials(workspaceId);
+
+    const connection: Connection = {
+      id: conn.id,
+      workspaceId,
+      connectorName: 'salesforce',
+      status: conn.status as Connection['status'],
+      credentials,
+    };
+
+    const result = await salesforceAdapter.testConnection(connection);
+
+    res.json({
+      success: result.success,
+      message: result.success ? 'Connection successful' : 'Connection failed',
+      accountInfo: result.accountInfo,
+      error: result.error,
+    });
+  } catch (error) {
+    logger.error('Failed to test Salesforce connection', { error });
+    res.status(500).json({
+      error: 'Failed to test connection',
+      message: (error as Error).message
+    });
+  }
+});
+
+// Discover schema
+router.post('/:workspaceId/connectors/salesforce/discover-schema', async (req, res) => {
+  const { workspaceId } = req.params;
+
+  try {
+    const connResult = await query<{ id: string; status: string }>(
+      `SELECT id, status FROM connections
+       WHERE workspace_id = $1 AND connector_name = 'salesforce'`,
+      [workspaceId]
+    );
+
+    if (connResult.rows.length === 0) {
+      res.status(404).json({ error: 'Salesforce connection not found. Connect first.' });
+      return;
+    }
+
+    const conn = connResult.rows[0];
+
+    // Get fresh credentials (auto-refresh if needed)
+    const credentials = await getFreshCredentials(workspaceId);
+
+    const connection: Connection = {
+      id: conn.id,
+      workspaceId,
+      connectorName: 'salesforce',
+      status: conn.status as Connection['status'],
+      credentials,
+    };
+
+    if (!salesforceAdapter.discoverSchema) {
+      res.status(501).json({ error: 'Schema discovery not implemented for Salesforce' });
+      return;
+    }
+
+    const schema = await salesforceAdapter.discoverSchema(connection);
+
+    const summary = {
+      objectTypes: schema.objectTypes.map(ot => ({
+        name: ot.name,
+        totalFields: ot.fields.length,
+        customFields: ot.fields.filter(f => f.custom).length,
+      })),
+    };
+
+    res.json({
+      success: true,
+      summary,
+      schema,
+    });
+  } catch (error) {
+    logger.error('Failed to discover Salesforce schema', { error });
+    res.status(500).json({
+      error: 'Failed to discover schema',
+      message: (error as Error).message
+    });
+  }
+});
+
+// Health check
+router.get('/:workspaceId/connectors/salesforce/health', async (req, res) => {
+  const { workspaceId } = req.params;
+
+  try {
+    const health = await salesforceAdapter.health(workspaceId);
+    res.json(health);
+  } catch (error) {
+    logger.error('Failed to check Salesforce health', { error });
+    res.status(500).json({
+      error: 'Failed to check health',
+      message: (error as Error).message
+    });
+  }
+});
+
+// Disconnect
+router.delete('/:workspaceId/connectors/salesforce/disconnect', async (req, res) => {
+  const { workspaceId } = req.params;
+
+  try {
+    const result = await query(
+      `UPDATE connections
+       SET credentials = NULL, status = 'disconnected', updated_at = NOW()
+       WHERE workspace_id = $1 AND connector_name = 'salesforce'
+       RETURNING id`,
+      [workspaceId]
+    );
+
+    if (result.rows.length === 0) {
+      res.status(404).json({ error: 'Salesforce connection not found' });
+      return;
+    }
+
+    logger.info('Salesforce connection disconnected', { workspaceId });
+
+    res.json({
+      success: true,
+      message: 'Salesforce connection disconnected',
+    });
+  } catch (error) {
+    logger.error('Failed to disconnect Salesforce', { error });
+    res.status(500).json({
+      error: 'Failed to disconnect',
       message: (error as Error).message
     });
   }
