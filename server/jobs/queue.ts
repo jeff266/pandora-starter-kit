@@ -113,7 +113,7 @@ export class JobQueue {
   async updateProgress(jobId: string, progress: JobProgress): Promise<void> {
     await query(
       `UPDATE jobs
-       SET progress = $1, updated_at = NOW()
+       SET progress = $1
        WHERE id = $2`,
       [JSON.stringify(progress), jobId]
     );

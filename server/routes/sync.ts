@@ -36,7 +36,7 @@ router.post('/:id/sync', async (req: Request, res: Response): Promise<void> => {
 
     const connResult = await query<{ connector_name: string }>(
       `SELECT connector_name FROM connections
-       WHERE workspace_id = $1 AND status IN ('connected', 'synced', 'error')
+       WHERE workspace_id = $1 AND status IN ('connected', 'synced', 'error', 'healthy')
        ${connectorType ? "AND connector_name = $2" : ""}`,
       connectorType ? [workspaceId, connectorType] : [workspaceId]
     );
