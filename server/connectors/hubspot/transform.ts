@@ -18,6 +18,8 @@ export interface NormalizedDeal {
   pipeline: string | null;
   last_activity_date: Date | null;
   custom_fields: Record<string, any>;
+  account_source_id: string | null;
+  contact_source_ids: string[];
 }
 
 // TODO: Allow per-workspace override via context_layer.definitions.stage_mapping
@@ -64,6 +66,7 @@ export interface NormalizedContact {
   phone: string | null;
   last_activity_date: Date | null;
   custom_fields: Record<string, any>;
+  account_source_id: string | null;
 }
 
 export interface NormalizedAccount {
@@ -116,6 +119,24 @@ function extractCustomFields(
 export interface DealTransformOptions {
   stageMap?: Map<string, string>;
   pipelineMap?: Map<string, string>;
+  ownerMap?: Map<string, string>;
+}
+
+export interface ContactTransformOptions {
+  ownerMap?: Map<string, string>;
+}
+
+function extractCompanyAssociationId(associations: any): string | null {
+  const companyResults = associations?.companies?.results;
+  if (Array.isArray(companyResults) && companyResults.length > 0) {
+    return companyResults[0].id ?? null;
+  }
+  return null;
+}
+
+function resolveOwnerName(ownerId: string | null, ownerMap?: Map<string, string>): string | null {
+  if (!ownerId || !ownerMap) return ownerId;
+  return ownerMap.get(ownerId) ?? ownerId;
 }
 
 export function transformDeal(
@@ -146,6 +167,16 @@ export function transformDeal(
     }
   }
 
+  const accountSourceId = extractCompanyAssociationId(deal.associations);
+
+  const contactSourceIds: string[] = [];
+  const contactResults = deal.associations?.contacts?.results;
+  if (Array.isArray(contactResults)) {
+    for (const c of contactResults) {
+      if (c.id) contactSourceIds.push(c.id);
+    }
+  }
+
   return {
     workspace_id: workspaceId,
     source: "hubspot",
@@ -159,17 +190,25 @@ export function transformDeal(
     stage: resolvedStage,
     stage_normalized: normalizeStage(resolvedStage),
     close_date: sanitizeDate(props.closedate),
-    owner: sanitizeText(props.hubspot_owner_id),
+    owner: resolveOwnerName(sanitizeText(props.hubspot_owner_id), options?.ownerMap),
     probability: sanitizeNumber(props.hs_deal_stage_probability),
     forecast_category: null,
     pipeline: resolvedPipeline,
     last_activity_date: parseDate(sanitizeDate(props.notes_last_updated)),
     custom_fields: extractCustomFields(props, CORE_DEAL_FIELDS),
+    account_source_id: accountSourceId,
+    contact_source_ids: contactSourceIds,
   };
 }
 
-export function transformContact(contact: HubSpotContact, workspaceId: string): NormalizedContact {
+export function transformContact(
+  contact: HubSpotContact,
+  workspaceId: string,
+  options?: ContactTransformOptions
+): NormalizedContact {
   const props = contact.properties;
+
+  const accountSourceId = extractCompanyAssociationId(contact.associations);
 
   return {
     workspace_id: workspaceId,
@@ -190,6 +229,7 @@ export function transformContact(contact: HubSpotContact, workspaceId: string): 
     phone: normalizePhone(sanitizeText(props.phone)),
     last_activity_date: parseDate(sanitizeDate(props.lastmodifieddate)),
     custom_fields: extractCustomFields(props, CORE_CONTACT_FIELDS),
+    account_source_id: accountSourceId,
   };
 }
 

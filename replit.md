@@ -80,5 +80,14 @@ DeepSeek sometimes returns objects instead of arrays (e.g., `{ classifications: 
 1. **Runtime normalization** (`runtime.ts`): When `deepseekSchema.type === 'array'` but response is an object, unwraps by selecting the largest array value.
 2. **Tool validation** (`tool-definitions.ts`): `calculateOutputBudget` validates classification items have expected fields (`dealName`, `root_cause`, `suggested_action`) before accepting.
 
+## Runtime Tool Call Recovery
+When Claude's synthesize step hits `maxToolCalls` limit, the runtime makes one final LLM call without tools to force a text response. This prevents "Tool use limit reached" error messages from being returned as skill results.
+
+## HubSpot Sync Notes
+- HubSpot has its own sync route: `POST /:workspaceId/connectors/hubspot/sync` (separate from universal adapter sync)
+- Connection status must be `connected`, `synced`, or `error` for universal sync; HubSpot connector uses `healthy`/`connected`
+- To force full re-sync: clear `sync_cursor` on the connection, then POST to the HubSpot sync route with `{"mode": "initial"}`
+- FK resolution runs post-upsert: maps HubSpot company/contact source_ids to Pandora account_id/contact_id UUIDs
+
 ## Smoke Test
 Run `npm run smoke-test` to validate the full pipeline end-to-end with synthetic data (24 tests covering all query functions, computed fields, and pipeline snapshot). Use `--keep` flag to preserve test data for inspection.

@@ -8,6 +8,7 @@ import {
   type NormalizedContact,
   type NormalizedAccount,
   type DealTransformOptions,
+  type ContactTransformOptions,
 } from './transform.js';
 import type { SyncResult } from '../_interface.js';
 import { transformWithErrorCapture } from '../../utils/sync-helpers.js';
@@ -31,6 +32,126 @@ async function buildStageMaps(client: HubSpotClient): Promise<DealTransformOptio
   }
 
   return { stageMap, pipelineMap };
+}
+
+async function buildOwnerMap(client: HubSpotClient): Promise<Map<string, string>> {
+  const ownerMap = new Map<string, string>();
+  try {
+    const owners = await client.getOwners();
+    for (const owner of owners) {
+      const name = `${owner.firstName} ${owner.lastName}`.trim();
+      if (name) {
+        ownerMap.set(owner.id, name);
+      }
+    }
+    console.log(`[HubSpot Sync] Built owner map: ${ownerMap.size} owners`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    console.warn(`[HubSpot Sync] Failed to fetch owners: ${msg}`);
+  }
+  return ownerMap;
+}
+
+async function resolveAccountIds(
+  workspaceId: string,
+  sourceIds: Set<string>
+): Promise<Map<string, string>> {
+  const sourceIdToUuid = new Map<string, string>();
+  if (sourceIds.size === 0) return sourceIdToUuid;
+
+  const idsArray = Array.from(sourceIds);
+  const result = await query<{ id: string; source_id: string }>(
+    `SELECT id, source_id FROM accounts
+     WHERE workspace_id = $1 AND source = 'hubspot' AND source_id = ANY($2)`,
+    [workspaceId, idsArray]
+  );
+
+  for (const row of result.rows) {
+    sourceIdToUuid.set(row.source_id, row.id);
+  }
+  return sourceIdToUuid;
+}
+
+async function resolveContactIds(
+  workspaceId: string,
+  sourceIds: Set<string>
+): Promise<Map<string, string>> {
+  const sourceIdToUuid = new Map<string, string>();
+  if (sourceIds.size === 0) return sourceIdToUuid;
+
+  const idsArray = Array.from(sourceIds);
+  const result = await query<{ id: string; source_id: string }>(
+    `SELECT id, source_id FROM contacts
+     WHERE workspace_id = $1 AND source = 'hubspot' AND source_id = ANY($2)`,
+    [workspaceId, idsArray]
+  );
+
+  for (const row of result.rows) {
+    sourceIdToUuid.set(row.source_id, row.id);
+  }
+  return sourceIdToUuid;
+}
+
+async function updateDealForeignKeys(
+  workspaceId: string,
+  deals: NormalizedDeal[],
+  accountMap: Map<string, string>,
+  contactMap: Map<string, string>
+): Promise<void> {
+  const client = await getClient();
+  try {
+    await client.query('BEGIN');
+    for (const deal of deals) {
+      const accountUuid = deal.account_source_id ? accountMap.get(deal.account_source_id) ?? null : null;
+      const contactUuid = deal.contact_source_ids.length > 0
+        ? contactMap.get(deal.contact_source_ids[0]) ?? null
+        : null;
+
+      if (accountUuid || contactUuid) {
+        await client.query(
+          `UPDATE deals SET
+            account_id = COALESCE($1, account_id),
+            contact_id = COALESCE($2, contact_id),
+            updated_at = NOW()
+          WHERE workspace_id = $3 AND source = 'hubspot' AND source_id = $4`,
+          [accountUuid, contactUuid, workspaceId, deal.source_id]
+        );
+      }
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[HubSpot Sync] Failed to update deal foreign keys:', err);
+  } finally {
+    client.release();
+  }
+}
+
+async function updateContactAccountIds(
+  workspaceId: string,
+  contacts: NormalizedContact[],
+  accountMap: Map<string, string>
+): Promise<void> {
+  const client = await getClient();
+  try {
+    await client.query('BEGIN');
+    for (const contact of contacts) {
+      const accountUuid = contact.account_source_id ? accountMap.get(contact.account_source_id) ?? null : null;
+      if (accountUuid) {
+        await client.query(
+          `UPDATE contacts SET account_id = $1, updated_at = NOW()
+           WHERE workspace_id = $2 AND source = 'hubspot' AND source_id = $3`,
+          [accountUuid, workspaceId, contact.source_id]
+        );
+      }
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[HubSpot Sync] Failed to update contact account_ids:', err);
+  } finally {
+    client.release();
+  }
 }
 
 const BATCH_SIZE = 500;
@@ -226,7 +347,12 @@ export async function initialSync(
   console.log(`[HubSpot Sync] Starting initial sync for workspace ${workspaceId}`);
 
   try {
-    const dealOptions = await buildStageMaps(client);
+    const [dealOptions, ownerMap] = await Promise.all([
+      buildStageMaps(client),
+      buildOwnerMap(client),
+    ]);
+    dealOptions.ownerMap = ownerMap;
+    const contactOptions: ContactTransformOptions = { ownerMap };
 
     let rawDeals: any[] = [];
     let rawContacts: any[] = [];
@@ -244,7 +370,6 @@ export async function initialSync(
     totalFetched = rawDeals.length + rawContacts.length + rawCompanies.length;
     console.log(`[HubSpot Sync] Fetched ${rawDeals.length} deals, ${rawContacts.length} contacts, ${rawCompanies.length} companies`);
 
-    // Transform with per-record error capture
     const dealTransformResult = transformWithErrorCapture(
       rawDeals,
       (d) => transformDeal(d, workspaceId, dealOptions),
@@ -254,7 +379,7 @@ export async function initialSync(
 
     const contactTransformResult = transformWithErrorCapture(
       rawContacts,
-      (c) => transformContact(c, workspaceId),
+      (c) => transformContact(c, workspaceId, contactOptions),
       'HubSpot Contacts',
       (c) => c.id
     );
@@ -266,7 +391,6 @@ export async function initialSync(
       (c) => c.id
     );
 
-    // Log transform failures
     if (dealTransformResult.failed.length > 0) {
       errors.push(`Deal transform failures: ${dealTransformResult.failed.length} records`);
     }
@@ -281,7 +405,14 @@ export async function initialSync(
     const normalizedContacts = contactTransformResult.succeeded;
     const normalizedAccounts = accountTransformResult.succeeded;
 
-    const [dealsStored, contactsStored, accountsStored] = await Promise.all([
+    // Upsert accounts first so we can resolve account_id FKs
+    const accountsStored = await upsertAccounts(normalizedAccounts).catch(err => {
+      console.error(`[HubSpot Sync] Failed to store accounts:`, err.message);
+      errors.push(`Failed to store accounts: ${err.message}`);
+      return 0;
+    });
+
+    const [dealsStored, contactsStored] = await Promise.all([
       upsertDeals(normalizedDeals).catch(err => {
         console.error(`[HubSpot Sync] Failed to store deals:`, err.message);
         errors.push(`Failed to store deals: ${err.message}`);
@@ -292,12 +423,30 @@ export async function initialSync(
         errors.push(`Failed to store contacts: ${err.message}`);
         return 0;
       }),
-      upsertAccounts(normalizedAccounts).catch(err => {
-        console.error(`[HubSpot Sync] Failed to store accounts:`, err.message);
-        errors.push(`Failed to store accounts: ${err.message}`);
-        return 0;
-      }),
     ]);
+
+    // Resolve account_source_id → account_id UUIDs and update FK columns
+    const allAccountSourceIds = new Set<string>();
+    const allContactSourceIds = new Set<string>();
+    for (const d of normalizedDeals) {
+      if (d.account_source_id) allAccountSourceIds.add(d.account_source_id);
+      for (const cId of d.contact_source_ids) allContactSourceIds.add(cId);
+    }
+    for (const c of normalizedContacts) {
+      if (c.account_source_id) allAccountSourceIds.add(c.account_source_id);
+    }
+
+    const [accountIdMap, contactIdMap] = await Promise.all([
+      resolveAccountIds(workspaceId, allAccountSourceIds),
+      resolveContactIds(workspaceId, allContactSourceIds),
+    ]);
+
+    await Promise.all([
+      updateDealForeignKeys(workspaceId, normalizedDeals, accountIdMap, contactIdMap),
+      updateContactAccountIds(workspaceId, normalizedContacts, accountIdMap),
+    ]);
+
+    console.log(`[HubSpot Sync] Resolved FKs: ${accountIdMap.size} accounts, ${contactIdMap.size} contacts`);
 
     totalStored = dealsStored + contactsStored + accountsStored;
     console.log(`[HubSpot Sync] Stored ${dealsStored} deals, ${contactsStored} contacts, ${accountsStored} accounts`);
@@ -330,7 +479,12 @@ export async function incrementalSync(
 
   console.log(`[HubSpot Sync] Starting incremental sync for workspace ${workspaceId} since ${since.toISOString()}`);
 
-  const dealOptions = await buildStageMaps(hubspotClient);
+  const [dealOptions, ownerMap] = await Promise.all([
+    buildStageMaps(hubspotClient),
+    buildOwnerMap(hubspotClient),
+  ]);
+  dealOptions.ownerMap = ownerMap;
+  const contactOptions: ContactTransformOptions = { ownerMap };
 
   const dealProps = [
     "dealname", "amount", "dealstage", "closedate", "createdate",
@@ -399,7 +553,7 @@ export async function incrementalSync(
 
     const contactTransformResult = transformWithErrorCapture(
       rawContacts,
-      (c) => transformContact({ id: c.id, properties: c.properties as any } as any, workspaceId),
+      (c) => transformContact({ id: c.id, properties: c.properties as any } as any, workspaceId, contactOptions),
       'HubSpot Contacts (Incremental)',
       (c) => c.id
     );
@@ -411,7 +565,6 @@ export async function incrementalSync(
       (c) => c.id
     );
 
-    // Log transform failures
     if (dealTransformResult.failed.length > 0) {
       errors.push(`Deal transform failures: ${dealTransformResult.failed.length} records`);
     }
@@ -426,10 +579,32 @@ export async function incrementalSync(
     const normalizedContacts = contactTransformResult.succeeded;
     const normalizedAccounts = accountTransformResult.succeeded;
 
-    const [dealsStored, contactsStored, accountsStored] = await Promise.all([
+    const accountsStored = await upsertAccounts(normalizedAccounts).catch(err => { errors.push(`Failed to store accounts: ${err.message}`); return 0; });
+
+    const [dealsStored, contactsStored] = await Promise.all([
       upsertDeals(normalizedDeals).catch(err => { errors.push(`Failed to store deals: ${err.message}`); return 0; }),
       upsertContacts(normalizedContacts).catch(err => { errors.push(`Failed to store contacts: ${err.message}`); return 0; }),
-      upsertAccounts(normalizedAccounts).catch(err => { errors.push(`Failed to store accounts: ${err.message}`); return 0; }),
+    ]);
+
+    // Resolve FK associations
+    const allAccountSourceIds = new Set<string>();
+    const allContactSourceIds = new Set<string>();
+    for (const d of normalizedDeals) {
+      if (d.account_source_id) allAccountSourceIds.add(d.account_source_id);
+      for (const cId of d.contact_source_ids) allContactSourceIds.add(cId);
+    }
+    for (const c of normalizedContacts) {
+      if (c.account_source_id) allAccountSourceIds.add(c.account_source_id);
+    }
+
+    const [accountIdMap, contactIdMap] = await Promise.all([
+      resolveAccountIds(workspaceId, allAccountSourceIds),
+      resolveContactIds(workspaceId, allContactSourceIds),
+    ]);
+
+    await Promise.all([
+      updateDealForeignKeys(workspaceId, normalizedDeals, accountIdMap, contactIdMap),
+      updateContactAccountIds(workspaceId, normalizedContacts, accountIdMap),
     ]);
 
     totalStored = dealsStored + contactsStored + accountsStored;

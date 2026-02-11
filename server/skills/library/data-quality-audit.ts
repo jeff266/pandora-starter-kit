@@ -160,7 +160,7 @@ Each classification object should have:
         'calculate-output-budget',
       ],
       claudeTools: ['queryDeals', 'queryContacts'],
-      maxToolCalls: 3,
+      maxToolCalls: 5,
       claudePrompt: `You are a RevOps operations analyst auditing CRM data quality for {{business_model.company_name}}.
 
 TIME SCOPE:
@@ -190,9 +190,6 @@ TREND (vs last audit):
 
 OWNER PATTERNS (from automated classification):
 {{quality_classifications}}
-
-TOP PROBLEM RECORDS:
-{{enriched_offenders}}
 
 REPORT PARAMETERS:
 - Depth: {{output_budget.reportDepth}}

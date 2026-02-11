@@ -424,8 +424,19 @@ export class SkillRuntime {
       return response.content;
     }
 
-    console.warn(`[LLM Tool] Max tool calls (${maxToolCalls}) reached, stopping`);
-    return 'Tool use limit reached. Results may be incomplete.';
+    console.warn(`[LLM Tool] Max tool calls (${maxToolCalls}) reached, making final call without tools`);
+    messages.push({
+      role: 'user',
+      content: 'You have used all available tool calls. Please provide your final analysis now based on the data you have gathered so far. Do not request any more tools.',
+    });
+    const finalResponse = await callLLM(context.workspaceId, capability, {
+      systemPrompt,
+      messages,
+      maxTokens: 4096,
+      temperature: capability === 'reason' ? 0.7 : 0.1,
+    });
+    this.trackTokens(context, tier, finalResponse.usage.input + finalResponse.usage.output);
+    return finalResponse.content;
   }
 
   private trackTokens(context: SkillExecutionContext, tier: string, tokens: number): void {
