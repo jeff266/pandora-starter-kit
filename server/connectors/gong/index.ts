@@ -75,9 +75,9 @@ export class GongConnector implements PandoraConnector {
     );
   }
 
-  async initialSync(connection: Connection, workspaceId: string): Promise<SyncResult> {
+  async initialSync(connection: Connection, workspaceId: string, options?: { lookbackDays?: number }): Promise<SyncResult> {
     const client = new GongClient(connection.credentials.apiKey!);
-    return initialSync(client, workspaceId);
+    return initialSync(client, workspaceId, options);
   }
 
   async incrementalSync(connection: Connection, workspaceId: string, since: Date): Promise<SyncResult> {

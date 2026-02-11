@@ -102,23 +102,25 @@ async function updateConnectionSyncStatus(
 
 export async function initialSync(
   client: FirefliesClient,
-  workspaceId: string
+  workspaceId: string,
+  options?: { lookbackDays?: number }
 ): Promise<SyncResult> {
   const startTime = Date.now();
   const errors: string[] = [];
   let totalFetched = 0;
   let totalStored = 0;
 
-  console.log(`[Fireflies Sync] Starting initial sync for workspace ${workspaceId}`);
+  const days = options?.lookbackDays ?? 90;
+  console.log(`[Fireflies Sync] Starting initial sync for workspace ${workspaceId} (lookback: ${days} days)`);
 
   try {
-    const ninetyDaysAgo = new Date();
-    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+    const lookbackDate = new Date();
+    lookbackDate.setDate(lookbackDate.getDate() - days);
 
     let rawTranscripts: any[] = [];
 
     try {
-      rawTranscripts = await client.getAllTranscripts({ afterDate: ninetyDaysAgo });
+      rawTranscripts = await client.getAllTranscripts({ afterDate: lookbackDate });
     } catch (err: any) {
       errors.push(`Failed to fetch transcripts: ${err.message}`);
     }

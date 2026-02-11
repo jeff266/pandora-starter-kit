@@ -52,7 +52,7 @@ router.post('/:workspaceId/connectors/gong/connect', async (req: Request<Workspa
 router.post('/:workspaceId/connectors/gong/sync', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId;
-    const { mode = 'initial', since } = req.body as { mode?: string; since?: string };
+    const { mode = 'initial', since, lookbackDays } = req.body as { mode?: string; since?: string; lookbackDays?: number };
 
     const connResult = await query<{
       id: string;
@@ -98,7 +98,7 @@ router.post('/:workspaceId/connectors/gong/sync', async (req: Request<WorkspaceP
       }
       case 'initial':
       default:
-        result = await gongConnector.initialSync(connection, workspaceId);
+        result = await gongConnector.initialSync(connection, workspaceId, { lookbackDays: lookbackDays ? Number(lookbackDays) : undefined });
         break;
     }
 

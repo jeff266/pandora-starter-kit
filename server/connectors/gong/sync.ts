@@ -102,19 +102,21 @@ async function updateConnectionSyncStatus(
 
 export async function initialSync(
   client: GongClient,
-  workspaceId: string
+  workspaceId: string,
+  options?: { lookbackDays?: number }
 ): Promise<SyncResult> {
   const startTime = Date.now();
   const errors: string[] = [];
   let totalFetched = 0;
   let totalStored = 0;
 
-  console.log(`[Gong Sync] Starting initial sync for workspace ${workspaceId}`);
+  const days = options?.lookbackDays ?? 90;
+  console.log(`[Gong Sync] Starting initial sync for workspace ${workspaceId} (lookback: ${days} days)`);
 
   try {
-    const ninetyDaysAgo = new Date();
-    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
-    const fromDate = ninetyDaysAgo.toISOString();
+    const lookbackDate = new Date();
+    lookbackDate.setDate(lookbackDate.getDate() - days);
+    const fromDate = lookbackDate.toISOString();
 
     let rawCalls: any[] = [];
 
