@@ -43,6 +43,7 @@ Pandora is built on Node.js 20 with TypeScript 5+, using Express.js and PostgreS
 -   **LLM Integration:** Utilizes Anthropic Claude via Replit AI for reasoning/generation and Fireworks DeepSeek for extraction/classification, with token guardrails and prompt safety mechanisms.
 -   **Tier 2 Schema (ICP/Lead Scoring):** `account_signals` (company enrichment), `icp_profiles` (ICP model output with personas/weights), `lead_scores` (per-entity scores with grade/breakdown). `deal_contacts` extended with enrichment columns (apollo_data, linkedin_data, buying_role, enrichment_status, etc.). Custom Field Discovery skill (compute-only, on-demand) analyzes custom_fields JSONB across deals/accounts/contacts/leads for ICP relevance scoring.
 -   **Lead Sync:** 5,565 Salesforce leads synced with custom field discovery, FK resolution (converted_contact/account/deal), cohort analysis ready (4,484 converted, 1,081 unconverted).
+-   **HubSpot Association-Based Deal Contacts:** `populateDealContactsFromAssociations()` runs during initial sync; `populateDealContactsFromSourceData()` backfills from stored `source_data.associations`. Uses `source = 'hubspot_association'` and `role_source = 'crm_association'`. Unique constraint on `(workspace_id, deal_id, contact_id, source)` allows multiple sources per deal-contact pair. Route: `POST /:workspaceId/connectors/hubspot/populate-deal-contacts` for one-time backfill.
 
 ## External Dependencies
 

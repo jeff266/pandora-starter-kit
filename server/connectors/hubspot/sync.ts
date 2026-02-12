@@ -159,6 +159,99 @@ async function updateDealForeignKeys(
   }
 }
 
+async function populateDealContactsFromAssociations(
+  workspaceId: string,
+  deals: NormalizedDeal[],
+  contactMap: Map<string, string>
+): Promise<number> {
+  const client = await getClient();
+  let populated = 0;
+  try {
+    await client.query('BEGIN');
+    for (const deal of deals) {
+      if (deal.contact_source_ids.length === 0) continue;
+
+      const dealResult = await client.query(
+        `SELECT id FROM deals WHERE workspace_id = $1 AND source = 'hubspot' AND source_id = $2`,
+        [workspaceId, deal.source_id]
+      );
+      const dealUuid = dealResult.rows[0]?.id;
+      if (!dealUuid) continue;
+
+      for (let i = 0; i < deal.contact_source_ids.length; i++) {
+        const contactUuid = contactMap.get(deal.contact_source_ids[i]);
+        if (!contactUuid) continue;
+
+        await client.query(`
+          INSERT INTO deal_contacts (workspace_id, deal_id, contact_id, is_primary, source, role_source)
+          VALUES ($1, $2, $3, $4, 'hubspot_association', 'crm_association')
+          ON CONFLICT (workspace_id, deal_id, contact_id, source) DO UPDATE SET
+            is_primary = EXCLUDED.is_primary,
+            updated_at = NOW()
+        `, [workspaceId, dealUuid, contactUuid, i === 0]);
+        populated++;
+      }
+    }
+    await client.query('COMMIT');
+    console.log(`[HubSpot Sync] Populated ${populated} deal_contacts from associations`);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[HubSpot Sync] Failed to populate deal_contacts from associations:', err);
+  } finally {
+    client.release();
+  }
+  return populated;
+}
+
+export async function populateDealContactsFromSourceData(workspaceId: string): Promise<number> {
+  const result = await query<{ deal_id: string; contact_source_ids: string[] }>(`
+    SELECT d.id as deal_id, 
+      ARRAY(
+        SELECT elem->>'id' 
+        FROM jsonb_array_elements(d.source_data->'associations'->'contacts'->'results') elem
+        WHERE elem->>'id' IS NOT NULL
+      ) as contact_source_ids
+    FROM deals d
+    WHERE d.workspace_id = $1 
+      AND d.source = 'hubspot'
+      AND d.source_data->'associations'->'contacts'->'results' IS NOT NULL
+      AND jsonb_array_length(d.source_data->'associations'->'contacts'->'results') > 0
+  `, [workspaceId]);
+
+  const client = await getClient();
+  let populated = 0;
+  try {
+    await client.query('BEGIN');
+    for (const row of result.rows) {
+      for (let i = 0; i < row.contact_source_ids.length; i++) {
+        const contactResult = await client.query(
+          `SELECT id FROM contacts WHERE workspace_id = $1 AND source = 'hubspot' AND source_id = $2`,
+          [workspaceId, row.contact_source_ids[i]]
+        );
+        const contactUuid = contactResult.rows[0]?.id;
+        if (!contactUuid) continue;
+
+        await client.query(`
+          INSERT INTO deal_contacts (workspace_id, deal_id, contact_id, is_primary, source, role_source)
+          VALUES ($1, $2, $3, $4, 'hubspot_association', 'crm_association')
+          ON CONFLICT (workspace_id, deal_id, contact_id, source) DO UPDATE SET
+            is_primary = EXCLUDED.is_primary,
+            updated_at = NOW()
+        `, [workspaceId, row.deal_id, contactUuid, i === 0]);
+        populated++;
+      }
+    }
+    await client.query('COMMIT');
+    console.log(`[HubSpot Sync] Populated ${populated} deal_contacts from stored association data`);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[HubSpot Sync] Failed to populate deal_contacts from source data:', err);
+  } finally {
+    client.release();
+  }
+  return populated;
+}
+
 async function updateContactAccountIds(
   workspaceId: string,
   contacts: NormalizedContact[],
@@ -666,6 +759,8 @@ export async function incrementalSync(
       updateContactAccountIds(workspaceId, normalizedContacts, accountIdMap),
     ]);
 
+    await populateDealContactsFromAssociations(workspaceId, normalizedDeals, contactIdMap);
+
     totalStored = dealsStored + contactsStored + accountsStored;
     await updateConnectionSyncStatus(workspaceId, 'hubspot', totalStored, errors.length > 0 ? errors[0] : null);
 
@@ -735,6 +830,8 @@ export async function backfillAssociations(
     }
 
     console.log(`[HubSpot Sync] Backfilled associations for ${totalStored} deals`);
+
+    await populateDealContactsFromSourceData(workspaceId);
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Unknown error';
     errors.push(msg);

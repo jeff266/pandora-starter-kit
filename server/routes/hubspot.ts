@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import { query } from '../db.js';
 import { hubspotConnector } from '../connectors/hubspot/index.js';
+import { populateDealContactsFromSourceData } from '../connectors/hubspot/sync.js';
 import type { Connection, ConnectorCredentials } from '../connectors/_interface.js';
 import { decryptCredentials, isEncrypted } from '../lib/encryption.js';
 
@@ -180,6 +181,18 @@ router.post('/:workspaceId/connectors/hubspot/discover-schema', async (req: Requ
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.error('[HubSpot Route] Schema discovery error:', message);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.post('/:workspaceId/connectors/hubspot/populate-deal-contacts', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    const { workspaceId } = req.params;
+    const populated = await populateDealContactsFromSourceData(workspaceId);
+    res.json({ success: true, populated });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[HubSpot Route] Populate deal contacts error:', message);
     res.status(500).json({ error: message });
   }
 });
