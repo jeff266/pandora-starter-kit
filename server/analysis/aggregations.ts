@@ -570,7 +570,7 @@ export async function dealThreadingAnalysis(workspaceId: string): Promise<Thread
   }
 
   // Identify critical and warning deals
-  const criticalStages = ['evaluation', 'decision', 'proposal', 'negotiation'];
+  const criticalStages = ['evaluation', 'decision', 'negotiation'];
   const criticalDeals = singleThreaded
     .filter(d => {
       const stage = d.stage ? d.stage.toLowerCase() : '';

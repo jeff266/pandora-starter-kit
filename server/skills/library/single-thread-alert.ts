@@ -72,7 +72,7 @@ For each deal, determine:
 
 Context:
 - Average sales cycle: {{business_model.sales_cycle_days}} days
-- Critical stages: evaluation, decision, proposal, negotiation
+- Critical stages: evaluation, decision, negotiation
 
 CRITICAL DEALS (single-threaded in late stage OR above-average value):
 {{enriched_deals}}
