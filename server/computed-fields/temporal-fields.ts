@@ -1,6 +1,10 @@
 export const DEAL_TEMPORAL_FIELDS = `
   EXTRACT(EPOCH FROM (NOW() - last_activity_date)) / 86400 AS computed_days_since_activity,
-  days_in_stage AS computed_days_in_stage
+  CASE
+    WHEN stage_changed_at IS NOT NULL
+    THEN FLOOR(EXTRACT(EPOCH FROM (NOW() - stage_changed_at)) / 86400)::integer
+    ELSE days_in_stage
+  END AS computed_days_in_stage
 `;
 
 export const DEAL_WITH_TEMPORAL_SQL = `
