@@ -2775,8 +2775,8 @@ const generateContactRoleReportTool: ToolDefinition = {
     return safeExecute('generateContactRoleReport', async () => {
       const resolutionResult = (context.stepResults as any).resolution_result as ResolutionResult;
 
-      if (!resolutionResult) {
-        throw new Error('resolution_result not found in context. Run resolveContactRoles first.');
+      if (!resolutionResult || !resolutionResult.contactsResolved) {
+        throw new Error('resolution_result not found or incomplete in context. Run resolveContactRoles first.');
       }
 
       const report = generateResolutionReport(resolutionResult);

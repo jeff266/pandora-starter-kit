@@ -276,18 +276,37 @@ async function upsertDealContact(
     role_confidence?: number;
   }
 ): Promise<void> {
-  await query(`
-    INSERT INTO deal_contacts (workspace_id, deal_id, contact_id, buying_role, role_source, role_confidence, created_at, updated_at)
-    VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
-    ON CONFLICT (workspace_id, deal_id, contact_id)
-    DO UPDATE SET
-      buying_role = COALESCE(EXCLUDED.buying_role, deal_contacts.buying_role),
-      role_source = COALESCE(EXCLUDED.role_source, deal_contacts.role_source),
-      role_confidence = COALESCE(EXCLUDED.role_confidence, deal_contacts.role_confidence),
-      updated_at = NOW()
-    WHERE deal_contacts.role_confidence IS NULL
-      OR deal_contacts.role_confidence < EXCLUDED.role_confidence
-  `, [workspaceId, dealId, contactId, update.buying_role, update.role_source, update.role_confidence]);
+  const existingRecord = await query<{ id: string; source: string }>(`
+    SELECT id, source FROM deal_contacts
+    WHERE workspace_id = $1 AND deal_id = $2 AND contact_id = $3
+    LIMIT 1
+  `, [workspaceId, dealId, contactId]);
+
+  if (existingRecord.rows.length > 0) {
+    await query(`
+      UPDATE deal_contacts
+      SET buying_role = COALESCE($1, buying_role),
+          role_source = COALESCE($2, role_source),
+          role_confidence = COALESCE($3::numeric, role_confidence),
+          updated_at = NOW()
+      WHERE id = $4
+        AND (role_confidence IS NULL OR role_confidence < $3::numeric)
+    `, [update.buying_role, update.role_source, update.role_confidence, existingRecord.rows[0].id]);
+  } else {
+    const source = update.role_source || 'role_resolution';
+    await query(`
+      INSERT INTO deal_contacts (workspace_id, deal_id, contact_id, source, buying_role, role_source, role_confidence, created_at, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+      ON CONFLICT (workspace_id, deal_id, contact_id, source)
+      DO UPDATE SET
+        buying_role = COALESCE(EXCLUDED.buying_role, deal_contacts.buying_role),
+        role_source = COALESCE(EXCLUDED.role_source, deal_contacts.role_source),
+        role_confidence = COALESCE(EXCLUDED.role_confidence, deal_contacts.role_confidence),
+        updated_at = NOW()
+      WHERE deal_contacts.role_confidence IS NULL
+        OR deal_contacts.role_confidence < EXCLUDED.role_confidence
+    `, [workspaceId, dealId, contactId, source, update.buying_role, update.role_source, update.role_confidence]);
+  }
 }
 
 function inferRoleFromTitle(title: string | null): { role: string; confidence: number } | null {
@@ -355,7 +374,7 @@ async function resolveCrmDealFields(workspaceId: string, dealId?: string): Promi
     SELECT id, account_id, custom_fields
     FROM deals
     WHERE workspace_id = $1
-      AND status = 'open'
+      AND stage_normalized NOT IN ('closed_won', 'closed_lost')
       ${dealFilter}
   `, params);
 
@@ -415,8 +434,8 @@ async function resolveConversationParticipants(workspaceId: string, dealId?: str
       conv.deal_id,
       c.email,
       c.first_name || ' ' || c.last_name as name
-    FROM conversations conv,
-      jsonb_array_elements(conv.participants) AS p
+    FROM conversations conv
+    CROSS JOIN LATERAL jsonb_array_elements(conv.participants) AS p
     JOIN contacts c ON (
       c.workspace_id = conv.workspace_id
       AND (
@@ -592,12 +611,12 @@ async function resolveActivityBasedInference(workspaceId: string, dealId?: strin
       dc.deal_id,
       dc.contact_id,
       COUNT(a.id) as total_activities,
-      COUNT(a.id) FILTER (WHERE a.type = 'meeting') as meetings,
-      COUNT(a.id) FILTER (WHERE a.type = 'email') as emails,
-      COUNT(a.id) FILTER (WHERE a.type = 'call') as calls,
-      MIN(a.activity_date) as first_activity,
-      MAX(a.activity_date) as last_activity,
-      COUNT(DISTINCT DATE(a.activity_date)) as active_days
+      COUNT(a.id) FILTER (WHERE a.activity_type = 'meeting') as meetings,
+      COUNT(a.id) FILTER (WHERE a.activity_type = 'email') as emails,
+      COUNT(a.id) FILTER (WHERE a.activity_type = 'call') as calls,
+      MIN(a.timestamp) as first_activity,
+      MAX(a.timestamp) as last_activity,
+      COUNT(DISTINCT DATE(a.timestamp)) as active_days
     FROM deal_contacts dc
     LEFT JOIN activities a ON (
       a.workspace_id = dc.workspace_id
@@ -729,7 +748,7 @@ async function discoverContactsFromAccount(workspaceId: string, dealId?: string)
     SELECT d.id, d.account_id
     FROM deals d
     WHERE d.workspace_id = $1
-      AND d.status = 'open'
+      AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
       ${dealFilter}
       AND NOT EXISTS (
         SELECT 1 FROM deal_contacts dc
@@ -865,7 +884,7 @@ export async function resolveContactRoles(
       ROUND(AVG((SELECT COUNT(*) FROM deal_contacts dc WHERE dc.deal_id = d.id AND dc.workspace_id = d.workspace_id AND dc.buying_role IS NOT NULL AND dc.buying_role != 'unknown')), 2) as avg_roles_per_deal
     FROM deals d
     WHERE d.workspace_id = $1
-      AND d.status = 'open'
+      AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
       ${dealFilter}
   `, params);
 
