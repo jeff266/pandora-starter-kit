@@ -1,0 +1,103 @@
+Contact Role Resolution - Implementation Complete ✓                      
+                                                                           
+  I've built the complete multi-source contact role resolution engine with 
+  all five priority levels and discovery mechanisms.                       
+                                                                           
+  What Was Implemented                                                     
+                                                                           
+  Core Engine (server/skills/compute/contact-role-resolution.ts - ~900     
+  lines):                                                                  
+                                                                           
+  Priority 1: CRM Role Normalization (0.95 confidence)                     
+  - Normalizes 960 existing CRM roles to standard taxonomy                 
+  - Maps "Decision Maker" → "decision_maker", "Budget Holder" →            
+  "economic_buyer", etc.                                                   
+  - Updates deal_contacts with standardized values                         
+                                                                           
+  Priority 2: CRM Deal Fields (0.90 confidence)                            
+  - Scans deal.custom_fields for champion__c, economic_buyer__c patterns   
+  - Matches contact by email, Salesforce ID, or name                       
+  - Upserts deal_contact with resolved role                                
+                                                                           
+  Priority 2.5: Conversation Participants (0.65 confidence)                
+  - Finds contacts on calls (via conversations.participants JSONB)         
+  - Adds to deal_contacts if not already associated                        
+  - Infers initial role from title                                         
+                                                                           
+  Priority 3: Cross-Deal Pattern Match (0.70 confidence)                   
+  - If contact has role on Deal A at Account X                             
+  - And same contact on Deal B at same account                             
+  - Carry role over (only if no higher-confidence role exists)             
+                                                                           
+  Priority 4: Title-Based Inference (0.50 confidence)                      
+  - 15 regex patterns for title matching                                   
+  - CEO/CTO → decision_maker (0.55)                                        
+  - VP Sales → economic_buyer (0.50)                                       
+  - Director Engineering → technical_evaluator (0.50)                      
+  - Manager → champion/influencer (0.45)                                   
+                                                                           
+  Priority 5: Activity-Based Inference (0.40 confidence)                   
+  - Analyzes meeting patterns, email volume, engagement timeline           
+  - Most meetings + early engagement → champion (0.40)                     
+  - Late-stage appearance + few emails → decision_maker (0.35)             
+  - High email volume + low meetings → influencer (0.35)                   
+                                                                           
+  Contact Discovery:                                                       
+  - Activity-based (0.35): Contacts with 2+ activities on deals not in     
+  deal_contacts                                                            
+  - Account-based (0.25): Senior contacts at account for zero-contact deals
+                                                                           
+  Resolution Result includes:                                              
+  - Total deals processed, contacts resolved by source                     
+  - Role distribution (champion, economic_buyer, decision_maker, etc.)     
+  - Threading quality metrics (deals with champion, EB, fully threaded)    
+  - Gaps analysis (deals with no contacts, no roles, missing key roles)    
+  - New discoveries breakdown                                              
+                                                                           
+  Skill Definition (server/skills/library/contact-role-resolution.ts):     
+  - Two-step skill: resolveContactRoles → generateContactRoleReport        
+  - Triggers: post_sync, on_demand                                         
+  - Output: Markdown report                                                
+                                                                           
+  Test Prompt for Replit                                                   
+                                                                           
+  Test contact-role-resolution skill against Imubit workspace. Show me:    
+  1. Total contacts resolved by source (crm_contact_role, title_match,     
+  activity_discovery, etc.)                                                
+  2. Role distribution (how many champions, economic buyers, decision      
+  makers)                                                                  
+  3. Threading quality (% of deals with champion, economic buyer, fully    
+  threaded)                                                                
+  4. New discoveries (contacts found via activities/conversations)         
+  5. Gaps (deals with no contacts, no champion, no economic buyer)         
+  6. Before/after comparison: query deal_contacts to show role coverage    
+  improvement                                                              
+                                                                           
+  Expected Results on Imubit Workspace                                     
+                                                                           
+  Before resolution:                                                       
+  - 1,193 deal_contacts records                                            
+  - 960 have roles from CRM (80% coverage)                                 
+  - 233 have no role (20% gap)                                             
+                                                                           
+  After resolution:                                                        
+  - 1,400-1,500+ contacts (new discoveries from activities)                
+  - 90%+ role coverage (title-based inference fills most gaps)             
+  - Improved threading: more deals with champion + economic buyer          
+  - Detailed breakdown of which methods resolved which contacts            
+                                                                           
+  Next Step: Re-run Lead Scoring                                           
+                                                                           
+  After resolution completes, re-run lead scoring to see the impact:       
+                                                                           
+  Re-run lead scoring after contact role resolution and compare:           
+  1. Threading score improvements (has_champion, has_economic_buyer,       
+  role_diversity)                                                          
+  2. Grade distribution shift (C→B, D→C as threading improves)             
+  3. Show a few example deals with before/after score breakdowns           
+                                                                           
+  Expected impact: Deals with newly resolved roles should see +5-15 point  
+  boosts in threading category, pushing some C-grade deals into B          
+  territory.                                                               
+                                                                           
+  Ready to test!                       
