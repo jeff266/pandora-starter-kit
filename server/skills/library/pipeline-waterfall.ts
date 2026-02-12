@@ -190,18 +190,18 @@ Total open pipeline start: {{current_waterfall.summary.totalOpenStart}} deals
 Total open pipeline end: {{current_waterfall.summary.totalOpenEnd}} deals
 Net change: {{current_waterfall.summary.netPipelineChange}} deals
 
-New pipeline created: {{current_waterfall.summary.newPipelineCreated.count}} deals (${{current_waterfall.summary.newPipelineCreated.value}})
-Closed won: {{current_waterfall.summary.closedWon.count}} deals (${{current_waterfall.summary.closedWon.value}})
-Closed lost: {{current_waterfall.summary.closedLost.count}} deals (${{current_waterfall.summary.closedLost.value}})
+New pipeline created: {{current_waterfall.summary.newPipelineCreated.count}} deals (\${{current_waterfall.summary.newPipelineCreated.value}})
+Closed won: {{current_waterfall.summary.closedWon.count}} deals (\${{current_waterfall.summary.closedWon.value}})
+Closed lost: {{current_waterfall.summary.closedLost.count}} deals (\${{current_waterfall.summary.closedLost.value}})
 
 STAGE-BY-STAGE FLOW:
 {{#each current_waterfall.stages}}
 Stage: {{this.stage}}
   Start: {{this.startOfPeriod}} deals
-  Entered: {{this.entered}} deals (${{this.enteredValue}})
-  Advanced: {{this.advanced}} deals (${{this.advancedValue}})
-  Fell out: {{this.fellOut}} deals (${{this.fellOutValue}})
-  Won: {{this.won}} deals (${{this.wonValue}})
+  Entered: {{this.entered}} deals (\${{this.enteredValue}})
+  Advanced: {{this.advanced}} deals (\${{this.advancedValue}})
+  Fell out: {{this.fellOut}} deals (\${{this.fellOutValue}})
+  Won: {{this.won}} deals (\${{this.wonValue}})
   End: {{this.endOfPeriod}} deals
   Net change: {{this.netChange}} deals
 {{/each}}

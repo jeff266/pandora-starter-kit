@@ -90,7 +90,7 @@ Urgency:
 - developmental: longer-term skill gap, not urgent this quarter
 
 Team averages for reference:
-Average closed won: ${{scorecard.teamAverages.avgClosedWon}}
+Average closed won: \${{scorecard.teamAverages.avgClosedWon}}
 Average win rate: {{scorecard.teamAverages.avgWinRate}}
 Average coverage ratio: {{scorecard.teamAverages.avgCoverageRatio}}
 Average activities: {{scorecard.teamAverages.avgActivities}}
@@ -158,8 +158,8 @@ Average composite score: {{scorecard.teamAverages}}
 TOP PERFORMERS (by composite score):
 {{#each scorecard.top3}}
 {{this.rank}}. {{this.repName}} - Score: {{this.overallScore}}/100
-   Closed won: ${{this.closedWon}} ({{this.closedWonCount}} deals)
-   Open pipeline: ${{this.openPipeline}} ({{this.openDealCount}} deals)
+   Closed won: \${{this.closedWon}} ({{this.closedWonCount}} deals)
+   Open pipeline: \${{this.openPipeline}} ({{this.openDealCount}} deals)
    {{#if this.quota}}Quota attainment: {{this.quotaAttainment}}%{{/if}}
    {{#if this.coverageRatio}}Coverage: {{this.coverageRatio}}x{{/if}}
    {{#if this.totalActivities}}Activities: {{this.totalActivities}} ({{this.activitiesPerDeal}} per deal){{/if}}
