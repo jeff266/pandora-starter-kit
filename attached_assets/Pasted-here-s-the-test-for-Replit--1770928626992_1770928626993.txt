@@ -1,0 +1,117 @@
+here's the test for Replit:                                  
+                                                                           
+  Lead Scoring V2 Test - Replit                                            
+                                                                           
+  Test Goal: Verify that Lead Scoring V2 consumes ICP weights and produces 
+  ICP-aware scores                                                         
+                                                                           
+  Prerequisites                                                            
+                                                                           
+  Your Imubit workspace should already have:                               
+  - ICP profile generated (draft status is fine now)                       
+  - 371 closed deals analyzed                                              
+  - 18 personas discovered                                                 
+  - 10 buying committee combinations with lift data                        
+                                                                           
+  Test Command                                                             
+                                                                           
+  // In Replit console                                                     
+  const { scoreLeads } = await                                             
+  import('./server/skills/compute/lead-scoring.js');                       
+  const result = await scoreLeads('imubit_workspace_id');                  
+                                                                           
+  console.log('=== LEAD SCORING V2 RESULTS ===\n');                        
+                                                                           
+  // 1. Check scoring method                                               
+  const icpScored = result.scores.filter(s => s.scoringMethod ===          
+  'icp_point_based');                                                      
+  const defaultScored = result.scores.filter(s => s.scoringMethod ===      
+  'point_based');                                                          
+  console.log(`Scoring Method Distribution:`);                             
+  console.log(`  ICP-weighted: ${icpScored.length} deals`);                
+  console.log(`  Default: ${defaultScored.length} deals\n`);               
+                                                                           
+  // 2. Show top 5 ICP-scored deals                                        
+  console.log('Top 5 ICP-Weighted Scores:');                               
+  icpScored                                                                
+    .sort((a, b) => b.score - a.score)                                     
+    .slice(0, 5)                                                           
+    .forEach((s, i) => {                                                   
+      console.log(`${i + 1}. ${s.dealName} - ${s.score}pts (${s.grade})`); 
+      console.log(`   Breakdown:`, Object.keys(s.scoreBreakdown).filter(k  
+  => k.startsWith('icp_')));                                               
+    });                                                                    
+                                                                           
+  // 3. Check for ICP features in breakdown                                
+  const sampleDeal = icpScored[0];                                         
+  if (sampleDeal) {                                                        
+    console.log('\n=== Sample ICP Score Breakdown ===');                   
+    console.log(`Deal: ${sampleDeal.dealName}`);                           
+    Object.entries(sampleDeal.scoreBreakdown)                              
+      .filter(([key]) => key.startsWith('icp_'))                           
+      .forEach(([key, data]) => {                                          
+        console.log(`  ${key}: ${data.points}pts                           
+  (${JSON.stringify(data.value)})`);                                       
+      });                                                                  
+  }                                                                        
+                                                                           
+  // 4. Verify buying committee bonus                                      
+  const withCommittee = icpScored.filter(s =>                              
+    Object.keys(s.scoreBreakdown).some(k => k.startsWith('icp_committee_'))
+  );                                                                       
+  console.log(`\nDeals with buying committee bonus:                        
+  ${withCommittee.length}`);                                               
+  if (withCommittee.length > 0) {                                          
+    console.log(`Example: ${withCommittee[0].dealName}`);                  
+    const committeeKey =                                                   
+  Object.keys(withCommittee[0].scoreBreakdown).find(k =>                   
+  k.startsWith('icp_committee_'));                                         
+    if (committeeKey) {                                                    
+      console.log(`  ${committeeKey}:                                      
+  ${withCommittee[0].scoreBreakdown[committeeKey].points}pts`);            
+    }                                                                      
+  }                                                                        
+                                                                           
+  // 5. Grade distribution comparison                                      
+  console.log('\n=== Grade Distribution ===');                             
+  const gradeCount = icpScored.reduce((acc, s) => {                        
+    acc[s.grade] = (acc[s.grade] || 0) + 1;                                
+    return acc;                                                            
+  }, {});                                                                  
+  console.log(gradeCount);                                                 
+                                                                           
+  console.log('\n✅ Test complete!');                                      
+                                                                           
+  Expected Results                                                         
+                                                                           
+  1. All deals scored with ICP method:                                     
+    - scoringMethod: 'icp_point_based' for all deals                       
+    - No 'point_based' fallback (since ICP profile exists)                 
+  2. ICP features in score breakdown:                                      
+    - icp_company_size: Points for employee count in sweet spot range      
+    - icp_industry: Points for high-lift industries                        
+    - icp_committee_champion+decision_maker: 8pt bonus for winning         
+  committee                                                                
+    - icp_lead_source: Points based on full-funnel conversion rate         
+    - icp_persona_*: Points for high-lift personas (e.g., VP Engineering)  
+  3. Higher scores for ICP-fit deals:                                      
+    - Deals with Champion + Decision Maker should score higher             
+    - Deals in 51-200 employee range should get company_size bonus         
+    - Deals with high-lift personas should get persona_fit points          
+  4. Buying committee bonuses working:                                     
+    - At least some deals should have icp_committee_* keys in breakdown    
+    - Should see 8pt bonuses for deals with lift >= 1.3 committee combos   
+                                                                           
+  Troubleshooting                                                          
+                                                                           
+  If you see scoringMethod: 'point_based' instead of 'icp_point_based':    
+  - Check that ICP profile exists: SELECT id, status, generated_at FROM    
+  icp_profiles WHERE workspace_id = 'imubit' ORDER BY generated_at DESC    
+  LIMIT 1                                                                  
+  - Status should be 'draft' or 'active' (both work now)                   
+                                                                           
+  If no icp_committee_* bonuses appear:                                    
+  - Verify buying_committees data: SELECT id,                              
+  jsonb_array_length(buying_committees) FROM icp_profiles WHERE            
+  workspace_id = 'imubit'                                                  
+  - Should return 10 entries   
