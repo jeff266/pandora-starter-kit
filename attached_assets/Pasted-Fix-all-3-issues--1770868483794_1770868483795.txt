@@ -1,0 +1,60 @@
+Fix all 3 issues:                                                        
+                                                                           
+  1. Security Fix (Critical)                                               
+                                                                           
+  Remove lines 178-188 - delete the unreachable code that leaks tokens.    
+  This is a security vulnerability even if unreachable.                    
+                                                                           
+  2. Orchestrator Status Check (Correctness)                               
+                                                                           
+  Change the orchestrator query from:                                      
+  // Bad: syncs everything that isn't disconnected                         
+  WHERE status != 'disconnected'                                           
+                                                                           
+  To:                                                                      
+  // Good: only syncs active connections                                   
+  WHERE status IN ('connected', 'healthy')                                 
+                                                                           
+  This is more explicit and matches the pattern used elsewhere in the      
+  codebase.                                                                
+                                                                           
+  3. OAuth CSRF Protection (Robustness)                                    
+                                                                           
+  Replace PKCE in-memory map with HMAC-signed state as specified in the    
+  prompt.                                                                  
+                                                                           
+  Why: The in-memory pendingFlows map won't survive server restarts (Replit
+   restarts frequently). The HMAC approach is stateless and more           
+  production-ready.                                                        
+                                                                           
+  Implementation: The prompt already has the exact code (lines 23-27 in    
+  authorize, lines 44-54 in callback). Use:                                
+  // In /authorize - sign the state                                        
+  const state = JSON.stringify({ workspaceId });                           
+  const signature = crypto                                                 
+    .createHmac('sha256', process.env.SESSION_SECRET ||                    
+  'change-me-in-production')                                               
+    .update(state)                                                         
+    .digest('hex');                                                        
+  const signedState =                                                      
+  `${Buffer.from(state).toString('base64')}.${signature}`;                 
+                                                                           
+  // In /callback - verify the state                                       
+  const [encodedState, signature] = state.split('.');                      
+  const expectedSignature = crypto                                         
+    .createHmac('sha256', process.env.SESSION_SECRET ||                    
+  'change-me-in-production')                                               
+    .update(Buffer.from(encodedState, 'base64').toString())                
+    .digest('hex');                                                        
+                                                                           
+  if (signature !== expectedSignature) {                                   
+    return res.status(400).json({ error: 'Invalid state signature' });     
+  }                                                                        
+                                                                           
+  ---                                                                      
+  After these 3 fixes, Replit should:                                      
+  1. Verify compilation - no TypeScript errors                             
+  2. Test the OAuth flow - ensure state verification works                 
+  3. Report back that all fixes are complete                               
+                                                                           
+  Then we'll move to the test plan! 🚀    

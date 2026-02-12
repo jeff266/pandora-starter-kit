@@ -11,16 +11,8 @@ const LOGIN_URL = "https://login.salesforce.com";
 const AUTHORIZE_URL = `${LOGIN_URL}/services/oauth2/authorize`;
 const TOKEN_URL = `${LOGIN_URL}/services/oauth2/token`;
 
-const pendingFlows = new Map<string, { codeVerifier: string; workspaceId: string; createdAt: number }>();
-
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, val] of pendingFlows) {
-    if (now - val.createdAt > 10 * 60 * 1000) {
-      pendingFlows.delete(key);
-    }
-  }
-}, 60_000);
+const STATE_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
+const STATE_MAX_AGE_MS = 10 * 60 * 1000;
 
 function base64url(buffer: Buffer): string {
   return buffer.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -33,6 +25,42 @@ function generateCodeVerifier(): string {
 function generateCodeChallenge(verifier: string): string {
   const hash = crypto.createHash("sha256").update(verifier).digest();
   return base64url(hash);
+}
+
+function signState(payload: object): string {
+  const json = JSON.stringify(payload);
+  const encoded = Buffer.from(json).toString("base64");
+  const signature = crypto
+    .createHmac("sha256", STATE_SECRET)
+    .update(json)
+    .digest("hex");
+  return `${encoded}.${signature}`;
+}
+
+function verifyState(signedState: string): { valid: boolean; payload?: any } {
+  const dotIndex = signedState.lastIndexOf(".");
+  if (dotIndex === -1) return { valid: false };
+
+  const encoded = signedState.slice(0, dotIndex);
+  const signature = signedState.slice(dotIndex + 1);
+
+  const json = Buffer.from(encoded, "base64").toString();
+  const expectedSignature = crypto
+    .createHmac("sha256", STATE_SECRET)
+    .update(json)
+    .digest("hex");
+
+  if (signature !== expectedSignature) return { valid: false };
+
+  try {
+    const parsed = JSON.parse(json);
+    if (parsed.ts && Date.now() - parsed.ts > STATE_MAX_AGE_MS) {
+      return { valid: false };
+    }
+    return { valid: true, payload: parsed };
+  } catch {
+    return { valid: false };
+  }
 }
 
 router.get("/authorize", (req: Request, res: Response) => {
@@ -51,33 +79,37 @@ router.get("/authorize", (req: Request, res: Response) => {
     return;
   }
 
-  const state = crypto.randomBytes(16).toString("hex");
   const codeVerifier = generateCodeVerifier();
   const codeChallenge = generateCodeChallenge(codeVerifier);
-
-  pendingFlows.set(state, { codeVerifier, workspaceId, createdAt: Date.now() });
+  const signedState = signState({ workspaceId, cv: codeVerifier, ts: Date.now() });
 
   const params = new URLSearchParams({
     response_type: "code",
     client_id: clientId,
     redirect_uri: callbackUrl,
     scope: "api refresh_token offline_access id",
-    state,
+    state: signedState,
+    prompt: "login consent",
     code_challenge: codeChallenge,
     code_challenge_method: "S256",
   });
 
   const redirectUrl = `${AUTHORIZE_URL}?${params.toString()}`;
-  logger.info("Redirecting to Salesforce OAuth", { state });
+  logger.info("Redirecting to Salesforce OAuth", { workspaceId });
   res.redirect(redirectUrl);
 });
 
 router.get("/callback", async (req: Request, res: Response) => {
-  const { code, state, error, error_description } = req.query;
+  const { code, state, error: oauthError, error_description } = req.query;
 
-  if (error) {
-    logger.error("OAuth error from Salesforce", { error, error_description });
-    res.status(400).json({ error, error_description });
+  if (oauthError) {
+    if (oauthError === "access_denied") {
+      logger.warn("User denied Salesforce OAuth consent");
+      res.redirect("/?error=salesforce_denied");
+      return;
+    }
+    logger.error("OAuth error from Salesforce", { error: oauthError, error_description });
+    res.status(400).json({ error: oauthError, error_description });
     return;
   }
 
@@ -86,13 +118,14 @@ router.get("/callback", async (req: Request, res: Response) => {
     return;
   }
 
-  const flow = pendingFlows.get(state);
-  if (!flow) {
-    res.status(400).json({ error: "Invalid or expired state parameter" });
+  const { valid, payload } = verifyState(state);
+  if (!valid || !payload?.workspaceId) {
+    logger.error("Invalid or tampered state parameter");
+    res.status(400).json({ error: "Invalid state signature" });
     return;
   }
 
-  pendingFlows.delete(state);
+  const { workspaceId, cv: codeVerifier } = payload;
 
   const clientId = process.env.SALESFORCE_CLIENT_ID;
   const clientSecret = process.env.SALESFORCE_CLIENT_SECRET;
@@ -104,14 +137,17 @@ router.get("/callback", async (req: Request, res: Response) => {
   }
 
   try {
-    const body = new URLSearchParams({
+    const tokenParams: Record<string, string> = {
       grant_type: "authorization_code",
       code,
       client_id: clientId,
       client_secret: clientSecret,
       redirect_uri: callbackUrl,
-      code_verifier: flow.codeVerifier,
-    });
+    };
+    if (codeVerifier) {
+      tokenParams.code_verifier = codeVerifier;
+    }
+    const body = new URLSearchParams(tokenParams);
 
     const tokenResponse = await fetch(TOKEN_URL, {
       method: "POST",
@@ -123,7 +159,7 @@ router.get("/callback", async (req: Request, res: Response) => {
 
     if (!tokenResponse.ok) {
       logger.error("Token exchange failed", { status: tokenResponse.status, tokenData });
-      res.status(tokenResponse.status).json({ error: "Token exchange failed", details: tokenData });
+      res.redirect("/?error=salesforce_token_failed");
       return;
     }
 
@@ -133,54 +169,37 @@ router.get("/callback", async (req: Request, res: Response) => {
       scope: tokenData.scope,
     });
 
-    const workspaceId = flow.workspaceId;
+    const workspaceResult = await query(
+      `SELECT id FROM workspaces WHERE id = $1`,
+      [workspaceId]
+    );
 
-    try {
-      // Verify workspace exists
-      const workspaceResult = await query(
-        `SELECT id FROM workspaces WHERE id = $1`,
-        [workspaceId]
-      );
-
-      if (workspaceResult.rows.length === 0) {
-        logger.error("Workspace not found", { workspaceId });
-        res.status(404).json({ error: "Workspace not found" });
-        return;
-      }
-
-      // Encrypt credentials before storing
-      const encrypted = encryptCredentials({
-        accessToken: tokenData.access_token,
-        refreshToken: tokenData.refresh_token,
-        instanceUrl: tokenData.instance_url,
-      });
-
-      await query(
-        `INSERT INTO connections (workspace_id, connector_name, credentials, status, created_at, updated_at)
-         VALUES ($1, 'salesforce', $2, 'connected', NOW(), NOW())
-         ON CONFLICT (workspace_id, connector_name) DO UPDATE SET
-           credentials = $2, status = 'connected', updated_at = NOW()`,
-        [workspaceId, JSON.stringify(encrypted)]
-      );
-
-      logger.info("Stored Salesforce connection", { workspaceId });
-
-      // Redirect to workspace connectors page
-      res.redirect(`/workspaces/${workspaceId}/connectors`);
-      return;
-    } catch (storeErr: any) {
-      logger.error("Failed to store connection", {
-        message: storeErr?.message,
-        code: storeErr?.code,
-        detail: storeErr?.detail,
-        stack: storeErr?.stack?.split('\n').slice(0, 3).join(' | '),
-      });
-      res.status(500).json({ error: "Failed to store connection" });
+    if (workspaceResult.rows.length === 0) {
+      logger.error("Workspace not found", { workspaceId });
+      res.status(404).json({ error: "Workspace not found" });
       return;
     }
+
+    // Encrypt credentials before storing
+    const encrypted = encryptCredentials({
+      accessToken: tokenData.access_token,
+      refreshToken: tokenData.refresh_token,
+      instanceUrl: tokenData.instance_url,
+    });
+
+    await query(
+      `INSERT INTO connections (workspace_id, connector_name, credentials, status, created_at, updated_at)
+       VALUES ($1, 'salesforce', $2, 'connected', NOW(), NOW())
+       ON CONFLICT (workspace_id, connector_name) DO UPDATE SET
+         credentials = $2, status = 'connected', updated_at = NOW()`,
+      [workspaceId, JSON.stringify(encrypted)]
+    );
+
+    logger.info("Stored Salesforce connection", { workspaceId });
+    res.redirect(`/workspaces/${workspaceId}/connectors`);
   } catch (err) {
     logger.error("Token exchange error", { error: err });
-    res.status(500).json({ error: "Token exchange failed", message: (err as Error).message });
+    res.redirect("/?error=salesforce_callback_failed");
   }
 });
 

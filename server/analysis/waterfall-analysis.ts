@@ -42,19 +42,21 @@ export interface WaterfallResult {
  * Get ordered list of pipeline stages
  */
 async function getStageOrdering(workspaceId: string): Promise<string[]> {
-  // Try to get from connector config metadata (HubSpot stage ordering)
-  const configResult = await query<{ metadata: any }>(
-    `SELECT metadata FROM connector_configs
-     WHERE workspace_id = $1 AND connector_name = 'hubspot'
-     LIMIT 1`,
-    [workspaceId]
-  );
+  try {
+    const configResult = await query<{ metadata: any }>(
+      `SELECT metadata FROM connections
+       WHERE workspace_id = $1 AND connector_name = 'hubspot'
+       LIMIT 1`,
+      [workspaceId]
+    );
 
-  if (configResult.rows.length > 0 && configResult.rows[0].metadata?.stages) {
-    const stages = configResult.rows[0].metadata.stages as Array<{ name: string; display_order: number }>;
-    return stages
-      .sort((a, b) => a.display_order - b.display_order)
-      .map(s => s.name);
+    if (configResult.rows.length > 0 && configResult.rows[0].metadata?.stages) {
+      const stages = configResult.rows[0].metadata.stages as Array<{ name: string; display_order: number }>;
+      return stages
+        .sort((a, b) => a.display_order - b.display_order)
+        .map(s => s.name);
+    }
+  } catch {
   }
 
   // Fallback: infer order from deal progression patterns
@@ -144,7 +146,7 @@ async function getDealsAtTimestamp(
     FROM deals d
     LEFT JOIN latest_transition lt ON lt.deal_id = d.id
     WHERE d.workspace_id = $1
-      AND d.created_date < $2
+      AND d.created_at < $2
       AND (d.close_date IS NULL OR d.close_date >= $2)
       AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')`,
     [workspaceId, timestamp]

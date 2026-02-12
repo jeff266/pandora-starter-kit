@@ -42,12 +42,13 @@ export async function syncWorkspace(
     }
 
     const conn = await getCredentials(workspaceId, sourceType);
-    if (!conn || conn.status === 'disconnected') {
+    const activeStatuses = ['connected', 'healthy', 'synced'];
+    if (!conn || !activeStatuses.includes(conn.status)) {
       results.push({
         connector: sourceType,
         category: adapter.category,
         status: 'skipped',
-        message: conn ? 'Connection is disconnected' : 'No connection configured',
+        message: conn ? `Connection status '${conn.status}' is not active` : 'No connection configured',
       });
       continue;
     }

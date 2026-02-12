@@ -1,0 +1,51 @@
+Yes, I committed the Salesforce Prompt 1 files earlier (commit 7cf0608): 
+  - SALESFORCE_PROMPT_1_REPLIT.md                                          
+  - SALESFORCE_PROMPT_1_TEST_PLAN.md                                       
+                                                                           
+  You already pulled them with git pull origin main.                       
+                                                                           
+  Since then, there's been no new code to commit - all the work has been:  
+  1. Replit implementing the OAuth + sync routes (on Replit, not pushed to 
+  your local)                                                              
+  2. You testing on Replit (verification, not code changes)                
+                                                                           
+  ---                                                                      
+  What's Where:                                                            
+                                                                           
+  On GitHub (your local after pull):                                       
+  - ✅ Salesforce implementation prompt                                    
+  - ✅ Salesforce test plan                                                
+  - ✅ Pipeline Waterfall skill                                            
+  - ✅ Rep Scorecard skill                                                 
+  - ✅ Stage History Part 2 (API routes, queries, backfill script)         
+                                                                           
+  On Replit (not in GitHub yet):                                           
+  - ✅ Salesforce OAuth routes (server/routes/salesforce-auth.ts)          
+  - ✅ Salesforce sync routes (server/routes/salesforce-sync.ts)           
+  - ✅ Orchestrator updates (status check fix)                             
+  - ✅ Working Salesforce connection with Imubit data                      
+                                                                           
+  ---                                                                      
+  Should Replit commit and push?                                           
+                                                                           
+  Yes! Once you finish the multi-tenant test (Option A), have Replit:      
+                                                                           
+  1. Commit the Salesforce integration:                                    
+  git add server/routes/salesforce-auth.ts server/routes/salesforce-sync.ts
+   server/sync/orchestrator.ts                                             
+  git commit -m "Add Salesforce OAuth and sync integration (Prompt 1)      
+                                                                           
+  - OAuth flow with HMAC-signed state and replay protection                
+  - Connector API routes: test, sync, discover-schema, health, disconnect  
+  - Orchestrator integration with explicit status allowlist                
+  - Initial and incremental sync working                                   
+  - Tested with Imubit production org (11,190 records in 19s)              
+                                                                           
+  Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"               
+  git push origin main                                                     
+                                                                           
+  2. Then you can pull those changes locally to have the full Salesforce   
+  implementation.                                                          
+                                                                           
+  ---                                                                      
+  Want to finish the multi-tenant test first, then commit? Or commit now?
