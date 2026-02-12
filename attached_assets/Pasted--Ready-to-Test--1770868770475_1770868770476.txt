@@ -1,0 +1,55 @@
+🧪 Ready to Test!                                                        
+                                                                           
+  Open SALESFORCE_PROMPT_1_TEST_PLAN.md and start testing:                 
+                                                                           
+  Test 1: OAuth Authorization Flow                                         
+                                                                           
+  1. Get your Replit URL:                                                  
+  https://<your-app>.replit.app                                            
+  2. Get a test workspace ID:                                              
+  SELECT id, name FROM workspaces LIMIT 1;                                 
+  3. Trigger OAuth:                                                        
+  https://<your-app>.replit.app/api/auth/salesforce/authorize?workspaceId=<
+  workspace-id>                                                            
+  4. Expected:                                                             
+    - Redirects to login.salesforce.com (NOT test.salesforce.com)          
+    - URL has all OAuth params (client_id, redirect_uri, scope, state)     
+    - State is base64-encoded with HMAC signature                          
+  5. Log in to your first Salesforce production org                        
+  6. After granting permissions:                                           
+    - Redirects back to your app                                           
+    - Should see ?workspace=<id>&connected=salesforce in URL               
+  7. Verify credentials stored:                                            
+  SELECT                                                                   
+    workspace_id,                                                          
+    connector_name,                                                        
+    status,                                                                
+    credentials->>'org_id' as org_id,                                      
+    credentials->>'instance_url' as instance_url,                          
+    credentials->>'connected_by' as connected_by                           
+  FROM connector_configs                                                   
+  WHERE connector_name = 'salesforce';                                     
+                                                                           
+  Expected result:                                                         
+  - status = 'connected'                                                   
+  - org_id is a 15-char Salesforce ID                                      
+  - instance_url is an HTTPS URL                                           
+  - connected_by is your email                                             
+                                                                           
+  ---                                                                      
+  If Test 1 passes, continue to Test 5: Connection Test Endpoint to verify 
+  the connection works:                                                    
+                                                                           
+  curl -X POST https://<your-app>.replit.app/api/workspaces/<workspace-id>/
+  connectors/salesforce/test                                               
+                                                                           
+  Expected:                                                                
+  {                                                                        
+    "success": true,                                                       
+    "orgName": "Your Org Name",                                            
+    "orgId": "00D...",                                                     
+    "userName": "user@example.com",                                        
+    "instanceUrl": "https://naXX.salesforce.com"                           
+  }                                                                        
+                                                                           
+  Then move to Test 7: Initial Sync to populate data! 
