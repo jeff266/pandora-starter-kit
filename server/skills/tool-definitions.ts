@@ -2697,7 +2697,14 @@ const generateCustomFieldReportTool: ToolDefinition = {
 
       console.log(`[Custom Field Discovery] Generated report (${report.length} chars)`);
 
-      return report;
+      // Return both report and structured data for downstream consumption (e.g., lead scoring)
+      return {
+        report,
+        topFields: discoveryResult.topFields,
+        discoveredFields: discoveryResult.discoveredFields,
+        entityBreakdown: discoveryResult.entityBreakdown,
+        metadata: discoveryResult.metadata,
+      };
     }, params);
   },
 };
