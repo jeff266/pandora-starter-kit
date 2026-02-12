@@ -1,0 +1,249 @@
+Frontera Health is already halfway there — HubSpot synced (6,062 records), Gong linked (20/22 conversations), cross-entity linker working. What's missing is running the full skill stack against it and timing the experience.
+
+Here's the Replit prompt to run the complete onboarding sequence:
+
+```
+ONBOARDING VALIDATION — FRONTERA HEALTH
+
+Frontera Health has HubSpot (385 deals, 3,988 contacts, 1,689 
+accounts) and Gong (22 conversations, 20 linked) connected. 
+Run the full post-setup skill sequence and time every step. 
+This is the "new customer experience" validation.
+
+The goal: measure how long it takes from "data synced" to 
+"first actionable insights in Slack." Every step gets timed. 
+Every failure gets logged.
+
+---
+
+STEP 1: VERIFY DATA FOUNDATION
+
+Run these checks and log results:
+
+a. Confirm sync is current:
+   SELECT connector_type, status, last_sync_at, 
+     (metadata->>'record_count')::int as records
+   FROM connector_configs 
+   WHERE workspace_id = '<frontera_workspace_id>';
+
+b. Check entity counts:
+   SELECT 'deals' as entity, COUNT(*) as total,
+     COUNT(*) FILTER (WHERE stage_normalized NOT IN ('closed_won', 'closed_lost')) as open,
+     COUNT(*) FILTER (WHERE stage_normalized = 'closed_won') as won,
+     COUNT(*) FILTER (WHERE stage_normalized = 'closed_lost') as lost
+   FROM deals WHERE workspace_id = '<frontera_id>'
+   UNION ALL
+   SELECT 'contacts', COUNT(*), NULL, NULL, NULL
+   FROM contacts WHERE workspace_id = '<frontera_id>'
+   UNION ALL
+   SELECT 'accounts', COUNT(*), NULL, NULL, NULL
+   FROM accounts WHERE workspace_id = '<frontera_id>'
+   UNION ALL
+   SELECT 'activities', COUNT(*), NULL, NULL, NULL
+   FROM activities WHERE workspace_id = '<frontera_id>'
+   UNION ALL
+   SELECT 'conversations', COUNT(*),
+     COUNT(*) FILTER (WHERE account_id IS NOT NULL), 
+     COUNT(*) FILTER (WHERE deal_id IS NOT NULL), NULL
+   FROM conversations WHERE workspace_id = '<frontera_id>';
+
+c. Check computed fields ran:
+   SELECT COUNT(*) FILTER (WHERE days_in_stage IS NOT NULL) as has_days_in_stage,
+     COUNT(*) FILTER (WHERE pipeline_velocity IS NOT NULL) as has_velocity,
+     COUNT(*) FILTER (WHERE engagement_score IS NOT NULL) as has_engagement
+   FROM deals WHERE workspace_id = '<frontera_id>';
+
+   If computed fields are NULL, trigger them:
+   POST /api/workspaces/<frontera_id>/computed-fields/refresh
+
+d. Check deal_contacts:
+   SELECT COUNT(*) as contact_roles,
+     COUNT(DISTINCT buying_role) as unique_roles
+   FROM deal_contacts WHERE workspace_id = '<frontera_id>';
+
+   If zero, that's expected for HubSpot (no OpportunityContactRole 
+   equivalent unless associations were synced). Log this — it affects 
+   Single-Thread Alert and Lead Scoring threading scores.
+
+e. Check custom_fields population:
+   SELECT COUNT(*) FILTER (
+     WHERE custom_fields IS NOT NULL 
+       AND custom_fields != '{}' 
+       AND custom_fields::text != 'null'
+   ) as deals_with_custom_fields
+   FROM deals WHERE workspace_id = '<frontera_id>';
+
+   Also check what keys exist:
+   SELECT DISTINCT jsonb_object_keys(custom_fields) as key
+   FROM deals 
+   WHERE workspace_id = '<frontera_id>' 
+     AND custom_fields IS NOT NULL AND custom_fields != '{}'
+   LIMIT 30;
+
+Log ALL results. This is the "data readiness checklist."
+
+---
+
+STEP 2: RUN CUSTOM FIELD DISCOVERY
+
+Time this step.
+
+POST /api/workspaces/<frontera_id>/skills/custom-field-discovery/run
+
+Log:
+- How many fields scanned per entity type
+- How many passed filter
+- Top 5 fields by score with their stats
+- Whether lead data exists (Frontera is HubSpot — leads are 
+  contacts with lifecycle stages, not a separate object)
+- Total execution time
+
+If custom_fields is empty (HubSpot might handle this differently 
+than Salesforce), log that and note: "Custom field discovery 
+found no fields. Check if HubSpot transform populates 
+custom_fields JSONB."
+
+---
+
+STEP 3: RUN ALL 9 TIER 1 SKILLS
+
+Run each skill sequentially. Time each one. Log status, duration, 
+and a one-line summary of the key finding.
+
+const skills = [
+  'pipeline-hygiene',
+  'single-thread-alert',
+  'data-quality-audit',
+  'pipeline-coverage',
+  'pipeline-waterfall',
+  'rep-scorecard',
+  'deal-risk-review',
+  'weekly-recap',
+  'forecast-rollup'
+];
+
+for (const skillId of skills) {
+  const start = Date.now();
+  try {
+    const result = await POST /api/workspaces/<frontera_id>/skills/${skillId}/run
+    log({
+      skill: skillId,
+      status: 'PASS',
+      duration: Date.now() - start,
+      summary: result.output_preview || 'completed',
+      tokens: result.token_usage
+    });
+  } catch (err) {
+    log({
+      skill: skillId,
+      status: 'FAIL',
+      duration: Date.now() - start,
+      error: err.message
+    });
+  }
+}
+
+For each skill, note:
+- Did it produce real Frontera deal names and amounts?
+- Did it handle HubSpot data patterns (different stage names, 
+  different custom fields, different activity types)?
+- Did conversation data enhance any skill output? (Single-Thread 
+  Alert and Deal Risk Review should reference Gong calls)
+- Any errors, empty sections, or "no data" messages?
+
+CRITICAL: If any skill fails or produces empty/generic output, 
+log the full error. Don't skip it — this is the validation.
+
+---
+
+STEP 4: RUN ICP DISCOVERY
+
+Time this step.
+
+POST /api/workspaces/<frontera_id>/skills/icp-discovery/run
+
+Log:
+- Number of closed deals analyzed (won + lost)
+- Persona patterns found
+- Company sweet spot
+- Custom field discoveries
+- Full execution time
+- Did conversation intelligence add anything? (Frontera has Gong 
+  linked to 12 deals — that's a small sample but might surface 
+  early patterns)
+
+If Frontera has fewer than 30 closed deals, ICP Discovery may 
+produce limited results. That's fine — log the data readiness 
+assessment it outputs.
+
+---
+
+STEP 5: RUN LEAD SCORING
+
+Time this step.
+
+POST /api/workspaces/<frontera_id>/skills/lead-scoring/run
+
+Log:
+- Total entities scored (deals + contacts)
+- Grade distribution
+- Scoring method used (point_based or icp_point_based — depends 
+  on whether ICP Discovery produced a profile)
+- Top 3 deals with scores
+- Custom field contribution (did discovery fields add points?)
+- Conversation features contribution (did Gong calls add points?)
+- Full execution time
+
+---
+
+STEP 6: GENERATE ONBOARDING REPORT
+
+After all steps complete, compile a summary:
+
+# Onboarding Report — Frontera Health
+
+## Data Foundation
+- CRM: HubSpot (connected <date>)
+- Conversations: Gong (22 calls, 20 linked)
+- Entities: X deals, Y contacts, Z accounts
+- Activities: N
+- Contact roles: N (or "not available — HubSpot limitation")
+- Custom fields: N fields discovered
+
+## Skill Validation Results
+| Skill | Status | Duration | Key Finding |
+|-------|--------|----------|-------------|
+| ... | ... | ... | ... |
+
+## Total Time
+- Data verification: Xs
+- Custom field discovery: Xs  
+- 9 Tier 1 skills: Xs total (avg Xs per skill)
+- ICP Discovery: Xs
+- Lead Scoring: Xs
+- TOTAL: Xs from data-ready to full intelligence
+
+## Issues Found
+- [ ] list any failures, empty outputs, or data gaps
+
+## Comparison to Imubit
+- Imubit: 621 deals, Salesforce, no conversations
+- Frontera: 385 deals, HubSpot, 22 Gong conversations
+- Key differences in output quality: ...
+
+Save this report to skill_runs or output it to the console.
+
+---
+
+DO NOT:
+- Fix any bugs during this run — just log them
+- Skip any skill even if you think it will fail
+- Modify Frontera's data
+- Run syncs (data should already be current)
+- Post to Slack (just run the skills and capture output)
+
+This is a read-only validation pass. Every issue found becomes 
+a fix list for the next session.
+```
+
+The goal is a single number: **"X minutes from data-ready to full intelligence."** That's what you sell. If it's under 5 minutes for 385 deals, that's a compelling demo. If skills fail on HubSpot data patterns that work fine on Salesforce, you find out now instead of in a customer demo.
