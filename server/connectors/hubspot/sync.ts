@@ -12,6 +12,7 @@ import {
 } from './transform.js';
 import type { SyncResult } from '../_interface.js';
 import { transformWithErrorCapture } from '../../utils/sync-helpers.js';
+import { detectStageChanges, recordStageChanges, updateDealStageCache } from './stage-tracker.js';
 
 async function buildStageMaps(client: HubSpotClient): Promise<DealTransformOptions> {
   const stageMap = new Map<string, string>();
@@ -447,6 +448,21 @@ export async function initialSync(
       return 0;
     });
 
+    // Detect stage changes BEFORE upserting deals (must capture previous stage)
+    const stageChanges = await detectStageChanges(
+      workspaceId,
+      normalizedDeals.map(d => ({
+        sourceId: d.source_id,
+        stage: d.stage,
+        stage_normalized: d.stage_normalized,
+      }))
+    );
+
+    if (stageChanges.length > 0) {
+      const recorded = await recordStageChanges(stageChanges, 'sync_detection');
+      console.log(`[Stage Tracker] Recorded ${recorded} stage changes for workspace ${workspaceId}`);
+    }
+
     const [dealsStored, contactsStored] = await Promise.all([
       upsertDeals(normalizedDeals).catch(err => {
         console.error(`[HubSpot Sync] Failed to store deals:`, err.message);
@@ -459,6 +475,11 @@ export async function initialSync(
         return 0;
       }),
     ]);
+
+    // Update cached stage columns AFTER upsert
+    if (stageChanges.length > 0) {
+      await updateDealStageCache(stageChanges);
+    }
 
     // Resolve account_source_id → account_id UUIDs and update FK columns
     const allAccountSourceIds = new Set<string>();
