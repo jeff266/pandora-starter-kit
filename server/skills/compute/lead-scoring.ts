@@ -108,7 +108,7 @@ interface LeadScore {
   totalScore: number;
   scoreBreakdown: Record<string, ScoreComponent>;
   scoreGrade: 'A' | 'B' | 'C' | 'D' | 'F';
-  scoringMethod: 'point_based';
+  scoringMethod: 'point_based' | 'icp_point_based';
   scoredAt: Date;
   previousScore?: number;
   scoreChange?: number;
@@ -516,15 +516,17 @@ function mapICPToScoringWeights(profile: ICPProfile): ICPWeights {
   };
 
   // Map persona lifts to threading weights
+  // Multiple personas may map to the same buying role — keep the highest lift
   if (Array.isArray(profile.personas)) {
     for (const persona of profile.personas) {
       if (persona.lift && persona.topBuyingRoles) {
-        // Convert lift to points: 1.5x = 5pts, 2.0x = 10pts, 1.0x = 0pts
         const points = Math.round(Math.max(0, (persona.lift - 1.0) * 10));
-        // Use the most common buying role for this persona
+        const cappedPoints = Math.min(10, points);
         const primaryRole = persona.topBuyingRoles[0];
         if (primaryRole) {
-          weights.personaWeights[primaryRole.toLowerCase()] = Math.min(10, points);
+          const roleKey = primaryRole.toLowerCase();
+          const existing = weights.personaWeights[roleKey] || 0;
+          weights.personaWeights[roleKey] = Math.max(existing, cappedPoints);
         }
       }
     }
@@ -573,8 +575,19 @@ function mapICPToScoringWeights(profile: ICPProfile): ICPWeights {
   }
 
   // Map buying committee combinations
-  // Primary source: top-level buying_committees column (from ICP Discovery)
-  // Fallback: model_metadata (for backwards compatibility)
+  // ICP Discovery stores committees as persona ID pairs (e.g. c_level__executive + manager__unknown).
+  // Deals have buying roles (champion, decision_maker, etc.), not persona IDs.
+  // Bridge: use each persona's topBuyingRoles to translate persona IDs → buying roles for matching.
+  const personaToBuyingRoles = new Map<string, string[]>();
+  if (Array.isArray(profile.personas)) {
+    for (const persona of profile.personas) {
+      const key = persona.key || `${persona.seniority}__${persona.department}`;
+      if (persona.topBuyingRoles && Array.isArray(persona.topBuyingRoles)) {
+        personaToBuyingRoles.set(key, persona.topBuyingRoles.map((r: string) => r.toLowerCase()));
+      }
+    }
+  }
+
   const committees = profile.buying_committees
     || profile.model_metadata?.buyingCommittee
     || profile.model_metadata?.committees
@@ -583,11 +596,21 @@ function mapICPToScoringWeights(profile: ICPProfile): ICPWeights {
   if (Array.isArray(committees)) {
     for (const combo of committees) {
       if (combo.lift >= 1.3) {
-        weights.committeeBonuses.push({
-          roles: combo.personas || combo.roles || [],
-          lift: combo.lift,
-          bonusPoints: Math.round(Math.min(8, (combo.lift - 1.0) * 10)),
-        });
+        const personaIds: string[] = combo.personas || combo.roles || [];
+        const buyingRolesNeeded = new Set<string>();
+        for (const pid of personaIds) {
+          const roles = personaToBuyingRoles.get(pid);
+          if (roles && roles.length > 0) {
+            buyingRolesNeeded.add(roles[0]);
+          }
+        }
+        if (buyingRolesNeeded.size >= 2) {
+          weights.committeeBonuses.push({
+            roles: Array.from(buyingRolesNeeded),
+            lift: combo.lift,
+            bonusPoints: Math.round(Math.min(8, (combo.lift - 1.0) * 10)),
+          });
+        }
       }
     }
   }
@@ -606,10 +629,11 @@ function mapICPToScoringWeights(profile: ICPProfile): ICPWeights {
   }
 
   logger.info('[Lead Scoring] Mapped ICP weights', {
-    personaWeights: Object.keys(weights.personaWeights).length,
+    personaWeights: weights.personaWeights,
     companyFitRules: weights.companyFitRules.length,
-    committeeBonuses: weights.committeeBonuses.length,
+    committeeBonuses: weights.committeeBonuses.map(c => ({ roles: c.roles, lift: c.lift, pts: c.bonusPoints })),
     leadSourceWeights: Object.keys(weights.leadSourceWeights).length,
+    personaToBuyingRolesCount: personaToBuyingRoles.size,
   });
 
   return weights;
