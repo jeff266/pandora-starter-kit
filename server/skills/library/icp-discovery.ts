@@ -111,7 +111,7 @@ Top personas by lift (frequency in won deals vs lost deals):
    - Lift: {{this.lift}}x (appears in {{multiply this.frequency_in_won 100}}% of won deals vs {{multiply this.frequency_in_lost 100}}% of lost)
    - Top titles: {{join this.topTitles ", "}}
    - Top buying roles: {{join this.topBuyingRoles ", "}}
-   - Avg deal size won: ${{formatNumber this.avgDealSizeWon}}
+   - Avg deal size won: \${{formatNumber this.avgDealSizeWon}}
    - Confidence: {{this.confidence}}
 {{/each}}
 
@@ -123,7 +123,7 @@ Committee combinations with highest win rates:
 {{@index}}. **{{join this.personaNames " + "}}**
    - Win rate: {{multiply this.winRate 100}}% ({{this.wonCount}}/{{this.totalCount}} deals)
    - Lift: {{this.lift}}x vs baseline
-   - Avg deal size: ${{formatNumber this.avgDealSize}}
+   - Avg deal size: \${{formatNumber this.avgDealSize}}
 {{/each}}
 
 ## Company Sweet Spots
@@ -135,7 +135,7 @@ Committee combinations with highest win rates:
 ## Industry Analysis
 
 {{#each discovery_result.companyProfile.industryWinRates}}
-- **{{this.industry}}**: {{multiply this.winRate 100}}% win rate across {{this.count}} deals, avg ${{formatNumber this.avgDeal}}
+- **{{this.industry}}**: {{multiply this.winRate 100}}% win rate across {{this.count}} deals, avg \${{formatNumber this.avgDeal}}
 {{/each}}
 
 ## Custom Field Segmentation
