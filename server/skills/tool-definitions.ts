@@ -90,7 +90,7 @@ const queryDeals: ToolDefinition = {
     type: 'object',
     properties: {
       stage: { type: 'string', description: 'Filter by stage name' },
-      stageNormalized: { type: 'string', description: 'Filter by normalized stage (open, closed_won, closed_lost)' },
+      stageNormalized: { type: 'string', description: 'Filter by normalized stage (awareness, qualification, evaluation, decision, negotiation, closed_won, closed_lost)' },
       owner: { type: 'string', description: 'Filter by deal owner' },
       amountMin: { type: 'number', description: 'Minimum deal amount' },
       amountMax: { type: 'number', description: 'Maximum deal amount' },
