@@ -114,6 +114,34 @@ export interface SalesforceEvent {
   LastModifiedDate: string;
 }
 
+export interface SalesforceLead {
+  Id: string;
+  FirstName: string | null;
+  LastName: string;
+  Email: string | null;
+  Phone: string | null;
+  Title: string | null;
+  Company: string;
+  Website: string | null;
+  Status: string;                  // New, Working, Qualified, Converted, Disqualified
+  LeadSource: string | null;
+  Industry: string | null;
+  AnnualRevenue: number | null;
+  NumberOfEmployees: number | null;
+  Description: string | null;
+  IsConverted: boolean;
+  ConvertedDate: string | null;    // ISO datetime
+  ConvertedContactId: string | null;
+  ConvertedAccountId: string | null;
+  ConvertedOpportunityId: string | null;
+  OwnerId: string;
+  Owner?: { Name: string; Email: string };
+  CreatedDate: string;
+  LastModifiedDate: string;
+  SystemModstamp: string;
+  [key: string]: unknown;
+}
+
 // ============================================================================
 // Salesforce Metadata
 // ============================================================================
@@ -272,6 +300,34 @@ export const DEFAULT_ACCOUNT_FIELDS = [
   'SystemModstamp',
 ];
 
+export const DEFAULT_LEAD_FIELDS = [
+  'Id',
+  'FirstName',
+  'LastName',
+  'Email',
+  'Phone',
+  'Title',
+  'Company',
+  'Website',
+  'Status',
+  'LeadSource',
+  'Industry',
+  'AnnualRevenue',
+  'NumberOfEmployees',
+  'Description',
+  'IsConverted',
+  'ConvertedDate',
+  'ConvertedContactId',
+  'ConvertedAccountId',
+  'ConvertedOpportunityId',
+  'OwnerId',
+  'Owner.Name',
+  'Owner.Email',
+  'CreatedDate',
+  'LastModifiedDate',
+  'SystemModstamp',
+];
+
 // ============================================================================
 // Field Metadata (for dynamic custom field discovery)
 // ============================================================================
@@ -305,4 +361,5 @@ export const EXTRA_STANDARD_FIELDS = {
   opportunity: ['Type', 'LeadSource', 'ForecastCategory', 'NextStep', 'Territory', 'Description'],
   account: ['Industry', 'Type', 'Rating', 'Ownership', 'NumberOfEmployees', 'AnnualRevenue', 'BillingCountry', 'BillingState'],
   contact: ['LeadSource', 'Department', 'Level', 'MailingCountry', 'MailingState'],
+  lead: ['Description', 'Rating', 'MobilePhone', 'Street', 'City', 'State', 'PostalCode', 'Country'],
 };

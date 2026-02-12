@@ -13,6 +13,7 @@ import type {
   SalesforceOpportunity,
   SalesforceContact,
   SalesforceAccount,
+  SalesforceLead,
   SalesforceStage,
   SalesforceContactRole,
   SalesforceTask,
@@ -441,6 +442,57 @@ export class SalesforceClient {
     }
 
     return this.queryAll<SalesforceAccount>(soql);
+  }
+
+  async getLeads(
+    fields?: string[],
+    since?: Date,
+    initialSync: boolean = false
+  ): Promise<import('./types.js').SalesforceLead[]> {
+    const { DEFAULT_LEAD_FIELDS } = await import('./types.js');
+    const fieldList = fields && fields.length > 0 ? fields : DEFAULT_LEAD_FIELDS;
+
+    let soql = `SELECT ${fieldList.join(', ')} FROM Lead`;
+
+    const whereClauses: string[] = [];
+
+    // For initial sync, limit to last 12 months to avoid huge datasets
+    if (initialSync) {
+      whereClauses.push('CreatedDate >= LAST_N_MONTHS:12');
+
+      // Get count first to warn about large datasets
+      try {
+        const countResult = await this.query<{ expr0: number }>('SELECT COUNT() FROM Lead WHERE CreatedDate >= LAST_N_MONTHS:12');
+        const count = countResult.records[0]?.expr0 || 0;
+
+        if (count > 50000) {
+          logger.warn('[Salesforce Client] Large lead volume detected', {
+            count,
+            recommendation: 'Consider using Bulk API or further filtering',
+          });
+        } else {
+          logger.info('[Salesforce Client] Lead count for initial sync', { count });
+        }
+      } catch (error) {
+        logger.warn('[Salesforce Client] Failed to count leads', { error });
+      }
+    } else if (since) {
+      // Incremental sync
+      whereClauses.push(`LastModifiedDate >= ${since.toISOString()}`);
+    }
+
+    if (whereClauses.length > 0) {
+      soql += ` WHERE ${whereClauses.join(' AND ')}`;
+    }
+
+    soql += ` ORDER BY CreatedDate DESC`;
+
+    try {
+      return await this.queryAll<import('./types.js').SalesforceLead>(soql);
+    } catch (error) {
+      logger.error('[Salesforce Client] Lead query failed', { error });
+      throw error;
+    }
   }
 
   async getOpportunityContactRoles(

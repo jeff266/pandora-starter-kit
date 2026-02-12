@@ -187,26 +187,30 @@ export class SalesforceAdapter implements CRMAdapter {
     opportunityFields: string[];
     contactFields: string[];
     accountFields: string[];
+    leadFields: string[];
     fieldMetadata: {
       opportunity: SalesforceField[];
       contact: SalesforceField[];
       account: SalesforceField[];
+      lead: SalesforceField[];
     };
   }> {
     // Import default field lists
-    const { DEFAULT_OPPORTUNITY_FIELDS, DEFAULT_CONTACT_FIELDS, DEFAULT_ACCOUNT_FIELDS } = await import('./types.js');
+    const { DEFAULT_OPPORTUNITY_FIELDS, DEFAULT_CONTACT_FIELDS, DEFAULT_ACCOUNT_FIELDS, DEFAULT_LEAD_FIELDS } = await import('./types.js');
 
     // Fetch field metadata in parallel
-    const [oppFieldMeta, contactFieldMeta, accountFieldMeta] = await Promise.all([
+    const [oppFieldMeta, contactFieldMeta, accountFieldMeta, leadFieldMeta] = await Promise.all([
       client.getObjectFields('Opportunity'),
       client.getObjectFields('Contact'),
       client.getObjectFields('Account'),
+      client.getObjectFields('Lead'),
     ]);
 
     // Extract field names from metadata
     const oppCustomFieldNames = oppFieldMeta.map(f => f.name);
     const contactCustomFieldNames = contactFieldMeta.map(f => f.name);
     const accountCustomFieldNames = accountFieldMeta.map(f => f.name);
+    const leadCustomFieldNames = leadFieldMeta.map(f => f.name);
 
     // Combine with defaults, deduplicating
     const opportunityFields = Array.from(new Set([
@@ -224,20 +228,28 @@ export class SalesforceAdapter implements CRMAdapter {
       ...accountCustomFieldNames,
     ]));
 
+    const leadFields = Array.from(new Set([
+      ...DEFAULT_LEAD_FIELDS,
+      ...leadCustomFieldNames,
+    ]));
+
     logger.info('[Salesforce Adapter] Built field lists', {
       opportunity: { default: DEFAULT_OPPORTUNITY_FIELDS.length, custom: oppCustomFieldNames.length, total: opportunityFields.length },
       contact: { default: DEFAULT_CONTACT_FIELDS.length, custom: contactCustomFieldNames.length, total: contactFields.length },
       account: { default: DEFAULT_ACCOUNT_FIELDS.length, custom: accountCustomFieldNames.length, total: accountFields.length },
+      lead: { default: DEFAULT_LEAD_FIELDS.length, custom: leadCustomFieldNames.length, total: leadFields.length },
     });
 
     return {
       opportunityFields,
       contactFields,
       accountFields,
+      leadFields,
       fieldMetadata: {
         opportunity: oppFieldMeta,
         contact: contactFieldMeta,
         account: accountFieldMeta,
+        lead: leadFieldMeta,
       },
     };
   }
@@ -247,7 +259,7 @@ export class SalesforceAdapter implements CRMAdapter {
    */
   private async storeFieldMetadata(
     workspaceId: string,
-    fieldMetadata: { opportunity: SalesforceField[]; contact: SalesforceField[]; account: SalesforceField[] }
+    fieldMetadata: { opportunity: SalesforceField[]; contact: SalesforceField[]; account: SalesforceField[]; lead: SalesforceField[] }
   ): Promise<void> {
     try {
       await query(
@@ -267,6 +279,7 @@ export class SalesforceAdapter implements CRMAdapter {
         opportunity: fieldMetadata.opportunity.length,
         contact: fieldMetadata.contact.length,
         account: fieldMetadata.account.length,
+        lead: fieldMetadata.lead.length,
       });
     } catch (error) {
       logger.warn('[Salesforce Adapter] Failed to store field metadata', { error });
@@ -290,7 +303,7 @@ export class SalesforceAdapter implements CRMAdapter {
     const client = await this.createClientWithRefresh(credentials, workspaceId);
 
     // Fetch custom field metadata and build field lists
-    const { opportunityFields, contactFields, accountFields, fieldMetadata } = await this.buildFieldLists(client);
+    const { opportunityFields, contactFields, accountFields, leadFields, fieldMetadata } = await this.buildFieldLists(client);
 
     // Store field metadata for custom field discovery engine
     await this.storeFieldMetadata(workspaceId, fieldMetadata);
@@ -347,6 +360,12 @@ export class SalesforceAdapter implements CRMAdapter {
       dealsFailed: deals.failed.length,
     });
 
+    // Sync Leads (for ICP funnel analysis)
+    await this.syncLeads(client, workspaceId, leadFields);
+
+    // Link converted leads to contacts/accounts/deals
+    await this.linkConvertedLeads(workspaceId);
+
     // Sync OpportunityContactRole (deal-contact associations)
     await this.syncContactRoles(client, workspaceId);
 
@@ -374,7 +393,7 @@ export class SalesforceAdapter implements CRMAdapter {
 
     try {
       // Fetch custom field metadata and build field lists
-      const { opportunityFields, contactFields, accountFields, fieldMetadata } = await this.buildFieldLists(client);
+      const { opportunityFields, contactFields, accountFields, leadFields, fieldMetadata } = await this.buildFieldLists(client);
 
       // Store field metadata for custom field discovery engine
       await this.storeFieldMetadata(workspaceId, fieldMetadata);
@@ -411,6 +430,12 @@ export class SalesforceAdapter implements CRMAdapter {
         workspaceId,
         (opp) => transformOpportunity(opp, workspaceId, stageMap)
       );
+
+      // Sync Leads (for ICP funnel analysis) - incremental
+      await this.syncLeads(client, workspaceId, leadFields, lastSyncTime);
+
+      // Link converted leads to contacts/accounts/deals
+      await this.linkConvertedLeads(workspaceId);
 
       // Sync OpportunityContactRole (deal-contact associations)
       await this.syncContactRoles(client, workspaceId);
@@ -630,6 +655,177 @@ export class SalesforceAdapter implements CRMAdapter {
     } catch (error) {
       logger.error('[Salesforce Adapter] Account sync failed completely', { error });
       return { succeeded: [], failed: [], totalAttempted: 0 };
+    }
+  }
+
+  private async syncLeads(
+    client: SalesforceClient,
+    workspaceId: string,
+    fields: string[],
+    since?: Date
+  ): Promise<void> {
+    try {
+      const isInitialSync = !since;
+      const rawLeads = await client.getLeads(fields, since, isInitialSync);
+
+      logger.info('[Salesforce Adapter] Syncing leads', {
+        count: rawLeads.length,
+        mode: isInitialSync ? 'initial' : 'incremental',
+      });
+
+      // Transform leads
+      const { transformLead } = await import('./transform.js');
+      let synced = 0;
+      let failed = 0;
+
+      for (const lead of rawLeads) {
+        try {
+          const normalized = transformLead(lead, workspaceId);
+
+          // Upsert to leads table
+          await query(
+            `INSERT INTO leads (
+              workspace_id, source, source_id, source_data,
+              first_name, last_name, email, phone, title, company, website,
+              status, lead_source, industry, annual_revenue, employee_count,
+              is_converted, converted_at,
+              sf_converted_contact_id, sf_converted_account_id, sf_converted_opportunity_id,
+              owner_id, owner_name, owner_email,
+              custom_fields, created_date, last_modified,
+              created_at, updated_at
+            ) VALUES (
+              $1, $2, $3, $4,
+              $5, $6, $7, $8, $9, $10, $11,
+              $12, $13, $14, $15, $16,
+              $17, $18,
+              $19, $20, $21,
+              $22, $23, $24,
+              $25, $26, $27,
+              NOW(), NOW()
+            )
+            ON CONFLICT (workspace_id, source, source_id)
+            DO UPDATE SET
+              first_name = $5, last_name = $6, email = $7, phone = $8,
+              title = $9, company = $10, website = $11,
+              status = $12, lead_source = $13, industry = $14,
+              annual_revenue = $15, employee_count = $16,
+              is_converted = $17, converted_at = $18,
+              sf_converted_contact_id = $19, sf_converted_account_id = $20, sf_converted_opportunity_id = $21,
+              owner_id = $22, owner_name = $23, owner_email = $24,
+              custom_fields = $25, created_date = $26, last_modified = $27,
+              source_data = $4, updated_at = NOW()`,
+            [
+              normalized.workspace_id,
+              normalized.source,
+              normalized.source_id,
+              JSON.stringify(normalized.source_data),
+              normalized.first_name,
+              normalized.last_name,
+              normalized.email,
+              normalized.phone,
+              normalized.title,
+              normalized.company,
+              normalized.website,
+              normalized.status,
+              normalized.lead_source,
+              normalized.industry,
+              normalized.annual_revenue,
+              normalized.employee_count,
+              normalized.is_converted,
+              normalized.converted_at,
+              normalized.sf_converted_contact_id,
+              normalized.sf_converted_account_id,
+              normalized.sf_converted_opportunity_id,
+              normalized.owner_id,
+              normalized.owner_name,
+              normalized.owner_email,
+              JSON.stringify(normalized.custom_fields),
+              normalized.created_date,
+              normalized.last_modified,
+            ]
+          );
+
+          synced++;
+        } catch (error) {
+          failed++;
+          logger.warn('[Salesforce Adapter] Failed to sync lead', {
+            leadId: lead.Id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+      logger.info('[Salesforce Adapter] Lead sync completed', {
+        total: rawLeads.length,
+        synced,
+        failed,
+      });
+    } catch (error) {
+      logger.warn('[Salesforce Adapter] Lead sync failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      // Don't fail overall sync - leads are enrichment
+    }
+  }
+
+  /**
+   * Link converted leads to their corresponding contacts/accounts/deals
+   * Resolves sf_converted_* Salesforce IDs to UUID foreign keys
+   */
+  private async linkConvertedLeads(workspaceId: string): Promise<void> {
+    try {
+      // Link to contacts
+      const contactResult = await query(
+        `UPDATE leads l SET
+          converted_contact_id = c.id
+        FROM contacts c
+        WHERE l.workspace_id = c.workspace_id
+          AND l.sf_converted_contact_id = c.source_id
+          AND c.source = 'salesforce'
+          AND l.workspace_id = $1
+          AND l.converted_contact_id IS NULL
+          AND l.sf_converted_contact_id IS NOT NULL`,
+        [workspaceId]
+      );
+
+      // Link to accounts
+      const accountResult = await query(
+        `UPDATE leads l SET
+          converted_account_id = a.id
+        FROM accounts a
+        WHERE l.workspace_id = a.workspace_id
+          AND l.sf_converted_account_id = a.source_id
+          AND a.source = 'salesforce'
+          AND l.workspace_id = $1
+          AND l.converted_account_id IS NULL
+          AND l.sf_converted_account_id IS NOT NULL`,
+        [workspaceId]
+      );
+
+      // Link to deals
+      const dealResult = await query(
+        `UPDATE leads l SET
+          converted_deal_id = d.id
+        FROM deals d
+        WHERE l.workspace_id = d.workspace_id
+          AND l.sf_converted_opportunity_id = d.source_id
+          AND d.source = 'salesforce'
+          AND l.workspace_id = $1
+          AND l.converted_deal_id IS NULL
+          AND l.sf_converted_opportunity_id IS NOT NULL`,
+        [workspaceId]
+      );
+
+      logger.info('[Salesforce Adapter] Linked converted leads', {
+        contacts: contactResult.rowCount,
+        accounts: accountResult.rowCount,
+        deals: dealResult.rowCount,
+      });
+    } catch (error) {
+      logger.warn('[Salesforce Adapter] Failed to link converted leads', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      // Non-fatal - continue
     }
   }
 

@@ -16,6 +16,7 @@ import type {
   SalesforceOpportunity,
   SalesforceContact,
   SalesforceAccount,
+  SalesforceLead,
   SalesforceStage,
   SalesforceTask,
   SalesforceEvent,
@@ -78,6 +79,36 @@ export interface NormalizedAccount {
   annual_revenue: number | null;
   owner: string | null;
   custom_fields: Record<string, any>;
+}
+
+export interface NormalizedLead {
+  workspace_id: string;
+  source: 'salesforce';
+  source_id: string;
+  source_data: Record<string, any>;
+  first_name: string | null;
+  last_name: string | null;
+  email: string | null;
+  phone: string | null;
+  title: string | null;
+  company: string | null;
+  website: string | null;
+  status: string | null;
+  lead_source: string | null;
+  industry: string | null;
+  annual_revenue: number | null;
+  employee_count: number | null;
+  is_converted: boolean;
+  converted_at: Date | null;
+  sf_converted_contact_id: string | null;
+  sf_converted_account_id: string | null;
+  sf_converted_opportunity_id: string | null;
+  owner_id: string | null;
+  owner_name: string | null;
+  owner_email: string | null;
+  custom_fields: Record<string, any>;
+  created_date: Date | null;
+  last_modified: Date | null;
 }
 
 export interface NormalizedActivity {
@@ -271,6 +302,32 @@ const MAPPED_ACCOUNT_FIELDS = new Set([
   'SystemModstamp',
 ]);
 
+const MAPPED_LEAD_FIELDS = new Set([
+  'Id',
+  'FirstName',
+  'LastName',
+  'Email',
+  'Phone',
+  'Title',
+  'Company',
+  'Website',
+  'Status',
+  'LeadSource',
+  'Industry',
+  'AnnualRevenue',
+  'NumberOfEmployees',
+  'IsConverted',
+  'ConvertedDate',
+  'ConvertedContactId',
+  'ConvertedAccountId',
+  'ConvertedOpportunityId',
+  'OwnerId',
+  'Owner',
+  'CreatedDate',
+  'LastModifiedDate',
+  'SystemModstamp',
+]);
+
 /**
  * Extract unmapped fields into custom_fields object
  * Includes:
@@ -280,7 +337,7 @@ const MAPPED_ACCOUNT_FIELDS = new Set([
  */
 function extractCustomFields(
   rawObject: Record<string, any>,
-  objectType: 'opportunity' | 'contact' | 'account',
+  objectType: 'opportunity' | 'contact' | 'account' | 'lead',
   mappedFields: Set<string>
 ): Record<string, any> {
   const customFields: Record<string, any> = {};
@@ -494,6 +551,92 @@ export function transformAccount(
     annual_revenue: sanitizeNumber(account.AnnualRevenue), // FIX: empty string would crash PostgreSQL
     owner: account.Owner?.Email || account.Owner?.Name || account.OwnerId,
     custom_fields: customFields,
+  };
+}
+
+// ============================================================================
+// Lead Transform
+// ============================================================================
+
+export function transformLead(
+  lead: SalesforceLead,
+  workspaceId: string
+): NormalizedLead {
+  // Extract all unmapped custom and extra standard fields
+  const customFields = extractCustomFields(
+    lead as unknown as Record<string, any>,
+    'lead',
+    MAPPED_LEAD_FIELDS
+  );
+
+  // Parse owner information
+  const ownerId = lead.OwnerId;
+  const ownerName = lead.Owner?.Name || null;
+  const ownerEmail = lead.Owner?.Email || null;
+
+  // Parse conversion date
+  let convertedAt: Date | null = null;
+  if (lead.ConvertedDate) {
+    try {
+      convertedAt = new Date(lead.ConvertedDate);
+    } catch (error) {
+      logger.warn('[Salesforce Transform] Invalid ConvertedDate', {
+        leadId: lead.Id,
+        convertedDate: lead.ConvertedDate,
+      });
+    }
+  }
+
+  // Parse created and modified dates
+  let createdDate: Date | null = null;
+  let lastModified: Date | null = null;
+
+  try {
+    createdDate = new Date(lead.CreatedDate);
+  } catch (error) {
+    logger.warn('[Salesforce Transform] Invalid CreatedDate', {
+      leadId: lead.Id,
+      createdDate: lead.CreatedDate,
+    });
+  }
+
+  try {
+    lastModified = new Date(lead.LastModifiedDate);
+  } catch (error) {
+    logger.warn('[Salesforce Transform] Invalid LastModifiedDate', {
+      leadId: lead.Id,
+      lastModifiedDate: lead.LastModifiedDate,
+    });
+  }
+
+  return {
+    workspace_id: workspaceId,
+    source: 'salesforce',
+    source_id: lead.Id,
+    source_data: lead as unknown as Record<string, any>,
+    first_name: sanitizeText(lead.FirstName, 100),
+    last_name: sanitizeText(lead.LastName, 100),
+    email: sanitizeText(lead.Email, 255),
+    phone: sanitizeText(lead.Phone, 50),
+    title: sanitizeText(lead.Title, 255),
+    company: sanitizeText(lead.Company, 255),
+    website: sanitizeText(lead.Website, 255),
+    status: sanitizeText(lead.Status, 100),
+    lead_source: sanitizeText(lead.LeadSource, 100),
+    industry: sanitizeText(lead.Industry, 100),
+    annual_revenue: sanitizeNumber(lead.AnnualRevenue),
+    employee_count: sanitizeInteger(lead.NumberOfEmployees),
+    is_converted: lead.IsConverted,
+    converted_at: convertedAt,
+    sf_converted_contact_id: lead.ConvertedContactId,
+    sf_converted_account_id: lead.ConvertedAccountId,
+    sf_converted_opportunity_id: lead.ConvertedOpportunityId,
+    owner_id: ownerId,
+    owner_name: ownerName,
+    owner_email: ownerEmail,
+    custom_fields: customFields,
+    created_date: createdDate,
+    last_modified: lastModified,
   };
 }
 
