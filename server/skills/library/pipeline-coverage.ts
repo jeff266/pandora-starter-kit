@@ -125,7 +125,7 @@ Definitions:
 IMPORTANT: If a rep has ≤2x coverage AND ≥3 conversations_without_deals_count, use 'active_not_logging' as the root cause instead of 'insufficient_prospecting'
 
 Context:
-- Quarter: Q{{time_windows.analysisRange.quarter}} ({{coverage_data.team.daysElapsed}} days elapsed, {{coverage_data.team.daysRemaining}} remaining)
+- Quarter: {{time_windows.analysisRange.quarter}} ({{coverage_data.team.daysElapsed}} days elapsed, {{coverage_data.team.daysRemaining}} remaining)
 - Team coverage target: {{coverage_data.team.coverageTarget}}x
 - Team coverage: {{coverage_data.team.coverageRatio}}x
 
@@ -208,6 +208,8 @@ Each classification should be:
       ],
       claudePrompt: `You are a VP of Revenue Operations analyzing pipeline coverage for {{business_model.company_name}}.
 
+REPORT PERIOD: {{time_windows.analysisRange.quarter}}
+
 {{coverage_summary.quotaNote}}
 
 TEAM OVERVIEW:
@@ -261,6 +263,7 @@ Produce a Pipeline Coverage Report. Include:
    - Each action must name specific reps or dollar amounts
 
 RULES:
+- Use "{{time_windows.analysisRange.quarter}}" as the report period in the header — do NOT guess the quarter or year
 - Lead with the verdict (on track / at risk / behind)
 - Use specific dollar amounts, rep names, and deal counts
 - If quotas aren't configured, note this and show absolute numbers only
