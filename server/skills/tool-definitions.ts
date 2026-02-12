@@ -48,6 +48,11 @@ import {
   getMaturity as fetchMaturity,
   getContext,
 } from '../context/index.js';
+import {
+  discoverCustomFields,
+  generateDiscoveryReport,
+  type CustomFieldDiscoveryResult,
+} from './compute/custom-field-discovery.js';
 import { query } from '../db.js';
 import {
   findConversationsWithoutDeals,
@@ -2640,6 +2645,63 @@ const repScorecardComputeTool: ToolDefinition = {
 };
 
 // ============================================================================
+// Custom Field Discovery Tools
+// ============================================================================
+
+const discoverCustomFieldsTool: ToolDefinition = {
+  name: 'discoverCustomFields',
+  description: 'Automatically discover which CRM custom fields are meaningful for ICP analysis based on variance and win/loss correlation',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {
+      enableClassification: {
+        type: 'boolean',
+        description: 'Enable DeepSeek semantic classification of fields (adds ~$0.003 cost)',
+      },
+    },
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('discoverCustomFields', async () => {
+      const result = await discoverCustomFields(context.workspaceId, {
+        enableClassification: params.enableClassification ?? false,
+      });
+
+      console.log(`[Custom Field Discovery] Discovered ${result.topFields.length} high-relevance fields (score >= 50)`);
+
+      return result;
+    }, params);
+  },
+};
+
+const generateCustomFieldReportTool: ToolDefinition = {
+  name: 'generateCustomFieldReport',
+  description: 'Generate a markdown report from custom field discovery results',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('generateCustomFieldReport', async () => {
+      const discoveryResult = (context.stepResults as any).discovery_result as CustomFieldDiscoveryResult;
+
+      if (!discoveryResult) {
+        throw new Error('discovery_result not found in context. Run discoverCustomFields first.');
+      }
+
+      const report = generateDiscoveryReport(discoveryResult);
+
+      console.log(`[Custom Field Discovery] Generated report (${report.length} chars)`);
+
+      return report;
+    }, params);
+  },
+};
+
+// ============================================================================
 // Tool Registry
 // ============================================================================
 
@@ -2705,6 +2767,8 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['velocityBenchmarks', velocityBenchmarksTool],
   ['checkDataAvailability', checkDataAvailabilityTool],
   ['repScorecardCompute', repScorecardComputeTool],
+  ['discoverCustomFields', discoverCustomFieldsTool],
+  ['generateCustomFieldReport', generateCustomFieldReportTool],
 ]);
 
 // ============================================================================
