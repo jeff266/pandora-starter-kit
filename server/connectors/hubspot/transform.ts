@@ -25,6 +25,7 @@ export interface NormalizedDeal {
 
 // TODO: Allow per-workspace override via context_layer.definitions.stage_mapping
 const DEFAULT_STAGE_NORMALIZED_MAP: Record<string, string> = {
+  // Standard HubSpot stages
   appointmentscheduled: 'qualification',
   qualifiedtobuy: 'qualification',
   presentationscheduled: 'evaluation',
@@ -43,12 +44,59 @@ const DEFAULT_STAGE_NORMALIZED_MAP: Record<string, string> = {
   renewalprep: 'evaluation',
   scopeoptions: 'evaluation',
   scopeandoptions: 'evaluation',
+
+  // Common custom HubSpot stages
+  demo: 'evaluation',
+  democonducted: 'evaluation',
+  demoscheduled: 'qualification',
+  demoscompleted: 'evaluation',
+  pilot: 'evaluation',
+  pilotcompleted: 'evaluation',
+  poc: 'evaluation',
+  pocpilotprogramdesign: 'evaluation',
+  discovery: 'awareness',
+  discoveryqualification: 'awareness',
+  discoveryandalignment: 'awareness',
+  initialconversation: 'awareness',
+  newleadinquiry: 'awareness',
+  proposalreviewed: 'decision',
+  proposalsent: 'decision',
+  verbalcommitment: 'negotiation',
+  fellowcontractsigned: 'negotiation',
+  fellowredirecttocoresales: 'qualification',
+  closedlostpartnership: 'closed_lost',
+  closedwonpartnership: 'closed_won',
+
+  // Catch variations
+  qualificationstage: 'qualification',
+  evaluationstage: 'evaluation',
+  decisionstage: 'decision',
+  negotiationstage: 'negotiation',
 };
 
 function normalizeStage(rawStage: string | null): string | null {
   if (!rawStage) return null;
   const cleaned = rawStage.replace(/[^\p{L}\p{N}]/gu, '').toLowerCase();
-  return DEFAULT_STAGE_NORMALIZED_MAP[cleaned] ?? 'awareness';
+
+  // Try exact match first
+  if (DEFAULT_STAGE_NORMALIZED_MAP[cleaned]) {
+    return DEFAULT_STAGE_NORMALIZED_MAP[cleaned];
+  }
+
+  // Fallback: keyword-based detection
+  // Check for closed won/lost first (highest priority)
+  if (/closedwon|won/.test(cleaned) && !/lost/.test(cleaned)) return 'closed_won';
+  if (/closedlost|lost/.test(cleaned)) return 'closed_lost';
+
+  // Then check for other stage indicators
+  if (/contract|verbal|commitment|signed/.test(cleaned)) return 'negotiation';
+  if (/proposal|decision|reviewed/.test(cleaned)) return 'decision';
+  if (/demo|pilot|poc|presentation|evaluation/.test(cleaned)) return 'evaluation';
+  if (/qualified|qualification|scheduled|redirect/.test(cleaned)) return 'qualification';
+  if (/discovery|initial|intro|lead|inquiry|awareness/.test(cleaned)) return 'awareness';
+
+  // Final fallback
+  return 'awareness';
 }
 
 export interface NormalizedContact {
