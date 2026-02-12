@@ -24,6 +24,7 @@ import quotasRouter from "./routes/quotas.js";
 import stageHistoryRouter from './routes/stage-history.js';
 import scoresRouter from './routes/scores.js';
 import icpRouter from './routes/icp.js';
+import configRouter from './routes/config.js';
 import { getAdapterRegistry } from "./connectors/adapters/registry.js";
 import { MondayTaskAdapter } from "./connectors/monday/adapter.js";
 import { GoogleDriveDocumentAdapter } from "./connectors/google-drive/adapter.js";
@@ -73,6 +74,7 @@ app.use("/api", quotasRouter);
 app.use("/api/workspaces", stageHistoryRouter);
 app.use("/api/workspaces", scoresRouter);
 app.use("/api/workspaces", icpRouter);
+app.use("/api/workspaces", configRouter);
 
 function registerAdapters(): void {
   const registry = getAdapterRegistry();
