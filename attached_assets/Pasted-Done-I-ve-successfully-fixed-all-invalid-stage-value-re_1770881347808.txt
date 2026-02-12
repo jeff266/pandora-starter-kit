@@ -1,0 +1,49 @@
+Done! I've successfully fixed all invalid stage value references across  
+  the codebase and pushed to GitHub.                                       
+                                                                           
+  Fixed Issues:                                                            
+                                                                           
+  1. Invalid 'open' stage in documentation                                 
+                                                                           
+  File: server/skills/tool-definitions.ts:93                               
+  - Before: "Filter by normalized stage (open, closed_won, closed_lost)"   
+  - After: "Filter by normalized stage (awareness, qualification,          
+  evaluation, decision, negotiation, closed_won, closed_lost)"             
+                                                                           
+  2. Invalid 'proposal' stage in critical deals logic                      
+                                                                           
+  File: server/analysis/aggregations.ts:573                                
+  - Before: const criticalStages = ['evaluation', 'decision', 'proposal',  
+  'negotiation'];                                                          
+  - After: const criticalStages = ['evaluation', 'decision',               
+  'negotiation'];                                                          
+                                                                           
+  3. Invalid 'proposal' stage in AI prompt                                 
+                                                                           
+  File: server/skills/library/single-thread-alert.ts:75                    
+  - Before: "Critical stages: evaluation, decision, proposal, negotiation" 
+  - After: "Critical stages: evaluation, decision, negotiation"            
+                                                                           
+  Valid Normalized Stage Values:                                           
+                                                                           
+  - awareness                                                              
+  - qualification                                                          
+  - evaluation                                                             
+  - decision                                                               
+  - negotiation (from HubSpot connector)                                   
+  - closed_won                                                             
+  - closed_lost                                                            
+                                                                           
+  What This Fixes:                                                         
+                                                                           
+  - Skills that were filtering for "open deals" using invalid stage values 
+  will now work correctly                                                  
+  - The criticalStages filter in Single-Thread Alert will correctly        
+  identify late-stage deals                                                
+  - AI tools that query deals will receive accurate documentation about    
+  valid stage values                                                       
+                                                                           
+  Note: "Open deals" are correctly identified throughout the codebase      
+  using: stage_normalized NOT IN ('closed_won', 'closed_lost') or by       
+  explicitly listing the open stages.                                      
+                                          
