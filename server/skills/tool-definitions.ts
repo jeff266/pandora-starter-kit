@@ -54,6 +54,7 @@ import {
   type CustomFieldDiscoveryResult,
 } from './compute/custom-field-discovery.js';
 import { scoreLeads } from './compute/lead-scoring.js';
+import { resolveContactRoles, type ResolutionResult } from './compute/contact-role-resolution.js';
 import { query } from '../db.js';
 import {
   findConversationsWithoutDeals,
@@ -2733,6 +2734,138 @@ const scoreLeadsTool: ToolDefinition = {
 };
 
 // ============================================================================
+// Contact Role Resolution Tools
+// ============================================================================
+
+const resolveContactRolesTool: ToolDefinition = {
+  name: 'resolveContactRoles',
+  description: 'Resolve buying roles for deal contacts using multi-source inference (CRM, titles, activities, conversations)',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {
+      dealId: {
+        type: 'string',
+        description: 'Optional deal ID to resolve roles for a specific deal. If not provided, resolves all deals.',
+      },
+    },
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('resolveContactRoles', async () => {
+      const result = await resolveContactRoles(context.workspaceId, params.dealId);
+
+      console.log(`[Contact Role Resolution] Resolved ${result.contactsResolved.total} contacts across ${result.dealsProcessed} deals`);
+
+      return result;
+    }, params);
+  },
+};
+
+const generateContactRoleReportTool: ToolDefinition = {
+  name: 'generateContactRoleReport',
+  description: 'Generate a markdown report from contact role resolution results',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('generateContactRoleReport', async () => {
+      const resolutionResult = (context.stepResults as any).resolution_result as ResolutionResult;
+
+      if (!resolutionResult) {
+        throw new Error('resolution_result not found in context. Run resolveContactRoles first.');
+      }
+
+      const report = generateResolutionReport(resolutionResult);
+
+      console.log(`[Contact Role Resolution] Generated report (${report.length} chars)`);
+
+      return {
+        report,
+        ...resolutionResult,
+      };
+    }, params);
+  },
+};
+
+function generateResolutionReport(result: ResolutionResult): string {
+  const pct = (num: number, total: number) => total > 0 ? Math.round((num / total) * 100) : 0;
+
+  const sourceTable = Object.entries(result.contactsResolved.bySource)
+    .sort((a, b) => b[1] - a[1])
+    .map(([source, count]) => {
+      const confidence = {
+        crm_contact_role: '0.95',
+        crm_deal_field: '0.90',
+        cross_deal_match: '0.70',
+        conversation_participant: '0.65',
+        title_match: '0.50',
+        activity_inference: '0.40',
+        activity_discovery: '0.35',
+        account_seniority_match: '0.25',
+      }[source] || '—';
+
+      return `| ${source} | ${count} | ${confidence} |`;
+    })
+    .join('\n');
+
+  const roleTable = Object.entries(result.roleDistribution)
+    .filter(([role]) => role !== 'unknown')
+    .sort((a, b) => b[1] - a[1])
+    .map(([role, count]) => {
+      return `| ${role} | ${count} | ${pct(count, result.totalDeals)}% |`;
+    })
+    .join('\n');
+
+  const newContacts = result.newDiscoveries.fromActivities +
+    result.newDiscoveries.fromConversations +
+    result.newDiscoveries.fromAccountMatch;
+
+  const resolvedCount = Object.values(result.roleDistribution).reduce((a, b) => a + b, 0) -
+    (result.roleDistribution['unknown'] || 0);
+  const unresolvedCount = result.roleDistribution['unknown'] || 0;
+
+  return `# Contact Role Resolution Report
+
+## Summary
+- Deals processed: ${result.dealsProcessed}
+- Total contacts mapped: ${result.contactsResolved.total}${newContacts > 0 ? ` (${newContacts} newly discovered)` : ''}
+- Roles resolved: ${resolvedCount} / ${result.contactsResolved.total} (${pct(resolvedCount, result.contactsResolved.total)}%)
+- Average contacts per deal: ${result.avgContactsPerDeal}
+- Average roles per deal: ${result.avgRolesPerDeal}
+
+## Resolution Sources
+| Source | Count | Confidence |
+|--------|-------|-----------|
+${sourceTable}
+${unresolvedCount > 0 ? `| Unresolved | ${unresolvedCount} | — |` : ''}
+
+## Buying Committee Coverage
+| Role | Count | % of Deals |
+|------|-------|-----------|
+${roleTable}
+
+## Deal Threading Quality
+- **Deals with champion**: ${result.dealsWithChampion} (${pct(result.dealsWithChampion, result.totalDeals)}%)
+- **Deals with economic buyer**: ${result.dealsWithEconomicBuyer} (${pct(result.dealsWithEconomicBuyer, result.totalDeals)}%)
+- **Fully threaded deals** (3+ roles including champion + EB/DM): ${result.dealsFullyThreaded} (${pct(result.dealsFullyThreaded, result.totalDeals)}%)
+
+## Gaps
+${result.dealsWithNoContacts > 0 ? `- **${result.dealsWithNoContacts} deals have zero contacts** (all resolution sources exhausted)\n` : ''}${result.dealsWithNoRoles > 0 ? `- **${result.dealsWithNoRoles} deals have contacts but no identified roles**\n` : ''}${result.totalDeals - result.dealsWithChampion > 0 ? `- **${result.totalDeals - result.dealsWithChampion} deals missing champion**\n` : ''}${result.totalDeals - result.dealsWithEconomicBuyer > 0 ? `- **${result.totalDeals - result.dealsWithEconomicBuyer} deals missing economic buyer**\n` : ''}
+${newContacts > 0 ? `## New Discoveries
+- From activities: ${result.newDiscoveries.fromActivities}
+- From conversations: ${result.newDiscoveries.fromConversations}
+- From account seniority match: ${result.newDiscoveries.fromAccountMatch}
+` : ''}
+---
+*Resolution completed in ${Math.round(result.executionMs / 1000)}s*
+`;
+}
+
+// ============================================================================
 // Tool Registry
 // ============================================================================
 
@@ -2801,6 +2934,8 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['discoverCustomFields', discoverCustomFieldsTool],
   ['generateCustomFieldReport', generateCustomFieldReportTool],
   ['scoreLeads', scoreLeadsTool],
+  ['resolveContactRoles', resolveContactRolesTool],
+  ['generateContactRoleReport', generateContactRoleReportTool],
 ]);
 
 // ============================================================================

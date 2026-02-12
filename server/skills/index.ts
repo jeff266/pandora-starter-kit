@@ -16,6 +16,7 @@ import { pipelineWaterfallSkill } from './library/pipeline-waterfall.js';
 import { repScorecardSkill } from './library/rep-scorecard.js';
 import { customFieldDiscoverySkill } from './library/custom-field-discovery.js';
 import { leadScoringSkill } from './library/lead-scoring.js';
+import { contactRoleResolutionSkill } from './library/contact-role-resolution.js';
 
 // Types
 export type {
@@ -72,6 +73,7 @@ export { pipelineWaterfallSkill } from './library/pipeline-waterfall.js';
 export { repScorecardSkill } from './library/rep-scorecard.js';
 export { customFieldDiscoverySkill } from './library/custom-field-discovery.js';
 export { leadScoringSkill } from './library/lead-scoring.js';
+export { contactRoleResolutionSkill } from './library/contact-role-resolution.js';
 
 // Formatters
 export {
@@ -113,6 +115,7 @@ export function registerBuiltInSkills(): void {
   registry.register(repScorecardSkill);
   registry.register(customFieldDiscoverySkill);
   registry.register(leadScoringSkill);
+  registry.register(contactRoleResolutionSkill);
 
   console.log('[Skills] Registered all built-in skills');
 }
