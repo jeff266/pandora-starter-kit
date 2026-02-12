@@ -1,0 +1,74 @@
+Lead Scoring v1 has been successfully committed and pushed to GitHub.    
+                                                                           
+  What Was Implemented                                                     
+                                                                           
+  Lead Scoring v1 - A point-based scoring system that works immediately    
+  with your existing data:                                                 
+                                                                           
+  Core Scoring Engine (server/skills/compute/lead-scoring.ts - ~1100 lines)
+                                                                           
+  - Feature extraction from open deals and contacts with engagement,       
+  threading, velocity, and conversation signals                            
+  - Point-based scoring algorithm with default weights that work           
+  generically                                                              
+  - Dynamic custom field integration - loads weights from discovery results
+   and applies them automatically                                          
+  - Score persistence with change tracking to identify movers              
+  - Workspace normalization for amount-based scoring                       
+                                                                           
+  Skill Definition (server/skills/library/lead-scoring.ts)                 
+                                                                           
+  Three-phase execution pattern:                                           
+  1. Compute phase: scoreLeads function extracts features and computes     
+  scores                                                                   
+  2. Classification phase: DeepSeek identifies primary strengths/risks for 
+  top and bottom deals                                                     
+  3. Synthesis phase: Claude generates Slack-ready report with actionable  
+  insights                                                                 
+                                                                           
+  Scoring Dimensions (max 100 points)                                      
+                                                                           
+  - Engagement (25pts): activity volume, recency, multi-channel, active    
+  days                                                                     
+  - Threading (20pts): multi-threaded, champion, economic buyer, role      
+  diversity                                                                
+  - Deal quality (20pts): amount tier, probability, stage progression      
+  - Velocity (15pts): close date health, stage velocity, days since        
+  activity                                                                 
+  - Conversation (10pts): call presence, volume, timing                    
+  - Custom fields (10pts): dynamic weights based on win-rate correlation   
+  from discovery                                                           
+                                                                           
+  Schedule & Triggers                                                      
+                                                                           
+  - Cron: Monday 7am weekly                                                
+  - Triggers: Post-sync + on-demand                                        
+  - Output: Slack format with top opportunities, at-risk deals, score      
+  movers, rep comparison                                                   
+                                                                           
+  The system is ready to test against the Imubit workspace (250 open       
+  deals).                                                                  
+                                                                           
+✻ Sautéed for 7m 13s                                                       
+                                                                           
+❯ give me a test prompt for replit                                         
+                                                                           
+⏺ Here's a test prompt for Replit:                                         
+                                                                           
+  Test lead scoring v1 against Imubit workspace. Run the scoreLeads compute
+   function and show me:                                                   
+  1. Total deals scored                                                    
+  2. Score distribution by grade (A/B/C/D/F)                               
+  3. Top 5 highest scoring deals with their score breakdowns               
+  4. Bottom 5 lowest scoring deals                                         
+  5. Which custom fields contributed to scores (if any loaded from         
+  discovery)                                                               
+  6. Summary stats: avg score, median score, score range                   
+                                                                           
+  This will validate:                                                      
+  - The scoring engine runs without errors                                 
+  - Scores are distributed across the 0-100 range with proper letter grades
+  - Score breakdowns show which features contributed points                
+  - Custom field weights are loading and being applied from your discovery 
+  results                                                                  
+  - The 250 open deals in Imubit are being processed correctly     
