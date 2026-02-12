@@ -78,6 +78,13 @@ export class SkillRegistry {
   }
 
   /**
+   * Get all registered skill definitions
+   */
+  getAll(): SkillDefinition[] {
+    return Array.from(this.skills.values());
+  }
+
+  /**
    * Check if skill exists
    */
   has(skillId: string): boolean {
