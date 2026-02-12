@@ -193,7 +193,7 @@ export async function getStageConversionRates(
       COUNT(*) AS transition_count,
       CASE
         WHEN AVG(dsh.duration_in_previous_stage_ms) IS NOT NULL
-        THEN ROUND(AVG(dsh.duration_in_previous_stage_ms) / (1000.0 * 60 * 60 * 24), 2)
+        THEN ROUND((AVG(dsh.duration_in_previous_stage_ms) / (1000.0 * 60 * 60 * 24))::NUMERIC, 2)
         ELSE NULL
       END AS avg_duration_days
     FROM deal_stage_history dsh
@@ -410,10 +410,10 @@ export async function getAverageTimeInStage(
   }>(
     `SELECT
       dsh.to_stage_normalized AS stage,
-      ROUND(AVG(dsh.duration_in_previous_stage_ms) / (1000.0 * 60 * 60 * 24), 2) AS avg_days,
-      ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (
+      ROUND((AVG(dsh.duration_in_previous_stage_ms) / (1000.0 * 60 * 60 * 24))::NUMERIC, 2) AS avg_days,
+      ROUND((PERCENTILE_CONT(0.5) WITHIN GROUP (
         ORDER BY dsh.duration_in_previous_stage_ms
-      ) / (1000.0 * 60 * 60 * 24), 2) AS median_days,
+      ) / (1000.0 * 60 * 60 * 24))::NUMERIC, 2) AS median_days,
       COUNT(*) AS deal_count
     FROM deal_stage_history dsh
     WHERE dsh.workspace_id = $1

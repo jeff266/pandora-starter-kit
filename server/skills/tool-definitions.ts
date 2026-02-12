@@ -2321,11 +2321,11 @@ const waterfallAnalysisTool: ToolDefinition = {
 
       const period = params.period || 'current';
       const periodStart = period === 'current'
-        ? new Date(timeWindows.analysisStart)
-        : new Date(timeWindows.prevStart);
+        ? new Date(timeWindows.analysisRange.start)
+        : new Date(timeWindows.previousPeriodRange?.start || timeWindows.analysisRange.start);
       const periodEnd = period === 'current'
-        ? new Date(timeWindows.analysisEnd)
-        : new Date(timeWindows.prevEnd);
+        ? new Date(timeWindows.analysisRange.end)
+        : new Date(timeWindows.previousPeriodRange?.end || timeWindows.analysisRange.end);
 
       return await waterfallAnalysis(context.workspaceId, periodStart, periodEnd);
     }, params);
@@ -2348,6 +2348,10 @@ const waterfallDeltasTool: ToolDefinition = {
 
       if (!current || !previous) {
         throw new Error('current_waterfall and previous_waterfall required in context');
+      }
+
+      if (!current.stages || !previous.stages) {
+        throw new Error('current_waterfall.stages and previous_waterfall.stages are required');
       }
 
       // Calculate deltas per stage
@@ -2448,8 +2452,8 @@ const topDealsInMotionTool: ToolDefinition = {
 
       const transitions = await getStageTransitionsInWindow(
         context.workspaceId,
-        new Date(timeWindows.analysisStart),
-        new Date(timeWindows.analysisEnd)
+        new Date(timeWindows.analysisRange.start),
+        new Date(timeWindows.analysisRange.end)
       );
 
       const dealIds = [...new Set(transitions.map(t => t.dealId))];
@@ -2516,8 +2520,8 @@ const velocityBenchmarksTool: ToolDefinition = {
       if (timeWindows) {
         const transitions = await getStageTransitionsInWindow(
           context.workspaceId,
-          new Date(timeWindows.analysisStart),
-          new Date(timeWindows.analysisEnd)
+          new Date(timeWindows.analysisRange.start),
+          new Date(timeWindows.analysisRange.end)
         );
 
         // Calculate average for this period
@@ -2614,10 +2618,10 @@ const repScorecardComputeTool: ToolDefinition = {
         throw new Error('time_windows and data_availability required in context');
       }
 
-      const periodStart = new Date(timeWindows.quarterStart || timeWindows.analysisStart);
-      const periodEnd = new Date(timeWindows.quarterEnd || timeWindows.analysisEnd);
-      const changeWindowStart = new Date(timeWindows.changeStart);
-      const changeWindowEnd = new Date(timeWindows.changeEnd);
+      const periodStart = new Date(timeWindows.analysisRange?.start || timeWindows.quarterStart);
+      const periodEnd = new Date(timeWindows.analysisRange?.end || timeWindows.quarterEnd);
+      const changeWindowStart = new Date(timeWindows.changeRange.start);
+      const changeWindowEnd = new Date(timeWindows.changeRange.end);
 
       const result = await repScorecard(
         context.workspaceId,
