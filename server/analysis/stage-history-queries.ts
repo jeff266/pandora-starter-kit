@@ -1,322 +1,433 @@
-/**
- * Stage History Query Functions
- *
- * High-level queries for Pipeline Waterfall, Rep Scorecard,
- * and other skills that need stage transition data.
- */
-
 import { query } from '../db.js';
 
-export interface StageTransition {
-  deal_id: string;
-  deal_name: string;
-  deal_source_id: string;
-  from_stage: string | null;
-  from_stage_normalized: string | null;
-  to_stage: string;
-  to_stage_normalized: string;
-  changed_at: Date;
-  duration_in_previous_stage_ms: number | null;
-  duration_days: number | null;
+export interface StageHistoryEntry {
+  id: string;
+  dealId: string;
+  dealName: string;
+  dealAmount: number;
+  fromStage: string | null;
+  fromStageNormalized: string | null;
+  toStage: string;
+  toStageNormalized: string | null;
+  changedAt: string;
+  durationInPreviousStageDays: number | null;
   source: string;
 }
 
-export interface DealStageJourney {
-  deal_id: string;
-  deal_name: string;
-  owner: string;
-  amount: number;
-  transitions: StageTransition[];
-  total_transitions: number;
-  current_stage: string;
-  days_in_current_stage: number;
-  created_at: Date;
+export interface StageHistoryResult {
+  dealId: string;
+  dealName: string;
+  dealAmount: number;
+  history: StageHistoryEntry[];
 }
 
-export interface StageConversionRate {
-  from_stage_normalized: string;
-  to_stage_normalized: string;
-  transition_count: number;
-  avg_duration_days: number;
-}
-
-export interface RepStageMetrics {
-  rep_name: string;
-  stage_normalized: string;
-  deals_entered: number;
-  deals_exited: number;
-  avg_duration_days: number;
-  fastest_transition_days: number;
-  slowest_transition_days: number;
-}
-
-/**
- * Get all stage transitions for a specific deal, ordered chronologically
- */
 export async function getDealStageHistory(
   workspaceId: string,
   dealId: string
-): Promise<DealStageJourney | null> {
-  // Get deal info
-  const dealResult = await query<{
+): Promise<StageHistoryResult | null> {
+  const result = await query<{
     id: string;
-    name: string;
-    owner: string;
-    amount: number;
-    stage: string;
-    stage_changed_at: Date;
-    created_at: Date;
+    deal_id: string;
+    deal_name: string;
+    deal_amount: string;
+    from_stage: string | null;
+    from_stage_normalized: string | null;
+    to_stage: string;
+    to_stage_normalized: string | null;
+    changed_at: string;
+    duration_in_previous_stage_ms: string | null;
+    source: string;
   }>(
-    `SELECT id, name, owner, amount, stage, stage_changed_at, created_at
-     FROM deals
-     WHERE id = $1 AND workspace_id = $2`,
-    [dealId, workspaceId]
-  );
-
-  if (dealResult.rows.length === 0) return null;
-
-  const deal = dealResult.rows[0];
-
-  // Get stage history
-  const historyResult = await query<StageTransition>(
     `SELECT
+      dsh.id,
       dsh.deal_id,
-      d.name as deal_name,
-      dsh.deal_source_id,
+      d.name AS deal_name,
+      d.amount AS deal_amount,
       dsh.from_stage,
       dsh.from_stage_normalized,
       dsh.to_stage,
       dsh.to_stage_normalized,
       dsh.changed_at,
       dsh.duration_in_previous_stage_ms,
-      ROUND(dsh.duration_in_previous_stage_ms / 86400000.0, 1)::NUMERIC as duration_days,
       dsh.source
-     FROM deal_stage_history dsh
-     JOIN deals d ON d.id = dsh.deal_id
-     WHERE dsh.deal_id = $1 AND dsh.workspace_id = $2
-     ORDER BY dsh.changed_at ASC`,
-    [dealId, workspaceId]
+    FROM deal_stage_history dsh
+    JOIN deals d ON d.id = dsh.deal_id AND d.workspace_id = $1
+    WHERE dsh.workspace_id = $1 AND dsh.deal_id = $2
+    ORDER BY dsh.changed_at ASC`,
+    [workspaceId, dealId]
   );
 
-  // Calculate days in current stage
-  const daysInCurrentStage = deal.stage_changed_at
-    ? Math.floor((Date.now() - new Date(deal.stage_changed_at).getTime()) / 86400000)
-    : 0;
+  if (result.rows.length === 0) return null;
+
+  const first = result.rows[0];
+  const history: StageHistoryEntry[] = result.rows.map((row) => ({
+    id: row.id,
+    dealId: row.deal_id,
+    dealName: row.deal_name || 'Unnamed Deal',
+    dealAmount: parseFloat(row.deal_amount) || 0,
+    fromStage: row.from_stage,
+    fromStageNormalized: row.from_stage_normalized,
+    toStage: row.to_stage,
+    toStageNormalized: row.to_stage_normalized,
+    changedAt: row.changed_at,
+    durationInPreviousStageDays: row.duration_in_previous_stage_ms
+      ? parseFloat(row.duration_in_previous_stage_ms) / (1000 * 60 * 60 * 24)
+      : null,
+    source: row.source,
+  }));
 
   return {
-    deal_id: deal.id,
-    deal_name: deal.name,
-    owner: deal.owner,
-    amount: deal.amount,
-    transitions: historyResult.rows,
-    total_transitions: historyResult.rows.length,
-    current_stage: deal.stage,
-    days_in_current_stage: daysInCurrentStage,
-    created_at: deal.created_at,
+    dealId: first.deal_id,
+    dealName: first.deal_name || 'Unnamed Deal',
+    dealAmount: parseFloat(first.deal_amount) || 0,
+    history,
   };
 }
 
-/**
- * Get stage transitions for all deals in a workspace within a time window
- * Useful for Pipeline Waterfall analysis
- */
+export interface StageTransition {
+  historyId: string;
+  dealId: string;
+  dealName: string;
+  dealOwner: string;
+  dealAmount: number;
+  fromStage: string | null;
+  fromStageNormalized: string | null;
+  toStage: string;
+  toStageNormalized: string | null;
+  changedAt: string;
+  durationInPreviousStageDays: number | null;
+  source: string;
+}
+
 export async function getStageTransitionsInWindow(
   workspaceId: string,
   startDate: Date,
   endDate: Date
 ): Promise<StageTransition[]> {
-  const result = await query<StageTransition>(
+  const result = await query<{
+    history_id: string;
+    deal_id: string;
+    deal_name: string;
+    deal_owner: string;
+    deal_amount: string;
+    from_stage: string | null;
+    from_stage_normalized: string | null;
+    to_stage: string;
+    to_stage_normalized: string | null;
+    changed_at: string;
+    duration_in_previous_stage_ms: string | null;
+    source: string;
+  }>(
     `SELECT
+      dsh.id AS history_id,
       dsh.deal_id,
-      d.name as deal_name,
-      dsh.deal_source_id,
+      d.name AS deal_name,
+      d.owner AS deal_owner,
+      d.amount AS deal_amount,
       dsh.from_stage,
       dsh.from_stage_normalized,
       dsh.to_stage,
       dsh.to_stage_normalized,
       dsh.changed_at,
       dsh.duration_in_previous_stage_ms,
-      ROUND(dsh.duration_in_previous_stage_ms / 86400000.0, 1)::NUMERIC as duration_days,
       dsh.source
-     FROM deal_stage_history dsh
-     JOIN deals d ON d.id = dsh.deal_id
-     WHERE dsh.workspace_id = $1
-       AND dsh.changed_at >= $2
-       AND dsh.changed_at <= $3
-     ORDER BY dsh.changed_at ASC`,
-    [workspaceId, startDate, endDate]
+    FROM deal_stage_history dsh
+    JOIN deals d ON d.id = dsh.deal_id AND d.workspace_id = $1
+    WHERE dsh.workspace_id = $1
+      AND dsh.changed_at >= $2
+      AND dsh.changed_at <= $3
+    ORDER BY dsh.changed_at ASC`,
+    [workspaceId, startDate.toISOString(), endDate.toISOString()]
   );
 
-  return result.rows;
+  return result.rows.map((row) => ({
+    historyId: row.history_id,
+    dealId: row.deal_id,
+    dealName: row.deal_name || 'Unnamed Deal',
+    dealOwner: row.deal_owner || 'Unassigned',
+    dealAmount: parseFloat(row.deal_amount) || 0,
+    fromStage: row.from_stage,
+    fromStageNormalized: row.from_stage_normalized,
+    toStage: row.to_stage,
+    toStageNormalized: row.to_stage_normalized,
+    changedAt: row.changed_at,
+    durationInPreviousStageDays: row.duration_in_previous_stage_ms
+      ? parseFloat(row.duration_in_previous_stage_ms) / (1000 * 60 * 60 * 24)
+      : null,
+    source: row.source,
+  }));
 }
 
-/**
- * Get stage conversion rates (how many deals moved from stage A to stage B)
- * Groups by normalized stages for consistent reporting
- */
+export interface StageConversionRate {
+  fromStage: string;
+  toStage: string;
+  transitionCount: number;
+  avgDurationDays: number | null;
+}
+
 export async function getStageConversionRates(
   workspaceId: string,
-  startDate?: Date,
-  endDate?: Date
+  options?: { startDate?: Date; endDate?: Date }
 ): Promise<StageConversionRate[]> {
-  const conditions = ['workspace_id = $1'];
-  const params: any[] = [workspaceId];
+  const params: unknown[] = [workspaceId];
+  let dateFilter = '';
 
-  if (startDate) {
-    params.push(startDate);
-    conditions.push(`changed_at >= $${params.length}`);
+  if (options?.startDate) {
+    params.push(options.startDate.toISOString());
+    dateFilter += ` AND dsh.changed_at >= $${params.length}`;
+  }
+  if (options?.endDate) {
+    params.push(options.endDate.toISOString());
+    dateFilter += ` AND dsh.changed_at <= $${params.length}`;
   }
 
-  if (endDate) {
-    params.push(endDate);
-    conditions.push(`changed_at <= $${params.length}`);
-  }
-
-  const result = await query<StageConversionRate>(
+  const result = await query<{
+    from_stage: string;
+    to_stage: string;
+    transition_count: string;
+    avg_duration_days: string | null;
+  }>(
     `SELECT
-      from_stage_normalized,
-      to_stage_normalized,
-      COUNT(*)::INTEGER as transition_count,
-      ROUND(AVG(duration_in_previous_stage_ms / 86400000.0), 1)::NUMERIC as avg_duration_days
-     FROM deal_stage_history
-     WHERE ${conditions.join(' AND ')}
-       AND from_stage_normalized IS NOT NULL
-       AND to_stage_normalized IS NOT NULL
-     GROUP BY from_stage_normalized, to_stage_normalized
-     ORDER BY transition_count DESC`,
+      dsh.from_stage_normalized AS from_stage,
+      dsh.to_stage_normalized AS to_stage,
+      COUNT(*) AS transition_count,
+      CASE
+        WHEN AVG(dsh.duration_in_previous_stage_ms) IS NOT NULL
+        THEN ROUND(AVG(dsh.duration_in_previous_stage_ms) / (1000.0 * 60 * 60 * 24), 2)
+        ELSE NULL
+      END AS avg_duration_days
+    FROM deal_stage_history dsh
+    WHERE dsh.workspace_id = $1
+      AND dsh.from_stage_normalized IS NOT NULL
+      AND dsh.to_stage_normalized IS NOT NULL
+      ${dateFilter}
+    GROUP BY dsh.from_stage_normalized, dsh.to_stage_normalized
+    ORDER BY transition_count DESC`,
     params
   );
 
-  return result.rows;
+  return result.rows.map((row) => ({
+    fromStage: row.from_stage,
+    toStage: row.to_stage,
+    transitionCount: parseInt(row.transition_count, 10),
+    avgDurationDays: row.avg_duration_days ? parseFloat(row.avg_duration_days) : null,
+  }));
 }
 
-/**
- * Get stage performance metrics by rep
- * Shows how long deals stay in each stage per rep
- */
+export interface RepStageMetric {
+  owner: string;
+  dealsMoved: number;
+  avgTimeInStageDays: number | null;
+  stagesAdvanced: number;
+  stagesRegressed: number;
+}
+
+const STAGE_ORDER: Record<string, number> = {
+  lead: 1,
+  qualified: 2,
+  discovery: 3,
+  evaluation: 4,
+  proposal: 5,
+  negotiation: 6,
+  decision: 7,
+  closed_won: 8,
+  closed_lost: 8,
+};
+
+function getStageIndex(stage: string | null): number {
+  if (!stage) return 0;
+  return STAGE_ORDER[stage.toLowerCase()] ?? 0;
+}
+
 export async function getRepStageMetrics(
   workspaceId: string,
-  startDate?: Date,
-  endDate?: Date
-): Promise<RepStageMetrics[]> {
-  const conditions = ['dsh.workspace_id = $1'];
-  const params: any[] = [workspaceId];
+  options?: { startDate?: Date; endDate?: Date }
+): Promise<RepStageMetric[]> {
+  const params: unknown[] = [workspaceId];
+  let dateFilter = '';
 
-  if (startDate) {
-    params.push(startDate);
-    conditions.push(`dsh.changed_at >= $${params.length}`);
+  if (options?.startDate) {
+    params.push(options.startDate.toISOString());
+    dateFilter += ` AND dsh.changed_at >= $${params.length}`;
+  }
+  if (options?.endDate) {
+    params.push(options.endDate.toISOString());
+    dateFilter += ` AND dsh.changed_at <= $${params.length}`;
   }
 
-  if (endDate) {
-    params.push(endDate);
-    conditions.push(`dsh.changed_at <= $${params.length}`);
-  }
-
-  const result = await query<RepStageMetrics>(
+  const result = await query<{
+    deal_owner: string;
+    from_stage_normalized: string | null;
+    to_stage_normalized: string | null;
+    duration_in_previous_stage_ms: string | null;
+  }>(
     `SELECT
-      d.owner as rep_name,
-      dsh.from_stage_normalized as stage_normalized,
-      COUNT(*)::INTEGER as deals_entered,
-      COUNT(*)::INTEGER as deals_exited,
-      ROUND(AVG(dsh.duration_in_previous_stage_ms / 86400000.0), 1)::NUMERIC as avg_duration_days,
-      ROUND(MIN(dsh.duration_in_previous_stage_ms / 86400000.0), 1)::NUMERIC as fastest_transition_days,
-      ROUND(MAX(dsh.duration_in_previous_stage_ms / 86400000.0), 1)::NUMERIC as slowest_transition_days
-     FROM deal_stage_history dsh
-     JOIN deals d ON d.id = dsh.deal_id
-     WHERE ${conditions.join(' AND ')}
-       AND dsh.from_stage_normalized IS NOT NULL
-       AND dsh.duration_in_previous_stage_ms IS NOT NULL
-     GROUP BY d.owner, dsh.from_stage_normalized
-     ORDER BY d.owner, avg_duration_days DESC`,
+      d.owner AS deal_owner,
+      dsh.from_stage_normalized,
+      dsh.to_stage_normalized,
+      dsh.duration_in_previous_stage_ms
+    FROM deal_stage_history dsh
+    JOIN deals d ON d.id = dsh.deal_id AND d.workspace_id = $1
+    WHERE dsh.workspace_id = $1
+      ${dateFilter}
+    ORDER BY d.owner`,
     params
   );
 
-  return result.rows;
+  const repMap = new Map<string, {
+    dealsMoved: number;
+    totalDurationMs: number;
+    durationCount: number;
+    advanced: number;
+    regressed: number;
+  }>();
+
+  for (const row of result.rows) {
+    const owner = row.deal_owner || 'Unassigned';
+    if (!repMap.has(owner)) {
+      repMap.set(owner, {
+        dealsMoved: 0,
+        totalDurationMs: 0,
+        durationCount: 0,
+        advanced: 0,
+        regressed: 0,
+      });
+    }
+    const stats = repMap.get(owner)!;
+    stats.dealsMoved++;
+
+    if (row.duration_in_previous_stage_ms) {
+      stats.totalDurationMs += parseFloat(row.duration_in_previous_stage_ms);
+      stats.durationCount++;
+    }
+
+    const fromIdx = getStageIndex(row.from_stage_normalized);
+    const toIdx = getStageIndex(row.to_stage_normalized);
+    if (fromIdx > 0 && toIdx > 0) {
+      if (toIdx > fromIdx) {
+        stats.advanced++;
+      } else if (toIdx < fromIdx) {
+        stats.regressed++;
+      }
+    }
+  }
+
+  const metrics: RepStageMetric[] = [];
+  repMap.forEach((stats, owner) => {
+    metrics.push({
+      owner,
+      dealsMoved: stats.dealsMoved,
+      avgTimeInStageDays: stats.durationCount > 0
+        ? Math.round((stats.totalDurationMs / stats.durationCount / (1000 * 60 * 60 * 24)) * 100) / 100
+        : null,
+      stagesAdvanced: stats.advanced,
+      stagesRegressed: stats.regressed,
+    });
+  });
+
+  return metrics.sort((a, b) => b.dealsMoved - a.dealsMoved);
 }
 
-/**
- * Get deals that have been stuck in a stage longer than a threshold
- * Useful for Pipeline Hygiene alerts
- */
-export async function getStalledDeals(
-  workspaceId: string,
-  stageNormalized: string,
-  daysThreshold: number
-): Promise<Array<{
-  deal_id: string;
-  deal_name: string;
-  owner: string;
+export interface StalledDeal {
+  dealId: string;
+  dealName: string;
   amount: number;
   stage: string;
-  days_in_stage: number;
-  last_changed_at: Date;
-}>> {
+  stageNormalized: string | null;
+  owner: string;
+  pipelineName: string | null;
+  closeDate: string | null;
+  stageChangedAt: string;
+  daysInStage: number;
+}
+
+export async function getStalledDeals(
+  workspaceId: string,
+  staleDays: number = 14
+): Promise<StalledDeal[]> {
   const result = await query<{
     deal_id: string;
     deal_name: string;
-    owner: string;
-    amount: number;
+    amount: string;
     stage: string;
-    days_in_stage: number;
-    last_changed_at: Date;
+    stage_normalized: string | null;
+    owner: string;
+    pipeline_name: string | null;
+    close_date: string | null;
+    stage_changed_at: string;
+    days_in_stage: string;
   }>(
     `SELECT
-      d.id as deal_id,
-      d.name as deal_name,
-      d.owner,
+      d.id AS deal_id,
+      d.name AS deal_name,
       d.amount,
       d.stage,
-      EXTRACT(EPOCH FROM (NOW() - d.stage_changed_at)) / 86400 as days_in_stage,
-      d.stage_changed_at as last_changed_at
-     FROM deals d
-     WHERE d.workspace_id = $1
-       AND d.stage_normalized = $2
-       AND d.stage_changed_at IS NOT NULL
-       AND EXTRACT(EPOCH FROM (NOW() - d.stage_changed_at)) / 86400 > $3
-     ORDER BY days_in_stage DESC`,
-    [workspaceId, stageNormalized, daysThreshold]
+      d.stage_normalized,
+      d.owner,
+      d.pipeline_name,
+      d.close_date,
+      d.stage_changed_at,
+      EXTRACT(DAY FROM (NOW() - d.stage_changed_at))::int AS days_in_stage
+    FROM deals d
+    WHERE d.workspace_id = $1
+      AND d.stage_changed_at IS NOT NULL
+      AND EXTRACT(DAY FROM (NOW() - d.stage_changed_at)) >= $2
+      AND (d.stage_normalized IS NULL
+           OR d.stage_normalized NOT IN ('closed_won', 'closed_lost'))
+    ORDER BY EXTRACT(DAY FROM (NOW() - d.stage_changed_at)) DESC`,
+    [workspaceId, staleDays]
   );
 
-  return result.rows;
+  return result.rows.map((row) => ({
+    dealId: row.deal_id,
+    dealName: row.deal_name || 'Unnamed Deal',
+    amount: parseFloat(row.amount) || 0,
+    stage: row.stage,
+    stageNormalized: row.stage_normalized,
+    owner: row.owner || 'Unassigned',
+    pipelineName: row.pipeline_name,
+    closeDate: row.close_date,
+    stageChangedAt: row.stage_changed_at,
+    daysInStage: parseInt(row.days_in_stage, 10) || 0,
+  }));
 }
 
-/**
- * Get average time-in-stage for each normalized stage
- * Useful for benchmarking and identifying bottlenecks
- */
+export interface StageTimeBenchmark {
+  stage: string;
+  avgDays: number;
+  medianDays: number;
+  dealCount: number;
+}
+
 export async function getAverageTimeInStage(
   workspaceId: string
-): Promise<Array<{
-  stage_normalized: string;
-  avg_duration_days: number;
-  median_duration_days: number;
-  deal_count: number;
-  min_duration_days: number;
-  max_duration_days: number;
-}>> {
+): Promise<StageTimeBenchmark[]> {
   const result = await query<{
-    stage_normalized: string;
-    avg_duration_days: number;
-    median_duration_days: number;
-    deal_count: number;
-    min_duration_days: number;
-    max_duration_days: number;
+    stage: string;
+    avg_days: string;
+    median_days: string;
+    deal_count: string;
   }>(
     `SELECT
-      from_stage_normalized as stage_normalized,
-      ROUND(AVG(duration_in_previous_stage_ms / 86400000.0), 1)::NUMERIC as avg_duration_days,
-      ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY duration_in_previous_stage_ms / 86400000.0), 1)::NUMERIC as median_duration_days,
-      COUNT(*)::INTEGER as deal_count,
-      ROUND(MIN(duration_in_previous_stage_ms / 86400000.0), 1)::NUMERIC as min_duration_days,
-      ROUND(MAX(duration_in_previous_stage_ms / 86400000.0), 1)::NUMERIC as max_duration_days
-     FROM deal_stage_history
-     WHERE workspace_id = $1
-       AND from_stage_normalized IS NOT NULL
-       AND duration_in_previous_stage_ms IS NOT NULL
-     GROUP BY from_stage_normalized
-     ORDER BY avg_duration_days DESC`,
+      dsh.to_stage_normalized AS stage,
+      ROUND(AVG(dsh.duration_in_previous_stage_ms) / (1000.0 * 60 * 60 * 24), 2) AS avg_days,
+      ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (
+        ORDER BY dsh.duration_in_previous_stage_ms
+      ) / (1000.0 * 60 * 60 * 24), 2) AS median_days,
+      COUNT(*) AS deal_count
+    FROM deal_stage_history dsh
+    WHERE dsh.workspace_id = $1
+      AND dsh.to_stage_normalized IS NOT NULL
+      AND dsh.duration_in_previous_stage_ms IS NOT NULL
+    GROUP BY dsh.to_stage_normalized
+    ORDER BY avg_days DESC`,
     [workspaceId]
   );
 
-  return result.rows;
+  return result.rows.map((row) => ({
+    stage: row.stage,
+    avgDays: parseFloat(row.avg_days) || 0,
+    medianDays: parseFloat(row.median_days) || 0,
+    dealCount: parseInt(row.deal_count, 10),
+  }));
 }

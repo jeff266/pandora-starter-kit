@@ -1,0 +1,69 @@
+Perfect! Part 2 of the Deal Stage History feature is now complete and    
+  committed. Here's what was built:                                        
+                                                                           
+  Completed Components                                                     
+                                                                           
+  1. API Routes (server/routes/stage-history.ts)                           
+  - POST                                                                   
+  /api/workspaces/:workspaceId/connectors/hubspot/backfill-stage-history - 
+  Triggers historical backfill, returns 202 Accepted, runs in background   
+  - GET /api/workspaces/:workspaceId/stage-history/stats - Returns         
+  statistics (total transitions, deals with/without history, source        
+  breakdown)                                                               
+  - GET /api/workspaces/:workspaceId/deals/:dealId/stage-history - Returns 
+  complete stage journey for a specific deal                               
+                                                                           
+  2. Query Functions (server/analysis/stage-history-queries.ts)            
+  - getDealStageHistory() - Complete journey for one deal                  
+  - getStageTransitionsInWindow() - All transitions in time range (for     
+  Pipeline Waterfall)                                                      
+  - getStageConversionRates() - Conversion rates between stages            
+  - getRepStageMetrics() - Stage performance by rep (for Rep Scorecard)    
+  - getStalledDeals() - Deals stuck in a stage (for Pipeline Hygiene       
+  alerts)                                                                  
+  - getAverageTimeInStage() - Benchmark metrics per stage                  
+                                                                           
+  3. Backfill Script (scripts/backfill-stage-history.ts)                   
+  - CLI tool for running backfill manually: npm run backfill-stage-history 
+  <workspace_id>                                                           
+  - Shows pre/post statistics, progress updates, error summary             
+  - Helpful for testing and one-time backfills                             
+                                                                           
+  4. Updated Computed Fields (server/computed-fields/temporal-fields.ts)   
+  - computed_days_in_stage now uses real stage_changed_at data instead of  
+  placeholder                                                              
+  - Accurate calculation: FLOOR(EXTRACT(EPOCH FROM (NOW() -                
+  stage_changed_at)) / 86400)                                              
+                                                                           
+  5. Server Integration (server/index.ts)                                  
+  - Wired stage-history routes into Express app                            
+                                                                           
+  6. Comprehensive Documentation (STAGE_HISTORY_GUIDE.md)                  
+  - Architecture overview (sync detection + historical backfill)           
+  - Implementation details for all components                              
+  - Usage guide with code examples                                         
+  - Skill integration patterns (Pipeline Hygiene, Rep Scorecard, Pipeline  
+  Waterfall)                                                               
+  - Monitoring and troubleshooting tips                                    
+  - Database queries for debugging                                         
+                                                                           
+  Ready for Testing                                                        
+                                                                           
+  As you requested, everything is now built and ready to test together on  
+  Replit. The complete feature includes:                                   
+                                                                           
+  Part 1 (already committed):                                              
+  - Migration creating deal_stage_history table                            
+  - Stage tracker for sync detection                                       
+  - HubSpot backfill module                                                
+  - Integration into HubSpot sync                                          
+                                                                           
+  Part 2 (just committed):                                                 
+  - API routes                                                             
+  - Query functions for skills                                             
+  - Backfill script                                                        
+  - Updated computed fields                                                
+  - Documentation                                                          
+                                                                           
+  All changes have been committed. You can now pull to Replit and test the 
+  full stage history tracking system end-to-end.

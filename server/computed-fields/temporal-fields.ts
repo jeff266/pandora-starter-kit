@@ -3,7 +3,7 @@ export const DEAL_TEMPORAL_FIELDS = `
   CASE
     WHEN stage_changed_at IS NOT NULL
     THEN FLOOR(EXTRACT(EPOCH FROM (NOW() - stage_changed_at)) / 86400)::integer
-    ELSE NULL
+    ELSE days_in_stage
   END AS computed_days_in_stage
 `;
 
@@ -13,12 +13,7 @@ export const DEAL_WITH_TEMPORAL_SQL = `
       WHEN d.last_activity_date IS NOT NULL
       THEN FLOOR(EXTRACT(EPOCH FROM (NOW() - d.last_activity_date)) / 86400)::integer
       ELSE NULL
-    END AS computed_days_since_activity,
-    CASE
-      WHEN d.stage_changed_at IS NOT NULL
-      THEN FLOOR(EXTRACT(EPOCH FROM (NOW() - d.stage_changed_at)) / 86400)::integer
-      ELSE NULL
-    END AS computed_days_in_stage
+    END AS computed_days_since_activity
   FROM deals d
 `;
 
@@ -31,12 +26,7 @@ export function dealsWithTemporalQuery(workspaceId: string, additionalWhere?: st
           WHEN d.last_activity_date IS NOT NULL
           THEN FLOOR(EXTRACT(EPOCH FROM (NOW() - d.last_activity_date)) / 86400)::integer
           ELSE NULL
-        END AS computed_days_since_activity,
-        CASE
-          WHEN d.stage_changed_at IS NOT NULL
-          THEN FLOOR(EXTRACT(EPOCH FROM (NOW() - d.stage_changed_at)) / 86400)::integer
-          ELSE NULL
-        END AS computed_days_in_stage
+        END AS computed_days_since_activity
       FROM deals d
       WHERE d.workspace_id = $1 ${where}
     `,
