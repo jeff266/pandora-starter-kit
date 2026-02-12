@@ -432,6 +432,182 @@ async function getCustomFieldWeights(workspaceId: string): Promise<CustomFieldWe
 }
 
 // ============================================================================
+// ICP Weight Loading (Lead Scoring V2)
+// ============================================================================
+
+interface ICPProfile {
+  id: string;
+  scoring_weights: any;
+  model_metadata: any;
+  personas: any[];
+  company_profile: any;
+  scoring_method: string;
+  deals_analyzed: number;
+  won_deals: number;
+  generated_at: Date;
+}
+
+interface ICPWeights {
+  personaWeights: Record<string, number>;
+  companyFitRules: Array<{
+    field: string;
+    range?: [number, number];
+    value?: string;
+    lift: number;
+    points: number;
+  }>;
+  committeeBonuses: Array<{
+    roles: string[];
+    lift: number;
+    bonusPoints: number;
+  }>;
+  leadSourceWeights: Record<string, number>;
+  customFieldOverrides: Record<string, Record<string, number>>;
+}
+
+async function loadICPWeights(workspaceId: string): Promise<{ profile: ICPProfile; weights: ICPWeights } | null> {
+  try {
+    const result = await query<ICPProfile>(`
+      SELECT
+        id,
+        scoring_weights,
+        model_metadata,
+        personas,
+        company_profile,
+        scoring_method,
+        deals_analyzed,
+        won_deals,
+        generated_at
+      FROM icp_profiles
+      WHERE workspace_id = $1 AND status = 'active'
+      ORDER BY generated_at DESC LIMIT 1
+    `, [workspaceId]);
+
+    if (result.rows.length === 0) {
+      logger.info('[Lead Scoring] No active ICP profile found, using default weights');
+      return null;
+    }
+
+    const profile = result.rows[0];
+    logger.info('[Lead Scoring] Using ICP profile', {
+      profileId: profile.id,
+      dealsAnalyzed: profile.deals_analyzed,
+      wonDeals: profile.won_deals,
+      generatedAt: profile.generated_at,
+    });
+
+    const weights = mapICPToScoringWeights(profile);
+    return { profile, weights };
+  } catch (error) {
+    logger.warn('[Lead Scoring] Failed to load ICP profile', { error });
+    return null;
+  }
+}
+
+function mapICPToScoringWeights(profile: ICPProfile): ICPWeights {
+  const weights: ICPWeights = {
+    personaWeights: {},
+    companyFitRules: [],
+    committeeBonuses: [],
+    leadSourceWeights: {},
+    customFieldOverrides: {},
+  };
+
+  // Map persona lifts to threading weights
+  if (Array.isArray(profile.personas)) {
+    for (const persona of profile.personas) {
+      if (persona.lift && persona.topBuyingRoles) {
+        // Convert lift to points: 1.5x = 5pts, 2.0x = 10pts, 1.0x = 0pts
+        const points = Math.round(Math.max(0, (persona.lift - 1.0) * 10));
+        // Use the most common buying role for this persona
+        const primaryRole = persona.topBuyingRoles[0];
+        if (primaryRole) {
+          weights.personaWeights[primaryRole.toLowerCase()] = Math.min(10, points);
+        }
+      }
+    }
+  }
+
+  // Map company profile to fit rules
+  if (profile.company_profile) {
+    // Employee count bands
+    if (Array.isArray(profile.company_profile.sizeWinRates)) {
+      for (const band of profile.company_profile.sizeWinRates) {
+        const rangeMatch = band.bucket?.match(/(\d+)-(\d+)/);
+        if (rangeMatch) {
+          const lift = band.winRate / (profile.won_deals / profile.deals_analyzed || 0.5);
+          weights.companyFitRules.push({
+            field: 'employee_count',
+            range: [parseInt(rangeMatch[1]), parseInt(rangeMatch[2])],
+            lift,
+            points: Math.round(Math.max(0, (lift - 1.0) * 15)),
+          });
+        }
+      }
+    }
+
+    // Industry
+    if (Array.isArray(profile.company_profile.industryWinRates)) {
+      for (const ind of profile.company_profile.industryWinRates) {
+        const lift = ind.winRate / (profile.won_deals / profile.deals_analyzed || 0.5);
+        weights.companyFitRules.push({
+          field: 'industry',
+          value: ind.industry,
+          lift,
+          points: Math.round(Math.max(0, (lift - 1.0) * 15)),
+        });
+      }
+    }
+
+    // Lead source funnel
+    if (Array.isArray(profile.company_profile.leadSourceFunnel)) {
+      const maxRate = Math.max(...profile.company_profile.leadSourceFunnel.map((s: any) => s.fullFunnelRate || 0));
+      if (maxRate > 0) {
+        for (const source of profile.company_profile.leadSourceFunnel) {
+          weights.leadSourceWeights[source.source.toLowerCase()] = Math.round((source.fullFunnelRate / maxRate) * 8);
+        }
+      }
+    }
+  }
+
+  // Map buying committee combinations
+  if (profile.model_metadata?.buyingCommittee || Array.isArray(profile.model_metadata?.committees)) {
+    const committees = profile.model_metadata.buyingCommittee || profile.model_metadata.committees || [];
+    for (const combo of committees) {
+      if (combo.lift >= 1.3) {
+        weights.committeeBonuses.push({
+          roles: combo.personas || combo.roles || [],
+          lift: combo.lift,
+          bonusPoints: Math.round(Math.min(8, (combo.lift - 1.0) * 10)),
+        });
+      }
+    }
+  }
+
+  // Custom field segmentation overrides
+  if (profile.company_profile?.customFieldSegments) {
+    for (const seg of profile.company_profile.customFieldSegments) {
+      if (seg.segments) {
+        weights.customFieldOverrides[seg.fieldKey] = {};
+        for (const s of seg.segments) {
+          const lift = s.winRate / (profile.won_deals / profile.deals_analyzed || 0.5);
+          weights.customFieldOverrides[seg.fieldKey][s.value] = Math.round(Math.min(10, Math.max(0, (lift - 0.5) * 10)));
+        }
+      }
+    }
+  }
+
+  logger.info('[Lead Scoring] Mapped ICP weights', {
+    personaWeights: Object.keys(weights.personaWeights).length,
+    companyFitRules: weights.companyFitRules.length,
+    committeeBonuses: weights.committeeBonuses.length,
+    leadSourceWeights: Object.keys(weights.leadSourceWeights).length,
+  });
+
+  return weights;
+}
+
+// ============================================================================
 // Scoring Engine
 // ============================================================================
 
@@ -543,7 +719,8 @@ function scoreDeal(
   deal: DealFeatures,
   customFieldWeights: CustomFieldWeight[],
   workspaceMedianAmount: number,
-  hasConversationConnector: boolean
+  hasConversationConnector: boolean,
+  icpWeights: ICPWeights | null = null
 ): LeadScore {
   const breakdown: Record<string, ScoreComponent> = {};
   let totalPoints = 0;
@@ -585,6 +762,66 @@ function scoreDeal(
     }
   }
 
+  // ICP-specific scoring (Lead Scoring V2)
+  if (icpWeights) {
+    // Company fit scoring (employee count + industry)
+    for (const rule of icpWeights.companyFitRules) {
+      if (rule.field === 'employee_count' && rule.range && deal.employeeCount) {
+        const [min, max] = rule.range;
+        if (deal.employeeCount >= min && deal.employeeCount <= max) {
+          breakdown['icp_company_size'] = { value: deal.employeeCount, points: rule.points, weight: 15 };
+          totalPoints += rule.points;
+          maxPossible += 15;
+          break;
+        }
+      } else if (rule.field === 'industry' && rule.value && deal.industry) {
+        if (deal.industry.toLowerCase() === rule.value.toLowerCase()) {
+          breakdown['icp_industry'] = { value: deal.industry, points: rule.points, weight: 15 };
+          totalPoints += rule.points;
+          maxPossible += 15;
+          break;
+        }
+      }
+    }
+
+    // Buying committee bonus
+    const rolesPresent = new Set(deal.rolesPresent.map(r => r.toLowerCase()));
+    for (const combo of icpWeights.committeeBonuses) {
+      if (combo.roles.every(r => rolesPresent.has(r.toLowerCase()))) {
+        breakdown[`icp_committee_${combo.roles.join('+')}`] = {
+          value: combo.roles.join(' + '),
+          points: combo.bonusPoints,
+          weight: 8,
+        };
+        totalPoints += combo.bonusPoints;
+        maxPossible += 8;
+        break; // Only award highest combo bonus
+      }
+    }
+
+    // Lead source scoring
+    const leadSource = deal.customFields?.LeadSource || deal.customFields?.lead_source || deal.customFields?.hs_analytics_source;
+    if (leadSource && icpWeights.leadSourceWeights[leadSource.toLowerCase()]) {
+      const points = icpWeights.leadSourceWeights[leadSource.toLowerCase()];
+      breakdown['icp_lead_source'] = { value: leadSource, points, weight: 8 };
+      totalPoints += points;
+      maxPossible += 8;
+    }
+
+    // Persona-weighted threading (override default has_champion, etc.)
+    if (Object.keys(icpWeights.personaWeights).length > 0) {
+      let personaPoints = 0;
+      for (const role of deal.rolesPresent) {
+        const weight = icpWeights.personaWeights[role.toLowerCase()] || 0;
+        personaPoints += weight;
+      }
+      personaPoints = Math.min(20, personaPoints); // Cap at threading budget
+      breakdown['icp_persona_fit'] = { value: deal.rolesPresent.join(', '), points: personaPoints, weight: 20 };
+      totalPoints += personaPoints;
+      maxPossible += 20;
+    }
+  }
+
   const normalizedScore = maxPossible > 0
     ? Math.max(0, Math.min(100, Math.round((totalPoints / maxPossible) * 100)))
     : 0;
@@ -601,7 +838,7 @@ function scoreDeal(
     totalScore: normalizedScore,
     scoreBreakdown: breakdown,
     scoreGrade: grade,
-    scoringMethod: 'point_based',
+    scoringMethod: icpWeights ? 'icp_point_based' : 'point_based',
     scoredAt: new Date(),
   };
 }
@@ -728,7 +965,7 @@ async function persistScore(workspaceId: string, score: LeadScore): Promise<void
 export async function scoreLeads(workspaceId: string): Promise<ScoringResult> {
   logger.info('[Lead Scoring] Starting scoring run', { workspaceId });
 
-  const [dealFeatures, contactFeatures, customFieldWeights, connectorResult] = await Promise.all([
+  const [dealFeatures, contactFeatures, customFieldWeights, connectorResult, icpProfile] = await Promise.all([
     extractDealFeatures(workspaceId),
     extractContactFeatures(workspaceId),
     getCustomFieldWeights(workspaceId),
@@ -737,12 +974,17 @@ export async function scoreLeads(workspaceId: string): Promise<ScoringResult> {
       WHERE workspace_id = $1 AND connector_name IN ('gong', 'fireflies')
       LIMIT 1
     `, [workspaceId]),
+    loadICPWeights(workspaceId),
   ]);
 
   const hasConversationConnector = connectorResult.rows.length > 0;
+  const icpWeights = icpProfile?.weights || null;
+
   logger.info('[Lead Scoring] Workspace config', {
     hasConversationConnector,
     customFieldWeightsCount: customFieldWeights.length,
+    hasICPProfile: !!icpProfile,
+    icpProfileId: icpProfile?.profile.id,
   });
 
   const amounts = dealFeatures.map(d => d.amount).filter((a): a is number => a !== null && a > 0);
@@ -752,7 +994,7 @@ export async function scoreLeads(workspaceId: string): Promise<ScoringResult> {
 
   const dealScores: LeadScore[] = [];
   for (const deal of dealFeatures) {
-    const score = scoreDeal(deal, customFieldWeights, workspaceMedianAmount, hasConversationConnector);
+    const score = scoreDeal(deal, customFieldWeights, workspaceMedianAmount, hasConversationConnector, icpWeights);
     dealScores.push(score);
     await persistScore(workspaceId, score);
   }
