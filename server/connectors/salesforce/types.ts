@@ -271,3 +271,38 @@ export const DEFAULT_ACCOUNT_FIELDS = [
   'LastModifiedDate',
   'SystemModstamp',
 ];
+
+// ============================================================================
+// Field Metadata (for dynamic custom field discovery)
+// ============================================================================
+
+export interface SalesforcePicklistValue {
+  value: string;
+  label: string;
+  active?: boolean;
+}
+
+export interface SalesforceField {
+  name: string;
+  label: string;
+  type: string;
+  custom: boolean;
+  picklistValues?: SalesforcePicklistValue[];
+  length?: number;
+  precision?: number;
+  scale?: number;
+}
+
+export interface SalesforceDescribeResult {
+  name: string;
+  label: string;
+  fields: SalesforceField[];
+}
+
+// Extra standard fields to include for segmentation
+// (not already mapped to normalized columns)
+export const EXTRA_STANDARD_FIELDS = {
+  opportunity: ['Type', 'LeadSource', 'ForecastCategory', 'NextStep', 'Territory', 'Description'],
+  account: ['Industry', 'Type', 'Rating', 'Ownership', 'NumberOfEmployees', 'AnnualRevenue', 'BillingCountry', 'BillingState'],
+  contact: ['LeadSource', 'Department', 'Level', 'MailingCountry', 'MailingState'],
+};

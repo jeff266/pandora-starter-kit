@@ -20,6 +20,7 @@ import type {
   SalesforceTask,
   SalesforceEvent,
 } from './types.js';
+import { EXTRA_STANDARD_FIELDS } from './types.js';
 
 // ============================================================================
 // Normalized Entity Types (matching HubSpot schema)
@@ -210,6 +211,117 @@ function parseSeniority(title: string | null): string | null {
 }
 
 // ============================================================================
+// Custom Field Extraction
+// ============================================================================
+
+/**
+ * Fields that are already mapped to normalized schema columns
+ * These should NOT be included in custom_fields to avoid duplication
+ */
+const MAPPED_OPPORTUNITY_FIELDS = new Set([
+  'Id',
+  'Name',
+  'Amount',
+  'StageName',
+  'CloseDate',
+  'Probability',
+  'ForecastCategoryName',
+  'OwnerId',
+  'Owner',
+  'AccountId',
+  'Account',
+  'IsClosed',
+  'IsWon',
+  'CreatedDate',
+  'LastModifiedDate',
+  'SystemModstamp',
+]);
+
+const MAPPED_CONTACT_FIELDS = new Set([
+  'Id',
+  'FirstName',
+  'LastName',
+  'Email',
+  'Phone',
+  'Title',
+  'Department',
+  'AccountId',
+  'Account',
+  'OwnerId',
+  'Owner',
+  'CreatedDate',
+  'LastModifiedDate',
+  'SystemModstamp',
+]);
+
+const MAPPED_ACCOUNT_FIELDS = new Set([
+  'Id',
+  'Name',
+  'Website',
+  'Industry',
+  'NumberOfEmployees',
+  'AnnualRevenue',
+  'OwnerId',
+  'Owner',
+  'BillingCity',
+  'BillingState',
+  'BillingCountry',
+  'CreatedDate',
+  'LastModifiedDate',
+  'SystemModstamp',
+]);
+
+/**
+ * Extract unmapped fields into custom_fields object
+ * Includes:
+ * - All custom fields (ending with __c)
+ * - Extra standard fields defined in EXTRA_STANDARD_FIELDS
+ * - Excludes fields already mapped to normalized schema
+ */
+function extractCustomFields(
+  rawObject: Record<string, any>,
+  objectType: 'opportunity' | 'contact' | 'account',
+  mappedFields: Set<string>
+): Record<string, any> {
+  const customFields: Record<string, any> = {};
+  const extraStandardFields = EXTRA_STANDARD_FIELDS[objectType] || [];
+
+  for (const [key, value] of Object.entries(rawObject)) {
+    // Skip null/undefined values
+    if (value === null || value === undefined) {
+      continue;
+    }
+
+    // Skip fields already mapped to normalized schema
+    if (mappedFields.has(key)) {
+      continue;
+    }
+
+    // Skip relationship objects (e.g., Owner, Account)
+    if (typeof value === 'object' && !Array.isArray(value)) {
+      continue;
+    }
+
+    // Include if:
+    // 1. It's a custom field (contains __c)
+    // 2. It's in the extra standard fields list
+    const isCustom = key.includes('__c');
+    const isExtraStandard = extraStandardFields.includes(key);
+
+    if (isCustom || isExtraStandard) {
+      // Sanitize text values to prevent database errors
+      if (typeof value === 'string') {
+        customFields[key] = sanitizeText(value, 5000);
+      } else {
+        customFields[key] = value;
+      }
+    }
+  }
+
+  return customFields;
+}
+
+// ============================================================================
 // Opportunity Transform
 // ============================================================================
 
@@ -286,39 +398,16 @@ export function transformOpportunity(
     }
   }
 
-  // Build custom fields
-  const customFields: Record<string, unknown> = {};
+  // Extract all unmapped custom and extra standard fields
+  const customFields = extractCustomFields(
+    opp as unknown as Record<string, any>,
+    'opportunity',
+    MAPPED_OPPORTUNITY_FIELDS
+  );
 
-  if (opp.Probability !== null) {
-    customFields.probability = opp.Probability;
-  }
-
-  if (opp.Description) {
-    customFields.description = sanitizeText(opp.Description, 5000);
-  }
-
-  if (opp.NextStep) {
-    customFields.next_step = sanitizeText(opp.NextStep, 1000);
-  }
-
-  if (opp.Type) {
-    customFields.type = opp.Type;
-  }
-
-  if (opp.LeadSource) {
-    customFields.lead_source = opp.LeadSource;
-  }
-
-  // Flag if amount is zero but deal is open
+  // Flag if amount is zero but deal is open (enrichment hint)
   if (opp.Amount === 0 && !opp.IsClosed) {
     customFields._amount_zero = true;
-  }
-
-  // Extract custom fields (fields with __c suffix or namespace__FieldName__c)
-  for (const [key, value] of Object.entries(opp)) {
-    if (key.includes('__c') && value !== null && value !== undefined) {
-      customFields[key] = value;
-    }
   }
 
   return {
@@ -351,6 +440,13 @@ export function transformContact(
   contact: SalesforceContact,
   workspaceId: string
 ): NormalizedContact {
+  // Extract all unmapped custom and extra standard fields
+  const customFields = extractCustomFields(
+    contact as unknown as Record<string, any>,
+    'contact',
+    MAPPED_CONTACT_FIELDS
+  );
+
   return {
     workspace_id: workspaceId,
     source: 'salesforce',
@@ -366,7 +462,7 @@ export function transformContact(
     engagement_score: null,
     phone: sanitizeText(contact.Phone, 50),
     last_activity_date: null,
-    custom_fields: {},
+    custom_fields: customFields,
     account_source_id: contact.AccountId,
   };
 }
@@ -379,6 +475,13 @@ export function transformAccount(
   account: SalesforceAccount,
   workspaceId: string
 ): NormalizedAccount {
+  // Extract all unmapped custom and extra standard fields
+  const customFields = extractCustomFields(
+    account as unknown as Record<string, any>,
+    'account',
+    MAPPED_ACCOUNT_FIELDS
+  );
+
   return {
     workspace_id: workspaceId,
     source: 'salesforce',
@@ -390,7 +493,7 @@ export function transformAccount(
     employee_count: sanitizeInteger(account.NumberOfEmployees), // FIX: empty string would crash PostgreSQL
     annual_revenue: sanitizeNumber(account.AnnualRevenue), // FIX: empty string would crash PostgreSQL
     owner: account.Owner?.Email || account.Owner?.Name || account.OwnerId,
-    custom_fields: {},
+    custom_fields: customFields,
   };
 }
 

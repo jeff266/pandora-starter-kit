@@ -28,6 +28,8 @@ import {
   DEFAULT_OPPORTUNITY_FIELDS,
   DEFAULT_CONTACT_FIELDS,
   DEFAULT_ACCOUNT_FIELDS,
+  EXTRA_STANDARD_FIELDS,
+  type SalesforceField,
 } from './types.js';
 
 // ============================================================================
@@ -272,6 +274,112 @@ export class SalesforceClient {
     });
 
     return allRecords;
+  }
+
+  // ==========================================================================
+  // Object Metadata (Field Discovery)
+  // ==========================================================================
+
+  /**
+   * Get field metadata for a Salesforce object
+   * Returns all custom fields and select standard fields useful for segmentation
+   * Caches result per sync run - call once at start of sync
+   */
+  async getObjectFields(objectName: string): Promise<import('./types.js').SalesforceField[]> {
+    const { SalesforceField, EXTRA_STANDARD_FIELDS } = await import('./types.js');
+
+    const url = `${this.baseUrl}/sobjects/${objectName}/describe`;
+
+    logger.debug('[Salesforce Client] Fetching object metadata', { objectName, url });
+
+    const response = await withRetry(
+      async () => {
+        const res = await fetch(url, {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${this.accessToken}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (!res.ok) {
+          const error = (await res.json()) as any;
+          throw new Error(`Failed to describe ${objectName}: ${error.message || res.statusText}`);
+        }
+
+        return res.json();
+      },
+      { maxRetries: 3, delayMs: 1000 }
+    );
+
+    const describeResult = response as any;
+
+    // Filter fields to keep:
+    // 1. All custom fields (name ends with __c)
+    // 2. Extra standard fields for segmentation (if they exist)
+    const extraStandardForObject = EXTRA_STANDARD_FIELDS[objectName.toLowerCase() as keyof typeof EXTRA_STANDARD_FIELDS] || [];
+
+    // Skip complex field types that aren't useful
+    const SKIP_TYPES = new Set([
+      'address', 'blob', 'base64', 'encryptedstring', 'complexvalue',
+      'location', 'datacategorygroupreference', 'anyType',
+    ]);
+
+    const fields: import('./types.js').SalesforceField[] = [];
+
+    for (const field of describeResult.fields || []) {
+      const isCustom = field.custom === true || field.name.includes('__c');
+      const isExtraStandard = extraStandardForObject.includes(field.name);
+
+      if (!isCustom && !isExtraStandard) {
+        continue; // Skip standard fields not in the extra list
+      }
+
+      if (SKIP_TYPES.has(field.type.toLowerCase())) {
+        continue; // Skip complex types
+      }
+
+      const fieldDef: import('./types.js').SalesforceField = {
+        name: field.name,
+        label: field.label || field.name,
+        type: field.type,
+        custom: isCustom,
+      };
+
+      // Include picklist values if available
+      if (field.type === 'picklist' && field.picklistValues && field.picklistValues.length > 0) {
+        fieldDef.picklistValues = field.picklistValues.map((pv: any) => ({
+          value: pv.value,
+          label: pv.label,
+          active: pv.active,
+        }));
+      }
+
+      // Include length for string fields
+      if (field.length) {
+        fieldDef.length = field.length;
+      }
+
+      // Include precision/scale for numeric fields
+      if (field.precision) {
+        fieldDef.precision = field.precision;
+      }
+      if (field.scale) {
+        fieldDef.scale = field.scale;
+      }
+
+      fields.push(fieldDef);
+    }
+
+    logger.info('[Salesforce Client] Discovered fields', {
+      objectName,
+      totalFields: describeResult.fields?.length || 0,
+      customFields: fields.filter(f => f.custom).length,
+      extraStandardFields: fields.filter(f => !f.custom).length,
+      returned: fields.length,
+    });
+
+    return fields;
   }
 
   // ==========================================================================

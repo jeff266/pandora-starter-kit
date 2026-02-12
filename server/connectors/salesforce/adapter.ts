@@ -18,7 +18,11 @@ import type {
   NormalizedAccount,
   NormalizedActivity,
 } from './transform.js';
-import type { SalesforceStage, SalesforceCredentials } from './types.js';
+import type {
+  SalesforceStage,
+  SalesforceCredentials,
+  SalesforceField,
+} from './types.js';
 import type { CRMAdapter, SyncResult } from '../adapters/types.js';
 import { createLogger } from '../../utils/logger.js';
 const logger = createLogger('Salesforce');
@@ -173,6 +177,104 @@ export class SalesforceAdapter implements CRMAdapter {
   }
 
   // ==========================================================================
+  // Custom Field Discovery
+  // ==========================================================================
+
+  /**
+   * Fetch custom field metadata and build complete field lists for SOQL queries
+   */
+  private async buildFieldLists(client: SalesforceClient): Promise<{
+    opportunityFields: string[];
+    contactFields: string[];
+    accountFields: string[];
+    fieldMetadata: {
+      opportunity: SalesforceField[];
+      contact: SalesforceField[];
+      account: SalesforceField[];
+    };
+  }> {
+    // Import default field lists
+    const { DEFAULT_OPPORTUNITY_FIELDS, DEFAULT_CONTACT_FIELDS, DEFAULT_ACCOUNT_FIELDS } = await import('./types.js');
+
+    // Fetch field metadata in parallel
+    const [oppFieldMeta, contactFieldMeta, accountFieldMeta] = await Promise.all([
+      client.getObjectFields('Opportunity'),
+      client.getObjectFields('Contact'),
+      client.getObjectFields('Account'),
+    ]);
+
+    // Extract field names from metadata
+    const oppCustomFieldNames = oppFieldMeta.map(f => f.name);
+    const contactCustomFieldNames = contactFieldMeta.map(f => f.name);
+    const accountCustomFieldNames = accountFieldMeta.map(f => f.name);
+
+    // Combine with defaults, deduplicating
+    const opportunityFields = Array.from(new Set([
+      ...DEFAULT_OPPORTUNITY_FIELDS,
+      ...oppCustomFieldNames,
+    ]));
+
+    const contactFields = Array.from(new Set([
+      ...DEFAULT_CONTACT_FIELDS,
+      ...contactCustomFieldNames,
+    ]));
+
+    const accountFields = Array.from(new Set([
+      ...DEFAULT_ACCOUNT_FIELDS,
+      ...accountCustomFieldNames,
+    ]));
+
+    logger.info('[Salesforce Adapter] Built field lists', {
+      opportunity: { default: DEFAULT_OPPORTUNITY_FIELDS.length, custom: oppCustomFieldNames.length, total: opportunityFields.length },
+      contact: { default: DEFAULT_CONTACT_FIELDS.length, custom: contactCustomFieldNames.length, total: contactFields.length },
+      account: { default: DEFAULT_ACCOUNT_FIELDS.length, custom: accountCustomFieldNames.length, total: accountFields.length },
+    });
+
+    return {
+      opportunityFields,
+      contactFields,
+      accountFields,
+      fieldMetadata: {
+        opportunity: oppFieldMeta,
+        contact: contactFieldMeta,
+        account: accountFieldMeta,
+      },
+    };
+  }
+
+  /**
+   * Store field metadata in connector_configs for use by custom field discovery engine
+   */
+  private async storeFieldMetadata(
+    workspaceId: string,
+    fieldMetadata: { opportunity: SalesforceField[]; contact: SalesforceField[]; account: SalesforceField[] }
+  ): Promise<void> {
+    try {
+      await query(
+        `UPDATE connections
+         SET connector_configs = jsonb_set(
+           COALESCE(connector_configs, '{}'::jsonb),
+           '{field_metadata}',
+           $1::jsonb
+         ),
+         updated_at = NOW()
+         WHERE workspace_id = $2 AND connector_name = 'salesforce'`,
+        [JSON.stringify(fieldMetadata), workspaceId]
+      );
+
+      logger.debug('[Salesforce Adapter] Stored field metadata', {
+        workspaceId,
+        opportunity: fieldMetadata.opportunity.length,
+        contact: fieldMetadata.contact.length,
+        account: fieldMetadata.account.length,
+      });
+    } catch (error) {
+      logger.warn('[Salesforce Adapter] Failed to store field metadata', { error });
+      // Non-fatal - continue with sync
+    }
+  }
+
+  // ==========================================================================
   // Initial Sync
   // ==========================================================================
 
@@ -186,6 +288,12 @@ export class SalesforceAdapter implements CRMAdapter {
     accounts?: SyncResult<NormalizedAccount>;
   }> {
     const client = await this.createClientWithRefresh(credentials, workspaceId);
+
+    // Fetch custom field metadata and build field lists
+    const { opportunityFields, contactFields, accountFields, fieldMetadata } = await this.buildFieldLists(client);
+
+    // Store field metadata for custom field discovery engine
+    await this.storeFieldMetadata(workspaceId, fieldMetadata);
 
     // Get stage metadata (needed for deal transformation)
     let stageMap = new Map<string, SalesforceStage>();
@@ -222,13 +330,13 @@ export class SalesforceAdapter implements CRMAdapter {
     });
 
     // Sync accounts first (needed for FK resolution)
-    const accounts = await this.syncAccounts(client, workspaceId, accountCount);
+    const accounts = await this.syncAccounts(client, workspaceId, accountCount, accountFields);
 
     // Sync contacts second
-    const contacts = await this.syncContacts(client, workspaceId, contactCount);
+    const contacts = await this.syncContacts(client, workspaceId, contactCount, contactFields);
 
     // Sync opportunities last
-    const deals = await this.syncOpportunities(client, workspaceId, oppCount, stageMap);
+    const deals = await this.syncOpportunities(client, workspaceId, oppCount, stageMap, opportunityFields);
 
     logger.info('[Salesforce Adapter] Initial sync completed', {
       accountsSucceeded: accounts.succeeded.length,
@@ -265,6 +373,12 @@ export class SalesforceAdapter implements CRMAdapter {
     const client = await this.createClientWithRefresh(credentials, workspaceId);
 
     try {
+      // Fetch custom field metadata and build field lists
+      const { opportunityFields, contactFields, accountFields, fieldMetadata } = await this.buildFieldLists(client);
+
+      // Store field metadata for custom field discovery engine
+      await this.storeFieldMetadata(workspaceId, fieldMetadata);
+
       const stages = await client.getOpportunityStages();
       const stageMap = new Map(stages.map(s => [s.ApiName, s]));
 
@@ -274,9 +388,9 @@ export class SalesforceAdapter implements CRMAdapter {
 
       // Use REST API for incremental (volumes are small)
       const [rawAccounts, rawContacts, rawOpportunities] = await Promise.all([
-        client.getModifiedSince('Account', [], lastSyncTime),
-        client.getModifiedSince('Contact', [], lastSyncTime),
-        client.getModifiedSince('Opportunity', [], lastSyncTime),
+        client.getModifiedSince('Account', accountFields, lastSyncTime),
+        client.getModifiedSince('Contact', contactFields, lastSyncTime),
+        client.getModifiedSince('Opportunity', opportunityFields, lastSyncTime),
       ]);
 
       // Transform and upsert
@@ -411,26 +525,28 @@ export class SalesforceAdapter implements CRMAdapter {
     client: SalesforceClient,
     workspaceId: string,
     count: number,
-    stageMap: Map<string, SalesforceStage>
+    stageMap: Map<string, SalesforceStage>,
+    fields: string[]
   ): Promise<SyncResult<NormalizedDeal>> {
     let rawOpportunities: any[] = [];
 
     try {
       if (count < 10000) {
         // Use REST API for smaller datasets
-        rawOpportunities = await client.getOpportunities();
+        rawOpportunities = await client.getOpportunities(fields);
       } else {
         // Try Bulk API first for large datasets
         try {
-          logger.info('[Salesforce Adapter] Using Bulk API for opportunities', { count });
-          rawOpportunities = await client.bulkQuery('SELECT Id, Name, Amount, StageName, CloseDate, Probability, ForecastCategoryName, OwnerId, AccountId, Type, LeadSource, IsClosed, IsWon, Description, NextStep, CreatedDate, LastModifiedDate, SystemModstamp FROM Opportunity');
+          logger.info('[Salesforce Adapter] Using Bulk API for opportunities', { count, fields: fields.length });
+          const soql = `SELECT ${fields.join(', ')} FROM Opportunity`;
+          rawOpportunities = await client.bulkQuery(soql);
         } catch (bulkError) {
           // Fallback to REST API if Bulk API fails
           logger.warn('[Salesforce Adapter] Bulk API failed, falling back to REST API', {
             error: bulkError instanceof Error ? bulkError.message : String(bulkError),
             count,
           });
-          rawOpportunities = await client.getOpportunities();
+          rawOpportunities = await client.getOpportunities(fields);
         }
       }
 
@@ -446,26 +562,28 @@ export class SalesforceAdapter implements CRMAdapter {
   private async syncContacts(
     client: SalesforceClient,
     workspaceId: string,
-    count: number
+    count: number,
+    fields: string[]
   ): Promise<SyncResult<NormalizedContact>> {
     let rawContacts: any[] = [];
 
     try {
       if (count < 10000) {
         // Use REST API for smaller datasets
-        rawContacts = await client.getContacts();
+        rawContacts = await client.getContacts(fields);
       } else {
         // Try Bulk API first for large datasets
         try {
-          logger.info('[Salesforce Adapter] Using Bulk API for contacts', { count });
-          rawContacts = await client.bulkQuery('SELECT Id, FirstName, LastName, Email, Phone, Title, Department, AccountId, OwnerId, LeadSource, CreatedDate, LastModifiedDate, SystemModstamp FROM Contact');
+          logger.info('[Salesforce Adapter] Using Bulk API for contacts', { count, fields: fields.length });
+          const soql = `SELECT ${fields.join(', ')} FROM Contact`;
+          rawContacts = await client.bulkQuery(soql);
         } catch (bulkError) {
           // Fallback to REST API if Bulk API fails
           logger.warn('[Salesforce Adapter] Bulk API failed, falling back to REST API', {
             error: bulkError instanceof Error ? bulkError.message : String(bulkError),
             count,
           });
-          rawContacts = await client.getContacts();
+          rawContacts = await client.getContacts(fields);
         }
       }
 
@@ -481,26 +599,28 @@ export class SalesforceAdapter implements CRMAdapter {
   private async syncAccounts(
     client: SalesforceClient,
     workspaceId: string,
-    count: number
+    count: number,
+    fields: string[]
   ): Promise<SyncResult<NormalizedAccount>> {
     let rawAccounts: any[] = [];
 
     try {
       if (count < 10000) {
         // Use REST API for smaller datasets
-        rawAccounts = await client.getAccounts();
+        rawAccounts = await client.getAccounts(fields);
       } else {
         // Try Bulk API first for large datasets
         try {
-          logger.info('[Salesforce Adapter] Using Bulk API for accounts', { count });
-          rawAccounts = await client.bulkQuery('SELECT Id, Name, Website, Industry, NumberOfEmployees, AnnualRevenue, OwnerId, BillingCity, BillingState, BillingCountry, Type, CreatedDate, LastModifiedDate, SystemModstamp FROM Account');
+          logger.info('[Salesforce Adapter] Using Bulk API for accounts', { count, fields: fields.length });
+          const soql = `SELECT ${fields.join(', ')} FROM Account`;
+          rawAccounts = await client.bulkQuery(soql);
         } catch (bulkError) {
           // Fallback to REST API if Bulk API fails
           logger.warn('[Salesforce Adapter] Bulk API failed, falling back to REST API', {
             error: bulkError instanceof Error ? bulkError.message : String(bulkError),
             count,
           });
-          rawAccounts = await client.getAccounts();
+          rawAccounts = await client.getAccounts(fields);
         }
       }
 
