@@ -2282,6 +2282,362 @@ const prepareForecastSummary: ToolDefinition = {
 };
 
 // ============================================================================
+// Pipeline Waterfall Tools
+// ============================================================================
+
+import { waterfallAnalysis } from '../analysis/waterfall-analysis.js';
+import {
+  getStageTransitionsInWindow,
+  getAverageTimeInStage,
+  getStalledDeals
+} from '../analysis/stage-history-queries.js';
+import {
+  checkDataAvailability,
+  repScorecard,
+  type DataAvailability,
+} from '../analysis/rep-scorecard-analysis.js';
+
+const waterfallAnalysisTool: ToolDefinition = {
+  name: 'waterfallAnalysis',
+  description: 'Compute stage-by-stage pipeline flow for a time period',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {
+      period: {
+        type: 'string',
+        enum: ['current', 'previous'],
+        description: 'Which period to analyze',
+      },
+    },
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('waterfallAnalysis', async () => {
+      const timeWindows = (context.stepResults as any).time_windows;
+      if (!timeWindows) {
+        throw new Error('time_windows not found in context');
+      }
+
+      const period = params.period || 'current';
+      const periodStart = period === 'current'
+        ? new Date(timeWindows.analysisStart)
+        : new Date(timeWindows.prevStart);
+      const periodEnd = period === 'current'
+        ? new Date(timeWindows.analysisEnd)
+        : new Date(timeWindows.prevEnd);
+
+      return await waterfallAnalysis(context.workspaceId, periodStart, periodEnd);
+    }, params);
+  },
+};
+
+const waterfallDeltasTool: ToolDefinition = {
+  name: 'waterfallDeltas',
+  description: 'Compare current waterfall to previous period and identify anomalies',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('waterfallDeltas', async () => {
+      const current = (context.stepResults as any).current_waterfall;
+      const previous = (context.stepResults as any).previous_waterfall;
+
+      if (!current || !previous) {
+        throw new Error('current_waterfall and previous_waterfall required in context');
+      }
+
+      // Calculate deltas per stage
+      const stageDeltas = current.stages.map((curStage: any) => {
+        const prevStage = previous.stages.find((s: any) => s.stage === curStage.stage);
+        if (!prevStage) {
+          return {
+            stage: curStage.stage,
+            enteredDelta: null,
+            advancedDelta: null,
+            fellOutDelta: null,
+          };
+        }
+
+        const calcDelta = (curr: number, prev: number) => {
+          if (prev === 0) return curr > 0 ? 100 : 0;
+          return Math.round(((curr - prev) / prev) * 100);
+        };
+
+        return {
+          stage: curStage.stage,
+          enteredDelta: calcDelta(curStage.entered, prevStage.entered),
+          advancedDelta: calcDelta(curStage.advanced, prevStage.advanced),
+          fellOutDelta: calcDelta(curStage.fellOut, prevStage.fellOut),
+          enteredChange: curStage.entered - prevStage.entered,
+          advancedChange: curStage.advanced - prevStage.advanced,
+          fellOutChange: curStage.fellOut - prevStage.fellOut,
+        };
+      });
+
+      // Identify anomalies (>20% change)
+      const anomalies = stageDeltas.filter((d: any) =>
+        Math.abs(d.enteredDelta || 0) > 20 ||
+        Math.abs(d.advancedDelta || 0) > 20 ||
+        Math.abs(d.fellOutDelta || 0) > 20
+      );
+
+      // Find biggest leakage (stage with most fell out)
+      const biggestLeakage = current.stages.reduce((max: any, stage: any) =>
+        stage.fellOut > (max?.fellOut || 0) ? stage : max
+      , null);
+
+      // Find biggest bottleneck (lowest advance rate)
+      const biggestBottleneck = current.stages
+        .filter((s: any) => s.startOfPeriod + s.entered > 0)
+        .reduce((min: any, stage: any) => {
+          const rate = stage.advanced / (stage.startOfPeriod + stage.entered);
+          const minRate = min ? min.advanced / (min.startOfPeriod + min.entered) : 1;
+          return rate < minRate ? stage : min;
+        }, null);
+
+      // Find fastest stage (highest advance rate)
+      const fastestStage = current.stages
+        .filter((s: any) => s.startOfPeriod + s.entered > 0)
+        .reduce((max: any, stage: any) => {
+          const rate = stage.advanced / (stage.startOfPeriod + stage.entered);
+          const maxRate = max ? max.advanced / (max.startOfPeriod + max.entered) : 0;
+          return rate > maxRate ? stage : max;
+        }, null);
+
+      return {
+        stageDeltas,
+        anomalies,
+        biggestLeakage: biggestLeakage ? {
+          stage: biggestLeakage.stage,
+          count: biggestLeakage.fellOut,
+          value: biggestLeakage.fellOutValue,
+        } : null,
+        biggestBottleneck: biggestBottleneck ? {
+          stage: biggestBottleneck.stage,
+          advanceRate: (biggestBottleneck.advanced / (biggestBottleneck.startOfPeriod + biggestBottleneck.entered)).toFixed(2),
+        } : null,
+        fastestStage: fastestStage ? {
+          stage: fastestStage.stage,
+          advanceRate: (fastestStage.advanced / (fastestStage.startOfPeriod + fastestStage.entered)).toFixed(2),
+        } : null,
+        summary: `Period over period: Net pipeline ${current.summary.netPipelineChange > 0 ? 'increased' : 'decreased'} by ${Math.abs(current.summary.netPipelineChange)} deals. ${anomalies.length} stage anomalies detected.`,
+      };
+    }, params);
+  },
+};
+
+const topDealsInMotionTool: ToolDefinition = {
+  name: 'topDealsInMotion',
+  description: 'Get top deals that advanced, fell out, or entered during the period',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('topDealsInMotion', async () => {
+      const timeWindows = (context.stepResults as any).time_windows;
+      if (!timeWindows) {
+        throw new Error('time_windows not found in context');
+      }
+
+      const transitions = await getStageTransitionsInWindow(
+        context.workspaceId,
+        new Date(timeWindows.analysisStart),
+        new Date(timeWindows.analysisEnd)
+      );
+
+      // Get deal amounts
+      const dealIds = [...new Set(transitions.map(t => t.deal_id))];
+      const dealResult = await query<{ id: string; amount: number; owner: string }>(
+        `SELECT id, amount, owner FROM deals WHERE id = ANY($1)`,
+        [dealIds]
+      );
+      const dealData = new Map(dealResult.rows.map(d => [d.id, { amount: Number(d.amount) || 0, owner: d.owner }]));
+
+      // Classify transitions
+      const advanced = transitions
+        .filter(t => t.to_stage_normalized && !['closed_won', 'closed_lost'].includes(t.to_stage_normalized))
+        .map(t => ({
+          ...t,
+          amount: dealData.get(t.deal_id)?.amount || 0,
+          owner: dealData.get(t.deal_id)?.owner || 'Unknown',
+        }))
+        .sort((a, b) => b.amount - a.amount)
+        .slice(0, 10);
+
+      const fellOut = transitions
+        .filter(t => t.to_stage_normalized === 'closed_lost')
+        .map(t => ({
+          ...t,
+          amount: dealData.get(t.deal_id)?.amount || 0,
+          owner: dealData.get(t.deal_id)?.owner || 'Unknown',
+        }))
+        .sort((a, b) => b.amount - a.amount)
+        .slice(0, 10);
+
+      const newDeals = transitions
+        .filter(t => !t.from_stage_normalized)
+        .map(t => ({
+          ...t,
+          amount: dealData.get(t.deal_id)?.amount || 0,
+          owner: dealData.get(t.deal_id)?.owner || 'Unknown',
+        }))
+        .sort((a, b) => b.amount - a.amount)
+        .slice(0, 5);
+
+      return {
+        topAdvanced: advanced,
+        topFellOut: fellOut,
+        topNew: newDeals,
+      };
+    }, params);
+  },
+};
+
+const velocityBenchmarksTool: ToolDefinition = {
+  name: 'velocityBenchmarks',
+  description: 'Get average time-in-stage benchmarks',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('velocityBenchmarks', async () => {
+      const avgTimes = await getAverageTimeInStage(context.workspaceId);
+
+      // Also get current period transitions to compare
+      const timeWindows = (context.stepResults as any).time_windows;
+      if (timeWindows) {
+        const transitions = await getStageTransitionsInWindow(
+          context.workspaceId,
+          new Date(timeWindows.analysisStart),
+          new Date(timeWindows.analysisEnd)
+        );
+
+        // Calculate average for this period
+        const periodAvgs = new Map<string, { sum: number; count: number }>();
+        for (const t of transitions) {
+          if (t.from_stage_normalized && t.duration_days) {
+            if (!periodAvgs.has(t.from_stage_normalized)) {
+              periodAvgs.set(t.from_stage_normalized, { sum: 0, count: 0 });
+            }
+            const agg = periodAvgs.get(t.from_stage_normalized)!;
+            agg.sum += t.duration_days;
+            agg.count++;
+          }
+        }
+
+        // Enrich with period comparison
+        return avgTimes.map(stage => {
+          const periodData = periodAvgs.get(stage.stage_normalized);
+          const thisPeriodAvg = periodData ? periodData.sum / periodData.count : null;
+          const delta = thisPeriodAvg ? thisPeriodAvg - stage.avg_duration_days : null;
+          const trend = delta && Math.abs(delta) > stage.avg_duration_days * 0.2
+            ? (delta > 0 ? 'slower' : 'faster')
+            : 'stable';
+
+          return {
+            ...stage,
+            thisPeriodAvgDays: thisPeriodAvg,
+            delta,
+            trend,
+          };
+        });
+      }
+
+      return avgTimes;
+    }, params);
+  },
+};
+
+// ============================================================================
+// Rep Scorecard Tools
+// ============================================================================
+
+const checkDataAvailabilityTool: ToolDefinition = {
+  name: 'checkDataAvailability',
+  description: 'Check which data sources are available for this workspace (quotas, activities, conversations, stage history)',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('checkDataAvailability', async () => {
+      const availability = await checkDataAvailability(context.workspaceId);
+
+      // Determine tier
+      let tier = 'Tier 0 (Deals only)';
+      if (availability.hasQuotas && availability.hasStageHistory && availability.hasActivities && availability.hasConversations) {
+        tier = 'Tier 4 (Full data)';
+      } else if (availability.hasQuotas && availability.hasStageHistory && availability.hasActivities) {
+        tier = 'Tier 3 (Deals + Quotas + History + Activities)';
+      } else if (availability.hasQuotas && availability.hasStageHistory) {
+        tier = 'Tier 2 (Deals + Quotas + History)';
+      } else if (availability.hasQuotas) {
+        tier = 'Tier 1 (Deals + Quotas)';
+      }
+
+      console.log(`[Rep Scorecard] Operating at ${tier}`);
+      console.log(`[Rep Scorecard] Data availability: quotas=${availability.hasQuotas} (${availability.quotaCount}), activities=${availability.hasActivities} (${availability.activityCount}), conversations=${availability.hasConversations} (${availability.conversationCount}), stageHistory=${availability.hasStageHistory} (${availability.stageHistoryCount})`);
+
+      return {
+        ...availability,
+        tier,
+      };
+    }, params);
+  },
+};
+
+const repScorecardComputeTool: ToolDefinition = {
+  name: 'repScorecardCompute',
+  description: 'Compute composite scorecard for all reps with adaptive weighting',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('repScorecardCompute', async () => {
+      const timeWindows = (context.stepResults as any).time_windows;
+      const dataAvailability = (context.stepResults as any).data_availability as DataAvailability;
+
+      if (!timeWindows || !dataAvailability) {
+        throw new Error('time_windows and data_availability required in context');
+      }
+
+      const periodStart = new Date(timeWindows.quarterStart || timeWindows.analysisStart);
+      const periodEnd = new Date(timeWindows.quarterEnd || timeWindows.analysisEnd);
+      const changeWindowStart = new Date(timeWindows.changeStart);
+      const changeWindowEnd = new Date(timeWindows.changeEnd);
+
+      const result = await repScorecard(
+        context.workspaceId,
+        periodStart,
+        periodEnd,
+        changeWindowStart,
+        changeWindowEnd,
+        dataAvailability
+      );
+
+      console.log(`[Rep Scorecard] Scored ${result.reps.length} reps. Top: ${result.top3[0]?.repName} (${result.top3[0]?.overallScore}), Bottom: ${result.bottom3[0]?.repName} (${result.bottom3[0]?.overallScore})`);
+
+      return result;
+    }, params);
+  },
+};
+
+// ============================================================================
 // Tool Registry
 // ============================================================================
 
@@ -2341,6 +2697,12 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['forecastRollup', forecastRollup],
   ['forecastWoWDelta', forecastWoWDelta],
   ['prepareForecastSummary', prepareForecastSummary],
+  ['waterfallAnalysis', waterfallAnalysisTool],
+  ['waterfallDeltas', waterfallDeltasTool],
+  ['topDealsInMotion', topDealsInMotionTool],
+  ['velocityBenchmarks', velocityBenchmarksTool],
+  ['checkDataAvailability', checkDataAvailabilityTool],
+  ['repScorecardCompute', repScorecardComputeTool],
 ]);
 
 // ============================================================================
