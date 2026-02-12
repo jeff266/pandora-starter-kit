@@ -2,6 +2,7 @@ import { query } from '../../db.js';
 import { GongClient } from './client.js';
 import { initialSync, incrementalSync } from './sync.js';
 import { fetchAndStoreDirectory, type NormalizedUser } from '../shared/tracked-users.js';
+import { encryptCredentials } from '../../lib/encryption.js';
 import type {
   PandoraConnector,
   ConnectorCredentials,
@@ -37,6 +38,9 @@ export class GongConnector implements PandoraConnector {
 
     let connectionId: string;
 
+    // Encrypt credentials before storing
+    const encrypted = encryptCredentials(credentials);
+
     if (existing.rows.length > 0) {
       connectionId = existing.rows[0].id;
       await query(
@@ -46,14 +50,14 @@ export class GongConnector implements PandoraConnector {
           error_message = NULL,
           updated_at = NOW()
         WHERE id = $2`,
-        [JSON.stringify(credentials), connectionId]
+        [JSON.stringify(encrypted), connectionId]
       );
     } else {
       const result = await query<{ id: string }>(
         `INSERT INTO connections (workspace_id, connector_name, auth_method, credentials, status, created_at, updated_at)
          VALUES ($1, 'gong', 'basic', $2, 'healthy', NOW(), NOW())
          RETURNING id`,
-        [workspaceId, JSON.stringify(credentials)]
+        [workspaceId, JSON.stringify(encrypted)]
       );
       connectionId = result.rows[0].id;
     }

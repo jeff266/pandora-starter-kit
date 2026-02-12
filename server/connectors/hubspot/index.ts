@@ -2,6 +2,7 @@ import { query } from '../../db.js';
 import { HubSpotClient } from './client.js';
 import { initialSync, incrementalSync, backfillAssociations } from './sync.js';
 import { discoverSchema as runSchemaDiscovery, discoverPipelines, storeSchemaMetadata } from './schema-discovery.js';
+import { encryptCredentials } from '../../lib/encryption.js';
 import type {
   PandoraConnector,
   ConnectorCredentials,
@@ -38,6 +39,9 @@ export class HubSpotConnector implements PandoraConnector {
 
     let connectionId: string;
 
+    // Encrypt credentials before storing
+    const encrypted = encryptCredentials(credentials);
+
     if (existing.rows.length > 0) {
       connectionId = existing.rows[0].id;
       await query(
@@ -47,14 +51,14 @@ export class HubSpotConnector implements PandoraConnector {
           error_message = NULL,
           updated_at = NOW()
         WHERE id = $2 AND workspace_id = $3`,
-        [JSON.stringify(credentials), connectionId, workspaceId]
+        [JSON.stringify(encrypted), connectionId, workspaceId]
       );
     } else {
       const result = await query<{ id: string }>(
         `INSERT INTO connections (workspace_id, connector_name, auth_method, credentials, status, created_at, updated_at)
          VALUES ($1, 'hubspot', 'oauth', $2, 'healthy', NOW(), NOW())
          RETURNING id`,
-        [workspaceId, JSON.stringify(credentials)]
+        [workspaceId, JSON.stringify(encrypted)]
       );
       connectionId = result.rows[0].id;
     }

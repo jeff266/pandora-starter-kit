@@ -4,6 +4,7 @@ import { firefliesConnector } from '../connectors/fireflies/index.js';
 import { FirefliesClient, formatSentencesToTranscript } from '../connectors/fireflies/client.js';
 import type { Connection, ConnectorCredentials } from '../connectors/_interface.js';
 import { linkConversations } from '../linker/entity-linker.js';
+import { decryptCredentials, isEncrypted } from '../lib/encryption.js';
 import {
   fetchAndStoreDirectory,
   getDirectory,
@@ -81,12 +82,18 @@ router.post('/:workspaceId/connectors/fireflies/sync', async (req: Request<Works
       return;
     }
 
+    // Decrypt credentials if encrypted
+    let credentials = conn.credentials;
+    if (credentials && isEncrypted(credentials)) {
+      credentials = decryptCredentials(credentials);
+    }
+
     const connection: Connection = {
       id: conn.id,
       workspaceId,
       connectorName: 'fireflies',
       status: conn.status as Connection['status'],
-      credentials: conn.credentials,
+      credentials,
     };
 
     let result;
@@ -167,7 +174,14 @@ router.get('/:workspaceId/connectors/fireflies/users', async (req: Request<Works
     }
 
     const conn = connResult.rows[0];
-    const client = new FirefliesClient(conn.credentials.apiKey);
+
+    // Decrypt credentials if encrypted
+    let credentials = conn.credentials;
+    if (credentials && isEncrypted(credentials)) {
+      credentials = decryptCredentials(credentials);
+    }
+
+    const client = new FirefliesClient(credentials.apiKey);
     const rawUsers = await client.getUsers();
     const normalized: NormalizedUser[] = rawUsers
       .map(u => ({
@@ -209,7 +223,13 @@ router.post('/:workspaceId/connectors/fireflies/users/refresh', async (req: Requ
       return;
     }
 
-    const client = new FirefliesClient(connResult.rows[0].credentials.apiKey);
+    // Decrypt credentials if encrypted
+    let credentials = connResult.rows[0].credentials;
+    if (credentials && isEncrypted(credentials)) {
+      credentials = decryptCredentials(credentials);
+    }
+
+    const client = new FirefliesClient(credentials.apiKey);
     const rawUsers = await client.getUsers();
     const normalized: NormalizedUser[] = rawUsers
       .map(u => ({
@@ -296,7 +316,13 @@ router.post('/:workspaceId/connectors/fireflies/transcript/:sourceId', async (re
       return;
     }
 
-    const client = new FirefliesClient(conn.credentials.apiKey);
+    // Decrypt credentials if encrypted
+    let credentials = conn.credentials;
+    if (credentials && isEncrypted(credentials)) {
+      credentials = decryptCredentials(credentials);
+    }
+
+    const client = new FirefliesClient(credentials.apiKey);
     const transcript = await client.getTranscript(sourceId);
 
     const transcriptText = transcript.sentences

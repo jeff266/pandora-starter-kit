@@ -12,6 +12,7 @@ import type { CRMAdapter, SyncResult } from '../adapters/types.js';
 import { createLogger } from '../../utils/logger.js';
 const logger = createLogger('Salesforce');
 import { query } from '../../db.js';
+import { encryptCredentials, decryptCredentials, isEncrypted } from '../../lib/encryption.js';
 
 // ============================================================================
 // Salesforce Adapter Implementation
@@ -352,11 +353,34 @@ export class SalesforceAdapter implements CRMAdapter {
     workspaceId: string,
     updates: { accessToken: string; instanceUrl: string }
   ): Promise<void> {
+    // Read current credentials
+    const result = await query<{ credentials: any }>(
+      `SELECT credentials FROM connections
+       WHERE workspace_id = $1 AND connector_name = 'salesforce'`,
+      [workspaceId]
+    );
+
+    if (result.rows.length === 0) {
+      throw new Error('Salesforce connection not found');
+    }
+
+    let credentials = result.rows[0].credentials;
+
+    // Decrypt if encrypted
+    if (isEncrypted(credentials)) {
+      credentials = decryptCredentials(credentials);
+    }
+
+    // Merge updates
+    const merged = { ...credentials, ...updates };
+
+    // Encrypt and store
+    const encrypted = encryptCredentials(merged);
     await query(
       `UPDATE connections
-       SET credentials = credentials || $1::jsonb
+       SET credentials = $1, updated_at = NOW()
        WHERE workspace_id = $2 AND connector_name = 'salesforce'`,
-      [JSON.stringify(updates), workspaceId]
+      [JSON.stringify(encrypted), workspaceId]
     );
   }
 

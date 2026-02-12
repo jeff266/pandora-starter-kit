@@ -1,4 +1,5 @@
 import { query } from '../../db.js';
+import { encryptCredentials, decryptCredentials, isEncrypted } from '../../lib/encryption.js';
 
 export interface StoredConnection {
   id: string;
@@ -23,7 +24,15 @@ export async function getCredentials(
      WHERE workspace_id = $1 AND connector_name = $2`,
     [workspaceId, connectorName]
   );
-  return result.rows[0] || null;
+  const row = result.rows[0];
+  if (!row) return null;
+
+  // Decrypt credentials if encrypted (backward compatible)
+  if (row.credentials && isEncrypted(row.credentials)) {
+    row.credentials = decryptCredentials(row.credentials as any);
+  }
+
+  return row;
 }
 
 export async function storeCredentials(
@@ -32,6 +41,9 @@ export async function storeCredentials(
   authMethod: string,
   credentials: Record<string, any>
 ): Promise<StoredConnection> {
+  // Encrypt credentials before storing
+  const encrypted = encryptCredentials(credentials);
+
   const result = await query<StoredConnection>(
     `INSERT INTO connections (id, workspace_id, connector_name, auth_method, credentials, status, created_at, updated_at)
      VALUES (gen_random_uuid(), $1, $2, $3, $4, 'connected', NOW(), NOW())
@@ -43,9 +55,15 @@ export async function storeCredentials(
        error_message = NULL,
        updated_at = NOW()
      RETURNING *`,
-    [workspaceId, connectorName, authMethod, JSON.stringify(credentials)]
+    [workspaceId, connectorName, authMethod, JSON.stringify(encrypted)]
   );
-  return result.rows[0];
+
+  // Decrypt for return value (callers expect plain object)
+  const row = result.rows[0];
+  if (row.credentials && isEncrypted(row.credentials)) {
+    row.credentials = decryptCredentials(row.credentials as any);
+  }
+  return row;
 }
 
 export async function updateSyncStatus(

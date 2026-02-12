@@ -6,6 +6,7 @@ import type { SalesforceStage } from './types.js';
 import { createLogger } from '../../utils/logger.js';
 import { computeFields } from '../../computed-fields/engine.js';
 import { transformWithErrorCapture } from '../../utils/sync-helpers.js';
+import { encryptCredentials, decryptCredentials, isEncrypted } from '../../lib/encryption.js';
 
 const logger = createLogger('SalesforceSync');
 
@@ -351,12 +352,33 @@ export async function syncSalesforce(
         credentials.clientSecret
       );
 
-      await query(
-        `UPDATE connections
-         SET credentials = credentials || $1::jsonb, updated_at = NOW()
-         WHERE workspace_id = $2 AND connector_name = 'salesforce'`,
-        [JSON.stringify({ accessToken: refreshed.accessToken, instanceUrl: refreshed.instanceUrl }), workspaceId]
+      // Read, decrypt, merge, encrypt, and store
+      const currentResult = await query<{ credentials: any }>(
+        `SELECT credentials FROM connections
+         WHERE workspace_id = $1 AND connector_name = 'salesforce'`,
+        [workspaceId]
       );
+
+      if (currentResult.rows.length > 0) {
+        let current = currentResult.rows[0].credentials;
+        if (isEncrypted(current)) {
+          current = decryptCredentials(current);
+        }
+
+        const merged = {
+          ...current,
+          accessToken: refreshed.accessToken,
+          instanceUrl: refreshed.instanceUrl,
+        };
+
+        const encrypted = encryptCredentials(merged);
+        await query(
+          `UPDATE connections
+           SET credentials = $1, updated_at = NOW()
+           WHERE workspace_id = $2 AND connector_name = 'salesforce'`,
+          [JSON.stringify(encrypted), workspaceId]
+        );
+      }
 
       const refreshedClient = new SalesforceClient({
         accessToken: refreshed.accessToken,

@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import crypto from "crypto";
 import { createLogger } from "../utils/logger.js";
 import { query } from "../db.js";
+import { encryptCredentials } from "../lib/encryption.js";
 
 const logger = createLogger("SalesforceAuth");
 const router = Router();
@@ -179,16 +180,19 @@ router.get("/callback", async (req: Request, res: Response) => {
       return;
     }
 
+    // Encrypt credentials before storing
+    const encrypted = encryptCredentials({
+      accessToken: tokenData.access_token,
+      refreshToken: tokenData.refresh_token,
+      instanceUrl: tokenData.instance_url,
+    });
+
     await query(
       `INSERT INTO connections (workspace_id, connector_name, credentials, status, created_at, updated_at)
        VALUES ($1, 'salesforce', $2, 'connected', NOW(), NOW())
        ON CONFLICT (workspace_id, connector_name) DO UPDATE SET
          credentials = $2, status = 'connected', updated_at = NOW()`,
-      [workspaceId, JSON.stringify({
-        accessToken: tokenData.access_token,
-        refreshToken: tokenData.refresh_token,
-        instanceUrl: tokenData.instance_url,
-      })]
+      [workspaceId, JSON.stringify(encrypted)]
     );
 
     logger.info("Stored Salesforce connection", { workspaceId });

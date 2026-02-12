@@ -4,6 +4,7 @@ import { gongConnector } from '../connectors/gong/index.js';
 import { GongClient } from '../connectors/gong/client.js';
 import type { Connection, ConnectorCredentials } from '../connectors/_interface.js';
 import { linkConversations } from '../linker/entity-linker.js';
+import { decryptCredentials, isEncrypted } from '../lib/encryption.js';
 import {
   fetchAndStoreDirectory,
   getDirectory,
@@ -86,12 +87,18 @@ router.post('/:workspaceId/connectors/gong/sync', async (req: Request<WorkspaceP
       return;
     }
 
+    // Decrypt credentials if encrypted
+    let credentials = conn.credentials;
+    if (credentials && isEncrypted(credentials)) {
+      credentials = decryptCredentials(credentials);
+    }
+
     const connection: Connection = {
       id: conn.id,
       workspaceId,
       connectorName: 'gong',
       status: conn.status as Connection['status'],
-      credentials: conn.credentials,
+      credentials,
     };
 
     let result;
@@ -172,7 +179,14 @@ router.get('/:workspaceId/connectors/gong/users', async (req: Request<WorkspaceP
     }
 
     const conn = connResult.rows[0];
-    const client = new GongClient(conn.credentials.apiKey);
+
+    // Decrypt credentials if encrypted
+    let credentials = conn.credentials;
+    if (credentials && isEncrypted(credentials)) {
+      credentials = decryptCredentials(credentials);
+    }
+
+    const client = new GongClient(credentials.apiKey);
     const rawUsers = await client.getAllUsers();
     const normalized: NormalizedUser[] = rawUsers
       .filter(u => u.active)
@@ -215,7 +229,13 @@ router.post('/:workspaceId/connectors/gong/users/refresh', async (req: Request<W
       return;
     }
 
-    const client = new GongClient(connResult.rows[0].credentials.apiKey);
+    // Decrypt credentials if encrypted
+    let credentials = connResult.rows[0].credentials;
+    if (credentials && isEncrypted(credentials)) {
+      credentials = decryptCredentials(credentials);
+    }
+
+    const client = new GongClient(credentials.apiKey);
     const rawUsers = await client.getAllUsers();
     const normalized: NormalizedUser[] = rawUsers
       .filter(u => u.active)
@@ -303,7 +323,13 @@ router.post('/:workspaceId/connectors/gong/transcript/:sourceId', async (req: Re
       return;
     }
 
-    const client = new GongClient(conn.credentials.apiKey);
+    // Decrypt credentials if encrypted
+    let credentials = conn.credentials;
+    if (credentials && isEncrypted(credentials)) {
+      credentials = decryptCredentials(credentials);
+    }
+
+    const client = new GongClient(credentials.apiKey);
     const { call, transcript } = await client.getCallWithTranscript(sourceId);
 
     if (!transcript) {
