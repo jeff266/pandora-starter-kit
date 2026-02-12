@@ -2452,41 +2452,39 @@ const topDealsInMotionTool: ToolDefinition = {
         new Date(timeWindows.analysisEnd)
       );
 
-      // Get deal amounts
-      const dealIds = [...new Set(transitions.map(t => t.deal_id))];
+      const dealIds = [...new Set(transitions.map(t => t.dealId))];
       const dealResult = await query<{ id: string; amount: number; owner: string }>(
         `SELECT id, amount, owner FROM deals WHERE id = ANY($1)`,
         [dealIds]
       );
       const dealData = new Map(dealResult.rows.map(d => [d.id, { amount: Number(d.amount) || 0, owner: d.owner }]));
 
-      // Classify transitions
       const advanced = transitions
-        .filter(t => t.to_stage_normalized && !['closed_won', 'closed_lost'].includes(t.to_stage_normalized))
+        .filter(t => t.toStageNormalized && !['closed_won', 'closed_lost'].includes(t.toStageNormalized))
         .map(t => ({
           ...t,
-          amount: dealData.get(t.deal_id)?.amount || 0,
-          owner: dealData.get(t.deal_id)?.owner || 'Unknown',
+          amount: dealData.get(t.dealId)?.amount || 0,
+          owner: dealData.get(t.dealId)?.owner || 'Unknown',
         }))
         .sort((a, b) => b.amount - a.amount)
         .slice(0, 10);
 
       const fellOut = transitions
-        .filter(t => t.to_stage_normalized === 'closed_lost')
+        .filter(t => t.toStageNormalized === 'closed_lost')
         .map(t => ({
           ...t,
-          amount: dealData.get(t.deal_id)?.amount || 0,
-          owner: dealData.get(t.deal_id)?.owner || 'Unknown',
+          amount: dealData.get(t.dealId)?.amount || 0,
+          owner: dealData.get(t.dealId)?.owner || 'Unknown',
         }))
         .sort((a, b) => b.amount - a.amount)
         .slice(0, 10);
 
       const newDeals = transitions
-        .filter(t => !t.from_stage_normalized)
+        .filter(t => !t.fromStageNormalized)
         .map(t => ({
           ...t,
-          amount: dealData.get(t.deal_id)?.amount || 0,
-          owner: dealData.get(t.deal_id)?.owner || 'Unknown',
+          amount: dealData.get(t.dealId)?.amount || 0,
+          owner: dealData.get(t.dealId)?.owner || 'Unknown',
         }))
         .sort((a, b) => b.amount - a.amount)
         .slice(0, 5);
@@ -2525,22 +2523,22 @@ const velocityBenchmarksTool: ToolDefinition = {
         // Calculate average for this period
         const periodAvgs = new Map<string, { sum: number; count: number }>();
         for (const t of transitions) {
-          if (t.from_stage_normalized && t.duration_days) {
-            if (!periodAvgs.has(t.from_stage_normalized)) {
-              periodAvgs.set(t.from_stage_normalized, { sum: 0, count: 0 });
+          if (t.fromStageNormalized && t.durationInPreviousStageDays) {
+            if (!periodAvgs.has(t.fromStageNormalized)) {
+              periodAvgs.set(t.fromStageNormalized, { sum: 0, count: 0 });
             }
-            const agg = periodAvgs.get(t.from_stage_normalized)!;
-            agg.sum += t.duration_days;
+            const agg = periodAvgs.get(t.fromStageNormalized)!;
+            agg.sum += t.durationInPreviousStageDays;
             agg.count++;
           }
         }
 
         // Enrich with period comparison
         return avgTimes.map(stage => {
-          const periodData = periodAvgs.get(stage.stage_normalized);
+          const periodData = periodAvgs.get(stage.stage);
           const thisPeriodAvg = periodData ? periodData.sum / periodData.count : null;
-          const delta = thisPeriodAvg ? thisPeriodAvg - stage.avg_duration_days : null;
-          const trend = delta && Math.abs(delta) > stage.avg_duration_days * 0.2
+          const delta = thisPeriodAvg ? thisPeriodAvg - stage.avgDays : null;
+          const trend = delta && Math.abs(delta) > stage.avgDays * 0.2
             ? (delta > 0 ? 'slower' : 'faster')
             : 'stable';
 

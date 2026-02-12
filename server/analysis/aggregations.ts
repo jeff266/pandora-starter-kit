@@ -227,7 +227,7 @@ export interface TimeWindows {
 }
 
 export interface TimeConfig {
-  analysisWindow: 'current_quarter' | 'current_month' | 'trailing_90d' | 'trailing_30d' | 'all_time';
+  analysisWindow: 'current_quarter' | 'current_month' | 'trailing_90d' | 'trailing_30d' | 'trailing_7d' | 'all_time';
   changeWindow: 'since_last_run' | 'last_7d' | 'last_14d' | 'last_30d';
   trendComparison: 'previous_period' | 'same_period_last_quarter' | 'none';
 }
@@ -272,6 +272,12 @@ export function resolveTimeWindows(
     case 'trailing_30d':
       analysisRange = {
         start: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000),
+        end: now,
+      };
+      break;
+    case 'trailing_7d':
+      analysisRange = {
+        start: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000),
         end: now,
       };
       break;

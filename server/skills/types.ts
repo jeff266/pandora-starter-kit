@@ -71,7 +71,7 @@ export interface SkillDefinition {
   /** Time-scoping configuration (overridable at runtime) */
   timeConfig?: {
     /** Primary analysis window for deal queries */
-    analysisWindow?: 'current_quarter' | 'current_month' | 'trailing_90d' | 'trailing_30d' | 'all_time';
+    analysisWindow?: 'current_quarter' | 'current_month' | 'trailing_90d' | 'trailing_30d' | 'trailing_7d' | 'all_time';
     /** Window for detecting changes/deltas */
     changeWindow?: 'since_last_run' | 'last_7d' | 'last_14d' | 'last_30d';
     /** Period comparison mode */

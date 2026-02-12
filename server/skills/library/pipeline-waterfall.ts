@@ -26,7 +26,7 @@ export const pipelineWaterfallSkill: SkillDefinition = {
 
   timeConfig: {
     analysisWindow: 'trailing_7d',
-    changeWindow: 'trailing_7d',
+    changeWindow: 'last_7d',
   },
 
   steps: [

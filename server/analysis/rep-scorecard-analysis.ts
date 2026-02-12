@@ -148,8 +148,8 @@ export async function repScorecard(
   dataAvailability: DataAvailability
 ): Promise<RepScorecardResult> {
   // Get all reps from deals table
-  const repsResult = await query<{ owner: string; owner_email: string | null }>(
-    `SELECT DISTINCT owner, owner_email
+  const repsResult = await query<{ owner: string }>(
+    `SELECT DISTINCT owner
      FROM deals
      WHERE workspace_id = $1
        AND owner IS NOT NULL
@@ -159,7 +159,7 @@ export async function repScorecard(
 
   const repList = repsResult.rows.map(r => ({
     name: r.owner,
-    email: r.owner_email,
+    email: null as string | null,
   }));
 
   // Initialize metrics for each rep
@@ -243,8 +243,8 @@ async function gatherRepMetrics(
       COUNT(CASE WHEN stage_normalized = 'closed_lost' THEN 1 END) as closed_lost_count,
       COALESCE(SUM(CASE WHEN stage_normalized = 'closed_lost' THEN amount ELSE 0 END), 0) as closed_lost,
       AVG(CASE WHEN stage_normalized = 'closed_won' THEN amount END) as avg_deal_size,
-      AVG(CASE WHEN stage_normalized = 'closed_won' AND close_date IS NOT NULL AND created_date IS NOT NULL
-        THEN EXTRACT(EPOCH FROM (close_date - created_date)) / 86400 END) as avg_sales_cycle
+      AVG(CASE WHEN stage_normalized = 'closed_won' AND close_date IS NOT NULL AND created_at IS NOT NULL
+        THEN EXTRACT(EPOCH FROM (close_date - created_at)) / 86400 END) as avg_sales_cycle
     FROM deals
     WHERE workspace_id = $1
       AND owner = $2
@@ -326,7 +326,7 @@ async function gatherRepMetrics(
 
       // Get team average for comparison
       const teamAvgResult = await getAverageTimeInStage(workspaceId);
-      const teamOverallAvg = teamAvgResult.reduce((sum, s) => sum + s.avg_duration_days, 0) / teamAvgResult.length;
+      const teamOverallAvg = teamAvgResult.reduce((sum, s) => sum + s.avgDays, 0) / teamAvgResult.length;
       velocityIndex = teamOverallAvg > 0 ? avgDaysPerStage / teamOverallAvg : null;
     }
   }
@@ -348,14 +348,14 @@ async function gatherRepMetrics(
     }>(
       `SELECT
         COUNT(*) as total,
-        COUNT(CASE WHEN type = 'email' THEN 1 END) as emails,
-        COUNT(CASE WHEN type = 'call' THEN 1 END) as calls,
-        COUNT(CASE WHEN type = 'meeting' THEN 1 END) as meetings
+        COUNT(CASE WHEN activity_type = 'email' THEN 1 END) as emails,
+        COUNT(CASE WHEN activity_type = 'call' THEN 1 END) as calls,
+        COUNT(CASE WHEN activity_type = 'meeting' THEN 1 END) as meetings
        FROM activities
        WHERE workspace_id = $1
-         AND actor_email = $2
+         AND actor = $2
          AND created_at BETWEEN $3 AND $4`,
-      [workspaceId, repEmail, changeWindowStart, changeWindowEnd]
+      [workspaceId, repName, changeWindowStart, changeWindowEnd]
     );
 
     if (activityResult.rows.length > 0) {
@@ -382,8 +382,8 @@ async function gatherRepMetrics(
     }>(
       `SELECT
         COUNT(*) as call_count,
-        AVG(duration) as avg_duration,
-        AVG(talk_ratio) as avg_talk_ratio
+        AVG(duration_seconds) as avg_duration,
+        AVG(talk_listen_ratio) as avg_talk_ratio
        FROM conversations
        WHERE workspace_id = $1
          AND $2 = ANY(participants)
@@ -391,7 +391,7 @@ async function gatherRepMetrics(
       [workspaceId, repEmail, changeWindowStart, changeWindowEnd]
     );
 
-    if (convResult.rows.length > 0 && convResult.rows[0].call_count) {
+    if (convResult.rows.length > 0 && Number(convResult.rows[0].call_count) > 0) {
       callCount = Number(convResult.rows[0].call_count);
       avgCallDuration = Number(convResult.rows[0].avg_duration) || null;
       avgTalkRatio = Number(convResult.rows[0].avg_talk_ratio) || null;
@@ -406,7 +406,7 @@ async function gatherRepMetrics(
      FROM deals
      WHERE workspace_id = $1
        AND owner = $2
-       AND created_date BETWEEN $3 AND $4`,
+       AND created_at BETWEEN $3 AND $4`,
     [workspaceId, repName, changeWindowStart, changeWindowEnd]
   );
 
