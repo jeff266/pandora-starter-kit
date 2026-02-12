@@ -13,8 +13,9 @@ import {
 import type { SyncResult } from '../_interface.js';
 import { transformWithErrorCapture } from '../../utils/sync-helpers.js';
 import { detectStageChanges, recordStageChanges, updateDealStageCache } from './stage-tracker.js';
+import { getStageMapping } from '../../config/index.js';
 
-async function buildStageMaps(client: HubSpotClient): Promise<DealTransformOptions> {
+async function buildStageMaps(client: HubSpotClient, workspaceId: string): Promise<DealTransformOptions> {
   const stageMap = new Map<string, string>();
   const pipelineMap = new Map<string, string>();
 
@@ -32,7 +33,14 @@ async function buildStageMaps(client: HubSpotClient): Promise<DealTransformOptio
     console.warn(`[HubSpot Sync] Failed to fetch pipelines for stage resolution: ${msg}`);
   }
 
-  return { stageMap, pipelineMap };
+  // Load custom stage mapping from workspace config
+  const customStageMapping = await getStageMapping(workspaceId);
+  const customMappingCount = Object.keys(customStageMapping).length;
+  if (customMappingCount > 0) {
+    console.log(`[HubSpot Sync] Loaded ${customMappingCount} custom stage mappings from workspace config`);
+  }
+
+  return { stageMap, pipelineMap, customStageMapping };
 }
 
 interface ForecastConfig {
@@ -474,7 +482,7 @@ export async function initialSync(
 
   try {
     const [dealOptions, ownerMap, forecastConfig] = await Promise.all([
-      buildStageMaps(client),
+      buildStageMaps(client, workspaceId),
       buildOwnerMap(client),
       getForecastConfig(workspaceId),
     ]);
@@ -629,7 +637,7 @@ export async function incrementalSync(
   console.log(`[HubSpot Sync] Starting incremental sync for workspace ${workspaceId} since ${since.toISOString()}`);
 
   const [dealOptions, ownerMap, forecastConfig] = await Promise.all([
-    buildStageMaps(hubspotClient),
+    buildStageMaps(hubspotClient, workspaceId),
     buildOwnerMap(hubspotClient),
     getForecastConfig(workspaceId),
   ]);

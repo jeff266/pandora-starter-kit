@@ -1,6 +1,7 @@
 import type { HubSpotDeal, HubSpotContact, HubSpotCompany } from './types.js';
 import { parseNumber, parseDate, normalizeEmail, normalizePhone } from '../../utils/data-transforms.js';
 import { sanitizeDate, sanitizeNumber, sanitizeText } from '../../utils/hubspot-sanitize.js';
+import type { StageMapping } from '../../config/index.js';
 
 export interface NormalizedDeal {
   workspace_id: string;
@@ -76,16 +77,31 @@ const DEFAULT_STAGE_NORMALIZED_MAP: Record<string, string> = {
   negotiationstage: 'negotiation',
 };
 
-export function normalizeStage(rawStage: string | null): string | null {
+export function normalizeStage(rawStage: string | null, customMapping?: StageMapping): string | null {
   if (!rawStage) return null;
   const cleaned = rawStage.replace(/[^\p{L}\p{N}]/gu, '').toLowerCase();
 
-  // Try exact match first
+  // Priority 1: Check custom workspace mapping (exact match on cleaned stage name)
+  if (customMapping) {
+    // Try exact match on original stage name
+    if (customMapping[rawStage]) {
+      return customMapping[rawStage];
+    }
+    // Try exact match on cleaned stage name
+    for (const [customStage, normalizedStage] of Object.entries(customMapping)) {
+      const cleanedCustom = customStage.replace(/[^\p{L}\p{N}]/gu, '').toLowerCase();
+      if (cleanedCustom === cleaned) {
+        return normalizedStage;
+      }
+    }
+  }
+
+  // Priority 2: Try default stage map exact match
   if (DEFAULT_STAGE_NORMALIZED_MAP[cleaned]) {
     return DEFAULT_STAGE_NORMALIZED_MAP[cleaned];
   }
 
-  // Fallback: keyword-based detection
+  // Priority 3: Fallback keyword-based detection
   // Check for closed won/lost first (highest priority)
   if (/closedwon|won/.test(cleaned) && !/lost/.test(cleaned)) return 'closed_won';
   if (/closedlost|lost/.test(cleaned)) return 'closed_lost';
@@ -176,6 +192,7 @@ export interface DealTransformOptions {
     best_case_threshold: number; // Decimal 0-1 (e.g. 0.60). Normalized from DB percentages at read time.
   };
   forecastedPipelines?: string[] | null;
+  customStageMapping?: StageMapping; // Workspace-specific stage normalization overrides
 }
 
 export interface ContactTransformOptions {
@@ -358,7 +375,7 @@ export function transformDeal(
     name: sanitizeText(props.dealname),
     amount: sanitizeNumber(props.amount),
     stage: resolvedStage,
-    stage_normalized: normalizeStage(resolvedStage),
+    stage_normalized: normalizeStage(resolvedStage, options?.customStageMapping),
     close_date: sanitizeDate(props.closedate),
     owner: resolveOwnerName(sanitizeText(props.hubspot_owner_id), options?.ownerMap),
     probability,
