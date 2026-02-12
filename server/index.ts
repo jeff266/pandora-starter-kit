@@ -26,6 +26,7 @@ import { MondayTaskAdapter } from "./connectors/monday/adapter.js";
 import { GoogleDriveDocumentAdapter } from "./connectors/google-drive/adapter.js";
 import { salesforceAdapter } from "./connectors/salesforce/adapter.js";
 import { startScheduler } from "./sync/scheduler.js";
+import { startSkillScheduler, stopSkillScheduler } from "./sync/skill-scheduler.js";
 import { registerBuiltInSkills } from "./skills/index.js";
 import { getSkillRegistry } from "./skills/registry.js";
 import { startJobQueue } from "./jobs/queue.js";
@@ -100,10 +101,24 @@ async function start(): Promise<void> {
   registerSkills();
   startJobQueue();
   startScheduler();
+  startSkillScheduler();
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`[server] Pandora v0.1.0 listening on port ${PORT}`);
   });
 }
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('[server] SIGTERM received, shutting down gracefully');
+  stopSkillScheduler();
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  console.log('[server] SIGINT received, shutting down gracefully');
+  stopSkillScheduler();
+  process.exit(0);
+});
 
 start();

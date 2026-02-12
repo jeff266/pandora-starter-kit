@@ -5,6 +5,7 @@ import { formatForSlack } from '../skills/formatters/slack-formatter.js';
 import { formatAsMarkdown } from '../skills/formatters/markdown-formatter.js';
 import { getSlackWebhook, postBlocks } from '../connectors/slack/client.js';
 import { query } from '../db.js';
+import { runScheduledSkills } from '../sync/skill-scheduler.js';
 import type { SkillResult } from '../skills/types.js';
 
 const router = Router();
@@ -232,6 +233,66 @@ router.get('/:workspaceId/skills/:skillId/runs/:runId', async (req, res) => {
     });
   } catch (err) {
     console.error('[skills] Error fetching skill run:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * POST /api/workspaces/:workspaceId/skills/run-all
+ * Run all (or filtered) skills for a workspace in staggered sequence
+ */
+router.post('/:workspaceId/skills/run-all', async (req, res) => {
+  try {
+    const { workspaceId } = req.params;
+    const { skills } = req.body || {};
+
+    const ws = await query('SELECT id, name FROM workspaces WHERE id = $1', [workspaceId]);
+    if (ws.rows.length === 0) {
+      return res.status(404).json({ error: 'Workspace not found' });
+    }
+
+    const registry = getSkillRegistry();
+    let skillIds: string[];
+
+    if (skills && Array.isArray(skills)) {
+      // Filter to specific skills
+      skillIds = skills;
+    } else {
+      // Run all skills that have a schedule
+      const allSkills = registry.getAll();
+      skillIds = allSkills
+        .filter(s => s.schedule?.cron)
+        .map(s => s.id);
+    }
+
+    if (skillIds.length === 0) {
+      return res.status(400).json({ error: 'No skills to run' });
+    }
+
+    console.log(`[Skills] Running ${skillIds.length} skills for workspace ${workspaceId}`);
+
+    // Run skills in staggered sequence
+    const results = await runScheduledSkills(workspaceId, skillIds, 'manual_batch');
+
+    const summary = {
+      total: results.length,
+      successful: results.filter(r => r.success).length,
+      failed: results.filter(r => !r.success).length,
+    };
+
+    return res.json({
+      success: true,
+      summary,
+      results: results.map(r => ({
+        skillId: r.skillId,
+        status: r.success ? 'completed' : 'failed',
+        runId: r.runId,
+        duration_ms: r.duration_ms,
+        error: r.error,
+      })),
+    });
+  } catch (err) {
+    console.error('[skills] Error running all skills:', err);
     return res.status(500).json({ error: 'Internal server error' });
   }
 });
