@@ -425,6 +425,7 @@ export interface EnrichedDeal extends ThreadingDeal {
   otherOpenDealsAtAccount: number;
   mostRecentActivityType: string | null;
   mostRecentActivityDate: string | null;
+  contactRoles: string[];
 }
 
 // ============================================================================
@@ -448,18 +449,17 @@ export async function dealThreadingAnalysis(workspaceId: string): Promise<Thread
       GROUP BY dc.deal_id
     ),
     fallback_contacts AS (
-      -- FALLBACK: Legacy contact counting (for deals without deal_contacts entries)
       SELECT
         d.id as deal_id,
-        COUNT(DISTINCT contact_id) as fallback_count,
+        COUNT(DISTINCT c3.cid) as fallback_count,
         STRING_AGG(DISTINCT COALESCE(c3.first_name || ' ' || c3.last_name, ''), ', ') as fallback_names
       FROM deals d
       LEFT JOIN LATERAL (
-        SELECT c1.id as contact_id, c1.first_name, c1.last_name
+        SELECT c1.id as cid, c1.first_name, c1.last_name
         FROM contacts c1
         WHERE c1.id = d.contact_id AND c1.workspace_id = $1
         UNION
-        SELECT c2.id as contact_id, c2.first_name, c2.last_name
+        SELECT c2.id as cid, c2.first_name, c2.last_name
         FROM activities act
         INNER JOIN contacts c2 ON act.contact_id = c2.id AND act.workspace_id = $1
         WHERE act.deal_id = d.id AND act.workspace_id = $1
@@ -621,6 +621,38 @@ export async function enrichCriticalDeals(
   }
 
   const result = await query(`
+    WITH deal_contact_roles AS (
+      SELECT
+        dc.deal_id,
+        COUNT(DISTINCT dc.contact_id) as role_contact_count,
+        STRING_AGG(DISTINCT COALESCE(c.first_name || ' ' || c.last_name, ''), ', ' ORDER BY COALESCE(c.first_name || ' ' || c.last_name, '')) as role_contact_names,
+        STRING_AGG(DISTINCT dc.role, ', ' ORDER BY dc.role) FILTER (WHERE dc.role IS NOT NULL) as contact_roles,
+        BOOL_OR(dc.is_primary) as has_primary
+      FROM deal_contacts dc
+      LEFT JOIN contacts c ON dc.contact_id = c.id AND c.workspace_id = $1
+      WHERE dc.workspace_id = $1 AND dc.deal_id = ANY($2)
+      GROUP BY dc.deal_id
+    ),
+    fallback_contacts AS (
+      SELECT
+        d.id as deal_id,
+        COUNT(DISTINCT c3.cid) as fallback_count,
+        STRING_AGG(DISTINCT COALESCE(c3.first_name || ' ' || c3.last_name, ''), ', ') as fallback_names
+      FROM deals d
+      LEFT JOIN LATERAL (
+        SELECT c1.id as cid, c1.first_name, c1.last_name
+        FROM contacts c1
+        WHERE c1.id = d.contact_id AND c1.workspace_id = $1
+        UNION
+        SELECT c2.id as cid, c2.first_name, c2.last_name
+        FROM activities act
+        INNER JOIN contacts c2 ON act.contact_id = c2.id AND act.workspace_id = $1
+        WHERE act.deal_id = d.id AND act.workspace_id = $1
+        LIMIT 5
+      ) c3 ON true
+      WHERE d.workspace_id = $1 AND d.id = ANY($2)
+      GROUP BY d.id
+    )
     SELECT 
       d.id as deal_id,
       d.name as deal_name,
@@ -634,41 +666,10 @@ export async function enrichCriticalDeals(
       COALESCE(pc.first_name || ' ' || pc.last_name, '') as primary_contact_name,
       pc.title as primary_contact_title,
       pc.seniority as primary_contact_seniority,
-      (
-        SELECT COUNT(DISTINCT contact_id)
-        FROM (
-          -- Primary contact
-          SELECT d.contact_id::text
-          WHERE d.contact_id IS NOT NULL
-          UNION
-          -- Contacts from activities
-          SELECT act.contact_id::text
-          FROM activities act
-          WHERE act.deal_id = d.id AND act.workspace_id = $1 AND act.contact_id IS NOT NULL
-          UNION
-          -- Contacts from HubSpot associations (source_data JSONB)
-          SELECT (assoc->>'id')::text as contact_id
-          FROM jsonb_array_elements(
-            COALESCE(d.source_data->'associations'->'contacts'->'results', '[]'::jsonb)
-          ) as assoc
-          WHERE assoc->>'type' = 'deal_to_contact'
-        ) all_contacts
-        WHERE contact_id IS NOT NULL
-      ) as contact_count,
-      (
-        SELECT STRING_AGG(DISTINCT COALESCE(c3.first_name || ' ' || c3.last_name, ''), ', ')
-        FROM (
-          SELECT c1.first_name, c1.last_name
-          FROM contacts c1
-          WHERE c1.id = d.contact_id AND c1.workspace_id = $1
-          UNION
-          SELECT c2.first_name, c2.last_name
-          FROM activities act
-          INNER JOIN contacts c2 ON act.contact_id = c2.id AND act.workspace_id = $1
-          WHERE act.deal_id = d.id AND act.workspace_id = $1
-          LIMIT 5
-        ) c3
-      ) as contact_names,
+      COALESCE(dcr.role_contact_count, fc.fallback_count, 0) as contact_count,
+      COALESCE(dcr.role_contact_names, fc.fallback_names, '') as contact_names,
+      COALESCE(dcr.contact_roles, '') as contact_roles,
+      COALESCE(dcr.has_primary, false) as has_primary,
       (
         SELECT COUNT(*)
         FROM contacts c
@@ -700,6 +701,8 @@ export async function enrichCriticalDeals(
     FROM deals d
     LEFT JOIN accounts a ON d.account_id = a.id AND a.workspace_id = $1
     LEFT JOIN contacts pc ON d.contact_id = pc.id AND pc.workspace_id = $1
+    LEFT JOIN deal_contact_roles dcr ON d.id = dcr.deal_id
+    LEFT JOIN fallback_contacts fc ON d.id = fc.deal_id
     WHERE d.workspace_id = $1 AND d.id = ANY($2)
   `, [workspaceId, dealIds]);
 
@@ -711,6 +714,8 @@ export async function enrichCriticalDeals(
     owner: row.owner || 'Unassigned',
     contactCount: parseInt(row.contact_count, 10) || 0,
     contactNames: (row.contact_names || '').split(', ').filter((n: string) => n),
+    contactRoles: (row.contact_roles || '').split(', ').filter((r: string) => r),
+    hasPrimaryContact: row.has_primary || false,
     primaryContactName: row.primary_contact_name || null,
     primaryContactTitle: row.primary_contact_title || null,
     primaryContactSeniority: row.primary_contact_seniority || null,
