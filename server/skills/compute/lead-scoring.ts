@@ -261,10 +261,10 @@ async function extractDealFeatures(workspaceId: string): Promise<DealFeatures[]>
       const conversationResult = await query<any>(`
         SELECT
           COUNT(*) as total_calls,
-          MAX(started_at) as last_call,
+          MAX(call_date) as last_call,
           AVG(duration_seconds) as avg_duration,
           COUNT(*) FILTER (
-            WHERE started_at >= NOW() - INTERVAL '14 days'
+            WHERE call_date >= NOW() - INTERVAL '14 days'
           ) as recent_calls
         FROM conversations
         WHERE workspace_id = $1 AND deal_id = $2
@@ -382,6 +382,7 @@ async function getCustomFieldWeights(workspaceId: string): Promise<CustomFieldWe
 
     const row = lastRun.rows[0];
     const topFields = row.result?.topFields
+      || row.result?.discovery_result?.topFields
       || row.output?.topFields
       || [];
 
