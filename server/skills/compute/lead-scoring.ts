@@ -368,9 +368,8 @@ async function extractContactFeatures(workspaceId: string): Promise<ContactFeatu
 
 async function getCustomFieldWeights(workspaceId: string): Promise<CustomFieldWeight[]> {
   try {
-    // Check if custom-field-discovery has run
-    const lastRun = await query<{ output: any }>(`
-      SELECT output FROM skill_runs
+    const lastRun = await query<{ output: any; result: any }>(`
+      SELECT output, result FROM skill_runs
       WHERE workspace_id = $1 AND skill_id = 'custom-field-discovery'
         AND status = 'completed'
       ORDER BY completed_at DESC LIMIT 1
@@ -381,8 +380,15 @@ async function getCustomFieldWeights(workspaceId: string): Promise<CustomFieldWe
       return [];
     }
 
-    const discovery = lastRun.rows[0].output;
-    const topFields = discovery.topFields || [];
+    const row = lastRun.rows[0];
+    const topFields = row.result?.topFields
+      || row.output?.topFields
+      || [];
+
+    if (topFields.length === 0) {
+      logger.warn('[Lead Scoring] Custom field discovery ran but topFields not found in output. Re-run discovery to populate structured data.');
+      return [];
+    }
 
     const weights: CustomFieldWeight[] = [];
 
@@ -535,21 +541,31 @@ function evaluateDealFeature(feature: string, deal: DealFeatures, maxWeight: num
 function scoreDeal(
   deal: DealFeatures,
   customFieldWeights: CustomFieldWeight[],
-  workspaceMedianAmount: number
+  workspaceMedianAmount: number,
+  hasConversationConnector: boolean
 ): LeadScore {
   const breakdown: Record<string, ScoreComponent> = {};
   let totalPoints = 0;
   let maxPossible = 0;
 
-  // Score each default feature
+  const conversationFeatures = new Set([
+    'has_calls', 'recent_call', 'call_volume', 'no_calls_late_stage',
+  ]);
+
   for (const [feature, maxWeight] of Object.entries(DEFAULT_WEIGHTS.deal)) {
+    if (conversationFeatures.has(feature) && !hasConversationConnector) {
+      continue;
+    }
+
     const { points, rawValue } = evaluateDealFeature(feature, deal, maxWeight);
     breakdown[feature] = { value: rawValue, points, weight: maxWeight };
     totalPoints += points;
-    maxPossible += Math.abs(maxWeight);
+
+    if (maxWeight > 0) {
+      maxPossible += maxWeight;
+    }
   }
 
-  // Score custom fields
   for (const cfw of customFieldWeights) {
     if (cfw.entityType !== 'deal' && cfw.entityType !== 'account') continue;
 
@@ -568,10 +584,9 @@ function scoreDeal(
     }
   }
 
-  // Normalize to 0-100
-  const normalizedScore = Math.max(0, Math.min(100,
-    Math.round((totalPoints / maxPossible) * 100)
-  ));
+  const normalizedScore = maxPossible > 0
+    ? Math.max(0, Math.min(100, Math.round((totalPoints / maxPossible) * 100)))
+    : 0;
 
   // Assign grade
   const grade = normalizedScore >= 85 ? 'A' :
@@ -712,23 +727,31 @@ async function persistScore(workspaceId: string, score: LeadScore): Promise<void
 export async function scoreLeads(workspaceId: string): Promise<ScoringResult> {
   logger.info('[Lead Scoring] Starting scoring run', { workspaceId });
 
-  // 1. Extract features
-  const [dealFeatures, contactFeatures, customFieldWeights] = await Promise.all([
+  const [dealFeatures, contactFeatures, customFieldWeights, connectorResult] = await Promise.all([
     extractDealFeatures(workspaceId),
     extractContactFeatures(workspaceId),
     getCustomFieldWeights(workspaceId),
+    query<{ connector_name: string }>(`
+      SELECT connector_name FROM connections
+      WHERE workspace_id = $1 AND connector_name IN ('gong', 'fireflies')
+      LIMIT 1
+    `, [workspaceId]),
   ]);
 
-  // 2. Compute workspace median amount (for amount_tier scoring)
+  const hasConversationConnector = connectorResult.rows.length > 0;
+  logger.info('[Lead Scoring] Workspace config', {
+    hasConversationConnector,
+    customFieldWeightsCount: customFieldWeights.length,
+  });
+
   const amounts = dealFeatures.map(d => d.amount).filter((a): a is number => a !== null && a > 0);
   const workspaceMedianAmount = amounts.length > 0
     ? amounts.sort((a, b) => a - b)[Math.floor(amounts.length / 2)]
     : 50000;
 
-  // 3. Score all deals
   const dealScores: LeadScore[] = [];
   for (const deal of dealFeatures) {
-    const score = scoreDeal(deal, customFieldWeights, workspaceMedianAmount);
+    const score = scoreDeal(deal, customFieldWeights, workspaceMedianAmount, hasConversationConnector);
     dealScores.push(score);
     await persistScore(workspaceId, score);
   }

@@ -2697,6 +2697,21 @@ const generateCustomFieldReportTool: ToolDefinition = {
 
       console.log(`[Custom Field Discovery] Generated report (${report.length} chars)`);
 
+      await query(`
+        UPDATE skill_runs
+        SET result = $2
+        WHERE run_id = $1
+      `, [
+        context.runId,
+        JSON.stringify({
+          report,
+          topFields: discoveryResult.topFields,
+          metadata: discoveryResult.metadata,
+        }),
+      ]);
+
+      console.log(`[Custom Field Discovery] Persisted ${discoveryResult.topFields.length} structured topFields to result column`);
+
       return report;
     }, params);
   },

@@ -1,0 +1,108 @@
+LEAD SCORING V1 — TWO FIXES
+
+Fix 1: CUSTOM FIELD WEIGHT BRIDGE
+
+The custom field discovery skill stores output as markdown in 
+result.report, but the scoring engine looks for output.topFields 
+(structured array). Bridge this gap.
+
+In the custom-field-discovery skill, when storing the run result, 
+persist BOTH the markdown report AND the structured data:
+
+  // In the skill run output, store:
+  {
+    report: "# Custom Field Discovery Report\n...",   // existing markdown
+    topFields: discoveredFields.filter(f => f.icpRelevanceScore >= 50),
+    metadata: { totalScanned, passedFilter, scoredAbove50, executionMs }
+  }
+
+Then in the scoring engine's getCustomFieldWeights(), update the 
+query to handle both formats:
+
+  const lastRun = await db.query(`
+    SELECT output FROM skill_runs 
+    WHERE workspace_id = $1 AND skill_id = 'custom-field-discovery'
+      AND status = 'completed'
+    ORDER BY completed_at DESC LIMIT 1
+  `, [workspaceId]);
+
+  // Try structured format first
+  const output = lastRun.rows[0]?.output;
+  const topFields = output?.topFields 
+    || output?.result?.topFields 
+    || [];
+
+If topFields is still empty, log a warning:
+  "Custom field discovery ran but topFields not found in output. 
+   Re-run discovery to populate structured data."
+
+After fixing, re-run custom-field-discovery for Imubit to persist 
+the structured format, then re-run lead-scoring.
+
+Expected: 27 fields available, top ones (probability, lead_source) 
+contributing bonus points. Top deal scores should increase 5-15 
+points.
+
+Fix 2: SCORE NORMALIZATION
+
+The current max is 67/100 because the denominator includes 
+conversation points (10) and custom field points (10) that are 
+structurally unavailable. This deflates every score.
+
+Fix: make maxPossible dynamic based on what's actually available.
+
+In scoreDeal():
+
+  // Before calculating maxPossible, check what's available
+  const hasConversationConnector = await workspaceHasConnector(
+    workspaceId, ['gong', 'fireflies']
+  );
+  const hasCustomFieldWeights = customFieldWeights.length > 0;
+
+  // When computing maxPossible, skip categories that don't apply:
+  for (const [feature, maxWeight] of Object.entries(weights.deal)) {
+    // Skip conversation weights if no connector
+    const isConversationFeature = ['has_calls', 'recent_call', 
+      'call_volume', 'no_calls_late_stage'].includes(feature);
+    if (isConversationFeature && !hasConversationConnector) {
+      continue; // don't add to maxPossible, don't score
+    }
+    
+    const { points, rawValue } = evaluateFeature(feature, deal, maxWeight);
+    breakdown[feature] = { value: rawValue, points, weight: maxWeight };
+    totalPoints += points;
+    maxPossible += Math.abs(maxWeight);
+  }
+
+  // Same for custom fields — only add to maxPossible if weights exist
+  // (already handled since the loop only runs over available weights)
+
+This means:
+- Imubit with no conversations + no custom fields: max possible 
+  is ~80 points (standard features only), so 67 raw → ~84 normalized
+- Imubit with custom fields loaded: max possible is ~90, scores 
+  adjust proportionally
+- Workspace with everything: max possible is 100, full range
+
+Also: for negative weights (days_since_activity: -8, 
+no_calls_late_stage: -5), don't add them to maxPossible. They 
+reduce scores but shouldn't inflate the denominator. Only count 
+positive-max features in maxPossible.
+
+After both fixes, re-run lead-scoring for Imubit.
+
+Expected results:
+- Custom fields contributing (lead_source, probability as bonus)
+- Score range expanding: top deals should hit 80+ (B grade)
+- Some A-grade deals should emerge (the ones with 13+ contacts, 
+  champions, high activity, AND favorable custom field values)
+- Grade distribution shifts: fewer F's (the $0/no-activity deals 
+  stay F), more B's and C's, some A's
+
+Log the before/after comparison:
+  SELECT score_grade, COUNT(*) 
+  FROM lead_scores 
+  WHERE workspace_id = '<imubit_id>' AND entity_type = 'deal'
+  GROUP BY score_grade ORDER BY score_grade;
+
+Run this BEFORE and AFTER the fixes to show the shift.
