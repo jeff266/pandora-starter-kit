@@ -1,0 +1,138 @@
+Already pushed! ✅ (commit cb2939e)                                      
+                                                                           
+  Test Prompt for Replit                                                   
+                                                                           
+  Copy-paste this into your Replit Agent to test the full cohort-based lead
+   discovery:                                                              
+                                                                           
+  CUSTOM FIELD DISCOVERY TEST — COHORT-BASED LEAD ANALYSIS                 
+                                                                           
+  Context: I just implemented full cohort-based lead field discovery in the
+                                                                           
+  custom-field-discovery.ts compute function. Need to validate it works    
+  correctly with the Salesforce Lead sync.                                 
+                                                                           
+  Test Steps:                                                              
+                                                                           
+  1. VERIFY LEADS TABLE EXISTS                                             
+     Run: SELECT COUNT(*) FROM leads WHERE workspace_id = '<workspace-id>';
+     Expected: Should return count of leads synced from Salesforce         
+     If 0: Need to run initial sync first                                  
+                                                                           
+  2. VERIFY LEAD CUSTOM FIELDS POPULATED                                   
+     Run: SELECT COUNT(*) FROM leads WHERE                                 
+          workspace_id = '<workspace-id>'                                  
+          AND jsonb_object_keys(custom_fields) IS NOT NULL;                
+     Expected: Leads should have custom_fields JSONB populated             
+                                                                           
+  3. TEST COHORT EXTRACTION                                                
+     Call extractLeadFields() and verify it returns:                       
+     - totalRecords (all leads)                                            
+     - convertedTotal, convertedFilled, convertedFillRate                  
+     - unconvertedTotal, unconvertedFilled, unconvertedFillRate            
+     - fillRateGap (behavioral signal indicator)                           
+                                                                           
+     Log the top 5 fields by converted fill rate                           
+                                                                           
+  4. TEST CONVERSION CORRELATION                                           
+     For a high-scoring lead field, call computeLeadConversionCorrelation()
+     Verify it returns:                                                    
+     - conversionRate per value                                            
+     - leadCount, convertedCount, unconvertedCount per value               
+                                                                           
+     Show conversion rate spread (max - min)                               
+                                                                           
+  5. TEST WON-DEAL CORRELATION (if converted_deal_id links exist)          
+     Call computeLeadWonDealCorrelation() for the same field               
+     Verify it returns:                                                    
+     - wonRate per value (for converted leads only)                        
+     - wonDeals, lostDeals, avgWonAmount per value                         
+                                                                           
+     This validates the converted_deal_id FK join works                    
+                                                                           
+  6. TEST COHORT-AWARE SCORING                                             
+     Call scoreLeadFieldRelevance() with mock data:                        
+     {                                                                     
+       convertedFillRate: 0.85,                                            
+       unconvertedFillRate: 0.15,                                          
+       fillRateGap: 0.70,                                                  
+       distinctValues: 5,                                                  
+       convertedFilled: 120,                                               
+       conversionRateSpread: 0.35,                                         
+       wonDealRateSpread: 0.22                                             
+     }                                                                     
+                                                                           
+     Expected score: ~90/100 (high gap + high conversion spread)           
+                                                                           
+  7. RUN FULL DISCOVERY                                                    
+     Execute: discoverCustomFields(workspaceId, { enableClassification:    
+  false })                                                                 
+                                                                           
+     Verify result includes:                                               
+     - entityBreakdown.leads with:                                         
+       - total, candidates, relevant counts                                
+       - convertedTotal, unconvertedTotal                                  
+     - discoveredFields includes LeadFieldAnalysis objects                 
+     - topFields may include high-scoring lead fields                      
+                                                                           
+  8. VALIDATE REPORT OUTPUT                                                
+     Call generateDiscoveryReport() and verify markdown includes:          
+     - Entity Breakdown table with Leads row                               
+     - Lead Cohort Summary section showing conversion %                    
+     - Top lead fields formatted with cohort stats:                        
+       "Converted Fill Rate: X% | Unconverted: Y% | Gap: Zpts"             
+     - Conversion rate spreads displayed                                   
+                                                                           
+  EXPECTED RESULTS:                                                        
+                                                                           
+  If workspace has ~400+ converted leads:                                  
+  - Should find 10-30 lead fields passing cohort filter                    
+  - Top lead fields should score 50-90 (high predictiveness)               
+  - Report should highlight:                                               
+    - Fields with big fill rate gaps (qualification signals)               
+    - Fields with high conversion rate spreads (ICP predictors)            
+    - Possibly won-deal correlations (if FK links exist)                   
+                                                                           
+  VALIDATION CHECKS:                                                       
+                                                                           
+  ✅ Cohort stats correctly computed (converted vs unconverted separate)   
+  ✅ Fill rate gap identifies behavioral signals (reps filling during      
+  qualification)                                                           
+  ✅ Conversion correlation shows which values convert better              
+  ✅ Won-deal correlation joins through converted_deal_id FK               
+  ✅ Scoring properly weights cohort signals                               
+  ✅ Report displays cohort-specific insights                              
+                                                                           
+  OUTPUT FORMAT:                                                           
+                                                                           
+  Return:                                                                  
+  1. Lead extraction summary (fields found, cohort sizes)                  
+  2. Top 3 lead fields with full cohort breakdown                          
+  3. Sample conversion correlation for 1 field                             
+  4. Final discovery report excerpt (Lead Cohort Summary + top lead field) 
+  5. Any errors or warnings encountered                                    
+                                                                           
+  If leads table doesn't exist yet, just confirm migration 015 needs to run
+   first.                                                                  
+                                                                           
+  ---                                                                      
+  Quick Validation Query (if you have psql access)                         
+                                                                           
+  -- Check lead sync status                                                
+  SELECT                                                                   
+    COUNT(*) as total_leads,                                               
+    COUNT(*) FILTER (WHERE is_converted = true) as converted,              
+    COUNT(*) FILTER (WHERE is_converted = false) as unconverted,           
+    COUNT(*) FILTER (WHERE custom_fields != '{}'::jsonb) as                
+  with_custom_fields,                                                      
+    COUNT(DISTINCT jsonb_object_keys(custom_fields)) as                    
+  unique_custom_fields                                                     
+  FROM leads                                                               
+  WHERE workspace_id = '<your-workspace-id>';                              
+                                                                           
+  -- Expected output example:                                              
+  -- total_leads | converted | unconverted | with_custom_fields |          
+  unique_custom_fields                                                     
+  -- 2847        | 412       | 2435        | 2847               | 47       
+                                                                           
+  This will validate your lead data is ready for cohort-based discovery! 
