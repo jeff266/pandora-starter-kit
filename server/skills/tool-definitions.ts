@@ -53,6 +53,7 @@ import {
   generateDiscoveryReport,
   type CustomFieldDiscoveryResult,
 } from './compute/custom-field-discovery.js';
+import { scoreLeads } from './compute/lead-scoring.js';
 import { query } from '../db.js';
 import {
   findConversationsWithoutDeals,
@@ -2702,6 +2703,30 @@ const generateCustomFieldReportTool: ToolDefinition = {
 };
 
 // ============================================================================
+// Lead Scoring Tools
+// ============================================================================
+
+const scoreLeadsTool: ToolDefinition = {
+  name: 'scoreLeads',
+  description: 'Score open deals and contacts using point-based scoring with engagement, threading, velocity, and custom field signals',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('scoreLeads', async () => {
+      const result = await scoreLeads(context.workspaceId);
+
+      console.log(`[Lead Scoring] Scored ${result.dealScores.length} deals and ${result.contactScores.length} contacts`);
+
+      return result;
+    }, params);
+  },
+};
+
+// ============================================================================
 // Tool Registry
 // ============================================================================
 
@@ -2769,6 +2794,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['repScorecardCompute', repScorecardComputeTool],
   ['discoverCustomFields', discoverCustomFieldsTool],
   ['generateCustomFieldReport', generateCustomFieldReportTool],
+  ['scoreLeads', scoreLeadsTool],
 ]);
 
 // ============================================================================

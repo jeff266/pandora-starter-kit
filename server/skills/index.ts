@@ -15,6 +15,7 @@ import { forecastRollupSkill } from './library/forecast-rollup.js';
 import { pipelineWaterfallSkill } from './library/pipeline-waterfall.js';
 import { repScorecardSkill } from './library/rep-scorecard.js';
 import { customFieldDiscoverySkill } from './library/custom-field-discovery.js';
+import { leadScoringSkill } from './library/lead-scoring.js';
 
 // Types
 export type {
@@ -70,6 +71,7 @@ export { forecastRollupSkill } from './library/forecast-rollup.js';
 export { pipelineWaterfallSkill } from './library/pipeline-waterfall.js';
 export { repScorecardSkill } from './library/rep-scorecard.js';
 export { customFieldDiscoverySkill } from './library/custom-field-discovery.js';
+export { leadScoringSkill } from './library/lead-scoring.js';
 
 // Formatters
 export {
@@ -110,6 +112,7 @@ export function registerBuiltInSkills(): void {
   registry.register(pipelineWaterfallSkill);
   registry.register(repScorecardSkill);
   registry.register(customFieldDiscoverySkill);
+  registry.register(leadScoringSkill);
 
   console.log('[Skills] Registered all built-in skills');
 }
