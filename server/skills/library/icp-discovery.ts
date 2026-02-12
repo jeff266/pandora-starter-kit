@@ -23,14 +23,24 @@ export const icpDiscoverySkill: SkillDefinition = {
   category: 'intelligence',
   tier: 'claude',
 
-  requiredTools: ['discoverICP'],
+  requiredTools: ['resolveContactRoles', 'discoverICP'],
   requiredContext: [],
 
   steps: [
     {
+      id: 'ensure-contact-roles',
+      name: 'Ensure Contact Roles for Closed Deals',
+      tier: 'compute',
+      computeFn: 'resolveContactRoles',
+      computeArgs: { includeClosedDeals: true },
+      outputKey: 'contact_role_result',
+    },
+
+    {
       id: 'discover-patterns',
       name: 'Discover ICP Patterns',
       tier: 'compute',
+      dependsOn: ['ensure-contact-roles'],
       computeFn: 'discoverICP',
       computeArgs: {},
       outputKey: 'discovery_result',

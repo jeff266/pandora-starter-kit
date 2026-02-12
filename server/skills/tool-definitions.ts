@@ -2749,12 +2749,18 @@ const resolveContactRolesTool: ToolDefinition = {
         type: 'string',
         description: 'Optional deal ID to resolve roles for a specific deal. If not provided, resolves all deals.',
       },
+      includeClosedDeals: {
+        type: 'boolean',
+        description: 'Include closed_won and closed_lost deals in resolution. Required for ICP Discovery which needs closed deal contact data. Default: false (only open deals).',
+      },
     },
     required: [],
   },
   execute: async (params, context) => {
     return safeExecute('resolveContactRoles', async () => {
-      const result = await resolveContactRoles(context.workspaceId, params.dealId);
+      const result = await resolveContactRoles(context.workspaceId, params.dealId, {
+        includeClosedDeals: params.includeClosedDeals ?? false,
+      });
 
       console.log(`[Contact Role Resolution] Resolved ${result.contactsResolved.total} contacts across ${result.dealsProcessed} deals`);
 

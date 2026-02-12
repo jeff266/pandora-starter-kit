@@ -364,17 +364,18 @@ async function normalizeCrmRoles(workspaceId: string): Promise<number> {
 // Priority 2: CRM Deal Custom Fields
 // ============================================================================
 
-async function resolveCrmDealFields(workspaceId: string, dealId?: string): Promise<number> {
+async function resolveCrmDealFields(workspaceId: string, dealId?: string, includeClosedDeals = false): Promise<number> {
   logger.info('[Priority 2] Resolving from CRM deal custom fields');
 
   const dealFilter = dealId ? 'AND d.id = $2' : '';
+  const closedFilter = includeClosedDeals ? '' : "AND stage_normalized NOT IN ('closed_won', 'closed_lost')";
   const params = dealId ? [workspaceId, dealId] : [workspaceId];
 
   const dealsResult = await query<{ id: string; account_id: string; custom_fields: any }>(`
     SELECT id, account_id, custom_fields
     FROM deals
     WHERE workspace_id = $1
-      AND stage_normalized NOT IN ('closed_won', 'closed_lost')
+      ${closedFilter}
       ${dealFilter}
   `, params);
 
@@ -737,18 +738,19 @@ async function discoverContactsFromActivities(workspaceId: string, dealId?: stri
   return discovered;
 }
 
-async function discoverContactsFromAccount(workspaceId: string, dealId?: string): Promise<number> {
+async function discoverContactsFromAccount(workspaceId: string, dealId?: string, includeClosedDeals = false): Promise<number> {
   logger.info('[Discovery] Finding senior contacts at account (zero-contact deals only)');
 
   // Only run for deals with zero contacts
   const dealFilter = dealId ? 'AND d.id = $2' : '';
+  const closedFilter = includeClosedDeals ? '' : "AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')";
   const params = dealId ? [workspaceId, dealId] : [workspaceId];
 
   const dealsWithNoContacts = await query<{ id: string; account_id: string }>(`
     SELECT d.id, d.account_id
     FROM deals d
     WHERE d.workspace_id = $1
-      AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+      ${closedFilter}
       ${dealFilter}
       AND NOT EXISTS (
         SELECT 1 FROM deal_contacts dc
@@ -793,8 +795,10 @@ async function discoverContactsFromAccount(workspaceId: string, dealId?: string)
 
 export async function resolveContactRoles(
   workspaceId: string,
-  dealId?: string
+  dealId?: string,
+  options?: { includeClosedDeals?: boolean }
 ): Promise<ResolutionResult> {
+  const includeClosedDeals = options?.includeClosedDeals ?? false;
   const startTime = Date.now();
 
   logger.info('[Contact Role Resolution] Starting', { workspaceId, dealId });
@@ -814,7 +818,7 @@ export async function resolveContactRoles(
   stats.normalized = await normalizeCrmRoles(workspaceId);
 
   // Priority 2: CRM deal custom fields
-  stats.crmDealField = await resolveCrmDealFields(workspaceId, dealId);
+  stats.crmDealField = await resolveCrmDealFields(workspaceId, dealId, includeClosedDeals);
 
   // Priority 2.5: Conversation participants
   stats.conversationParticipant = await resolveConversationParticipants(workspaceId, dealId);
@@ -830,7 +834,7 @@ export async function resolveContactRoles(
 
   // Discovery: Unassociated contacts
   stats.activityDiscovery = await discoverContactsFromActivities(workspaceId, dealId);
-  stats.accountMatch = await discoverContactsFromAccount(workspaceId, dealId);
+  stats.accountMatch = await discoverContactsFromAccount(workspaceId, dealId, includeClosedDeals);
 
   // Compute final statistics
   const dealFilter = dealId ? 'AND dc.deal_id = $2' : '';
@@ -884,7 +888,7 @@ export async function resolveContactRoles(
       ROUND(AVG((SELECT COUNT(*) FROM deal_contacts dc WHERE dc.deal_id = d.id AND dc.workspace_id = d.workspace_id AND dc.buying_role IS NOT NULL AND dc.buying_role != 'unknown')), 2) as avg_roles_per_deal
     FROM deals d
     WHERE d.workspace_id = $1
-      AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+      ${includeClosedDeals ? '' : "AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')"}
       ${dealFilter}
   `, params);
 
