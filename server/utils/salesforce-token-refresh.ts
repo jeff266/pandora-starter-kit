@@ -8,6 +8,7 @@
 import { query } from '../db.js';
 import { SalesforceClient } from '../connectors/salesforce/client.js';
 import { createLogger } from './logger.js';
+import { encryptCredentials, decryptCredentials, isEncrypted } from '../lib/encryption.js';
 
 const logger = createLogger('SalesforceTokenRefresh');
 
@@ -37,7 +38,12 @@ export async function getFreshCredentials(workspaceId: string): Promise<Salesfor
     throw new Error('Salesforce connection not found');
   }
 
-  const { credentials, updated_at } = result.rows[0];
+  let { credentials, updated_at } = result.rows[0];
+
+  // Decrypt credentials if encrypted
+  if (credentials && isEncrypted(credentials)) {
+    credentials = decryptCredentials(credentials as any) as SalesforceCredentials;
+  }
 
   // Check if token needs refresh (older than 90 minutes)
   const tokenAge = Date.now() - new Date(updated_at).getTime();
@@ -86,12 +92,15 @@ export async function refreshToken(
       issuedAt: Date.now(),
     };
 
+    // Encrypt credentials before storing
+    const encrypted = encryptCredentials(newCredentials);
+
     // Update database with new credentials
     await query(
       `UPDATE connections
        SET credentials = $1, updated_at = NOW()
        WHERE workspace_id = $2 AND connector_name = 'salesforce'`,
-      [JSON.stringify(newCredentials), workspaceId]
+      [JSON.stringify(encrypted), workspaceId]
     );
 
     logger.info('Token refreshed successfully', { workspaceId });

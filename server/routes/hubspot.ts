@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import { query } from '../db.js';
 import { hubspotConnector } from '../connectors/hubspot/index.js';
 import type { Connection, ConnectorCredentials } from '../connectors/_interface.js';
+import { decryptCredentials, isEncrypted } from '../lib/encryption.js';
 
 const router = Router();
 
@@ -71,12 +72,18 @@ router.post('/:workspaceId/connectors/hubspot/sync', async (req: Request<Workspa
       return;
     }
 
+    // Decrypt credentials if encrypted
+    let credentials = conn.credentials;
+    if (credentials && isEncrypted(credentials)) {
+      credentials = decryptCredentials(credentials);
+    }
+
     const connection: Connection = {
       id: conn.id,
       workspaceId,
       connectorName: 'hubspot',
       status: conn.status as Connection['status'],
-      credentials: conn.credentials,
+      credentials,
     };
 
     let result;
@@ -140,12 +147,19 @@ router.post('/:workspaceId/connectors/hubspot/discover-schema', async (req: Requ
     }
 
     const conn = connResult.rows[0];
+
+    // Decrypt credentials if encrypted
+    let credentials = conn.credentials;
+    if (credentials && isEncrypted(credentials)) {
+      credentials = decryptCredentials(credentials);
+    }
+
     const connection: Connection = {
       id: conn.id,
       workspaceId,
       connectorName: 'hubspot',
       status: conn.status as Connection['status'],
-      credentials: conn.credentials,
+      credentials,
     };
 
     const schema = await hubspotConnector.discoverSchema!(connection);
