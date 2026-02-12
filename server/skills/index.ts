@@ -17,6 +17,7 @@ import { repScorecardSkill } from './library/rep-scorecard.js';
 import { customFieldDiscoverySkill } from './library/custom-field-discovery.js';
 import { leadScoringSkill } from './library/lead-scoring.js';
 import { contactRoleResolutionSkill } from './library/contact-role-resolution.js';
+import { icpDiscoverySkill } from './library/icp-discovery.js';
 
 // Types
 export type {
@@ -74,6 +75,7 @@ export { repScorecardSkill } from './library/rep-scorecard.js';
 export { customFieldDiscoverySkill } from './library/custom-field-discovery.js';
 export { leadScoringSkill } from './library/lead-scoring.js';
 export { contactRoleResolutionSkill } from './library/contact-role-resolution.js';
+export { icpDiscoverySkill } from './library/icp-discovery.js';
 
 // Formatters
 export {
@@ -116,6 +118,7 @@ export function registerBuiltInSkills(): void {
   registry.register(customFieldDiscoverySkill);
   registry.register(leadScoringSkill);
   registry.register(contactRoleResolutionSkill);
+  registry.register(icpDiscoverySkill);
 
   console.log('[Skills] Registered all built-in skills');
 }

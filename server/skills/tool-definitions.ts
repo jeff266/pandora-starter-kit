@@ -55,6 +55,7 @@ import {
 } from './compute/custom-field-discovery.js';
 import { scoreLeads } from './compute/lead-scoring.js';
 import { resolveContactRoles, type ResolutionResult } from './compute/contact-role-resolution.js';
+import { discoverICP, type ICPDiscoveryResult } from './compute/icp-discovery.js';
 import { query } from '../db.js';
 import {
   findConversationsWithoutDeals,
@@ -2866,6 +2867,30 @@ ${newContacts > 0 ? `## New Discoveries
 }
 
 // ============================================================================
+// ICP Discovery Tools
+// ============================================================================
+
+const discoverICPTool: ToolDefinition = {
+  name: 'discoverICP',
+  description: 'Discover ideal customer profile patterns from closed deal data (personas, buying committees, company sweet spots)',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('discoverICP', async () => {
+      const result = await discoverICP(context.workspaceId);
+
+      console.log(`[ICP Discovery] Mode: ${result.mode}, Analyzed ${result.metadata.dealsAnalyzed} deals, Discovered ${result.personas.length} personas`);
+
+      return result;
+    }, params);
+  },
+};
+
+// ============================================================================
 // Tool Registry
 // ============================================================================
 
@@ -2936,6 +2961,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['scoreLeads', scoreLeadsTool],
   ['resolveContactRoles', resolveContactRolesTool],
   ['generateContactRoleReport', generateContactRoleReportTool],
+  ['discoverICP', discoverICPTool],
 ]);
 
 // ============================================================================
