@@ -1,0 +1,152 @@
+What Was Implemented                                                     
+                                                                           
+  Core Analysis Engine (server/skills/compute/icp-discovery.ts - ~1400     
+  lines):                                                                  
+                                                                           
+  Step 1: Data Readiness Check                                             
+  - Queries closed deals by outcome (won/lost)                             
+  - Counts contact roles, unique contacts, custom fields                   
+  - Checks for conversation connectors and enrichment                      
+  - Mode selection logic (descriptive/point_based/regression)              
+  - For Imubit: 371 closed → 960 contact roles → DESCRIPTIVE mode          
+                                                                           
+  Step 2: Feature Matrix Builder                                           
+  - Extracts deal-level features: amount, sales cycle, owner, account      
+  details                                                                  
+  - Committee features: size, has_champion, has_economic_buyer, role       
+  diversity                                                                
+  - Parses seniority from titles (C-level, SVP, VP, Director, Manager, IC) 
+  - Parses department (Engineering, Operations, Sales, Finance, etc.)      
+  - Activity features: emails, calls, meetings, engagement velocity        
+  - Custom field integration: loads from discovery results                 
+                                                                           
+  Step 3: Persona Pattern Discovery                                        
+  - Clusters contacts by seniority × department                            
+  - Computes lift: (frequency in won) / (frequency in lost)                
+  - Generates persona names: "VP Operations", "Director Engineering"       
+  - Tracks: top titles, buying roles, deal sizes, confidence scores        
+  - Filters to significant personas (5+ deals minimum)                     
+  - Sorts by lift (strongest positive signals first)                       
+                                                                           
+  Step 3B: Buying Committee Combinations                                   
+  - Finds persona pairs that co-occur in deals                             
+  - Computes win rate when both present                                    
+  - Calculates lift vs baseline win rate                                   
+  - Tracks avg deal size, sample size                                      
+  - Identifies minimum viable committee                                    
+                                                                           
+  Step 4: Company Pattern Discovery                                        
+  - Industry analysis: Win rates by industry (3+ deals min)                
+  - Size analysis: Buckets by employee count (1-50, 51-200, etc.)          
+  - Custom field segmentation: Win rates by field values (leverages your 27
+   discovered fields)                                                      
+  - Lead source funnel: Conversion rate → close rate by source (5,565 leads
+   available)                                                              
+  - Sweet spots: Industry × size × custom field combos with high win rates 
+  (1.2x+ lift)                                                             
+                                                                           
+  Step 5: Scoring Weights (Descriptive Mode)                               
+  - Persona weights: lift × 3, capped at 10                                
+  - Custom field weights: win rate normalized per field (0-10 scale)       
+  - Industry weights: win rate normalized across industries (0-10 scale)   
+  - Note: Heuristic weights, not regression-validated                      
+                                                                           
+  Step 10: Persistence                                                     
+  - Inserts into icp_profiles table (status = 'draft')                     
+  - Stores: personas, buying_committees, company_profile, scoring_weights  
+  (JSONB)                                                                  
+  - Metadata: deals analyzed, won/lost counts, execution time              
+  - Returns profileId for reference                                        
+                                                                           
+  Skill Definition (server/skills/library/icp-discovery.ts):               
+                                                                           
+  Three-phase pattern:                                                     
+  1. Compute: discoverICP function (Steps 1-10 above)                      
+  2. DeepSeek: Classifies insights (confirmed_pattern, new_discovery,      
+  actionability, confidence)                                               
+  3. Claude: Synthesizes Slack-ready ICP report                            
+                                                                           
+  Key Adaptations for No-Enrichment Reality                                
+                                                                           
+  ✅ Uses CRM contact roles instead of Apollo/LinkedIn enrichment (960     
+  roles available)                                                         
+  ✅ Parses seniority/department from job titles (fallback when enrichment 
+  missing)                                                                 
+  ✅ Integrates 27 discovered custom fields for workspace-specific         
+  segmentation                                                             
+  ✅ Works with existing data: closed deals, activities, leads, accounts   
+  ✅ Mode selection adapted: Checks for contact roles, not enrichment      
+  status                                                                   
+                                                                           
+  Test Prompt for Replit                                                   
+                                                                           
+  Test ICP Discovery against Imubit workspace:                             
+                                                                           
+  POST /api/workspaces/<imubit_id>/skills/icp-discovery/run                
+                                                                           
+  Expected results:                                                        
+  1. Mode: DESCRIPTIVE (371 closed deals, 960 contact roles detected)      
+  2. Feature matrix: 371 deals with committee + activity + custom field    
+  features                                                                 
+  3. Personas: At least 5 significant personas (seniority × department)    
+  with lift scores                                                         
+  4. Buying committees: Top 3-5 combinations with win rates                
+  5. Industry analysis: Win rates by industry (Oil & Gas, Refining,        
+  Chemicals, etc.)                                                         
+  6. Custom field segmentation: Win rates for probability, lead_source, and
+   other discovered fields                                                 
+  7. Lead source funnel: Conversion and close rates by source              
+  8. Sweet spots: Industry × custom field combos with high lift            
+  9. ICP profile persisted to icp_profiles table (status = 'draft')        
+  10. Slack report with specific numbers, percentages, deal names          
+                                                                           
+  Verify persistence:                                                      
+  SELECT id, version, status, scoring_method, deals_analyzed, won_deals,   
+  lost_deals                                                               
+  FROM icp_profiles                                                        
+  WHERE workspace_id = '<imubit_id>'                                       
+  ORDER BY version DESC LIMIT 1;                                           
+                                                                           
+  Show persona patterns:                                                   
+  SELECT                                                                   
+    jsonb_array_length(personas) as persona_count,                         
+    jsonb_array_length(buying_committees) as committee_count,              
+    (company_profile->>'industryWinRates')::jsonb AS industries            
+  FROM icp_profiles                                                        
+  WHERE workspace_id = '<imubit_id>'                                       
+  ORDER BY version DESC LIMIT 1;                                           
+                                                                           
+  Expected Output on Imubit Workspace                                      
+                                                                           
+  Data Foundation:                                                         
+  - 371 closed deals (287 won, 84 lost = 77% baseline win rate)            
+  - 960 contact roles across deals                                         
+  - 27 custom fields discovered (probability, lead_source, activity fields)
+  - 5,565 leads with conversion tracking                                   
+                                                                           
+  Persona Discoveries:                                                     
+  - VP Operations (Refining industry - likely high lift given vertical)    
+  - Director Engineering (Process control buyers)                          
+  - Manager Operations (Champions for plant implementations)               
+  - C-Level Executive (Decision makers on large deals)                     
+  - Director Sales/Commercial (Economic buyers)                            
+                                                                           
+  Committee Patterns:                                                      
+  - "VP Operations + Director Engineering" = likely 80%+ win rate          
+  - "Champion (Manager Ops) + Economic Buyer (Director Commercial)" combos 
+  - Threading: Deals with 3+ roles including champion + EB should show     
+  highest win rates                                                        
+                                                                           
+  Company Sweet Spots:                                                     
+  - Oil & Gas Refining industry (likely dominant in Imubit's book)         
+  - Large refineries (1000+ employees)                                     
+  - Custom fields: Deals with higher probability scores, ZoomInfo-sourced  
+  leads (3x conversion from discovery)                                     
+                                                                           
+  Lead Source Funnel:                                                      
+  - ZoomInfo → 81pt conversion spread (from lead discovery)                
+  - Website → lower conversion but volume play                             
+  - Partner referrals → quality                                            
+                                                                           
+  The system is ready to test! This will produce the first data-driven ICP 
+  profile for the workspace.        
