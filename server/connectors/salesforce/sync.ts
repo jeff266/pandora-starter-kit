@@ -1,6 +1,6 @@
 import { query, getClient } from '../../db.js';
 import { SalesforceClient } from './client.js';
-import { transformOpportunity, transformContact, transformAccount } from './transform.js';
+import { transformOpportunity, transformContact, transformAccount, transformTask, transformEvent } from './transform.js';
 import type { NormalizedDeal, NormalizedContact, NormalizedAccount } from './transform.js';
 import type { SalesforceStage } from './types.js';
 import { createLogger } from '../../utils/logger.js';
@@ -571,6 +571,17 @@ async function runSync(
 
   logger.info('Resolved FKs', { accounts: accountIdMap.size, contacts: contactIdMap.size });
 
+  // Sync OpportunityContactRole → deal_contacts
+  await syncContactRoles(client, workspaceId).catch(err => {
+    errors.push(`Contact roles sync failed: ${err.message}`);
+  });
+
+  // Sync Activities (Tasks + Events)
+  const sinceDate = watermark ? new Date(watermark) : null;
+  await syncActivities(client, workspaceId, sinceDate).catch(err => {
+    errors.push(`Activities sync failed: ${err.message}`);
+  });
+
   let computedFields = null;
   try {
     computedFields = await computeFields(workspaceId);
@@ -607,4 +618,164 @@ async function runSync(
     duration,
     errors,
   };
+}
+
+// ============================================================================
+// Contact Roles Sync (OpportunityContactRole → deal_contacts)
+// ============================================================================
+
+async function syncContactRoles(
+  client: SalesforceClient,
+  workspaceId: string
+): Promise<void> {
+  const dealResult = await query<{ source_id: string; id: string }>(
+    `SELECT source_id, id FROM deals WHERE workspace_id = $1 AND source = 'salesforce'`,
+    [workspaceId]
+  );
+  const dealIdMap = new Map(dealResult.rows.map(r => [r.source_id, r.id]));
+
+  const contactResult = await query<{ source_id: string; id: string }>(
+    `SELECT source_id, id FROM contacts WHERE workspace_id = $1 AND source = 'salesforce'`,
+    [workspaceId]
+  );
+  const contactIdMap = new Map(contactResult.rows.map(r => [r.source_id, r.id]));
+
+  const roles = await client.getOpportunityContactRoles();
+
+  if (roles.length === 0) {
+    logger.info('No OpportunityContactRoles found (may not be used in this org)');
+    return;
+  }
+
+  let synced = 0;
+  let skipped = 0;
+
+  for (const role of roles) {
+    const dealId = dealIdMap.get(role.OpportunityId);
+    const contactId = contactIdMap.get(role.ContactId);
+
+    if (!dealId || !contactId) {
+      skipped++;
+      continue;
+    }
+
+    await query(
+      `INSERT INTO deal_contacts (workspace_id, deal_id, contact_id, role, is_primary, source, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, 'salesforce', NOW(), NOW())
+       ON CONFLICT (workspace_id, deal_id, contact_id, source)
+       DO UPDATE SET role = $4, is_primary = $5, updated_at = NOW()`,
+      [workspaceId, dealId, contactId, role.Role, role.IsPrimary]
+    );
+    synced++;
+  }
+
+  logger.info('Synced contact roles', { total: roles.length, synced, skipped });
+}
+
+// ============================================================================
+// Activities Sync (Tasks + Events → activities)
+// ============================================================================
+
+async function syncActivities(
+  client: SalesforceClient,
+  workspaceId: string,
+  since: Date | null
+): Promise<void> {
+  const dealResult = await query<{ source_id: string; id: string }>(
+    `SELECT source_id, id FROM deals WHERE workspace_id = $1 AND source = 'salesforce'`,
+    [workspaceId]
+  );
+  const dealIdMap = new Map(dealResult.rows.map(r => [r.source_id, r.id]));
+
+  const contactResult = await query<{ source_id: string; id: string }>(
+    `SELECT source_id, id FROM contacts WHERE workspace_id = $1 AND source = 'salesforce'`,
+    [workspaceId]
+  );
+  const contactIdMap = new Map(contactResult.rows.map(r => [r.source_id, r.id]));
+
+  const [tasks, events] = await Promise.all([
+    client.getTasks(undefined, undefined, since || undefined),
+    client.getEvents(undefined, undefined, since || undefined),
+  ]);
+
+  let tasksSynced = 0;
+  let tasksSkipped = 0;
+
+  for (const task of tasks) {
+    const activity = transformTask(task, workspaceId, dealIdMap, contactIdMap);
+    if (!activity) {
+      tasksSkipped++;
+      continue;
+    }
+
+    await query(
+      `INSERT INTO activities (workspace_id, source, source_id, source_data, activity_type, timestamp, actor, subject, body, deal_id, contact_id, account_id, direction, duration_seconds, custom_fields, created_at, updated_at)
+       VALUES ($1, 'salesforce', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW())
+       ON CONFLICT (workspace_id, source, source_id)
+       DO UPDATE SET
+         activity_type = $4, timestamp = $5, actor = $6, subject = $7, body = $8,
+         deal_id = $9, contact_id = $10, account_id = $11, direction = $12,
+         duration_seconds = $13, custom_fields = $14, updated_at = NOW()`,
+      [
+        workspaceId,
+        activity.source_id,
+        JSON.stringify(activity.source_data),
+        activity.activity_type,
+        activity.timestamp,
+        activity.actor,
+        activity.subject,
+        activity.body,
+        activity.deal_id,
+        activity.contact_id,
+        activity.account_id,
+        activity.direction,
+        activity.duration_seconds,
+        JSON.stringify(activity.custom_fields),
+      ]
+    );
+    tasksSynced++;
+  }
+
+  let eventsSynced = 0;
+  let eventsSkipped = 0;
+
+  for (const event of events) {
+    const activity = transformEvent(event, workspaceId, dealIdMap, contactIdMap);
+    if (!activity) {
+      eventsSkipped++;
+      continue;
+    }
+
+    await query(
+      `INSERT INTO activities (workspace_id, source, source_id, source_data, activity_type, timestamp, actor, subject, body, deal_id, contact_id, account_id, direction, duration_seconds, custom_fields, created_at, updated_at)
+       VALUES ($1, 'salesforce', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW())
+       ON CONFLICT (workspace_id, source, source_id)
+       DO UPDATE SET
+         activity_type = $4, timestamp = $5, actor = $6, subject = $7, body = $8,
+         deal_id = $9, contact_id = $10, account_id = $11, direction = $12,
+         duration_seconds = $13, custom_fields = $14, updated_at = NOW()`,
+      [
+        workspaceId,
+        activity.source_id,
+        JSON.stringify(activity.source_data),
+        activity.activity_type,
+        activity.timestamp,
+        activity.actor,
+        activity.subject,
+        activity.body,
+        activity.deal_id,
+        activity.contact_id,
+        activity.account_id,
+        activity.direction,
+        activity.duration_seconds,
+        JSON.stringify(activity.custom_fields),
+      ]
+    );
+    eventsSynced++;
+  }
+
+  logger.info('Synced activities', {
+    tasks: { total: tasks.length, synced: tasksSynced, skipped: tasksSkipped },
+    events: { total: events.length, synced: eventsSynced, skipped: eventsSkipped },
+  });
 }
