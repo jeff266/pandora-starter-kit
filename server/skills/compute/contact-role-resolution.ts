@@ -367,6 +367,30 @@ async function normalizeCrmRoles(workspaceId: string): Promise<number> {
 async function resolveCrmDealFields(workspaceId: string, dealId?: string, includeClosedDeals = false): Promise<number> {
   logger.info('[Priority 2] Resolving from CRM deal custom fields');
 
+  // Load custom role field mappings from workspace config
+  const { getRoleFieldMappings } = await import('../../config/index.js');
+  const customRoleMappings = await getRoleFieldMappings(workspaceId);
+
+  // Merge custom mappings with default patterns
+  // Custom mappings are direct field → role, convert to role → [fields] for consistency
+  const mergedPatterns: Record<string, string[]> = {};
+  for (const [role, patterns] of Object.entries(ROLE_FIELD_PATTERNS)) {
+    mergedPatterns[role] = [...patterns];
+  }
+  for (const [fieldName, role] of Object.entries(customRoleMappings)) {
+    if (!mergedPatterns[role]) {
+      mergedPatterns[role] = [];
+    }
+    if (!mergedPatterns[role].includes(fieldName)) {
+      mergedPatterns[role].push(fieldName);
+    }
+  }
+
+  const customMappingsCount = Object.keys(customRoleMappings).length;
+  if (customMappingsCount > 0) {
+    logger.info(`[Priority 2] Added ${customMappingsCount} custom role field mappings`);
+  }
+
   const dealFilter = dealId ? 'AND d.id = $2' : '';
   const closedFilter = includeClosedDeals ? '' : "AND stage_normalized NOT IN ('closed_won', 'closed_lost')";
   const params = dealId ? [workspaceId, dealId] : [workspaceId];
@@ -384,7 +408,7 @@ async function resolveCrmDealFields(workspaceId: string, dealId?: string, includ
   for (const deal of dealsResult.rows) {
     if (!deal.custom_fields) continue;
 
-    for (const [role, patterns] of Object.entries(ROLE_FIELD_PATTERNS)) {
+    for (const [role, patterns] of Object.entries(mergedPatterns)) {
       for (const pattern of patterns) {
         const value = deal.custom_fields[pattern];
         if (!value) continue;

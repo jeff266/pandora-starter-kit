@@ -195,9 +195,23 @@ function parseSeniority(title: string | null): string {
   return 'unknown';
 }
 
-function parseDepartment(title: string | null): string {
+function parseDepartment(title: string | null, customPatterns?: Record<string, string[]>): string {
   if (!title) return 'unknown';
   const t = title.toLowerCase();
+
+  // Check custom patterns first (if provided)
+  if (customPatterns) {
+    for (const [deptName, keywords] of Object.entries(customPatterns)) {
+      for (const keyword of keywords) {
+        const pattern = new RegExp(`\\b${keyword.toLowerCase()}\\b`, 'i');
+        if (pattern.test(t)) {
+          return deptName;
+        }
+      }
+    }
+  }
+
+  // Default patterns
   if (/\b(engineer|technical|architect|developer|devops|it |cto|technology)\b/.test(t)) return 'engineering';
   if (/\b(process|operations|plant|refinery|manufacturing|production)\b/.test(t)) return 'operations';
   if (/\b(sales|account exec|business develop|commercial)\b/.test(t)) return 'sales';
@@ -346,6 +360,14 @@ async function checkDataReadiness(workspaceId: string): Promise<DataReadiness> {
 async function buildFeatureMatrix(workspaceId: string): Promise<FeatureVector[]> {
   logger.info('[Step 2] Building feature matrix');
 
+  // Load custom department patterns from workspace config
+  const { getDepartmentPatterns } = await import('../../config/index.js');
+  const customDepartmentPatterns = await getDepartmentPatterns(workspaceId);
+  const customPatternsCount = Object.keys(customDepartmentPatterns).length;
+  if (customPatternsCount > 0) {
+    logger.info(`[Step 2] Using ${customPatternsCount} custom department patterns`);
+  }
+
   // Get all closed deals
   const dealsResult = await query<{
     id: string;
@@ -419,7 +441,7 @@ async function buildFeatureMatrix(workspaceId: string): Promise<FeatureVector[]>
       }
 
       const seniority = contact.seniority_verified || parseSeniority(contact.title);
-      const department = contact.department_verified || parseDepartment(contact.title);
+      const department = contact.department_verified || parseDepartment(contact.title, customDepartmentPatterns);
 
       parsedSeniorities.push(seniority);
       parsedDepartments.push(department);

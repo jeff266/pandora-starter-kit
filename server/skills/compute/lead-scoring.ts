@@ -136,8 +136,24 @@ interface ScoringResult {
 }
 
 // ============================================================================
-// Default Weights
+// Default Weights & Grade Thresholds
 // ============================================================================
+
+const DEFAULT_GRADE_THRESHOLDS = {
+  A: 85,
+  B: 70,
+  C: 50,
+  D: 30,
+  F: 0,
+};
+
+function calculateGrade(score: number, thresholds = DEFAULT_GRADE_THRESHOLDS): 'A' | 'B' | 'C' | 'D' | 'F' {
+  if (score >= thresholds.A) return 'A';
+  if (score >= thresholds.B) return 'B';
+  if (score >= thresholds.C) return 'C';
+  if (score >= thresholds.D) return 'D';
+  return 'F';
+}
 
 const DEFAULT_WEIGHTS = {
   deal: {
@@ -752,7 +768,8 @@ function scoreDeal(
   customFieldWeights: CustomFieldWeight[],
   workspaceMedianAmount: number,
   hasConversationConnector: boolean,
-  icpWeights: ICPWeights | null = null
+  icpWeights: ICPWeights | null = null,
+  gradeThresholds = DEFAULT_GRADE_THRESHOLDS
 ): LeadScore {
   const breakdown: Record<string, ScoreComponent> = {};
   let totalPoints = 0;
@@ -858,11 +875,8 @@ function scoreDeal(
     ? Math.max(0, Math.min(100, Math.round((totalPoints / maxPossible) * 100)))
     : 0;
 
-  // Assign grade
-  const grade = normalizedScore >= 85 ? 'A' :
-                normalizedScore >= 70 ? 'B' :
-                normalizedScore >= 50 ? 'C' :
-                normalizedScore >= 30 ? 'D' : 'F';
+  // Assign grade using custom thresholds
+  const grade = calculateGrade(normalizedScore, gradeThresholds);
 
   return {
     entityType: 'deal',
@@ -875,7 +889,7 @@ function scoreDeal(
   };
 }
 
-function scoreContact(contact: ContactFeatures, dealScore: number | undefined): LeadScore {
+function scoreContact(contact: ContactFeatures, dealScore: number | undefined, gradeThresholds = DEFAULT_GRADE_THRESHOLDS): LeadScore {
   const breakdown: Record<string, ScoreComponent> = {};
   let totalPoints = 0;
   let maxPossible = 0;
@@ -931,11 +945,8 @@ function scoreContact(contact: ContactFeatures, dealScore: number | undefined): 
     Math.round((totalPoints / maxPossible) * 100)
   ));
 
-  // Assign grade
-  const grade = normalizedScore >= 85 ? 'A' :
-                normalizedScore >= 70 ? 'B' :
-                normalizedScore >= 50 ? 'C' :
-                normalizedScore >= 30 ? 'D' : 'F';
+  // Assign grade using custom thresholds
+  const grade = calculateGrade(normalizedScore, gradeThresholds);
 
   return {
     entityType: 'contact',
@@ -997,7 +1008,9 @@ async function persistScore(workspaceId: string, score: LeadScore): Promise<void
 export async function scoreLeads(workspaceId: string): Promise<ScoringResult> {
   logger.info('[Lead Scoring] Starting scoring run', { workspaceId });
 
-  const [dealFeatures, contactFeatures, customFieldWeights, connectorResult, icpProfile] = await Promise.all([
+  const { getGradeThresholds } = await import('../../config/index.js');
+
+  const [dealFeatures, contactFeatures, customFieldWeights, connectorResult, icpProfile, gradeThresholds] = await Promise.all([
     extractDealFeatures(workspaceId),
     extractContactFeatures(workspaceId),
     getCustomFieldWeights(workspaceId),
@@ -1007,6 +1020,7 @@ export async function scoreLeads(workspaceId: string): Promise<ScoringResult> {
       LIMIT 1
     `, [workspaceId]),
     loadICPWeights(workspaceId),
+    getGradeThresholds(workspaceId),
   ]);
 
   const hasConversationConnector = connectorResult.rows.length > 0;
@@ -1026,7 +1040,7 @@ export async function scoreLeads(workspaceId: string): Promise<ScoringResult> {
 
   const dealScores: LeadScore[] = [];
   for (const deal of dealFeatures) {
-    const score = scoreDeal(deal, customFieldWeights, workspaceMedianAmount, hasConversationConnector, icpWeights);
+    const score = scoreDeal(deal, customFieldWeights, workspaceMedianAmount, hasConversationConnector, icpWeights, gradeThresholds);
     dealScores.push(score);
     await persistScore(workspaceId, score);
   }
@@ -1036,7 +1050,7 @@ export async function scoreLeads(workspaceId: string): Promise<ScoringResult> {
   const contactScores: LeadScore[] = [];
   for (const contact of contactFeatures) {
     const dealScore = dealScoreMap.get(contact.dealId);
-    const score = scoreContact(contact, dealScore);
+    const score = scoreContact(contact, dealScore, gradeThresholds);
     contactScores.push(score);
     await persistScore(workspaceId, score);
   }
