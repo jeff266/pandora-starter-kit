@@ -1,0 +1,72 @@
+RUN TIER 1 SKILLS AGAINST SALESFORCE DATA
+
+The Imubit workspace has 54 Salesforce opportunities synced with 
+computed fields already calculated. Run the existing Tier 1 skills 
+against this workspace to validate cross-CRM normalization.
+
+1. IDENTIFY THE IMUBIT WORKSPACE ID
+
+Query the database:
+  SELECT id, name FROM workspaces WHERE name ILIKE '%imubit%';
+
+You need the workspace_id for all skill runs below.
+
+2. RUN EACH SKILL
+
+Trigger via the existing skill execution endpoint:
+
+a. Pipeline Hygiene
+   POST /api/workspaces/:workspaceId/skills/pipeline-hygiene/run
+
+b. Single-Thread Alert  
+   POST /api/workspaces/:workspaceId/skills/single-thread-alert/run
+
+c. Data Quality Audit
+   POST /api/workspaces/:workspaceId/skills/data-quality-audit/run
+
+d. Pipeline Coverage by Rep
+   POST /api/workspaces/:workspaceId/skills/pipeline-coverage-by-rep/run
+
+3. FOR EACH SKILL, VERIFY:
+
+- Skill completes without errors
+- Output references actual Salesforce deal names (not HubSpot data)
+- Stage names are properly normalized (Salesforce stages like 
+  "Closed Won", "04 - Proposal & Commercial Validation" should 
+  map correctly to universal stages)
+- Dollar amounts are populated (not null/zero)
+- Duration and token usage are logged
+
+4. LOG RESULTS
+
+For each skill, capture:
+- Status: PASS or FAIL
+- Duration (ms)
+- Number of deals analyzed
+- Any errors or warnings
+- Sample output (first 500 chars of the formatted result)
+
+5. LIKELY ISSUES TO WATCH FOR:
+
+- Stage normalization gaps: Salesforce custom stages that don't map 
+  to any universal stage — the skill should handle these gracefully, 
+  not crash
+- Null amounts: Salesforce allows null Amount on Opportunities — 
+  skills should skip or flag these, not divide-by-zero
+- Small dataset (54 opps): Some skills may produce thin results. 
+  That's fine — we're testing that they RUN, not that the insights 
+  are deep
+- Contact-to-deal associations: Single-Thread Alert needs contacts 
+  linked to deals. If OpportunityContactRole wasn't synced, the skill 
+  may flag everything as single-threaded. Note whether this is a 
+  real finding or a data gap.
+- Owner/rep names: Verify Salesforce owner names appear correctly 
+  in Pipeline Coverage by Rep output
+
+6. IF A SKILL FAILS:
+
+Don't fix it yet. Log the error with full stack trace and move to 
+the next skill. We want a complete picture of what works and what 
+doesn't before making changes.
+
+Run all four skills and report results.
