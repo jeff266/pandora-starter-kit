@@ -1,7 +1,7 @@
 import { query, getClient } from '../../db.js';
 import { SalesforceClient } from './client.js';
-import { transformOpportunity, transformContact, transformAccount, transformTask, transformEvent } from './transform.js';
-import type { NormalizedDeal, NormalizedContact, NormalizedAccount } from './transform.js';
+import { transformOpportunity, transformContact, transformAccount, transformTask, transformEvent, transformLead } from './transform.js';
+import type { NormalizedDeal, NormalizedContact, NormalizedAccount, NormalizedLead } from './transform.js';
 import type { SalesforceStage } from './types.js';
 import { createLogger } from '../../utils/logger.js';
 import { computeFields } from '../../computed-fields/engine.js';
@@ -186,6 +186,85 @@ async function upsertAccounts(accounts: NormalizedAccount[]): Promise<number> {
             account.workspace_id, account.source, account.source_id, JSON.stringify(account.source_data),
             account.name, account.domain, account.industry, account.employee_count,
             account.annual_revenue, account.owner, JSON.stringify(account.custom_fields),
+          ]
+        );
+        stored++;
+      }
+
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    return stored;
+  });
+}
+
+async function upsertLeads(leads: NormalizedLead[]): Promise<number> {
+  return upsertInBatches(leads, async (batch) => {
+    if (batch.length === 0) return 0;
+
+    const client = await getClient();
+    let stored = 0;
+    try {
+      await client.query('BEGIN');
+
+      for (const lead of batch) {
+        await client.query(
+          `INSERT INTO leads (
+            workspace_id, source, source_id, source_data,
+            first_name, last_name, email, phone, title, company, website,
+            status, lead_source, industry, annual_revenue, employee_count,
+            is_converted, converted_at,
+            sf_converted_contact_id, sf_converted_account_id, sf_converted_opportunity_id,
+            owner_id, owner_name, owner_email,
+            custom_fields, created_date, last_modified, created_at, updated_at
+          ) VALUES (
+            $1, $2, $3, $4,
+            $5, $6, $7, $8, $9, $10, $11,
+            $12, $13, $14, $15, $16,
+            $17, $18,
+            $19, $20, $21,
+            $22, $23, $24,
+            $25, $26, $27, NOW(), NOW()
+          )
+          ON CONFLICT (workspace_id, source, source_id) DO UPDATE SET
+            source_data = EXCLUDED.source_data,
+            first_name = EXCLUDED.first_name,
+            last_name = EXCLUDED.last_name,
+            email = EXCLUDED.email,
+            phone = EXCLUDED.phone,
+            title = EXCLUDED.title,
+            company = EXCLUDED.company,
+            website = EXCLUDED.website,
+            status = EXCLUDED.status,
+            lead_source = EXCLUDED.lead_source,
+            industry = EXCLUDED.industry,
+            annual_revenue = EXCLUDED.annual_revenue,
+            employee_count = EXCLUDED.employee_count,
+            is_converted = EXCLUDED.is_converted,
+            converted_at = EXCLUDED.converted_at,
+            sf_converted_contact_id = EXCLUDED.sf_converted_contact_id,
+            sf_converted_account_id = EXCLUDED.sf_converted_account_id,
+            sf_converted_opportunity_id = EXCLUDED.sf_converted_opportunity_id,
+            owner_id = EXCLUDED.owner_id,
+            owner_name = EXCLUDED.owner_name,
+            owner_email = EXCLUDED.owner_email,
+            custom_fields = EXCLUDED.custom_fields,
+            created_date = EXCLUDED.created_date,
+            last_modified = EXCLUDED.last_modified,
+            updated_at = NOW()`,
+          [
+            lead.workspace_id, lead.source, lead.source_id, JSON.stringify(lead.source_data),
+            lead.first_name, lead.last_name, lead.email, lead.phone, lead.title, lead.company, lead.website,
+            lead.status, lead.lead_source, lead.industry, lead.annual_revenue, lead.employee_count,
+            lead.is_converted, lead.converted_at,
+            lead.sf_converted_contact_id, lead.sf_converted_account_id, lead.sf_converted_opportunity_id,
+            lead.owner_id, lead.owner_name, lead.owner_email,
+            JSON.stringify(lead.custom_fields), lead.created_date, lead.last_modified,
           ]
         );
         stored++;
@@ -582,6 +661,11 @@ async function runSync(
     errors.push(`Activities sync failed: ${err.message}`);
   });
 
+  // Sync Leads (with custom fields + FK resolution)
+  await syncLeads(client, workspaceId, watermark).catch(err => {
+    errors.push(`Leads sync failed: ${err.message}`);
+  });
+
   let computedFields = null;
   try {
     computedFields = await computeFields(workspaceId);
@@ -778,4 +862,110 @@ async function syncActivities(
     tasks: { total: tasks.length, synced: tasksSynced, skipped: tasksSkipped },
     events: { total: events.length, synced: eventsSynced, skipped: eventsSkipped },
   });
+}
+
+// ============================================================================
+// Lead Sync (Lead → leads table with custom fields + FK resolution)
+// ============================================================================
+
+export async function syncLeads(
+  client: SalesforceClient,
+  workspaceId: string,
+  watermark: string | null = null
+): Promise<{ fetched: number; stored: number; fksResolved: number }> {
+  let customFieldNames: string[] = [];
+  try {
+    const fields = await client.getObjectFields('Lead');
+    customFieldNames = fields.map(f => f.name);
+    logger.info('Discovered Lead custom fields', { count: customFieldNames.length });
+  } catch (err) {
+    logger.warn('Failed to discover Lead custom fields, using defaults only', {
+      error: err instanceof Error ? err.message : 'Unknown',
+    });
+  }
+
+  const { DEFAULT_LEAD_FIELDS } = await import('./types.js');
+  const allFields = [...new Set([...DEFAULT_LEAD_FIELDS, ...customFieldNames])];
+
+  let rawLeads: any[] = [];
+  try {
+    const since = watermark ? new Date(watermark) : undefined;
+    rawLeads = await client.getLeads(allFields, since, !watermark);
+  } catch (err: any) {
+    logger.error('Failed to fetch leads', { error: err.message });
+    throw err;
+  }
+
+  logger.info('Fetched leads', { count: rawLeads.length });
+
+  const leadResult = transformWithErrorCapture(
+    rawLeads,
+    (lead) => transformLead(lead, workspaceId),
+    'Salesforce Leads',
+    (lead) => lead.Id
+  );
+
+  if (leadResult.failed.length > 0) {
+    logger.warn('Lead transform failures', { count: leadResult.failed.length });
+  }
+
+  const normalizedLeads = leadResult.succeeded;
+
+  const stored = await upsertLeads(normalizedLeads);
+  logger.info('Stored leads', { fetched: rawLeads.length, stored });
+
+  const fksResolved = await resolveLeadForeignKeys(workspaceId);
+
+  return { fetched: rawLeads.length, stored, fksResolved };
+}
+
+async function resolveLeadForeignKeys(workspaceId: string): Promise<number> {
+  let resolved = 0;
+
+  const contactResult = await query<{ count: string }>(
+    `UPDATE leads l SET
+       converted_contact_id = c.id
+     FROM contacts c
+     WHERE l.workspace_id = $1
+       AND l.sf_converted_contact_id IS NOT NULL
+       AND l.converted_contact_id IS NULL
+       AND c.workspace_id = l.workspace_id
+       AND c.source = 'salesforce'
+       AND c.source_id = l.sf_converted_contact_id`,
+    [workspaceId]
+  );
+  const contactsLinked = parseInt((contactResult as any).rowCount || '0', 10);
+
+  const accountResult = await query<{ count: string }>(
+    `UPDATE leads l SET
+       converted_account_id = a.id
+     FROM accounts a
+     WHERE l.workspace_id = $1
+       AND l.sf_converted_account_id IS NOT NULL
+       AND l.converted_account_id IS NULL
+       AND a.workspace_id = l.workspace_id
+       AND a.source = 'salesforce'
+       AND a.source_id = l.sf_converted_account_id`,
+    [workspaceId]
+  );
+  const accountsLinked = parseInt((accountResult as any).rowCount || '0', 10);
+
+  const dealResult = await query<{ count: string }>(
+    `UPDATE leads l SET
+       converted_deal_id = d.id
+     FROM deals d
+     WHERE l.workspace_id = $1
+       AND l.sf_converted_opportunity_id IS NOT NULL
+       AND l.converted_deal_id IS NULL
+       AND d.workspace_id = l.workspace_id
+       AND d.source = 'salesforce'
+       AND d.source_id = l.sf_converted_opportunity_id`,
+    [workspaceId]
+  );
+  const dealsLinked = parseInt((dealResult as any).rowCount || '0', 10);
+
+  resolved = contactsLinked + accountsLinked + dealsLinked;
+  logger.info('Resolved lead FKs', { contactsLinked, accountsLinked, dealsLinked, total: resolved });
+
+  return resolved;
 }
