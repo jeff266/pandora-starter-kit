@@ -193,11 +193,11 @@ async function extractDealFeatures(workspaceId: string): Promise<DealFeatures[]>
   const dealsResult = await query<any>(`
     SELECT
       d.id, d.name, d.amount, d.stage_normalized, d.close_date,
-      d.probability, d.owner_email, d.owner_name, d.created_date,
+      d.probability, d.owner as owner_email, d.owner as owner_name, d.created_at as created_date,
       d.custom_fields,
       a.name as account_name, a.industry, a.employee_count,
       a.annual_revenue, a.custom_fields as account_custom_fields,
-      EXTRACT(EPOCH FROM (NOW() - d.created_date)) / 86400 as days_since_creation,
+      EXTRACT(EPOCH FROM (NOW() - d.created_at)) / 86400 as days_since_creation,
       EXTRACT(EPOCH FROM (d.close_date - NOW())) / 86400 as days_until_close
     FROM deals d
     LEFT JOIN accounts a ON d.account_id = a.id AND a.workspace_id = d.workspace_id
@@ -207,6 +207,14 @@ async function extractDealFeatures(workspaceId: string): Promise<DealFeatures[]>
   `, [workspaceId]);
 
   const deals: DealFeatures[] = [];
+
+  let hasConversationsTable = false;
+  try {
+    await query(`SELECT 1 FROM conversations LIMIT 0`);
+    hasConversationsTable = true;
+  } catch {
+    logger.debug('[Lead Scoring] No conversations table, skipping conversation signals for all deals');
+  }
 
   for (const row of dealsResult.rows) {
     // Get engagement signals
@@ -248,9 +256,8 @@ async function extractDealFeatures(workspaceId: string): Promise<DealFeatures[]>
 
     const threadingRow = threadingResult.rows[0] || {};
 
-    // Get conversation signals (if available)
     let conversationRow: any = {};
-    try {
+    if (hasConversationsTable) {
       const conversationResult = await query<any>(`
         SELECT
           COUNT(*) as total_calls,
@@ -264,9 +271,6 @@ async function extractDealFeatures(workspaceId: string): Promise<DealFeatures[]>
       `, [workspaceId, row.id]);
 
       conversationRow = conversationResult.rows[0] || {};
-    } catch (error) {
-      // Conversations table may not exist - skip
-      logger.debug('[Lead Scoring] No conversations table, skipping conversation signals');
     }
 
     const lastActivity = activityRow.last_activity ? new Date(activityRow.last_activity) : null;
@@ -501,10 +505,10 @@ function evaluateDealFeature(feature: string, deal: DealFeatures, maxWeight: num
       return { points: penalty, rawValue: deal.daysSinceLastActivity };
     }
 
-    case 'stage_velocity':
-      // TODO: compute actual velocity, for now use days since creation as proxy
-      const points = deal.daysSinceCreation < 30 ? maxWeight : deal.daysSinceCreation < 60 ? maxWeight * 0.5 : 0;
-      return { points: Math.round(points), rawValue: deal.daysSinceCreation };
+    case 'stage_velocity': {
+      const velocityPts = deal.daysSinceCreation < 30 ? maxWeight : deal.daysSinceCreation < 60 ? maxWeight * 0.5 : 0;
+      return { points: Math.round(velocityPts), rawValue: deal.daysSinceCreation };
+    }
 
     case 'has_calls':
       return { points: (deal.totalCalls || 0) > 0 ? maxWeight : 0, rawValue: deal.totalCalls || 0 };

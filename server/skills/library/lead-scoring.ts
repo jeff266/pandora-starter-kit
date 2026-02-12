@@ -31,9 +31,9 @@ export const leadScoringSkill: SkillDefinition = {
     {
       id: 'classify-deals',
       name: 'Classify Top & Bottom Deals',
-      tier: 'tier_1',
+      tier: 'deepseek',
       dependsOn: ['compute-scores'],
-      prompt: `You are a sales operations analyst classifying scored deals by their strengths and risks.
+      deepseekPrompt: `You are a sales operations analyst classifying scored deals by their strengths and risks.
 
 For each deal below, provide:
 1. primary_strength: one of [strong_engagement, well_threaded, high_velocity, strong_fit, balanced]
@@ -57,7 +57,6 @@ Respond with ONLY a JSON object in this format:
     }
   ]
 }`,
-      model: 'deepseek',
       outputKey: 'classifications',
       parseAs: 'json',
     },
@@ -65,9 +64,9 @@ Respond with ONLY a JSON object in this format:
     {
       id: 'synthesize-report',
       name: 'Generate Scoring Report',
-      tier: 'tier_3',
+      tier: 'claude',
       dependsOn: ['compute-scores', 'classify-deals'],
-      prompt: `You are a sales operations analyst delivering a lead scoring report. Be specific with deal names, dollar amounts, and rep names. Focus on what's actionable.
+      claudePrompt: `You are a sales operations analyst delivering a lead scoring report. Be specific with deal names, dollar amounts, and rep names. Focus on what's actionable.
 
 # Scoring Summary
 
