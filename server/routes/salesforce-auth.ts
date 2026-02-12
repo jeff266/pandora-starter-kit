@@ -13,6 +13,19 @@ const TOKEN_URL = `${LOGIN_URL}/services/oauth2/token`;
 const STATE_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
 const STATE_MAX_AGE_MS = 10 * 60 * 1000;
 
+function base64url(buffer: Buffer): string {
+  return buffer.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function generateCodeVerifier(): string {
+  return base64url(crypto.randomBytes(96));
+}
+
+function generateCodeChallenge(verifier: string): string {
+  const hash = crypto.createHash("sha256").update(verifier).digest();
+  return base64url(hash);
+}
+
 function signState(payload: object): string {
   const json = JSON.stringify(payload);
   const encoded = Buffer.from(json).toString("base64");
@@ -65,7 +78,9 @@ router.get("/authorize", (req: Request, res: Response) => {
     return;
   }
 
-  const signedState = signState({ workspaceId, ts: Date.now() });
+  const codeVerifier = generateCodeVerifier();
+  const codeChallenge = generateCodeChallenge(codeVerifier);
+  const signedState = signState({ workspaceId, cv: codeVerifier, ts: Date.now() });
 
   const params = new URLSearchParams({
     response_type: "code",
@@ -74,6 +89,8 @@ router.get("/authorize", (req: Request, res: Response) => {
     scope: "api refresh_token offline_access id",
     state: signedState,
     prompt: "login consent",
+    code_challenge: codeChallenge,
+    code_challenge_method: "S256",
   });
 
   const redirectUrl = `${AUTHORIZE_URL}?${params.toString()}`;
@@ -107,7 +124,7 @@ router.get("/callback", async (req: Request, res: Response) => {
     return;
   }
 
-  const { workspaceId } = payload;
+  const { workspaceId, cv: codeVerifier } = payload;
 
   const clientId = process.env.SALESFORCE_CLIENT_ID;
   const clientSecret = process.env.SALESFORCE_CLIENT_SECRET;
@@ -119,13 +136,17 @@ router.get("/callback", async (req: Request, res: Response) => {
   }
 
   try {
-    const body = new URLSearchParams({
+    const tokenParams: Record<string, string> = {
       grant_type: "authorization_code",
       code,
       client_id: clientId,
       client_secret: clientSecret,
       redirect_uri: callbackUrl,
-    });
+    };
+    if (codeVerifier) {
+      tokenParams.code_verifier = codeVerifier;
+    }
+    const body = new URLSearchParams(tokenParams);
 
     const tokenResponse = await fetch(TOKEN_URL, {
       method: "POST",
