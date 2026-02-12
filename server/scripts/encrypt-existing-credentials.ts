@@ -7,8 +7,8 @@ const logger = createLogger('EncryptCredentials');
 async function main() {
   logger.info('Starting credential encryption migration...');
 
-  const result = await query<{ workspace_id: string; connector_name: string; credentials: any }>(
-    `SELECT workspace_id, connector_name, credentials FROM connections WHERE credentials IS NOT NULL`
+  const result = await query<{ id: string; workspace_id: string; connector_name: string; credentials: any }>(
+    `SELECT id, workspace_id, connector_name, credentials FROM connections WHERE credentials IS NOT NULL`
   );
 
   let encrypted = 0;
@@ -16,7 +16,7 @@ async function main() {
   let errors = 0;
 
   for (const row of result.rows) {
-    const { workspace_id, connector_name, credentials } = row;
+    const { id, workspace_id, connector_name, credentials } = row;
 
     if (isEncrypted(credentials)) {
       logger.info(`Already encrypted: ${connector_name} (${workspace_id.slice(0, 8)}...)`);
@@ -27,8 +27,8 @@ async function main() {
     try {
       const encryptedValue = encryptCredentials(credentials);
       await query(
-        `UPDATE connections SET credentials = $1, updated_at = NOW() WHERE workspace_id = $2 AND connector_name = $3`,
-        [JSON.stringify(encryptedValue), workspace_id, connector_name]
+        `UPDATE connections SET credentials = $1, updated_at = NOW() WHERE id = $2`,
+        [JSON.stringify(encryptedValue), id]
       );
       logger.info(`Encrypted: ${connector_name} (${workspace_id.slice(0, 8)}...)`);
       encrypted++;

@@ -58,8 +58,12 @@ export function decryptCredentials(encoded: string): Record<string, any> {
 
 /**
  * Detects if a credential value is already encrypted.
- * Encrypted values are base64 strings, plaintext values are JSON objects.
+ * Encrypted values are base64 strings with minimum length (iv + tag + ciphertext).
+ * Plaintext values are JSON objects with keys like accessToken, apiKey, etc.
  */
 export function isEncrypted(value: any): boolean {
-  return typeof value === 'string';
+  if (typeof value !== 'string') return false;
+  if (value.length < 44) return false;
+  const base64Regex = /^[A-Za-z0-9+/=]+$/;
+  return base64Regex.test(value);
 }
