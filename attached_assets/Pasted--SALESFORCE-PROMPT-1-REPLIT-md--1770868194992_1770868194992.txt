@@ -1,0 +1,147 @@
+📋 SALESFORCE_PROMPT_1_REPLIT.md                                         
+                                                                           
+  Complete implementation guide for Replit with:                           
+                                                                           
+  7 Tasks:                                                                 
+  1. Add Environment Variables - CLIENT_ID, CLIENT_SECRET, CALLBACK_URL    
+  2. Build OAuth Routes - /authorize + /callback with CSRF protection      
+  3. Build Connector API Routes - test, sync, discover-schema, health,     
+  disconnect                                                               
+  4. Wire into Sync Orchestrator - Generalize to support multiple          
+  connectors                                                               
+  5. Add to Nightly Sync Schedule - Same cadence as HubSpot                
+  6. Register Routes - Wire into Express                                   
+  7. Verify Adapter Registration - Salesforce adapter in registry          
+                                                                           
+  Key Implementation Details:                                              
+  - State signing for CSRF protection                                      
+  - Token exchange flow with error handling                                
+  - Credential storage in connector_configs                                
+  - Upsert pattern for re-auth (no duplicates)                             
+  - User denial handling                                                   
+  - Instance URL storage (critical for Salesforce)                         
+                                                                           
+  🧪 SALESFORCE_PROMPT_1_TEST_PLAN.md                                      
+                                                                           
+  Comprehensive test plan with 13 test scenarios:                          
+                                                                           
+  1. OAuth Authorization Flow - Verify redirect to Salesforce, state       
+  signing                                                                  
+  2. OAuth Callback (Happy Path) - Complete flow, store credentials        
+  3. OAuth Callback (User Denial) - Graceful error handling                
+  4. OAuth Re-Authorization - Update credentials, no duplicates            
+  5. Connection Test Endpoint - Query Salesforce, return org details       
+  6. Schema Discovery Endpoint - Return metadata (objects, fields)         
+  7. Initial Sync - Populate deals, contacts, accounts                     
+  8. Incremental Sync - Fetch only changes, no duplicates                  
+  9. Health Check Endpoint - Connection status, token age                  
+  10. Disconnect Endpoint - Remove credentials, keep data                  
+  11. Sync Orchestrator Integration - Discover and run Salesforce          
+  12. Multi-Tenant Isolation - Two orgs, no data leakage                   
+  13. Nightly Sync Scheduler - Verify Salesforce included                  
+                                                                           
+  Each test includes:                                                      
+  - Step-by-step instructions                                              
+  - Expected behavior                                                      
+  - Validation criteria                                                    
+  - SQL queries for verification                                           
+  - Troubleshooting guide                                                  
+                                                                           
+  ---                                                                      
+  How to Use on Replit                                                     
+                                                                           
+  Step 1: Pull Latest                                                      
+                                                                           
+  git pull origin main                                                     
+                                                                           
+  Step 2: Read the Prompt                                                  
+                                                                           
+  Open SALESFORCE_PROMPT_1_REPLIT.md and share with Replit AI agent.       
+                                                                           
+  Step 3: Set Environment Variables                                        
+                                                                           
+  Add to Replit Secrets:                                                   
+  - SALESFORCE_CLIENT_ID - Consumer Key from Connected App                 
+  - SALESFORCE_CLIENT_SECRET - Consumer Secret                             
+  - SALESFORCE_CALLBACK_URL - Your Replit URL +                            
+  /api/auth/salesforce/callback                                            
+                                                                           
+  Step 4: Let Replit Implement                                             
+                                                                           
+  Paste the prompt content into Replit and let it build:                   
+  - OAuth routes (server/routes/salesforce-auth.ts)                        
+  - Sync routes (server/routes/salesforce-sync.ts)                         
+  - Orchestrator updates                                                   
+  - Route registration                                                     
+                                                                           
+  Step 5: Test with Test Plan                                              
+                                                                           
+  Follow SALESFORCE_PROMPT_1_TEST_PLAN.md sequentially:                    
+  - Start with Test 1 (OAuth flow)                                         
+  - Work through each test                                                 
+  - Use provided SQL queries to verify                                     
+  - Check troubleshooting guide if issues arise                            
+                                                                           
+  ---                                                                      
+  Expected Outcome                                                         
+                                                                           
+  After Prompt 1 is complete and tested:                                   
+                                                                           
+  ✅ OAuth Flow Working                                                    
+  - Users can connect Salesforce orgs                                      
+  - Credentials stored securely                                            
+  - Re-auth updates (no duplicates)                                        
+                                                                           
+  ✅ Initial Sync Working                                                  
+  - Opportunities → deals                                                  
+  - Contacts → contacts                                                    
+  - Accounts → accounts                                                    
+  - Stage normalization                                                    
+  - Data validation                                                        
+                                                                           
+  ✅ Incremental Sync Working                                              
+  - Fetches changes only                                                   
+  - No duplicates                                                          
+  - Fast execution                                                         
+                                                                           
+  ✅ Multi-Tenant Isolation                                                
+  - Two orgs connected                                                     
+  - Data separated by workspace_id                                         
+  - No cross-contamination                                                 
+                                                                           
+  ✅ Integration Complete                                                  
+  - Adapter in registry                                                    
+  - Orchestrator discovers Salesforce                                      
+  - Scheduler includes both HubSpot + Salesforce                           
+                                                                           
+  ---                                                                      
+  What Comes Next                                                          
+                                                                           
+  After Prompt 1 tests pass:                                               
+                                                                           
+  Prompt 2: Stage History (Claude Code)                                    
+  - Query OpportunityFieldHistory                                          
+  - Populate deal_stage_history table                                      
+  - Unlocks: Pipeline Waterfall skill with Salesforce data                 
+                                                                           
+  Prompt 3: Contact Roles + Activities (Claude Code)                       
+  - Query OpportunityContactRole → deal_contacts                           
+  - Query Task + Event → activities                                        
+  - Unlocks: Single-Thread Alert enhancement, Rep Scorecard activities     
+                                                                           
+  Prompt 4: Token Refresh (Replit)                                         
+  - Auto-refresh before expiry                                             
+  - Retry on 401                                                           
+  - Fixes: 2-hour token expiration issue                                   
+                                                                           
+  ---                                                                      
+  Known Limitations (After Prompt 1)                                       
+                                                                           
+  ⚠️ Token Expiration: Access tokens expire after ~2 hours. You'll need to 
+  re-run OAuth manually until Prompt 4 adds auto-refresh.                  
+                                                                           
+  ✅ Workaround: Re-authenticate via OAuth flow to get fresh tokens.       
+                                                                           
+  ---                                                                      
+  Pull from GitHub and paste SALESFORCE_PROMPT_1_REPLIT.md into Replit to  
+  start the build!           

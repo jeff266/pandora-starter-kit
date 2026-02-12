@@ -1,0 +1,32 @@
+Option 3: Full review with cleanup                                       
+                                                                           
+  Have Replit:                                                             
+                                                                           
+  1. Read the full SALESFORCE_PROMPT_1_REPLIT.md file (it's in the repo now
+   after you pulled)                                                       
+  2. Do a cleanup pass first (critical security fix):                      
+    - Remove the unreachable code at lines 178-188 in the OAuth callback   
+    - Fix the token leaking issue                                          
+    - Align the status check: orchestrator should include 'healthy' along  
+  with 'connected' (match the pattern: WHERE status IN ('connected',       
+  'healthy'))                                                              
+  3. Cross-reference all 7 tasks against the prompt:                       
+    - Task 1: Environment variables (✓ but verify they're documented)      
+    - Task 2: OAuth routes - /authorize and /callback (✓ but need cleanup) 
+    - Task 3: Connector API routes - test, sync, discover-schema, health,  
+  disconnect (verify all 5 exist)                                          
+    - Task 4: Sync orchestrator wiring (verify status check includes       
+  'healthy')                                                               
+    - Task 5: Nightly sync schedule (verify Salesforce included alongside  
+  HubSpot)                                                                 
+    - Task 6: Route registration in server/index.ts (verify both auth and  
+  sync routes registered)                                                  
+    - Task 7: Adapter registration (verify salesforceAdapter is registered 
+  in registry)                                                             
+  4. Verify compilation - make sure everything compiles with no TypeScript 
+  errors                                                                   
+  5. Report back what was fixed and if anything was missing                
+                                                                           
+  ---                                                                      
+  This ensures both the security issue is fixed AND we have confidence that
+   the implementation matches the spec before testing
