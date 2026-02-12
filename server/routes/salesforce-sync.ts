@@ -4,7 +4,7 @@ import { getJobQueue } from '../jobs/queue.js';
 import { createLogger } from '../utils/logger.js';
 import { salesforceAdapter } from '../connectors/salesforce/adapter.js';
 import { getFreshCredentials } from '../utils/salesforce-token-refresh.js';
-import type { Connection } from '../connectors/_interface.js';
+
 
 const router = Router();
 const logger = createLogger('SalesforceSync');
@@ -129,23 +129,12 @@ router.post('/:workspaceId/connectors/salesforce/test', async (req, res) => {
 
     const conn = connResult.rows[0];
 
-    // Get fresh credentials (auto-refresh if needed)
     const credentials = await getFreshCredentials(workspaceId);
-
-    const connection: Connection = {
-      id: conn.id,
-      workspaceId,
-      connectorName: 'salesforce',
-      status: conn.status as Connection['status'],
-      credentials,
-    };
-
-    const result = await salesforceAdapter.testConnection(connection);
+    const result = await salesforceAdapter.testConnection(credentials);
 
     res.json({
       success: result.success,
       message: result.success ? 'Connection successful' : 'Connection failed',
-      accountInfo: result.accountInfo,
       error: result.error,
     });
   } catch (error) {
@@ -173,25 +162,14 @@ router.post('/:workspaceId/connectors/salesforce/discover-schema', async (req, r
       return;
     }
 
-    const conn = connResult.rows[0];
-
-    // Get fresh credentials (auto-refresh if needed)
     const credentials = await getFreshCredentials(workspaceId);
-
-    const connection: Connection = {
-      id: conn.id,
-      workspaceId,
-      connectorName: 'salesforce',
-      status: conn.status as Connection['status'],
-      credentials,
-    };
 
     if (!salesforceAdapter.discoverSchema) {
       res.status(501).json({ error: 'Schema discovery not implemented for Salesforce' });
       return;
     }
 
-    const schema = await salesforceAdapter.discoverSchema(connection);
+    const schema = await salesforceAdapter.discoverSchema(credentials);
 
     const summary = {
       objectTypes: schema.objectTypes.map(ot => ({
@@ -220,7 +198,8 @@ router.get('/:workspaceId/connectors/salesforce/health', async (req, res) => {
   const { workspaceId } = req.params;
 
   try {
-    const health = await salesforceAdapter.health(workspaceId);
+    const credentials = await getFreshCredentials(workspaceId);
+    const health = await salesforceAdapter.health(credentials);
     res.json(health);
   } catch (error) {
     logger.error('Failed to check Salesforce health', { error });
