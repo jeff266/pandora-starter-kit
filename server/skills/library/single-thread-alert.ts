@@ -169,6 +169,8 @@ Produce a Single-Thread Risk Alert with these sections:
 3. CRITICAL DEALS
    - For each critical/high risk classified deal:
      * Deal name, amount, stage, current contact
+     * If contactRoles available: include role information (e.g., "Champion", "Decision Maker")
+     * Threading status: "Multi-threaded (3): Decision Maker, Champion, End User" or "Single-threaded (1): Economic Buyer" or "No contacts linked"
      * Why it's risky (likely_cause from classification)
      * Specific expansion action (cite recommended_action)
      * If has_expansion_contacts: suggest using queryContacts to find expansion targets
