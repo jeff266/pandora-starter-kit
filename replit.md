@@ -41,6 +41,8 @@ Pandora is built on Node.js 20 with TypeScript 5+, using Express.js and PostgreS
 -   **Internal Meeting Filter:** Post-sync classification of conversations as internal/external using dual-layer detection (participant domain check + title heuristics). Persists `is_internal` and `internal_classification_reason` on conversations table. Runs automatically after linker in post-sync flow.
 -   **CWD (Conversations Without Deals):** Detects external conversations linked to accounts but not deals, with severity classification, account enrichment, and rep attribution. Exposed via `GET /api/workspaces/:id/conversations-without-deals` and integrated into Data Quality Audit skill.
 -   **LLM Integration:** Utilizes Anthropic Claude via Replit AI for reasoning/generation and Fireworks DeepSeek for extraction/classification, with token guardrails and prompt safety mechanisms.
+-   **Tier 2 Schema (ICP/Lead Scoring):** `account_signals` (company enrichment), `icp_profiles` (ICP model output with personas/weights), `lead_scores` (per-entity scores with grade/breakdown). `deal_contacts` extended with enrichment columns (apollo_data, linkedin_data, buying_role, enrichment_status, etc.). Custom Field Discovery skill (compute-only, on-demand) analyzes custom_fields JSONB across deals/accounts/contacts/leads for ICP relevance scoring.
+-   **Lead Sync:** 5,565 Salesforce leads synced with custom field discovery, FK resolution (converted_contact/account/deal), cohort analysis ready (4,484 converted, 1,081 unconverted).
 
 ## External Dependencies
 
