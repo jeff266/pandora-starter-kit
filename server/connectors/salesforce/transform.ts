@@ -17,6 +17,8 @@ import type {
   SalesforceContact,
   SalesforceAccount,
   SalesforceStage,
+  SalesforceTask,
+  SalesforceEvent,
 } from './types.js';
 
 // ============================================================================
@@ -74,6 +76,24 @@ export interface NormalizedAccount {
   employee_count: number | null;
   annual_revenue: number | null;
   owner: string | null;
+  custom_fields: Record<string, any>;
+}
+
+export interface NormalizedActivity {
+  workspace_id: string;
+  source: 'salesforce';
+  source_id: string;
+  source_data: Record<string, any>;
+  activity_type: string;
+  timestamp: Date;
+  actor: string | null;
+  subject: string | null;
+  body: string | null;
+  deal_id: string | null;
+  contact_id: string | null;
+  account_id: string | null;
+  direction: string | null;
+  duration_seconds: number | null;
   custom_fields: Record<string, any>;
 }
 
@@ -371,5 +391,146 @@ export function transformAccount(
     annual_revenue: sanitizeNumber(account.AnnualRevenue), // FIX: empty string would crash PostgreSQL
     owner: account.Owner?.Email || account.Owner?.Name || account.OwnerId,
     custom_fields: {},
+  };
+}
+
+// ============================================================================
+// Activity Transforms
+// ============================================================================
+
+/**
+ * Transform Salesforce Task to Pandora Activity
+ * Maps WhatId/WhoId to deal_id/contact_id using lookup maps
+ */
+export function transformTask(
+  task: SalesforceTask,
+  workspaceId: string,
+  dealIdMap: Map<string, string>,
+  contactIdMap: Map<string, string>
+): NormalizedActivity | null {
+  // Determine activity type from TaskSubtype
+  let activityType = 'task';
+  if (task.TaskSubtype) {
+    const subtype = task.TaskSubtype.toLowerCase();
+    if (subtype === 'call') {
+      activityType = 'call';
+    } else if (subtype === 'email') {
+      activityType = 'email';
+    }
+  }
+
+  // Map WhatId (Opportunity/Account) and WhoId (Contact/Lead)
+  let dealId: string | null = null;
+  let contactId: string | null = null;
+  let accountId: string | null = null;
+
+  if (task.WhatId) {
+    // WhatId starting with '006' is Opportunity
+    if (task.WhatId.startsWith('006')) {
+      dealId = dealIdMap.get(task.WhatId) || null;
+    }
+    // WhatId starting with '001' is Account - we don't have accountIdMap yet, skip for now
+  }
+
+  if (task.WhoId) {
+    // WhoId starting with '003' is Contact
+    if (task.WhoId.startsWith('003')) {
+      contactId = contactIdMap.get(task.WhoId) || null;
+    }
+  }
+
+  // Skip if no deal or contact association (we need at least one for relevance)
+  if (!dealId && !contactId) {
+    return null;
+  }
+
+  // Use ActivityDate if available, otherwise CreatedDate
+  const timestamp = task.ActivityDate
+    ? new Date(task.ActivityDate)
+    : new Date(task.CreatedDate);
+
+  return {
+    workspace_id: workspaceId,
+    source: 'salesforce',
+    source_id: task.Id,
+    source_data: task as unknown as Record<string, any>,
+    activity_type: activityType,
+    timestamp,
+    actor: task.OwnerId,
+    subject: sanitizeText(task.Subject, 500),
+    body: sanitizeText(task.Description, 10000),
+    deal_id: dealId,
+    contact_id: contactId,
+    account_id: accountId,
+    direction: null, // Tasks don't have direction
+    duration_seconds: null,
+    custom_fields: {
+      status: task.Status,
+      priority: task.Priority,
+    },
+  };
+}
+
+/**
+ * Transform Salesforce Event to Pandora Activity
+ * Maps WhatId/WhoId to deal_id/contact_id using lookup maps
+ */
+export function transformEvent(
+  event: SalesforceEvent,
+  workspaceId: string,
+  dealIdMap: Map<string, string>,
+  contactIdMap: Map<string, string>
+): NormalizedActivity | null {
+  // Map WhatId (Opportunity/Account) and WhoId (Contact/Lead)
+  let dealId: string | null = null;
+  let contactId: string | null = null;
+  let accountId: string | null = null;
+
+  if (event.WhatId) {
+    // WhatId starting with '006' is Opportunity
+    if (event.WhatId.startsWith('006')) {
+      dealId = dealIdMap.get(event.WhatId) || null;
+    }
+  }
+
+  if (event.WhoId) {
+    // WhoId starting with '003' is Contact
+    if (event.WhoId.startsWith('003')) {
+      contactId = contactIdMap.get(event.WhoId) || null;
+    }
+  }
+
+  // Skip if no deal or contact association
+  if (!dealId && !contactId) {
+    return null;
+  }
+
+  // Calculate duration if EndDateTime exists
+  let durationSeconds: number | null = null;
+  if (event.EndDateTime) {
+    const start = new Date(event.StartDateTime).getTime();
+    const end = new Date(event.EndDateTime).getTime();
+    durationSeconds = Math.floor((end - start) / 1000);
+  }
+
+  return {
+    workspace_id: workspaceId,
+    source: 'salesforce',
+    source_id: event.Id,
+    source_data: event as unknown as Record<string, any>,
+    activity_type: 'meeting',
+    timestamp: new Date(event.StartDateTime),
+    actor: event.OwnerId,
+    subject: sanitizeText(event.Subject, 500),
+    body: sanitizeText(event.Description, 10000),
+    deal_id: dealId,
+    contact_id: contactId,
+    account_id: accountId,
+    direction: null, // Events don't have direction
+    duration_seconds: durationSeconds,
+    custom_fields: {
+      location: event.Location,
+      end_time: event.EndDateTime,
+    },
   };
 }

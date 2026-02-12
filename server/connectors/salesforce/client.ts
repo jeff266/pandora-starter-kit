@@ -14,6 +14,9 @@ import type {
   SalesforceContact,
   SalesforceAccount,
   SalesforceStage,
+  SalesforceContactRole,
+  SalesforceTask,
+  SalesforceEvent,
   SalesforceObjectDescribe,
   SalesforceBulkJobInfo,
   SalesforceApiError,
@@ -330,6 +333,95 @@ export class SalesforceClient {
     }
 
     return this.queryAll<SalesforceAccount>(soql);
+  }
+
+  async getOpportunityContactRoles(
+    opportunityIds?: string[]
+  ): Promise<SalesforceContactRole[]> {
+    let soql = `SELECT Id, OpportunityId, ContactId, Role, IsPrimary,
+                Contact.FirstName, Contact.LastName, Contact.Email, Contact.Title
+                FROM OpportunityContactRole`;
+
+    if (opportunityIds && opportunityIds.length > 0) {
+      const ids = opportunityIds.map(id => `'${id}'`).join(', ');
+      soql += ` WHERE OpportunityId IN (${ids})`;
+    }
+
+    soql += ` ORDER BY OpportunityId`;
+
+    try {
+      return await this.queryAll<SalesforceContactRole>(soql);
+    } catch (error) {
+      // Some orgs don't use ContactRole - return empty array instead of failing
+      logger.warn('[Salesforce] OpportunityContactRole query failed (may not be used in this org)', { error });
+      return [];
+    }
+  }
+
+  async getTasks(
+    opportunityIds?: string[],
+    contactIds?: string[],
+    since?: Date
+  ): Promise<SalesforceTask[]> {
+    let soql = `SELECT Id, Subject, Status, Priority, ActivityDate,
+                WhoId, WhatId, OwnerId, Description, TaskSubtype,
+                CreatedDate, LastModifiedDate
+                FROM Task`;
+
+    const whereClauses: string[] = [];
+
+    if (since) {
+      whereClauses.push(`LastModifiedDate >= ${since.toISOString()}`);
+    } else {
+      // Default to last 6 months for initial sync
+      whereClauses.push(`CreatedDate >= LAST_N_MONTHS:6`);
+    }
+
+    if (whereClauses.length > 0) {
+      soql += ` WHERE ${whereClauses.join(' AND ')}`;
+    }
+
+    soql += ` ORDER BY ActivityDate DESC`;
+
+    try {
+      return await this.queryAll<SalesforceTask>(soql);
+    } catch (error) {
+      logger.error('[Salesforce] Task query failed', { error });
+      return [];
+    }
+  }
+
+  async getEvents(
+    opportunityIds?: string[],
+    contactIds?: string[],
+    since?: Date
+  ): Promise<SalesforceEvent[]> {
+    let soql = `SELECT Id, Subject, StartDateTime, EndDateTime,
+                WhoId, WhatId, OwnerId, Description, Location,
+                CreatedDate, LastModifiedDate
+                FROM Event`;
+
+    const whereClauses: string[] = [];
+
+    if (since) {
+      whereClauses.push(`LastModifiedDate >= ${since.toISOString()}`);
+    } else {
+      // Default to last 6 months for initial sync
+      whereClauses.push(`CreatedDate >= LAST_N_MONTHS:6`);
+    }
+
+    if (whereClauses.length > 0) {
+      soql += ` WHERE ${whereClauses.join(' AND ')}`;
+    }
+
+    soql += ` ORDER BY StartDateTime DESC`;
+
+    try {
+      return await this.queryAll<SalesforceEvent>(soql);
+    } catch (error) {
+      logger.error('[Salesforce] Event query failed', { error });
+      return [];
+    }
   }
 
   // ==========================================================================

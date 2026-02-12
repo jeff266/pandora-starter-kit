@@ -5,8 +5,19 @@
  */
 
 import { SalesforceClient, SalesforceSessionExpiredError } from './client.js';
-import { transformOpportunity, transformContact, transformAccount } from './transform.js';
-import type { NormalizedDeal, NormalizedContact, NormalizedAccount } from './transform.js';
+import {
+  transformOpportunity,
+  transformContact,
+  transformAccount,
+  transformTask,
+  transformEvent,
+} from './transform.js';
+import type {
+  NormalizedDeal,
+  NormalizedContact,
+  NormalizedAccount,
+  NormalizedActivity,
+} from './transform.js';
 import type { SalesforceStage, SalesforceCredentials } from './types.js';
 import type { CRMAdapter, SyncResult } from '../adapters/types.js';
 import { createLogger } from '../../utils/logger.js';
@@ -228,6 +239,12 @@ export class SalesforceAdapter implements CRMAdapter {
       dealsFailed: deals.failed.length,
     });
 
+    // Sync OpportunityContactRole (deal-contact associations)
+    await this.syncContactRoles(client, workspaceId);
+
+    // Sync Activities (Tasks + Events)
+    await this.syncActivities(client, workspaceId, null);
+
     return { deals, contacts, accounts };
   }
 
@@ -280,6 +297,12 @@ export class SalesforceAdapter implements CRMAdapter {
         workspaceId,
         (opp) => transformOpportunity(opp, workspaceId, stageMap)
       );
+
+      // Sync OpportunityContactRole (deal-contact associations)
+      await this.syncContactRoles(client, workspaceId);
+
+      // Sync Activities (Tasks + Events) - incremental from lastSyncTime
+      await this.syncActivities(client, workspaceId, lastSyncTime);
 
       // TODO: Check for deleted records using IsDeleted = true
 
@@ -487,6 +510,192 @@ export class SalesforceAdapter implements CRMAdapter {
     } catch (error) {
       logger.error('[Salesforce Adapter] Account sync failed completely', { error });
       return { succeeded: [], failed: [], totalAttempted: 0 };
+    }
+  }
+
+  private async syncContactRoles(
+    client: SalesforceClient,
+    workspaceId: string
+  ): Promise<void> {
+    try {
+      // Build lookup maps for deal_id and contact_id resolution
+      const dealResult = await query<{ source_id: string; id: string }>(
+        `SELECT source_id, id FROM deals WHERE workspace_id = $1 AND source = 'salesforce'`,
+        [workspaceId]
+      );
+      const dealIdMap = new Map(dealResult.rows.map(r => [r.source_id, r.id]));
+
+      const contactResult = await query<{ source_id: string; id: string }>(
+        `SELECT source_id, id FROM contacts WHERE workspace_id = $1 AND source = 'salesforce'`,
+        [workspaceId]
+      );
+      const contactIdMap = new Map(contactResult.rows.map(r => [r.source_id, r.id]));
+
+      // Fetch contact roles from Salesforce
+      const roles = await client.getOpportunityContactRoles();
+
+      if (roles.length === 0) {
+        logger.info('[Salesforce Adapter] No OpportunityContactRoles found (may not be used in this org)');
+        return;
+      }
+
+      // Upsert to deal_contacts table
+      let synced = 0;
+      let skipped = 0;
+
+      for (const role of roles) {
+        const dealId = dealIdMap.get(role.OpportunityId);
+        const contactId = contactIdMap.get(role.ContactId);
+
+        if (!dealId || !contactId) {
+          skipped++;
+          continue;
+        }
+
+        await query(
+          `INSERT INTO deal_contacts (workspace_id, deal_id, contact_id, role, is_primary, source, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, 'salesforce', NOW(), NOW())
+           ON CONFLICT (workspace_id, deal_id, contact_id, source)
+           DO UPDATE SET role = $4, is_primary = $5, updated_at = NOW()`,
+          [workspaceId, dealId, contactId, role.Role, role.IsPrimary]
+        );
+        synced++;
+      }
+
+      logger.info('[Salesforce Adapter] Synced contact roles', {
+        total: roles.length,
+        synced,
+        skipped,
+      });
+    } catch (error) {
+      // Don't fail overall sync if contact roles fail
+      logger.warn('[Salesforce Adapter] Contact role sync failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private async syncActivities(
+    client: SalesforceClient,
+    workspaceId: string,
+    since: Date | null
+  ): Promise<void> {
+    try {
+      // Build lookup maps for deal_id and contact_id resolution
+      const dealResult = await query<{ source_id: string; id: string }>(
+        `SELECT source_id, id FROM deals WHERE workspace_id = $1 AND source = 'salesforce'`,
+        [workspaceId]
+      );
+      const dealIdMap = new Map(dealResult.rows.map(r => [r.source_id, r.id]));
+
+      const contactResult = await query<{ source_id: string; id: string }>(
+        `SELECT source_id, id FROM contacts WHERE workspace_id = $1 AND source = 'salesforce'`,
+        [workspaceId]
+      );
+      const contactIdMap = new Map(contactResult.rows.map(r => [r.source_id, r.id]));
+
+      // Fetch tasks and events in parallel
+      const [tasks, events] = await Promise.all([
+        client.getTasks(undefined, undefined, since || undefined),
+        client.getEvents(undefined, undefined, since || undefined),
+      ]);
+
+      let tasksSynced = 0;
+      let tasksSkipped = 0;
+
+      // Transform and upsert tasks
+      for (const task of tasks) {
+        const activity = transformTask(task, workspaceId, dealIdMap, contactIdMap);
+        if (!activity) {
+          tasksSkipped++;
+          continue;
+        }
+
+        await query(
+          `INSERT INTO activities (workspace_id, source, source_id, source_data, activity_type, timestamp, actor, subject, body, deal_id, contact_id, account_id, direction, duration_seconds, custom_fields, created_at, updated_at)
+           VALUES ($1, 'salesforce', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW())
+           ON CONFLICT (workspace_id, source, source_id)
+           DO UPDATE SET
+             activity_type = $4, timestamp = $5, actor = $6, subject = $7, body = $8,
+             deal_id = $9, contact_id = $10, account_id = $11, direction = $12,
+             duration_seconds = $13, custom_fields = $14, updated_at = NOW()`,
+          [
+            workspaceId,
+            activity.source_id,
+            JSON.stringify(activity.source_data),
+            activity.activity_type,
+            activity.timestamp,
+            activity.actor,
+            activity.subject,
+            activity.body,
+            activity.deal_id,
+            activity.contact_id,
+            activity.account_id,
+            activity.direction,
+            activity.duration_seconds,
+            JSON.stringify(activity.custom_fields),
+          ]
+        );
+        tasksSynced++;
+      }
+
+      let eventsSynced = 0;
+      let eventsSkipped = 0;
+
+      // Transform and upsert events
+      for (const event of events) {
+        const activity = transformEvent(event, workspaceId, dealIdMap, contactIdMap);
+        if (!activity) {
+          eventsSkipped++;
+          continue;
+        }
+
+        await query(
+          `INSERT INTO activities (workspace_id, source, source_id, source_data, activity_type, timestamp, actor, subject, body, deal_id, contact_id, account_id, direction, duration_seconds, custom_fields, created_at, updated_at)
+           VALUES ($1, 'salesforce', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW())
+           ON CONFLICT (workspace_id, source, source_id)
+           DO UPDATE SET
+             activity_type = $4, timestamp = $5, actor = $6, subject = $7, body = $8,
+             deal_id = $9, contact_id = $10, account_id = $11, direction = $12,
+             duration_seconds = $13, custom_fields = $14, updated_at = NOW()`,
+          [
+            workspaceId,
+            activity.source_id,
+            JSON.stringify(activity.source_data),
+            activity.activity_type,
+            activity.timestamp,
+            activity.actor,
+            activity.subject,
+            activity.body,
+            activity.deal_id,
+            activity.contact_id,
+            activity.account_id,
+            activity.direction,
+            activity.duration_seconds,
+            JSON.stringify(activity.custom_fields),
+          ]
+        );
+        eventsSynced++;
+      }
+
+      logger.info('[Salesforce Adapter] Synced activities', {
+        tasks: { total: tasks.length, synced: tasksSynced, skipped: tasksSkipped },
+        events: { total: events.length, synced: eventsSynced, skipped: eventsSkipped },
+      });
+
+      // Log warning if volume is very high on initial sync
+      if (!since && (tasks.length > 50000 || events.length > 50000)) {
+        logger.warn('[Salesforce Adapter] Very high activity volume detected', {
+          tasks: tasks.length,
+          events: events.length,
+          recommendation: 'Consider using Bulk API for activities in future',
+        });
+      }
+    } catch (error) {
+      // Don't fail overall sync if activities fail - they're enrichment, not core
+      logger.warn('[Salesforce Adapter] Activity sync failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 

@@ -71,6 +71,49 @@ export interface SalesforceAccount {
   [key: string]: unknown;
 }
 
+export interface SalesforceContactRole {
+  Id: string;
+  OpportunityId: string;
+  ContactId: string;
+  Role: string | null;
+  IsPrimary: boolean;
+  Contact?: {
+    FirstName: string | null;
+    LastName: string | null;
+    Email: string | null;
+    Title: string | null;
+  };
+}
+
+export interface SalesforceTask {
+  Id: string;
+  Subject: string | null;
+  Status: string | null;
+  Priority: string | null;
+  ActivityDate: string | null;    // YYYY-MM-DD
+  WhoId: string | null;            // Contact/Lead ID (starts with '003' for Contact)
+  WhatId: string | null;           // Opportunity/Account ID (starts with '006' for Opportunity)
+  OwnerId: string;
+  Description: string | null;
+  TaskSubtype: string | null;      // 'Call', 'Email', etc.
+  CreatedDate: string;
+  LastModifiedDate: string;
+}
+
+export interface SalesforceEvent {
+  Id: string;
+  Subject: string | null;
+  StartDateTime: string;           // ISO datetime
+  EndDateTime: string | null;      // ISO datetime
+  WhoId: string | null;            // Contact/Lead ID
+  WhatId: string | null;           // Opportunity/Account ID
+  OwnerId: string;
+  Description: string | null;
+  Location: string | null;
+  CreatedDate: string;
+  LastModifiedDate: string;
+}
+
 // ============================================================================
 // Salesforce Metadata
 // ============================================================================
