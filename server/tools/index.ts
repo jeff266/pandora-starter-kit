@@ -58,3 +58,7 @@ export {
   type Document,
   type DocumentFilters,
 } from './document-query.js';
+
+export {
+  refreshComputedFields,
+} from './computed-fields-refresh.js';

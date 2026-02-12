@@ -4,6 +4,7 @@ import { generatePipelineSnapshot } from '../analysis/pipeline-snapshot.js';
 import { formatPipelineSnapshot, formatPipelineOneLiner, postToSlack } from '../connectors/slack/client.js';
 import { getGoals } from '../context/index.js';
 import { computeFields } from '../computed-fields/engine.js';
+import { refreshComputedFields } from '../tools/computed-fields-refresh.js';
 
 const router = Router();
 
@@ -123,6 +124,18 @@ router.post('/:workspaceId/actions/compute-fields', async (req: Request<Workspac
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.error('[Actions] Compute fields error:', message);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.post('/:workspaceId/actions/refresh-computed-fields', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    const { workspaceId } = req.params;
+    const result = await refreshComputedFields(workspaceId);
+    res.json({ success: true, result });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[Actions] Refresh computed fields error:', message);
     res.status(500).json({ error: message });
   }
 });

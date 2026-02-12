@@ -63,7 +63,9 @@ const DEFAULT_STAGE_NORMALIZED_MAP: Record<string, string> = {
   proposalsent: 'decision',
   verbalcommitment: 'negotiation',
   fellowcontractsigned: 'negotiation',
+  fellowcontractsignedclosedwon: 'negotiation',
   fellowredirecttocoresales: 'qualification',
+  fellowredirecttocoresalesclosedlost: 'closed_lost',
   closedlostpartnership: 'closed_lost',
   closedwonpartnership: 'closed_won',
 
@@ -74,7 +76,7 @@ const DEFAULT_STAGE_NORMALIZED_MAP: Record<string, string> = {
   negotiationstage: 'negotiation',
 };
 
-function normalizeStage(rawStage: string | null): string | null {
+export function normalizeStage(rawStage: string | null): string | null {
   if (!rawStage) return null;
   const cleaned = rawStage.replace(/[^\p{L}\p{N}]/gu, '').toLowerCase();
 
