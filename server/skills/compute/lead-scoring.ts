@@ -441,6 +441,7 @@ interface ICPProfile {
   model_metadata: any;
   personas: any[];
   company_profile: any;
+  buying_committees?: any[];
   scoring_method: string;
   deals_analyzed: number;
   won_deals: number;
@@ -474,12 +475,13 @@ async function loadICPWeights(workspaceId: string): Promise<{ profile: ICPProfil
         model_metadata,
         personas,
         company_profile,
+        buying_committees,
         scoring_method,
         deals_analyzed,
         won_deals,
         generated_at
       FROM icp_profiles
-      WHERE workspace_id = $1 AND status = 'active'
+      WHERE workspace_id = $1 AND status IN ('active', 'draft')
       ORDER BY generated_at DESC LIMIT 1
     `, [workspaceId]);
 
@@ -571,8 +573,14 @@ function mapICPToScoringWeights(profile: ICPProfile): ICPWeights {
   }
 
   // Map buying committee combinations
-  if (profile.model_metadata?.buyingCommittee || Array.isArray(profile.model_metadata?.committees)) {
-    const committees = profile.model_metadata.buyingCommittee || profile.model_metadata.committees || [];
+  // Primary source: top-level buying_committees column (from ICP Discovery)
+  // Fallback: model_metadata (for backwards compatibility)
+  const committees = profile.buying_committees
+    || profile.model_metadata?.buyingCommittee
+    || profile.model_metadata?.committees
+    || [];
+
+  if (Array.isArray(committees)) {
     for (const combo of committees) {
       if (combo.lift >= 1.3) {
         weights.committeeBonuses.push({
