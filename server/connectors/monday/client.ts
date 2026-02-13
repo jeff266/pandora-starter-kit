@@ -43,6 +43,12 @@ export interface MondayColumnValue {
   text: string | null;
 }
 
+export interface MondayUser {
+  id: string;
+  name: string;
+  email: string;
+}
+
 export interface CreateItemInput {
   boardId: string;
   groupId: string;
@@ -133,6 +139,27 @@ export class MondayClient {
         success: false,
         error: error instanceof Error ? error.message : String(error),
       };
+    }
+  }
+
+  /**
+   * Get all boards accessible with this API key
+   */
+  async getBoards(credentials: MondayCredentials): Promise<MondayBoard[]> {
+    try {
+      const query = `
+        query {
+          boards (limit: 100) {
+            id
+            name
+          }
+        }
+      `;
+      const data = await this.graphql<{ boards: MondayBoard[] }>(credentials, query);
+      return data.boards || [];
+    } catch (error) {
+      console.error('[Monday Client] Error fetching boards:', error);
+      return [];
     }
   }
 
@@ -350,6 +377,52 @@ export class MondayClient {
     `;
 
     await this.graphql(credentials, query);
+  }
+
+  /**
+   * Get all users in the Monday workspace
+   */
+  async getUsers(credentials: MondayCredentials): Promise<MondayUser[]> {
+    try {
+      const query = `
+        query {
+          users {
+            id
+            name
+            email
+          }
+        }
+      `;
+      const data = await this.graphql<{ users: MondayUser[] }>(credentials, query);
+      return data.users || [];
+    } catch (error) {
+      console.error('[Monday Client] Error fetching users:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Add an update (comment/note) to an item
+   */
+  async addUpdate(credentials: MondayCredentials, itemId: string, body: string): Promise<string> {
+    const query = `
+      mutation {
+        create_update (
+          item_id: ${itemId},
+          body: ${JSON.stringify(body)}
+        ) {
+          id
+        }
+      }
+    `;
+
+    const data = await this.graphql<{ create_update: { id: string } }>(credentials, query);
+
+    if (!data.create_update?.id) {
+      throw new Error('Monday.com: Failed to create update - no ID returned');
+    }
+
+    return data.create_update.id;
   }
 
   /**
