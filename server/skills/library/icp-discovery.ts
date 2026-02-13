@@ -263,11 +263,13 @@ Committee combinations with highest win rates:
 - **{{this.description}}**: {{multiply this.winRate 100}}% win rate ({{this.count}} deals, {{this.lift}}x lift)
 {{/each}}
 
-## Industry Analysis
+## Industry Analysis (AUTHORITATIVE — use these exact names and numbers)
 
 {{#each discovery_result.companyProfile.industryWinRates}}
 - **{{this.industry}}**: {{multiply this.winRate 100}}% win rate across {{this.count}} deals, avg \${{formatNumber this.avgDeal}}
 {{/each}}
+
+CRITICAL: The industries listed above are the ONLY industries in the dataset. Do NOT invent, rename, or substitute industry names. Use the exact industry names and numbers shown above in your report.
 
 ## Custom Field Segmentation
 
@@ -366,7 +368,10 @@ Write a Slack-ready ICP report covering:
 8. **Data Quality Notes** — What data limitations affect confidence. What additional data would improve the analysis.
 {{/if}}
 
-Do NOT make up data. Only reference patterns with sufficient sample size (5+ deals). Flag low-confidence findings explicitly.
+CRITICAL RULES:
+- Do NOT make up data. Only reference patterns with sufficient sample size (5+ deals). Flag low-confidence findings explicitly.
+- Do NOT invent or rename industries. Use ONLY the exact industry names from the Industry Analysis section above.
+- Every number (win rate, deal size, count) you cite MUST come from the data above. If a metric is not in the data, do not fabricate it.
 
 Keep it concise and actionable. Use real deal sizes and percentages from the data.`,
       outputKey: 'report',

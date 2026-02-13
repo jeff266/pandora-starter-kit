@@ -20,6 +20,7 @@ import type {
   SkillResult,
   SkillStepResult,
 } from './types.js';
+import Handlebars from 'handlebars';
 import { getToolDefinition } from './tool-definitions.js';
 import { getContext, getDataFreshness } from '../context/index.js';
 import {
@@ -37,6 +38,30 @@ import { randomUUID } from 'crypto';
 // ============================================================================
 // Skill Runtime
 // ============================================================================
+
+Handlebars.registerHelper('multiply', (a: number, b: number) => {
+  const result = Number(a) * Number(b);
+  return isNaN(result) ? '0' : result.toFixed(1).replace(/\.0$/, '');
+});
+
+Handlebars.registerHelper('join', (arr: any[], sep: string) => {
+  if (!Array.isArray(arr)) return '';
+  return arr.join(typeof sep === 'string' ? sep : ', ');
+});
+
+Handlebars.registerHelper('formatNumber', (num: any) => {
+  const n = Number(num);
+  if (isNaN(n)) return '0';
+  return n.toLocaleString('en-US', { maximumFractionDigits: 0 });
+});
+
+Handlebars.registerHelper('json', (obj: any) => {
+  return JSON.stringify(obj, null, 2);
+});
+
+Handlebars.registerHelper('lt', (a: any, b: any) => Number(a) < Number(b));
+Handlebars.registerHelper('eq', (a: any, b: any) => a === b || String(a) === String(b));
+Handlebars.registerHelper('gt', (a: any, b: any) => Number(a) > Number(b));
 
 export class SkillRuntime {
   constructor() {}
@@ -476,9 +501,27 @@ Important:
   }
 
   private renderTemplate(template: string, context: SkillExecutionContext): string {
-    let rendered = template;
+    const data: Record<string, any> = {};
 
-    const variablePattern = /\{\{([^}]+)\}\}/g;
+    for (const [k, v] of Object.entries(context.businessContext || {})) {
+      data[k] = v;
+    }
+    for (const [k, v] of Object.entries(context.stepResults || {})) {
+      data[k] = v;
+    }
+
+    try {
+      const compiled = Handlebars.compile(template, { noEscape: true });
+      return compiled(data);
+    } catch (err) {
+      console.error('[Template] Handlebars compilation failed, falling back to simple replacement:', err instanceof Error ? err.message : err);
+      return this.renderTemplateFallback(template, context);
+    }
+  }
+
+  private renderTemplateFallback(template: string, context: SkillExecutionContext): string {
+    let rendered = template;
+    const variablePattern = /\{\{([^#/}][^}]*)\}\}/g;
     const matches = template.matchAll(variablePattern);
 
     for (const match of matches) {
@@ -518,37 +561,12 @@ Important:
     if (typeof value === 'string') return value;
     if (typeof value === 'number') return String(value);
     if (typeof value === 'boolean') return String(value);
-    if (Array.isArray(value)) {
-      const summarized = value.slice(0, 20).map(item => this.summarizeItem(item));
-      const json = JSON.stringify(summarized, null, 2);
-      if (value.length > 20) {
-        return `${json}\n... and ${value.length - 20} more items (${value.length} total)`;
-      }
-      return json;
-    }
+    if (Array.isArray(value)) return JSON.stringify(value.slice(0, 20), null, 2);
     if (typeof value === 'object') {
       const json = JSON.stringify(value, null, 2);
-      if (json.length > 8000) {
-        return json.slice(0, 8000) + '\n... [truncated]';
-      }
-      return json;
+      return json.length > 8000 ? json.slice(0, 8000) + '\n... [truncated]' : json;
     }
     return String(value);
-  }
-
-  private summarizeItem(item: any): any {
-    if (typeof item !== 'object' || item === null) return item;
-    const summary: any = {};
-    const keepFields = ['name', 'deal_name', 'dealName', 'dealId', 'id', 'amount', 'stage', 'stage_normalized', 'close_date', 'owner', 'deal_risk', 'health_score', 'velocity_score', 'days_in_stage', 'last_activity_date', 'total', 'count', 'type', 'risk_level', 'likely_cause', 'has_expansion_contacts', 'recommended_action', 'root_cause', 'suggested_action', 'contactCount', 'contactNames'];
-    for (const key of keepFields) {
-      if (key in item) summary[key] = item[key];
-    }
-    if (Object.keys(summary).length === 0) {
-      for (const [k, v] of Object.entries(item).slice(0, 8)) {
-        summary[k] = typeof v === 'object' ? '[object]' : v;
-      }
-    }
-    return summary;
   }
 
   // ============================================================================

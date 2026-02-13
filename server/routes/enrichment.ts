@@ -3,6 +3,7 @@ import { query } from '../db.js';
 import { enrichClosedDeal, enrichClosedDealsInBatch, reEnrichExistingDealContacts } from '../enrichment/closed-deal-enrichment.js';
 import { getContactsForDeal } from '../enrichment/resolve-contact-roles.js';
 import { getEnrichmentConfig } from '../enrichment/config.js';
+import { backfillAccountsFromDealContacts } from '../enrichment/apollo-company.js';
 
 const router = Router();
 
@@ -135,6 +136,28 @@ router.post('/:workspaceId/enrichment/re-enrich', async (req: Request<WorkspaceP
     res.json(result);
   } catch (err: any) {
     console.error('[Enrichment] Re-enrich error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/:workspaceId/enrichment/accounts', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    const { workspaceId } = req.params;
+    const { closedDealsOnly } = req.body || {};
+
+    const wsCheck = await query('SELECT id FROM workspaces WHERE id = $1', [workspaceId]);
+    if (wsCheck.rows.length === 0) {
+      res.status(404).json({ error: 'Workspace not found' });
+      return;
+    }
+
+    const result = await backfillAccountsFromDealContacts(workspaceId, {
+      closedDealsOnly: closedDealsOnly !== false,
+    });
+
+    res.json(result);
+  } catch (err: any) {
+    console.error('[Enrichment] Account enrichment error:', err);
     res.status(500).json({ error: err.message });
   }
 });

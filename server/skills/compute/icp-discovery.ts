@@ -22,6 +22,53 @@ import { createLogger } from '../../utils/logger.js';
 
 const logger = createLogger('ICPDiscovery');
 
+const INDUSTRY_NORMALIZATION: Record<string, string> = {
+  'hospital_health_care': 'Hospital & Health Care',
+  'health_wellness_and_fitness': 'Health, Wellness & Fitness',
+  'mental_health_care': 'Mental Health Care',
+  'individual_family_services': 'Individual & Family Services',
+  'education_management': 'Education Management',
+  'primary_secondary_education': 'Primary/Secondary Education',
+  'e_learning': 'E-Learning',
+  'higher_education': 'Higher Education',
+  'transportation_trucking_railroad': 'Transportation/Trucking/Railroad',
+  'management_consulting': 'Management Consulting',
+  'information_services': 'Information Services',
+  'information_technology_and_services': 'Information Technology & Services',
+  'computer_software': 'Computer Software',
+  'financial_services': 'Financial Services',
+  'insurance': 'Insurance',
+  'nonprofit_organization_management': 'Nonprofit Organization Management',
+  'medical_practice': 'Medical Practice',
+  'professional_training_coaching': 'Professional Training & Coaching',
+  'sports': 'Sports',
+  'government_administration': 'Government Administration',
+};
+
+function normalizeIndustry(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  const key = trimmed.toLowerCase().replace(/[\s&,]+/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+  if (INDUSTRY_NORMALIZATION[key]) return INDUSTRY_NORMALIZATION[key];
+
+  const lc = trimmed.toLowerCase();
+  for (const [, normalized] of Object.entries(INDUSTRY_NORMALIZATION)) {
+    if (normalized.toLowerCase() === lc) return normalized;
+  }
+
+  if (/^[A-Z_]+$/.test(trimmed)) {
+    return trimmed
+      .split('_')
+      .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join(' ')
+      .replace(/ And /g, ' & ');
+  }
+
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+}
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -652,7 +699,7 @@ async function buildFeatureMatrix(workspaceId: string): Promise<FeatureVector[]>
       closeDate: deal.close_date,
       accountId: deal.account_id,
       accountName: deal.account_name,
-      industry: deal.industry,
+      industry: normalizeIndustry(deal.industry),
       employeeCount: deal.employee_count ? Number(deal.employee_count) : null,
       annualRevenue: deal.annual_revenue ? Number(deal.annual_revenue) : null,
       committeeSize: titles.length,
@@ -1233,12 +1280,25 @@ async function discoverCompanyPatterns(
     ORDER BY won DESC
   `, [workspaceId]);
 
-  const industryWinRates = industryResult.rows.map(row => ({
-    industry: row.industry,
-    winRate: Number(row.won) / Number(row.deals),
-    avgDeal: Number(row.avg_won_amount || 0),
-    count: Number(row.deals),
-  }));
+  const industryMap = new Map<string, { won: number; deals: number; totalAmount: number }>();
+  for (const row of industryResult.rows) {
+    const normalized = normalizeIndustry(row.industry) || row.industry;
+    const existing = industryMap.get(normalized) || { won: 0, deals: 0, totalAmount: 0 };
+    existing.won += Number(row.won);
+    existing.deals += Number(row.deals);
+    existing.totalAmount += Number(row.avg_won_amount || 0) * Number(row.won);
+    industryMap.set(normalized, existing);
+  }
+
+  const industryWinRates = Array.from(industryMap.entries())
+    .map(([industry, data]) => ({
+      industry,
+      winRate: data.won / data.deals,
+      avgDeal: data.won > 0 ? data.totalAmount / data.won : 0,
+      count: data.deals,
+    }))
+    .filter(i => i.count >= 3)
+    .sort((a, b) => b.winRate - a.winRate);
 
   // Company size analysis
   const sizeResult = await query<{
