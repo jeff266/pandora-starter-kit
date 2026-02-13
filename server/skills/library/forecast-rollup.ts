@@ -177,6 +177,14 @@ Return ONLY the JSON array, no other text.`,
       ],
       claudePrompt: `You are a VP of Sales Operations providing a weekly forecast roll-up to sales leadership for {{business_model.company_name}}.
 
+{{#if dataFreshness.isStale}}
+⚠️ DATA FRESHNESS: {{dataFreshness.staleCaveat}}
+{{/if}}
+
+{{#if dataFreshness.source === 'file_import'}}
+NOTE: Forecast based on file-imported data, not live CRM sync. Week-over-week comparison only available after multiple imports. Deal movements since last import are not reflected.
+{{/if}}
+
 {{forecast_summary.quotaNote}}
 
 TIME WINDOW:

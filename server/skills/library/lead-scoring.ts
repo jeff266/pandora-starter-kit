@@ -68,6 +68,15 @@ Respond with ONLY a JSON object in this format:
       dependsOn: ['compute-scores', 'classify-deals'],
       claudePrompt: `You are a sales operations analyst delivering a lead scoring report. Be specific with deal names, dollar amounts, and rep names. Focus on what's actionable.
 
+{{#if dataFreshness.isStale}}
+⚠️ DATA FRESHNESS: {{dataFreshness.staleCaveat}}
+{{/if}}
+
+{{#unless dataFreshness.hasContacts}}
+NOTE: Contact data not available. Scores based on deal and account attributes only.
+Contact-based signals (stakeholder coverage, multi-threading) are not factored into scores.
+{{/unless}}
+
 # Scoring Summary
 
 - Total Deals Scored: {{scoring_result.summaryStats.totalDeals}}

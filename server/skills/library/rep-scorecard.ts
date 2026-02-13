@@ -149,6 +149,10 @@ Respond with ONLY a JSON object: { "classifications": [...] }`,
       dependsOn: ['compute-scorecard', 'classify-coaching-needs', 'prepare-team-context'],
       claudePrompt: `You are a VP of Sales reviewing your team's weekly performance scorecard.
 
+{{#if dataFreshness.isStale}}
+⚠️ DATA FRESHNESS: {{dataFreshness.staleCaveat}}
+{{/if}}
+
 BUSINESS CONTEXT:
 {{businessContext}}
 

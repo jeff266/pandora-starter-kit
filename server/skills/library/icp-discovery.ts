@@ -104,11 +104,24 @@ Respond with ONLY a JSON object in this format:
       dependsOn: ['discover-patterns', 'classify-insights'],
       claudePrompt: `You are a revenue intelligence analyst delivering an ICP Discovery report based on real deal outcome data. Be specific with numbers, percentages, and dollar amounts. This is descriptive analysis — patterns observed, not predictions.
 
+{{#if dataFreshness.isStale}}
+⚠️ DATA FRESHNESS: {{dataFreshness.staleCaveat}}
+{{/if}}
+
+{{#unless dataFreshness.hasContacts}}
+NOTE: Contact data not available (file import workspace). ICP analysis based on account-level patterns only.
+Persona and buying committee analysis will be limited or unavailable.
+{{/unless}}
+
 ## Data Analyzed
 
 **Mode:** {{discovery_result.mode}}
 **Deals:** {{discovery_result.metadata.dealsAnalyzed}} closed ({{discovery_result.metadata.wonCount}} won, {{discovery_result.metadata.lostCount}} lost)
+{{#if dataFreshness.hasContacts}}
 **Contact Roles:** {{discovery_result.dataReadiness.totalContactRoles}} across {{discovery_result.dataReadiness.dealsWithContacts}} deals
+{{else}}
+**Contact Roles:** Not available (file import workspace without contacts)
+{{/if}}
 **Custom Fields:** {{discovery_result.dataReadiness.customFieldsAvailable}} discovered and integrated
 **Execution:** {{discovery_result.metadata.executionMs}}ms
 
@@ -173,11 +186,17 @@ Committee combinations with highest win rates:
 
 Write a Slack-ready ICP report covering:
 
-1. **ICP Summary** — In 2-3 sentences, who does this company actually sell to successfully? Be specific about industry, company profile, and buying committee composition.
+1. **ICP Summary** — In 2-3 sentences, who does this company actually sell to successfully? Be specific about industry, company profile{{#if dataFreshness.hasContacts}}, and buying committee composition{{/if}}.
 
+{{#if dataFreshness.hasContacts}}
 2. **Winning Personas** — The 3-5 personas most correlated with won deals. For each: title patterns, department, seniority, frequency in won deals, and lift score. Call out which persona is the strongest positive signal.
 
 3. **Ideal Buying Committee** — The combination of personas with the highest win rate. "When you have [X] AND [Y] in the deal, you win at Z% — versus W% baseline."
+{{else}}
+2. **Winning Personas** — SKIPPED (contact data not available). Upload contacts to enable persona analysis.
+
+3. **Ideal Buying Committee** — SKIPPED (contact data not available). Upload contacts to enable buying committee analysis.
+{{/if}}
 
 4. **Company Sweet Spot** — Industry, size, and any custom field values that define the ideal target. Include win rates.
 

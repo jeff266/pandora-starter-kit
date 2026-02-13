@@ -208,6 +208,10 @@ Each classification should be:
       ],
       claudePrompt: `You are a VP of Revenue Operations analyzing pipeline coverage for {{business_model.company_name}}.
 
+{{#if dataFreshness.isStale}}
+⚠️ DATA FRESHNESS: Coverage calculations based on data imported {{dataFreshness.daysSinceUpdate}} days ago. Re-upload latest CRM export for current coverage numbers.
+{{/if}}
+
 REPORT PERIOD: {{time_windows.analysisRange.quarter}}
 
 {{coverage_summary.quotaNote}}

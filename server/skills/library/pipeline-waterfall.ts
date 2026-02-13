@@ -195,6 +195,21 @@ Respond with ONLY a JSON object: { "dealClassifications": [...], "anomalyClassif
       ],
       claudePrompt: `You are a RevOps strategist analyzing pipeline flow for a sales team.
 
+{{#if dataFreshness.isStale}}
+⚠️ DATA FRESHNESS: {{dataFreshness.staleCaveat}}
+{{/if}}
+
+{{#unless dataFreshness.hasStageHistory}}
+NOTE: Stage history not available (file import workspace). Waterfall analysis requires stage transition history to track deal progression. Re-upload deals weekly to build stage movement tracking over time.
+
+Output a brief message:
+"Pipeline waterfall analysis requires stage history to track deal movements between periods.
+Current file import contains snapshot data only. Upload deals consistently (weekly) to build stage transition history and enable waterfall insights."
+
+Skip the full waterfall report.
+{{/unless}}
+
+{{#if dataFreshness.hasStageHistory}}
 BUSINESS CONTEXT:
 {{businessContext}}
 
@@ -266,7 +281,8 @@ Rules:
 - End with prioritized actions, not a summary
 - Use markdown formatting with headers, bullet points, and bold text for emphasis
 
-Word budget: 600 words.`,
+Word budget: 600 words.
+{{/if}}`,
       outputKey: 'narrative',
     },
   ],

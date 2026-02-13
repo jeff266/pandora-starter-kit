@@ -6,6 +6,9 @@
  * - Initial workspace setup ("here's what we found in your CRM")
  * - Debugging ("why isn't field X showing up?")
  * - Ongoing monitoring ("new fields appeared since last run")
+ *
+ * Works with file imports: Custom fields are preserved in CSV/Excel uploads.
+ * If data is >14 days old, discovered fields may not reflect recent CRM schema changes.
  */
 
 import type { SkillDefinition } from '../types.js';

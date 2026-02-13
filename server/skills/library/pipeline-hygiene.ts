@@ -192,6 +192,14 @@ Return valid JSON array with one object per deal:
       maxToolCalls: 3,
       claudePrompt: `You have pre-analyzed pipeline data for this workspace. All raw data has been aggregated into structured summaries, and deals have been classified by root cause. Work from these summaries and classifications, not raw records.
 
+{{#if dataFreshness.isStale}}
+⚠️ DATA FRESHNESS: {{dataFreshness.staleCaveat}}
+{{/if}}
+
+{{#unless dataFreshness.hasActivities}}
+NOTE: Activity data not available (file import workspace). Deal staleness based on last modification date, which may undercount truly stale deals. For better staleness detection, upload activity data or connect to your CRM.
+{{/unless}}
+
 TIME SCOPE:
 - Analysis period: {{time_windows.analysisRange.start}} to {{time_windows.analysisRange.end}}
 - Changes since: {{time_windows.changeRange.start}} ({{time_windows.config.changeWindow}})

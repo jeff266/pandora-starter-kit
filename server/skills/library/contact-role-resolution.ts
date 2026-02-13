@@ -4,6 +4,10 @@
  * Multi-source resolution engine that fills gaps in buying roles using
  * progressively lower-confidence methods. Runs post-sync to maximize
  * threading coverage before lead scoring.
+ *
+ * REQUIRES CONTACT DATA: This skill will skip execution if no contacts are available
+ * (file import workspace without contacts). The compute function checks dataFreshness
+ * and returns a skip message if hasContacts === false.
  */
 
 import type { SkillDefinition } from '../types.js';
