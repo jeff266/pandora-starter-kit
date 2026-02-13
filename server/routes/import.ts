@@ -11,7 +11,7 @@ import { classifyColumns as aiClassifyColumns, type ClassificationResult } from 
 import { classifyStages, heuristicMapStages, type StageMappingResult } from '../import/stage-classifier.js';
 import { parseAmount, parseDate, parsePercentage, normalizeText } from '../import/value-parsers.js';
 import {
-  applyDealImport, applyContactImport, applyAccountImport,
+  applyDealImport, applyContactImport, applyAccountImport, relinkAll,
   type TransformedDeal, type TransformedContact, type TransformedAccount,
   type StageMapping,
 } from '../import/apply.js';
@@ -81,6 +81,23 @@ router.post('/:id/import/upload', upload.single('file'), async (req, res) => {
     }
 
     warnings.push(...(classification.warnings || []));
+
+    if (entityType === 'contact' || entityType === 'deal') {
+      try {
+        const accountCount = await query<{ count: string }>(
+          `SELECT COUNT(*) as count FROM accounts WHERE workspace_id = $1`,
+          [workspaceId]
+        );
+        if (parseInt(accountCount.rows[0].count) === 0) {
+          warnings.push(
+            `No accounts imported yet — ${entityType}s won't be linked to accounts. ` +
+            `Import accounts first for best results, or import them after and use the re-link endpoint.`
+          );
+        }
+      } catch (err) {
+        console.warn('[Import] Failed to check account count for warning:', err);
+      }
+    }
 
     const batchId = uuidv4();
 
@@ -423,6 +440,20 @@ router.get('/:id/import/freshness', async (req, res) => {
   }
 });
 
+// POST /api/workspaces/:id/import/relink
+router.post('/:id/import/relink', async (req, res) => {
+  try {
+    const workspaceId = req.params.id;
+    console.log(`[Import] Running full re-link for workspace ${workspaceId}`);
+    const result = await relinkAll(workspaceId);
+    console.log(`[Import] Re-link complete:`, result);
+    return res.json(result);
+  } catch (err) {
+    console.error('[Import] Relink error:', err);
+    return res.status(500).json({ error: err instanceof Error ? err.message : 'Relink failed' });
+  }
+});
+
 // ============================================================================
 // Helpers
 // ============================================================================
@@ -579,6 +610,7 @@ function transformContactRows(
       lifecycle_stage: normalizeText(getFieldValue(row, mapping, 'lifecycle_stage')) || undefined,
       seniority: normalizeText(getFieldValue(row, mapping, 'seniority')) || undefined,
       external_id: normalizeText(getFieldValue(row, mapping, 'external_id')) || undefined,
+      associated_deal_name: normalizeText(getFieldValue(row, mapping, 'associated_deals')) || undefined,
       unmappedFields,
       raw: rawObj,
     });

@@ -57,6 +57,7 @@ export interface ContactClassification {
     external_id: ColumnMapping;
     department: ColumnMapping;
     seniority: ColumnMapping;
+    associated_deals: ColumnMapping;
   };
   source_crm: string;
   has_header_row: boolean;
@@ -234,6 +235,7 @@ Map each column to one of these normalized contact fields:
 - external_id: The CRM record ID (for deduplication)
 - department: Department (sales, marketing, engineering, etc.)
 - seniority: Seniority level (IC, manager, director, VP, C-level)
+- associated_deals: Column containing deal names or IDs linked to this contact (e.g. "Associated Deals", "Deal Name", "Opportunity")
 
 Also determine:
 - source_crm: Which CRM this export likely came from (hubspot, salesforce, pipedrive, zoho, dynamics, unknown)
@@ -254,7 +256,8 @@ Respond with ONLY valid JSON, no markdown:
     "owner": { "column_index": null, "column_header": null, "confidence": 0 },
     "external_id": { "column_index": 0, "column_header": "Contact ID", "confidence": 0.90 },
     "department": { "column_index": null, "column_header": null, "confidence": 0 },
-    "seniority": { "column_index": null, "column_header": null, "confidence": 0 }
+    "seniority": { "column_index": null, "column_header": null, "confidence": 0 },
+    "associated_deals": { "column_index": null, "column_header": null, "confidence": 0 }
   },
   "source_crm": "salesforce",
   "has_header_row": true,

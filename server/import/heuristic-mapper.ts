@@ -42,6 +42,7 @@ const CONTACT_PATTERNS: FieldPattern[] = [
   { field: 'lifecycle_stage', exact: [/^lifecycle.?stage$/i, /^lead.?status$/i], partial: [/lifecycle/i, /lead.?status/i] },
   { field: 'external_id', exact: [/^record.?id$/i, /^contact.?id$/i, /^hubspot.?id$/i, /^id$/i], partial: [/contact.?id/i, /record.?id/i] },
   { field: 'seniority', exact: [/^seniority$/i, /^level$/i], partial: [/seniority/i] },
+  { field: 'associated_deals', exact: [/^associated.?deals?$/i, /^deal.?name$/i, /^opportunity$/i, /^opportunity.?name$/i], partial: [/associated.?deal/i, /deal.?name/i, /opportunity/i] },
 ];
 
 const ACCOUNT_PATTERNS: FieldPattern[] = [

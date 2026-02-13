@@ -30,6 +30,7 @@ export interface TransformedContact {
   lifecycle_stage?: string;
   seniority?: string;
   external_id?: string;
+  associated_deal_name?: string;
   unmappedFields: Record<string, any>;
   raw: Record<string, any>;
 }
@@ -54,9 +55,20 @@ export interface ImportResult {
   errors: string[];
   postActions: {
     accountsLinked: number;
+    dealsLinkedToAccounts: number;
+    contactsLinkedToAccounts: number;
+    contactsLinkedToDeals: number;
+    contactsInferred: number;
     computedFieldsRefreshed: boolean;
     contextLayerUpdated: boolean;
   };
+}
+
+export interface RelinkResult {
+  dealsLinkedToAccounts: number;
+  contactsLinkedToAccounts: number;
+  contactsLinkedToDeals: number;
+  contactsInferred: number;
 }
 
 export interface StageMapping {
@@ -141,12 +153,185 @@ async function linkContactsToAccounts(client: any, workspaceId: string, contactI
   return linked;
 }
 
+async function buildAccountIndex(workspaceId: string, client?: any): Promise<Map<string, string>> {
+  const queryFn = client ? (sql: string, params: any[]) => client.query(sql, params) : query;
+  const allAccounts = await queryFn(
+    `SELECT id, name, domain FROM accounts WHERE workspace_id = $1`,
+    [workspaceId]
+  );
+  const accountIndex = new Map<string, string>();
+  for (const a of allAccounts.rows) {
+    if (!a.name) continue;
+    const normalized = normalizeCompanyName(a.name);
+    if (normalized) {
+      accountIndex.set(normalized, a.id);
+    }
+    if (a.domain) {
+      accountIndex.set(a.domain.toLowerCase().trim(), a.id);
+    }
+  }
+  return accountIndex;
+}
+
+export async function linkAllUnlinkedDeals(workspaceId: string, client?: any): Promise<number> {
+  const queryFn = client ? (sql: string, params: any[]) => client.query(sql, params) : query;
+  const accountIndex = await buildAccountIndex(workspaceId, client);
+  if (accountIndex.size === 0) return 0;
+
+  const unlinkedDeals = await queryFn(
+    `SELECT id, source_data->>'account_name' as company
+     FROM deals
+     WHERE workspace_id = $1 AND account_id IS NULL
+       AND source_data->>'account_name' IS NOT NULL`,
+    [workspaceId]
+  );
+
+  let linked = 0;
+  for (const deal of unlinkedDeals.rows) {
+    if (!deal.company) continue;
+    const normalized = normalizeCompanyName(deal.company);
+    if (!normalized) continue;
+    const accountId = accountIndex.get(normalized);
+    if (accountId) {
+      await queryFn(
+        `UPDATE deals SET account_id = $1, updated_at = NOW() WHERE id = $2`,
+        [accountId, deal.id]
+      );
+      linked++;
+    }
+  }
+  return linked;
+}
+
+export async function linkAllUnlinkedContacts(workspaceId: string, client?: any): Promise<number> {
+  const queryFn = client ? (sql: string, params: any[]) => client.query(sql, params) : query;
+  const accountIndex = await buildAccountIndex(workspaceId, client);
+  if (accountIndex.size === 0) return 0;
+
+  const unlinkedContacts = await queryFn(
+    `SELECT id, source_data->>'account_name' as company, email
+     FROM contacts
+     WHERE workspace_id = $1 AND account_id IS NULL
+       AND (source_data->>'account_name' IS NOT NULL OR email IS NOT NULL)`,
+    [workspaceId]
+  );
+
+  let linked = 0;
+  for (const contact of unlinkedContacts.rows) {
+    let accountId: string | undefined;
+
+    if (contact.email) {
+      const domain = contact.email.split('@')[1]?.toLowerCase().trim();
+      if (domain) {
+        accountId = accountIndex.get(domain);
+      }
+    }
+
+    if (!accountId && contact.company) {
+      const normalized = normalizeCompanyName(contact.company);
+      if (normalized) {
+        accountId = accountIndex.get(normalized);
+      }
+    }
+
+    if (accountId) {
+      await queryFn(
+        `UPDATE contacts SET account_id = $1, updated_at = NOW() WHERE id = $2`,
+        [accountId, contact.id]
+      );
+      linked++;
+    }
+  }
+  return linked;
+}
+
+export async function inferContactDealLinks(workspaceId: string, client?: any): Promise<{ explicit: number; inferred: number }> {
+  const queryFn = client ? (sql: string, params: any[]) => client.query(sql, params) : query;
+
+  const contactsWithDeals = await queryFn(
+    `SELECT c.id as contact_id, c.account_id,
+            c.source_data->>'associated_deal_name' as deal_name
+     FROM contacts c
+     WHERE c.workspace_id = $1
+       AND c.account_id IS NOT NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM deal_contacts dc WHERE dc.contact_id = c.id AND dc.workspace_id = $1
+       )`,
+    [workspaceId]
+  );
+
+  if (contactsWithDeals.rows.length === 0) return { explicit: 0, inferred: 0 };
+
+  const allDeals = await queryFn(
+    `SELECT id, name, account_id FROM deals WHERE workspace_id = $1`,
+    [workspaceId]
+  );
+
+  const dealNameIndex = new Map<string, string>();
+  for (const d of allDeals.rows) {
+    if (d.name) {
+      dealNameIndex.set(d.name.toLowerCase().trim(), d.id);
+    }
+  }
+
+  const dealsByAccount = new Map<string, string[]>();
+  for (const d of allDeals.rows) {
+    if (d.account_id) {
+      const existing = dealsByAccount.get(d.account_id) || [];
+      existing.push(d.id);
+      dealsByAccount.set(d.account_id, existing);
+    }
+  }
+
+  let explicit = 0;
+  let inferred = 0;
+
+  for (const contact of contactsWithDeals.rows) {
+    let dealId: string | undefined;
+    let linkMethod = 'inferred_single_deal';
+
+    if (contact.deal_name) {
+      dealId = dealNameIndex.get(contact.deal_name.toLowerCase().trim());
+      if (dealId) {
+        linkMethod = 'explicit_deal_name';
+        explicit++;
+      }
+    }
+
+    if (!dealId && contact.account_id) {
+      const accountDeals = dealsByAccount.get(contact.account_id);
+      if (accountDeals && accountDeals.length === 1) {
+        dealId = accountDeals[0];
+        inferred++;
+      }
+    }
+
+    if (dealId) {
+      await queryFn(
+        `INSERT INTO deal_contacts (workspace_id, deal_id, contact_id, source, role_source, role_confidence)
+         VALUES ($1, $2, $3, 'csv_import', $4, $5)
+         ON CONFLICT (workspace_id, deal_id, contact_id, source) DO NOTHING`,
+        [workspaceId, dealId, contact.contact_id, linkMethod, linkMethod === 'explicit_deal_name' ? 0.9 : 0.6]
+      );
+    }
+  }
+
+  return { explicit, inferred };
+}
+
+export async function relinkAll(workspaceId: string): Promise<RelinkResult> {
+  const dealsLinkedToAccounts = await linkAllUnlinkedDeals(workspaceId);
+  const contactsLinkedToAccounts = await linkAllUnlinkedContacts(workspaceId);
+  const { explicit: contactsLinkedToDeals, inferred: contactsInferred } = await inferContactDealLinks(workspaceId);
+  return { dealsLinkedToAccounts, contactsLinkedToAccounts, contactsLinkedToDeals, contactsInferred };
+}
+
 async function logToSyncLog(workspaceId: string, entityType: string, recordCount: number, durationMs: number): Promise<void> {
   try {
     await query(
       `INSERT INTO sync_log (workspace_id, connector_type, sync_type, status, records_synced, duration_ms, started_at, completed_at)
-       VALUES ($1, 'file_import', $2, 'completed', $3, $4, NOW() - make_interval(secs => $4::double precision / 1000), NOW())`,
-      [workspaceId, entityType, recordCount, durationMs]
+       VALUES ($1, 'file_import', $2, 'completed', $3, $4, NOW() - make_interval(secs => $5::double precision / 1000), NOW())`,
+      [workspaceId, entityType, recordCount, durationMs, durationMs]
     );
   } catch (err) {
     console.error('[Import] Failed to log sync:', err);
@@ -274,7 +459,15 @@ export async function applyDealImport(
 
     return {
       batchId, inserted, updated, skipped, errors,
-      postActions: { accountsLinked, computedFieldsRefreshed, contextLayerUpdated: false },
+      postActions: {
+        accountsLinked,
+        dealsLinkedToAccounts: 0,
+        contactsLinkedToAccounts: 0,
+        contactsLinkedToDeals: 0,
+        contactsInferred: 0,
+        computedFieldsRefreshed,
+        contextLayerUpdated: false,
+      },
     };
   } catch (err) {
     if (client) await client.query('ROLLBACK').catch(() => {});
@@ -331,6 +524,7 @@ export async function applyContactImport(
           import_batch_id: batchId,
           original_row: record.raw,
           account_name: record.account_name || null,
+          associated_deal_name: record.associated_deal_name || null,
         });
 
         if (strategy === 'merge' && record.external_id) {
@@ -377,7 +571,7 @@ export async function applyContactImport(
       }
     }
 
-    const accountsLinked = await linkContactsToAccounts(client, workspaceId, contactIds);
+    const contactsLinkedToAccounts = await linkContactsToAccounts(client, workspaceId, contactIds);
 
     await client.query(
       `UPDATE import_batches SET
@@ -392,9 +586,27 @@ export async function applyContactImport(
     const durationMs = Date.now() - startTime;
     await logToSyncLog(workspaceId, 'contacts', inserted + updated, durationMs);
 
+    let contactsLinkedToDeals = 0;
+    let contactsInferred = 0;
+    try {
+      const dealLinks = await inferContactDealLinks(workspaceId);
+      contactsLinkedToDeals = dealLinks.explicit;
+      contactsInferred = dealLinks.inferred;
+    } catch (err) {
+      console.error('[Import] Failed to infer contact-deal links:', err);
+    }
+
     return {
       batchId, inserted, updated, skipped, errors,
-      postActions: { accountsLinked, computedFieldsRefreshed: false, contextLayerUpdated: false },
+      postActions: {
+        accountsLinked: 0,
+        dealsLinkedToAccounts: 0,
+        contactsLinkedToAccounts,
+        contactsLinkedToDeals,
+        contactsInferred,
+        computedFieldsRefreshed: false,
+        contextLayerUpdated: false,
+      },
     };
   } catch (err) {
     if (client) await client.query('ROLLBACK').catch(() => {});
@@ -497,9 +709,27 @@ export async function applyAccountImport(
     const durationMs = Date.now() - startTime;
     await logToSyncLog(workspaceId, 'accounts', inserted + updated, durationMs);
 
+    let dealsLinkedToAccounts = 0;
+    let contactsLinkedToAccounts = 0;
+    try {
+      dealsLinkedToAccounts = await linkAllUnlinkedDeals(workspaceId);
+      contactsLinkedToAccounts = await linkAllUnlinkedContacts(workspaceId);
+      console.log(`[Import] Post-account re-link: ${dealsLinkedToAccounts} deals, ${contactsLinkedToAccounts} contacts linked`);
+    } catch (err) {
+      console.error('[Import] Failed to re-link after account import:', err);
+    }
+
     return {
       batchId, inserted, updated, skipped, errors,
-      postActions: { accountsLinked: 0, computedFieldsRefreshed: false, contextLayerUpdated: false },
+      postActions: {
+        accountsLinked: 0,
+        dealsLinkedToAccounts,
+        contactsLinkedToAccounts,
+        contactsLinkedToDeals: 0,
+        contactsInferred: 0,
+        computedFieldsRefreshed: false,
+        contextLayerUpdated: false,
+      },
     };
   } catch (err) {
     if (client) await client.query('ROLLBACK').catch(() => {});
