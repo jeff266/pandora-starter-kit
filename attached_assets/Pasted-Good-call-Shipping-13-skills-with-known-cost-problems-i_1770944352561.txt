@@ -1,0 +1,27 @@
+Good call. Shipping 13 skills with known cost problems into weekly cron runs is a compounding issue — every Monday morning run burns the excess tokens. Fix it once now rather than paying the tax indefinitely.
+
+**Item 1 is the priority: token optimization.** Item 2 (output persistence) is cosmetic and can ride along.
+
+Here's the prompt for Claude Code:
+
+> **Token optimization pass on Pipeline Waterfall and Rep Scorecard.**
+> 
+> Both skills are blowing their token budgets because Claude is making tool calls during synthesis to query deals by stage, amount, risk, and activity. If Claude needs to make tool calls, the compute phase didn't aggregate enough data.
+> 
+> **The fix pattern is the same for both skills:**
+> 1. Look at what Claude's tool calls are querying during the synthesis step — check the skill_runs output for the tool call inputs
+> 2. Move that data into the compute steps so it's already in the summary Claude receives
+> 3. Remove or reduce the tools available to Claude in the synthesis step — ideally Claude needs zero tool calls
+> 4. Verify the compute step outputs stay under 4K tokens total going to Claude (the design guide ceiling)
+> 
+> **Targets:**
+> - Pipeline Waterfall: from 37,148 Claude tokens → under 11,000 total
+> - Rep Scorecard: from 110,364 Claude tokens → under 11,500 total
+> 
+> **Reference:** Read `PANDORA_SKILL_DESIGN_GUIDE.md` — specifically the validation rules: no Claude step receives raw data arrays > 10 items, Claude context should be < 4K tokens total, if a skill exceeds 20K tokens you haven't aggregated enough in compute.
+> 
+> **Reference skills:** Look at how Forecast Roll-up and Lead Scoring stay within budget. They aggregate aggressively in compute and give Claude pre-digested summaries. Copy that discipline.
+> 
+> **While you're in there:** Standardize output persistence so compute-only skills (Custom Field Discovery, Contact Role Resolution) write to the `output_text` column the same way LLM-powered skills do.
+> 
+> After fixing, run both skills against the Frontera workspace and report the new token counts. Don't move on until both are under their targets.
