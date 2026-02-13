@@ -664,7 +664,7 @@ const getMaturityScores: ToolDefinition = {
 
 const computePipelineCoverage: ToolDefinition = {
   name: 'computePipelineCoverage',
-  description: 'Compute pipeline coverage ratio (pipeline value ÷ quota target) and generate full snapshot.',
+  description: 'Compute pipeline coverage ratio (pipeline value ÷ quota target) and generate full snapshot with ICP quality summary.',
   tier: 'compute',
   parameters: {
     type: 'object',
@@ -675,8 +675,86 @@ const computePipelineCoverage: ToolDefinition = {
     required: [],
   },
   execute: async (params, context) => {
-    return safeExecute('computePipelineCoverage', () =>
-      generatePipelineSnapshot(context.workspaceId, params.quota, params.staleDaysThreshold), params);
+    return safeExecute('computePipelineCoverage', async () => {
+      const snapshot = await generatePipelineSnapshot(context.workspaceId, params.quota, params.staleDaysThreshold);
+      const staleDays = params.staleDaysThreshold || 14;
+
+      // Load ICP scores for all open deals
+      const icpResult = await query(
+        `SELECT ls.score_grade, d.amount, d.id, d.stage_normalized, d.last_activity_date
+         FROM lead_scores ls
+         JOIN deals d ON d.id = ls.entity_id AND d.workspace_id = ls.workspace_id
+         WHERE ls.workspace_id = $1
+           AND ls.entity_type = 'deal'
+           AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')`,
+        [context.workspaceId]
+      );
+
+      const hasIcpScores = icpResult.rows.length > 0;
+
+      if (!hasIcpScores) {
+        return { ...snapshot, icpSummary: null };
+      }
+
+      // Build ICP quality summary
+      const icpSummary: any = {
+        total_scored: icpResult.rows.length,
+        by_grade: {
+          A: { count: 0, value: 0 },
+          B: { count: 0, value: 0 },
+          C: { count: 0, value: 0 },
+          D: { count: 0, value: 0 },
+          F: { count: 0, value: 0 },
+        },
+        ab_grade_pct: 0,
+        df_grade_pct: 0,
+        high_fit_stale_count: 0,
+        low_fit_active_count: 0,
+        high_fit_stuck_count: 0,
+      };
+
+      let totalValue = 0;
+
+      for (const row of icpResult.rows) {
+        const grade = row.score_grade;
+        const amount = Number(row.amount || 0);
+        totalValue += amount;
+
+        if (icpSummary.by_grade[grade]) {
+          icpSummary.by_grade[grade].count++;
+          icpSummary.by_grade[grade].value += amount;
+        }
+
+        // Count risk signals
+        const daysStale = row.last_activity_date
+          ? Math.floor((Date.now() - new Date(row.last_activity_date).getTime()) / (1000 * 60 * 60 * 24))
+          : 999;
+
+        if (grade === 'A' && daysStale > staleDays) {
+          icpSummary.high_fit_stale_count++;
+        }
+
+        if ((grade === 'D' || grade === 'F')) {
+          icpSummary.low_fit_active_count++;
+        }
+
+        const isEarlyStage = ['qualification', 'discovery', 'demo'].includes(row.stage_normalized);
+        // Estimate days_in_stage (would need stage_history for exact value)
+        if ((grade === 'A' || grade === 'B') && isEarlyStage && daysStale > 14) {
+          icpSummary.high_fit_stuck_count++;
+        }
+      }
+
+      icpSummary.ab_grade_pct = totalValue > 0
+        ? Math.round(((icpSummary.by_grade.A.value + icpSummary.by_grade.B.value) / totalValue) * 100)
+        : 0;
+
+      icpSummary.df_grade_pct = totalValue > 0
+        ? Math.round(((icpSummary.by_grade.D.value + icpSummary.by_grade.F.value) / totalValue) * 100)
+        : 0;
+
+      return { ...snapshot, icpSummary };
+    }, params);
   },
 };
 
@@ -701,7 +779,7 @@ const refreshComputedFields: ToolDefinition = {
 
 const aggregateStaleDeals: ToolDefinition = {
   name: 'aggregateStaleDeals',
-  description: 'Get stale deals pre-aggregated into summary, severity buckets, per-owner breakdown, and top N deals. Designed for LLM consumption.',
+  description: 'Get stale deals pre-aggregated into summary, severity buckets, per-owner breakdown, and top N deals. Includes ICP grade risk signals if available.',
   tier: 'compute',
   parameters: {
     type: 'object',
@@ -720,9 +798,40 @@ const aggregateStaleDeals: ToolDefinition = {
         resolveOwnerNames(context.workspaceId),
       ]);
 
-      const staleItems = deals.map(pickStaleDealFields).map(d => ({
-        ...d, owner: resolveOwnerName(d.owner, nameMap),
-      }));
+      // Load ICP scores for stale deals (if available)
+      const dealIds = deals.map((d: any) => d.id);
+      let icpScoresMap = new Map<string, { score: number; grade: string }>();
+      let hasIcpScores = false;
+
+      if (dealIds.length > 0) {
+        const scoresResult = await query(
+          `SELECT entity_id, total_score, score_grade
+           FROM lead_scores
+           WHERE workspace_id = $1
+             AND entity_type = 'deal'
+             AND entity_id = ANY($2)`,
+          [context.workspaceId, dealIds]
+        );
+
+        hasIcpScores = scoresResult.rows.length > 0;
+        for (const row of scoresResult.rows) {
+          icpScoresMap.set(row.entity_id, {
+            score: Number(row.total_score),
+            grade: row.score_grade,
+          });
+        }
+      }
+
+      const staleItems = deals.map(pickStaleDealFields).map(d => {
+        const icpData = icpScoresMap.get(d.dealId);
+        return {
+          ...d,
+          owner: resolveOwnerName(d.owner, nameMap),
+          icp_grade: icpData?.grade ?? null,
+          icp_score: icpData?.score ?? null,
+        };
+      });
+
       const summary = summarizeDeals(deals);
       const avgDaysStale = staleItems.length > 0
         ? Math.round(staleItems.reduce((s, d) => s + d.daysStale, 0) / staleItems.length)
@@ -743,6 +852,26 @@ const aggregateStaleDeals: ToolDefinition = {
         staleItems, topN, d => d.amount, d => d.amount
       );
 
+      // Add ICP-aware risk signals
+      const icpRiskSignals: any[] = [];
+      if (hasIcpScores) {
+        for (const deal of staleItems) {
+          // High-fit deal going stale — biggest loss risk
+          if (deal.icp_grade === 'A' && deal.daysStale > staleDays) {
+            icpRiskSignals.push({
+              type: 'high_fit_stale',
+              severity: 'high',
+              deal_id: deal.dealId,
+              deal_name: deal.name,
+              amount: deal.amount,
+              days_stale: deal.daysStale,
+              icp_grade: deal.icp_grade,
+              message: `${deal.name} is A-grade ICP fit ($${deal.amount}) but stale for ${deal.daysStale} days — high priority recovery`,
+            });
+          }
+        }
+      }
+
       return {
         summary: { total: summary.total, totalValue: summary.totalValue, avgDaysStale },
         bySeverity,
@@ -750,6 +879,8 @@ const aggregateStaleDeals: ToolDefinition = {
         byStage,
         topDeals: topItems,
         remaining,
+        hasIcpScores,
+        icpRiskSignals,
       };
     }, params);
   },
@@ -2111,6 +2242,93 @@ const forecastRollup: ToolDefinition = {
         };
       }).sort((a, b) => b.bearCase - a.bearCase);
 
+      // Load ICP scores for forecast deals
+      const icpDealsResult = await query(
+        `SELECT d.id, d.amount, d.forecast_category, ls.score_grade
+         FROM deals d
+         LEFT JOIN lead_scores ls ON ls.entity_id = d.id
+           AND ls.workspace_id = d.workspace_id
+           AND ls.entity_type = 'deal'
+         WHERE d.workspace_id = $1
+           AND d.forecast_category IS NOT NULL
+           AND d.stage_normalized NOT IN ('closed_lost')`,
+        [context.workspaceId]
+      );
+
+      const hasIcpScores = icpDealsResult.rows.some((r: any) => r.score_grade !== null);
+
+      let icpForecast: any = null;
+
+      if (hasIcpScores) {
+        const commitDeals = icpDealsResult.rows.filter((r: any) => r.forecast_category === 'commit');
+        const bestCaseDeals = icpDealsResult.rows.filter((r: any) => r.forecast_category === 'best_case');
+        const pipelineDeals = icpDealsResult.rows.filter((r: any) => r.forecast_category === 'pipeline');
+
+        icpForecast = {
+          commit: {
+            total: commitDeals.reduce((s: number, d: any) => s + (Number(d.amount) || 0), 0),
+            ab_grade: commitDeals.filter((d: any) => d.score_grade === 'A' || d.score_grade === 'B')
+              .reduce((s: number, d: any) => s + (Number(d.amount) || 0), 0),
+            cdf_grade: commitDeals.filter((d: any) => ['C','D','F'].includes(d.score_grade))
+              .reduce((s: number, d: any) => s + (Number(d.amount) || 0), 0),
+          },
+          best_case: {
+            total: bestCaseDeals.reduce((s: number, d: any) => s + (Number(d.amount) || 0), 0),
+            ab_grade: bestCaseDeals.filter((d: any) => d.score_grade === 'A' || d.score_grade === 'B')
+              .reduce((s: number, d: any) => s + (Number(d.amount) || 0), 0),
+            cdf_grade: bestCaseDeals.filter((d: any) => ['C','D','F'].includes(d.score_grade))
+              .reduce((s: number, d: any) => s + (Number(d.amount) || 0), 0),
+          },
+          pipeline: {
+            total: pipelineDeals.reduce((s: number, d: any) => s + (Number(d.amount) || 0), 0),
+            ab_grade: pipelineDeals.filter((d: any) => d.score_grade === 'A' || d.score_grade === 'B')
+              .reduce((s: number, d: any) => s + (Number(d.amount) || 0), 0),
+            cdf_grade: pipelineDeals.filter((d: any) => ['C','D','F'].includes(d.score_grade))
+              .reduce((s: number, d: any) => s + (Number(d.amount) || 0), 0),
+          },
+          has_grade_adjusted: false,
+        };
+
+        // Compute historical close rates by grade (only if enough data)
+        const historicalByGrade = await query(
+          `SELECT ls.score_grade as grade,
+            COUNT(*) FILTER (WHERE d.stage_normalized = 'closed_won') as won,
+            COUNT(*) as total,
+            ROUND(COUNT(*) FILTER (WHERE d.stage_normalized = 'closed_won')::numeric /
+              NULLIF(COUNT(*), 0) * 100) as close_rate
+          FROM lead_scores ls
+          JOIN deals d ON d.id = ls.entity_id AND d.workspace_id = ls.workspace_id
+          WHERE ls.workspace_id = $1
+            AND ls.entity_type = 'deal'
+            AND d.stage_normalized IN ('closed_won', 'closed_lost')
+          GROUP BY ls.score_grade
+          HAVING COUNT(*) >= 5
+          ORDER BY ls.score_grade`,
+          [context.workspaceId]
+        );
+
+        const gradeCloseRates: Record<string, number> = {};
+        for (const row of historicalByGrade.rows) {
+          gradeCloseRates[row.grade] = Number(row.close_rate) / 100;
+        }
+
+        // Only compute grade-adjusted if we have enough grades
+        if (Object.keys(gradeCloseRates).length >= 3) {
+          icpForecast.grade_adjusted_commit = commitDeals.reduce((sum: number, d: any) => {
+            const rate = gradeCloseRates[d.score_grade] ?? 0.5;
+            return sum + (Number(d.amount) || 0) * rate;
+          }, 0);
+
+          icpForecast.grade_adjusted_best_case = bestCaseDeals.reduce((sum: number, d: any) => {
+            const rate = gradeCloseRates[d.score_grade] ?? 0.3;
+            return sum + (Number(d.amount) || 0) * rate;
+          }, 0);
+
+          icpForecast.has_grade_adjusted = true;
+          icpForecast.grade_close_rates = gradeCloseRates;
+        }
+      }
+
       return {
         team: {
           closedWon,
@@ -2134,6 +2352,7 @@ const forecastRollup: ToolDefinition = {
           total: Object.values(categories).reduce((s, c) => s + c.count, 0),
         },
         byRep,
+        icpForecast,
       };
     }, params);
   },

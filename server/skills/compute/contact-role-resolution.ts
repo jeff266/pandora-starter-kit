@@ -321,6 +321,64 @@ function inferRoleFromTitle(title: string | null): { role: string; confidence: n
   return null;
 }
 
+/**
+ * Infer buying role from Apollo-verified seniority and department
+ * Higher confidence (0.65) than title-only inference (0.50) because data is verified
+ */
+function inferRoleFromEnrichment(
+  seniority: string,
+  department: string
+): { role: string; confidence: number } | null {
+  // C-level → decision_maker or executive_sponsor
+  if (seniority === 'c_level') {
+    // C-level in business departments → decision_maker
+    if (['executive', 'finance', 'operations'].includes(department)) {
+      return { role: 'decision_maker', confidence: 0.70 };
+    }
+    // C-level in IT/engineering → executive_sponsor
+    if (['it', 'engineering', 'product'].includes(department)) {
+      return { role: 'executive_sponsor', confidence: 0.70 };
+    }
+    // Default C-level → decision_maker
+    return { role: 'decision_maker', confidence: 0.65 };
+  }
+
+  // VP/SVP → economic_buyer or decision_maker
+  if (['vp', 'svp'].includes(seniority)) {
+    if (['finance', 'operations'].includes(department)) {
+      return { role: 'economic_buyer', confidence: 0.65 };
+    }
+    if (['it', 'engineering', 'product'].includes(department)) {
+      return { role: 'decision_maker', confidence: 0.65 };
+    }
+    return { role: 'decision_maker', confidence: 0.60 };
+  }
+
+  // Director → champion or technical_evaluator
+  if (seniority === 'director') {
+    if (['it', 'engineering', 'product'].includes(department)) {
+      return { role: 'technical_evaluator', confidence: 0.60 };
+    }
+    return { role: 'champion', confidence: 0.60 };
+  }
+
+  // Manager → champion
+  if (seniority === 'manager') {
+    if (['it', 'engineering', 'product'].includes(department)) {
+      return { role: 'technical_evaluator', confidence: 0.55 };
+    }
+    return { role: 'champion', confidence: 0.55 };
+  }
+
+  // IC (individual contributor) in technical departments → technical_evaluator
+  if (seniority === 'ic' && ['it', 'engineering', 'product'].includes(department)) {
+    return { role: 'technical_evaluator', confidence: 0.50 };
+  }
+
+  // No clear mapping
+  return null;
+}
+
 // ============================================================================
 // Priority 1: Normalize Existing CRM Roles
 // ============================================================================
@@ -574,13 +632,19 @@ async function resolveTitleBasedInference(workspaceId: string, dealId?: string):
   const dealFilter = dealId ? 'AND dc.deal_id = $2' : '';
   const params = dealId ? [workspaceId, dealId] : [workspaceId];
 
+  // Skip contacts that already have enrichment data with buying roles
+  // Enriched contacts should not be overwritten by lower-confidence title inference
   const result = await query<{
     id: string;
     deal_id: string;
     contact_id: string;
     title: string;
+    seniority_verified: string;
+    department_verified: string;
+    enrichment_status: string;
   }>(`
-    SELECT dc.id, dc.deal_id, dc.contact_id, c.title
+    SELECT dc.id, dc.deal_id, dc.contact_id, c.title,
+           dc.seniority_verified, dc.department_verified, dc.enrichment_status
     FROM deal_contacts dc
     JOIN contacts c ON dc.contact_id = c.id AND dc.workspace_id = c.workspace_id
     WHERE dc.workspace_id = $1
@@ -592,16 +656,34 @@ async function resolveTitleBasedInference(workspaceId: string, dealId?: string):
   let resolved = 0;
 
   for (const row of result.rows) {
-    const titleMatch = inferRoleFromTitle(row.title);
-    if (!titleMatch) continue;
+    let roleMatch: { role: string; confidence: number; source: string } | null = null;
 
-    const hasHigherRole = await hasHigherConfidenceRole(workspaceId, row.deal_id, row.contact_id, titleMatch.confidence);
+    // Task 3b: Prefer Apollo-verified seniority + department for role inference
+    if (row.seniority_verified && row.department_verified) {
+      roleMatch = inferRoleFromEnrichment(row.seniority_verified, row.department_verified);
+      if (roleMatch) {
+        roleMatch.source = 'enrichment_inference';
+        // Higher confidence (0.65) because Apollo verified the data
+      }
+    }
+
+    // Fallback to title-based inference if enrichment doesn't provide a role
+    if (!roleMatch) {
+      const titleMatch = inferRoleFromTitle(row.title);
+      if (titleMatch) {
+        roleMatch = { ...titleMatch, source: 'title_match' };
+      }
+    }
+
+    if (!roleMatch) continue;
+
+    const hasHigherRole = await hasHigherConfidenceRole(workspaceId, row.deal_id, row.contact_id, roleMatch.confidence);
     if (hasHigherRole) continue;
 
     await upsertDealContact(workspaceId, row.deal_id, row.contact_id, {
-      buying_role: titleMatch.role,
-      role_source: 'title_match',
-      role_confidence: titleMatch.confidence,
+      buying_role: roleMatch.role,
+      role_source: roleMatch.source,
+      role_confidence: roleMatch.confidence,
     });
 
     resolved++;

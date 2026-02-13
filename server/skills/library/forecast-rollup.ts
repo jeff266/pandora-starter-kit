@@ -208,6 +208,28 @@ CONCENTRATION RISK ANALYSIS:
 BEHAVIORAL RISK CLASSIFICATIONS (AI-detected):
 {{risk_classifications}}
 
+{{#if forecast_data.icpForecast}}
+ICP-ADJUSTED FORECAST:
+- Commit: ${{forecast_data.icpForecast.commit.total}} total
+  - ${{forecast_data.icpForecast.commit.ab_grade}} in A/B-grade deals (high confidence)
+  - ${{forecast_data.icpForecast.commit.cdf_grade}} in C/D/F-grade deals (lower confidence)
+- Best Case: ${{forecast_data.icpForecast.best_case.total}} total
+  - ${{forecast_data.icpForecast.best_case.ab_grade}} in A/B-grade deals
+  - ${{forecast_data.icpForecast.best_case.cdf_grade}} in C/D/F-grade deals
+- Pipeline: ${{forecast_data.icpForecast.pipeline.total}} total
+  - ${{forecast_data.icpForecast.pipeline.ab_grade}} in A/B-grade deals
+  - ${{forecast_data.icpForecast.pipeline.cdf_grade}} in C/D/F-grade deals
+
+{{#if forecast_data.icpForecast.has_grade_adjusted}}
+Grade-Adjusted Expected Value (based on historical close rates by ICP grade):
+{{#each forecast_data.icpForecast.grade_close_rates}}
+  - {{@key}}-grade: {{this}}% close rate
+{{/each}}
+- Adjusted commit: ${{forecast_data.icpForecast.grade_adjusted_commit}}
+- Adjusted best case: ${{forecast_data.icpForecast.grade_adjusted_best_case}}
+{{/if}}
+{{/if}}
+
 OUTPUT GUIDANCE:
 {{output_budget}}
 
@@ -234,6 +256,17 @@ If quota not configured, use absolute numbers and note the gap.
   - If spread >30% quota: **High volatility** — forecast unreliable
   - If spread 15-30%: **Medium volatility** — watch closely
   - If spread <15%: **Low volatility** — stable forecast
+
+{{#if forecast_data.icpForecast}}
+## ICP Quality Analysis
+- **A/B-grade pipeline concentration**: What % of commit/best case is high-fit?
+  - If A/B < 50% of commit: Flag as **quality problem** even if total looks healthy
+  - If commit heavily C/D/F: Flag as **forecast risk** — lower close rates expected
+- **Grade-adjusted forecast**: If available, compare to raw forecast
+  - If grade-adjusted < raw: **Over-forecasting risk** — deals are lower quality
+  - If grade-adjusted > raw: **Under-forecasting** — deals are higher quality
+  - Note: Grade-adjusted only shown when 5+ closed deals per grade (enough data)
+{{/if}}
 
 ## Concentration Risk
 - **Top 3 Deals**: List name, amount, category, owner, probability
@@ -285,7 +318,12 @@ STYLE RULES:
 - Don't repeat raw data — interpret it and explain what it means
 - Avoid generic phrases like "pipeline looks healthy" — be specific about why
 - Prioritize high-severity risks and high-value opportunities
-- If concentration risk is high, make it prominent — this is a critical insight`,
+- If concentration risk is high, make it prominent — this is a critical insight
+{{#if forecast_data.icpForecast}}
+- Reference ICP quality when assessing forecast confidence
+- If A/B-grade thin in commit, flag as quality problem
+- If grade-adjusted forecast available, compare to quota for realistic attainment
+{{/if}}`,
       outputKey: 'narrative',
     },
   ],

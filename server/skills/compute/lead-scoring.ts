@@ -72,6 +72,18 @@ interface DealFeatures {
   daysSinceCreation: number;
   daysUntilClose: number | null;
   daysSinceLastActivity: number | null;
+
+  // Enrichment signals (optional - from enrichment pipeline)
+  hasEnrichmentData?: boolean;
+  buyingCommitteeComplete?: boolean;
+  rolesIdentified?: number;
+  decisionMakerCount?: number;
+  seniorityClevelPresent?: boolean;
+  signalScore?: number;
+  hasFundingSignal?: boolean;
+  hasHiringSignal?: boolean;
+  hasExpansionSignal?: boolean;
+  hasRiskSignal?: boolean;
 }
 
 interface ContactFeatures {
@@ -202,6 +214,18 @@ const DEFAULT_WEIGHTS = {
     sentiment_declining: -8, // NEGATIVE: declining sentiment trajectory
     competitor_heavy: -3, // NEGATIVE: high competitor mentions
     long_gap_since_call: -5, // NEGATIVE: >21 days since last call in active deal
+
+    // Enrichment signals (max 30 points - requires enrichment pipeline)
+    buying_committee_complete: 5, // 3+ contacts with 3+ identified buying roles
+    has_champion_identified: 3, // Champion role identified via Apollo
+    seniority_c_level_present: 4, // C-level contact present
+    decision_maker_count: 2, // Per decision maker (up to 3)
+    signal_score_positive: 4, // Account signal score > 0.5
+    signal_score_very_positive: 8, // Account signal score > 0.8
+    has_funding_signal: 3, // Recent funding news
+    has_hiring_signal: 2, // Recent hiring news
+    has_expansion_signal: 3, // Recent expansion news
+    has_risk_signal: -5, // NEGATIVE: risk signals present
   },
 
   contact: {
@@ -343,6 +367,56 @@ async function extractDealFeatures(workspaceId: string): Promise<DealFeatures[]>
       ? Math.floor((Date.now() - lastActivity.getTime()) / (1000 * 60 * 60 * 24))
       : null;
 
+    // Get enrichment signals (optional - graceful degradation if not available)
+    let enrichmentData: any = {};
+    try {
+      const enrichmentResult = await query<any>(`
+        SELECT
+          COUNT(*) FILTER (WHERE dc.enrichment_status = 'enriched') as enriched_count,
+          COUNT(*) FILTER (WHERE dc.buying_role IS NOT NULL) as roles_identified,
+          COUNT(*) FILTER (WHERE dc.buying_role = 'decision_maker') as decision_maker_count,
+          bool_or(dc.seniority_verified = 'c_level' OR c.title ~* '\\b(chief|ceo|cto|cfo|coo)\\b') as c_level_present
+        FROM deal_contacts dc
+        JOIN contacts c ON dc.contact_id = c.id AND c.workspace_id = dc.workspace_id
+        WHERE dc.workspace_id = $1 AND dc.deal_id = $2
+      `, [workspaceId, row.id]);
+
+      const enrichmentRow = enrichmentResult.rows[0];
+      const enrichedCount = parseInt(enrichmentRow?.enriched_count || '0', 10);
+      const rolesIdentified = parseInt(enrichmentRow?.roles_identified || '0', 10);
+      const totalContacts = parseInt(threadingRow.total_contacts || '0', 10);
+
+      enrichmentData.hasEnrichmentData = enrichedCount > 0;
+      enrichmentData.buyingCommitteeComplete = totalContacts >= 3 && rolesIdentified >= 3;
+      enrichmentData.rolesIdentified = rolesIdentified;
+      enrichmentData.decisionMakerCount = parseInt(enrichmentRow?.decision_maker_count || '0', 10);
+      enrichmentData.seniorityClevelPresent = enrichmentRow?.c_level_present || false;
+
+      // Get account signals (if available)
+      const signalsResult = await query<any>(`
+        SELECT signal_score, signals
+        FROM account_signals
+        WHERE workspace_id = $1 AND account_id = (
+          SELECT account_id FROM deals WHERE id = $2 AND workspace_id = $1
+        )
+        ORDER BY created_at DESC
+        LIMIT 1
+      `, [workspaceId, row.id]);
+
+      if (signalsResult.rows.length > 0) {
+        const signalsRow = signalsResult.rows[0];
+        enrichmentData.signalScore = signalsRow.signal_score;
+        const signals = signalsRow.signals || [];
+        enrichmentData.hasFundingSignal = Array.isArray(signals) && signals.some((s: any) => s.type === 'funding');
+        enrichmentData.hasHiringSignal = Array.isArray(signals) && signals.some((s: any) => s.type === 'hiring');
+        enrichmentData.hasExpansionSignal = Array.isArray(signals) && signals.some((s: any) => s.type === 'expansion');
+        enrichmentData.hasRiskSignal = Array.isArray(signals) && signals.some((s: any) => s.type === 'risk');
+      }
+    } catch (error) {
+      // Graceful degradation - enrichment tables may not exist yet
+      logger.debug('[Lead Scoring] Enrichment data not available for deal', { dealId: row.id });
+    }
+
     deals.push({
       id: row.id,
       name: row.name,
@@ -386,6 +460,17 @@ async function extractDealFeatures(workspaceId: string): Promise<DealFeatures[]>
       daysSinceCreation: Math.floor(parseFloat(row.days_since_creation || '0')),
       daysUntilClose: row.days_until_close ? Math.floor(parseFloat(row.days_until_close)) : null,
       daysSinceLastActivity,
+      // Enrichment signals
+      hasEnrichmentData: enrichmentData.hasEnrichmentData,
+      buyingCommitteeComplete: enrichmentData.buyingCommitteeComplete,
+      rolesIdentified: enrichmentData.rolesIdentified,
+      decisionMakerCount: enrichmentData.decisionMakerCount,
+      seniorityClevelPresent: enrichmentData.seniorityClevelPresent,
+      signalScore: enrichmentData.signalScore,
+      hasFundingSignal: enrichmentData.hasFundingSignal,
+      hasHiringSignal: enrichmentData.hasHiringSignal,
+      hasExpansionSignal: enrichmentData.hasExpansionSignal,
+      hasRiskSignal: enrichmentData.hasRiskSignal,
     });
   }
 
@@ -535,6 +620,7 @@ interface ICPWeights {
   }>;
   leadSourceWeights: Record<string, number>;
   customFieldOverrides: Record<string, Record<string, number>>;
+  enrichmentWeights?: Record<string, number>; // Optional enrichment weights from ICP profile
 }
 
 async function loadICPWeights(workspaceId: string): Promise<{ profile: ICPProfile; weights: ICPWeights } | null> {
@@ -699,12 +785,21 @@ function mapICPToScoringWeights(profile: ICPProfile): ICPWeights {
     }
   }
 
+  // Extract enrichment weights from scoring_weights.enrichment (if available)
+  if (profile.scoring_weights?.enrichment) {
+    weights.enrichmentWeights = profile.scoring_weights.enrichment;
+    logger.info('[Lead Scoring] Loaded enrichment weights from ICP profile', {
+      enrichmentWeights: Object.keys(weights.enrichmentWeights).length,
+    });
+  }
+
   logger.info('[Lead Scoring] Mapped ICP weights', {
     personaWeights: weights.personaWeights,
     companyFitRules: weights.companyFitRules.length,
     committeeBonuses: weights.committeeBonuses.map(c => ({ roles: c.roles, lift: c.lift, pts: c.bonusPoints })),
     leadSourceWeights: Object.keys(weights.leadSourceWeights).length,
     personaToBuyingRolesCount: personaToBuyingRoles.size,
+    enrichmentWeights: weights.enrichmentWeights ? Object.keys(weights.enrichmentWeights).length : 0,
   });
 
   return weights;
@@ -839,6 +934,48 @@ function evaluateDealFeature(feature: string, deal: DealFeatures, maxWeight: num
       return { points: longGap ? maxWeight : 0, rawValue: deal.daysSinceLastCall || null };
     }
 
+    // Enrichment features
+    case 'buying_committee_complete':
+      return { points: deal.buyingCommitteeComplete ? maxWeight : 0, rawValue: deal.buyingCommitteeComplete || false };
+
+    case 'has_champion_identified': {
+      // Check for champion in buying roles (enriched or not)
+      const hasChampion = deal.champions > 0 || deal.rolesPresent.includes('champion');
+      return { points: hasChampion ? maxWeight : 0, rawValue: hasChampion };
+    }
+
+    case 'seniority_c_level_present':
+      return { points: deal.seniorityClevelPresent ? maxWeight : 0, rawValue: deal.seniorityClevelPresent || false };
+
+    case 'decision_maker_count': {
+      const count = deal.decisionMakerCount || 0;
+      const points = Math.min(maxWeight * 3, count * maxWeight); // Up to 3 decision makers
+      return { points: Math.round(points), rawValue: count };
+    }
+
+    case 'signal_score_positive': {
+      const isPositive = (deal.signalScore || 0) > 0.5;
+      return { points: isPositive ? maxWeight : 0, rawValue: deal.signalScore || 0 };
+    }
+
+    case 'signal_score_very_positive': {
+      const isVeryPositive = (deal.signalScore || 0) > 0.8;
+      return { points: isVeryPositive ? maxWeight : 0, rawValue: deal.signalScore || 0 };
+    }
+
+    case 'has_funding_signal':
+      return { points: deal.hasFundingSignal ? maxWeight : 0, rawValue: deal.hasFundingSignal || false };
+
+    case 'has_hiring_signal':
+      return { points: deal.hasHiringSignal ? maxWeight : 0, rawValue: deal.hasHiringSignal || false };
+
+    case 'has_expansion_signal':
+      return { points: deal.hasExpansionSignal ? maxWeight : 0, rawValue: deal.hasExpansionSignal || false };
+
+    case 'has_risk_signal':
+      // NEGATIVE points for risk signals
+      return { points: deal.hasRiskSignal ? maxWeight : 0, rawValue: deal.hasRiskSignal || false };
+
     default:
       return { points: 0, rawValue: null };
   }
@@ -862,8 +999,20 @@ function scoreDeal(
     'sentiment_declining', 'competitor_heavy', 'long_gap_since_call',
   ]);
 
+  const enrichmentFeatures = new Set([
+    'buying_committee_complete', 'has_champion_identified', 'seniority_c_level_present',
+    'decision_maker_count', 'signal_score_positive', 'signal_score_very_positive',
+    'has_funding_signal', 'has_hiring_signal', 'has_expansion_signal', 'has_risk_signal',
+  ]);
+
+  const hasEnrichmentData = deal.hasEnrichmentData || false;
+
   for (const [feature, maxWeight] of Object.entries(DEFAULT_WEIGHTS.deal)) {
     if (conversationFeatures.has(feature) && !hasConversationConnector) {
+      continue;
+    }
+
+    if (enrichmentFeatures.has(feature) && !hasEnrichmentData) {
       continue;
     }
 
@@ -951,6 +1100,20 @@ function scoreDeal(
       breakdown['icp_persona_fit'] = { value: deal.rolesPresent.join(', '), points: personaPoints, weight: 20 };
       totalPoints += personaPoints;
       maxPossible += 20;
+    }
+
+    // Apply ICP-derived enrichment weights (if available and deal has enrichment data)
+    if (icpWeights.enrichmentWeights && deal.hasEnrichmentData) {
+      for (const [feature, weight] of Object.entries(icpWeights.enrichmentWeights)) {
+        const { points, rawValue } = evaluateDealFeature(feature, deal, weight);
+        if (points !== 0 || rawValue !== null) {
+          breakdown[`icp_${feature}`] = { value: rawValue, points, weight };
+          totalPoints += points;
+          if (weight > 0) {
+            maxPossible += weight;
+          }
+        }
+      }
     }
   }
 

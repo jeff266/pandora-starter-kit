@@ -117,10 +117,15 @@ export const pipelineHygieneSkill: SkillDefinition = {
       deepseekPrompt: `You are a RevOps data analyst. Classify each deal below to identify root causes and recommend actions.
 
 For each deal, determine:
-1. root_cause: one of [rep_neglect, prospect_stalled, data_hygiene, process_gap, timing, competitive_loss, champion_change]
+1. root_cause: one of [rep_neglect, prospect_stalled, data_hygiene, process_gap, timing, competitive_loss, champion_change, high_fit_stale, low_fit_active, high_fit_stuck]
 2. confidence: 0.0 to 1.0
 3. signals: list of specific evidence supporting your classification
 4. suggested_action: one concrete next step
+
+Additional root causes (ICP-based, if grades available):
+- high_fit_stale: A/B-grade ICP fit deal that has gone stale. Recommended: immediate rep outreach, manager escalation.
+- low_fit_active: D/F-grade ICP fit deal still in active pipeline. Recommended: evaluate whether to continue pursuing or disqualify.
+- high_fit_stuck: A/B-grade deal stuck in early stage too long. Recommended: accelerate — schedule next meeting, multi-thread.
 
 Context:
 - Stale threshold: {{goals_and_targets.thresholds.stale_deal_days}} days
@@ -229,6 +234,25 @@ OWNER PERFORMANCE (sorted by stale rate):
 
 DEAL CLASSIFICATIONS (AI-analyzed root causes for top 30 deals):
 {{deal_classifications}}
+
+{{#if pipeline_summary.icpSummary}}
+PIPELINE QUALITY (ICP Fit):
+- {{pipeline_summary.icpSummary.by_grade.A.count}} A-grade deals (${{pipeline_summary.icpSummary.by_grade.A.value}})
+- {{pipeline_summary.icpSummary.by_grade.B.count}} B-grade deals (${{pipeline_summary.icpSummary.by_grade.B.value}})
+- {{pipeline_summary.icpSummary.ab_grade_pct}}% of pipeline value is A/B-grade ICP fit
+- {{pipeline_summary.icpSummary.df_grade_pct}}% of pipeline value is D/F-grade (deprioritization candidates)
+{{#if pipeline_summary.icpSummary.high_fit_stale_count}}
+- ⚠️ {{pipeline_summary.icpSummary.high_fit_stale_count}} A-grade deals are stale — highest priority for recovery
+{{/if}}
+{{#if pipeline_summary.icpSummary.low_fit_active_count}}
+- {{pipeline_summary.icpSummary.low_fit_active_count}} D/F-grade deals consuming pipeline capacity
+{{/if}}
+
+When synthesizing, reference ICP grades in your recommendations:
+- Prioritize recovery actions for A/B-grade stale deals over C/D/F
+- Flag D/F-grade deals as deprioritization candidates, not just stale deals
+- Note if a rep's pipeline is heavily weighted toward low-fit deals
+{{/if}}
 
 REPORT PARAMETERS:
 - Depth: {{output_budget.reportDepth}}

@@ -112,6 +112,18 @@ export interface FeatureVector {
   sentiment_trajectory: 'improving' | 'stable' | 'declining' | null;
   next_steps_explicit: boolean | null;
   decision_criteria_count: number | null;
+
+  // Enrichment features (optional - graceful degradation if not available)
+  has_enrichment_data: boolean;
+  buying_committee_complete: boolean | null;
+  roles_identified: number | null;
+  decision_maker_count: number | null;
+  seniority_c_level_present: boolean | null;
+  signal_score: number | null;
+  has_funding_signal: boolean | null;
+  has_hiring_signal: boolean | null;
+  has_expansion_signal: boolean | null;
+  has_risk_signal: boolean | null;
 }
 
 export interface PersonaPattern {
@@ -210,6 +222,22 @@ export interface CompanyProfile {
       count: number;
     }>;
   };
+  signal_analysis?: {
+    funding_lift: number;
+    hiring_lift: number;
+    expansion_lift: number;
+    risk_lift: number;
+    signal_types: Array<{
+      type: 'funding' | 'hiring' | 'expansion' | 'risk';
+      won_rate: number;
+      lost_rate: number;
+      lift: number;
+      avg_signal_score_won: number;
+      avg_signal_score_lost: number;
+      count_won: number;
+      count_lost: number;
+    }>;
+  };
 }
 
 export interface ScoringWeights {
@@ -218,6 +246,7 @@ export interface ScoringWeights {
   customFields: Record<string, Record<string, number>>;
   industries: Record<string, number>;
   conversation?: Record<string, number>; // Optional conversation weights (when data available)
+  enrichment?: Record<string, number>; // Optional enrichment weights (when data available)
   note: string;
 }
 
@@ -537,6 +566,58 @@ async function buildFeatureMatrix(workspaceId: string): Promise<FeatureVector[]>
       parsedSeniorities.includes('director') ? 'director' :
       parsedSeniorities.includes('manager') ? 'manager' : 'ic';
 
+    // Get enrichment metrics from deal_contacts
+    const enrichmentResult = await query<{
+      enriched_count: number;
+      roles_with_buying_role: number;
+      has_champion: boolean;
+      has_economic_buyer: boolean;
+      decision_maker_count: number;
+      c_level_count: number;
+    }>(`
+      SELECT
+        COUNT(*) FILTER (WHERE dc.enrichment_status = 'enriched') as enriched_count,
+        COUNT(*) FILTER (WHERE dc.buying_role IS NOT NULL) as roles_with_buying_role,
+        bool_or(dc.buying_role = 'champion') as has_champion,
+        bool_or(dc.buying_role IN ('economic_buyer', 'executive_sponsor')) as has_economic_buyer,
+        COUNT(*) FILTER (WHERE dc.buying_role = 'decision_maker') as decision_maker_count,
+        COUNT(*) FILTER (
+          WHERE dc.seniority_verified = 'c_level'
+          OR (dc.seniority_verified IS NULL AND c.title ~* '\\b(chief|ceo|cto|cfo|coo|cmo|cio|ciso|cpo|cro)\\b')
+        ) as c_level_count
+      FROM deal_contacts dc
+      JOIN contacts c ON dc.contact_id = c.id AND c.workspace_id = dc.workspace_id
+      WHERE dc.workspace_id = $1 AND dc.deal_id = $2
+    `, [workspaceId, deal.id]);
+
+    const enrichmentRow = enrichmentResult.rows[0];
+    const enrichedContactCount = Number(enrichmentRow?.enriched_count || 0);
+    const hasEnrichmentData = enrichedContactCount > 0;
+    const rolesIdentified = Number(enrichmentRow?.roles_with_buying_role || 0);
+    const buyingCommitteeComplete = contactsResult.rows.length >= 3 && rolesIdentified >= 3;
+
+    // Get account signals
+    const signalsResult = await query<{
+      signal_score: number;
+      signals: any;
+    }>(`
+      SELECT signal_score, signals
+      FROM account_signals
+      WHERE workspace_id = $1 AND account_id = $2
+      ORDER BY created_at DESC
+      LIMIT 1
+    `, [workspaceId, deal.account_id]);
+
+    const signalsRow = signalsResult.rows[0];
+    const signalScore = signalsRow?.signal_score ?? null;
+    const signals = signalsRow?.signals || [];
+
+    // Extract signal types from classified signals array
+    const hasFundingSignal = Array.isArray(signals) && signals.some((s: any) => s.type === 'funding');
+    const hasHiringSignal = Array.isArray(signals) && signals.some((s: any) => s.type === 'hiring');
+    const hasExpansionSignal = Array.isArray(signals) && signals.some((s: any) => s.type === 'expansion');
+    const hasRiskSignal = Array.isArray(signals) && signals.some((s: any) => s.type === 'risk');
+
     // Get activity features
     const activityResult = await query<{
       total_activities: number;
@@ -621,6 +702,17 @@ async function buildFeatureMatrix(workspaceId: string): Promise<FeatureVector[]>
       sentiment_trajectory: null,
       next_steps_explicit: null,
       decision_criteria_count: null,
+      // Enrichment features
+      has_enrichment_data: hasEnrichmentData,
+      buying_committee_complete: buyingCommitteeComplete,
+      roles_identified: rolesIdentified,
+      decision_maker_count: Number(enrichmentRow?.decision_maker_count || 0),
+      seniority_c_level_present: Number(enrichmentRow?.c_level_count || 0) > 0,
+      signal_score: signalScore,
+      has_funding_signal: hasFundingSignal,
+      has_hiring_signal: hasHiringSignal,
+      has_expansion_signal: hasExpansionSignal,
+      has_risk_signal: hasRiskSignal,
     });
   }
 
@@ -1490,6 +1582,78 @@ async function discoverCompanyPatterns(
     });
   }
 
+  // ============================================================================
+  // Signal-Based Lift Analysis (if enrichment data available)
+  // ============================================================================
+
+  let signal_analysis: CompanyProfile['signal_analysis'];
+
+  const hasEnrichmentData = featureMatrix.some(d => d.has_enrichment_data);
+
+  if (hasEnrichmentData) {
+    logger.info('[Step 4] Calculating signal-based lift analysis');
+
+    const wonDeals = featureMatrix.filter(d => d.outcome === 'won');
+    const lostDeals = featureMatrix.filter(d => d.outcome === 'lost');
+
+    const signalTypes: Array<'funding' | 'hiring' | 'expansion' | 'risk'> = [
+      'funding',
+      'hiring',
+      'expansion',
+      'risk',
+    ];
+
+    const signalTypeAnalysis = signalTypes.map(signalType => {
+      const signalField = `has_${signalType}_signal` as keyof FeatureVector;
+
+      const wonWithSignal = wonDeals.filter(d => d[signalField] === true);
+      const lostWithSignal = lostDeals.filter(d => d[signalField] === true);
+
+      const wonRate = wonDeals.length > 0 ? wonWithSignal.length / wonDeals.length : 0;
+      const lostRate = lostDeals.length > 0 ? lostWithSignal.length / lostDeals.length : 0;
+      const lift = lostRate > 0 ? wonRate / lostRate : 0;
+
+      // Calculate average signal scores (where signal is present)
+      const avgSignalScoreWon =
+        wonWithSignal.length > 0
+          ? wonWithSignal.reduce((sum, d) => sum + (d.signal_score || 0), 0) / wonWithSignal.length
+          : 0;
+
+      const avgSignalScoreLost =
+        lostWithSignal.length > 0
+          ? lostWithSignal.reduce((sum, d) => sum + (d.signal_score || 0), 0) / lostWithSignal.length
+          : 0;
+
+      return {
+        type: signalType,
+        won_rate: wonRate,
+        lost_rate: lostRate,
+        lift,
+        avg_signal_score_won: avgSignalScoreWon,
+        avg_signal_score_lost: avgSignalScoreLost,
+        count_won: wonWithSignal.length,
+        count_lost: lostWithSignal.length,
+      };
+    });
+
+    signal_analysis = {
+      funding_lift: signalTypeAnalysis.find(s => s.type === 'funding')?.lift || 0,
+      hiring_lift: signalTypeAnalysis.find(s => s.type === 'hiring')?.lift || 0,
+      expansion_lift: signalTypeAnalysis.find(s => s.type === 'expansion')?.lift || 0,
+      risk_lift: signalTypeAnalysis.find(s => s.type === 'risk')?.lift || 0,
+      signal_types: signalTypeAnalysis,
+    };
+
+    logger.info('[Step 4] Signal analysis complete', {
+      fundingLift: signal_analysis.funding_lift.toFixed(2),
+      hiringLift: signal_analysis.hiring_lift.toFixed(2),
+      expansionLift: signal_analysis.expansion_lift.toFixed(2),
+      riskLift: signal_analysis.risk_lift.toFixed(2),
+    });
+  } else {
+    logger.info('[Step 4] No enrichment data available, skipping signal analysis');
+  }
+
   logger.info('[Step 4] Company patterns discovered', {
     industries: industryWinRates.length,
     sizeBuckets: sizeWinRates.length,
@@ -1497,6 +1661,7 @@ async function discoverCompanyPatterns(
     leadSources: leadSourceFunnel.length,
     sweetSpots: sweetSpots.length,
     conversationBenchmarks: conversation_benchmarks ? 'yes' : 'no',
+    signalAnalysis: signal_analysis ? 'yes' : 'no',
   });
 
   return {
@@ -1506,6 +1671,7 @@ async function discoverCompanyPatterns(
     leadSourceFunnel,
     sweetSpots,
     conversation_benchmarks,
+    signal_analysis,
   };
 }
 
@@ -1590,11 +1756,47 @@ function buildScoringWeights(
     });
   }
 
+  // Enrichment weights (if signal analysis available)
+  let enrichmentWeights: Record<string, number> | undefined;
+  if (companyProfile.signal_analysis) {
+    enrichmentWeights = {};
+    const signals = companyProfile.signal_analysis;
+
+    // Signal lift-based weights (normalize by max lift)
+    const maxLift = Math.max(
+      signals.funding_lift,
+      signals.hiring_lift,
+      signals.expansion_lift,
+      Math.abs(signals.risk_lift)
+    );
+
+    if (maxLift > 0) {
+      enrichmentWeights['signal_funding'] = Math.min(10, Math.round((signals.funding_lift / maxLift) * 10));
+      enrichmentWeights['signal_hiring'] = Math.min(10, Math.round((signals.hiring_lift / maxLift) * 10));
+      enrichmentWeights['signal_expansion'] = Math.min(10, Math.round((signals.expansion_lift / maxLift) * 10));
+      // Risk is negative (inverse weight)
+      enrichmentWeights['signal_risk'] = Math.max(-10, Math.round((signals.risk_lift / maxLift) * -10));
+    }
+
+    // Buying committee completeness weight (fixed high value if correlated with wins)
+    enrichmentWeights['buying_committee_complete'] = 5;
+    enrichmentWeights['has_champion_identified'] = 3;
+    enrichmentWeights['seniority_c_level_present'] = 4;
+    enrichmentWeights['decision_maker_count'] = 2; // Per decision maker
+
+    logger.info('[Step 5] Enrichment weights added', {
+      enrichmentWeights: Object.keys(enrichmentWeights).length,
+      fundingLift: signals.funding_lift.toFixed(2),
+      hiringLift: signals.hiring_lift.toFixed(2),
+    });
+  }
+
   logger.info('[Step 5] Scoring weights built', {
     personas: Object.keys(personaWeights).length,
     customFields: Object.keys(customFieldWeights).length,
     industries: Object.keys(industryWeights).length,
     conversation: conversationWeights ? Object.keys(conversationWeights).length : 0,
+    enrichment: enrichmentWeights ? Object.keys(enrichmentWeights).length : 0,
   });
 
   const result: ScoringWeights = {
@@ -1607,6 +1809,10 @@ function buildScoringWeights(
 
   if (conversationWeights) {
     result.conversation = conversationWeights;
+  }
+
+  if (enrichmentWeights) {
+    result.enrichment = enrichmentWeights;
   }
 
   return result;
