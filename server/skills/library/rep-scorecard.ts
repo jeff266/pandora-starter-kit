@@ -18,6 +18,7 @@ export const repScorecardSkill: SkillDefinition = {
   requiredTools: [
     'checkDataAvailability',
     'repScorecardCompute',
+    'prepareRepScorecardSummary',
   ],
 
   requiredContext: ['goals_and_targets'],
@@ -59,7 +60,18 @@ export const repScorecardSkill: SkillDefinition = {
       outputKey: 'scorecard',
     },
 
-    // Step 4: Classify coaching needs (DeepSeek)
+    // Step 4: Prepare team context
+    {
+      id: 'prepare-team-context',
+      name: 'Prepare Team Context',
+      tier: 'compute',
+      dependsOn: ['compute-scorecard'],
+      computeFn: 'prepareRepScorecardSummary',
+      computeArgs: {},
+      outputKey: 'team_context',
+    },
+
+    // Step 5: Classify coaching needs (DeepSeek)
     {
       id: 'classify-coaching-needs',
       name: 'Classify Coaching Needs (DeepSeek)',
@@ -129,12 +141,12 @@ Respond with ONLY a JSON object: { "classifications": [...] }`,
       outputKey: 'coaching_classifications',
     },
 
-    // Step 5: Synthesize scorecard report (Claude)
+    // Step 6: Synthesize scorecard report (Claude)
     {
       id: 'synthesize-scorecard-report',
       name: 'Synthesize Scorecard Report',
       tier: 'claude',
-      dependsOn: ['compute-scorecard', 'classify-coaching-needs'],
+      dependsOn: ['compute-scorecard', 'classify-coaching-needs', 'prepare-team-context'],
       claudePrompt: `You are a VP of Sales reviewing your team's weekly performance scorecard.
 
 BUSINESS CONTEXT:
@@ -175,6 +187,23 @@ Rep: {{this.repName}}
   Urgency: {{this.urgency}}
 {{/each}}
 
+PIPELINE CONTEXT:
+{{#each team_context.stageDistribution}}
+- {{this.stage}}: {{this.count}} deals (\${{this.totalValue}})
+{{/each}}
+
+RECENT WINS:
+{{#each team_context.recentWins}}
+- {{this.name}} (\${{this.amount}}, {{this.owner}})
+{{/each}}
+
+AT-RISK DEALS (deal_risk ≥ 70):
+{{#each team_context.atRiskDeals}}
+- {{this.name}} (\${{this.amount}}, {{this.owner}}) — Risk: {{this.dealRisk}}, Stage: {{this.stage}}
+{{/each}}
+
+STALE DEALS (no activity >14 days): {{team_context.staleDealsSummary.count}} deals (\${{team_context.staleDealsSummary.totalValue}})
+
 Produce a Weekly Rep Scorecard Report:
 
 1. TEAM PULSE (2-3 sentences)
@@ -205,8 +234,6 @@ Rules:
 
 Word budget: 700 words.`,
       outputKey: 'narrative',
-      claudeTools: ['queryDeals', 'getDealsByStage'],
-      maxToolCalls: 10,
     },
   ],
 

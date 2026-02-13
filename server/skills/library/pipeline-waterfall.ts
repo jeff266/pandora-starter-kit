@@ -20,6 +20,7 @@ export const pipelineWaterfallSkill: SkillDefinition = {
     'waterfallDeltas',
     'topDealsInMotion',
     'velocityBenchmarks',
+    'prepareWaterfallSummary',
   ],
 
   requiredContext: ['goals_and_targets'],
@@ -94,7 +95,18 @@ export const pipelineWaterfallSkill: SkillDefinition = {
       outputKey: 'velocity_benchmarks',
     },
 
-    // Step 7: Classify movement patterns (DeepSeek)
+    // Step 7: Prepare waterfall summary for Claude
+    {
+      id: 'prepare-summary',
+      name: 'Prepare Waterfall Summary',
+      tier: 'compute',
+      dependsOn: ['gather-current-waterfall', 'compute-waterfall-deltas', 'gather-top-deals-in-motion', 'gather-velocity-benchmarks'],
+      computeFn: 'prepareWaterfallSummary',
+      computeArgs: {},
+      outputKey: 'pipeline_context',
+    },
+
+    // Step 8: Classify movement patterns (DeepSeek)
     {
       id: 'classify-movement-patterns',
       name: 'Classify Movement Patterns (DeepSeek)',
@@ -168,7 +180,7 @@ Respond with ONLY a JSON object: { "dealClassifications": [...], "anomalyClassif
       outputKey: 'classifications',
     },
 
-    // Step 8: Synthesize waterfall report (Claude)
+    // Step 9: Synthesize waterfall report (Claude)
     {
       id: 'synthesize-waterfall-report',
       name: 'Synthesize Waterfall Report',
@@ -179,6 +191,7 @@ Respond with ONLY a JSON object: { "dealClassifications": [...], "anomalyClassif
         'gather-top-deals-in-motion',
         'gather-velocity-benchmarks',
         'classify-movement-patterns',
+        'prepare-summary',
       ],
       claudePrompt: `You are a RevOps strategist analyzing pipeline flow for a sales team.
 
@@ -222,6 +235,22 @@ ANOMALIES:
 VELOCITY BENCHMARKS:
 {{velocity_benchmarks}}
 
+CURRENT PIPELINE SNAPSHOT:
+{{#each pipeline_context.stageDistribution}}
+- {{this.stage}}: {{this.count}} deals (\${{this.totalValue}})
+{{/each}}
+Total open: {{pipeline_context.pipelineTotals.totalOpenDeals}} deals (\${{pipeline_context.pipelineTotals.totalOpenValue}})
+
+HIGH-RISK DEALS (risk score >= 60):
+{{#each pipeline_context.highRiskDeals}}
+- {{this.name}} (\${{this.amount}}, {{this.owner}}) — Risk: {{this.dealRisk}}, Stage: {{this.stage}}, {{this.daysInStage}} days in stage
+{{/each}}
+
+STALE DEALS (no activity > 14 days):
+{{#each pipeline_context.staleDeals}}
+- {{this.name}} (\${{this.amount}}, {{this.owner}}) — Stage: {{this.stage}}, {{this.daysSinceActivity}} days since activity
+{{/each}}
+
 Produce a Pipeline Waterfall Report that answers:
 1. Where is the pipeline leaking? (which stages have the highest fall-out, and why)
 2. Where is it bottlenecked? (which stages have the lowest advance rates)
@@ -239,8 +268,6 @@ Rules:
 
 Word budget: 600 words.`,
       outputKey: 'narrative',
-      claudeTools: ['queryDeals', 'getDealsByStage'],
-      maxToolCalls: 10,
     },
   ],
 

@@ -2720,6 +2720,83 @@ const velocityBenchmarksTool: ToolDefinition = {
 };
 
 // ============================================================================
+// Waterfall Summary Tool (pre-compute for Claude)
+// ============================================================================
+
+const prepareWaterfallSummaryTool: ToolDefinition = {
+  name: 'prepareWaterfallSummary',
+  description: 'Pre-compute pipeline snapshot, high-risk deals, and stale deals for the waterfall report so Claude does not need tool calls.',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('prepareWaterfallSummary', async () => {
+      const stageRows = await query(
+        `SELECT stage_normalized, COUNT(*) as count, SUM(amount) as total_value
+         FROM deals
+         WHERE workspace_id = $1 AND stage_normalized NOT IN ('closed_won', 'closed_lost')
+         GROUP BY stage_normalized`,
+        [context.workspaceId]
+      );
+
+      const highRiskRows = await query(
+        `SELECT name, amount, owner, deal_risk, stage_normalized, days_in_stage
+         FROM deals
+         WHERE workspace_id = $1 AND deal_risk >= 60 AND stage_normalized NOT IN ('closed_won', 'closed_lost')
+         ORDER BY deal_risk DESC, amount DESC
+         LIMIT 5`,
+        [context.workspaceId]
+      );
+
+      const staleRows = await query(
+        `SELECT name, amount, owner, stage_normalized, EXTRACT(DAY FROM NOW() - last_activity_date)::int as days_since_activity
+         FROM deals
+         WHERE workspace_id = $1 AND last_activity_date < NOW() - INTERVAL '14 days' AND stage_normalized NOT IN ('closed_won', 'closed_lost')
+         ORDER BY amount DESC
+         LIMIT 5`,
+        [context.workspaceId]
+      );
+
+      const stageDistribution = stageRows.rows.map((r: any) => ({
+        stage: r.stage_normalized,
+        count: Number(r.count),
+        totalValue: Number(r.total_value),
+      }));
+
+      const totalOpenDeals = stageDistribution.reduce((sum: number, s: any) => sum + s.count, 0);
+      const totalOpenValue = stageDistribution.reduce((sum: number, s: any) => sum + s.totalValue, 0);
+
+      return {
+        stageDistribution,
+        highRiskDeals: highRiskRows.rows.map((r: any) => ({
+          name: r.name,
+          amount: Number(r.amount),
+          owner: r.owner,
+          dealRisk: Number(r.deal_risk),
+          stage: r.stage_normalized,
+          daysInStage: Number(r.days_in_stage),
+        })),
+        staleDeals: staleRows.rows.map((r: any) => ({
+          name: r.name,
+          amount: Number(r.amount),
+          owner: r.owner,
+          stage: r.stage_normalized,
+          daysSinceActivity: Number(r.days_since_activity),
+        })),
+        pipelineTotals: {
+          totalOpenDeals,
+          totalOpenValue,
+          avgDealSize: totalOpenDeals > 0 ? Math.round(totalOpenValue / totalOpenDeals) : 0,
+        },
+      };
+    }, params);
+  },
+};
+
+// ============================================================================
 // Rep Scorecard Tools
 // ============================================================================
 
@@ -2794,6 +2871,85 @@ const repScorecardComputeTool: ToolDefinition = {
       console.log(`[Rep Scorecard] Scored ${result.reps.length} reps. Top: ${result.top3[0]?.repName} (${result.top3[0]?.overallScore}), Bottom: ${result.bottom3[0]?.repName} (${result.bottom3[0]?.overallScore})`);
 
       return result;
+    }, params);
+  },
+};
+
+const prepareRepScorecardSummaryTool: ToolDefinition = {
+  name: 'prepareRepScorecardSummary',
+  description: 'Prepare team context data for rep scorecard report: stage distribution, recent wins, at-risk deals, stale deals',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('prepareRepScorecardSummary', async () => {
+      const scorecard = (context.stepResults as any).scorecard;
+      if (!scorecard) {
+        throw new Error('scorecard not found in context. Run repScorecardCompute first.');
+      }
+
+      const [stageRows, recentWinsRows, atRiskRows, staleRows] = await Promise.all([
+        query(
+          `SELECT stage_normalized, COUNT(*) as count, SUM(amount) as total_value
+           FROM deals WHERE workspace_id = $1 AND stage_normalized NOT IN ('closed_won', 'closed_lost')
+           GROUP BY stage_normalized`,
+          [context.workspaceId]
+        ),
+        query(
+          `SELECT name, amount, owner, close_date
+           FROM deals WHERE workspace_id = $1 AND stage_normalized = 'closed_won'
+           ORDER BY close_date DESC, amount DESC LIMIT 5`,
+          [context.workspaceId]
+        ),
+        query(
+          `SELECT name, amount, owner, deal_risk, stage_normalized
+           FROM deals WHERE workspace_id = $1 AND deal_risk >= 70 AND stage_normalized NOT IN ('closed_won', 'closed_lost')
+           ORDER BY deal_risk DESC, amount DESC LIMIT 5`,
+          [context.workspaceId]
+        ),
+        query(
+          `SELECT COUNT(*) as count, COALESCE(SUM(amount), 0) as total_value
+           FROM deals WHERE workspace_id = $1 AND last_activity_date < NOW() - INTERVAL '14 days' AND stage_normalized NOT IN ('closed_won', 'closed_lost')`,
+          [context.workspaceId]
+        ),
+      ]);
+
+      const stageDistribution = stageRows.rows.map((r: any) => ({
+        stage: r.stage_normalized,
+        count: Number(r.count),
+        totalValue: Number(r.total_value),
+      }));
+
+      const totalOpenDeals = stageDistribution.reduce((sum: number, s: any) => sum + s.count, 0);
+      const totalOpenValue = stageDistribution.reduce((sum: number, s: any) => sum + s.totalValue, 0);
+
+      return {
+        stageDistribution,
+        recentWins: recentWinsRows.rows.map((r: any) => ({
+          name: r.name,
+          amount: Number(r.amount),
+          owner: r.owner,
+          closeDate: r.close_date,
+        })),
+        atRiskDeals: atRiskRows.rows.map((r: any) => ({
+          name: r.name,
+          amount: Number(r.amount),
+          owner: r.owner,
+          dealRisk: Number(r.deal_risk),
+          stage: r.stage_normalized,
+        })),
+        staleDealsSummary: {
+          count: Number(staleRows.rows[0]?.count || 0),
+          totalValue: Number(staleRows.rows[0]?.total_value || 0),
+        },
+        pipelineTotals: {
+          totalOpenDeals,
+          totalOpenValue,
+        },
+      };
     }, params);
   },
 };
@@ -3113,8 +3269,10 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['waterfallDeltas', waterfallDeltasTool],
   ['topDealsInMotion', topDealsInMotionTool],
   ['velocityBenchmarks', velocityBenchmarksTool],
+  ['prepareWaterfallSummary', prepareWaterfallSummaryTool],
   ['checkDataAvailability', checkDataAvailabilityTool],
   ['repScorecardCompute', repScorecardComputeTool],
+  ['prepareRepScorecardSummary', prepareRepScorecardSummaryTool],
   ['discoverCustomFields', discoverCustomFieldsTool],
   ['generateCustomFieldReport', generateCustomFieldReportTool],
   ['scoreLeads', scoreLeadsTool],

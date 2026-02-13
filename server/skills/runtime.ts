@@ -612,6 +612,7 @@ Important:
       console.error('[Skill Runtime] Failed to log skill run:', err);
     }
   }
+
 }
 
 /**
