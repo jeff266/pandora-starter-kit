@@ -1,0 +1,128 @@
+## PROMPT 2: Generic File Parser (Generalize Quota Upload)
+
+```
+Read PANDORA_FILE_IMPORT_CONNECTOR_SPEC.md first.
+
+The quota upload feature already has a file parser (parseQuotaFile). 
+You're generalizing it into a reusable module that handles any entity type.
+
+1. FIND THE EXISTING PARSER
+
+Look at the quota upload code â€” find parseQuotaFile (or similar). 
+Understand how it:
+- Reads the buffer with SheetJS
+- Extracts headers and sample rows
+- Handles multiple sheets
+- Returns structured parse results
+
+2. CREATE server/import/file-parser.ts
+
+This is entity-agnostic. It doesn't know about deals or contacts.
+
+export interface ParseResult {
+  headers: string[];
+  sampleRows: any[][];           // first 10 data rows (raw values)
+  sheetNames: string[];
+  selectedSheet: string;
+  totalRows: number;
+  detectedDateFormat: string | null;   // 'MM/DD/YYYY', 'YYYY-MM-DD', 'DD/MM/YYYY', etc.
+  detectedDelimiter: string | null;    // for CSV: ',', ';', '\t'
+  fileType: 'csv' | 'xlsx' | 'xls';
+}
+
+export function parseImportFile(
+  buffer: Buffer, 
+  filename: string, 
+  sheetName?: string    // optional override if multi-sheet
+): ParseResult
+
+Implementation:
+a. Detect file type from extension
+b. Parse with XLSX.read(buffer, { type: 'buffer' })
+c. If multiple sheets and no sheetName override, use first sheet
+d. Convert to raw rows: XLSX.utils.sheet_to_json(sheet, { header: 1 })
+e. Separate header row (row 0) from data rows
+f. Take first 10 data rows as sample
+g. Detect date format by scanning sample rows for date-like values:
+   - If values match YYYY-MM-DD â†’ 'YYYY-MM-DD'
+   - If values match MM/DD/YYYY â†’ 'MM/DD/YYYY'
+   - If values match DD/MM/YYYY â†’ 'DD/MM/YYYY'  
+   - If Excel serial numbers (5-digit integers) â†’ 'excel_serial'
+   - Use SheetJS date parsing: XLSX.SSF.parse_date_code() for serial numbers
+h. For CSV, detect delimiter by checking first line for ',', ';', '\t'
+
+IMPORTANT edge cases from production:
+- Some exports have empty rows at the top (company logo area). 
+  Skip leading empty rows until you find one with 3+ non-empty cells.
+- Some exports have a title row ("HubSpot Deal Export - Feb 2026") before 
+  the actual header row. Detect this: if row 0 has only 1-2 non-empty cells 
+  but row 1 has many, row 1 is probably the header.
+- Excel serial date numbers (e.g., 45658 for a 2024 date) must be converted.
+  Use XLSX.SSF.parse_date_code() or the { cellDates: true } option in XLSX.read.
+- Handle BOM (byte order mark) in CSV files â€” SheetJS handles this but verify.
+
+3. CREATE server/import/value-parsers.ts
+
+Utility functions for parsing messy real-world values:
+
+export function parseAmount(value: any): number | null
+  - Handle: "$1,234.56", "1234.56", "1,234", "$1.2M", "$500K", "1234", 1234
+  - Strip currency symbols ($, â‚¬, Â£), commas, whitespace
+  - Handle K/M/B suffixes (1.2M â†’ 1200000)
+  - Return null if unparseable (not 0 â€” 0 means something different)
+
+export function parseDate(value: any, format?: string): string | null
+  - Handle: "2026-01-15", "01/15/2026", "15/01/2026", "Jan 15, 2026", 
+    Excel serial numbers, ISO datetime strings
+  - Always return ISO date string (YYYY-MM-DD) or null
+  - If format hint provided, prefer that interpretation 
+    (matters for ambiguous dates like 03/04/2026)
+
+export function parsePercentage(value: any): number | null
+  - Handle: "75%", "0.75", "75", ".75"
+  - Always return as decimal (0.75), not percentage (75)
+
+export function normalizeText(value: any): string | null
+  - Trim whitespace, collapse multiple spaces
+  - Return null for empty strings, undefined, "N/A", "n/a", "-", "--"
+
+export function normalizeCompanyName(name: string): string
+  - Lowercase
+  - Strip: Inc, LLC, Ltd, Corp, Co, Company, Group, International, 
+    Holdings, Partners, Enterprises, Technologies, Solutions
+  - Strip trailing dots and commas after suffix removal
+  - Collapse whitespace
+  - Used for fuzzy matching accounts to deals
+
+4. VERIFY SheetJS and multer are installed
+
+If not already installed from quota upload:
+  npm install xlsx multer @types/multer
+
+5. WRITE UNIT TESTS
+
+Create scripts/test-file-parser.ts
+
+Test parseImportFile with:
+a. Create a CSV string in memory with deal-like data:
+   "Deal Name,Amount,Stage,Close Date,Owner\nAcme Corp,$50000,Discovery,2026-03-15,Jane Smith"
+   Convert to buffer, parse, verify headers and sample rows
+
+b. Test value parsers:
+   - parseAmount("$1,234.56") === 1234.56
+   - parseAmount("1.2M") === 1200000
+   - parseAmount("$500K") === 500000
+   - parseAmount("abc") === null
+   - parseAmount("") === null
+   - parseDate("2026-01-15") === "2026-01-15"
+   - parseDate("01/15/2026", "MM/DD/YYYY") === "2026-01-15"
+   - parseDate("") === null
+   - normalizeCompanyName("Acme Corp, Inc.") === "acme corp"
+   - normalizeCompanyName("Global Tech Solutions LLC") === "global tech"
+   
+   Log PASS/FAIL for each.
+
+Run: npx tsx scripts/test-file-parser.ts
+```
+
+---
