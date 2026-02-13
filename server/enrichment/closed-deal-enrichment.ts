@@ -2,8 +2,10 @@ import { query } from '../db.js';
 import { createLogger } from '../utils/logger.js';
 import { resolveContactRoles } from './resolve-contact-roles.js';
 import { enrichBatchViaApollo } from './apollo.js';
-import { enrichAccountWithSignals } from './classify-signals.js';
+import { enrichAccountWithSignals, classifyAccountSignalsBatch } from './classify-signals.js';
 import { getEnrichmentConfig } from './config.js';
+import { searchCompanySignalsBatch } from './serper.js';
+import pLimit from 'p-limit';
 
 const logger = createLogger('ClosedDealEnrichment');
 
@@ -423,14 +425,42 @@ export async function reEnrichExistingDealContacts(
 export async function enrichClosedDealsInBatch(
   workspaceId: string,
   lookbackMonths: number = 6,
-  limit: number = 50
+  limit: number = 50,
+  concurrency: number = 5
 ): Promise<{
   processed: number;
   succeeded: number;
   failed: number;
   results: EnrichmentResult[];
+  durationMs: number;
 }> {
-  logger.info('Starting batch closed deal enrichment', { workspaceId, lookbackMonths, limit });
+  const batchStartTime = Date.now();
+  logger.info('Starting batch closed deal enrichment', { workspaceId, lookbackMonths, limit, concurrency });
+
+  // If concurrency is 1, use sequential mode (original behavior)
+  if (concurrency === 1) {
+    return enrichClosedDealsInBatchSequential(workspaceId, lookbackMonths, limit);
+  }
+
+  // Parallel mode
+  return enrichClosedDealsInBatchParallel(workspaceId, lookbackMonths, limit, concurrency);
+}
+
+/**
+ * Sequential enrichment (original behavior, preserved as fallback)
+ */
+async function enrichClosedDealsInBatchSequential(
+  workspaceId: string,
+  lookbackMonths: number,
+  limit: number
+): Promise<{
+  processed: number;
+  succeeded: number;
+  failed: number;
+  results: EnrichmentResult[];
+  durationMs: number;
+}> {
+  const startTime = Date.now();
 
   const dealsResult = await query(
     `SELECT d.id FROM deals d
@@ -464,7 +494,182 @@ export async function enrichClosedDealsInBatch(
     }
   }
 
-  logger.info('Batch closed deal enrichment complete', { workspaceId, processed, succeeded, failed });
+  const durationMs = Date.now() - startTime;
+  logger.info('Sequential batch enrichment complete', { workspaceId, processed, succeeded, failed, durationMs });
 
-  return { processed, succeeded, failed, results };
+  return { processed, succeeded, failed, results, durationMs };
+}
+
+/**
+ * Parallel enrichment with controlled concurrency
+ */
+async function enrichClosedDealsInBatchParallel(
+  workspaceId: string,
+  lookbackMonths: number,
+  limit: number,
+  concurrency: number
+): Promise<{
+  processed: number;
+  succeeded: number;
+  failed: number;
+  results: EnrichmentResult[];
+  durationMs: number;
+}> {
+  const startTime = Date.now();
+
+  // Get deals to enrich
+  const dealsResult = await query(
+    `SELECT d.id, d.name, d.stage_normalized, a.id as account_id, a.name as account_name
+     FROM deals d
+     LEFT JOIN accounts a ON a.id = d.account_id AND a.workspace_id = d.workspace_id
+     LEFT JOIN deal_contacts dc ON dc.deal_id = d.id AND dc.workspace_id = d.workspace_id
+     WHERE d.workspace_id = $1
+       AND d.stage_normalized IN ('closed_won', 'closed_lost')
+       AND d.close_date > NOW() - INTERVAL '1 month' * $2
+       AND dc.id IS NULL
+     ORDER BY d.close_date DESC
+     LIMIT $3`,
+    [workspaceId, lookbackMonths, limit]
+  );
+
+  const deals = dealsResult.rows.map((r: any) => ({
+    id: r.id,
+    name: r.name,
+    stage: r.stage_normalized,
+    accountId: r.account_id,
+    accountName: r.account_name,
+  }));
+
+  logger.info('Fetched deals for parallel enrichment', { dealCount: deals.length });
+
+  const config = await getEnrichmentConfig(workspaceId);
+
+  // Phase 1: Parallel Serper searches for account signals
+  let serperResults = new Map<string, any[]>();
+
+  if (config.serperApiKey) {
+    const accountsToEnrich = deals
+      .filter(d => d.accountId && d.accountName)
+      .map(d => ({ id: d.accountId, name: d.accountName }));
+
+    // Remove duplicates
+    const uniqueAccounts = Array.from(
+      new Map(accountsToEnrich.map(a => [a.id, a])).values()
+    );
+
+    // Check cache for accounts
+    const cacheResult = await query(
+      `SELECT account_id FROM account_signals
+       WHERE workspace_id = $1 AND account_id = ANY($2)
+         AND enriched_at > NOW() - ($3 || ' days')::interval`,
+      [workspaceId, uniqueAccounts.map(a => a.id), config.cacheDays]
+    );
+
+    const cachedAccountIds = new Set(cacheResult.rows.map((r: any) => r.account_id));
+    const accountsToFetch = uniqueAccounts.filter(a => !cachedAccountIds.has(a.id));
+
+    logger.info('Serper cache check', {
+      total: uniqueAccounts.length,
+      cached: cachedAccountIds.size,
+      toFetch: accountsToFetch.length,
+    });
+
+    if (accountsToFetch.length > 0) {
+      logger.info('Starting parallel Serper searches', { accountCount: accountsToFetch.length });
+      serperResults = await searchCompanySignalsBatch(accountsToFetch, config.serperApiKey);
+      logger.info('Parallel Serper searches complete', { resultCount: serperResults.size });
+    }
+  }
+
+  // Phase 2: Batch DeepSeek classification
+  if (serperResults.size > 0) {
+    const accountsForClassification = Array.from(serperResults.entries())
+      .filter(([_, results]) => results.length > 0)
+      .map(([accountId, searchResults]) => {
+        const deal = deals.find(d => d.accountId === accountId);
+        return {
+          accountId,
+          companyName: deal?.accountName || '',
+          searchResults,
+        };
+      });
+
+    // Process in batches of 5 for DeepSeek
+    const batchSize = 5;
+    logger.info('Starting batched DeepSeek classification', {
+      accountCount: accountsForClassification.length,
+      batchSize,
+    });
+
+    for (let i = 0; i < accountsForClassification.length; i += batchSize) {
+      const batch = accountsForClassification.slice(i, i + batchSize);
+      try {
+        const classificationResults = await classifyAccountSignalsBatch(workspaceId, batch);
+
+        // Store results in database
+        for (const [accountId, result] of classificationResults.entries()) {
+          await query(
+            `INSERT INTO account_signals (workspace_id, account_id, signals, signal_summary, signal_score, enriched_at)
+             VALUES ($1, $2, $3, $4, $5, NOW())
+             ON CONFLICT (workspace_id, account_id)
+             DO UPDATE SET signals = $3, signal_summary = $4, signal_score = $5, enriched_at = NOW()`,
+            [workspaceId, accountId, JSON.stringify(result.signals), result.signal_summary, result.signal_score]
+          );
+        }
+
+        logger.info('Batch classification complete', {
+          batchIndex: Math.floor(i / batchSize) + 1,
+          totalBatches: Math.ceil(accountsForClassification.length / batchSize),
+          accountsInBatch: batch.length,
+        });
+      } catch (error) {
+        logger.error('Batch classification failed', error instanceof Error ? error : new Error(String(error)), {
+          batchIndex: i / batchSize,
+        });
+      }
+    }
+  }
+
+  // Phase 3: Enrich deals (contact roles + Apollo) with controlled concurrency
+  const limit = pLimit(concurrency);
+  let processed = 0;
+  let succeeded = 0;
+  let failed = 0;
+  const results: EnrichmentResult[] = [];
+
+  const enrichmentPromises = deals.map(deal =>
+    limit(async () => {
+      processed++;
+      try {
+        const result = await enrichClosedDeal(workspaceId, deal.id);
+        results.push(result);
+        succeeded++;
+        logger.info('Deal enrichment complete', {
+          dealId: deal.id,
+          dealName: deal.name,
+          progress: `${processed}/${deals.length}`,
+        });
+      } catch (error) {
+        failed++;
+        logger.error('Failed to enrich deal in parallel batch', error instanceof Error ? error : new Error(String(error)), {
+          workspaceId,
+          dealId: deal.id,
+        });
+      }
+    })
+  );
+
+  await Promise.all(enrichmentPromises);
+
+  const durationMs = Date.now() - startTime;
+  logger.info('Parallel batch enrichment complete', {
+    workspaceId,
+    processed,
+    succeeded,
+    failed,
+    durationMs,
+    avgTimePerDeal: Math.round(durationMs / processed),
+  });
+
+  return { processed, succeeded, failed, results, durationMs };
 }

@@ -1,5 +1,6 @@
 import { query } from '../db.js';
 import { createLogger } from '../utils/logger.js';
+import pLimit from 'p-limit';
 
 const logger = createLogger('Serper');
 
@@ -9,6 +10,9 @@ export interface SerperSearchResult {
   snippet: string;
   date?: string;
 }
+
+// Rate limiter: 5 requests per second (Serper API limit)
+const serperLimit = pLimit(5);
 
 let lastRequestTime = 0;
 const MIN_REQUEST_INTERVAL_MS = 200;
@@ -81,4 +85,34 @@ export async function searchCompanySignals(
     logger.error('Serper search failed', err instanceof Error ? err : new Error(String(err)), { companyName });
     return [];
   }
+}
+
+/**
+ * Search company signals for multiple companies in parallel with rate limiting
+ */
+export async function searchCompanySignalsBatch(
+  companies: Array<{ id: string; name: string }>,
+  apiKey: string
+): Promise<Map<string, SerperSearchResult[]>> {
+  const results = new Map<string, SerperSearchResult[]>();
+
+  // Execute searches in parallel with concurrency limit of 5
+  const promises = companies.map(({ id, name }) =>
+    serperLimit(async () => {
+      try {
+        const searchResults = await searchCompanySignals(name, apiKey);
+        results.set(id, searchResults);
+        logger.info('Serper search completed', { companyId: id, companyName: name, resultCount: searchResults.length });
+      } catch (err) {
+        logger.error('Serper batch search failed for company', err instanceof Error ? err : new Error(String(err)), {
+          companyId: id,
+          companyName: name,
+        });
+        results.set(id, []);
+      }
+    })
+  );
+
+  await Promise.all(promises);
+  return results;
 }

@@ -105,6 +105,138 @@ Respond with valid JSON only (no markdown):
   }
 }
 
+/**
+ * Classify signals for multiple accounts in a single DeepSeek call
+ */
+export async function classifyAccountSignalsBatch(
+  workspaceId: string,
+  accounts: Array<{ accountId: string; companyName: string; searchResults: SerperSearchResult[] }>
+): Promise<Map<string, { signals: ClassifiedSignal[]; signal_summary: string; signal_score: number }>> {
+  const results = new Map();
+
+  if (accounts.length === 0) {
+    return results;
+  }
+
+  // Filter out accounts with no search results
+  const accountsWithResults = accounts.filter(a => a.searchResults.length > 0);
+
+  if (accountsWithResults.length === 0) {
+    accounts.forEach(a => {
+      results.set(a.accountId, { signals: [], signal_summary: 'No search results to classify.', signal_score: 0 });
+    });
+    return results;
+  }
+
+  const systemPrompt = `You are a B2B sales intelligence analyst. Classify company news signals from search results into structured categories for sales teams.
+
+Signal types: ${SIGNAL_TYPES.join(', ')}
+
+You will receive search results for multiple companies. Respond with valid JSON only (no markdown):
+{
+  "results": [
+    {
+      "company": "<company_name>",
+      "signals": [
+        {
+          "type": "<signal_type>",
+          "signal": "<brief description>",
+          "source_url": "<url>",
+          "relevance": <0.0-1.0>,
+          "date": "<YYYY-MM-DD or null>"
+        }
+      ],
+      "signal_summary": "<2-3 sentence summary of key signals for a sales rep>",
+      "signal_score": <-1.0 to 1.0, positive = buying signals, negative = risk signals>
+    }
+  ]
+}`;
+
+  // Build prompt with all accounts
+  const companiesData = accountsWithResults.map(a => ({
+    company: a.companyName,
+    results: a.searchResults.map(r => ({
+      title: r.title,
+      url: r.link,
+      snippet: r.snippet,
+      date: r.date || null,
+    })),
+  }));
+
+  const userMessage = `Classify these search results for the following companies:\n\n${JSON.stringify(companiesData, null, 2)}`;
+
+  try {
+    const response = await callLLM(workspaceId, 'extract', {
+      systemPrompt,
+      messages: [{ role: 'user', content: userMessage }],
+      maxTokens: 4096,
+      temperature: 0.1,
+    });
+
+    const parsed = parseJsonFromResponse(response.content);
+    const batchResults = parsed.results || [];
+
+    // Map results back to account IDs
+    for (const account of accountsWithResults) {
+      const result = batchResults.find((r: any) => r.company === account.companyName);
+
+      if (result) {
+        const signals: ClassifiedSignal[] = (result.signals || [])
+          .filter((s: any) => SIGNAL_TYPES.includes(s.type))
+          .map((s: any) => ({
+            type: s.type,
+            signal: String(s.signal || ''),
+            source_url: String(s.source_url || ''),
+            relevance: typeof s.relevance === 'number' ? Math.min(1, Math.max(0, s.relevance)) : 0.5,
+            date: s.date || null,
+          }));
+
+        results.set(account.accountId, {
+          signals,
+          signal_summary: String(result.signal_summary || ''),
+          signal_score: typeof result.signal_score === 'number'
+            ? Math.min(1, Math.max(-1, result.signal_score))
+            : 0,
+        });
+      } else {
+        // Fallback: classify individually if not found in batch result
+        logger.warn('Company not found in batch classification result, falling back to individual', {
+          companyName: account.companyName,
+        });
+        const individualResult = await classifyAccountSignals(workspaceId, account.companyName, account.searchResults);
+        results.set(account.accountId, individualResult);
+      }
+    }
+
+    // Set empty results for accounts without search results
+    accounts.filter(a => a.searchResults.length === 0).forEach(a => {
+      results.set(a.accountId, { signals: [], signal_summary: 'No search results to classify.', signal_score: 0 });
+    });
+
+  } catch (err) {
+    logger.error('Batch signal classification failed, falling back to individual classification', {
+      error: err instanceof Error ? err.message : String(err),
+      accountCount: accounts.length,
+    });
+
+    // Fallback: classify each account individually
+    for (const account of accounts) {
+      try {
+        const result = await classifyAccountSignals(workspaceId, account.companyName, account.searchResults);
+        results.set(account.accountId, result);
+      } catch (individualErr) {
+        logger.error('Individual classification also failed', {
+          error: individualErr instanceof Error ? individualErr.message : String(individualErr),
+          companyName: account.companyName,
+        });
+        results.set(account.accountId, { signals: [], signal_summary: '', signal_score: 0 });
+      }
+    }
+  }
+
+  return results;
+}
+
 export async function enrichAccountWithSignals(
   workspaceId: string,
   accountId: string,
