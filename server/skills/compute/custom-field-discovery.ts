@@ -155,6 +155,25 @@ export interface CustomFieldDiscoveryResult {
     scoredAbove50: number;
     executionMs: number;
   };
+  // Framework detection (MEDDPIC/BANT/SPICED)
+  frameworkDetection?: {
+    detected_framework: string | null;
+    confidence: number;
+    matched_fields: Array<{
+      crm_field_name: string;
+      crm_field_label: string;
+      insight_type: string;
+      fill_rate: number;
+      object_type: string;
+    }>;
+    unmatched_framework_fields: string[];
+    unmapped_custom_fields: Array<{
+      crm_field_name: string;
+      crm_field_label: string;
+      fill_rate: number;
+      object_type: string;
+    }>;
+  };
 }
 
 // ============================================================================
@@ -994,6 +1013,69 @@ export function generateDiscoveryReport(result: CustomFieldDiscoveryResult): str
     lines.push('');
   }
 
+  // Framework detection (MEDDPIC/BANT/SPICED)
+  if (result.frameworkDetection) {
+    const fw = result.frameworkDetection;
+
+    lines.push('## Qualification Framework Analysis');
+    lines.push('');
+
+    if (fw.detected_framework) {
+      lines.push(`### Detected Framework: ${fw.detected_framework.toUpperCase()}`);
+      lines.push('');
+      lines.push(`**Confidence**: ${fw.confidence}% (${fw.matched_fields.length} of ${fw.matched_fields.length + fw.unmatched_framework_fields.length} framework fields found)`);
+      lines.push('');
+
+      if (fw.matched_fields.length > 0) {
+        lines.push('**Matched Fields:**');
+        lines.push('');
+        lines.push('| Field | Insight Type | Fill Rate |');
+        lines.push('|-------|--------------|-----------|');
+        fw.matched_fields.forEach(field => {
+          lines.push(`| ${field.crm_field_label} | ${field.insight_type} | ${field.fill_rate.toFixed(1)}% |`);
+        });
+        lines.push('');
+
+        // Calculate average fill rate
+        const avgFillRate = fw.matched_fields.reduce((sum, f) => sum + f.fill_rate, 0) / fw.matched_fields.length;
+        const lowFillFields = fw.matched_fields.filter(f => f.fill_rate < 10);
+
+        lines.push(`**Average Fill Rate**: ${avgFillRate.toFixed(1)}%`);
+        lines.push('');
+
+        if (lowFillFields.length > 0) {
+          lines.push(`⚠️ **Gap Analysis**: ${lowFillFields.length} of ${fw.matched_fields.length} ${fw.detected_framework.toUpperCase()} fields have <10% fill rate`);
+          lines.push('');
+        }
+      }
+
+      if (fw.unmatched_framework_fields.length > 0) {
+        lines.push(`**Missing Framework Fields**: ${fw.unmatched_framework_fields.join(', ')}`);
+        lines.push('');
+      }
+
+      // Recommendation
+      lines.push('**💡 Recommendation**: Enable Deal Insights extraction to auto-populate qualification fields from conversation transcripts.');
+      lines.push('');
+      lines.push(`Your conversation data (Gong/Fireflies) can automatically extract ${fw.detected_framework.toUpperCase()} insights from call transcripts and populate these CRM fields.`);
+      lines.push('');
+      lines.push('Configure at: Settings → Deal Insights');
+      lines.push('');
+    } else {
+      lines.push('### No Standard Framework Detected');
+      lines.push('');
+      lines.push('No MEDDPIC, BANT, or SPICED qualification framework detected in your CRM schema.');
+      lines.push('');
+
+      if (fw.unmapped_custom_fields.length > 0) {
+        lines.push(`You have ${fw.unmapped_custom_fields.length} custom fields on Opportunities/Deals that could be mapped to qualification insights.`);
+        lines.push('');
+        lines.push('**💡 Recommendation**: Configure custom insight types in Settings → Deal Insights to extract qualification data from conversation transcripts.');
+        lines.push('');
+      }
+    }
+  }
+
   if (result.topFields.length > 0) {
     lines.push('## Top Segmentation Fields (by ICP Relevance)');
     lines.push('');
@@ -1332,9 +1414,35 @@ export async function discoverCustomFields(
   const leadConvertedTotal = leadFields.length > 0 ? leadFields[0].convertedTotal : 0;
   const leadUnconvertedTotal = leadFields.length > 0 ? leadFields[0].unconvertedTotal : 0;
 
+  // 6. Detect qualification framework (MEDDPIC/BANT/SPICED)
+  let frameworkDetection;
+  try {
+    const { detectFramework } = await import('../../analysis/framework-detector.js');
+
+    const fieldsForDetection = allFields.map(f => ({
+      name: f.fieldKey,
+      label: f.fieldKey, // TODO: get actual label from CRM schema
+      fill_rate: f.fillRate,
+      object_type: f.entityType,
+    }));
+
+    frameworkDetection = detectFramework(fieldsForDetection);
+
+    if (frameworkDetection.detected_framework) {
+      logger.info('[Custom Field Discovery] Framework detected', {
+        framework: frameworkDetection.detected_framework,
+        confidence: frameworkDetection.confidence,
+        matchedFields: frameworkDetection.matched_fields.length,
+      });
+    }
+  } catch (error) {
+    logger.warn('[Custom Field Discovery] Framework detection failed', { error });
+  }
+
   return {
     discoveredFields,
     topFields,
+    frameworkDetection,
     entityBreakdown: {
       deals: {
         total: dealFields.length,

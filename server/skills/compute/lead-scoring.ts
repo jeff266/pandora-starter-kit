@@ -60,6 +60,14 @@ interface DealFeatures {
   avgDuration?: number;
   recentCalls?: number;
 
+  // Conversation intelligence signals (requires transcript data + DeepSeek classification)
+  callsWithTranscript?: number;
+  championDetected?: boolean;
+  nextStepsExplicit?: boolean;
+  sentimentDeclining?: boolean;
+  competitorHeavy?: boolean;
+  daysSinceLastCall?: number | null;
+
   // Velocity signals
   daysSinceCreation: number;
   daysUntilClose: number | null;
@@ -181,11 +189,19 @@ const DEFAULT_WEIGHTS = {
     days_since_activity: -8, // NEGATIVE
     stage_velocity: 8,
 
-    // Conversation (max 10 points)
-    has_calls: 5,
-    recent_call: 3,
-    call_volume: 2,
-    no_calls_late_stage: -5, // NEGATIVE
+    // Conversation (max 30 points with conversation intelligence)
+    has_calls: 5, // Legacy: any calls present
+    recent_call: 5, // call in last 7 days
+    call_volume: 2, // Legacy: multiple calls
+    no_calls_late_stage: -5, // NEGATIVE: in advanced stage but no calls
+
+    // Conversation Intelligence (requires Gong/Fireflies integration)
+    call_engagement: 8, // 2+ calls with transcript
+    champion_detected: 3, // Champion language in latest call
+    next_steps_explicit: 2, // Explicit next steps in latest call
+    sentiment_declining: -8, // NEGATIVE: declining sentiment trajectory
+    competitor_heavy: -3, // NEGATIVE: high competitor mentions
+    long_gap_since_call: -5, // NEGATIVE: >21 days since last call in active deal
   },
 
   contact: {
@@ -273,6 +289,8 @@ async function extractDealFeatures(workspaceId: string): Promise<DealFeatures[]>
     const threadingRow = threadingResult.rows[0] || {};
 
     let conversationRow: any = {};
+    let conversationIntelligence: any = {};
+
     if (hasConversationsTable) {
       const conversationResult = await query<any>(`
         SELECT
@@ -281,12 +299,43 @@ async function extractDealFeatures(workspaceId: string): Promise<DealFeatures[]>
           AVG(duration_seconds) as avg_duration,
           COUNT(*) FILTER (
             WHERE call_date >= NOW() - INTERVAL '14 days'
-          ) as recent_calls
+          ) as recent_calls,
+          COUNT(*) FILTER (
+            WHERE transcript_text IS NOT NULL
+          ) as calls_with_transcript,
+          EXTRACT(EPOCH FROM (NOW() - MAX(call_date))) / 86400 as days_since_last_call
         FROM conversations
         WHERE workspace_id = $1 AND deal_id = $2
       `, [workspaceId, row.id]);
 
       conversationRow = conversationResult.rows[0] || {};
+
+      // Fetch latest conversation for DeepSeek classification (if transcript available)
+      const latestCallResult = await query<any>(`
+        SELECT id, transcript_text, summary
+        FROM conversations
+        WHERE workspace_id = $1 AND deal_id = $2
+          AND (transcript_text IS NOT NULL OR summary IS NOT NULL)
+        ORDER BY call_date DESC
+        LIMIT 1
+      `, [workspaceId, row.id]);
+
+      if (latestCallResult.rows.length > 0) {
+        const latestCall = latestCallResult.rows[0];
+        const textForClassification = latestCall.transcript_text || latestCall.summary;
+
+        // TODO: Call DeepSeek API for classification when integrated
+        // For now, use simple heuristics as placeholders
+        conversationIntelligence = {
+          championDetected: textForClassification?.toLowerCase().includes('champion') ||
+                            textForClassification?.toLowerCase().includes('advocate'),
+          nextStepsExplicit: textForClassification?.toLowerCase().includes('next step') ||
+                            textForClassification?.toLowerCase().includes('action item'),
+          sentimentDeclining: textForClassification?.toLowerCase().includes('concern') ||
+                             textForClassification?.toLowerCase().includes('hesit'),
+          competitorHeavy: (textForClassification?.match(/competitor|alternative|incumbent/gi) || []).length > 3,
+        };
+      }
     }
 
     const lastActivity = activityRow.last_activity ? new Date(activityRow.last_activity) : null;
@@ -328,6 +377,12 @@ async function extractDealFeatures(workspaceId: string): Promise<DealFeatures[]>
       lastCall: conversationRow.last_call ? new Date(conversationRow.last_call) : undefined,
       avgDuration: conversationRow.avg_duration ? parseFloat(conversationRow.avg_duration) : undefined,
       recentCalls: conversationRow.recent_calls ? parseInt(conversationRow.recent_calls, 10) : undefined,
+      callsWithTranscript: conversationRow.calls_with_transcript ? parseInt(conversationRow.calls_with_transcript, 10) : undefined,
+      championDetected: conversationIntelligence.championDetected,
+      nextStepsExplicit: conversationIntelligence.nextStepsExplicit,
+      sentimentDeclining: conversationIntelligence.sentimentDeclining,
+      competitorHeavy: conversationIntelligence.competitorHeavy,
+      daysSinceLastCall: conversationRow.days_since_last_call ? Math.floor(parseFloat(conversationRow.days_since_last_call)) : undefined,
       daysSinceCreation: Math.floor(parseFloat(row.days_since_creation || '0')),
       daysUntilClose: row.days_until_close ? Math.floor(parseFloat(row.days_until_close)) : null,
       daysSinceLastActivity,
@@ -758,6 +813,32 @@ function evaluateDealFeature(feature: string, deal: DealFeatures, maxWeight: num
       return { points: isLateStage && noCalls ? maxWeight : 0, rawValue: isLateStage && noCalls };
     }
 
+    // Conversation intelligence features
+    case 'call_engagement': {
+      const hasEngagement = (deal.callsWithTranscript || 0) >= 2;
+      return { points: hasEngagement ? maxWeight : 0, rawValue: deal.callsWithTranscript || 0 };
+    }
+
+    case 'champion_detected':
+      return { points: deal.championDetected ? maxWeight : 0, rawValue: deal.championDetected || false };
+
+    case 'next_steps_explicit':
+      return { points: deal.nextStepsExplicit ? maxWeight : 0, rawValue: deal.nextStepsExplicit || false };
+
+    case 'sentiment_declining':
+      // NEGATIVE points
+      return { points: deal.sentimentDeclining ? maxWeight : 0, rawValue: deal.sentimentDeclining || false };
+
+    case 'competitor_heavy':
+      // NEGATIVE points
+      return { points: deal.competitorHeavy ? maxWeight : 0, rawValue: deal.competitorHeavy || false };
+
+    case 'long_gap_since_call': {
+      // NEGATIVE: No call in >21 days for an active deal
+      const longGap = deal.daysSinceLastCall !== undefined && deal.daysSinceLastCall !== null && deal.daysSinceLastCall > 21;
+      return { points: longGap ? maxWeight : 0, rawValue: deal.daysSinceLastCall || null };
+    }
+
     default:
       return { points: 0, rawValue: null };
   }
@@ -777,6 +858,8 @@ function scoreDeal(
 
   const conversationFeatures = new Set([
     'has_calls', 'recent_call', 'call_volume', 'no_calls_late_stage',
+    'call_engagement', 'champion_detected', 'next_steps_explicit',
+    'sentiment_declining', 'competitor_heavy', 'long_gap_since_call',
   ]);
 
   for (const [feature, maxWeight] of Object.entries(DEFAULT_WEIGHTS.deal)) {

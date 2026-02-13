@@ -81,6 +81,37 @@ export interface FeatureVector {
   // Custom fields
   customFields: Record<string, any>;
   accountCustomFields: Record<string, any>;
+
+  // Conversation features (optional - graceful degradation if not available)
+  has_conversation_data: boolean;
+  total_call_minutes: number | null;
+  call_count_with_transcript: number | null;
+  avg_call_duration_minutes: number | null;
+  unique_customer_speakers: number | null;
+  unique_rep_speakers: number | null;
+  days_between_calls_avg: number | null;
+  first_call_timing: number | null;
+  last_call_to_close: number | null;
+  call_density: number | null;
+  talk_ratio_avg: number | null;
+  longest_monologue_avg: number | null;
+  question_rate_avg: number | null;
+  interactivity_avg: number | null;
+  action_items_total: number | null;
+  action_items_per_call: number | null;
+
+  // Conversation content signals (from DeepSeek)
+  competitor_mentions_count: number | null;
+  pricing_discussed: boolean | null;
+  budget_mentioned: boolean | null;
+  timeline_discussed: boolean | null;
+  objection_count: number | null;
+  champion_language: boolean | null;
+  technical_depth: number | null;
+  sentiment_overall: 'positive' | 'neutral' | 'negative' | null;
+  sentiment_trajectory: 'improving' | 'stable' | 'declining' | null;
+  next_steps_explicit: boolean | null;
+  decision_criteria_count: number | null;
 }
 
 export interface PersonaPattern {
@@ -97,6 +128,14 @@ export interface PersonaPattern {
   avgDealSizeLost: number;
   dealSizeLift: number;
   confidence: number;
+
+  // Conversation participation metrics (optional - only when conversation data available)
+  speaker_participation_rate?: number; // % of deals where this persona spoke on calls
+  avg_talk_percentage?: number; // average % of talk time for this persona
+  appears_in_first_call?: number; // % of deals where persona appeared in first call
+  appears_in_closing_call?: number; // % of deals where persona appeared in last call before close
+  first_call_appearance_lift?: number; // win rate lift when persona appears in first call
+  closing_call_appearance_lift?: number; // win rate lift when persona appears in closing call
 }
 
 export interface CommitteeCombo {
@@ -135,6 +174,42 @@ export interface CompanyProfile {
     count: number;
     lift: number;
   }>;
+  conversation_benchmarks?: {
+    call_volume_buckets: Array<{
+      size_bucket: string;
+      avg_calls: number;
+      median_calls: number;
+      min_calls: number;
+      max_calls: number;
+      win_rate: number;
+      count: number;
+    }>;
+    industry_content_patterns: Array<{
+      industry: string;
+      avg_technical_depth: number;
+      avg_sentiment_score: number; // positive=1, neutral=0, negative=-1
+      competitor_mention_rate: number;
+      pricing_discussion_rate: number;
+      budget_mention_rate: number;
+      timeline_discussion_rate: number;
+      count: number;
+    }>;
+    sentiment_predictor: {
+      positive_win_rate: number;
+      neutral_win_rate: number;
+      negative_win_rate: number;
+      improving_trajectory_win_rate: number;
+      declining_trajectory_win_rate: number;
+    };
+    calls_to_close_by_size: Array<{
+      size_bucket: string;
+      avg_calls_to_close: number;
+      median_calls_to_close: number;
+      avg_days_to_close: number;
+      win_rate: number;
+      count: number;
+    }>;
+  };
 }
 
 export interface ScoringWeights {
@@ -142,6 +217,7 @@ export interface ScoringWeights {
   personas: Record<string, number>;
   customFields: Record<string, Record<string, number>>;
   industries: Record<string, number>;
+  conversation?: Record<string, number>; // Optional conversation weights (when data available)
   note: string;
 }
 
@@ -162,6 +238,9 @@ export interface ICPDiscoveryResult {
     customFieldsUsed: number;
     executionMs: number;
   };
+  // Conversation intelligence (Step 2.5)
+  conversationCoverage?: ConversationCoverage | null;
+  conversationExcerpts?: any[] | null; // For DeepSeek classification in separate step
 }
 
 // ============================================================================
@@ -389,7 +468,7 @@ async function buildFeatureMatrix(workspaceId: string): Promise<FeatureVector[]>
     SELECT
       d.id, d.name, d.amount, d.stage_normalized,
       d.close_date, d.created_at,
-      d.owner as owner_email, d.owner as owner_name,
+      d.owner as owner_email, d.owner,
       d.custom_fields,
       a.id as account_id, a.name as account_name,
       a.industry, a.employee_count, a.annual_revenue,
@@ -488,7 +567,7 @@ async function buildFeatureMatrix(workspaceId: string): Promise<FeatureVector[]>
       amount: Number(deal.amount || 0),
       salesCycleDays,
       ownerEmail: deal.owner_email,
-      ownerName: deal.owner_name,
+      ownerName: deal.owner,
       closeDate: deal.close_date,
       accountId: deal.account_id,
       accountName: deal.account_name,
@@ -514,6 +593,34 @@ async function buildFeatureMatrix(workspaceId: string): Promise<FeatureVector[]>
       activeDays,
       customFields: deal.custom_fields || {},
       accountCustomFields: deal.account_custom_fields || {},
+      // Conversation features - will be populated in Step 2.5
+      has_conversation_data: false,
+      total_call_minutes: null,
+      call_count_with_transcript: null,
+      avg_call_duration_minutes: null,
+      unique_customer_speakers: null,
+      unique_rep_speakers: null,
+      days_between_calls_avg: null,
+      first_call_timing: null,
+      last_call_to_close: null,
+      call_density: null,
+      talk_ratio_avg: null,
+      longest_monologue_avg: null,
+      question_rate_avg: null,
+      interactivity_avg: null,
+      action_items_total: null,
+      action_items_per_call: null,
+      competitor_mentions_count: null,
+      pricing_discussed: null,
+      budget_mentioned: null,
+      timeline_discussed: null,
+      objection_count: null,
+      champion_language: null,
+      technical_depth: null,
+      sentiment_overall: null,
+      sentiment_trajectory: null,
+      next_steps_explicit: null,
+      decision_criteria_count: null,
     });
   }
 
@@ -530,7 +637,7 @@ async function buildFeatureMatrix(workspaceId: string): Promise<FeatureVector[]>
 // Step 3: Discover Persona Patterns
 // ============================================================================
 
-function discoverPersonaPatterns(featureMatrix: FeatureVector[]): PersonaPattern[] {
+async function discoverPersonaPatterns(workspaceId: string, featureMatrix: FeatureVector[]): Promise<PersonaPattern[]> {
   logger.info('[Step 3] Discovering persona patterns');
 
   const totalWonDeals = featureMatrix.filter(d => d.outcome === 'won').length;
@@ -546,6 +653,16 @@ function discoverPersonaPatterns(featureMatrix: FeatureVector[]): PersonaPattern
     totalDeals: Set<string>;
     dealAmountsWon: number[];
     dealAmountsLost: number[];
+    // Conversation participation tracking
+    dealsWithConversations: Set<string>;
+    participatedInConversations: Set<string>; // deals where persona spoke
+    talkPercentages: number[]; // talk % across all conversations
+    appearsInFirstCall: Set<string>; // deals where persona was in first call
+    appearsInClosingCall: Set<string>; // deals where persona was in closing call
+    appearsInFirstCall_won: Set<string>;
+    appearsInFirstCall_lost: Set<string>;
+    appearsInClosingCall_won: Set<string>;
+    appearsInClosingCall_lost: Set<string>;
   }
 
   const clusters = new Map<string, PersonaCluster>();
@@ -571,6 +688,15 @@ function discoverPersonaPatterns(featureMatrix: FeatureVector[]): PersonaPattern
           totalDeals: new Set(),
           dealAmountsWon: [],
           dealAmountsLost: [],
+          dealsWithConversations: new Set(),
+          participatedInConversations: new Set(),
+          talkPercentages: [],
+          appearsInFirstCall: new Set(),
+          appearsInClosingCall: new Set(),
+          appearsInFirstCall_won: new Set(),
+          appearsInFirstCall_lost: new Set(),
+          appearsInClosingCall_won: new Set(),
+          appearsInClosingCall_lost: new Set(),
         });
       }
 
@@ -587,6 +713,166 @@ function discoverPersonaPatterns(featureMatrix: FeatureVector[]): PersonaPattern
         cluster.dealAmountsLost.push(deal.amount);
       }
     }
+  }
+
+  // ============================================================================
+  // Enrich clusters with conversation participation data (if available)
+  // ============================================================================
+
+  const hasConversationData = featureMatrix.some(d => d.has_conversation_data);
+
+  if (hasConversationData) {
+    logger.info('[Step 3] Enriching persona patterns with conversation participation data');
+
+    // Get all deal IDs
+    const dealIds = featureMatrix.map(d => d.dealId);
+
+    // Query conversations with participants for these deals
+    const conversationResult = await query<{
+      id: string;
+      deal_id: string;
+      call_date: string;
+      participants: any;
+      outcome: string;
+    }>(`
+      SELECT c.id, c.deal_id, c.call_date, c.participants, d.outcome
+      FROM conversations c
+      JOIN deals d ON d.id = c.deal_id AND d.workspace_id = c.workspace_id
+      WHERE c.workspace_id = $1
+        AND c.deal_id = ANY($2::uuid[])
+        AND c.participants IS NOT NULL
+        AND jsonb_array_length(c.participants) > 0
+      ORDER BY c.deal_id, c.call_date
+    `, [workspaceId, dealIds]);
+
+    // Query deal contacts to build email → persona mapping
+    const contactResult = await query<{
+      deal_id: string;
+      email: string;
+      seniority: string;
+      department: string;
+    }>(`
+      SELECT dc.deal_id, dc.email, dc.seniority, dc.department
+      FROM deal_contacts dc
+      WHERE dc.workspace_id = $1
+        AND dc.deal_id = ANY($2::uuid[])
+        AND dc.email IS NOT NULL
+    `, [workspaceId, dealIds]);
+
+    // Build email → persona key map
+    const emailToPersonaKey = new Map<string, { dealId: string; personaKey: string }[]>();
+    for (const contact of contactResult.rows) {
+      const email = contact.email.toLowerCase().trim();
+      const personaKey = `${contact.seniority}__${contact.department}`;
+
+      if (!emailToPersonaKey.has(email)) {
+        emailToPersonaKey.set(email, []);
+      }
+      emailToPersonaKey.get(email)!.push({
+        dealId: contact.deal_id,
+        personaKey,
+      });
+    }
+
+    // Group conversations by deal to identify first/closing calls
+    const conversationsByDeal = new Map<string, Array<{
+      id: string;
+      call_date: string;
+      participants: any;
+      outcome: string;
+    }>>();
+
+    for (const conv of conversationResult.rows) {
+      if (!conversationsByDeal.has(conv.deal_id)) {
+        conversationsByDeal.set(conv.deal_id, []);
+      }
+      conversationsByDeal.get(conv.deal_id)!.push({
+        id: conv.id,
+        call_date: conv.call_date,
+        participants: conv.participants,
+        outcome: conv.outcome,
+      });
+    }
+
+    // Process each deal's conversations
+    for (const [dealId, conversations] of conversationsByDeal) {
+      if (conversations.length === 0) continue;
+
+      const firstConversation = conversations[0];
+      const closingConversation = conversations[conversations.length - 1];
+      const outcome = conversations[0].outcome;
+
+      // Track which personas have conversation data for this deal
+      const personasInDeal = new Set<string>();
+
+      for (const conv of conversations) {
+        const participants = Array.isArray(conv.participants) ? conv.participants : [];
+        const isFirstCall = conv.id === firstConversation.id;
+        const isClosingCall = conv.id === closingConversation.id;
+
+        for (const participant of participants) {
+          const email = participant.email?.toLowerCase().trim();
+          if (!email) continue;
+
+          // Skip reps (only track customer participants)
+          if (participant.type === 'rep' || participant.type === 'internal') continue;
+
+          // Find persona for this participant
+          const personaMappings = emailToPersonaKey.get(email);
+          if (!personaMappings) continue;
+
+          // Find mapping for this specific deal
+          const mapping = personaMappings.find(m => m.dealId === dealId);
+          if (!mapping) continue;
+
+          const cluster = clusters.get(mapping.personaKey);
+          if (!cluster) continue;
+
+          personasInDeal.add(mapping.personaKey);
+
+          // Track participation
+          cluster.participatedInConversations.add(dealId);
+
+          // Track talk percentage if available
+          if (typeof participant.talk_percentage === 'number') {
+            cluster.talkPercentages.push(participant.talk_percentage);
+          }
+
+          // Track first call appearance
+          if (isFirstCall) {
+            cluster.appearsInFirstCall.add(dealId);
+            if (outcome === 'won') {
+              cluster.appearsInFirstCall_won.add(dealId);
+            } else {
+              cluster.appearsInFirstCall_lost.add(dealId);
+            }
+          }
+
+          // Track closing call appearance
+          if (isClosingCall) {
+            cluster.appearsInClosingCall.add(dealId);
+            if (outcome === 'won') {
+              cluster.appearsInClosingCall_won.add(dealId);
+            } else {
+              cluster.appearsInClosingCall_lost.add(dealId);
+            }
+          }
+        }
+      }
+
+      // Mark all personas in this deal as having conversation coverage
+      for (const personaKey of personasInDeal) {
+        const cluster = clusters.get(personaKey);
+        if (cluster) {
+          cluster.dealsWithConversations.add(dealId);
+        }
+      }
+    }
+
+    logger.info('[Step 3] Conversation participation data enriched', {
+      conversationsProcessed: conversationResult.rows.length,
+      dealsWithConversations: conversationsByDeal.size,
+    });
   }
 
   // Compute persona metrics
@@ -624,6 +910,73 @@ function discoverPersonaPatterns(featureMatrix: FeatureVector[]): PersonaPattern
 
     const dealSizeLift = avgDealSizeLost > 0 ? avgDealSizeWon / avgDealSizeLost : avgDealSizeWon > 0 ? 10 : 0;
 
+    // Calculate conversation participation metrics (if available)
+    let conversationMetrics: {
+      speaker_participation_rate?: number;
+      avg_talk_percentage?: number;
+      appears_in_first_call?: number;
+      appears_in_closing_call?: number;
+      first_call_appearance_lift?: number;
+      closing_call_appearance_lift?: number;
+    } = {};
+
+    if (hasConversationData && cluster.dealsWithConversations.size > 0) {
+      // Speaker participation rate: % of deals where persona spoke
+      const speakerParticipationRate = cluster.participatedInConversations.size / cluster.dealsWithConversations.size;
+
+      // Average talk percentage
+      const avgTalkPercentage = cluster.talkPercentages.length > 0
+        ? cluster.talkPercentages.reduce((a, b) => a + b, 0) / cluster.talkPercentages.length
+        : 0;
+
+      // First call appearance rate
+      const appearsInFirstCallRate = cluster.appearsInFirstCall.size / cluster.dealsWithConversations.size;
+
+      // Closing call appearance rate
+      const appearsInClosingCallRate = cluster.appearsInClosingCall.size / cluster.dealsWithConversations.size;
+
+      // First call appearance lift (win rate when persona appears in first call vs when they don't)
+      let firstCallAppearanceLift = 0;
+      if (cluster.appearsInFirstCall.size > 0) {
+        const winRateWithFirstCall = cluster.appearsInFirstCall_won.size / cluster.appearsInFirstCall.size;
+        const dealsWithoutFirstCall = cluster.dealsWithConversations.size - cluster.appearsInFirstCall.size;
+        if (dealsWithoutFirstCall > 0) {
+          const wonWithoutFirstCall = cluster.wonDeals.size - cluster.appearsInFirstCall_won.size;
+          const winRateWithoutFirstCall = wonWithoutFirstCall / dealsWithoutFirstCall;
+          firstCallAppearanceLift = winRateWithoutFirstCall > 0
+            ? winRateWithFirstCall / winRateWithoutFirstCall
+            : winRateWithFirstCall > 0 ? 10 : 1;
+        } else {
+          firstCallAppearanceLift = winRateWithFirstCall > 0 ? 10 : 1;
+        }
+      }
+
+      // Closing call appearance lift (win rate when persona appears in closing call vs when they don't)
+      let closingCallAppearanceLift = 0;
+      if (cluster.appearsInClosingCall.size > 0) {
+        const winRateWithClosingCall = cluster.appearsInClosingCall_won.size / cluster.appearsInClosingCall.size;
+        const dealsWithoutClosingCall = cluster.dealsWithConversations.size - cluster.appearsInClosingCall.size;
+        if (dealsWithoutClosingCall > 0) {
+          const wonWithoutClosingCall = cluster.wonDeals.size - cluster.appearsInClosingCall_won.size;
+          const winRateWithoutClosingCall = wonWithoutClosingCall / dealsWithoutClosingCall;
+          closingCallAppearanceLift = winRateWithoutClosingCall > 0
+            ? winRateWithClosingCall / winRateWithoutClosingCall
+            : winRateWithClosingCall > 0 ? 10 : 1;
+        } else {
+          closingCallAppearanceLift = winRateWithClosingCall > 0 ? 10 : 1;
+        }
+      }
+
+      conversationMetrics = {
+        speaker_participation_rate: speakerParticipationRate,
+        avg_talk_percentage: avgTalkPercentage,
+        appears_in_first_call: appearsInFirstCallRate,
+        appears_in_closing_call: appearsInClosingCallRate,
+        first_call_appearance_lift: firstCallAppearanceLift,
+        closing_call_appearance_lift: closingCallAppearanceLift,
+      };
+    }
+
     personas.push({
       name,
       seniority: cluster.seniority,
@@ -638,6 +991,7 @@ function discoverPersonaPatterns(featureMatrix: FeatureVector[]): PersonaPattern
       avgDealSizeLost,
       dealSizeLift,
       confidence,
+      ...conversationMetrics,
     });
   }
 
@@ -940,12 +1294,209 @@ async function discoverCompanyPatterns(
 
   sweetSpots.sort((a, b) => b.lift - a.lift);
 
+  // ============================================================================
+  // Conversation Benchmarks (if conversation data available)
+  // ============================================================================
+
+  let conversation_benchmarks: CompanyProfile['conversation_benchmarks'];
+
+  const hasConversationData = featureMatrix.some(d => d.has_conversation_data);
+
+  if (hasConversationData) {
+    logger.info('[Step 4] Calculating conversation benchmarks');
+
+    // Helper to convert employee count to size bucket
+    const getSizeBucket = (employeeCount: number | null): string | null => {
+      if (employeeCount === null) return null;
+      if (employeeCount <= 50) return '1-50';
+      if (employeeCount <= 200) return '51-200';
+      if (employeeCount <= 1000) return '201-1000';
+      if (employeeCount <= 5000) return '1001-5000';
+      return '5000+';
+    };
+
+    // Call volume buckets by company size
+    const callVolumeBuckets: NonNullable<CompanyProfile['conversation_benchmarks']>['call_volume_buckets'] = [];
+    const sizeBuckets = ['1-50', '51-200', '201-1000', '1001-5000', '5000+'];
+
+    for (const sizeBucket of sizeBuckets) {
+      const dealsInBucket = featureMatrix.filter(d =>
+        getSizeBucket(d.employeeCount) === sizeBucket && d.has_conversation_data && d.call_count_with_transcript !== null
+      );
+
+      if (dealsInBucket.length >= 3) {
+        const callCounts = dealsInBucket.map(d => d.call_count_with_transcript!);
+        const avgCalls = callCounts.reduce((a, b) => a + b, 0) / callCounts.length;
+        const sortedCalls = [...callCounts].sort((a, b) => a - b);
+        const medianCalls = sortedCalls[Math.floor(sortedCalls.length / 2)];
+        const minCalls = Math.min(...callCounts);
+        const maxCalls = Math.max(...callCounts);
+        const wonDeals = dealsInBucket.filter(d => d.outcome === 'won').length;
+        const winRate = wonDeals / dealsInBucket.length;
+
+        callVolumeBuckets.push({
+          size_bucket: sizeBucket,
+          avg_calls: avgCalls,
+          median_calls: medianCalls,
+          min_calls: minCalls,
+          max_calls: maxCalls,
+          win_rate: winRate,
+          count: dealsInBucket.length,
+        });
+      }
+    }
+
+    // Industry content patterns
+    const industryContentPatterns: NonNullable<CompanyProfile['conversation_benchmarks']>['industry_content_patterns'] = [];
+    const industries = [...new Set(featureMatrix.map(d => d.industry).filter((i): i is string => i !== null))];
+
+    for (const industry of industries) {
+      const dealsInIndustry = featureMatrix.filter(d =>
+        d.industry === industry && d.has_conversation_data
+      );
+
+      if (dealsInIndustry.length >= 3) {
+        // Technical depth (average across deals)
+        const technicalDepths = dealsInIndustry
+          .map(d => d.technical_depth)
+          .filter((v): v is number => v !== null);
+        const avgTechnicalDepth = technicalDepths.length > 0
+          ? technicalDepths.reduce((a, b) => a + b, 0) / technicalDepths.length
+          : 0;
+
+        // Sentiment score (positive=1, neutral=0, negative=-1)
+        const sentiments: number[] = dealsInIndustry
+          .map(d => d.sentiment_overall === 'positive' ? 1 : d.sentiment_overall === 'negative' ? -1 : 0);
+        const avgSentimentScore = sentiments.length > 0
+          ? sentiments.reduce((a: number, b: number) => a + b, 0) / sentiments.length
+          : 0;
+
+        // Competitor mention rate
+        const competitorMentionRate = dealsInIndustry.filter(d =>
+          d.competitor_mentions_count !== null && d.competitor_mentions_count > 0
+        ).length / dealsInIndustry.length;
+
+        // Pricing discussion rate
+        const pricingDiscussionRate = dealsInIndustry.filter(d =>
+          d.pricing_discussed === true
+        ).length / dealsInIndustry.length;
+
+        // Budget mention rate
+        const budgetMentionRate = dealsInIndustry.filter(d =>
+          d.budget_mentioned === true
+        ).length / dealsInIndustry.length;
+
+        // Timeline discussion rate
+        const timelineDiscussionRate = dealsInIndustry.filter(d =>
+          d.timeline_discussed === true
+        ).length / dealsInIndustry.length;
+
+        industryContentPatterns.push({
+          industry,
+          avg_technical_depth: avgTechnicalDepth,
+          avg_sentiment_score: avgSentimentScore,
+          competitor_mention_rate: competitorMentionRate,
+          pricing_discussion_rate: pricingDiscussionRate,
+          budget_mention_rate: budgetMentionRate,
+          timeline_discussion_rate: timelineDiscussionRate,
+          count: dealsInIndustry.length,
+        });
+      }
+    }
+
+    // Sentiment predictor
+    const dealsWithSentiment = featureMatrix.filter(d => d.sentiment_overall !== null);
+    const positiveDeals = dealsWithSentiment.filter(d => d.sentiment_overall === 'positive');
+    const neutralDeals = dealsWithSentiment.filter(d => d.sentiment_overall === 'neutral');
+    const negativeDeals = dealsWithSentiment.filter(d => d.sentiment_overall === 'negative');
+
+    const dealsWithTrajectory = featureMatrix.filter(d => d.sentiment_trajectory !== null);
+    const improvingDeals = dealsWithTrajectory.filter(d => d.sentiment_trajectory === 'improving');
+    const decliningDeals = dealsWithTrajectory.filter(d => d.sentiment_trajectory === 'declining');
+
+    const sentiment_predictor = {
+      positive_win_rate: positiveDeals.length > 0
+        ? positiveDeals.filter(d => d.outcome === 'won').length / positiveDeals.length
+        : 0,
+      neutral_win_rate: neutralDeals.length > 0
+        ? neutralDeals.filter(d => d.outcome === 'won').length / neutralDeals.length
+        : 0,
+      negative_win_rate: negativeDeals.length > 0
+        ? negativeDeals.filter(d => d.outcome === 'won').length / negativeDeals.length
+        : 0,
+      improving_trajectory_win_rate: improvingDeals.length > 0
+        ? improvingDeals.filter(d => d.outcome === 'won').length / improvingDeals.length
+        : 0,
+      declining_trajectory_win_rate: decliningDeals.length > 0
+        ? decliningDeals.filter(d => d.outcome === 'won').length / decliningDeals.length
+        : 0,
+    };
+
+    // Calls to close by size
+    const callsToCloseBySize: NonNullable<CompanyProfile['conversation_benchmarks']>['calls_to_close_by_size'] = [];
+
+    for (const sizeBucket of sizeBuckets) {
+      const dealsInBucket = featureMatrix.filter(d =>
+        getSizeBucket(d.employeeCount) === sizeBucket &&
+        d.has_conversation_data &&
+        d.call_count_with_transcript !== null &&
+        d.outcome === 'won' // Only closed-won deals have meaningful "calls to close"
+      );
+
+      if (dealsInBucket.length >= 3) {
+        const callCounts = dealsInBucket.map(d => d.call_count_with_transcript!);
+        const avgCallsToClose = callCounts.reduce((a, b) => a + b, 0) / callCounts.length;
+        const sortedCalls = [...callCounts].sort((a, b) => a - b);
+        const medianCallsToClose = sortedCalls[Math.floor(sortedCalls.length / 2)];
+
+        // Calculate avg days to close from last_call_to_close and call_density
+        const daysToClose = dealsInBucket
+          .map(d => d.last_call_to_close)
+          .filter((v): v is number => v !== null && v >= 0);
+        const avgDaysToClose = daysToClose.length > 0
+          ? daysToClose.reduce((a, b) => a + b, 0) / daysToClose.length
+          : 0;
+
+        // Include all deals in size bucket for win rate (not just won)
+        const allDealsInBucket = featureMatrix.filter(d =>
+          getSizeBucket(d.employeeCount) === sizeBucket && d.has_conversation_data
+        );
+        const winRate = allDealsInBucket.length > 0
+          ? allDealsInBucket.filter(d => d.outcome === 'won').length / allDealsInBucket.length
+          : 0;
+
+        callsToCloseBySize.push({
+          size_bucket: sizeBucket,
+          avg_calls_to_close: avgCallsToClose,
+          median_calls_to_close: medianCallsToClose,
+          avg_days_to_close: avgDaysToClose,
+          win_rate: winRate,
+          count: dealsInBucket.length,
+        });
+      }
+    }
+
+    conversation_benchmarks = {
+      call_volume_buckets: callVolumeBuckets,
+      industry_content_patterns: industryContentPatterns,
+      sentiment_predictor,
+      calls_to_close_by_size: callsToCloseBySize,
+    };
+
+    logger.info('[Step 4] Conversation benchmarks calculated', {
+      callVolumeBuckets: callVolumeBuckets.length,
+      industryPatterns: industryContentPatterns.length,
+      callsToCloseBuckets: callsToCloseBySize.length,
+    });
+  }
+
   logger.info('[Step 4] Company patterns discovered', {
     industries: industryWinRates.length,
     sizeBuckets: sizeWinRates.length,
     customFieldSegments: customFieldSegments.length,
     leadSources: leadSourceFunnel.length,
     sweetSpots: sweetSpots.length,
+    conversationBenchmarks: conversation_benchmarks ? 'yes' : 'no',
   });
 
   return {
@@ -954,6 +1505,7 @@ async function discoverCompanyPatterns(
     customFieldSegments,
     leadSourceFunnel,
     sweetSpots,
+    conversation_benchmarks,
   };
 }
 
@@ -995,20 +1547,80 @@ function buildScoringWeights(
     }
   }
 
+  // Conversation weights (if available)
+  let conversationWeights: Record<string, number> | undefined;
+  if (companyProfile.conversation_benchmarks) {
+    conversationWeights = {};
+    const benchmarks = companyProfile.conversation_benchmarks;
+
+    // Sentiment predictor weights
+    if (benchmarks.sentiment_predictor) {
+      const { positive_win_rate, neutral_win_rate, negative_win_rate, improving_trajectory_win_rate, declining_trajectory_win_rate } = benchmarks.sentiment_predictor;
+      const maxSentimentWR = Math.max(positive_win_rate, neutral_win_rate, negative_win_rate);
+
+      if (maxSentimentWR > 0) {
+        conversationWeights['sentiment_positive'] = Math.round((positive_win_rate / maxSentimentWR) * 10);
+        conversationWeights['sentiment_neutral'] = Math.round((neutral_win_rate / maxSentimentWR) * 10);
+        conversationWeights['sentiment_negative'] = Math.round((negative_win_rate / maxSentimentWR) * 10);
+      }
+
+      // Trajectory weights (relative to baseline)
+      const avgTrajectoryWR = (improving_trajectory_win_rate + declining_trajectory_win_rate) / 2;
+      if (avgTrajectoryWR > 0) {
+        conversationWeights['trajectory_improving'] = Math.round((improving_trajectory_win_rate / avgTrajectoryWR) * 5);
+        conversationWeights['trajectory_declining'] = Math.round((declining_trajectory_win_rate / avgTrajectoryWR) * 5);
+      }
+    }
+
+    // Call volume weights (normalized by size bucket)
+    if (benchmarks.call_volume_buckets && benchmarks.call_volume_buckets.length > 0) {
+      const maxCallVolumeWR = Math.max(...benchmarks.call_volume_buckets.map(b => b.win_rate));
+      if (maxCallVolumeWR > 0) {
+        for (const bucket of benchmarks.call_volume_buckets) {
+          conversationWeights[`call_volume_${bucket.size_bucket}`] = Math.round((bucket.win_rate / maxCallVolumeWR) * 5);
+        }
+      }
+    }
+
+    // Champion language (binary - high weight if present)
+    conversationWeights['champion_language_detected'] = 8;
+
+    logger.info('[Step 5] Conversation weights added', {
+      conversationWeights: Object.keys(conversationWeights).length,
+    });
+  }
+
   logger.info('[Step 5] Scoring weights built', {
     personas: Object.keys(personaWeights).length,
     customFields: Object.keys(customFieldWeights).length,
     industries: Object.keys(industryWeights).length,
+    conversation: conversationWeights ? Object.keys(conversationWeights).length : 0,
   });
 
-  return {
+  const result: ScoringWeights = {
     method: 'descriptive_heuristic',
     personas: personaWeights,
     customFields: customFieldWeights,
     industries: industryWeights,
     note: 'Heuristic weights from descriptive analysis. Not validated by regression. Upgrade to point_based mode with 100+ deals or regression mode with 200+ deals for validated weights.',
   };
+
+  if (conversationWeights) {
+    result.conversation = conversationWeights;
+  }
+
+  return result;
 }
+
+// TODO: Implement buildPointBasedScoringWeights() for point_based mode
+// - Include call_density, champion_language, sentiment_trajectory lifts as weights
+// - Only use conversation features if coverage > 30%
+// - Use statistical validation for weight selection
+
+// TODO: Implement buildRegressionScoringWeights() for regression mode
+// - Add conversation variables with feature selection
+// - Apply coverage-based regularization (penalty if coverage < 50%)
+// - Track which conversation features survive selection in feature_importance
 
 // ============================================================================
 // Step 10: Persist Results
@@ -1068,6 +1680,178 @@ async function persistICPProfile(
 }
 
 // ============================================================================
+// Step 2.5: Extract Conversation Signals (NEW)
+// ============================================================================
+
+import {
+  linkConversationsToDeals,
+  aggregateConversationMetadata,
+  extractTranscriptExcerpts,
+  computeConversationCoverage,
+  type ConversationCoverage,
+  type ConversationMetadata,
+  type ConversationLinkage,
+} from './conversation-features.js';
+
+import {
+  batchExcerptsForDeepSeek,
+  buildConversationClassificationPrompt,
+  parseConversationClassifications,
+  conversationClassificationSchema,
+  type ConversationSignal,
+} from './conversation-classification.js';
+
+/**
+ * Extract conversation metadata and prepare for DeepSeek classification
+ * Phase A+B: Link conversations + aggregate metadata
+ * Phase C: Prepare excerpts for DeepSeek (will be called separately in skill step)
+ *
+ * Graceful degradation: If no conversations exist, returns null
+ */
+async function extractConversationMetadata(
+  workspaceId: string,
+  featureMatrix: FeatureVector[]
+): Promise<{
+  metadataMap: Map<string, ConversationMetadata>;
+  linkages: ConversationLinkage[];
+  coverage: ConversationCoverage;
+  excerpts: any[]; // Prepared for DeepSeek
+} | null> {
+  logger.info('[Step 2.5A-B] Extracting conversation metadata', { workspaceId });
+
+  const dealIds = featureMatrix.map(f => f.dealId);
+
+  // Sub-step A: Link conversations to deals
+  const linkages = await linkConversationsToDeals(workspaceId, dealIds);
+
+  if (linkages.length === 0) {
+    logger.info('[Step 2.5] No conversations linked - Tier 0 (graceful degradation)');
+    return null;
+  }
+
+  // Sub-step B: Aggregate metadata
+  const metadataMap = await aggregateConversationMetadata(workspaceId, linkages);
+
+  // Prepare excerpts for DeepSeek classification (done in separate skill step)
+  const excerpts = await extractTranscriptExcerpts(workspaceId, linkages);
+
+  // Compute coverage and tier
+  const coverage = computeConversationCoverage(featureMatrix.length, linkages, metadataMap);
+
+  logger.info('[Step 2.5A-B] Conversation metadata extracted', {
+    coverage: `${coverage.conversationCoverage.toFixed(1)}%`,
+    tier: coverage.tier,
+    dealsWithConversations: coverage.dealsWithConversations,
+  });
+
+  return {
+    metadataMap,
+    linkages,
+    coverage,
+    excerpts,
+  };
+}
+
+/**
+ * Merge conversation metadata into feature matrix
+ * Called during buildFeatureMatrix to add conversation features
+ */
+function mergeConversationMetadataIntoFeatures(
+  featureMatrix: FeatureVector[],
+  metadataMap: Map<string, ConversationMetadata> | null
+): FeatureVector[] {
+  if (!metadataMap) {
+    // No conversation data - set all to null
+    return featureMatrix.map(feature => ({
+      ...feature,
+      has_conversation_data: false,
+      total_call_minutes: null,
+      call_count_with_transcript: null,
+      avg_call_duration_minutes: null,
+      unique_customer_speakers: null,
+      unique_rep_speakers: null,
+      days_between_calls_avg: null,
+      first_call_timing: null,
+      last_call_to_close: null,
+      call_density: null,
+      talk_ratio_avg: null,
+      longest_monologue_avg: null,
+      question_rate_avg: null,
+      interactivity_avg: null,
+      action_items_total: null,
+      action_items_per_call: null,
+      competitor_mentions_count: null,
+      pricing_discussed: null,
+      budget_mentioned: null,
+      timeline_discussed: null,
+      objection_count: null,
+      champion_language: null,
+      technical_depth: null,
+      sentiment_overall: null,
+      sentiment_trajectory: null,
+      next_steps_explicit: null,
+      decision_criteria_count: null,
+    }));
+  }
+
+  return featureMatrix.map(feature => {
+    const metadata = metadataMap.get(feature.dealId);
+
+    if (!metadata) {
+      return {
+        ...feature,
+        has_conversation_data: false,
+        total_call_minutes: null,
+        call_count_with_transcript: null,
+        avg_call_duration_minutes: null,
+        unique_customer_speakers: null,
+        unique_rep_speakers: null,
+        days_between_calls_avg: null,
+        first_call_timing: null,
+        last_call_to_close: null,
+        call_density: null,
+        talk_ratio_avg: null,
+        longest_monologue_avg: null,
+        question_rate_avg: null,
+        interactivity_avg: null,
+        action_items_total: null,
+        action_items_per_call: null,
+        // Content signals will be null until DeepSeek classification
+        competitor_mentions_count: null,
+        pricing_discussed: null,
+        budget_mentioned: null,
+        timeline_discussed: null,
+        objection_count: null,
+        champion_language: null,
+        technical_depth: null,
+        sentiment_overall: null,
+        sentiment_trajectory: null,
+        next_steps_explicit: null,
+        decision_criteria_count: null,
+      };
+    }
+
+    return {
+      ...feature,
+      has_conversation_data: true,
+      ...metadata,
+      // Content signals will be added later via DeepSeek
+      competitor_mentions_count: null,
+      pricing_discussed: null,
+      budget_mentioned: null,
+      timeline_discussed: null,
+      objection_count: null,
+      champion_language: null,
+      technical_depth: null,
+      sentiment_overall: null,
+      sentiment_trajectory: null,
+      next_steps_explicit: null,
+      decision_criteria_count: null,
+    };
+  });
+}
+
+// ============================================================================
 // Main Function
 // ============================================================================
 
@@ -1094,10 +1878,26 @@ export async function discoverICP(workspaceId: string): Promise<ICPDiscoveryResu
   const topFields = customFieldResult.rows[0]?.output?.topFields || [];
 
   // Step 2: Build feature matrix
-  const featureMatrix = await buildFeatureMatrix(workspaceId);
+  let featureMatrix = await buildFeatureMatrix(workspaceId);
+
+  // Step 2.5: Extract conversation metadata (NEW)
+  const conversationData = await extractConversationMetadata(workspaceId, featureMatrix);
+
+  if (conversationData) {
+    // Merge conversation metadata into feature matrix
+    featureMatrix = mergeConversationMetadataIntoFeatures(featureMatrix, conversationData.metadataMap);
+    logger.info('[Step 2.5] Conversation metadata merged', {
+      tier: conversationData.coverage.tier,
+      coverage: `${conversationData.coverage.conversationCoverage.toFixed(1)}%`,
+    });
+  } else {
+    // No conversations - apply null values
+    featureMatrix = mergeConversationMetadataIntoFeatures(featureMatrix, null);
+    logger.info('[Step 2.5] No conversation data - Tier 0 degradation');
+  }
 
   // Step 3: Discover persona patterns
-  const personas = discoverPersonaPatterns(featureMatrix);
+  const personas = await discoverPersonaPatterns(workspaceId, featureMatrix);
 
   // Step 3B: Discover committee combinations
   const committees = discoverCommitteeCombos(featureMatrix, personas);
@@ -1131,6 +1931,7 @@ export async function discoverICP(workspaceId: string): Promise<ICPDiscoveryResu
   logger.info('[ICP Discovery] Complete', {
     profileId,
     executionMs: metadata.executionMs,
+    conversationTier: conversationData?.coverage.tier || 0,
   });
 
   return {
@@ -1143,5 +1944,7 @@ export async function discoverICP(workspaceId: string): Promise<ICPDiscoveryResu
     scoringWeights,
     customFieldContributions: topFields,
     metadata,
+    conversationCoverage: conversationData?.coverage || null,
+    conversationExcerpts: conversationData?.excerpts || null,
   };
 }
