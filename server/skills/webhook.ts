@@ -14,6 +14,10 @@ import { getSkillRegistry } from './registry.js';
 import { getSkillRuntime } from './runtime.js';
 import type { SkillResult } from './types.js';
 import { query } from '../db.js';
+import { generateDataQualityWorkItems, type DataQualityFinding } from './pm-actions.js';
+import { createLogger } from '../utils/logger.js';
+
+const logger = createLogger('SkillWebhook');
 
 /**
  * POST /api/webhooks/skills/:skillId/trigger
@@ -101,6 +105,11 @@ async function executeSkillAsync(
     const result: SkillResult = await runtime.executeSkill(skill, workspaceId, params);
 
     console.log(`[Webhook] Skill ${skill.id} completed with status: ${result.status}`);
+
+    // Generate PM work items if this is the data-quality-audit skill
+    if (skill.id === 'data-quality-audit' && result.status === 'completed' && result.stepData) {
+      await generatePMTasksForDataQuality(workspaceId, result);
+    }
 
     // If callback URL provided, POST results
     if (callbackUrl) {
@@ -293,6 +302,101 @@ export async function handleListSkillRuns(req: Request, res: Response): Promise<
 // ============================================================================
 // Helper Functions
 // ============================================================================
+
+/**
+ * Generate PM tasks for data quality audit skill results
+ */
+async function generatePMTasksForDataQuality(
+  workspaceId: string,
+  result: SkillResult
+): Promise<void> {
+  try {
+    const qualityMetrics = result.stepData?.quality_metrics;
+
+    if (!qualityMetrics || !qualityMetrics.byEntity) {
+      logger.warn('Data quality audit completed but missing quality_metrics', { workspaceId, runId: result.runId });
+      return;
+    }
+
+    // Extract field-level findings from quality metrics
+    const findings: DataQualityFinding[] = [];
+
+    // Process deals entity
+    if (qualityMetrics.byEntity.deals?.fieldCompleteness) {
+      for (const fieldStat of qualityMetrics.byEntity.deals.fieldCompleteness) {
+        if (!fieldStat.isCritical) continue; // Only create tasks for critical fields
+
+        const missingCount = fieldStat.total - fieldStat.filled;
+        const fillRate = fieldStat.fillRate || 0;
+
+        // Only create task if fill rate is below 90%
+        if (fillRate >= 90) continue;
+
+        const severity: 'critical' | 'moderate' | 'minor' =
+          fillRate < 50 ? 'critical' : fillRate < 75 ? 'moderate' : 'minor';
+
+        // Determine recommended fix based on field and severity
+        const recommendedFix = determineRecommendedFix(fieldStat.field, severity);
+
+        findings.push({
+          field: fieldStat.field,
+          missingCount,
+          affectedRecords: fieldStat.total,
+          severity,
+          recommendedFix,
+          impactMetric: `${fillRate}% fill rate (${missingCount} records missing)`,
+        });
+      }
+    }
+
+    if (findings.length === 0) {
+      logger.info('Data quality audit completed with no actionable findings', { workspaceId, runId: result.runId });
+      return;
+    }
+
+    logger.info('Generating PM tasks for data quality findings', {
+      workspaceId,
+      runId: result.runId,
+      findingCount: findings.length,
+    });
+
+    await generateDataQualityWorkItems(workspaceId, findings, result.runId);
+  } catch (error) {
+    logger.error('Failed to generate PM tasks for data quality audit', {
+      workspaceId,
+      runId: result.runId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
+ * Determine recommended fix based on field and severity
+ */
+function determineRecommendedFix(
+  field: string,
+  severity: 'critical' | 'moderate' | 'minor'
+): DataQualityFinding['recommendedFix'] {
+  // Critical fields that should be required
+  const requiredFieldCandidates = ['amount', 'close_date', 'stage', 'owner', 'email'];
+
+  if (requiredFieldCandidates.includes(field) && severity === 'critical') {
+    return 'required_field_enforcement';
+  }
+
+  // Fields that suggest process issues
+  const processFields = ['account_id', 'lead_source', 'next_step'];
+  if (processFields.includes(field)) {
+    return 'process_change';
+  }
+
+  // Default to training for moderate issues, bulk cleanup for critical
+  if (severity === 'critical') {
+    return 'bulk_cleanup';
+  }
+
+  return 'training';
+}
 
 function matchesTrigger(trigger: string, event: string): boolean {
   // Exact match
