@@ -79,13 +79,13 @@ export async function getConnectedPieces(
   // Get active connectors for workspace
   const connectorsResult = await db.query(
     `
-    SELECT connector_type FROM connector_configs
-    WHERE workspace_id = $1 AND status = 'connected'
+    SELECT connector_name FROM connections
+    WHERE workspace_id = $1 AND status = 'healthy'
     `,
     [workspaceId]
   );
 
-  const connectedTypes = connectorsResult.rows.map((r: any) => r.connector_type);
+  const connectedTypes = connectorsResult.rows.map((r: any) => r.connector_name);
 
   if (connectedTypes.length === 0) {
     return [];

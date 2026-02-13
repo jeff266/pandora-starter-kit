@@ -590,11 +590,11 @@ export class WorkflowService {
 
     // Check required connectors against workspace's active connectors
     const connectedResult = await this.db.query(
-      `SELECT connector_type FROM connector_configs WHERE workspace_id = $1 AND status = 'connected'`,
+      `SELECT connector_name FROM connections WHERE workspace_id = $1 AND status = 'healthy'`,
       [workspaceId]
     );
 
-    const connectedTypes = new Set(connectedResult.rows.map((r: any) => r.connector_type));
+    const connectedTypes = new Set(connectedResult.rows.map((r: any) => r.connector_name));
     const missingConnectors = template.required_connectors.filter(
       (c: string) => !connectedTypes.has(c)
     );
@@ -675,13 +675,13 @@ export class WorkflowService {
 
     // Query workspace's active connectors
     const connectorsResult = await this.db.query(
-      `SELECT connector_type, id FROM connector_configs WHERE workspace_id = $1 AND status = 'connected'`,
+      `SELECT connector_name, id FROM connections WHERE workspace_id = $1 AND status = 'healthy'`,
       [workspaceId]
     );
 
     const availableConnections = new Map<string, string>();
     for (const conn of connectorsResult.rows) {
-      availableConnections.set(conn.connector_type, conn.id);
+      availableConnections.set(conn.connector_name, conn.id);
     }
 
     // Get AP project ID (if exists)

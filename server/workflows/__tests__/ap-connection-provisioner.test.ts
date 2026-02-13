@@ -40,14 +40,14 @@ describe('APConnectionProvisioner', () => {
       mockDb.query.mockResolvedValueOnce({
         rows: [
           {
-            connector_type: 'hubspot',
+            connector_name: 'hubspot',
             credentials: {
               accessToken: 'hub_token',
               refreshToken: 'hub_refresh',
             },
           },
           {
-            connector_type: 'slack',
+            connector_name: 'slack',
             credentials: {
               botToken: 'slack_token',
             },
@@ -81,7 +81,7 @@ describe('APConnectionProvisioner', () => {
       mockDb.query.mockResolvedValueOnce({
         rows: [
           {
-            connector_type: 'unknown_connector',
+            connector_name: 'unknown_connector',
             credentials: {},
           },
         ],
@@ -102,7 +102,7 @@ describe('APConnectionProvisioner', () => {
       mockDb.query.mockResolvedValueOnce({
         rows: [
           {
-            connector_type: 'hubspot',
+            connector_name: 'hubspot',
             credentials: {
               accessToken: 'new_token',
               refreshToken: 'new_refresh',
@@ -178,7 +178,7 @@ describe('APConnectionProvisioner', () => {
       mockDb.query
         .mockResolvedValueOnce({ rows: [] }) // No tracking record
         .mockResolvedValueOnce({ rows: [{ ap_project_id: null }] }) // workspace query
-        .mockResolvedValueOnce({ rows: [] }); // update connector_configs
+        .mockResolvedValueOnce({ rows: [] }); // update connections
 
       (mockApClient.getProjectByExternalId as jest.Mock).mockResolvedValue({
         id: 'proj_123',

@@ -289,7 +289,7 @@ export class SalesforceAdapter implements CRMAdapter {
   }
 
   /**
-   * Store field metadata in connector_configs for use by custom field discovery engine
+   * Store field metadata in connections metadata for use by custom field discovery engine
    */
   private async storeFieldMetadata(
     workspaceId: string,
@@ -298,8 +298,8 @@ export class SalesforceAdapter implements CRMAdapter {
     try {
       await query(
         `UPDATE connections
-         SET connector_configs = jsonb_set(
-           COALESCE(connector_configs, '{}'::jsonb),
+         SET metadata = jsonb_set(
+           COALESCE(metadata, '{}'::jsonb),
            '{field_metadata}',
            $1::jsonb
          ),

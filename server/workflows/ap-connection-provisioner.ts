@@ -84,12 +84,12 @@ export async function provisionConnections(
     errors: [],
   };
 
-  // Query connector_configs for all active connectors
+  // Query connections for all active connectors
   const connectorsResult = await db.query(
     `
-    SELECT connector_type, credentials
-    FROM connector_configs
-    WHERE workspace_id = $1 AND status = 'connected'
+    SELECT connector_name, credentials
+    FROM connections
+    WHERE workspace_id = $1 AND status = 'healthy'
     `,
     [workspaceId]
   );
@@ -99,7 +99,7 @@ export async function provisionConnections(
   });
 
   for (const connector of connectorsResult.rows) {
-    const connectorType = connector.connector_type;
+    const connectorType = connector.connector_name;
 
     try {
       // Check if we have a mapping for this connector
@@ -253,12 +253,12 @@ export async function refreshConnection(
       // Ensure AP project exists
       const apProjectId = await ensureAPProject(workspaceId, apClient, db);
 
-      // Update connector_configs with new credentials
+      // Update connections with new credentials
       await db.query(
         `
-        UPDATE connector_configs
+        UPDATE connections
         SET credentials = $1
-        WHERE workspace_id = $2 AND connector_type = $3
+        WHERE workspace_id = $2 AND connector_name = $3
         `,
         [JSON.stringify(newCredentials), workspaceId, connectorType]
       );
