@@ -777,9 +777,13 @@ async function syncActivities(
   );
   const contactIdMap = new Map(contactResult.rows.map(r => [r.source_id, r.id]));
 
+  // For initial sync (since = null), limit to last 6 months to prevent pulling millions of activities
+  // Salesforce orgs can have huge activity volumes - this is a safety measure
+  const activitySince = since || new Date(Date.now() - 180 * 24 * 60 * 60 * 1000); // 6 months
+
   const [tasks, events] = await Promise.all([
-    client.getTasks(undefined, undefined, since || undefined),
-    client.getEvents(undefined, undefined, since || undefined),
+    client.getTasks(undefined, undefined, activitySince),
+    client.getEvents(undefined, undefined, activitySince),
   ]);
 
   let tasksSynced = 0;

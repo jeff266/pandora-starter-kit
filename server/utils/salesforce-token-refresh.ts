@@ -107,8 +107,25 @@ export async function refreshToken(
 
     return newCredentials;
   } catch (error) {
-    logger.error('Token refresh failed', { workspaceId, error });
-    throw new Error(`Failed to refresh Salesforce token: ${(error as Error).message}`);
+    const errorMessage = (error as Error).message || String(error);
+    logger.error('Token refresh failed', { workspaceId, error: errorMessage });
+
+    // Check if refresh token is expired (INVALID_GRANT error)
+    if (errorMessage.includes('invalid_grant') || errorMessage.includes('INVALID_GRANT')) {
+      logger.warn('Refresh token expired, marking connection as auth_expired', { workspaceId });
+
+      // Mark connection as auth_expired
+      await query(
+        `UPDATE connections
+         SET status = 'auth_expired', error_message = 'Refresh token expired. Re-authentication required.', updated_at = NOW()
+         WHERE workspace_id = $1 AND connector_name = 'salesforce'`,
+        [workspaceId]
+      );
+
+      throw new Error('Salesforce refresh token expired. Please reconnect your Salesforce account.');
+    }
+
+    throw new Error(`Failed to refresh Salesforce token: ${errorMessage}`);
   }
 }
 

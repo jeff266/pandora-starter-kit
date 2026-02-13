@@ -11,6 +11,8 @@ import {
   transformAccount,
   transformTask,
   transformEvent,
+  transformStageHistory,
+  normalizeSalesforceId,
 } from './transform.js';
 import type {
   NormalizedDeal,
@@ -82,6 +84,34 @@ export class SalesforceAdapter implements CRMAdapter {
       const result = await client.testConnection();
       const limits = client.getApiLimits();
 
+      // Calculate token freshness
+      const tokenIssuedAt = credentials.issuedAt
+        ? new Date(credentials.issuedAt)
+        : null;
+
+      let tokenAgeMinutes = null;
+      let tokenStatus = 'unknown';
+      let nextRefreshAt = null;
+
+      if (tokenIssuedAt) {
+        const ageMs = Date.now() - tokenIssuedAt.getTime();
+        tokenAgeMinutes = Math.floor(ageMs / (60 * 1000));
+
+        const REFRESH_THRESHOLD_MINUTES = 90;
+        const TOKEN_EXPIRY_MINUTES = 120;
+
+        if (tokenAgeMinutes < REFRESH_THRESHOLD_MINUTES) {
+          tokenStatus = 'fresh';
+          nextRefreshAt = new Date(tokenIssuedAt.getTime() + REFRESH_THRESHOLD_MINUTES * 60 * 1000);
+        } else if (tokenAgeMinutes < TOKEN_EXPIRY_MINUTES) {
+          tokenStatus = 'stale';
+          nextRefreshAt = new Date(); // Refresh on next sync
+        } else {
+          tokenStatus = 'expired';
+          nextRefreshAt = new Date(); // Immediate refresh needed
+        }
+      }
+
       return {
         healthy: result.success,
         details: {
@@ -91,6 +121,10 @@ export class SalesforceAdapter implements CRMAdapter {
           apiLimitsUsed: limits.used,
           apiLimitsTotal: limits.total,
           apiLimitsPercent: limits.percentUsed,
+          tokenAgeMinutes,
+          tokenStatus,
+          tokenIssuedAt: tokenIssuedAt?.toISOString() || null,
+          nextRefreshAt: nextRefreshAt?.toISOString() || null,
         },
       };
     } catch (error) {
@@ -372,6 +406,13 @@ export class SalesforceAdapter implements CRMAdapter {
     // Sync Activities (Tasks + Events)
     await this.syncActivities(client, workspaceId, null);
 
+    // Sync OpportunityFieldHistory (stage transitions)
+    await this.syncStageHistory(client, workspaceId, stageMap, null);
+
+    // File Import → Salesforce Upgrade: Transition file-imported deals to Salesforce source
+    // This runs automatically on first Salesforce sync to seamlessly upgrade workspaces
+    await this.runUpgradeIfNeeded(workspaceId);
+
     return { deals, contacts, accounts };
   }
 
@@ -442,6 +483,9 @@ export class SalesforceAdapter implements CRMAdapter {
 
       // Sync Activities (Tasks + Events) - incremental from lastSyncTime
       await this.syncActivities(client, workspaceId, lastSyncTime);
+
+      // Sync OpportunityFieldHistory (stage transitions) - incremental from lastSyncTime
+      await this.syncStageHistory(client, workspaceId, stageMap, lastSyncTime);
 
       // TODO: Check for deleted records using IsDeleted = true
 
@@ -839,13 +883,23 @@ export class SalesforceAdapter implements CRMAdapter {
         `SELECT source_id, id FROM deals WHERE workspace_id = $1 AND source = 'salesforce'`,
         [workspaceId]
       );
-      const dealIdMap = new Map(dealResult.rows.map(r => [r.source_id, r.id]));
+      // Normalize IDs to 15 chars for lookups (handles 15-char CSV IDs vs 18-char API IDs)
+      const dealIdMap = new Map(
+        dealResult.rows
+          .filter(r => r.source_id)
+          .map(r => [normalizeSalesforceId(r.source_id)!, r.id])
+      );
 
       const contactResult = await query<{ source_id: string; id: string }>(
         `SELECT source_id, id FROM contacts WHERE workspace_id = $1 AND source = 'salesforce'`,
         [workspaceId]
       );
-      const contactIdMap = new Map(contactResult.rows.map(r => [r.source_id, r.id]));
+      // Normalize IDs to 15 chars for lookups
+      const contactIdMap = new Map(
+        contactResult.rows
+          .filter(r => r.source_id)
+          .map(r => [normalizeSalesforceId(r.source_id)!, r.id])
+      );
 
       // Fetch contact roles from Salesforce
       const roles = await client.getOpportunityContactRoles();
@@ -860,8 +914,9 @@ export class SalesforceAdapter implements CRMAdapter {
       let skipped = 0;
 
       for (const role of roles) {
-        const dealId = dealIdMap.get(role.OpportunityId);
-        const contactId = contactIdMap.get(role.ContactId);
+        // Normalize IDs before lookup (Salesforce API returns 18-char, DB may have 15-char from CSV)
+        const dealId = dealIdMap.get(normalizeSalesforceId(role.OpportunityId)!);
+        const contactId = contactIdMap.get(normalizeSalesforceId(role.ContactId)!);
 
         if (!dealId || !contactId) {
           skipped++;
@@ -902,13 +957,23 @@ export class SalesforceAdapter implements CRMAdapter {
         `SELECT source_id, id FROM deals WHERE workspace_id = $1 AND source = 'salesforce'`,
         [workspaceId]
       );
-      const dealIdMap = new Map(dealResult.rows.map(r => [r.source_id, r.id]));
+      // Normalize IDs to 15 chars for lookups (handles 15-char CSV IDs vs 18-char API IDs)
+      const dealIdMap = new Map(
+        dealResult.rows
+          .filter(r => r.source_id)
+          .map(r => [normalizeSalesforceId(r.source_id)!, r.id])
+      );
 
       const contactResult = await query<{ source_id: string; id: string }>(
         `SELECT source_id, id FROM contacts WHERE workspace_id = $1 AND source = 'salesforce'`,
         [workspaceId]
       );
-      const contactIdMap = new Map(contactResult.rows.map(r => [r.source_id, r.id]));
+      // Normalize IDs to 15 chars for lookups
+      const contactIdMap = new Map(
+        contactResult.rows
+          .filter(r => r.source_id)
+          .map(r => [normalizeSalesforceId(r.source_id)!, r.id])
+      );
 
       // Fetch tasks and events in parallel
       const [tasks, events] = await Promise.all([
@@ -1010,6 +1075,90 @@ export class SalesforceAdapter implements CRMAdapter {
     } catch (error) {
       // Don't fail overall sync if activities fail - they're enrichment, not core
       logger.warn('[Salesforce Adapter] Activity sync failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
+   * Sync OpportunityFieldHistory to deal_stage_history table
+   * Gracefully handles case where Field History Tracking is not enabled
+   */
+  private async syncStageHistory(
+    client: SalesforceClient,
+    workspaceId: string,
+    stageMap: Map<string, SalesforceStage>,
+    since: Date | null
+  ): Promise<void> {
+    try {
+      // Build lookup map from Salesforce Opportunity ID -> Pandora deal UUID
+      const dealResult = await query<{ source_id: string; id: string }>(
+        `SELECT source_id, id FROM deals WHERE workspace_id = $1 AND source = 'salesforce'`,
+        [workspaceId]
+      );
+      const dealIdMap = new Map(dealResult.rows.map(r => [r.source_id, r.id]));
+
+      // Fetch OpportunityFieldHistory records
+      const historyRecords = await client.getOpportunityFieldHistory(since || undefined);
+
+      if (historyRecords.length === 0) {
+        logger.info('[Salesforce Adapter] No stage history records to sync');
+        return;
+      }
+
+      // Transform to StageChange objects
+      const transitions = transformStageHistory(historyRecords, workspaceId, dealIdMap, stageMap);
+
+      if (transitions.length === 0) {
+        logger.info('[Salesforce Adapter] No stage transitions after transformation (no matching deals)');
+        return;
+      }
+
+      // Record stage changes using shared utility
+      const { recordStageChanges } = await import('../hubspot/stage-tracker.js');
+      const recorded = await recordStageChanges(transitions, 'salesforce_history');
+
+      logger.info('[Salesforce Adapter] Synced stage history', {
+        historyRecords: historyRecords.length,
+        transitions: transitions.length,
+        recorded,
+      });
+    } catch (error) {
+      // Don't fail overall sync if stage history fails
+      // This is expected if Field History Tracking is not enabled for StageName
+      logger.warn('[Salesforce Adapter] Stage history sync failed (this is normal if Field History Tracking is not enabled)', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
+   * Run file import → Salesforce upgrade if needed
+   * Automatically transitions CSV-imported deals to Salesforce source on first sync
+   */
+  private async runUpgradeIfNeeded(workspaceId: string): Promise<void> {
+    try {
+      const { transitionToApiSync, hasTransitioned } = await import('../import/upgrade.js');
+
+      // Check if upgrade already completed
+      if (await hasTransitioned(workspaceId)) {
+        logger.debug('[Salesforce Adapter] Upgrade already completed, skipping', { workspaceId });
+        return;
+      }
+
+      // Run upgrade
+      const result = await transitionToApiSync(workspaceId);
+
+      if (result.matchedByExternalId > 0) {
+        logger.info('[Salesforce Adapter] File import upgrade completed', {
+          matchedDeals: result.matchedByExternalId,
+          unmatchedDeals: result.unmatchedDeals,
+          stageHistoryTransferred: result.stageHistoryTransferred,
+        });
+      }
+    } catch (error) {
+      // Don't fail overall sync if upgrade fails
+      logger.warn('[Salesforce Adapter] File import upgrade failed', {
         error: error instanceof Error ? error.message : String(error),
       });
     }

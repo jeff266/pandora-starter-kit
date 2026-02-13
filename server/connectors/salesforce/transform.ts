@@ -12,6 +12,34 @@ import {
   sanitizeInteger,
   sanitizeText as sanitizeTextField,
 } from '../../utils/field-sanitizer.js';
+
+// ============================================================================
+// Salesforce ID Normalization
+// ============================================================================
+
+/**
+ * Normalize Salesforce ID for comparison
+ *
+ * Salesforce IDs come in two formats:
+ * - 15-character (case-sensitive, from CSV exports/reports)
+ * - 18-character (case-insensitive, from API with checksum suffix)
+ *
+ * The first 15 characters are identical in both formats.
+ * Always normalize to 15 characters before comparison to avoid mismatches.
+ *
+ * Example:
+ * - 15-char: 006Dn00000A1bcd
+ * - 18-char: 006Dn00000A1bcdEFG (same first 15 chars)
+ *
+ * @param id Salesforce ID (15 or 18 characters)
+ * @returns Normalized 15-character ID for comparison
+ */
+export function normalizeSalesforceId(id: string | null | undefined): string | null {
+  if (!id) return null;
+  // Strip to 15 chars for comparison (first 15 are the same in both formats)
+  return id.substring(0, 15);
+}
+
 import type {
   SalesforceOpportunity,
   SalesforceContact,
@@ -673,7 +701,8 @@ export function transformTask(
   if (task.WhatId) {
     // WhatId starting with '006' is Opportunity
     if (task.WhatId.startsWith('006')) {
-      dealId = dealIdMap.get(task.WhatId) || null;
+      // Normalize ID before lookup (handles 15-char vs 18-char IDs)
+      dealId = dealIdMap.get(normalizeSalesforceId(task.WhatId)!) || null;
     }
     // WhatId starting with '001' is Account - we don't have accountIdMap yet, skip for now
   }
@@ -681,7 +710,8 @@ export function transformTask(
   if (task.WhoId) {
     // WhoId starting with '003' is Contact
     if (task.WhoId.startsWith('003')) {
-      contactId = contactIdMap.get(task.WhoId) || null;
+      // Normalize ID before lookup
+      contactId = contactIdMap.get(normalizeSalesforceId(task.WhoId)!) || null;
     }
   }
 
@@ -735,14 +765,16 @@ export function transformEvent(
   if (event.WhatId) {
     // WhatId starting with '006' is Opportunity
     if (event.WhatId.startsWith('006')) {
-      dealId = dealIdMap.get(event.WhatId) || null;
+      // Normalize ID before lookup (handles 15-char vs 18-char IDs)
+      dealId = dealIdMap.get(normalizeSalesforceId(event.WhatId)!) || null;
     }
   }
 
   if (event.WhoId) {
     // WhoId starting with '003' is Contact
     if (event.WhoId.startsWith('003')) {
-      contactId = contactIdMap.get(event.WhoId) || null;
+      // Normalize ID before lookup
+      contactId = contactIdMap.get(normalizeSalesforceId(event.WhoId)!) || null;
     }
   }
 
@@ -779,4 +811,154 @@ export function transformEvent(
       end_time: event.EndDateTime,
     },
   };
+}
+
+/**
+ * Normalize a Salesforce stage name to a standard category
+ * Uses stage metadata (IsClosed, IsWon, ForecastCategoryName, SortOrder) if available
+ * Falls back to text-based pattern matching if metadata is unavailable
+ */
+export function normalizeSalesforceStageName(
+  stageName: string | null,
+  stageMap: Map<string, SalesforceStage>
+): string | null {
+  if (!stageName) return null;
+
+  // Try to find stage in metadata
+  const stage = stageMap.get(stageName);
+
+  if (stage) {
+    // Use same normalization logic as transformOpportunity
+    if (stage.IsClosed && stage.IsWon) {
+      return 'closed_won';
+    } else if (stage.IsClosed && !stage.IsWon) {
+      return 'closed_lost';
+    } else {
+      switch (stage.ForecastCategoryName) {
+        case 'Omitted':
+          return 'awareness';
+        case 'Pipeline':
+          return 'qualification';
+        case 'Best Case':
+          return 'evaluation';
+        case 'Commit':
+          return 'decision';
+        default: {
+          // Calculate position-based normalization
+          const totalStages = Array.from(stageMap.values()).filter(s => !s.IsClosed).length;
+          const percentThrough = totalStages > 0 ? stage.SortOrder / totalStages : 0;
+
+          if (percentThrough < 0.33) return 'qualification';
+          if (percentThrough < 0.66) return 'evaluation';
+          return 'decision';
+        }
+      }
+    }
+  }
+
+  // Fallback: text-based pattern matching (for historical stages that may no longer exist)
+  const normalized = stageName.toLowerCase().trim();
+
+  if (normalized.includes('closed') && normalized.includes('won')) return 'closed_won';
+  if (normalized.includes('closed') && normalized.includes('lost')) return 'closed_lost';
+  if (normalized.includes('contract') || normalized.includes('negotiation')) return 'decision';
+  if (normalized.includes('proposal') || normalized.includes('quote')) return 'evaluation';
+  if (normalized.includes('demo') || normalized.includes('presentation')) return 'evaluation';
+  if (normalized.includes('qualified') || normalized.includes('discovery')) return 'qualification';
+  if (normalized.includes('prospecting') || normalized.includes('lead')) return 'qualification';
+
+  // Default fallback
+  return 'pipeline';
+}
+
+/**
+ * Transform Salesforce OpportunityFieldHistory records into StageChange objects
+ * Groups history records by OpportunityId and builds transition sequences
+ */
+export function transformStageHistory(
+  historyRecords: SalesforceOpportunityFieldHistory[],
+  workspaceId: string,
+  dealIdMap: Map<string, string>, // Map from Salesforce Opportunity ID -> Pandora deal UUID
+  stageMap: Map<string, SalesforceStage>
+): Array<{
+  dealId: string;
+  dealSourceId: string;
+  workspaceId: string;
+  fromStage: string | null;
+  fromStageNormalized: string | null;
+  toStage: string;
+  toStageNormalized: string | null;
+  changedAt: Date;
+  durationMs: number | null;
+}> {
+  if (historyRecords.length === 0) return [];
+
+  // Group history by OpportunityId
+  const historyByOpp = new Map<string, SalesforceOpportunityFieldHistory[]>();
+
+  for (const record of historyRecords) {
+    const existing = historyByOpp.get(record.OpportunityId) || [];
+    existing.push(record);
+    historyByOpp.set(record.OpportunityId, existing);
+  }
+
+  const transitions: Array<{
+    dealId: string;
+    dealSourceId: string;
+    workspaceId: string;
+    fromStage: string | null;
+    fromStageNormalized: string | null;
+    toStage: string;
+    toStageNormalized: string | null;
+    changedAt: Date;
+    durationMs: number | null;
+  }> = [];
+
+  // Process each opportunity's stage history
+  for (const [oppId, records] of historyByOpp.entries()) {
+    // Normalize ID before lookup (handles 15-char vs 18-char IDs)
+    const dealId = dealIdMap.get(normalizeSalesforceId(oppId)!);
+    if (!dealId) {
+      // Skip opportunities that don't exist in our deals table
+      continue;
+    }
+
+    // Sort chronologically (should already be sorted by query, but ensure it)
+    const sorted = [...records].sort(
+      (a, b) => new Date(a.CreatedDate).getTime() - new Date(b.CreatedDate).getTime()
+    );
+
+    for (let i = 0; i < sorted.length; i++) {
+      const record = sorted[i];
+      const prevRecord = i > 0 ? sorted[i - 1] : null;
+
+      // Skip if NewValue is null (shouldn't happen, but be safe)
+      if (!record.NewValue) continue;
+
+      // Skip if stage didn't actually change
+      if (prevRecord && prevRecord.NewValue === record.NewValue) continue;
+
+      // Calculate duration in previous stage
+      let durationMs: number | null = null;
+      if (prevRecord) {
+        const prevTime = new Date(prevRecord.CreatedDate).getTime();
+        const currentTime = new Date(record.CreatedDate).getTime();
+        durationMs = currentTime - prevTime;
+      }
+
+      transitions.push({
+        dealId,
+        dealSourceId: oppId,
+        workspaceId,
+        fromStage: record.OldValue,
+        fromStageNormalized: normalizeSalesforceStageName(record.OldValue, stageMap),
+        toStage: record.NewValue,
+        toStageNormalized: normalizeSalesforceStageName(record.NewValue, stageMap),
+        changedAt: new Date(record.CreatedDate),
+        durationMs,
+      });
+    }
+  }
+
+  return transitions;
 }

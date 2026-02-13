@@ -142,6 +142,15 @@ export interface SalesforceLead {
   [key: string]: unknown;
 }
 
+export interface SalesforceOpportunityFieldHistory {
+  OpportunityId: string;
+  Field: string;                  // Field name that changed (we filter for 'StageName')
+  OldValue: string | null;        // Previous stage name (null for first stage)
+  NewValue: string | null;        // New stage name
+  CreatedDate: string;            // ISO datetime when the change occurred
+  CreatedById: string;            // User who made the change
+}
+
 // ============================================================================
 // Salesforce Metadata
 // ============================================================================

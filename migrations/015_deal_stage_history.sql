@@ -16,6 +16,9 @@ CREATE TABLE IF NOT EXISTS deal_stage_history (
     -- 'sync_detection' = caught during incremental sync
     -- 'hubspot_history' = backfilled from HubSpot property history API
     -- 'salesforce_history' = backfilled from Salesforce field history
+    -- 'file_import_diff' = captured from CSV re-upload snapshot diff
+    -- 'file_import_new' = new deal from CSV upload
+    -- 'file_import_migrated' = file import history migrated after Salesforce upgrade
     -- 'manual' = manually corrected
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -55,7 +58,7 @@ COMMENT ON COLUMN deal_stage_history.duration_in_previous_stage_ms IS
   'Milliseconds spent in from_stage (NULL if unknown)';
 
 COMMENT ON COLUMN deal_stage_history.source IS
-  'How this transition was recorded: sync_detection, hubspot_history, salesforce_history, manual';
+  'How this transition was recorded: sync_detection, hubspot_history, salesforce_history, file_import_diff, file_import_new, file_import_migrated, manual';
 
 COMMENT ON COLUMN deals.previous_stage IS
   'Cached previous stage for sync detection (avoids querying stage_history)';

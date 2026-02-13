@@ -584,6 +584,44 @@ export class SalesforceClient {
     }
   }
 
+  /**
+   * Get OpportunityFieldHistory records for stage changes
+   * @param since - Only fetch history since this date (incremental sync)
+   * @returns Array of OpportunityFieldHistory records where Field = 'StageName'
+   */
+  async getOpportunityFieldHistory(since?: Date): Promise<SalesforceOpportunityFieldHistory[]> {
+    // OpportunityFieldHistory tracks changes to Opportunity fields
+    // We filter for Field = 'StageName' to get stage transitions only
+    let soql = `SELECT OpportunityId, Field, OldValue, NewValue, CreatedDate, CreatedById
+                FROM OpportunityFieldHistory
+                WHERE Field = 'StageName'`;
+
+    if (since) {
+      soql += ` AND CreatedDate >= ${since.toISOString()}`;
+    }
+
+    soql += ` ORDER BY OpportunityId, CreatedDate ASC`;
+
+    try {
+      return await this.queryAll<SalesforceOpportunityFieldHistory>(soql);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      // Graceful fallback: Field History Tracking may not be enabled for StageName
+      if (
+        errorMessage.includes('No such column') ||
+        errorMessage.includes('sObject type') ||
+        errorMessage.includes('INVALID_FIELD')
+      ) {
+        logger.warn('[Salesforce] OpportunityFieldHistory unavailable (Field History Tracking may not be enabled for StageName)');
+        return [];
+      }
+
+      logger.error('[Salesforce] OpportunityFieldHistory query failed', { error });
+      return [];
+    }
+  }
+
   // ==========================================================================
   // Metadata
   // ==========================================================================

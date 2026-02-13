@@ -952,4 +952,43 @@ router.delete('/:id/import/stage-mapping/:rawStage', async (req, res) => {
   }
 });
 
+/**
+ * Get file import → Salesforce upgrade status
+ * GET /import/:workspaceId/upgrade-status
+ */
+router.get('/:workspaceId/upgrade-status', async (req, res) => {
+  const { workspaceId } = req.params;
+
+  try {
+    const { getTransitionStatus, getOrphanedDeals } = await import('../import/upgrade.js');
+
+    const status = await getTransitionStatus(workspaceId);
+
+    if (!status) {
+      return res.json({
+        hasTransitioned: false,
+        orphanedDeals: [],
+      });
+    }
+
+    const orphanedDeals = await getOrphanedDeals(workspaceId);
+
+    return res.json({
+      hasTransitioned: true,
+      transition: status,
+      orphanedDeals: orphanedDeals.map(d => ({
+        id: d.id,
+        externalId: d.source_id,
+        name: d.name,
+        stage: d.stage,
+        amount: d.amount,
+        owner: d.owner,
+      })),
+    });
+  } catch (err) {
+    console.error('[Import] Get upgrade status error:', err);
+    return res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to get upgrade status' });
+  }
+});
+
 export default router;
