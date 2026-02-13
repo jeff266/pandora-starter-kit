@@ -1,0 +1,33 @@
+ ICP Discovery (validate enrichment pipeline)               
+                                                                       
+  Pros:                                                                
+  - Shows the full enrichment pipeline end-to-end                      
+  - Real customer ICP output you can show                              
+  - Validates contact role resolution, custom field discovery,         
+  conversation integration                                             
+  - Strategic value (informs targeting, messaging, product roadmap)    
+                                                                       
+  What to test:                                                        
+  1. Run on real customer data with at least 30 closed deals           
+  2. Verify contact roles are resolved correctly                       
+  3. Check persona clustering quality                                  
+  4. If conversation data available, validate conversation intelligence
+   tier                                                                
+  5. Export the ICP report - this is a real deliverable you can show   
+                                                                       
+  ---                                                                  
+  My Honest Recommendation                                             
+                                                                       
+  Do ICP Discovery first because:                                      
+  1. It validates your entire enrichment pipeline (contact roles,      
+  custom fields, conversations)                                        
+  2. You get a real ICP report you can show to stakeholders            
+  3. It's more impressive as a demo - "Here's who you actually sell to 
+  successfully"                                                        
+  4. Rep Scorecard is easier to test later (just needs deals + quotas) 
+                                                                       
+  Time estimate:                                                       
+  - ICP Discovery: 2-3 hours (run on real data, validate output,       
+  iterate on findings)                                                 
+  - Rep Scorecard: 1-2 hours (verify graceful degradation, test        
+  coaching classifications)  
