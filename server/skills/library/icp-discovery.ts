@@ -22,6 +22,7 @@ export const icpDiscoverySkill: SkillDefinition = {
   version: '1.0.0',
   category: 'intelligence',
   tier: 'claude',
+  slackTemplate: 'icp-discovery',
 
   requiredTools: ['resolveContactRoles', 'discoverICP'],
   requiredContext: [],

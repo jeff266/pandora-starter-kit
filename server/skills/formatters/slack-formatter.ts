@@ -29,6 +29,8 @@ export function formatForSlack(result: SkillResult, skill: SkillDefinition): Sla
     return formatDataQualityAudit(result);
   } else if (skill.slackTemplate === 'pipeline-coverage') {
     return formatPipelineCoverage(result);
+  } else if (skill.slackTemplate === 'icp-discovery') {
+    return formatICPDiscovery(result);
   }
 
   // Generic formatter fallback
@@ -920,6 +922,147 @@ function parseTopActions(text: string): string[] {
   }
 
   return actions.slice(0, 3);
+}
+
+/**
+ * ICP Discovery specific formatter
+ */
+export function formatICPDiscovery(result: SkillResult): SlackBlock[] {
+  const blocks: SlackBlock[] = [];
+
+  blocks.push({
+    type: 'header',
+    text: {
+      type: 'plain_text',
+      text: '🎯 ICP Discovery Report',
+      emoji: true,
+    },
+  });
+
+  const completedAt = result.completedAt || new Date();
+  blocks.push({
+    type: 'context',
+    elements: [
+      {
+        type: 'mrkdwn',
+        text: `${getStatusEmoji(result.status)} Completed <!date^${Math.floor(completedAt.getTime() / 1000)}^{date_short_pretty} at {time}|${completedAt.toISOString()}>`,
+      },
+    ],
+  });
+
+  blocks.push({ type: 'divider' });
+
+  const report = typeof result.output === 'string'
+    ? result.output
+    : (result.output as any)?.report || '';
+
+  const sections = parseICPReportSections(report);
+
+  if (sections.summary) {
+    appendSectionBlocks(blocks, '📋 ICP Summary', markdownToSlack(sections.summary), 2800);
+  }
+
+  if (sections.personas) {
+    appendSectionBlocks(blocks, '👤 Winning Personas', markdownToSlack(sections.personas), 2800);
+  }
+
+  if (sections.buyingCommittee) {
+    blocks.push({ type: 'divider' });
+    appendSectionBlocks(blocks, '🏛️ Ideal Buying Committee', markdownToSlack(sections.buyingCommittee), 2800);
+  }
+
+  if (sections.sweetSpot) {
+    appendSectionBlocks(blocks, '🏢 Company Sweet Spot', markdownToSlack(sections.sweetSpot), 2800);
+  }
+
+  blocks.push({ type: 'divider' });
+
+  if (sections.channels) {
+    appendSectionBlocks(blocks, '📣 Acquisition Channels', markdownToSlack(sections.channels), 2800);
+  }
+
+  if (sections.customFields) {
+    appendSectionBlocks(blocks, '🔧 Custom Field Discoveries', markdownToSlack(sections.customFields), 2800);
+  }
+
+  if (sections.conversationIntel) {
+    blocks.push({ type: 'divider' });
+    appendSectionBlocks(blocks, '🎙️ Conversation Intelligence', markdownToSlack(sections.conversationIntel), 2800);
+  }
+
+  if (sections.gaps) {
+    blocks.push({ type: 'divider' });
+    appendSectionBlocks(blocks, '⚡ Gaps & Recommendations', markdownToSlack(sections.gaps), 2800);
+  }
+
+  if (sections.dataQuality) {
+    appendSectionBlocks(blocks, '📊 Data Quality', markdownToSlack(sections.dataQuality), 2800);
+  }
+
+  blocks.push({ type: 'divider' });
+
+  const duration = result.totalDuration_ms || 0;
+  const claudeTokens = result.totalTokenUsage?.claude || 0;
+  const deepseekTokens = result.totalTokenUsage?.deepseek || 0;
+
+  blocks.push({
+    type: 'context',
+    elements: [
+      {
+        type: 'mrkdwn',
+        text: `Duration: ${formatDuration(duration)} | Tokens: Claude ${formatTokenCount(claudeTokens)}, DeepSeek ${formatTokenCount(deepseekTokens)} | Run ID: \`${result.runId}\``,
+      },
+    ],
+  });
+
+  return blocks;
+}
+
+interface ICPReportSections {
+  summary: string;
+  personas: string;
+  buyingCommittee: string;
+  sweetSpot: string;
+  channels: string;
+  customFields: string;
+  conversationIntel: string;
+  gaps: string;
+  dataQuality: string;
+}
+
+function parseICPReportSections(report: string): Partial<ICPReportSections> {
+  if (!report) return {};
+
+  const sections: Partial<ICPReportSections> = {};
+  const allSections = report.split(/(?=^## )/m).filter(s => s.trim());
+
+  for (const section of allSections) {
+    const firstLine = section.split('\n')[0].toLowerCase();
+    const body = section.replace(/^##[^\n]*\n/, '').trim();
+    if (!body) continue;
+
+    if (firstLine.includes('icp summary')) {
+      sections.summary = body;
+    } else if (firstLine.includes('winning persona')) {
+      sections.personas = body;
+    } else if (firstLine.includes('buying committee')) {
+      sections.buyingCommittee = body;
+    } else if (firstLine.includes('company sweet spot') || firstLine.includes('sweet spot')) {
+      sections.sweetSpot = body;
+    } else if (firstLine.includes('acquisition channel') || firstLine.includes('channel insight')) {
+      sections.channels = body;
+    } else if (firstLine.includes('custom field')) {
+      sections.customFields = body;
+    } else if (firstLine.includes('conversation intelligence') || firstLine.includes('conversation intel')) {
+      sections.conversationIntel = body;
+    } else if (firstLine.includes('gap') && firstLine.includes('recommendation')) {
+      sections.gaps = body;
+    } else if (firstLine.includes('data quality') || firstLine.includes('data limitation')) {
+      sections.dataQuality = body;
+    }
+  }
+
+  return sections;
 }
 
 /**
