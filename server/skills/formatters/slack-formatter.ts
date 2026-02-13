@@ -924,6 +924,106 @@ function parseTopActions(text: string): string[] {
   return actions.slice(0, 3);
 }
 
+interface ICPReportSections {
+  summary: string;
+  personas: string;
+  buyingCommittee: string;
+  sweetSpot: string;
+  channels: string;
+  customFields: string;
+  conversationIntel: string;
+  gaps: string;
+  dataQuality: string;
+}
+
+/**
+ * Extract TL;DR summary from ICP Discovery sections
+ */
+function extractICPTLDR(sections: Partial<ICPReportSections>, stepData?: any): string[] {
+  const tldr: string[] = [];
+
+  // Extract top ICP from sweet spot section
+  if (sections.sweetSpot) {
+    const topICPMatch = sections.sweetSpot.match(/^-\s*\*\*([^:]+):\*\*\s*([^(]+)\(([^)]+)\)/m);
+    if (topICPMatch) {
+      const industry = topICPMatch[1].trim();
+      const winRate = topICPMatch[2].match(/(\d+\.?\d*)%/)?.[1];
+      const deals = topICPMatch[3].match(/(\d+)\s+deal/)?.[1];
+      tldr.push(`✅ *Top ICP:* ${industry} (${winRate}% win rate, ${deals} deals analyzed)`);
+    } else {
+      // Fallback: extract first industry mention with win rate
+      const fallbackMatch = sections.sweetSpot.match(/([A-Z][^:\n]+?):\s*(\d+\.?\d*)%\s+win\s+rate/);
+      if (fallbackMatch) {
+        tldr.push(`✅ *Top ICP:* ${fallbackMatch[1].trim()} (${fallbackMatch[2]}% win rate)`);
+      }
+    }
+  }
+
+  // Extract segments to avoid from sweet spot or gaps
+  const avoidSegments: string[] = [];
+  if (sections.sweetSpot) {
+    const avoidSection = sections.sweetSpot.match(/Avoid[:\s]*\n([\s\S]*?)(?=\n\n|$)/i);
+    if (avoidSection) {
+      const avoidMatches = Array.from(avoidSection[1].matchAll(/^-\s*([^:]+):\s*(\d+)%\s+win\s+rate/gm));
+      for (const match of avoidMatches) {
+        if (match[2] === '0' || parseInt(match[2]) < 15) {
+          avoidSegments.push(`${match[1].trim()} (${match[2]}%)`);
+        }
+      }
+    }
+  }
+  if (avoidSegments.length > 0) {
+    tldr.push(`❌ *Avoid:* ${avoidSegments.slice(0, 3).join(', ')}`);
+  }
+
+  // Extract top persona insight
+  if (sections.personas && !sections.personas.includes('SKIPPED')) {
+    const topPersonaMatch = sections.personas.match(/1\.\s*\*\*([^—]+)—\s*([0-9.]+)x\s+lift/);
+    if (topPersonaMatch) {
+      const persona = topPersonaMatch[1].trim();
+      const lift = topPersonaMatch[2];
+      tldr.push(`🎯 *Best persona:* ${persona} (${lift}x lift vs baseline)`);
+    }
+  }
+
+  // Extract top channel insight
+  if (sections.channels) {
+    const topChannelMatch = sections.channels.match(/(?:1\.\s*|^-\s*)([^:]+):\s*(\d+\.?\d*)%\s+(?:close|win)\s+rate/m);
+    if (topChannelMatch) {
+      const channel = topChannelMatch[1].trim();
+      const rate = topChannelMatch[2];
+      tldr.push(`📣 *Best channel:* ${channel} (${rate}% close rate)`);
+    }
+  }
+
+  // Extract key action from gaps section
+  if (sections.gaps) {
+    const actionMatch = sections.gaps.match(/What Sales Should Do Differently[:\s]*\n\n1\.\s*([^:]+):\s*([^\n]+)/i);
+    if (actionMatch) {
+      const actionType = actionMatch[1].trim();
+      const actionDetail = actionMatch[2].trim().replace(/\.$/, '');
+      tldr.push(`⚡ *Action:* ${actionType} — ${actionDetail.substring(0, 80)}${actionDetail.length > 80 ? '...' : ''}`);
+    } else {
+      // Fallback: extract first numbered recommendation
+      const fallbackAction = sections.gaps.match(/^\d+\.\s*\*\*([^*]+)\*\*[:\s—-]\s*([^\n]+)/m);
+      if (fallbackAction) {
+        const action = fallbackAction[1].trim();
+        const detail = fallbackAction[2].trim().substring(0, 80);
+        tldr.push(`⚡ *Action:* ${action} — ${detail}${fallbackAction[2].length > 80 ? '...' : ''}`);
+      }
+    }
+  }
+
+  // Add data completeness note if persona data is missing
+  if (sections.personas && sections.personas.includes('SKIPPED')) {
+    tldr.push(`⚠️ *Note:* Upload contact data to unlock persona & buying committee analysis`);
+  } else if (sections.conversationIntel && sections.conversationIntel.includes('NO CONVERSATION DATA')) {
+    tldr.push(`⚠️ *Note:* Connect Gong/Fireflies to unlock conversation intelligence patterns`);
+  }
+
+  return tldr;
+}
+
 /**
  * ICP Discovery specific formatter
  */
@@ -950,13 +1050,26 @@ export function formatICPDiscovery(result: SkillResult): SlackBlock[] {
     ],
   });
 
-  blocks.push({ type: 'divider' });
-
   const report = typeof result.output === 'string'
     ? result.output
     : (result.output as any)?.report || '';
 
   const sections = parseICPReportSections(report);
+
+  // Add TL;DR summary at the top
+  const tldr = extractICPTLDR(sections, result.stepData);
+  if (tldr && tldr.length > 0) {
+    blocks.push({ type: 'divider' });
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*📌 TL;DR*\n${tldr.join('\n')}`,
+      },
+    });
+  }
+
+  blocks.push({ type: 'divider' });
 
   if (sections.summary) {
     appendSectionBlocks(blocks, '📋 ICP Summary', markdownToSlack(sections.summary), 2800);
@@ -1016,18 +1129,6 @@ export function formatICPDiscovery(result: SkillResult): SlackBlock[] {
   });
 
   return blocks;
-}
-
-interface ICPReportSections {
-  summary: string;
-  personas: string;
-  buyingCommittee: string;
-  sweetSpot: string;
-  channels: string;
-  customFields: string;
-  conversationIntel: string;
-  gaps: string;
-  dataQuality: string;
 }
 
 function parseICPReportSections(report: string): Partial<ICPReportSections> {
