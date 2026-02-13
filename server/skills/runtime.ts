@@ -21,7 +21,7 @@ import type {
   SkillStepResult,
 } from './types.js';
 import { getToolDefinition } from './tool-definitions.js';
-import { getContext } from '../context/index.js';
+import { getContext, getDataFreshness } from '../context/index.js';
 import {
   callLLM,
   assistantMessageFromResponse,
@@ -55,6 +55,7 @@ export class SkillRuntime {
     console.log(`[Skill Runtime] Starting ${skill.id} for workspace ${workspaceId}, runId: ${runId}`);
 
     const contextData = await getContext(workspaceId);
+    const dataFreshness = await getDataFreshness(workspaceId);
 
     // Merge skill timeConfig with runtime overrides from params
     const mergedTimeConfig = {
@@ -69,6 +70,7 @@ export class SkillRuntime {
       definitions: contextData?.definitions || {},
       operational_maturity: contextData?.operational_maturity || {},
       timeConfig: mergedTimeConfig,
+      dataFreshness,
     };
 
     const context: SkillExecutionContext = {

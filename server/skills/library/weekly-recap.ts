@@ -178,8 +178,16 @@ Return JSON with:
 Revenue Target: ${'$'}{{goals_and_targets.revenue_target}}
 Sales Cycle: {{business_model.sales_cycle_days}} days
 
+{{#if dataFreshness.isStale}}
+⚠️ DATA FRESHNESS: {{dataFreshness.staleCaveat}}
+{{/if}}
+
 This Week's Numbers:
+{{#if dataFreshness.hasActivities}}
 {{weekly_activity}}
+{{else}}
+Activity data not available (file import workspace). Activity metrics skipped.
+{{/if}}
 
 Current Pipeline:
 {{current_pipeline}}
@@ -190,8 +198,12 @@ Closed Won This Week:
 Closed Lost This Week:
 {{closed_lost}}
 
+{{#if dataFreshness.hasConversations}}
 Call Highlights:
 {{call_highlights}}
+{{else}}
+Conversation data not available (file import workspace). Call analysis skipped.
+{{/if}}
 
 Write a concise executive recap covering:
 
@@ -208,15 +220,23 @@ Write a concise executive recap covering:
    - Net pipeline change vs. last week
 
 3. ACTIVITY PULSE
+{{#if dataFreshness.hasActivities}}
    - Total activity this week (calls, emails, meetings)
    - Rep activity levels: who's active, any drops
    - Coverage: are key deals getting attention?
+{{else}}
+   - SKIP THIS SECTION (activity data not available for file imports)
+{{/if}}
 
 4. CALL THEMES
+{{#if dataFreshness.hasConversations}}
    - Primary themes from this week's conversations
    - Critical signals leadership should know
    - Competitive landscape updates
    - Buying signal trends
+{{else}}
+   - SKIP THIS SECTION (conversation data not available for file imports)
+{{/if}}
 
 5. NEXT WEEK PRIORITIES
    - What needs attention Monday morning

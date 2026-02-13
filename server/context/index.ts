@@ -1,4 +1,5 @@
 import { query } from '../db.js';
+import { differenceInDays, format } from 'date-fns';
 
 type ContextSection =
   | 'business_model'
@@ -180,4 +181,98 @@ export async function onboardWorkspace(
   );
 
   return result.rows[0];
+}
+
+/**
+ * Data Freshness for File Import Workspaces
+ *
+ * Tracks data source, staleness, and entity availability for graceful skill degradation.
+ */
+export interface DataFreshness {
+  source: 'file_import' | 'api_sync' | 'unknown';
+  lastUpdated: string | null;
+  daysSinceUpdate: number | null;
+  isStale: boolean;
+  hasDeals: boolean;
+  hasContacts: boolean;
+  hasAccounts: boolean;
+  hasActivities: boolean;
+  hasConversations: boolean;
+  hasStageHistory: boolean;
+  staleCaveat: string | null;
+}
+
+/**
+ * Get data freshness information for a workspace
+ */
+export async function getDataFreshness(workspaceId: string): Promise<DataFreshness> {
+  const importCheck = await query<{ created_at: string }>(
+    'SELECT created_at FROM import_batches WHERE workspace_id = $1 AND status = $2 ORDER BY created_at DESC LIMIT 1',
+    [workspaceId, 'applied']
+  );
+
+  const connectionCheck = await query<{ source: string; last_sync_at: string }>(
+    'SELECT source, last_sync_at FROM connections WHERE workspace_id = $1 ORDER BY last_sync_at DESC NULLS LAST LIMIT 1',
+    [workspaceId]
+  );
+
+  let source: 'file_import' | 'api_sync' | 'unknown' = 'unknown';
+  let lastUpdated: Date | null = null;
+
+  const hasImport = importCheck.rows.length > 0;
+  const hasConnection = connectionCheck.rows.length > 0;
+
+  if (hasImport && hasConnection) {
+    const importDate = new Date(importCheck.rows[0].created_at);
+    const syncDate = new Date(connectionCheck.rows[0].last_sync_at);
+    if (importDate > syncDate) {
+      source = 'file_import';
+      lastUpdated = importDate;
+    } else {
+      source = 'api_sync';
+      lastUpdated = syncDate;
+    }
+  } else if (hasImport) {
+    source = 'file_import';
+    lastUpdated = new Date(importCheck.rows[0].created_at);
+  } else if (hasConnection) {
+    source = 'api_sync';
+    lastUpdated = connectionCheck.rows[0].last_sync_at ? new Date(connectionCheck.rows[0].last_sync_at) : null;
+  }
+
+  const daysSinceUpdate = lastUpdated ? differenceInDays(new Date(), lastUpdated) : null;
+
+  const entityCounts = await query<{
+    deal_count: string;
+    contact_count: string;
+    account_count: string;
+    activity_count: string;
+    conversation_count: string;
+    stage_history_count: string;
+  }>(
+    'SELECT (SELECT COUNT(*) FROM deals WHERE workspace_id = $1) as deal_count, (SELECT COUNT(*) FROM contacts WHERE workspace_id = $1) as contact_count, (SELECT COUNT(*) FROM accounts WHERE workspace_id = $1) as account_count, (SELECT COUNT(*) FROM activities WHERE workspace_id = $1) as activity_count, (SELECT COUNT(*) FROM conversations WHERE workspace_id = $1) as conversation_count, (SELECT COUNT(*) FROM deal_stage_history WHERE workspace_id = $1) as stage_history_count',
+    [workspaceId]
+  );
+
+  const counts = entityCounts.rows[0];
+  const isStale = source === 'file_import' && (daysSinceUpdate === null || daysSinceUpdate > 14);
+
+  let staleCaveat: string | null = null;
+  if (isStale && lastUpdated) {
+    staleCaveat = 'Data was last imported ' + daysSinceUpdate + ' days ago (' + format(lastUpdated, 'MMM d, yyyy') + '). Insights may not reflect recent pipeline changes.';
+  }
+
+  return {
+    source,
+    lastUpdated: lastUpdated?.toISOString() || null,
+    daysSinceUpdate,
+    isStale,
+    hasDeals: parseInt(counts.deal_count) > 0,
+    hasContacts: parseInt(counts.contact_count) > 0,
+    hasAccounts: parseInt(counts.account_count) > 0,
+    hasActivities: parseInt(counts.activity_count) > 0,
+    hasConversations: parseInt(counts.conversation_count) > 0,
+    hasStageHistory: parseInt(counts.stage_history_count) > 0,
+    staleCaveat,
+  };
 }
