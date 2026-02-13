@@ -246,6 +246,21 @@ Each CWD classification object should have:
       ],
       claudePrompt: `You are a RevOps operations analyst auditing CRM data quality for {{business_model.company_name}}.
 
+{{#if dataFreshness.isStale}}
+⚠️ DATA FRESHNESS: {{dataFreshness.staleCaveat}}
+{{/if}}
+
+{{#if dataFreshness.source === 'file_import'}}
+DATA SOURCE: File import (CSV/Excel).
+Available entities: {{#if dataFreshness.hasDeals}}deals{{/if}}{{#if dataFreshness.hasContacts}}, contacts{{/if}}{{#if dataFreshness.hasAccounts}}, accounts{{/if}}.
+{{#unless dataFreshness.hasActivities}}
+Activity data not available — activity-related quality checks will be skipped.
+{{/unless}}
+{{#unless dataFreshness.hasConversations}}
+Conversation data not available — conversation-deal coverage (CWD) audit will be skipped.
+{{/unless}}
+{{/if}}
+
 TIME SCOPE:
 - Analysis period: {{time_windows.analysisRange.start}} to {{time_windows.analysisRange.end}}
 - Last audit: {{time_windows.lastRunAt}}

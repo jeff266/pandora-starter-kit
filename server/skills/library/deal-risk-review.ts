@@ -46,7 +46,7 @@ export const dealRiskReviewSkill: SkillDefinition = {
       outputKey: 'open_deals',
     },
 
-    // Step 2: Get recent conversations across all deals
+    // Step 2: Get recent conversations across all deals (returns empty if no conversation data)
     {
       id: 'get-recent-conversations',
       name: 'Get Recent Conversations',
@@ -60,7 +60,7 @@ export const dealRiskReviewSkill: SkillDefinition = {
       outputKey: 'recent_conversations',
     },
 
-    // Step 3: Extract call signals with DeepSeek
+    // Step 3: Extract call signals with DeepSeek (handles empty conversation array)
     {
       id: 'extract-call-signals',
       name: 'Extract Risk Signals from Call Transcripts',
@@ -68,8 +68,14 @@ export const dealRiskReviewSkill: SkillDefinition = {
       dependsOn: ['get-recent-conversations'],
       deepseekPrompt: `You are analyzing sales call transcripts for risk signals.
 
+{{#unless dataFreshness.hasConversations}}
+No conversation data available (file import workspace). Return empty JSON array: []
+{{/unless}}
+
+{{#if dataFreshness.hasConversations}}
 Conversations:
 {{recent_conversations}}
+{{/if}}
 
 Extract risk signals from these call transcripts. Look for:
 - Objections raised (pricing, features, timeline, budget)
@@ -124,18 +130,38 @@ Return valid JSON array of signals.`,
 Sales cycle expectation: {{business_model.sales_cycle_days}} days
 Stale threshold: {{goals_and_targets.thresholds.stale_deal_days}} days
 
+{{#if dataFreshness.isStale}}
+⚠️ DATA FRESHNESS: {{dataFreshness.staleCaveat}}
+{{/if}}
+
 Open Deals:
 {{open_deals}}
 
+{{#if dataFreshness.hasConversations}}
 Call Risk Signals Extracted:
 {{call_signals}}
+{{else}}
+NOTE: Conversation data not available (file import workspace). Call quality and sentiment signals skipped.
+{{/if}}
 
 For each deal, assess:
-1. Activity recency: Compare last_activity_date to sales cycle expectations
-2. Stakeholder coverage: Use tools to check if single-threaded or missing economic buyer
+1. Activity recency: {{#if dataFreshness.hasActivities}}Compare last_activity_date to sales cycle expectations{{else}}Use deal updated_at as proxy (activity data not available){{/if}}
+2. Stakeholder coverage: {{#if dataFreshness.hasContacts}}Use tools to check if single-threaded or missing economic buyer{{else}}Contact data not available - skip stakeholder analysis{{/if}}
 3. Velocity: Are they moving through stages at expected pace?
+{{#if dataFreshness.hasConversations}}
 4. Call signals: Match call_signals to dealId and factor into assessment
+{{else}}
+4. Call signals: SKIP (conversation data not available)
+{{/if}}
 5. Data quality: Missing critical fields that indicate lack of qualification?
+
+{{#unless dataFreshness.hasActivities}}
+IMPORTANT: Activity data not available. Use deal.updated_at as staleness proxy instead of last_activity_date.
+{{/unless}}
+
+{{#unless dataFreshness.hasContacts}}
+IMPORTANT: Contact data not available. Skip single-threading analysis.
+{{/unless}}
 
 You can call tools to get more details about any deal that looks concerning.
 

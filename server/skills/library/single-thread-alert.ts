@@ -64,6 +64,11 @@ export const singleThreadAlertSkill: SkillDefinition = {
       dependsOn: ['gather-threading-data', 'enrich-critical-deals'],
       deepseekPrompt: `You are a sales operations analyst. Classify each deal below to identify why it's single-threaded and recommend expansion actions.
 
+{{#unless dataFreshness.hasContacts}}
+IMPORTANT: Contact data not available (file import workspace). Return empty JSON array: []
+{{/unless}}
+
+{{#if dataFreshness.hasContacts}}
 For each deal, determine:
 1. risk_level: one of [critical, high, moderate, low]
 2. likely_cause: one of [early_stage_normal, champion_only, gatekeeper_block, rep_not_prospecting, small_org, transactional_deal]
@@ -90,7 +95,8 @@ Return valid JSON array with one object per deal:
   "likely_cause": "early_stage_normal | champion_only | gatekeeper_block | rep_not_prospecting | small_org | transactional_deal",
   "has_expansion_contacts": true | false,
   "recommended_action": "specific action for this deal"
-}`,
+}
+{{/if}}`,
       deepseekSchema: {
         type: 'array',
         items: {
@@ -134,6 +140,22 @@ Return valid JSON array with one object per deal:
       maxToolCalls: 5,
       claudePrompt: `You have pre-analyzed deal threading data for this workspace. All deals have been classified by contact coverage and expansion risk.
 
+{{#if dataFreshness.isStale}}
+⚠️ DATA FRESHNESS: {{dataFreshness.staleCaveat}}
+{{/if}}
+
+{{#unless dataFreshness.hasContacts}}
+CONTACT DATA NOT AVAILABLE: This workspace uses file-imported data without contacts.
+Single-thread analysis requires contact data to evaluate stakeholder coverage.
+
+Output a brief message:
+"Single-thread analysis skipped — contact data not yet imported for this workspace.
+Recommendation: Upload a contacts export (CSV/Excel) to identify single-threaded deals and reduce deal risk."
+
+Do not produce the full report. Stop here.
+{{/unless}}
+
+{{#if dataFreshness.hasContacts}}
 TIME SCOPE:
 - Analysis period: {{time_windows.analysisRange.start}} to {{time_windows.analysisRange.end}}
 - Last run: {{time_windows.lastRunAt}}
@@ -188,7 +210,8 @@ WORD BUDGET ENFORCEMENT:
 - {{output_budget.reportDepth}} report: {{output_budget.wordBudget}} words max
 - minimal: If <20% single-threaded and no critical deals, say "threading looks healthy" and stop
 - standard: Cover only sections with actionable items
-- detailed: Full coverage with specific examples and expansion playbook`,
+- detailed: Full coverage with specific examples and expansion playbook
+{{/if}}`,
       outputKey: 'threading_alert',
     },
   ],
