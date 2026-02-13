@@ -135,11 +135,11 @@ Stale threshold: {{goals_and_targets.thresholds.stale_deal_days}} days
 {{/if}}
 
 Open Deals:
-{{open_deals}}
+{{{json open_deals}}}
 
 {{#if dataFreshness.hasConversations}}
 Call Risk Signals Extracted:
-{{call_signals}}
+{{{json call_signals}}}
 {{else}}
 NOTE: Conversation data not available (file import workspace). Call quality and sentiment signals skipped.
 {{/if}}

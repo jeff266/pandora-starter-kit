@@ -80,7 +80,7 @@ Context:
 - Critical stages: evaluation, decision, negotiation
 
 CRITICAL DEALS (single-threaded in late stage OR above-average value):
-{{enriched_deals}}
+{{{json enriched_deals}}}
 
 SUMMARY STATS:
 - Total pipeline: {{threading_data.summary.totalOpenDeals}} deals
@@ -161,16 +161,16 @@ TIME SCOPE:
 - Last run: {{time_windows.lastRunAt}}
 
 THREADING SUMMARY:
-{{threading_data.summary}}
+{{{json threading_data.summary}}}
 
 BY STAGE:
-{{threading_data.byStage}}
+{{{json threading_data.byStage}}}
 
 BY OWNER:
-{{threading_data.byOwner}}
+{{{json threading_data.byOwner}}}
 
 CLASSIFIED DEALS (with expansion analysis):
-{{risk_classifications}}
+{{{json risk_classifications}}}
 
 REPORT PARAMETERS:
 - Depth: {{output_budget.reportDepth}}
