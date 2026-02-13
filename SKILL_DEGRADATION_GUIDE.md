@@ -261,23 +261,23 @@ Update remaining 12 skills for graceful degradation.
 - [x] Add `dataFreshness` to skill execution context
 - [x] Update weekly-recap as reference implementation
 
-### Phase 2: High-Priority Skills
-- [ ] Update deal-risk-review
-- [ ] Update single-thread-alert
-- [ ] Update data-quality-audit
+### Phase 2: High-Priority Skills ✅
+- [x] Update deal-risk-review
+- [x] Update single-thread-alert
+- [x] Update data-quality-audit
 
-### Phase 3: Medium-Priority Skills
-- [ ] Update icp-discovery
-- [ ] Update lead-scoring
-- [ ] Update contact-role-resolution
+### Phase 3: Medium-Priority Skills ✅
+- [x] Update icp-discovery
+- [x] Update lead-scoring
+- [x] Update contact-role-resolution
 
-### Phase 4: Low-Priority Skills
-- [ ] Update pipeline-hygiene (staleness fallback)
-- [ ] Update pipeline-coverage (staleness caveat)
-- [ ] Update forecast-rollup (file-import note)
-- [ ] Update pipeline-waterfall (stage history check)
-- [ ] Verify rep-scorecard (already done)
-- [ ] Update custom-field-discovery (staleness caveat)
+### Phase 4: Low-Priority Skills ✅
+- [x] Update pipeline-hygiene (staleness fallback)
+- [x] Update pipeline-coverage (staleness caveat)
+- [x] Update forecast-rollup (file-import note)
+- [x] Update pipeline-waterfall (stage history check)
+- [x] Verify rep-scorecard (already done)
+- [x] Update custom-field-discovery (staleness caveat)
 
 ### Phase 5: Testing
 - [ ] Test each skill with file-import workspace (no activities, conversations)
@@ -377,5 +377,6 @@ if (!dataFreshness.hasContacts) {
 
 ---
 
-**Status**: Foundation complete, 1/13 skills updated
-**Ready for**: Systematic skill updates + testing
+**Status**: ✅ ALL 13 SKILLS UPDATED
+**Completion**: Prompt 7 implementation complete
+**Next**: Phase 5 testing with file-import workspaces
