@@ -1,0 +1,57 @@
+Key Tests in Replit:                                 
+                                                       
+  1. Server Startup ✓                                  
+                                                       
+  npm run dev                                          
+  - Should start without import/syntax errors          
+  - Check for any initialization errors in logs        
+                                                       
+  2. Connector Operations (Most Critical)              
+                                                       
+  Test with an existing connected workspace:           
+  - Health checks: GET                                 
+  /api/workspaces/:id/connectors/hubspot/health        
+  - Sync operations: POST                              
+  /api/workspaces/:id/connectors/hubspot/sync          
+  - Connect flow: Try connecting a new connector       
+  - Test Gong, Fireflies, Salesforce if you have them  
+  configured                                           
+                                                       
+  3. Enrichment Config                                 
+                                                       
+  - GET /api/workspaces/:id/config/enrichment - Should 
+  return boolean indicators                            
+  - PUT /api/workspaces/:id/config/enrichment - Try    
+  updating an API key                                  
+                                                       
+  4. Token Refresh (If Salesforce is configured)       
+                                                       
+  - Trigger a Salesforce sync                          
+  - Verify token refresh works if credentials are      
+  expired                                              
+                                                       
+  5. Encryption Test Suite                             
+                                                       
+  CREDENTIAL_ENCRYPTION_KEY=your-key npx tsx           
+  server/scripts/test-encryption.ts                    
+  Should show: Tests Complete: 15 passed, 0 failed     
+                                                       
+  What to Watch For:                                   
+                                                       
+  ❌ Red flags:                                        
+  - Import errors on startup                           
+  - 500 errors on health checks                        
+  - "credentials not found" errors                     
+  - Type errors in logs                                
+                                                       
+  ✅ Good signs:                                       
+  - Server starts cleanly                              
+  - Existing connections show "connected/healthy"      
+  - Sync operations complete successfully              
+  - Enrichment config returns properly                 
+                                                       
+  If anything breaks, the error messages should be     
+  clear about which file/function has issues, and we   
+  can fix it quickly. The changes are isolated to      
+  credential access patterns, so any issues will       
+  surface immediately in connector operations. 

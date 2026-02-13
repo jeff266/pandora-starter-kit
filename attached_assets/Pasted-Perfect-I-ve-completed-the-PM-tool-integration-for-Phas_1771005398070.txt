@@ -1,0 +1,94 @@
+Perfect! I've completed the PM tool integration for  
+  Phase 1 tasks 4-7. Here's what was implemented:      
+                                                       
+  Completed Work                                       
+                                                       
+  1. Action Types (Task #48) ✅                        
+                                                       
+  Created server/actions/types.ts with:                
+  - ActionType enum including 8 ops-facing action types
+   (ops_process_fix, ops_system_config,                
+  ops_data_cleanup, etc.)                              
+  - isOpsAction() helper to check if action routes to  
+  PM tool                                              
+  - actionTypeToOpsCategory() to map action types to   
+  OpsCategory                                          
+                                                       
+  2. PM Task Service (Task #50) ✅                     
+                                                       
+  Created server/services/pm-task-service.ts with:     
+  - createPMTask() function that reads PM connector    
+  config from workspace settings                       
+  - Gets credentials from credential-store as          
+  pm_{connectorType}                                   
+  - Enriches work items with defaults (projectId,      
+  sectionId, labels)                                   
+  - Routes to appropriate PM adapter (Monday.com       
+  implemented)                                         
+  - Stores task references in pm_task_references table 
+                                                       
+  3. PM Action Helpers (Task #51) ✅                   
+                                                       
+  Created server/skills/pm-actions.ts with:            
+  - generateDataQualityWorkItems() to convert data     
+  quality findings to PM tasks                         
+  - Severity-based priority mapping (critical → 7 days,
+   moderate → 14 days)                                 
+  - Recommended fix → OpsCategory mapping              
+  - Rich task descriptions with impact metrics and     
+  field-specific explanations                          
+                                                       
+  4. Skill Integration (Task #51) ✅                   
+                                                       
+  Enhanced server/skills/webhook.ts to:                
+  - Automatically generate PM tasks when               
+  data-quality-audit skill completes                   
+  - Extract field-level findings from quality_metrics  
+  output                                               
+  - Create tasks for critical fields with <90% fill    
+  rate                                                 
+  - Determine recommended fix based on field type and  
+  severity                                             
+                                                       
+  5. Database Migration ✅                             
+                                                       
+  Created server/migrations/021_pm_task_references.sql:
+  - pm_task_references table to track PM tool tasks    
+  - Indexes on workspace_id, source_action_id,         
+  connector_type                                       
+  - UNIQUE constraint for deduplication                
+                                                       
+  Next Steps (Task #52 - Ready for Replit Testing)     
+                                                       
+  To test end-to-end in Replit:                        
+                                                       
+  1. Configure PM Connector in workspace settings:     
+  {                                                    
+    "pm_connector": {                                  
+      "enabled": true,                                 
+      "connectorType": "monday",                       
+      "defaultProjectId": "<board_id>",                
+      "defaultSectionId": "<group_id>",                
+      "labels": ["pandora-generated"]                  
+    }                                                  
+  }                                                    
+                                                       
+  2. Store Monday.com API Key in credential store:     
+  await storeConnectorCredentials(workspaceId,         
+  'pm_monday', { apiKey: '<api_key>' });               
+                                                       
+  3. Run Migration:                                    
+  psql $DATABASE_URL -f                                
+  server/migrations/021_pm_task_references.sql         
+                                                       
+  4. Trigger Data Quality Audit:                       
+  curl -X POST http://localhost:3000/api/webhooks/skill
+  s/data-quality-audit/trigger \                       
+    -H "Content-Type: application/json" \              
+    -d '{"workspaceId": "<workspace_id>"}'             
+                                                       
+  5. Verify Tasks Created in Monday.com board and check
+   pm_task_references table                            
+                                                       
+  All code is committed and pushed to GitHub (commit   
+  c0311ed).           
