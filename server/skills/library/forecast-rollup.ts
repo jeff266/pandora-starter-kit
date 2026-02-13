@@ -210,23 +210,23 @@ BEHAVIORAL RISK CLASSIFICATIONS (AI-detected):
 
 {{#if forecast_data.icpForecast}}
 ICP-ADJUSTED FORECAST:
-- Commit: ${{forecast_data.icpForecast.commit.total}} total
-  - ${{forecast_data.icpForecast.commit.ab_grade}} in A/B-grade deals (high confidence)
-  - ${{forecast_data.icpForecast.commit.cdf_grade}} in C/D/F-grade deals (lower confidence)
-- Best Case: ${{forecast_data.icpForecast.best_case.total}} total
-  - ${{forecast_data.icpForecast.best_case.ab_grade}} in A/B-grade deals
-  - ${{forecast_data.icpForecast.best_case.cdf_grade}} in C/D/F-grade deals
-- Pipeline: ${{forecast_data.icpForecast.pipeline.total}} total
-  - ${{forecast_data.icpForecast.pipeline.ab_grade}} in A/B-grade deals
-  - ${{forecast_data.icpForecast.pipeline.cdf_grade}} in C/D/F-grade deals
+- Commit: \${{forecast_data.icpForecast.commit.total}} total
+  - \${{forecast_data.icpForecast.commit.ab_grade}} in A/B-grade deals (high confidence)
+  - \${{forecast_data.icpForecast.commit.cdf_grade}} in C/D/F-grade deals (lower confidence)
+- Best Case: \${{forecast_data.icpForecast.best_case.total}} total
+  - \${{forecast_data.icpForecast.best_case.ab_grade}} in A/B-grade deals
+  - \${{forecast_data.icpForecast.best_case.cdf_grade}} in C/D/F-grade deals
+- Pipeline: \${{forecast_data.icpForecast.pipeline.total}} total
+  - \${{forecast_data.icpForecast.pipeline.ab_grade}} in A/B-grade deals
+  - \${{forecast_data.icpForecast.pipeline.cdf_grade}} in C/D/F-grade deals
 
 {{#if forecast_data.icpForecast.has_grade_adjusted}}
 Grade-Adjusted Expected Value (based on historical close rates by ICP grade):
 {{#each forecast_data.icpForecast.grade_close_rates}}
   - {{@key}}-grade: {{this}}% close rate
 {{/each}}
-- Adjusted commit: ${{forecast_data.icpForecast.grade_adjusted_commit}}
-- Adjusted best case: ${{forecast_data.icpForecast.grade_adjusted_best_case}}
+- Adjusted commit: \${{forecast_data.icpForecast.grade_adjusted_commit}}
+- Adjusted best case: \${{forecast_data.icpForecast.grade_adjusted_best_case}}
 {{/if}}
 {{/if}}
 

@@ -237,8 +237,8 @@ DEAL CLASSIFICATIONS (AI-analyzed root causes for top 30 deals):
 
 {{#if pipeline_summary.icpSummary}}
 PIPELINE QUALITY (ICP Fit):
-- {{pipeline_summary.icpSummary.by_grade.A.count}} A-grade deals (${{pipeline_summary.icpSummary.by_grade.A.value}})
-- {{pipeline_summary.icpSummary.by_grade.B.count}} B-grade deals (${{pipeline_summary.icpSummary.by_grade.B.value}})
+- {{pipeline_summary.icpSummary.by_grade.A.count}} A-grade deals (\${{pipeline_summary.icpSummary.by_grade.A.value}})
+- {{pipeline_summary.icpSummary.by_grade.B.count}} B-grade deals (\${{pipeline_summary.icpSummary.by_grade.B.value}})
 - {{pipeline_summary.icpSummary.ab_grade_pct}}% of pipeline value is A/B-grade ICP fit
 - {{pipeline_summary.icpSummary.df_grade_pct}}% of pipeline value is D/F-grade (deprioritization candidates)
 {{#if pipeline_summary.icpSummary.high_fit_stale_count}}

@@ -3,7 +3,7 @@
 
 CREATE TABLE IF NOT EXISTS pm_task_references (
   id SERIAL PRIMARY KEY,
-  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   source_action_id TEXT NOT NULL,
   connector_type TEXT NOT NULL, -- 'monday', 'asana', 'linear', 'jira', 'clickup'
   external_id TEXT NOT NULL,
