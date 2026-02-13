@@ -117,6 +117,7 @@ export async function extractInsightsFromConversations(
   for (const conversation of conversations) {
     try {
       const result = await extractInsightsFromConversation(
+        workspaceId,
         conversation,
         config
       );
@@ -282,6 +283,7 @@ async function findUnprocessedConversations(
  * Extract insights from a single conversation using DeepSeek
  */
 async function extractInsightsFromConversation(
+  workspaceId: string,
   conversation: {
     id: string;
     deal_id: string;
@@ -322,30 +324,68 @@ async function extractInsightsFromConversation(
     };
   }
 
-  // Build DeepSeek prompt
   const prompt = buildExtractionPrompt(conversation, textForExtraction, config);
 
-  // TODO: Call DeepSeek API when integrated
-  // For now, return empty result
-  logger.info('[Deal Insights] DeepSeek extraction not yet wired', {
-    conversationId: conversation.id,
-    textLength: textForExtraction.length,
-    activeInsights: config.active_insights.filter(i => i.enabled).length,
-  });
+  try {
+    const { callLLM } = await import('../utils/llm-router.js');
+    const llmResponse = await callLLM(workspaceId, 'extract', {
+      messages: [{ role: 'user', content: prompt }],
+      maxTokens: 2000,
+      temperature: 0.1,
+    });
 
-  // Mock response structure for now
-  const mockResponse = {
-    insights: [],
-    no_signal: config.active_insights.map(i => i.insight_type),
-  };
+    const responseText = llmResponse.content.trim();
+    let parsed: { insights: InsightCandidate[]; no_signal: string[] };
 
-  return {
-    conversationId: conversation.id,
-    dealId: conversation.deal_id,
-    extractedCount: 0,
-    skippedCount: mockResponse.no_signal.length,
-    insights: [],
-  };
+    try {
+      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error('No JSON found in response');
+      parsed = JSON.parse(jsonMatch[0]);
+    } catch (parseErr) {
+      logger.warn('[Deal Insights] Failed to parse DeepSeek response', {
+        conversationId: conversation.id,
+        responsePreview: responseText.substring(0, 200),
+      });
+      return {
+        conversationId: conversation.id,
+        dealId: conversation.deal_id,
+        extractedCount: 0,
+        skippedCount: 0,
+        insights: [],
+      };
+    }
+
+    const validInsights = (parsed.insights || []).filter(
+      (i: any) => i.insight_type && i.value && typeof i.confidence === 'number' && i.confidence >= config.min_confidence
+    );
+
+    logger.info('[Deal Insights] Extracted from conversation', {
+      conversationId: conversation.id,
+      dealId: conversation.deal_id,
+      extracted: validInsights.length,
+      noSignal: parsed.no_signal?.length || 0,
+    });
+
+    return {
+      conversationId: conversation.id,
+      dealId: conversation.deal_id,
+      extractedCount: validInsights.length,
+      skippedCount: parsed.no_signal?.length || 0,
+      insights: validInsights,
+    };
+  } catch (llmErr) {
+    logger.error('[Deal Insights] LLM call failed', {
+      conversationId: conversation.id,
+      error: llmErr instanceof Error ? llmErr.message : String(llmErr),
+    });
+    return {
+      conversationId: conversation.id,
+      dealId: conversation.deal_id,
+      extractedCount: 0,
+      skippedCount: 0,
+      insights: [],
+    };
+  }
 }
 
 /**

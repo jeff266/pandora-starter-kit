@@ -2,6 +2,7 @@ import { getSkillRegistry } from '../skills/registry.js';
 import { getSkillRuntime } from '../skills/runtime.js';
 import { linkConversations } from '../linker/entity-linker.js';
 import { classifyAndUpdateInternalStatus } from '../analysis/conversation-internal-filter.js';
+import { extractInsightsFromConversations } from '../analysis/deal-insights-extractor.js';
 
 interface SyncResult {
   connector: string;
@@ -37,6 +38,16 @@ export async function emitSyncCompleted(
         console.log(`[InternalFilter] Post-sync: ${stats.classified} classified, ${stats.markedInternal} internal (${stats.durationMs}ms)`);
       })
       .catch(err => console.error(`[InternalFilter] Post-sync failed:`, err instanceof Error ? err.message : err));
+  }
+
+  if (conversationSynced) {
+    extractInsightsFromConversations(workspaceId)
+      .then(result => {
+        console.log(`[Insights] Post-sync ${workspaceId}: ${result.extracted} created, ${result.skipped} skipped (${result.processed} conversations)`);
+      })
+      .catch(err => {
+        console.error(`[Insights] Post-sync ${workspaceId} failed:`, err instanceof Error ? err.message : err);
+      });
   }
 
   const registry = getSkillRegistry();

@@ -264,4 +264,162 @@ router.post('/api/workspaces/:workspaceId/insights/extract', async (req, res) =>
   }
 });
 
+// ============================================================================
+// Get Insight Extraction Status
+// ============================================================================
+
+router.get('/api/workspaces/:workspaceId/insights/status', async (req, res) => {
+  try {
+    const { workspaceId } = req.params;
+
+    const insightCounts = await query<{
+      total_insights: string;
+      current_insights: string;
+      superseded_insights: string;
+    }>(
+      `SELECT
+        COUNT(*)::text as total_insights,
+        COUNT(*) FILTER (WHERE is_current = true)::text as current_insights,
+        COUNT(*) FILTER (WHERE is_current = false)::text as superseded_insights
+      FROM deal_insights
+      WHERE workspace_id = $1`,
+      [workspaceId]
+    );
+
+    const byType = await query<{ insight_type: string; count: string }>(
+      `SELECT insight_type, COUNT(*)::text as count
+       FROM deal_insights
+       WHERE workspace_id = $1 AND is_current = true
+       GROUP BY insight_type
+       ORDER BY count DESC`,
+      [workspaceId]
+    );
+
+    const conversationCounts = await query<{
+      conversations_processed: string;
+      conversations_pending: string;
+    }>(
+      `SELECT
+        (SELECT COUNT(DISTINCT source_conversation_id)::text FROM deal_insights WHERE workspace_id = $1 AND source_conversation_id IS NOT NULL) as conversations_processed,
+        (SELECT COUNT(*)::text FROM conversations c
+         WHERE c.workspace_id = $1
+           AND c.is_internal = false
+           AND c.deal_id IS NOT NULL
+           AND c.duration_seconds > 120
+           AND NOT EXISTS (SELECT 1 FROM deal_insights di WHERE di.source_conversation_id = c.id)
+        ) as conversations_pending`,
+      [workspaceId]
+    );
+
+    const lastExtraction = await query<{ extracted_at: string }>(
+      `SELECT MAX(extracted_at)::text as extracted_at FROM deal_insights WHERE workspace_id = $1`,
+      [workspaceId]
+    );
+
+    const config = await query<{ definitions: any }>(
+      `SELECT definitions FROM context_layer WHERE workspace_id = $1 LIMIT 1`,
+      [workspaceId]
+    );
+
+    const insightConfig = config.rows[0]?.definitions?.insight_config || {};
+
+    const row = insightCounts.rows[0] || { total_insights: '0', current_insights: '0', superseded_insights: '0' };
+    const convRow = conversationCounts.rows[0] || { conversations_processed: '0', conversations_pending: '0' };
+
+    const byTypeMap: Record<string, number> = {};
+    for (const r of byType.rows) {
+      byTypeMap[r.insight_type] = parseInt(r.count, 10);
+    }
+
+    res.json({
+      total_insights: parseInt(row.total_insights, 10),
+      current_insights: parseInt(row.current_insights, 10),
+      superseded_insights: parseInt(row.superseded_insights, 10),
+      by_type: byTypeMap,
+      conversations_processed: parseInt(convRow.conversations_processed, 10),
+      conversations_pending: parseInt(convRow.conversations_pending, 10),
+      last_extraction_at: lastExtraction.rows[0]?.extracted_at || null,
+      config: {
+        framework: insightConfig.framework || 'none',
+        active_types: (insightConfig.active_insights || []).filter((i: any) => i.enabled).map((i: any) => i.insight_type),
+        min_confidence: insightConfig.min_confidence || 0.6,
+      },
+    });
+  } catch (error) {
+    logger.error('Failed to get insights status', { error });
+    res.status(500).json({ error: 'Failed to get insights status' });
+  }
+});
+
+// ============================================================================
+// Get Current Insights for a Deal
+// ============================================================================
+
+router.get('/api/workspaces/:workspaceId/deals/:dealId/insights', async (req, res) => {
+  try {
+    const { workspaceId, dealId } = req.params;
+
+    const result = await query<{
+      insight_type: string;
+      insight_key: string;
+      value: string;
+      confidence: number;
+      source_quote: string | null;
+      extracted_at: string;
+      source_conversation_id: string | null;
+    }>(
+      `SELECT insight_type, insight_key, value, confidence,
+              source_quote, extracted_at::text as extracted_at, source_conversation_id
+       FROM deal_insights
+       WHERE workspace_id = $1 AND deal_id = $2 AND is_current = true
+       ORDER BY insight_type`,
+      [workspaceId, dealId]
+    );
+
+    res.json({ deal_id: dealId, insights: result.rows });
+  } catch (error) {
+    logger.error('Failed to get deal insights', { error });
+    res.status(500).json({ error: 'Failed to get deal insights' });
+  }
+});
+
+// ============================================================================
+// Get Full Insight History for a Deal
+// ============================================================================
+
+router.get('/api/workspaces/:workspaceId/deals/:dealId/insights/history', async (req, res) => {
+  try {
+    const { workspaceId, dealId } = req.params;
+
+    const result = await query<{
+      id: string;
+      insight_type: string;
+      insight_key: string;
+      value: string;
+      confidence: number;
+      source_quote: string | null;
+      extracted_at: string;
+      is_current: boolean;
+      superseded_by: string | null;
+      source_conversation_id: string | null;
+      source_call_title: string | null;
+    }>(
+      `SELECT di.id, di.insight_type, di.insight_key, di.value, di.confidence,
+              di.source_quote, di.extracted_at::text as extracted_at,
+              di.is_current, di.superseded_by, di.source_conversation_id,
+              c.title as source_call_title
+       FROM deal_insights di
+       LEFT JOIN conversations c ON c.id = di.source_conversation_id
+       WHERE di.workspace_id = $1 AND di.deal_id = $2
+       ORDER BY di.insight_type, di.extracted_at ASC`,
+      [workspaceId, dealId]
+    );
+
+    res.json({ deal_id: dealId, history: result.rows });
+  } catch (error) {
+    logger.error('Failed to get deal insights history', { error });
+    res.status(500).json({ error: 'Failed to get deal insights history' });
+  }
+});
+
 export default router;

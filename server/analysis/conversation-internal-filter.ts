@@ -73,64 +73,117 @@ const INTERNAL_TITLE_PATTERNS = [
  * 2. Infer from workspace owner's email
  * 3. Find most common domain in contact base (fallback)
  */
-export async function resolveWorkspaceDomains(workspaceId: string): Promise<string[]> {
-  // Strategy 1: Check workspace settings for explicit internal_domains
-  const settingsResult = await query<{ settings: { internal_domains?: string[] } }>(
-    `SELECT settings FROM workspaces WHERE id = $1`,
+export async function resolveWorkspaceDomains(workspaceId: string): Promise<{ domains: string[]; source: 'config' | 'connector' | 'inferred' | 'none' }> {
+  // Strategy 1: Check context_layer.definitions for explicit internal_domains
+  const contextResult = await query<{ definitions: any }>(
+    `SELECT definitions FROM context_layer WHERE workspace_id = $1 LIMIT 1`,
     [workspaceId]
   );
 
-  if (settingsResult.rows.length > 0) {
-    const settings = settingsResult.rows[0].settings;
-    if (settings?.internal_domains && Array.isArray(settings.internal_domains)) {
-      const domains = settings.internal_domains.filter(d => typeof d === 'string' && d.length > 0);
+  if (contextResult.rows.length > 0) {
+    const definitions = contextResult.rows[0].definitions || {};
+    const internalDomains = definitions.internal_domains;
+    if (Array.isArray(internalDomains)) {
+      const domains = internalDomains.filter((d: any) => typeof d === 'string' && d.length > 0);
       if (domains.length > 0) {
-        logger.debug('Resolved domains from workspace config', { workspaceId, domains });
-        return domains;
+        logger.debug('Resolved domains from context_layer config', { workspaceId, domains });
+        return { domains, source: 'config' };
       }
     }
   }
 
-  // Strategy 2: Infer from workspace owner (assumes workspace creator is internal)
-  // For MVP, we'll look for the most common email domain among contacts
-  // since we don't have a workspace.owner_email field yet
-
-  // Strategy 3: Get most common email domain from contacts
-  const domainResult = await query<{ domain: string; count: number }>(
-    `SELECT
-       LOWER(SPLIT_PART(email, '@', 2)) as domain,
-       COUNT(*) as count
-     FROM contacts
+  // Strategy 2: Extract domains from tracked users in conversation connectors (Gong, Fireflies)
+  const convConnResult = await query<{ connector_name: string; metadata: any }>(
+    `SELECT connector_name, metadata FROM connections
      WHERE workspace_id = $1
-       AND email IS NOT NULL
-       AND email LIKE '%@%'
-     GROUP BY LOWER(SPLIT_PART(email, '@', 2))
-     ORDER BY count DESC
+       AND connector_name IN ('gong', 'fireflies')
+       AND status IN ('active', 'healthy')
      LIMIT 5`,
     [workspaceId]
   );
 
-  if (domainResult.rows.length > 0) {
-    // Filter out generic email providers
-    const validDomains = domainResult.rows
-      .map(r => r.domain)
-      .filter(d => !GENERIC_EMAIL_DOMAINS.includes(d));
+  const trackedDomains = new Set<string>();
+  for (const conn of convConnResult.rows) {
+    try {
+      const tracked = conn.metadata?.tracked_users;
+      if (Array.isArray(tracked)) {
+        for (const user of tracked) {
+          const email = user?.email;
+          if (email && email.includes('@')) {
+            const domain = email.split('@')[1].toLowerCase();
+            if (!GENERIC_EMAIL_DOMAINS.includes(domain)) {
+              trackedDomains.add(domain);
+            }
+          }
+        }
+      }
+    } catch { /* ignore parse errors */ }
+  }
 
-    if (validDomains.length > 0) {
-      // Take the most common non-generic domain
-      const topDomain = validDomains[0];
-      logger.info('Inferred workspace domain from contacts', {
-        workspaceId,
-        domain: topDomain,
-        contactCount: domainResult.rows[0].count,
-      });
-      return [topDomain];
+  if (trackedDomains.size > 0) {
+    const domains = Array.from(trackedDomains);
+    logger.info('Resolved domains from tracked users', { workspaceId, domains });
+    return { domains, source: 'connector' };
+  }
+
+  // Strategy 3: Infer from CRM connector credentials
+  const crmConnResult = await query<{ connector_name: string; credentials: any; metadata: any }>(
+    `SELECT connector_name, credentials, metadata FROM connections
+     WHERE workspace_id = $1
+       AND connector_name IN ('hubspot', 'salesforce')
+       AND status IN ('active', 'healthy')
+     LIMIT 5`,
+    [workspaceId]
+  );
+
+  for (const conn of crmConnResult.rows) {
+    let email: string | null = null;
+    try {
+      if (conn.credentials && typeof conn.credentials === 'object') {
+        email = conn.credentials.user_email || conn.credentials.email || null;
+      }
+      if (!email && conn.metadata && typeof conn.metadata === 'object') {
+        email = conn.metadata.user_email || conn.metadata.authenticated_email || null;
+      }
+    } catch { /* ignore parse errors */ }
+
+    if (email && email.includes('@')) {
+      const domain = email.split('@')[1].toLowerCase();
+      if (!GENERIC_EMAIL_DOMAINS.includes(domain)) {
+        logger.info('Resolved domain from CRM connector credentials', { workspaceId, domain, connector: conn.connector_name });
+        return { domains: [domain], source: 'connector' };
+      }
     }
   }
 
-  // No domain resolved
+  // Strategy 4: Most common email domain across synced contacts
+  const domainResult = await query<{ domain: string; cnt: string }>(
+    `SELECT domain, COUNT(*) as cnt FROM (
+       SELECT LOWER(SPLIT_PART(email, '@', 2)) as domain
+       FROM contacts
+       WHERE workspace_id = $1
+         AND email IS NOT NULL
+         AND email LIKE '%@%'
+     ) sub
+     WHERE domain NOT IN ('gmail.com','yahoo.com','hotmail.com','outlook.com','icloud.com','aol.com','protonmail.com')
+     GROUP BY domain
+     ORDER BY cnt DESC
+     LIMIT 1`,
+    [workspaceId]
+  );
+
+  if (domainResult.rows.length > 0) {
+    const topDomain = domainResult.rows[0].domain;
+    logger.info('Inferred workspace domain from contacts', {
+      workspaceId,
+      domain: topDomain,
+      contactCount: domainResult.rows[0].cnt,
+    });
+    return { domains: [topDomain], source: 'inferred' };
+  }
+
   logger.warn('Cannot resolve internal domain for workspace', { workspaceId });
-  return [];
+  return { domains: [], source: 'none' };
 }
 
 /**
@@ -179,10 +232,9 @@ export async function classifyInternalMeeting(
   conversationTitle: string | null,
   participants: Participant[]
 ): Promise<InternalClassificationResult> {
-  // Resolve workspace domains
-  const workspaceDomains = await resolveWorkspaceDomains(workspaceId);
+  const resolved = await resolveWorkspaceDomains(workspaceId);
+  const workspaceDomains = resolved.domains;
 
-  // If no domains resolved, can't classify as internal
   if (workspaceDomains.length === 0) {
     return {
       is_internal: false,
@@ -271,8 +323,8 @@ export async function batchClassifyInternalMeetings(
     conversationCount: conversations.length,
   });
 
-  // Resolve domains once for all conversations
-  const workspaceDomains = await resolveWorkspaceDomains(workspaceId);
+  const resolved = await resolveWorkspaceDomains(workspaceId);
+  const workspaceDomains = resolved.domains;
 
   if (workspaceDomains.length === 0) {
     logger.warn('No workspace domains resolved, cannot filter internal meetings', { workspaceId });

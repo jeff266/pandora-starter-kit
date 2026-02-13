@@ -288,21 +288,18 @@ function inferLikelyCause(
 ): 'deal_not_created' | 'early_stage' | 'disqualified_not_logged' | 'unknown' {
   if (cwd.open_deals_at_account > 0) {
     return 'deal_not_created';
-    // Account has deals but this call isn't linked to any —
-    // likely a new opportunity at an existing account, or
-    // the call relates to an existing deal but linking failed
   }
 
   if (cwd.duration_seconds < 300 && cwd.participant_count <= 2) {
     return 'early_stage';
-    // Short call, few participants — might be initial outreach
-    // that didn't progress to deal creation
   }
 
   if (cwd.days_since_call > 30 && cwd.duration_seconds > 1200) {
     return 'disqualified_not_logged';
-    // Long call, long time ago, no deal ever created —
-    // likely disqualified but rep didn't log it
+  }
+
+  if (cwd.duration_seconds >= 300 && cwd.days_since_call <= 30) {
+    return 'deal_not_created';
   }
 
   return 'unknown';

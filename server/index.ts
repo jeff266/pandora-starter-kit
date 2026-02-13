@@ -26,6 +26,7 @@ import scoresRouter from './routes/scores.js';
 import icpRouter from './routes/icp.js';
 import configRouter from './routes/config.js';
 import importRouter, { cleanupTempFiles } from './routes/import.js';
+import dealInsightsRouter from './routes/deal-insights.js';
 import { getAdapterRegistry } from "./connectors/adapters/registry.js";
 import { MondayTaskAdapter } from "./connectors/monday/adapter.js";
 import { GoogleDriveDocumentAdapter } from "./connectors/google-drive/adapter.js";
@@ -77,6 +78,7 @@ app.use("/api/workspaces", scoresRouter);
 app.use("/api/workspaces", icpRouter);
 app.use("/api/workspaces", configRouter);
 app.use("/api/workspaces", importRouter);
+app.use(dealInsightsRouter);
 
 function registerAdapters(): void {
   const registry = getAdapterRegistry();

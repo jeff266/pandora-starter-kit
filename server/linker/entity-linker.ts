@@ -1,4 +1,5 @@
 import { query } from '../db.js';
+import { resolveWorkspaceDomains, classifyInternalMeeting } from '../analysis/conversation-internal-filter.js';
 
 export interface LinkResult {
   processed: number;
@@ -7,6 +8,7 @@ export interface LinkResult {
     tier2_native: number;
     tier3_inferred: number;
   };
+  internalFiltered: number;
   stillUnlinked: number;
   errors: string[];
   durationMs: number;
@@ -39,12 +41,17 @@ export async function linkConversations(workspaceId: string): Promise<LinkResult
   const result: LinkResult = {
     processed: 0,
     linked: { tier1_email: 0, tier2_native: 0, tier3_inferred: 0 },
+    internalFiltered: 0,
     stillUnlinked: 0,
     errors: [],
     durationMs: 0,
   };
 
   try {
+    // Step 0: Classify unclassified conversations as internal/external BEFORE linking
+    const internalCount = await classifyUnclassifiedConversations(workspaceId);
+    result.internalFiltered = internalCount;
+
     const tier1Count = await tier1EmailMatch(workspaceId, result);
     const tier2Count = await tier2NativeCRM(workspaceId, result);
     const tier3Count = await tier3DealInference(workspaceId, result);
@@ -54,6 +61,7 @@ export async function linkConversations(workspaceId: string): Promise<LinkResult
     const stillUnlinked = await query<{ count: string }>(
       `SELECT COUNT(*) as count FROM conversations
        WHERE workspace_id = $1
+         AND is_internal = FALSE
          AND deal_id IS NULL AND account_id IS NULL
          AND linked_at IS NULL`,
       [workspaceId]
@@ -71,6 +79,62 @@ export async function linkConversations(workspaceId: string): Promise<LinkResult
   return result;
 }
 
+async function classifyUnclassifiedConversations(workspaceId: string): Promise<number> {
+  const unclassified = await query<{
+    id: string;
+    title: string | null;
+    participants: any;
+  }>(
+    `SELECT id, title, participants
+     FROM conversations
+     WHERE workspace_id = $1
+       AND (is_internal IS NULL OR (is_internal = FALSE AND internal_classification_reason IS NULL))`,
+    [workspaceId]
+  );
+
+  if (unclassified.rows.length === 0) return 0;
+
+  const resolved = await resolveWorkspaceDomains(workspaceId);
+  const internalDomains = resolved.domains;
+
+  if (internalDomains.length === 0) {
+    console.log(`[Linker] No internal domains resolved for ${workspaceId}, skipping internal filter`);
+    return 0;
+  }
+
+  let internalCount = 0;
+  for (const conv of unclassified.rows) {
+    const participants = Array.isArray(conv.participants) ? conv.participants : [];
+    const result = await classifyInternalMeeting(workspaceId, conv.title, participants);
+
+    if (result.is_internal) {
+      await query(
+        `UPDATE conversations SET
+          is_internal = true,
+          internal_classification_reason = $2,
+          deal_id = NULL,
+          link_method = 'internal_meeting',
+          updated_at = NOW()
+        WHERE id = $1`,
+        [conv.id, result.classification_reason]
+      );
+      internalCount++;
+    } else {
+      await query(
+        `UPDATE conversations SET
+          is_internal = false,
+          internal_classification_reason = 'classified_external',
+          updated_at = NOW()
+        WHERE id = $1 AND (is_internal IS DISTINCT FROM false OR internal_classification_reason IS NULL)`,
+        [conv.id]
+      );
+    }
+  }
+
+  console.log(`[Linker] Internal filter: ${internalCount}/${unclassified.rows.length} classified as internal`);
+  return internalCount;
+}
+
 async function tier1EmailMatch(
   workspaceId: string,
   result: LinkResult
@@ -79,6 +143,7 @@ async function tier1EmailMatch(
     `SELECT id, participants, source_data, source, account_id, deal_id
      FROM conversations
      WHERE workspace_id = $1
+       AND is_internal = FALSE
        AND (deal_id IS NULL OR account_id IS NULL)
        AND linked_at IS NULL`,
     [workspaceId]
@@ -175,6 +240,7 @@ async function tier2NativeCRM(
     `SELECT id, source, source_data, account_id, deal_id
      FROM conversations
      WHERE workspace_id = $1
+       AND is_internal = FALSE
        AND (account_id IS NULL OR deal_id IS NULL)
        AND linked_at IS NULL
        AND source_data IS NOT NULL`,
@@ -283,6 +349,7 @@ async function tier3DealInference(
     `SELECT id, account_id
      FROM conversations
      WHERE workspace_id = $1
+       AND is_internal = FALSE
        AND account_id IS NOT NULL
        AND deal_id IS NULL`,
     [workspaceId]
@@ -416,6 +483,7 @@ async function logLinkerRun(workspaceId: string, result: LinkResult, durationMs:
           tier1_email: result.linked.tier1_email,
           tier2_native: result.linked.tier2_native,
           tier3_inferred: result.linked.tier3_inferred,
+          internalFiltered: result.internalFiltered,
           stillUnlinked: result.stillUnlinked,
           processed: result.processed,
           errors: result.errors,
@@ -438,15 +506,21 @@ export async function getLinkerStatus(workspaceId: string) {
     via_email: string;
     via_crm: string;
     via_inference: string;
+    internal_meetings: string;
+    internal_by_participants: string;
+    internal_by_participants_and_title: string;
   }>(
     `SELECT
       COUNT(*) as total_conversations,
       COUNT(*) FILTER (WHERE deal_id IS NOT NULL) as linked_to_deal,
       COUNT(*) FILTER (WHERE account_id IS NOT NULL) as linked_to_account,
-      COUNT(*) FILTER (WHERE linked_at IS NULL AND deal_id IS NULL AND account_id IS NULL) as fully_unlinked,
+      COUNT(*) FILTER (WHERE linked_at IS NULL AND deal_id IS NULL AND account_id IS NULL AND is_internal = FALSE) as fully_unlinked,
       COUNT(*) FILTER (WHERE link_method = 'email_match') as via_email,
       COUNT(*) FILTER (WHERE link_method = 'crm_native') as via_crm,
-      COUNT(*) FILTER (WHERE link_method = 'deal_inference') as via_inference
+      COUNT(*) FILTER (WHERE link_method = 'deal_inference') as via_inference,
+      COUNT(*) FILTER (WHERE is_internal = TRUE) as internal_meetings,
+      COUNT(*) FILTER (WHERE internal_classification_reason = 'all_participants_internal') as internal_by_participants,
+      COUNT(*) FILTER (WHERE internal_classification_reason = 'all_internal_with_title_match') as internal_by_participants_and_title
     FROM conversations
     WHERE workspace_id = $1`,
     [workspaceId]
@@ -461,5 +535,8 @@ export async function getLinkerStatus(workspaceId: string) {
     via_email: parseInt(row.via_email, 10),
     via_crm: parseInt(row.via_crm, 10),
     via_inference: parseInt(row.via_inference, 10),
+    internal_meetings: parseInt(row.internal_meetings, 10),
+    internal_by_participants: parseInt(row.internal_by_participants, 10),
+    internal_by_participants_and_title: parseInt(row.internal_by_participants_and_title, 10),
   };
 }
