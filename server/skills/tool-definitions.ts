@@ -2365,10 +2365,10 @@ const gatherDealConcentrationRisk: ToolDefinition = {
         probability: number | null;
         forecast_category: string | null;
         stage_normalized: string | null;
-        owner_email: string | null;
+        owner: string | null;
         close_date: string | null;
       }>(
-        `SELECT id, name, amount, probability, forecast_category, stage_normalized, owner_email, close_date
+        `SELECT id, name, amount, probability, forecast_category, stage_normalized, owner, close_date
          FROM deals
          WHERE workspace_id = $1
            AND stage_normalized NOT IN ('closed_lost', 'closed_won')
@@ -2388,7 +2388,7 @@ const gatherDealConcentrationRisk: ToolDefinition = {
         probability: d.probability || 0,
         weighted: (d.amount || 0) * (d.probability || 0),
         category: d.forecast_category || 'unknown',
-        owner: nameMap[d.owner_email || ''] || d.owner_email || 'Unknown',
+        owner: nameMap[d.owner || ''] || d.owner || 'Unknown',
         closeDate: d.close_date,
       }));
 
@@ -2406,7 +2406,7 @@ const gatherDealConcentrationRisk: ToolDefinition = {
             probability: d.probability || 0,
             weighted: (d.amount || 0) * (d.probability || 0),
             category: d.forecast_category || 'unknown',
-            owner: nameMap[d.owner_email || ''] || d.owner_email || 'Unknown',
+            owner: nameMap[d.owner || ''] || d.owner || 'Unknown',
             closeDate: d.close_date,
           }));
       }

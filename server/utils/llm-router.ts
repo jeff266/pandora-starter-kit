@@ -77,10 +77,10 @@ async function loadConfig(workspaceId: string): Promise<LLMConfig> {
     const defaultConfig: LLMConfig = {
       providers: {},
       routing: {
-        extract: 'fireworks/deepseek-v3-0324',
+        extract: 'fireworks/deepseek-v3p1',
         reason: 'anthropic/claude-sonnet-4-20250514',
         generate: 'anthropic/claude-sonnet-4-20250514',
-        classify: 'fireworks/deepseek-v3-0324',
+        classify: 'fireworks/deepseek-v3p1',
       },
       default_token_budget: 50000,
       tokens_used_this_month: 0,
