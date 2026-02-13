@@ -1,5 +1,6 @@
 import { query } from '../db.js';
 import { HubSpotClient } from '../connectors/hubspot/client.js';
+import { getConnectorCredentials } from '../lib/credential-store.js';
 
 export interface BackfillResult {
   dealsProcessed: number;
@@ -18,8 +19,9 @@ export async function backfillHubSpotAssociations(
   let contactLinksCreated = 0;
   let accountLinksCreated = 0;
 
-  const connResult = await query<{ credentials: any }>(
-    `SELECT credentials FROM connections
+  // Check if HubSpot connection exists and is active
+  const connResult = await query<{ status: string }>(
+    `SELECT status FROM connections
      WHERE workspace_id = $1 AND connector_name = 'hubspot' AND status IN ('connected', 'synced')`,
     [workspaceId]
   );
@@ -28,7 +30,12 @@ export async function backfillHubSpotAssociations(
     return { dealsProcessed: 0, contactLinksCreated: 0, accountLinksCreated: 0, errors: ['No active HubSpot connection'], duration: 0 };
   }
 
-  const creds = connResult.rows[0].credentials;
+  // Get credentials from credential store
+  const creds = await getConnectorCredentials(workspaceId, 'hubspot');
+  if (!creds) {
+    return { dealsProcessed: 0, contactLinksCreated: 0, accountLinksCreated: 0, errors: ['HubSpot credentials not found'], duration: 0 };
+  }
+
   const client = new HubSpotClient(creds.accessToken);
 
   const dealsResult = await query<{ id: string; source_id: string; source_data: any }>(

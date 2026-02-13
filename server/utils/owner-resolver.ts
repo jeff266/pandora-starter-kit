@@ -1,5 +1,6 @@
 import pool from '../db.js';
 import { HubSpotClient } from '../connectors/hubspot/client.js';
+import { getConnectorCredentials } from '../lib/credential-store.js';
 
 type OwnerMap = Record<string, string>;
 
@@ -28,8 +29,9 @@ export async function resolveOwnerNames(workspaceId: string): Promise<OwnerMap> 
 }
 
 export async function fetchAndCacheOwners(workspaceId: string): Promise<OwnerMap> {
+  // Check if HubSpot connection exists
   const connResult = await pool.query(
-    `SELECT credentials FROM connections WHERE workspace_id = $1 AND connector_name = 'hubspot' AND status IN ('active', 'healthy') LIMIT 1`,
+    `SELECT status FROM connections WHERE workspace_id = $1 AND connector_name = 'hubspot' AND status IN ('active', 'healthy') LIMIT 1`,
     [workspaceId]
   );
 
@@ -37,8 +39,13 @@ export async function fetchAndCacheOwners(workspaceId: string): Promise<OwnerMap
     return {};
   }
 
-  const credentials = connResult.rows[0].credentials;
-  const accessToken = credentials?.access_token || credentials?.accessToken;
+  // Get credentials from credential store
+  const credentials = await getConnectorCredentials(workspaceId, 'hubspot');
+  if (!credentials) {
+    return {};
+  }
+
+  const accessToken = credentials.access_token || credentials.accessToken;
   if (!accessToken) {
     return {};
   }

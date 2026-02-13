@@ -9,6 +9,7 @@
 
 import { query } from '../db.js';
 import { createLogger } from '../utils/logger.js';
+import { getConnectorCredentials } from '../lib/credential-store.js';
 
 const logger = createLogger('InternalFilter');
 
@@ -126,9 +127,9 @@ export async function resolveWorkspaceDomains(workspaceId: string): Promise<{ do
     return { domains, source: 'connector' };
   }
 
-  // Strategy 3: Infer from CRM connector credentials
-  const crmConnResult = await query<{ connector_name: string; credentials: any; metadata: any }>(
-    `SELECT connector_name, credentials, metadata FROM connections
+  // Strategy 3: Infer from CRM connector credentials and metadata
+  const crmConnResult = await query<{ connector_name: string; metadata: any }>(
+    `SELECT connector_name, metadata FROM connections
      WHERE workspace_id = $1
        AND connector_name IN ('hubspot', 'salesforce')
        AND status IN ('active', 'healthy')
@@ -139,9 +140,12 @@ export async function resolveWorkspaceDomains(workspaceId: string): Promise<{ do
   for (const conn of crmConnResult.rows) {
     let email: string | null = null;
     try {
-      if (conn.credentials && typeof conn.credentials === 'object') {
-        email = conn.credentials.user_email || conn.credentials.email || null;
+      // Get credentials from credential store
+      const credentials = await getConnectorCredentials(workspaceId, conn.connector_name);
+      if (credentials && typeof credentials === 'object') {
+        email = credentials.user_email || credentials.email || null;
       }
+      // Also check metadata
       if (!email && conn.metadata && typeof conn.metadata === 'object') {
         email = conn.metadata.user_email || conn.metadata.authenticated_email || null;
       }

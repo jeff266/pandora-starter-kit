@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { query } from '../db.js';
 import { backfillStageHistory, getBackfillStats } from '../connectors/hubspot/stage-history-backfill.js';
 import { getDealStageHistory } from '../analysis/stage-history-queries.js';
+import { getConnectorCredentials } from '../lib/credential-store.js';
 
 const router = Router();
 
@@ -19,8 +20,9 @@ router.post('/:workspaceId/connectors/hubspot/backfill-stage-history', async (re
     const { workspaceId } = req.params;
     if (!(await validateWorkspace(workspaceId, res))) return;
 
-    const connResult = await query<{ credentials: Record<string, string> }>(
-      `SELECT credentials FROM connections WHERE workspace_id = $1 AND connector_name = 'hubspot' AND status IN ('connected', 'synced', 'healthy')`,
+    // Check if HubSpot connection exists and is active
+    const connResult = await query<{ status: string }>(
+      `SELECT status FROM connections WHERE workspace_id = $1 AND connector_name = 'hubspot' AND status IN ('connected', 'synced', 'healthy')`,
       [workspaceId]
     );
 
@@ -29,8 +31,14 @@ router.post('/:workspaceId/connectors/hubspot/backfill-stage-history', async (re
       return;
     }
 
-    const creds = connResult.rows[0].credentials;
-    const accessToken = creds?.accessToken || creds?.access_token;
+    // Get credentials from credential store
+    const creds = await getConnectorCredentials(workspaceId, 'hubspot');
+    if (!creds) {
+      res.status(404).json({ error: 'HubSpot credentials not found' });
+      return;
+    }
+
+    const accessToken = creds.accessToken || creds.access_token;
     if (!accessToken) {
       res.status(400).json({ error: 'HubSpot access token not found in credentials' });
       return;

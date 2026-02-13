@@ -15,7 +15,7 @@ router.post('/:workspaceId/connectors/salesforce/sync', async (req, res) => {
   try {
     // Check for active Salesforce connection
     const connResult = await query(
-      `SELECT credentials FROM connections
+      `SELECT status FROM connections
        WHERE workspace_id = $1 AND connector_name = 'salesforce' AND status IN ('connected', 'healthy', 'synced')`,
       [workspaceId]
     );

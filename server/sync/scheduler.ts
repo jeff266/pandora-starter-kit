@@ -97,16 +97,16 @@ export class SyncScheduler {
 }
 
 async function runPostSyncBackfill(workspaceId: string): Promise<void> {
-  const connResult = await query<{ credentials: any; sync_cursor: any }>(
-    `SELECT credentials, sync_cursor FROM connections
+  // Check if HubSpot connection exists and needs backfill
+  const connResult = await query<{ sync_cursor: any }>(
+    `SELECT sync_cursor FROM connections
      WHERE workspace_id = $1 AND connector_name = 'hubspot' AND status IN ('connected', 'synced')`,
     [workspaceId]
   );
 
   if (connResult.rows.length === 0) return;
 
-  const conn = connResult.rows[0];
-  const metadata = conn.sync_cursor;
+  const metadata = connResult.rows[0].sync_cursor;
   if (!metadata?.usedExportApi) return;
 
   console.log(`[Scheduler] Running HubSpot association backfill for workspace ${workspaceId}`);
