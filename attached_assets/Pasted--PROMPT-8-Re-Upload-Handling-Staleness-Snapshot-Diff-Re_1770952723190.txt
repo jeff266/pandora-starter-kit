@@ -1,0 +1,199 @@
+## PROMPT 8: Re-Upload Handling + Staleness + Snapshot Diff
+
+```
+Read PANDORA_FILE_IMPORT_CONNECTOR_SPEC.md â€” specifically the 
+"Re-Upload Handling" and "Pipeline Waterfall Workaround" sections.
+
+Build the infrastructure for repeat imports and deal stage tracking 
+from consecutive uploads.
+
+1. RE-UPLOAD STRATEGY HANDLING
+
+The confirm endpoint already accepts a strategy parameter. 
+Verify these strategies work correctly:
+
+REPLACE (default):
+- DELETE all records with source = 'csv_import' for this entity type
+- INSERT all new records
+- Re-run linking
+- Best for: "here's my latest full export"
+
+Test scenario:
+a. Import 100 deals
+b. Re-import 95 deals (5 were deleted in CRM)
+c. Verify: 95 deals remain, 5 old ones gone, account links preserved
+
+MERGE (when external_id is available):
+- For each record with a matching external_id: UPDATE
+- For records with no match: INSERT
+- Records in DB but not in file: LEAVE ALONE
+- Best for: partial exports or filtered views
+
+Test scenario:
+a. Import 100 deals with Record IDs
+b. Import 30 deals (filtered view), 25 match existing, 5 are new
+c. Verify: 105 deals total, 25 updated, 5 new, 75 untouched
+
+APPEND:
+- INSERT all records, never update or delete
+- Generate new source_id for each (ignore external_id for dedup)
+- Best for: activity logs (rarely used for deals)
+
+2. DEDUPLICATION DETECTION IN PREVIEW
+
+Update the upload preview to show dedup info before the user confirms:
+
+In the preview response, add:
+
+deduplication: {
+  strategy: 'external_id' | 'name_match' | 'none',
+  existingRecords: number,        // total csv_import records in DB for this entity
+  matchingRecords: number,        // how many new rows match existing records
+  newRecords: number,             // how many are genuinely new
+  deletedIfReplace: number,       // how many would be removed in replace mode
+  recommendation: 'replace' | 'merge',
+  reason: string
+}
+
+Logic:
+- If >80% of new rows have external_ids AND >50% match existing records 
+  â†’ recommend 'merge'
+- If new file has similar row count (Â±20%) to existing records 
+  â†’ recommend 'replace'
+- If new file is much smaller (<50% of existing) 
+  â†’ recommend 'merge' with warning "This looks like a partial export"
+
+3. DEAL STAGE SNAPSHOT DIFF
+
+When deals are re-imported, detect stage changes between the old and 
+new data. This populates deal_stage_history for file-import workspaces, 
+enabling Pipeline Waterfall (with weekly granularity).
+
+Create server/import/snapshot-diff.ts:
+
+export async function snapshotDealStageChanges(
+  workspaceId: string,
+  batchId: string
+): Promise<StageChangeResult>
+
+Implementation:
+
+BEFORE deleting/updating deals in applyDealImport:
+
+a. Capture current state:
+   SELECT id, source_id, stage, stage_normalized, amount, owner_name 
+   FROM deals 
+   WHERE workspace_id = $1 AND source = 'csv_import'
+
+   Build a map: { [source_id]: { stage, stage_normalized, amount } }
+
+AFTER inserting new deals:
+
+b. For each new deal that has a matching source_id in the old snapshot:
+   If old.stage !== new.stage:
+     INSERT INTO deal_stage_history (
+       workspace_id, deal_id, from_stage, to_stage, changed_at, source
+     ) VALUES (
+       $workspaceId, $newDealId, $oldStage, $newStage, NOW(), 'file_import_diff'
+     )
+
+c. For NEW deals (no matching source_id in old snapshot):
+   INSERT INTO deal_stage_history (
+     workspace_id, deal_id, from_stage, to_stage, changed_at, source
+   ) VALUES (
+     $workspaceId, $newDealId, NULL, $currentStage, NOW(), 'file_import_new'
+   )
+
+d. For REMOVED deals (in old snapshot but not in new import):
+   INSERT INTO deal_stage_history (
+     workspace_id, deal_id, from_stage, to_stage, changed_at, source
+   ) VALUES (
+     $workspaceId, $oldDealId, $oldStage, 'removed_from_export', NOW(), 'file_import_removed'
+   )
+
+e. Return:
+   { stageChanges: number, newDeals: number, removedDeals: number, 
+     changeDetails: [{ dealName, from, to }] }
+
+IMPORTANT: This MUST run BEFORE the replace delete. The sequence is:
+  1. Snapshot current state
+  2. Delete old records (if replace strategy)
+  3. Insert new records
+  4. Compare and write stage history
+  5. Link accounts
+
+4. WIRE SNAPSHOT DIFF INTO DEAL IMPORT
+
+Update applyDealImport to call snapshotDealStageChanges:
+
+async function applyDealImport(...) {
+  // Step 0: Snapshot current state BEFORE any changes
+  const previousState = await captureCurrentDealState(workspaceId);
+  
+  // Step 1: Transaction â€” delete old + insert new
+  await db.transaction(async (tx) => {
+    if (strategy === 'replace') { /* delete */ }
+    /* insert new records */
+  });
+  
+  // Step 2: After transaction, diff and write stage history
+  const stageChanges = await diffAndWriteStageHistory(
+    workspaceId, batchId, previousState
+  );
+  
+  // Step 3: Link accounts
+  // Step 4: Computed fields + context layer
+  
+  return { ...result, stageChanges };
+}
+
+5. UPDATE FRESHNESS TRACKING
+
+After every successful import, update the connection record:
+
+UPDATE connections SET 
+  last_sync_at = NOW(),
+  metadata = jsonb_set(
+    COALESCE(metadata, '{}'),
+    '{last_imports}',
+    (
+      SELECT jsonb_object_agg(entity_type, jsonb_build_object(
+        'imported_at', applied_at,
+        'record_count', records_inserted + records_updated,
+        'filename', filename
+      ))
+      FROM import_batches 
+      WHERE workspace_id = $1 AND status = 'applied'
+      AND applied_at = (
+        SELECT MAX(applied_at) FROM import_batches ib2 
+        WHERE ib2.workspace_id = import_batches.workspace_id 
+        AND ib2.entity_type = import_batches.entity_type 
+        AND ib2.status = 'applied'
+      )
+    )
+  )
+WHERE workspace_id = $1 AND source_type = 'csv_import';
+
+This gives the freshness endpoint per-entity-type import timestamps.
+
+6. TEMP FILE MANAGEMENT
+
+Improve the temp file handling:
+
+- After successful confirm: delete temp file immediately
+- After rollback: delete temp file
+- Add a POST /api/workspaces/:id/import/cancel/:batchId endpoint:
+  - Set import_batches status = 'cancelled'
+  - Delete temp file
+  - No data changes needed (data was never written)
+
+- Startup cleanup: delete temp files older than 24h
+- Cron cleanup: every hour, same check
+
+What NOT to build:
+- No file storage beyond temp â€” we don't keep raw uploads permanently
+- No import versioning (can't compare import from 3 weeks ago to today)
+- No automatic re-import scheduling
+```
+
+---
