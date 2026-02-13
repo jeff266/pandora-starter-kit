@@ -21,6 +21,8 @@ import {
   type GradeThresholds,
 } from '../config/workspace-config.js';
 import { query } from '../db.js';
+import { encryptCredentials, decryptCredentials, isEncrypted } from '../lib/encryption.js';
+import { getEnrichmentConfig } from '../enrichment/config.js';
 
 const router = Router();
 
@@ -304,6 +306,110 @@ router.get('/:workspaceId/config/defaults', async (req: Request<WorkspaceParams>
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.error('[Config API] Get defaults error:', message);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.get('/:workspaceId/config/enrichment', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    const { workspaceId } = req.params;
+
+    const result = await query<{ credentials: any; metadata: any }>(
+      `SELECT credentials, metadata FROM connections WHERE workspace_id = $1 AND connector_name = 'enrichment_config' LIMIT 1`,
+      [workspaceId]
+    );
+
+    const response: Record<string, any> = {
+      apollo_api_key: false,
+      serper_api_key: false,
+      linkedin_rapidapi_key: false,
+      auto_enrich_on_close: true,
+      enrich_lookback_months: 6,
+      cache_days: 90,
+    };
+
+    if (result.rows.length > 0) {
+      const row = result.rows[0];
+      const metadata = row.metadata || {};
+
+      if (row.credentials && isEncrypted(row.credentials)) {
+        const decrypted = decryptCredentials(row.credentials as any);
+        response.apollo_api_key = !!decrypted.apollo_api_key;
+        response.serper_api_key = !!decrypted.serper_api_key;
+        response.linkedin_rapidapi_key = !!decrypted.linkedin_rapidapi_key;
+      }
+
+      response.auto_enrich_on_close = metadata.auto_enrich_on_close ?? true;
+      response.enrich_lookback_months = metadata.enrich_lookback_months ?? 6;
+      response.cache_days = metadata.cache_days ?? 90;
+    }
+
+    res.json(response);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[Config API] Get enrichment config error:', message);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.put('/:workspaceId/config/enrichment', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    const { workspaceId } = req.params;
+    const body = req.body;
+
+    const apiKeyFields = ['apollo_api_key', 'serper_api_key', 'linkedin_rapidapi_key'];
+    const metadataFields = ['auto_enrich_on_close', 'enrich_lookback_months', 'cache_days'];
+
+    const newKeys: Record<string, string> = {};
+    for (const field of apiKeyFields) {
+      if (body[field] !== undefined && typeof body[field] === 'string' && body[field].length > 0) {
+        newKeys[field] = body[field];
+      }
+    }
+
+    const newMetadata: Record<string, any> = {};
+    for (const field of metadataFields) {
+      if (body[field] !== undefined) {
+        newMetadata[field] = body[field];
+      }
+    }
+
+    const existing = await query<{ credentials: any; metadata: any }>(
+      `SELECT credentials, metadata FROM connections WHERE workspace_id = $1 AND connector_name = 'enrichment_config' LIMIT 1`,
+      [workspaceId]
+    );
+
+    let mergedKeys: Record<string, string> = {};
+    let mergedMetadata: Record<string, any> = {};
+
+    if (existing.rows.length > 0) {
+      const row = existing.rows[0];
+      if (row.credentials && isEncrypted(row.credentials)) {
+        mergedKeys = decryptCredentials(row.credentials as any);
+      }
+      mergedMetadata = row.metadata || {};
+    }
+
+    Object.assign(mergedKeys, newKeys);
+    Object.assign(mergedMetadata, newMetadata);
+
+    const encrypted = encryptCredentials(mergedKeys);
+
+    await query(
+      `INSERT INTO connections (id, workspace_id, connector_name, auth_method, credentials, metadata, status, created_at, updated_at)
+       VALUES (gen_random_uuid(), $1, 'enrichment_config', 'api_key', $2, $3, 'connected', NOW(), NOW())
+       ON CONFLICT (workspace_id, connector_name)
+       DO UPDATE SET credentials = $2, metadata = $3, updated_at = NOW()`,
+      [workspaceId, JSON.stringify(encrypted), JSON.stringify(mergedMetadata)]
+    );
+
+    res.json({
+      success: true,
+      message: 'Enrichment configuration updated',
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[Config API] Update enrichment config error:', message);
     res.status(500).json({ error: message });
   }
 });

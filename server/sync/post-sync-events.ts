@@ -3,6 +3,9 @@ import { getSkillRuntime } from '../skills/runtime.js';
 import { linkConversations } from '../linker/entity-linker.js';
 import { classifyAndUpdateInternalStatus } from '../analysis/conversation-internal-filter.js';
 import { extractInsightsFromConversations } from '../analysis/deal-insights-extractor.js';
+import { enrichClosedDeal } from '../enrichment/closed-deal-enrichment.js';
+import { getEnrichmentConfig } from '../enrichment/config.js';
+import { query } from '../db.js';
 
 interface SyncResult {
   connector: string;
@@ -50,6 +53,13 @@ export async function emitSyncCompleted(
       });
   }
 
+  const crmSynced = connectorTypes.some(c => ['hubspot', 'salesforce'].includes(c));
+  if (crmSynced) {
+    triggerEnrichmentForNewlyClosedDeals(workspaceId).catch(err => {
+      console.error(`[Enrichment] Post-sync trigger failed:`, err instanceof Error ? err.message : err);
+    });
+  }
+
   const registry = getSkillRegistry();
   const allSkills = registry.listAll();
 
@@ -77,6 +87,51 @@ export async function emitSyncCompleted(
       console.log(`[PostSync] Queued skill ${skill.id} for workspace ${workspaceId}`);
     } catch (err) {
       console.error(`[PostSync] Failed to queue skill ${skill.id}:`, err);
+    }
+  }
+}
+
+async function triggerEnrichmentForNewlyClosedDeals(workspaceId: string): Promise<void> {
+  const config = await getEnrichmentConfig(workspaceId);
+  if (!config.autoEnrichOnClose) {
+    console.log('[Enrichment] Auto-enrich disabled for workspace', workspaceId);
+    return;
+  }
+
+  if (!config.apolloApiKey && !config.serperApiKey) {
+    console.log('[Enrichment] No enrichment API keys configured, skipping');
+    return;
+  }
+
+  const recentlyClosedResult = await query(`
+    SELECT d.id, d.name FROM deals d
+    WHERE d.workspace_id = $1
+      AND d.stage_normalized IN ('closed_won', 'closed_lost')
+      AND d.updated_at > NOW() - INTERVAL '1 day'
+      AND NOT EXISTS (
+        SELECT 1 FROM deal_contacts dc
+        WHERE dc.deal_id = d.id AND dc.workspace_id = d.workspace_id
+          AND dc.enrichment_status = 'enriched'
+          AND dc.buying_role IS NOT NULL
+          AND dc.apollo_data IS NOT NULL
+      )
+    ORDER BY d.updated_at DESC
+    LIMIT 10
+  `, [workspaceId]);
+
+  if (recentlyClosedResult.rows.length === 0) {
+    console.log('[Enrichment] No newly closed deals to enrich');
+    return;
+  }
+
+  console.log(`[Enrichment] Found ${recentlyClosedResult.rows.length} newly closed deals to enrich`);
+
+  for (const deal of recentlyClosedResult.rows) {
+    try {
+      const result = await enrichClosedDeal(workspaceId, deal.id);
+      console.log(`[Enrichment] Enriched "${deal.name}": ${result.contactResolution.rolesResolved} roles, ${result.apolloEnrichment.enrichedCount} contacts, ${result.accountSignals.signalCount} signals (${result.durationMs}ms)`);
+    } catch (err) {
+      console.error(`[Enrichment] Failed to enrich deal "${deal.name}":`, err instanceof Error ? err.message : err);
     }
   }
 }
