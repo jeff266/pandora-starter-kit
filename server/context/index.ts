@@ -211,8 +211,8 @@ export async function getDataFreshness(workspaceId: string): Promise<DataFreshne
     [workspaceId, 'applied']
   );
 
-  const connectionCheck = await query<{ source: string; last_sync_at: string }>(
-    'SELECT source, last_sync_at FROM connections WHERE workspace_id = $1 ORDER BY last_sync_at DESC NULLS LAST LIMIT 1',
+  const connectionCheck = await query<{ connector_name: string; last_sync_at: string }>(
+    'SELECT connector_name, last_sync_at FROM connections WHERE workspace_id = $1 ORDER BY last_sync_at DESC NULLS LAST LIMIT 1',
     [workspaceId]
   );
 
