@@ -1,0 +1,90 @@
+## PROMPT 1: Database Schema + Import Batch Tracking
+
+```
+Read PANDORA_FILE_IMPORT_CONNECTOR_SPEC.md first â€” it's the source of truth 
+for everything in this build.
+
+You're adding file import as a first-class data source. This prompt sets up 
+the database infrastructure.
+
+1. CREATE MIGRATION: import_batches table
+
+CREATE TABLE import_batches (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id),
+  entity_type TEXT NOT NULL,          -- 'deal', 'contact', 'account'
+  filename TEXT NOT NULL,
+  source_crm TEXT,                    -- 'hubspot', 'salesforce', 'pipedrive', 'unknown'
+  row_count INTEGER NOT NULL,
+  records_inserted INTEGER DEFAULT 0,
+  records_updated INTEGER DEFAULT 0,
+  records_skipped INTEGER DEFAULT 0,
+  classification JSONB,               -- DeepSeek column mapping result
+  warnings TEXT[],
+  status TEXT NOT NULL DEFAULT 'pending',  -- 'pending', 'confirmed', 'applied', 'rolled_back'
+  replace_strategy TEXT DEFAULT 'replace', -- 'replace', 'merge', 'append'
+  uploaded_by TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  confirmed_at TIMESTAMPTZ,
+  applied_at TIMESTAMPTZ
+);
+
+CREATE INDEX idx_import_batches_workspace ON import_batches(workspace_id, created_at DESC);
+CREATE INDEX idx_import_batches_status ON import_batches(workspace_id, status);
+
+2. CREATE MIGRATION: stage_mappings table
+
+Stage mappings are workspace-level configuration that persist across imports.
+When a consultant maps "Verbal Yes" â†’ negotiation, that mapping should 
+auto-apply on the next upload.
+
+CREATE TABLE stage_mappings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id),
+  source TEXT NOT NULL DEFAULT 'csv_import',  -- could also be 'hubspot', 'salesforce'
+  raw_stage TEXT NOT NULL,
+  normalized_stage TEXT NOT NULL,      -- 'discovery', 'qualification', 'proposal', 'negotiation', 'closed_won', 'closed_lost'
+  is_open BOOLEAN NOT NULL DEFAULT true,
+  display_order INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(workspace_id, source, raw_stage)
+);
+
+CREATE INDEX idx_stage_mappings_workspace ON stage_mappings(workspace_id, source);
+
+3. VERIFY source tracking on normalized entities
+
+Check the deals, contacts, and accounts tables. They should already have:
+- source TEXT â€” set to 'csv_import' for file imports
+- source_id TEXT â€” will hold external CRM ID if detected
+- source_data JSONB â€” will hold { import_batch_id, original_row }
+
+If source_data doesn't exist, add it:
+  ALTER TABLE deals ADD COLUMN IF NOT EXISTS source_data JSONB DEFAULT '{}';
+  ALTER TABLE contacts ADD COLUMN IF NOT EXISTS source_data JSONB DEFAULT '{}';
+  ALTER TABLE accounts ADD COLUMN IF NOT EXISTS source_data JSONB DEFAULT '{}';
+
+4. ADD 'csv_import' as a valid source type
+
+Check the connections table (or wherever connector configurations are stored).
+Ensure 'csv_import' is accepted as a connector/source type. If there's an 
+enum or check constraint, add it. The connection record for file-import 
+workspaces should look like:
+
+  workspace_id, 
+  source_type = 'csv_import',
+  source_label = 'HubSpot Export',  -- user-provided
+  config = '{}',                    -- no credentials needed
+  last_sync_at = last upload time
+
+5. RUN MIGRATIONS
+
+Execute against the database and verify all tables exist.
+Log the schema for import_batches and stage_mappings to confirm.
+
+What NOT to build:
+- No API routes yet (that's Prompt 3)
+- No file parsing yet (that's Prompt 2)
+- No UI
+```
