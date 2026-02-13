@@ -250,7 +250,7 @@ Each CWD classification object should have:
 ⚠️ DATA FRESHNESS: {{dataFreshness.staleCaveat}}
 {{/if}}
 
-{{#if dataFreshness.source === 'file_import'}}
+{{#if (eq dataFreshness.source 'file_import')}}
 DATA SOURCE: File import (CSV/Excel).
 Available entities: {{#if dataFreshness.hasDeals}}deals{{/if}}{{#if dataFreshness.hasContacts}}, contacts{{/if}}{{#if dataFreshness.hasAccounts}}, accounts{{/if}}.
 {{#unless dataFreshness.hasActivities}}
