@@ -1,0 +1,148 @@
+# PROMPT 9: End-to-End Test Script
+
+```
+Read PANDORA_FILE_IMPORT_CONNECTOR_SPEC.md first.
+
+Create a comprehensive test script that validates the entire file import 
+flow end-to-end.
+
+1. CREATE scripts/test-file-import.ts
+
+This script tests against a real workspace (use Frontera or create a 
+test workspace).
+
+### Test 1: Deal Import â€” HubSpot-style CSV
+
+Create a CSV in memory:
+
+const dealsCsv = `Record ID,Deal Name,Amount,Deal Stage,Close Date,Deal Owner,Company Name,Pipeline,Create Date
+HS-001,Acme Corp Expansion,$125000,Proposal Sent,2026-04-15,Nate Phillips,Acme Corp,Enterprise,2026-01-10
+HS-002,Globex Industries,$85000,Discovery Call,2026-05-01,Sara Bollman,Globex Industries Inc.,Enterprise,2026-01-20
+HS-003,Initech Migration,$200000,Negotiation,2026-03-31,Carter McKay,Initech LLC,Enterprise,2026-01-05
+HS-004,Umbrella Corp,$50000,Qualified,2026-06-15,Jack McArdle,Umbrella Corporation,SMB,2026-02-01
+HS-005,Wonka Industries,$0,Closed Lost,2025-12-31,Nate Phillips,Wonka Industries,,2025-11-01
+HS-006,Stark Enterprises,$350000,Closed Won,2026-01-20,Sara Bollman,Stark Enterprises,Enterprise,2025-10-15
+HS-007,Wayne Corp,$175000,Decision Maker Bought-In,2026-04-01,Nate Phillips,Wayne Corp,Enterprise,2026-01-25
+HS-008,,missing amount,Discovery Call,2026-07-01,Jack McArdle,Test Co,SMB,2026-02-05`;
+
+Steps:
+a. Convert to buffer
+b. POST /api/workspaces/:id/import/upload?entityType=deal
+c. Log the full preview response
+d. Verify:
+   - 8 rows detected
+   - AI or heuristic mapped: name â†’ "Deal Name", amount â†’ "Amount", 
+     stage â†’ "Deal Stage", close_date â†’ "Close Date"
+   - Stage values detected: ["Proposal Sent", "Discovery Call", 
+     "Negotiation", "Qualified", "Closed Lost", "Closed Won", 
+     "Decision Maker Bought-In"]
+   - Stage mapping suggested (check normalized values)
+   - Row 8 flagged: missing deal name, unparseable amount
+   - source_crm detected as 'hubspot' (or similar)
+   - Warnings include: row 8 issues, $0 amount on Wonka
+
+e. POST /api/workspaces/:id/import/confirm with:
+   { batchId, strategy: 'replace' }
+f. Verify ImportResult: 
+   - 7 inserted (row 8 skipped or included with warnings)
+   - Check deals table: SELECT * FROM deals WHERE workspace_id = $1 AND source = 'csv_import'
+   - Verify stage_normalized is set correctly
+   - Verify amount parsed correctly ($125000 â†’ 125000, $0 â†’ 0)
+
+Log: PASS/FAIL for each check
+
+### Test 2: Account Import + Deal Linking
+
+const accountsCsv = `Company ID,Company Name,Website,Industry,Employees,Annual Revenue
+AC-001,Acme Corp,acme.com,Technology,500,50000000
+AC-002,Globex Industries,globex.com,Manufacturing,2000,200000000
+AC-003,Initech,initech.com,Technology,150,15000000
+AC-004,Umbrella Corporation,umbrella.com,Healthcare,10000,5000000000
+AC-005,Stark Enterprises,stark.com,Technology,8000,3000000000`;
+
+Steps:
+a. Upload + confirm accounts
+b. Verify: 5 accounts inserted
+c. Check: how many deals got linked to accounts?
+   Expected: Acme â†’ Acme Corp (exact), Globex Industries Inc. â†’ Globex Industries 
+   (normalized match), Initech LLC â†’ Initech (normalized), etc.
+d. Log which deals linked and which didn't
+
+### Test 3: Contact Import + Association
+
+const contactsCsv = `Contact ID,First Name,Last Name,Email,Job Title,Company,Phone
+CT-001,John,Smith,john@acme.com,VP Engineering,Acme Corp,555-0101
+CT-002,Jane,Doe,jane@acme.com,CFO,Acme Corp,555-0102
+CT-003,Bob,Wilson,bob@globex.com,CTO,Globex Industries,555-0201
+CT-004,Alice,Johnson,alice@initech.com,CEO,Initech,555-0301
+CT-005,Charlie,Brown,charlie@test.com,Intern,Unknown Corp,555-0401`;
+
+Steps:
+a. Upload + confirm contacts
+b. Verify: 5 contacts inserted
+c. Check: contacts linked to accounts by company name
+   Expected: John + Jane â†’ Acme, Bob â†’ Globex, Alice â†’ Initech
+   Charlie â†’ NOT linked (Unknown Corp not in accounts)
+d. Log linking results
+
+### Test 4: Re-Upload (Replace Strategy)
+
+Update the deals CSV â€” change some stages, add a new deal, remove one:
+
+const dealsV2Csv = `Record ID,Deal Name,Amount,...
+HS-001,Acme Corp Expansion,$125000,Negotiation,...      â† stage changed from Proposal Sent
+HS-002,Globex Industries,$95000,Qualified,...            â† amount changed, stage changed
+HS-003,Initech Migration,$200000,Closed Won,...          â† stage changed to won
+HS-004,Umbrella Corp,$50000,Qualified,...                â† unchanged
+HS-006,Stark Enterprises,$350000,Closed Won,...          â† unchanged
+HS-007,Wayne Corp,$175000,Contract Sent,...              â† stage changed
+HS-009,New Deal Co,$100000,Discovery Call,...             â† new deal
+(HS-005 Wonka removed)`;
+
+Steps:
+a. Upload + confirm with strategy: 'replace'
+b. Verify: 7 deals in table (Wonka gone, New Deal added)
+c. Check deal_stage_history:
+   - HS-001: Proposal Sent â†’ Negotiation
+   - HS-002: Discovery Call â†’ Qualified
+   - HS-003: Negotiation â†’ Closed Won
+   - HS-007: Decision Maker Bought-In â†’ Contract Sent
+   - HS-009: NULL â†’ Discovery Call (new)
+   - HS-005: Closed Lost â†’ removed_from_export
+d. Log all stage changes
+
+### Test 5: Freshness Check
+
+a. GET /api/workspaces/:id/import/freshness
+b. Verify: deals lastImportedAt is recent, isStale = false
+c. Verify: contacts and accounts also show recent import
+
+### Test 6: Rollback
+
+a. Note the latest batch ID
+b. DELETE /api/workspaces/:id/import/batch/:batchId
+c. Verify: deals from that batch are deleted
+d. Verify: import_batches status = 'rolled_back'
+e. Verify: previous deals restored? No â€” rollback only removes 
+   the latest batch. If you want previous data, re-upload.
+
+### Test 7: Skill Execution with File-Import Data
+
+a. Trigger pipeline-hygiene skill for this workspace
+b. Verify: skill runs without errors
+c. Verify: output includes staleness context if applicable
+d. Verify: if no activity data, staleness uses updated_at proxy
+
+Log: PASS/FAIL for each test case with details.
+
+2. RUN THE SCRIPT
+
+npx tsx scripts/test-file-import.ts
+
+If any test fails, investigate and fix before declaring the feature complete.
+
+3. CLEANUP
+
+After tests pass, either:
+- Delete the test workspace data
+- Or keep it as a reference dataset for future testing
