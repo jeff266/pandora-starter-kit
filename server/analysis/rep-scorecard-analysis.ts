@@ -383,12 +383,12 @@ async function gatherRepMetrics(
       `SELECT
         COUNT(*) as call_count,
         AVG(duration_seconds) as avg_duration,
-        AVG(talk_listen_ratio) as avg_talk_ratio
+        AVG((talk_listen_ratio->>'talk_ratio')::numeric) as avg_talk_ratio
        FROM conversations
        WHERE workspace_id = $1
-         AND $2 = ANY(participants)
+         AND participants @> $2::jsonb
          AND created_at BETWEEN $3 AND $4`,
-      [workspaceId, repEmail, changeWindowStart, changeWindowEnd]
+      [workspaceId, JSON.stringify([{ email: repEmail }]), changeWindowStart, changeWindowEnd]
     );
 
     if (convResult.rows.length > 0 && Number(convResult.rows[0].call_count) > 0) {
