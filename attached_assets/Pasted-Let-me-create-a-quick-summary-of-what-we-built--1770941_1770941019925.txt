@@ -1,0 +1,110 @@
+Let me create a quick summary of what we 
+  built.                                                                    
+                                                                            
+  Forecast Roll-up v3.0 — Complete! 🎉                                      
+                                                                            
+  I've successfully enhanced the forecast-rollup skill with all the features
+   you specified in your detailed prompt. Here's what was delivered:        
+                                                                            
+  New Features Added                                                        
+                                                                            
+  1. Time Windows Resolution (Step 2)                                       
+                                                                            
+  - Proper Q1/Q2 context instead of hardcoded assumptions                   
+  - Uses existing resolveTimeWindows function                               
+  - Provides quarter labels and date ranges                                 
+                                                                            
+  2. Previous Forecast Retrieval (Step 4)                                   
+                                                                            
+  - New gatherPreviousForecast compute function                             
+  - Retrieves full historical forecast data (not just deltas)               
+  - Enables deeper trend analysis and pattern detection                     
+  - Gracefully handles first-run scenario                                   
+                                                                            
+  3. Concentration Risk Analysis (Step 6)                                   
+                                                                            
+  - New gatherDealConcentrationRisk compute function                        
+  - Top 3 Deals: Identifies biggest pipeline deals with weighted analysis   
+  - Whale Deals: Detects any deal >20% of team quota                        
+  - Risk Levels: Automatically classifies as high/medium/low based on       
+  concentration thresholds                                                  
+    - HIGH: Top 3 >50% OR whale >40% of base case                           
+    - MEDIUM: Top 3 >30% OR whale >25%                                      
+    - LOW: Below medium thresholds                                          
+                                                                            
+  4. AI-Powered Behavioral Risk Detection (Step 8)                          
+                                                                            
+  - New DeepSeek step for forecast gaming detection                         
+  - Detects 4 risk types:                                                   
+    - Sandbagging: Under-forecasting patterns                               
+    - Over-forecasting: Optimistic commit with low probability              
+    - Whale dependency: Single deal >30% of rep quota                       
+    - Category gaming: Suspicious shifts without deal progression           
+  - Returns structured JSON with severity, evidence, and suggested actions  
+                                                                            
+  5. Dynamic Output Budgeting (Step 9)                                      
+                                                                            
+  - Uses existing calculateOutputBudget function                            
+  - Adapts narrative depth based on issue complexity                        
+  - Provides word count guidance to Claude                                  
+                                                                            
+  6. Enhanced Claude Synthesis (Step 10)                                    
+                                                                            
+  - Comprehensive executive template with 8 sections:                       
+    a. Executive Summary (one-sentence verdict)                             
+    b. Forecast Position vs Quota (Bear/Base/Bull + Risk-Adjusted Landing   
+  Zone)                                                                     
+    c. Category Breakdown & Confidence (spread analysis, volatility         
+  thresholds)                                                               
+    d. Concentration Risk (Top 3 + whale deals analysis)                    
+    e. Rep Performance Spotlight (top performers + at-risk reps)            
+    f. Week-over-Week Movement (commit direction, category shifts)          
+    g. Behavioral Risks (AI-Detected) (sandbagging, over-forecasting, etc.) 
+    h. Top 3 Actions This Week (ranked by revenue impact)                   
+                                                                            
+  Files Modified                                                            
+                                                                            
+  1. server/skills/tool-definitions.ts                                      
+    - Added gatherPreviousForecast (59 lines)                               
+    - Added gatherDealConcentrationRisk (85 lines)                          
+    - Registered both in exports                                            
+  2. server/skills/library/forecast-rollup.ts                               
+    - Complete rewrite with 10-step sequence                                
+    - Version bumped: 2.0.0 → 3.0.0                                         
+    - Added DeepSeek behavioral risk classification                         
+    - Enhanced Claude prompt with comprehensive template                    
+    - Duration: 30s → 45s                                                   
+                                                                            
+  Validation Results                                                        
+                                                                            
+  ✅ ALL VALIDATIONS PASSED                                                 
+     ✓ Steps: 10/10                                                         
+     ✓ New steps: 5/5                                                       
+     ✓ Missing tools: None                                                  
+     ✓ DeepSeek step: Present                                               
+     ✓ Version: 3.0.0                                                       
+                                                                            
+  Key Capabilities                                                          
+                                                                            
+  1. Forecast Fragility Detection: Automatically identifies when forecast   
+  depends on 1-3 large deals                                                
+  2. Gaming Detection: AI spots sandbagging and over-forecasting patterns   
+  before they impact the quarter                                            
+  3. Risk-Adjusted Landing Zones: Gives leadership realistic forecast ranges
+   instead of single numbers                                                
+  4. Historical Context: Full trend analysis with previous forecast data,   
+  not just deltas                                                           
+  5. Dynamic Depth: Report depth adapts to complexity automatically         
+                                                                            
+  Next Steps                                                                
+                                                                            
+  The implementation is complete and validated. Ready to:                   
+  1. Test with Frontera Health data on Replit                               
+  2. Validate DeepSeek risk classifications with real forecast patterns     
+  3. Deploy to production                                                   
+                                                                            
+  All files are ready at:                                                   
+  - Implementation: server/skills/library/forecast-rollup.ts                
+  - Compute functions: server/skills/tool-definitions.ts (lines 2292-2430)  
+  - Documentation: FORECAST_ROLLUP_V3_ENHANCEMENTS.md                       
+  - Validation script: test-f
