@@ -46,7 +46,7 @@ async function computeDeals(
 ): Promise<{ processed: number; updated: number }> {
   const result = await query<DealRow>(
     `SELECT id, amount, stage, close_date, probability, days_in_stage,
-            last_activity_date, created_at, pipeline
+            last_activity_date, created_at, pipeline, stage_changed_at
      FROM deals
      WHERE workspace_id = $1
        AND stage NOT IN ('closedwon', 'closedlost', 'closed won', 'closed lost')`,
@@ -83,6 +83,12 @@ async function computeDeals(
       const activity = activityMap.get(deal.id);
       const scores = computeDealScores(deal, config, activity);
 
+      // Calculate days_in_stage: time since stage_changed_at (or created_at if never changed)
+      const stageAnchor = (deal as any).stage_changed_at
+        ? new Date((deal as any).stage_changed_at)
+        : new Date(deal.created_at);
+      const daysInStage = Math.floor((Date.now() - stageAnchor.getTime()) / (1000 * 60 * 60 * 24));
+
       const healthScore = Math.round((100 - scores.dealRisk) * 100) / 100;
       await client.query(
         `UPDATE deals
@@ -90,9 +96,10 @@ async function computeDeals(
              deal_risk = $3,
              deal_risk_factors = $4,
              health_score = $5,
+             days_in_stage = $6,
              updated_at = NOW()
-         WHERE id = $1 AND workspace_id = $6`,
-        [deal.id, scores.velocityScore, scores.dealRisk, JSON.stringify(scores.riskFactors), healthScore, workspaceId]
+         WHERE id = $1 AND workspace_id = $7`,
+        [deal.id, scores.velocityScore, scores.dealRisk, JSON.stringify(scores.riskFactors), healthScore, daysInStage, workspaceId]
       );
       updated++;
     }

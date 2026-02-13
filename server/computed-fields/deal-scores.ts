@@ -8,6 +8,7 @@ export interface DealRow {
   last_activity_date: string | null;
   created_at: string;
   pipeline: string | null;
+  stage_changed_at?: string | null;
 }
 
 interface DealActivity {

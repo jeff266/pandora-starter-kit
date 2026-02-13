@@ -286,7 +286,7 @@ async function computeMetadataForDeal(
   }>(
     `SELECT id, call_date, duration_seconds, participants, source, source_data, transcript_text
      FROM conversations
-     WHERE workspace_id = $1 AND id = ANY($2::uuid[])
+     WHERE workspace_id = $1 AND id = ANY($2)
      ORDER BY call_date`,
     [workspaceId, conversationIds]
   );
@@ -500,7 +500,7 @@ export async function extractTranscriptExcerpts(
     }>(
       `SELECT id, title, transcript_text, summary, duration_seconds, call_date
        FROM conversations
-       WHERE workspace_id = $1 AND id = ANY($2::uuid[])
+       WHERE workspace_id = $1 AND id = ANY($2)
        ORDER BY call_date DESC, duration_seconds DESC
        LIMIT 5`,
       [workspaceId, linkage.conversationIds]

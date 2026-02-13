@@ -111,6 +111,11 @@ async function executeSkillAsync(
       await generatePMTasksForDataQuality(workspaceId, result);
     }
 
+    // Save ICP profile if this is the icp-discovery skill
+    if (skill.id === 'icp-discovery' && result.status === 'completed' && result.stepData) {
+      await saveICPProfileFromDiscovery(workspaceId, result);
+    }
+
     // If callback URL provided, POST results
     if (callbackUrl) {
       try {
@@ -302,6 +307,91 @@ export async function handleListSkillRuns(req: Request, res: Response): Promise<
 // ============================================================================
 // Helper Functions
 // ============================================================================
+
+/**
+ * Save ICP profile from ICP Discovery skill results
+ */
+async function saveICPProfileFromDiscovery(
+  workspaceId: string,
+  result: SkillResult
+): Promise<void> {
+  try {
+    const discoveryResult = result.stepData?.discovery_result;
+
+    if (!discoveryResult) {
+      logger.warn('ICP Discovery completed but missing discovery_result', { workspaceId, runId: result.runId });
+      return;
+    }
+
+    // Mark all existing active profiles as superseded
+    await query(
+      `UPDATE icp_profiles
+       SET status = 'superseded'
+       WHERE workspace_id = $1 AND status = 'active'`,
+      [workspaceId]
+    );
+
+    // Insert new ICP profile as active
+    const insertResult = await query(
+      `INSERT INTO icp_profiles (
+        workspace_id,
+        version,
+        status,
+        personas,
+        buying_committees,
+        company_profile,
+        scoring_weights,
+        scoring_method,
+        model_metadata,
+        deals_analyzed,
+        won_deals,
+        lost_deals,
+        contacts_enriched,
+        generated_by
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+      RETURNING id`,
+      [
+        workspaceId,
+        1, // version - could be incremented from previous, but starting with 1 for simplicity
+        'active',
+        JSON.stringify(discoveryResult.personas || []),
+        JSON.stringify(discoveryResult.committees || []),
+        JSON.stringify(discoveryResult.companyProfile || {}),
+        JSON.stringify(discoveryResult.scoringWeights || {}),
+        discoveryResult.mode || 'descriptive',
+        JSON.stringify({
+          dataReadiness: discoveryResult.dataReadiness,
+          conversationCoverage: discoveryResult.conversationCoverage,
+          customFieldContributions: discoveryResult.customFieldContributions,
+          executionMs: discoveryResult.metadata?.executionMs,
+        }),
+        discoveryResult.metadata?.dealsAnalyzed || 0,
+        discoveryResult.metadata?.wonCount || 0,
+        discoveryResult.metadata?.lostCount || 0,
+        discoveryResult.metadata?.contactRolesUsed || 0,
+        'icp-discovery',
+      ]
+    );
+
+    const profileId = insertResult.rows[0]?.id;
+
+    logger.info('Saved ICP profile from discovery', {
+      workspaceId,
+      runId: result.runId,
+      profileId,
+      mode: discoveryResult.mode,
+      dealsAnalyzed: discoveryResult.metadata?.dealsAnalyzed,
+      personaCount: discoveryResult.personas?.length || 0,
+      committeeCount: discoveryResult.committees?.length || 0,
+    });
+  } catch (error) {
+    logger.error('Failed to save ICP profile from discovery', {
+      workspaceId,
+      runId: result.runId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
 
 /**
  * Generate PM tasks for data quality audit skill results
