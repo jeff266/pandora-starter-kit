@@ -25,6 +25,7 @@ import stageHistoryRouter from './routes/stage-history.js';
 import scoresRouter from './routes/scores.js';
 import icpRouter from './routes/icp.js';
 import configRouter from './routes/config.js';
+import importRouter, { cleanupTempFiles } from './routes/import.js';
 import { getAdapterRegistry } from "./connectors/adapters/registry.js";
 import { MondayTaskAdapter } from "./connectors/monday/adapter.js";
 import { GoogleDriveDocumentAdapter } from "./connectors/google-drive/adapter.js";
@@ -75,6 +76,7 @@ app.use("/api/workspaces", stageHistoryRouter);
 app.use("/api/workspaces", scoresRouter);
 app.use("/api/workspaces", icpRouter);
 app.use("/api/workspaces", configRouter);
+app.use("/api/workspaces", importRouter);
 
 function registerAdapters(): void {
   const registry = getAdapterRegistry();
@@ -110,6 +112,9 @@ async function start(): Promise<void> {
   startJobQueue();
   startScheduler();
   startSkillScheduler();
+
+  cleanupTempFiles();
+  setInterval(cleanupTempFiles, 60 * 60 * 1000);
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`[server] Pandora v0.1.0 listening on port ${PORT}`);

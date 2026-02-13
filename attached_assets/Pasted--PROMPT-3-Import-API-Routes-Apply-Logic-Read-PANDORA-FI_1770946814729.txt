@@ -1,0 +1,243 @@
+## PROMPT 3: Import API Routes + Apply Logic
+
+```
+Read PANDORA_FILE_IMPORT_CONNECTOR_SPEC.md first.
+
+Build the API routes for the upload â†’ preview â†’ confirm â†’ apply flow.
+This prompt does NOT include DeepSeek classification â€” it uses a placeholder 
+that Prompt 4 will replace. For now, use a simple heuristic mapper.
+
+1. CREATE server/import/heuristic-mapper.ts
+
+A fallback column mapper that works without DeepSeek. This is useful for:
+- When DeepSeek is down
+- Testing the flow end-to-end before wiring LLM
+- Very obvious column names that don't need AI
+
+export function heuristicMapColumns(
+  entityType: 'deal' | 'contact' | 'account',
+  headers: string[],
+  sampleRows: any[][]
+): ColumnMapping
+
+For deals, check headers against known patterns:
+  - name: /deal.?name|opportunity.?name|^name$/i
+  - amount: /amount|value|revenue|acv|arr|deal.?amount/i
+  - stage: /stage|deal.?stage|pipeline.?stage|status/i
+  - close_date: /close.?date|expected.?close|close.?by/i
+  - owner: /owner|deal.?owner|rep|sales.?rep|assigned/i
+  - pipeline: /pipeline|pipeline.?name/i
+  - account_name: /company|account|company.?name|account.?name/i
+  - external_id: /record.?id|deal.?id|opportunity.?id|hubspot.?id|^id$/i
+  - probability: /probability|win.?prob|percent/i
+  - created_date: /create.?date|created|date.?created/i
+
+Similar patterns for contacts and accounts (see the spec for field lists).
+
+Return:
+{
+  mapping: { [field]: { columnIndex, columnHeader, confidence, source: 'heuristic' } },
+  unmappedColumns: string[],
+  warnings: string[]
+}
+
+Confidence scoring:
+- Exact match (case insensitive) â†’ 0.95
+- Partial match (contains keyword) â†’ 0.75
+- No match â†’ skip
+
+2. CREATE server/import/apply.ts
+
+The core function that writes import data to normalized entity tables.
+
+export async function applyDealImport(
+  workspaceId: string,
+  batchId: string,
+  records: TransformedDeal[],
+  strategy: 'replace' | 'merge' | 'append',
+  stageMapping: StageMapping | null
+): Promise<ImportResult>
+
+Implementation:
+
+a. Begin transaction
+
+b. If strategy === 'replace':
+   - Delete all deals where source = 'csv_import' AND workspace_id = $1
+   - This wipes the previous file import cleanly
+   - Do NOT delete API-synced deals (source = 'hubspot', 'salesforce')
+
+c. For each record:
+   - Apply stage mapping if available: 
+     look up record.stage in stage_mappings table â†’ get normalized_stage
+   - Parse amount with parseAmount()
+   - Parse close_date with parseDate()
+   - Parse created_date with parseDate()
+   - Build normalized deal record:
+     {
+       workspace_id, name, amount, stage, stage_normalized,
+       close_date, owner_email: null, owner_name: record.owner,
+       pipeline: record.pipeline || 'default',
+       probability: parsePercentage(record.probability),
+       source: 'csv_import', 
+       source_id: record.external_id || gen_random_uuid(),
+       source_data: { import_batch_id: batchId, original_row: record.raw },
+       custom_fields: record.unmappedFields
+     }
+   
+   - If strategy === 'merge' and external_id exists:
+     INSERT ... ON CONFLICT (workspace_id, source, source_id) 
+     DO UPDATE SET name=$, amount=$, stage=$, ...
+   - Else:
+     INSERT
+
+d. After all records inserted, try to link deals to accounts:
+   - For each deal with an account_name value:
+     SELECT id FROM accounts 
+     WHERE workspace_id = $1 
+       AND normalizeCompanyName(name) = normalizeCompanyName($account_name)
+     LIMIT 1
+   - If found, UPDATE deals SET account_id = $account_id WHERE id = $deal_id
+   - Track how many were linked
+
+e. Update import_batches row:
+   UPDATE import_batches SET 
+     status = 'applied',
+     records_inserted = $inserted,
+     records_updated = $updated,
+     records_skipped = $skipped,
+     applied_at = NOW()
+   WHERE id = $batchId
+
+f. Commit transaction
+
+g. After commit (outside transaction):
+   - Refresh computed fields: refreshComputedFields(workspaceId)
+   - Update context layer: refreshContextLayer(workspaceId)
+   - Log to sync_log: connector_type = 'file_import', entity_type, records count
+
+h. Return ImportResult:
+   { batchId, inserted, updated, skipped, errors[], 
+     postActions: { accountsLinked, computedFieldsRefreshed, contextLayerUpdated } }
+
+Create equivalent functions:
+- applyContactImport(workspaceId, batchId, records, strategy)
+- applyAccountImport(workspaceId, batchId, records, strategy)
+
+For contacts: after insert, try to link to accounts by company name 
+(same pattern as deals).
+
+For accounts: no linking needed, they ARE the link target.
+
+3. CREATE server/routes/import.ts
+
+Wire the full flow:
+
+### POST /api/workspaces/:id/import/upload
+
+Multer config:
+const upload = multer({ 
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },  // 10MB
+  fileFilter: (req, file, cb) => {
+    const allowed = ['.xlsx', '.xls', '.csv'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, allowed.includes(ext));
+  }
+});
+
+Handler:
+- Required query param: entityType ('deal' | 'contact' | 'account')
+- Parse file â†’ parseImportFile(buffer, filename)
+- Classify columns â†’ heuristicMapColumns(entityType, headers, sampleRows)
+  (Prompt 4 will add DeepSeek as primary, heuristic as fallback)
+- Generate batchId (UUID)
+- Create import_batches row with status = 'pending'
+- Build preview:
+  - Transform first 5 rows using the mapping to show sample normalized records
+  - Count valid rows vs rows with errors
+  - Detect unique stage values (for deals)
+  - Check for existing stage mappings in stage_mappings table
+  - Run deduplication check against existing data
+- Return preview JSON
+
+### POST /api/workspaces/:id/import/confirm
+
+Body: { batchId, overrides?, strategy? }
+
+Overrides allow:
+- mapping: { field: { columnIndex } } â€” reassign columns
+- stageMapping: { rawStage: normalizedStage } â€” fix stage mappings
+- excludeRows: number[] â€” skip specific row numbers
+- defaults: { pipeline: 'Enterprise' } â€” set default values for unmapped fields
+
+Handler:
+- Load the import_batch by batchId, verify status = 'pending'
+- Re-parse the file (we don't store the raw file â€” re-upload if needed)
+  ACTUALLY: store the parsed data in import_batches.classification JSONB 
+  so we don't need the file again. The classification field should hold:
+  { mapping, parsedHeaders, parsedRows (all rows, not just sample), 
+    sourceCrm, dateFormat }
+  
+  WAIT â€” storing all rows in JSONB could be huge for large files. Instead:
+  - Store the raw file temporarily: save buffer to a temp file on disk 
+    at /tmp/imports/{batchId}.{ext}
+  - Clean up temp files after 24 hours or after confirm/cancel
+  - On confirm, re-parse from temp file
+
+- Apply overrides to the mapping
+- Save stage mapping overrides to stage_mappings table (persist for future imports)
+- Transform all rows using final mapping + value parsers
+- Call applyDealImport (or contact/account variant)
+- Delete temp file
+- Return ImportResult
+
+### DELETE /api/workspaces/:id/import/batch/:batchId
+
+Rollback an import:
+- Delete all records where source_data->>'import_batch_id' = $batchId
+- Update import_batches SET status = 'rolled_back'
+- Re-run computed fields and context layer
+- Return { deleted: number, entityType }
+
+### GET /api/workspaces/:id/import/history
+
+- SELECT * FROM import_batches 
+  WHERE workspace_id = $1 
+  ORDER BY created_at DESC 
+  LIMIT 50
+- Return array of import batches with summary info
+
+### GET /api/workspaces/:id/import/freshness
+
+Per entity type, return:
+- lastImportedAt: most recent applied import timestamp
+- daysSinceImport: calculated
+- recordCount: total records from file import
+- isStale: daysSinceImport > 14
+- staleCaveat: human-readable message if stale
+
+SELECT entity_type, 
+  MAX(applied_at) as last_import,
+  SUM(records_inserted + records_updated) as total_records
+FROM import_batches 
+WHERE workspace_id = $1 AND status = 'applied'
+GROUP BY entity_type
+
+4. WIRE ROUTES
+
+Add to Express app:
+import importRoutes from './routes/import';
+app.use('/api', importRoutes);
+
+5. TEMP FILE CLEANUP
+
+Add a simple cleanup function that runs on server startup and every hour:
+- Delete files in /tmp/imports/ older than 24 hours
+- Log cleanup count
+
+What NOT to build:
+- No DeepSeek classification yet (Prompt 4)
+- No stage mapping UI (API only for now)
+- No multi-file upload in single request
+```
