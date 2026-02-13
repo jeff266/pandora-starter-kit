@@ -4,7 +4,7 @@ import { firefliesConnector } from '../connectors/fireflies/index.js';
 import { FirefliesClient, formatSentencesToTranscript } from '../connectors/fireflies/client.js';
 import type { Connection, ConnectorCredentials } from '../connectors/_interface.js';
 import { linkConversations } from '../linker/entity-linker.js';
-import { decryptCredentials, isEncrypted } from '../lib/encryption.js';
+import { getConnectorCredentials } from '../lib/credential-store.js';
 import {
   fetchAndStoreDirectory,
   getDirectory,
@@ -60,13 +60,13 @@ router.post('/:workspaceId/connectors/fireflies/sync', async (req: Request<Works
     const workspaceId = req.params.workspaceId;
     const { mode = 'initial', since, lookbackDays } = req.body as { mode?: string; since?: string; lookbackDays?: number };
 
+    // Get connection metadata (not credentials)
     const connResult = await query<{
       id: string;
-      credentials: any;
       status: string;
       last_sync_at: Date | null;
     }>(
-      `SELECT id, credentials, status, last_sync_at FROM connections
+      `SELECT id, status, last_sync_at FROM connections
        WHERE workspace_id = $1 AND connector_name = 'fireflies'`,
       [workspaceId]
     );
@@ -82,10 +82,11 @@ router.post('/:workspaceId/connectors/fireflies/sync', async (req: Request<Works
       return;
     }
 
-    // Decrypt credentials if encrypted
-    let credentials = conn.credentials;
-    if (credentials && isEncrypted(credentials)) {
-      credentials = decryptCredentials(credentials);
+    // Get credentials from credential store
+    const credentials = await getConnectorCredentials(workspaceId, 'fireflies');
+    if (!credentials) {
+      res.status(404).json({ error: 'Fireflies credentials not found.' });
+      return;
     }
 
     const connection: Connection = {
@@ -162,23 +163,11 @@ router.get('/:workspaceId/connectors/fireflies/users', async (req: Request<Works
       }
     }
 
-    const connResult = await query<{ credentials: any; status: string }>(
-      `SELECT credentials, status FROM connections
-       WHERE workspace_id = $1 AND connector_name = 'fireflies'`,
-      [workspaceId]
-    );
-
-    if (connResult.rows.length === 0) {
+    // Get credentials from credential store
+    const credentials = await getConnectorCredentials(workspaceId, 'fireflies');
+    if (!credentials) {
       res.status(404).json({ error: 'Fireflies connection not found. Connect first.' });
       return;
-    }
-
-    const conn = connResult.rows[0];
-
-    // Decrypt credentials if encrypted
-    let credentials = conn.credentials;
-    if (credentials && isEncrypted(credentials)) {
-      credentials = decryptCredentials(credentials);
     }
 
     const client = new FirefliesClient(credentials.apiKey);
@@ -212,21 +201,11 @@ router.post('/:workspaceId/connectors/fireflies/users/refresh', async (req: Requ
   try {
     const workspaceId = req.params.workspaceId;
 
-    const connResult = await query<{ credentials: any }>(
-      `SELECT credentials FROM connections
-       WHERE workspace_id = $1 AND connector_name = 'fireflies'`,
-      [workspaceId]
-    );
-
-    if (connResult.rows.length === 0) {
+    // Get credentials from credential store
+    const credentials = await getConnectorCredentials(workspaceId, 'fireflies');
+    if (!credentials) {
       res.status(404).json({ error: 'Fireflies connection not found.' });
       return;
-    }
-
-    // Decrypt credentials if encrypted
-    let credentials = connResult.rows[0].credentials;
-    if (credentials && isEncrypted(credentials)) {
-      credentials = decryptCredentials(credentials);
     }
 
     const client = new FirefliesClient(credentials.apiKey);
@@ -299,8 +278,9 @@ router.post('/:workspaceId/connectors/fireflies/transcript/:sourceId', async (re
   try {
     const { workspaceId, sourceId } = req.params;
 
-    const connResult = await query<{ credentials: any; status: string }>(
-      `SELECT credentials, status FROM connections
+    // Check connection status
+    const connResult = await query<{ status: string }>(
+      `SELECT status FROM connections
        WHERE workspace_id = $1 AND connector_name = 'fireflies'`,
       [workspaceId]
     );
@@ -310,16 +290,16 @@ router.post('/:workspaceId/connectors/fireflies/transcript/:sourceId', async (re
       return;
     }
 
-    const conn = connResult.rows[0];
-    if (conn.status === 'disconnected') {
+    if (connResult.rows[0].status === 'disconnected') {
       res.status(400).json({ error: 'Fireflies connection is disconnected.' });
       return;
     }
 
-    // Decrypt credentials if encrypted
-    let credentials = conn.credentials;
-    if (credentials && isEncrypted(credentials)) {
-      credentials = decryptCredentials(credentials);
+    // Get credentials from credential store
+    const credentials = await getConnectorCredentials(workspaceId, 'fireflies');
+    if (!credentials) {
+      res.status(404).json({ error: 'Fireflies credentials not found.' });
+      return;
     }
 
     const client = new FirefliesClient(credentials.apiKey);

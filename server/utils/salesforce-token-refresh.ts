@@ -8,7 +8,7 @@
 import { query } from '../db.js';
 import { SalesforceClient } from '../connectors/salesforce/client.js';
 import { createLogger } from './logger.js';
-import { encryptCredentials, decryptCredentials, isEncrypted } from '../lib/encryption.js';
+import { getConnectorCredentials, updateCredentialFields } from '../lib/credential-store.js';
 
 const logger = createLogger('SalesforceTokenRefresh');
 
@@ -27,9 +27,16 @@ export interface SalesforceCredentials {
  * @returns Fresh credentials ready for use
  */
 export async function getFreshCredentials(workspaceId: string): Promise<SalesforceCredentials> {
-  // Get current credentials from database
-  const result = await query<{ credentials: SalesforceCredentials; updated_at: Date }>(
-    `SELECT credentials, updated_at FROM connections
+  // Get current credentials from credential store
+  const credentials = await getConnectorCredentials(workspaceId, 'salesforce');
+
+  if (!credentials) {
+    throw new Error('Salesforce connection not found');
+  }
+
+  // Get updated_at timestamp to check token age
+  const result = await query<{ updated_at: Date }>(
+    `SELECT updated_at FROM connections
      WHERE workspace_id = $1 AND connector_name = 'salesforce'`,
     [workspaceId]
   );
@@ -38,12 +45,7 @@ export async function getFreshCredentials(workspaceId: string): Promise<Salesfor
     throw new Error('Salesforce connection not found');
   }
 
-  let { credentials, updated_at } = result.rows[0];
-
-  // Decrypt credentials if encrypted
-  if (credentials && isEncrypted(credentials)) {
-    credentials = decryptCredentials(credentials as any) as SalesforceCredentials;
-  }
+  const { updated_at } = result.rows[0];
 
   // Check if token needs refresh (older than 90 minutes)
   const tokenAge = Date.now() - new Date(updated_at).getTime();
@@ -51,13 +53,13 @@ export async function getFreshCredentials(workspaceId: string): Promise<Salesfor
 
   if (!needsRefresh) {
     logger.debug('Token still fresh', { workspaceId, tokenAge: Math.round(tokenAge / 1000 / 60) + 'min' });
-    return credentials;
+    return credentials as SalesforceCredentials;
   }
 
   logger.info('Token needs refresh', { workspaceId, tokenAge: Math.round(tokenAge / 1000 / 60) + 'min' });
 
   // Refresh the token
-  return await refreshToken(workspaceId, credentials);
+  return await refreshToken(workspaceId, credentials as SalesforceCredentials);
 }
 
 /**
@@ -92,16 +94,12 @@ export async function refreshToken(
       issuedAt: Date.now(),
     };
 
-    // Encrypt credentials before storing
-    const encrypted = encryptCredentials(newCredentials);
-
-    // Update database with new credentials
-    await query(
-      `UPDATE connections
-       SET credentials = $1, updated_at = NOW()
-       WHERE workspace_id = $2 AND connector_name = 'salesforce'`,
-      [JSON.stringify(encrypted), workspaceId]
-    );
+    // Update credentials using credential store
+    await updateCredentialFields(workspaceId, 'salesforce', {
+      accessToken: newCredentials.accessToken,
+      instanceUrl: newCredentials.instanceUrl,
+      issuedAt: newCredentials.issuedAt,
+    });
 
     logger.info('Token refreshed successfully', { workspaceId });
 

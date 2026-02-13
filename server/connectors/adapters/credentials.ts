@@ -1,5 +1,5 @@
 import { query } from '../../db.js';
-import { encryptCredentials, decryptCredentials, isEncrypted } from '../../lib/encryption.js';
+import { getConnectorCredentials, setConnectorCredentials } from '../../lib/credential-store.js';
 
 type ConnectorHook = (workspaceId: string, connectorName: string, credentials: Record<string, any>) => Promise<void>;
 type DisconnectHook = (workspaceId: string, connectorName: string) => Promise<void>;
@@ -33,20 +33,23 @@ export async function getCredentials(
   workspaceId: string,
   connectorName: string
 ): Promise<StoredConnection | null> {
-  const result = await query<StoredConnection>(
-    `SELECT * FROM connections
+  const result = await query<Omit<StoredConnection, 'credentials'>>(
+    `SELECT id, workspace_id, connector_name, auth_method, status, last_sync_at, sync_cursor, error_message, created_at, updated_at
+     FROM connections
      WHERE workspace_id = $1 AND connector_name = $2`,
     [workspaceId, connectorName]
   );
   const row = result.rows[0];
   if (!row) return null;
 
-  // Decrypt credentials if encrypted (backward compatible)
-  if (row.credentials && isEncrypted(row.credentials)) {
-    row.credentials = decryptCredentials(row.credentials as any);
-  }
+  // Get decrypted credentials from credential store
+  const credentials = await getConnectorCredentials(workspaceId, connectorName);
+  if (!credentials) return null;
 
-  return row;
+  return {
+    ...row,
+    credentials,
+  };
 }
 
 export async function storeCredentials(
@@ -55,30 +58,30 @@ export async function storeCredentials(
   authMethod: string,
   credentials: Record<string, any>
 ): Promise<StoredConnection> {
-  // Encrypt credentials before storing
-  const encrypted = encryptCredentials(credentials);
+  // Store credentials using credential store (handles encryption)
+  await setConnectorCredentials(workspaceId, connectorName, credentials);
 
-  const result = await query<StoredConnection>(
-    `INSERT INTO connections (id, workspace_id, connector_name, auth_method, credentials, status, created_at, updated_at)
-     VALUES (gen_random_uuid(), $1, $2, $3, $4, 'connected', NOW(), NOW())
+  // Update connection metadata
+  const result = await query<Omit<StoredConnection, 'credentials'>>(
+    `INSERT INTO connections (id, workspace_id, connector_name, auth_method, status, created_at, updated_at)
+     VALUES (gen_random_uuid(), $1, $2, $3, 'connected', NOW(), NOW())
      ON CONFLICT (workspace_id, connector_name)
      DO UPDATE SET
-       credentials = $4,
        auth_method = $3,
        status = 'connected',
        error_message = NULL,
        updated_at = NOW()
-     RETURNING *`,
-    [workspaceId, connectorName, authMethod, JSON.stringify(encrypted)]
+     RETURNING id, workspace_id, connector_name, auth_method, status, last_sync_at, sync_cursor, error_message, created_at, updated_at`,
+    [workspaceId, connectorName, authMethod]
   );
 
-  const row = result.rows[0];
-  if (row.credentials && isEncrypted(row.credentials)) {
-    row.credentials = decryptCredentials(row.credentials as any);
-  }
+  const row = {
+    ...result.rows[0],
+    credentials,
+  };
 
   if (_onConnectedHook) {
-    _onConnectedHook(workspaceId, connectorName, row.credentials).catch((err) => {
+    _onConnectedHook(workspaceId, connectorName, credentials).catch((err) => {
       console.error('[credentials] onConnectedHook failed (non-fatal):', err instanceof Error ? err.message : err);
     });
   }

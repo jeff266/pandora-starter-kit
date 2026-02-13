@@ -3,7 +3,7 @@ import { query } from '../db.js';
 import { hubspotConnector } from '../connectors/hubspot/index.js';
 import { populateDealContactsFromSourceData } from '../connectors/hubspot/sync.js';
 import type { Connection, ConnectorCredentials } from '../connectors/_interface.js';
-import { decryptCredentials, isEncrypted } from '../lib/encryption.js';
+import { getConnectorCredentials } from '../lib/credential-store.js';
 
 const router = Router();
 
@@ -51,13 +51,13 @@ router.post('/:workspaceId/connectors/hubspot/sync', async (req: Request<Workspa
     const workspaceId = req.params.workspaceId;
     const { mode = 'initial', since } = req.body as { mode?: string; since?: string };
 
+    // Get connection metadata (not credentials)
     const connResult = await query<{
       id: string;
-      credentials: any;
       status: string;
       last_sync_at: Date | null;
     }>(
-      `SELECT id, credentials, status, last_sync_at FROM connections
+      `SELECT id, status, last_sync_at FROM connections
        WHERE workspace_id = $1 AND connector_name = 'hubspot'`,
       [workspaceId]
     );
@@ -73,10 +73,11 @@ router.post('/:workspaceId/connectors/hubspot/sync', async (req: Request<Workspa
       return;
     }
 
-    // Decrypt credentials if encrypted
-    let credentials = conn.credentials;
-    if (credentials && isEncrypted(credentials)) {
-      credentials = decryptCredentials(credentials);
+    // Get credentials from credential store
+    const credentials = await getConnectorCredentials(workspaceId, 'hubspot');
+    if (!credentials) {
+      res.status(404).json({ error: 'HubSpot credentials not found.' });
+      return;
     }
 
     const connection: Connection = {
@@ -136,8 +137,9 @@ router.post('/:workspaceId/connectors/hubspot/discover-schema', async (req: Requ
   try {
     const workspaceId = req.params.workspaceId;
 
-    const connResult = await query<{ id: string; credentials: any; status: string }>(
-      `SELECT id, credentials, status FROM connections
+    // Get connection metadata (not credentials)
+    const connResult = await query<{ id: string; status: string }>(
+      `SELECT id, status FROM connections
        WHERE workspace_id = $1 AND connector_name = 'hubspot'`,
       [workspaceId]
     );
@@ -149,10 +151,11 @@ router.post('/:workspaceId/connectors/hubspot/discover-schema', async (req: Requ
 
     const conn = connResult.rows[0];
 
-    // Decrypt credentials if encrypted
-    let credentials = conn.credentials;
-    if (credentials && isEncrypted(credentials)) {
-      credentials = decryptCredentials(credentials);
+    // Get credentials from credential store
+    const credentials = await getConnectorCredentials(workspaceId, 'hubspot');
+    if (!credentials) {
+      res.status(404).json({ error: 'HubSpot credentials not found.' });
+      return;
     }
 
     const connection: Connection = {
