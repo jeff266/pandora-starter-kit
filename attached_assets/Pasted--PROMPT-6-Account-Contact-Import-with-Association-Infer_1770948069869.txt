@@ -1,0 +1,176 @@
+## PROMPT 6: Account + Contact Import with Association Inference
+
+```
+Read PANDORA_FILE_IMPORT_CONNECTOR_SPEC.md â€” specifically the 
+"Association Inference" section.
+
+You're extending the import system to handle accounts and contacts, 
+and building cross-entity linking so imported deals connect to 
+imported accounts and contacts.
+
+Before starting:
+1. Find applyDealImport in server/import/apply.ts
+2. Find normalizeCompanyName in server/import/value-parsers.ts
+3. Verify the accounts and contacts tables have the columns needed 
+   (source, source_id, source_data, custom_fields)
+
+1. BUILD applyAccountImport
+
+In server/import/apply.ts, add:
+
+export async function applyAccountImport(
+  workspaceId: string,
+  batchId: string,
+  records: TransformedAccount[],
+  strategy: 'replace' | 'merge' | 'append'
+): Promise<ImportResult>
+
+Implementation follows the same pattern as applyDealImport:
+
+a. Begin transaction
+b. If replace: DELETE FROM accounts WHERE workspace_id = $1 AND source = 'csv_import'
+c. For each record, insert normalized account:
+   { workspace_id, name, domain, industry, employee_count, annual_revenue,
+     city, state, country, owner_name, 
+     source: 'csv_import', source_id: external_id || uuid,
+     source_data: { import_batch_id, original_row },
+     custom_fields: unmapped columns }
+d. Commit
+
+AFTER accounts are imported, re-link existing deals:
+
+Run the deal-to-account linking query for ALL csv_import deals 
+in this workspace that don't have an account_id:
+
+UPDATE deals d SET account_id = a.id
+FROM accounts a
+WHERE d.workspace_id = $1 
+  AND d.account_id IS NULL
+  AND d.source = 'csv_import'
+  AND a.workspace_id = $1
+  AND (
+    -- Exact normalized name match
+    lower(regexp_replace(d.source_data->>'import_company_name', 
+      '\s*(inc|llc|ltd|corp|co|company|group)\.?\s*$', '', 'gi')) 
+    = lower(regexp_replace(a.name, 
+      '\s*(inc|llc|ltd|corp|co|company|group)\.?\s*$', '', 'gi'))
+    -- OR domain match if deal has an email-based owner
+    -- (extract domain from contact emails linked to deal)
+  )
+
+IMPORTANT: Do this in application code, not raw SQL, so you can use 
+normalizeCompanyName() properly and handle edge cases. Pseudocode:
+
+const unlinkedDeals = SELECT id, source_data->>'import_company_name' as company 
+  FROM deals WHERE workspace_id = $1 AND source = 'csv_import' AND account_id IS NULL
+
+const allAccounts = SELECT id, name FROM accounts WHERE workspace_id = $1
+
+// Build normalized name index
+const accountIndex = new Map();
+for (const a of allAccounts) {
+  accountIndex.set(normalizeCompanyName(a.name), a.id);
+}
+
+// Match deals to accounts
+let linked = 0;
+for (const deal of unlinkedDeals) {
+  if (!deal.company) continue;
+  const normalizedCompany = normalizeCompanyName(deal.company);
+  const accountId = accountIndex.get(normalizedCompany);
+  if (accountId) {
+    UPDATE deals SET account_id = $accountId WHERE id = $deal.id;
+    linked++;
+  }
+}
+
+Return linked count in postActions.
+
+2. BUILD applyContactImport
+
+export async function applyContactImport(
+  workspaceId: string,
+  batchId: string,
+  records: TransformedContact[],
+  strategy: 'replace' | 'merge' | 'append'
+): Promise<ImportResult>
+
+Same pattern, but with contact-specific linking:
+
+After contact insertion:
+
+a. Link contacts to accounts:
+   Same normalizeCompanyName matching as deals â†’ accounts.
+   For each contact with a company_name, find matching account, set account_id.
+
+b. Link contacts to deals (if association data exists):
+   Some CRM exports include a "Associated Deals" or "Deal Name" column.
+   The AI classifier should detect this column.
+   If present, match contact to deal by deal name:
+   
+   const dealIndex = new Map();
+   for (const d of allDeals) {
+     dealIndex.set(d.name.toLowerCase().trim(), d.id);
+   }
+   
+   Then create deal_contacts association records (if you have a junction table)
+   or store deal associations in the contact's source_data.
+
+c. If no explicit association data:
+   Try to infer from shared account: if a contact and a deal share the 
+   same account_id, and the account has only 1 open deal, link the contact 
+   to that deal. If multiple open deals at the account, don't guess.
+   
+   Track inferred links separately in postActions:
+   { contactsLinkedToAccounts, contactsLinkedToDeals, contactsInferred }
+
+3. UPDATE AI CLASSIFIER FOR CONTACT ASSOCIATIONS
+
+In server/import/ai-classifier.ts, add to the contact classification prompt:
+
+Additional fields to detect:
+- associated_deals: Column containing deal names or IDs linked to this contact
+- associated_companies: Column containing company/account reference
+
+Add to the response JSON:
+"association_columns": {
+  "deal_reference": { "column_index": 8, "column_header": "Associated Deals", "type": "deal_name" },
+  "company_reference": { "column_index": 3, "column_header": "Company", "type": "company_name" }
+}
+
+type can be: 'deal_name', 'deal_id', 'company_name', 'company_id', 'company_domain'
+
+4. HANDLE IMPORT ORDER DEPENDENCY
+
+The upload route should warn if the user imports contacts before accounts:
+
+If entityType === 'contact':
+  Check: SELECT COUNT(*) FROM accounts WHERE workspace_id = $1
+  If 0: add warning "No accounts imported yet â€” contacts won't be linked 
+  to accounts. Import accounts first for best results, or import them 
+  after and re-link will happen automatically."
+
+Same for deals before accounts â€” already handled by the existing 
+post-import linking step, but warn the user.
+
+5. BUILD RE-LINK ENDPOINT
+
+Sometimes a consultant imports deals first, then accounts later, and 
+wants to re-run the linking. Add:
+
+POST /api/workspaces/:id/import/relink
+- No body needed
+- Runs the full linking logic:
+  1. Link deals â†’ accounts by company name
+  2. Link contacts â†’ accounts by company name  
+  3. Link contacts â†’ deals by explicit association or inference
+- Returns: { dealsLinkedToAccounts, contactsLinkedToAccounts, 
+  contactsLinkedToDeals, contactsInferred }
+
+This is idempotent â€” running it twice doesn't create duplicates.
+
+What NOT to build:
+- No domain-based matching (future: match account domain to contact email domain)
+- No fuzzy matching beyond normalized company names (no Levenshtein/cosine similarity)
+- No activity import (file imports rarely include useful activity data)
+```
