@@ -111,8 +111,8 @@ export async function getEnrichmentKeys(
 
   if (result.rows.length === 0) {
     return {
-      apollo_api_key: null,
-      serper_api_key: null,
+      apollo_api_key: process.env.APOLLO_API_KEY || null,
+      serper_api_key: process.env.SERPER_API_KEY || null,
       linkedin_rapidapi_key: null,
     };
   }
@@ -122,8 +122,8 @@ export async function getEnrichmentKeys(
   if (typeof raw === 'string' && isEncrypted(raw)) {
     const decrypted = decryptCredentials(raw);
     return {
-      apollo_api_key: decrypted.apollo_api_key || null,
-      serper_api_key: decrypted.serper_api_key || null,
+      apollo_api_key: decrypted.apollo_api_key || process.env.APOLLO_API_KEY || null,
+      serper_api_key: decrypted.serper_api_key || process.env.SERPER_API_KEY || null,
       linkedin_rapidapi_key: decrypted.linkedin_rapidapi_key || null,
     };
   }
@@ -131,15 +131,15 @@ export async function getEnrichmentKeys(
   // Legacy plaintext or JSONB object
   if (typeof raw === 'object' && raw !== null) {
     return {
-      apollo_api_key: raw.apollo_api_key || null,
-      serper_api_key: raw.serper_api_key || null,
+      apollo_api_key: raw.apollo_api_key || process.env.APOLLO_API_KEY || null,
+      serper_api_key: raw.serper_api_key || process.env.SERPER_API_KEY || null,
       linkedin_rapidapi_key: raw.linkedin_rapidapi_key || null,
     };
   }
 
   return {
-    apollo_api_key: null,
-    serper_api_key: null,
+    apollo_api_key: process.env.APOLLO_API_KEY || null,
+    serper_api_key: process.env.SERPER_API_KEY || null,
     linkedin_rapidapi_key: null,
   };
 }

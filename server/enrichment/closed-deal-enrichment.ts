@@ -79,7 +79,7 @@ export async function enrichClosedDeal(
        JOIN contacts c ON c.id = dc.contact_id AND c.workspace_id = dc.workspace_id
        WHERE dc.deal_id = $1 AND dc.workspace_id = $2
          AND c.email IS NOT NULL
-         AND (dc.enrichment_status IS NULL OR dc.enrichment_status = 'pending')`,
+         AND dc.enriched_at IS NULL`,
       [dealId, workspaceId]
     );
 
@@ -464,11 +464,14 @@ async function enrichClosedDealsInBatchSequential(
 
   const dealsResult = await query(
     `SELECT d.id FROM deals d
-     LEFT JOIN deal_contacts dc ON dc.deal_id = d.id AND dc.workspace_id = d.workspace_id
      WHERE d.workspace_id = $1
        AND d.stage_normalized IN ('closed_won', 'closed_lost')
        AND d.close_date > NOW() - INTERVAL '1 month' * $2
-       AND dc.id IS NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM deal_contacts dc
+         WHERE dc.deal_id = d.id AND dc.workspace_id = d.workspace_id
+           AND dc.enriched_at IS NOT NULL
+       )
      ORDER BY d.close_date DESC
      LIMIT $3`,
     [workspaceId, lookbackMonths, limit]
@@ -517,16 +520,19 @@ async function enrichClosedDealsInBatchParallel(
 }> {
   const startTime = Date.now();
 
-  // Get deals to enrich
+  // Get deals to enrich (deals without any Apollo-enriched contacts)
   const dealsResult = await query(
     `SELECT d.id, d.name, d.stage_normalized, a.id as account_id, a.name as account_name
      FROM deals d
      LEFT JOIN accounts a ON a.id = d.account_id AND a.workspace_id = d.workspace_id
-     LEFT JOIN deal_contacts dc ON dc.deal_id = d.id AND dc.workspace_id = d.workspace_id
      WHERE d.workspace_id = $1
        AND d.stage_normalized IN ('closed_won', 'closed_lost')
        AND d.close_date > NOW() - INTERVAL '1 month' * $2
-       AND dc.id IS NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM deal_contacts dc
+         WHERE dc.deal_id = d.id AND dc.workspace_id = d.workspace_id
+           AND dc.enriched_at IS NOT NULL
+       )
      ORDER BY d.close_date DESC
      LIMIT $3`,
     [workspaceId, lookbackMonths, limit]
@@ -631,14 +637,14 @@ async function enrichClosedDealsInBatchParallel(
   }
 
   // Phase 3: Enrich deals (contact roles + Apollo) with controlled concurrency
-  const limit = pLimit(concurrency);
+  const limiter = pLimit(concurrency);
   let processed = 0;
   let succeeded = 0;
   let failed = 0;
   const results: EnrichmentResult[] = [];
 
   const enrichmentPromises = deals.map(deal =>
-    limit(async () => {
+    limiter(async () => {
       processed++;
       try {
         const result = await enrichClosedDeal(workspaceId, deal.id);

@@ -183,13 +183,18 @@ export async function enrichBatchViaApollo(
 
       if (result.found) {
         await query(
-          `UPDATE deal_contacts SET apollo_data = $1, enriched_at = NOW()
+          `UPDATE deal_contacts SET apollo_data = $1, enriched_at = NOW(), enrichment_status = 'enriched'
            WHERE id = $2`,
           [JSON.stringify(result.raw_data), contact.dealContactId]
         );
         enrichedCount++;
         logger.debug('Enriched contact via Apollo', { dealContactId: contact.dealContactId });
       } else {
+        await query(
+          `UPDATE deal_contacts SET enrichment_status = 'not_found', enriched_at = NOW()
+           WHERE id = $1`,
+          [contact.dealContactId]
+        );
         failedCount++;
         logger.debug('Apollo enrichment returned no data', { dealContactId: contact.dealContactId });
       }
