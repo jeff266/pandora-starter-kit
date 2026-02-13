@@ -304,6 +304,7 @@ export async function enrichBatchViaApollo(
       // Create email → match map
       const matchMap = new Map<string, any>();
       for (const match of matches) {
+        if (!match) continue;
         const email = match.email?.toLowerCase();
         if (email) {
           matchMap.set(email, match);

@@ -551,6 +551,7 @@ async function enrichClosedDealsInBatchParallel(
   const config = await getEnrichmentConfig(workspaceId);
 
   // Phase 1: Parallel Serper searches for account signals
+  const phase1Start = Date.now();
   let serperResults = new Map<string, any[]>();
 
   if (config.serperApiKey) {
@@ -587,7 +588,14 @@ async function enrichClosedDealsInBatchParallel(
     }
   }
 
+  const phase1Duration = Date.now() - phase1Start;
+  logger.info('Phase 1: Serper signal search complete', {
+    durationMs: phase1Duration,
+    accountsSearched: serperResults.size,
+  });
+
   // Phase 2: Batch DeepSeek classification
+  const phase2Start = Date.now();
   if (serperResults.size > 0) {
     const accountsForClassification = Array.from(serperResults.entries())
       .filter(([_, results]) => results.length > 0)
@@ -636,46 +644,240 @@ async function enrichClosedDealsInBatchParallel(
     }
   }
 
-  // Phase 3: Enrich deals (contact roles + Apollo) with controlled concurrency
+  const phase2Duration = Date.now() - phase2Start;
+  logger.info('Phase 2: DeepSeek classification complete', {
+    durationMs: phase2Duration,
+    accountsClassified: serperResults.size,
+  });
+
+  // Phase 3A: Resolve contact roles across all deals in parallel
+  const phase3aStart = Date.now();
   const limiter = pLimit(concurrency);
+
+  const connResult = await query(
+    `SELECT connector_name FROM connections
+     WHERE workspace_id = $1 AND connector_name IN ('hubspot', 'salesforce') AND status IN ('active', 'healthy') LIMIT 1`,
+    [workspaceId]
+  );
+  const source: 'hubspot' | 'salesforce' = connResult.rows.length > 0
+    ? connResult.rows[0].connector_name as 'hubspot' | 'salesforce'
+    : 'hubspot';
+
+  const roleResults = new Map<string, { contactCount: number; rolesResolved: number; rolesSummary: Record<string, number> }>();
+
+  await Promise.all(deals.map(deal =>
+    limiter(async () => {
+      try {
+        const cr = await resolveContactRoles(workspaceId, deal.id, source);
+        roleResults.set(deal.id, cr);
+      } catch (error) {
+        logger.error('Contact role resolution failed', error instanceof Error ? error : new Error(String(error)), { dealId: deal.id });
+        roleResults.set(deal.id, { contactCount: 0, rolesResolved: 0, rolesSummary: {} });
+      }
+    })
+  ));
+
+  const phase3aDuration = Date.now() - phase3aStart;
+  logger.info('Phase 3A: Contact role resolution complete', {
+    dealCount: deals.length,
+    durationMs: phase3aDuration,
+  });
+
+  // Phase 3B: Collect ALL unenriched contacts across ALL deals, dedupe by email, bulk Apollo
+  const phase3bStart = Date.now();
+  let apolloStats = { enrichedCount: 0, cachedCount: 0, failedCount: 0, bulkBatches: 0, uniqueEmails: 0, totalContacts: 0 };
+
+  if (config.apolloApiKey) {
+    const dealIds = deals.map(d => d.id);
+
+    const allContactsResult = await query(
+      `SELECT dc.id as deal_contact_id, dc.deal_id, c.email
+       FROM deal_contacts dc
+       JOIN contacts c ON c.id = dc.contact_id AND c.workspace_id = dc.workspace_id
+       WHERE dc.deal_id = ANY($1) AND dc.workspace_id = $2
+         AND c.email IS NOT NULL
+         AND dc.enriched_at IS NULL`,
+      [dealIds, workspaceId]
+    );
+
+    const allRows = allContactsResult.rows as Array<{ deal_contact_id: string; deal_id: string; email: string }>;
+    apolloStats.totalContacts = allRows.length;
+
+    const emailToDealContacts = new Map<string, string[]>();
+    for (const row of allRows) {
+      const email = row.email.toLowerCase();
+      const existing = emailToDealContacts.get(email) || [];
+      existing.push(row.deal_contact_id);
+      emailToDealContacts.set(email, existing);
+    }
+
+    const uniqueContacts = Array.from(emailToDealContacts.entries()).map(([email, dcIds]) => ({
+      email,
+      dealContactId: dcIds[0],
+      allDealContactIds: dcIds,
+    }));
+    apolloStats.uniqueEmails = uniqueContacts.length;
+
+    logger.info('Phase 3B: Collected contacts for bulk Apollo enrichment', {
+      totalContacts: allRows.length,
+      uniqueEmails: uniqueContacts.length,
+      duplicatesSaved: allRows.length - uniqueContacts.length,
+      acrossDeals: dealIds.length,
+    });
+
+    if (uniqueContacts.length > 0) {
+      const bulkResult = await enrichBatchViaApollo(uniqueContacts, config.apolloApiKey, config.cacheDays);
+
+      for (const contact of uniqueContacts) {
+        if (contact.allDealContactIds.length > 1) {
+          const primaryDc = await query(
+            `SELECT apollo_data, enrichment_status, enriched_at FROM deal_contacts WHERE id = $1`,
+            [contact.allDealContactIds[0]]
+          );
+          if (primaryDc.rows.length > 0 && primaryDc.rows[0].apollo_data) {
+            const siblingIds = contact.allDealContactIds.slice(1);
+            await query(
+              `UPDATE deal_contacts SET apollo_data = $1, enrichment_status = $2, enriched_at = $3, updated_at = NOW()
+               WHERE id = ANY($4)`,
+              [primaryDc.rows[0].apollo_data, primaryDc.rows[0].enrichment_status, primaryDc.rows[0].enriched_at, siblingIds]
+            );
+          }
+        }
+      }
+
+      apolloStats.enrichedCount = bulkResult.enrichedCount;
+      apolloStats.cachedCount = bulkResult.cachedCount;
+      apolloStats.failedCount = bulkResult.failedCount;
+      apolloStats.bulkBatches = Math.ceil(uniqueContacts.length / 10);
+    }
+  }
+
+  const phase3bDuration = Date.now() - phase3bStart;
+  logger.info('Phase 3B: Bulk Apollo enrichment complete', {
+    ...apolloStats,
+    durationMs: phase3bDuration,
+  });
+
+  // Phase 3C: Post-process role upgrades from Apollo data + build results
+  const phase3cStart = Date.now();
   let processed = 0;
   let succeeded = 0;
   let failed = 0;
   const results: EnrichmentResult[] = [];
 
-  const enrichmentPromises = deals.map(deal =>
+  await Promise.all(deals.map(deal =>
     limiter(async () => {
       processed++;
       try {
-        const result = await enrichClosedDeal(workspaceId, deal.id);
-        results.push(result);
-        succeeded++;
-        logger.info('Deal enrichment complete', {
+        const enrichedContacts = await query(
+          `SELECT dc.id, dc.buying_role, dc.role_source, dc.apollo_data
+           FROM deal_contacts dc
+           WHERE dc.deal_id = $1 AND dc.workspace_id = $2
+             AND dc.apollo_data IS NOT NULL`,
+          [deal.id, workspaceId]
+        );
+
+        for (const dc of enrichedContacts.rows) {
+          const apolloData = typeof dc.apollo_data === 'string' ? JSON.parse(dc.apollo_data) : dc.apollo_data;
+          const person = apolloData?.person;
+          if (!person) {
+            await query(`UPDATE deal_contacts SET enrichment_status = 'partial', updated_at = NOW() WHERE id = $1`, [dc.id]);
+            continue;
+          }
+
+          const seniority = person.seniority_level?.toLowerCase?.();
+          if (seniority && ['owner', 'founder', 'c_suite'].includes(seniority) && (!dc.buying_role || dc.role_source === 'title_match')) {
+            await query(
+              `UPDATE deal_contacts SET buying_role = 'decision_maker', role_confidence = 0.75, role_source = 'apollo_seniority', updated_at = NOW() WHERE id = $1`,
+              [dc.id]
+            );
+          }
+
+          let tenureMonths: number | null = null;
+          if (person.employment_history && Array.isArray(person.employment_history) && person.employment_history.length > 0) {
+            const current = person.employment_history[0];
+            if (current.start_date) {
+              const start = new Date(current.start_date);
+              tenureMonths = Math.round((Date.now() - start.getTime()) / (1000 * 60 * 60 * 24 * 30));
+            }
+          }
+
+          await query(
+            `UPDATE deal_contacts SET enrichment_status = 'enriched',
+               tenure_months = COALESCE($2, tenure_months),
+               seniority_verified = COALESCE($3, seniority_verified),
+               department_verified = COALESCE($4, department_verified),
+               updated_at = NOW()
+             WHERE id = $1`,
+            [dc.id, tenureMonths, person.seniority_level || null, person.department || null]
+          );
+        }
+
+        const signalRow = await query(
+          `SELECT signal_score, signals FROM account_signals
+           WHERE workspace_id = $1 AND account_id = $2 ORDER BY enriched_at DESC LIMIT 1`,
+          [workspaceId, deal.accountId]
+        );
+
+        const accountSignals = {
+          signalCount: 0,
+          signalScore: 0,
+          topSignals: [] as string[],
+        };
+
+        if (signalRow.rows.length > 0) {
+          accountSignals.signalScore = signalRow.rows[0].signal_score || 0;
+          const signals = typeof signalRow.rows[0].signals === 'string' ? JSON.parse(signalRow.rows[0].signals) : signalRow.rows[0].signals;
+          if (Array.isArray(signals)) {
+            accountSignals.signalCount = signals.length;
+            accountSignals.topSignals = signals
+              .sort((a: any, b: any) => (b.relevance || 0) - (a.relevance || 0))
+              .slice(0, 5)
+              .map((s: any) => s.signal || s.type || '');
+          }
+        }
+
+        const cr = roleResults.get(deal.id) || { contactCount: 0, rolesResolved: 0, rolesSummary: {} };
+        const outcome: 'won' | 'lost' = deal.stage === 'closed_won' ? 'won' : 'lost';
+
+        results.push({
           dealId: deal.id,
           dealName: deal.name,
-          progress: `${processed}/${deals.length}`,
+          outcome,
+          contactResolution: cr,
+          apolloEnrichment: apolloStats,
+          accountSignals,
+          linkedinEnrichment: null,
+          durationMs: 0,
         });
+        succeeded++;
       } catch (error) {
         failed++;
-        logger.error('Failed to enrich deal in parallel batch', error instanceof Error ? error : new Error(String(error)), {
-          workspaceId,
-          dealId: deal.id,
-        });
+        logger.error('Post-processing failed for deal', error instanceof Error ? error : new Error(String(error)), { dealId: deal.id });
       }
     })
-  );
+  ));
 
-  await Promise.all(enrichmentPromises);
+  const phase3cDuration = Date.now() - phase3cStart;
+  const totalDuration = Date.now() - startTime;
 
-  const durationMs = Date.now() - startTime;
+  logger.info('Phase 3C: Post-processing complete', { durationMs: phase3cDuration });
+
   logger.info('Parallel batch enrichment complete', {
     workspaceId,
     processed,
     succeeded,
     failed,
-    durationMs,
-    avgTimePerDeal: Math.round(durationMs / processed),
+    totalDurationMs: totalDuration,
+    phase1_serper_ms: phase1Duration,
+    phase2_deepseek_ms: phase2Duration,
+    phase3a_roles_ms: phase3aDuration,
+    phase3b_apollo_ms: phase3bDuration,
+    phase3c_postprocess_ms: phase3cDuration,
+    apolloContacts: apolloStats.enrichedCount + apolloStats.failedCount,
+    apolloBulkBatches: apolloStats.bulkBatches,
+    avgTimePerDeal: Math.round(totalDuration / (processed || 1)),
   });
 
-  return { processed, succeeded, failed, results, durationMs };
+  return { processed, succeeded, failed, results, durationMs: totalDuration };
 }
