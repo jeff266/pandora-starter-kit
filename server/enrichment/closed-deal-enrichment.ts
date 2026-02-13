@@ -219,6 +219,207 @@ export async function enrichClosedDeal(
   };
 }
 
+export async function reEnrichExistingDealContacts(
+  workspaceId: string,
+  options: {
+    resolveRoles?: boolean;
+    runApollo?: boolean;
+    runSerper?: boolean;
+    apolloLimit?: number;
+    serperLimit?: number;
+  } = {}
+): Promise<{
+  rolesResolved: number;
+  apolloEnriched: number;
+  apolloFailed: number;
+  accountsSignaled: number;
+  errors: string[];
+}> {
+  const {
+    resolveRoles = true,
+    runApollo = true,
+    runSerper = true,
+    apolloLimit = 500,
+    serperLimit = 100,
+  } = options;
+
+  logger.info('Starting re-enrichment of existing deal contacts', { workspaceId, resolveRoles, runApollo, runSerper });
+
+  const config = await getEnrichmentConfig(workspaceId);
+  const errors: string[] = [];
+  let totalRolesResolved = 0;
+  let totalApolloEnriched = 0;
+  let totalApolloFailed = 0;
+  let totalAccountsSignaled = 0;
+
+  const connResult = await query(
+    `SELECT connector_name FROM connections
+     WHERE workspace_id = $1 AND connector_name IN ('hubspot', 'salesforce') AND status IN ('active', 'healthy') LIMIT 1`,
+    [workspaceId]
+  );
+  const source: 'hubspot' | 'salesforce' = connResult.rows.length > 0
+    ? connResult.rows[0].connector_name as 'hubspot' | 'salesforce'
+    : 'hubspot';
+
+  if (resolveRoles) {
+    const closedDeals = await query(
+      `SELECT DISTINCT d.id FROM deals d
+       JOIN deal_contacts dc ON dc.deal_id = d.id AND dc.workspace_id = d.workspace_id
+       WHERE d.workspace_id = $1 AND d.stage_normalized IN ('closed_won', 'closed_lost')
+       AND (dc.buying_role IS NULL OR dc.role_confidence < 0.5)
+       ORDER BY d.id`,
+      [workspaceId]
+    );
+
+    logger.info('Resolving contact roles', { dealsToProcess: closedDeals.rows.length });
+
+    for (const deal of closedDeals.rows) {
+      try {
+        const result = await resolveContactRoles(workspaceId, deal.id, source);
+        totalRolesResolved += result.rolesResolved;
+      } catch (err: any) {
+        errors.push(`Role resolution failed for deal ${deal.id}: ${err.message}`);
+        logger.error('Role resolution failed', err instanceof Error ? err : new Error(String(err)), { dealId: deal.id });
+      }
+    }
+    logger.info('Contact role resolution complete', { totalRolesResolved });
+  }
+
+  if (runApollo && config.apolloApiKey) {
+    const pendingContacts = await query(
+      `SELECT dc.id, c.email FROM deal_contacts dc
+       JOIN contacts c ON c.id = dc.contact_id AND c.workspace_id = dc.workspace_id
+       JOIN deals d ON d.id = dc.deal_id AND d.workspace_id = dc.workspace_id
+       WHERE dc.workspace_id = $1
+         AND d.stage_normalized IN ('closed_won', 'closed_lost')
+         AND c.email IS NOT NULL
+         AND (dc.enrichment_status IS NULL OR dc.enrichment_status = 'pending')
+         AND (dc.apollo_data IS NULL OR dc.apollo_data::text = '{}' OR dc.apollo_data::text = 'null')
+       ORDER BY d.close_date DESC
+       LIMIT $2`,
+      [workspaceId, apolloLimit]
+    );
+
+    logger.info('Running Apollo enrichment on pending contacts', { contactCount: pendingContacts.rows.length });
+
+    const contacts = pendingContacts.rows.map((r: any) => ({
+      email: r.email,
+      dealContactId: r.id,
+    }));
+
+    if (contacts.length > 0) {
+      const apolloResult = await enrichBatchViaApollo(contacts, config.apolloApiKey, config.cacheDays);
+      totalApolloEnriched = apolloResult.enrichedCount;
+      totalApolloFailed = apolloResult.failedCount;
+
+      const enrichedContacts = await query(
+        `SELECT dc.id, dc.buying_role, dc.role_source, dc.apollo_data
+         FROM deal_contacts dc
+         WHERE dc.workspace_id = $1
+           AND dc.apollo_data IS NOT NULL AND dc.apollo_data::text != '{}'
+           AND (dc.enrichment_status IS NULL OR dc.enrichment_status = 'pending')`,
+        [workspaceId]
+      );
+
+      for (const dc of enrichedContacts.rows) {
+        const apolloData = typeof dc.apollo_data === 'string' ? JSON.parse(dc.apollo_data) : dc.apollo_data;
+        const person = apolloData?.person;
+        if (!person) continue;
+
+        const seniority = person.seniority_level?.toLowerCase?.();
+        if (
+          seniority &&
+          ['owner', 'founder', 'c_suite'].includes(seniority) &&
+          (!dc.buying_role || dc.role_source === 'title_match')
+        ) {
+          await query(
+            `UPDATE deal_contacts
+             SET buying_role = 'decision_maker', role_confidence = 0.75, role_source = 'apollo_seniority', updated_at = NOW()
+             WHERE id = $1`,
+            [dc.id]
+          );
+        }
+
+        const seniorityVerified = person.seniority_level || null;
+        const departmentVerified = person.department || null;
+        let tenureMonths: number | null = null;
+        if (person.employment_history && Array.isArray(person.employment_history) && person.employment_history.length > 0) {
+          const current = person.employment_history[0];
+          if (current.start_date) {
+            const start = new Date(current.start_date);
+            const now = new Date();
+            tenureMonths = Math.round((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24 * 30));
+          }
+        }
+
+        await query(
+          `UPDATE deal_contacts
+           SET enrichment_status = 'enriched',
+               tenure_months = COALESCE($2, tenure_months),
+               seniority_verified = COALESCE($3, seniority_verified),
+               department_verified = COALESCE($4, department_verified),
+               updated_at = NOW()
+           WHERE id = $1`,
+          [dc.id, tenureMonths, seniorityVerified, departmentVerified]
+        );
+      }
+    }
+
+    logger.info('Apollo enrichment complete', { totalApolloEnriched, totalApolloFailed });
+  } else if (runApollo && !config.apolloApiKey) {
+    errors.push('Apollo enrichment skipped: no API key configured');
+  }
+
+  if (runSerper && config.serperApiKey) {
+    const accountsNeedingSignals = await query(
+      `SELECT DISTINCT a.id, a.name FROM accounts a
+       JOIN deals d ON d.account_id = a.id AND d.workspace_id = a.workspace_id
+       LEFT JOIN account_signals asi ON asi.account_id = a.id AND asi.workspace_id = a.workspace_id
+       WHERE a.workspace_id = $1
+         AND d.stage_normalized IN ('closed_won', 'closed_lost')
+         AND a.name IS NOT NULL AND a.name != ''
+         AND asi.id IS NULL
+       ORDER BY a.name
+       LIMIT $2`,
+      [workspaceId, serperLimit]
+    );
+
+    logger.info('Running Serper enrichment on accounts', { accountCount: accountsNeedingSignals.rows.length });
+
+    for (const account of accountsNeedingSignals.rows) {
+      try {
+        const result = await enrichAccountWithSignals(
+          workspaceId, account.id, account.name, config.serperApiKey, config.cacheDays
+        );
+        if (!result.cached) {
+          totalAccountsSignaled++;
+        }
+      } catch (err: any) {
+        errors.push(`Serper enrichment failed for account ${account.name}: ${err.message}`);
+        logger.error('Serper enrichment failed', err instanceof Error ? err : new Error(String(err)), {
+          accountId: account.id, accountName: account.name,
+        });
+      }
+    }
+
+    logger.info('Serper enrichment complete', { totalAccountsSignaled });
+  } else if (runSerper && !config.serperApiKey) {
+    errors.push('Serper enrichment skipped: no API key configured');
+  }
+
+  logger.info('Re-enrichment complete', {
+    totalRolesResolved, totalApolloEnriched, totalApolloFailed, totalAccountsSignaled, errorCount: errors.length,
+  });
+
+  return {
+    rolesResolved: totalRolesResolved,
+    apolloEnriched: totalApolloEnriched,
+    apolloFailed: totalApolloFailed,
+    accountsSignaled: totalAccountsSignaled,
+    errors,
+  };
+}
+
 export async function enrichClosedDealsInBatch(
   workspaceId: string,
   lookbackMonths: number = 6,

@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import { query } from '../db.js';
-import { enrichClosedDeal, enrichClosedDealsInBatch } from '../enrichment/closed-deal-enrichment.js';
+import { enrichClosedDeal, enrichClosedDealsInBatch, reEnrichExistingDealContacts } from '../enrichment/closed-deal-enrichment.js';
 import { getContactsForDeal } from '../enrichment/resolve-contact-roles.js';
 import { getEnrichmentConfig } from '../enrichment/config.js';
 
@@ -109,6 +109,32 @@ router.get('/:workspaceId/enrichment/status', async (req: Request<WorkspaceParam
     });
   } catch (err: any) {
     console.error('[Enrichment] Status error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/:workspaceId/enrichment/re-enrich', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    const { workspaceId } = req.params;
+    const { resolveRoles, runApollo, runSerper, apolloLimit, serperLimit } = req.body || {};
+
+    const wsCheck = await query('SELECT id FROM workspaces WHERE id = $1', [workspaceId]);
+    if (wsCheck.rows.length === 0) {
+      res.status(404).json({ error: 'Workspace not found' });
+      return;
+    }
+
+    const result = await reEnrichExistingDealContacts(workspaceId, {
+      resolveRoles: resolveRoles !== false,
+      runApollo: runApollo !== false,
+      runSerper: runSerper !== false,
+      apolloLimit: parseInt(apolloLimit) || 500,
+      serperLimit: parseInt(serperLimit) || 100,
+    });
+
+    res.json(result);
+  } catch (err: any) {
+    console.error('[Enrichment] Re-enrich error:', err);
     res.status(500).json({ error: err.message });
   }
 });
