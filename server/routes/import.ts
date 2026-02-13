@@ -15,6 +15,7 @@ import {
   type TransformedDeal, type TransformedContact, type TransformedAccount,
   type StageMapping,
 } from '../import/apply.js';
+import { computeDeduplication } from '../import/snapshot-diff.js';
 import { refreshComputedFields } from '../tools/computed-fields-refresh.js';
 
 const router = Router();
@@ -211,6 +212,26 @@ router.post('/:id/import/upload', upload.single('file'), async (req, res) => {
       }
     }
 
+    let deduplication = null;
+    try {
+      deduplication = await computeDeduplication(
+        workspaceId,
+        entityType as 'deal' | 'contact' | 'account',
+        parsed.sampleRows,
+        parsed.headers,
+        classification.mapping
+      );
+      if (deduplication.existingRecords > 0) {
+        warnings.push(
+          `Found ${deduplication.existingRecords} existing imported ${entityType}s. ` +
+          `${deduplication.matchingRecords} rows match existing records. ` +
+          `Recommended strategy: ${deduplication.recommendation}`
+        );
+      }
+    } catch (err) {
+      console.warn('[Import] Failed to compute deduplication:', err);
+    }
+
     return res.json({
       batchId,
       filename: req.file.originalname,
@@ -221,6 +242,7 @@ router.post('/:id/import/upload', upload.single('file'), async (req, res) => {
       unmappedColumns: classification.unmappedColumns,
       warnings,
       previewRows,
+      deduplication,
       stageMapping: {
         uniqueStages,
         existingMappings: existingStageMappings,
@@ -342,8 +364,8 @@ router.delete('/:id/import/batch/:batchId', async (req, res) => {
     const workspaceId = req.params.id;
     const batchId = req.params.batchId;
 
-    const batch = await query<{ entity_type: string; status: string }>(
-      `SELECT entity_type, status FROM import_batches WHERE id = $1 AND workspace_id = $2`,
+    const batch = await query<{ entity_type: string; status: string; filename: string }>(
+      `SELECT entity_type, status, filename FROM import_batches WHERE id = $1 AND workspace_id = $2`,
       [batchId, workspaceId]
     );
 
@@ -363,6 +385,15 @@ router.delete('/:id/import/batch/:batchId', async (req, res) => {
       [workspaceId, batchId]
     );
 
+    if (entityType === 'deal') {
+      await query(
+        `DELETE FROM deal_stage_history
+         WHERE workspace_id = $1
+           AND source IN ('file_import_diff', 'file_import_new', 'file_import_removed')`,
+        [workspaceId]
+      );
+    }
+
     await query(
       `UPDATE import_batches SET status = 'rolled_back' WHERE id = $1`,
       [batchId]
@@ -372,6 +403,10 @@ router.delete('/:id/import/batch/:batchId', async (req, res) => {
       await refreshComputedFields(workspaceId);
     } catch {}
 
+    const ext = path.extname(batch.rows[0].filename).toLowerCase();
+    const tempPath = path.join(TEMP_DIR, `${batchId}${ext}`);
+    try { fs.unlinkSync(tempPath); } catch {}
+
     return res.json({
       deleted: deleteResult.rowCount || 0,
       entityType,
@@ -380,6 +415,41 @@ router.delete('/:id/import/batch/:batchId', async (req, res) => {
   } catch (err) {
     console.error('[Import] Rollback error:', err);
     return res.status(500).json({ error: err instanceof Error ? err.message : 'Rollback failed' });
+  }
+});
+
+// POST /api/workspaces/:id/import/cancel/:batchId
+router.post('/:id/import/cancel/:batchId', async (req, res) => {
+  try {
+    const workspaceId = req.params.id;
+    const batchId = req.params.batchId;
+
+    const batch = await query<{ status: string; filename: string }>(
+      `SELECT status, filename FROM import_batches WHERE id = $1 AND workspace_id = $2`,
+      [batchId, workspaceId]
+    );
+
+    if (batch.rows.length === 0) {
+      return res.status(404).json({ error: 'Import batch not found' });
+    }
+
+    if (batch.rows[0].status !== 'pending') {
+      return res.status(400).json({ error: `Cannot cancel batch with status "${batch.rows[0].status}"` });
+    }
+
+    await query(
+      `UPDATE import_batches SET status = 'cancelled' WHERE id = $1`,
+      [batchId]
+    );
+
+    const ext = path.extname(batch.rows[0].filename).toLowerCase();
+    const tempPath = path.join(TEMP_DIR, `${batchId}${ext}`);
+    try { fs.unlinkSync(tempPath); } catch {}
+
+    return res.json({ cancelled: true, batchId });
+  } catch (err) {
+    console.error('[Import] Cancel error:', err);
+    return res.status(500).json({ error: err instanceof Error ? err.message : 'Cancel failed' });
   }
 });
 

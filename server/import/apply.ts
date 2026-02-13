@@ -2,6 +2,7 @@ import { query, getClient } from '../db.js';
 import { v4 as uuidv4 } from 'uuid';
 import { parseAmount, parseDate, parsePercentage, normalizeCompanyName } from './value-parsers.js';
 import { refreshComputedFields } from '../tools/computed-fields-refresh.js';
+import { captureCurrentDealState, diffAndWriteStageHistory, type StageChangeResult } from './snapshot-diff.js';
 
 export interface TransformedDeal {
   name: string;
@@ -53,6 +54,7 @@ export interface ImportResult {
   updated: number;
   skipped: number;
   errors: string[];
+  stageChanges?: StageChangeResult;
   postActions: {
     accountsLinked: number;
     dealsLinkedToAccounts: number;
@@ -354,6 +356,9 @@ export async function applyDealImport(
   const errors: string[] = [];
   const dealIds: string[] = [];
 
+  const previousState = await captureCurrentDealState(workspaceId);
+  console.log(`[Import] Captured snapshot of ${previousState.size} existing deals before import`);
+
   try {
     client = await getClient();
     await client.query('BEGIN');
@@ -439,12 +444,22 @@ export async function applyDealImport(
     await client.query(
       `UPDATE import_batches SET
          status = 'applied', records_inserted = $2, records_updated = $3,
-         records_skipped = $4, applied_at = NOW()
+         records_skipped = $4, replace_strategy = $5, applied_at = NOW()
        WHERE id = $1`,
-      [batchId, inserted, updated, skipped]
+      [batchId, inserted, updated, skipped, strategy]
     );
 
     await client.query('COMMIT');
+
+    let stageChanges: StageChangeResult | undefined;
+    if (previousState.size > 0) {
+      try {
+        stageChanges = await diffAndWriteStageHistory(workspaceId, batchId, previousState);
+        console.log(`[Import] Stage diff: ${stageChanges.stageChanges} changes, ${stageChanges.newDeals} new, ${stageChanges.removedDeals} removed`);
+      } catch (err) {
+        console.error('[Import] Failed to compute stage diff:', err);
+      }
+    }
 
     const durationMs = Date.now() - startTime;
     let computedFieldsRefreshed = false;
@@ -457,8 +472,13 @@ export async function applyDealImport(
 
     await logToSyncLog(workspaceId, 'deals', inserted + updated, durationMs);
 
+    await updateImportFreshness(workspaceId).catch(err => {
+      console.error('[Import] Failed to update freshness:', err);
+    });
+
     return {
       batchId, inserted, updated, skipped, errors,
+      stageChanges,
       postActions: {
         accountsLinked,
         dealsLinkedToAccounts: 0,
@@ -576,9 +596,9 @@ export async function applyContactImport(
     await client.query(
       `UPDATE import_batches SET
          status = 'applied', records_inserted = $2, records_updated = $3,
-         records_skipped = $4, applied_at = NOW()
+         records_skipped = $4, replace_strategy = $5, applied_at = NOW()
        WHERE id = $1`,
-      [batchId, inserted, updated, skipped]
+      [batchId, inserted, updated, skipped, strategy]
     );
 
     await client.query('COMMIT');
@@ -595,6 +615,10 @@ export async function applyContactImport(
     } catch (err) {
       console.error('[Import] Failed to infer contact-deal links:', err);
     }
+
+    await updateImportFreshness(workspaceId).catch(err => {
+      console.error('[Import] Failed to update freshness:', err);
+    });
 
     return {
       batchId, inserted, updated, skipped, errors,
@@ -699,9 +723,9 @@ export async function applyAccountImport(
     await client.query(
       `UPDATE import_batches SET
          status = 'applied', records_inserted = $2, records_updated = $3,
-         records_skipped = $4, applied_at = NOW()
+         records_skipped = $4, replace_strategy = $5, applied_at = NOW()
        WHERE id = $1`,
-      [batchId, inserted, updated, skipped]
+      [batchId, inserted, updated, skipped, strategy]
     );
 
     await client.query('COMMIT');
@@ -718,6 +742,10 @@ export async function applyAccountImport(
     } catch (err) {
       console.error('[Import] Failed to re-link after account import:', err);
     }
+
+    await updateImportFreshness(workspaceId).catch(err => {
+      console.error('[Import] Failed to update freshness:', err);
+    });
 
     return {
       batchId, inserted, updated, skipped, errors,
@@ -737,4 +765,45 @@ export async function applyAccountImport(
   } finally {
     if (client) client.release();
   }
+}
+
+export async function updateImportFreshness(workspaceId: string): Promise<void> {
+  const connCheck = await query(
+    `SELECT id FROM connections WHERE workspace_id = $1 AND connector_name = 'csv_import' LIMIT 1`,
+    [workspaceId]
+  );
+
+  if (connCheck.rows.length === 0) {
+    await query(
+      `INSERT INTO connections (workspace_id, connector_name, status, last_sync_at, metadata)
+       VALUES ($1, 'csv_import', 'active', NOW(), '{}')`,
+      [workspaceId]
+    );
+  }
+
+  await query(
+    `UPDATE connections SET
+       last_sync_at = NOW(),
+       metadata = jsonb_set(
+         COALESCE(metadata, '{}'),
+         '{last_imports}',
+         (
+           SELECT COALESCE(jsonb_object_agg(entity_type, jsonb_build_object(
+             'imported_at', applied_at,
+             'record_count', records_inserted + records_updated,
+             'filename', filename
+           )), '{}'::jsonb)
+           FROM (
+             SELECT DISTINCT ON (entity_type) entity_type, applied_at, records_inserted, records_updated, filename
+             FROM import_batches
+             WHERE workspace_id = $1 AND status = 'applied'
+             ORDER BY entity_type, applied_at DESC
+           ) latest
+         )
+       )
+     WHERE workspace_id = $1 AND connector_name = 'csv_import'`,
+    [workspaceId]
+  );
+
+  console.log(`[Import] Updated freshness for workspace ${workspaceId}`);
 }
