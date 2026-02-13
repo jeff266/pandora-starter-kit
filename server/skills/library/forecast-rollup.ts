@@ -3,16 +3,20 @@ import type { SkillDefinition } from '../types.js';
 export const forecastRollupSkill: SkillDefinition = {
   id: 'forecast-rollup',
   name: 'Forecast Roll-up',
-  description: 'Aggregates pipeline by forecast category with bear/base/bull scenarios, rep-level breakdowns, and week-over-week comparison.',
-  version: '2.0.0',
+  description: 'Aggregates pipeline by forecast category with bear/base/bull scenarios, concentration risk analysis, and AI-powered risk classification.',
+  version: '3.0.0',
   category: 'forecasting',
   tier: 'mixed',
 
   requiredTools: [
     'checkQuotaConfig',
+    'resolveTimeWindows',
     'forecastRollup',
+    'gatherPreviousForecast',
     'forecastWoWDelta',
+    'gatherDealConcentrationRisk',
     'prepareForecastSummary',
+    'calculateOutputBudget',
   ],
 
   requiredContext: ['goals_and_targets'],
@@ -20,6 +24,7 @@ export const forecastRollupSkill: SkillDefinition = {
   timeConfig: {
     analysisWindow: 'current_quarter',
     changeWindow: 'last_7d',
+    trendComparison: 'previous_period',
   },
 
   steps: [
@@ -33,48 +38,149 @@ export const forecastRollupSkill: SkillDefinition = {
     },
 
     {
+      id: 'resolve-time-windows',
+      name: 'Resolve Time Windows',
+      tier: 'compute',
+      dependsOn: ['check-quota-config'],
+      computeFn: 'resolveTimeWindows',
+      computeArgs: {
+        analysisWindow: 'current_quarter',
+        changeWindow: 'last_7d',
+        trendComparison: 'previous_period',
+      },
+      outputKey: 'time_windows',
+    },
+
+    {
       id: 'gather-forecast-data',
       name: 'Gather Forecast Category Aggregation',
       tier: 'compute',
-      dependsOn: ['check-quota-config'],
+      dependsOn: ['resolve-time-windows'],
       computeFn: 'forecastRollup',
       computeArgs: {},
       outputKey: 'forecast_data',
     },
 
     {
+      id: 'gather-previous-forecast',
+      name: 'Retrieve Previous Forecast Run',
+      tier: 'compute',
+      dependsOn: ['gather-forecast-data'],
+      computeFn: 'gatherPreviousForecast',
+      computeArgs: {},
+      outputKey: 'previous_forecast',
+    },
+
+    {
       id: 'gather-wow-delta',
       name: 'Compare Week-over-Week',
       tier: 'compute',
-      dependsOn: ['gather-forecast-data'],
+      dependsOn: ['gather-forecast-data', 'gather-previous-forecast'],
       computeFn: 'forecastWoWDelta',
       computeArgs: {},
       outputKey: 'wow_delta',
     },
 
     {
-      id: 'prepare-summary',
-      name: 'Prepare Forecast Summary for Claude',
+      id: 'gather-deal-concentration-risk',
+      name: 'Analyze Deal Concentration Risk',
       tier: 'compute',
-      dependsOn: ['gather-forecast-data', 'gather-wow-delta', 'check-quota-config'],
+      dependsOn: ['gather-forecast-data', 'check-quota-config'],
+      computeFn: 'gatherDealConcentrationRisk',
+      computeArgs: {},
+      outputKey: 'concentration_risk',
+    },
+
+    {
+      id: 'prepare-summary',
+      name: 'Prepare Forecast Summary for AI',
+      tier: 'compute',
+      dependsOn: ['gather-forecast-data', 'gather-wow-delta', 'check-quota-config', 'gather-deal-concentration-risk'],
       computeFn: 'prepareForecastSummary',
       computeArgs: {},
       outputKey: 'forecast_summary',
     },
 
     {
+      id: 'classify-forecast-risks',
+      name: 'Classify Forecast Behavioral Risks',
+      tier: 'deepseek',
+      dependsOn: ['gather-forecast-data', 'gather-previous-forecast', 'gather-wow-delta', 'gather-deal-concentration-risk'],
+      deepseekPrompt: `You are a sales forecast auditor analyzing rep behavior patterns for {{business_model.company_name}}.
+
+CURRENT FORECAST DATA:
+{{forecast_data}}
+
+PREVIOUS FORECAST (if available):
+{{previous_forecast}}
+
+WEEK-OVER-WEEK CHANGES:
+{{wow_delta}}
+
+CONCENTRATION RISK:
+{{concentration_risk}}
+
+YOUR TASK:
+Analyze the forecast data for behavioral red flags that indicate sandbagging, over-forecasting, or gaming.
+
+Return a JSON array of risk classifications. Each entry should have:
+{
+  "rep_name": "string",
+  "risk_type": "sandbagging" | "over_forecasting" | "whale_dependency" | "category_gaming" | "none",
+  "severity": "high" | "medium" | "low",
+  "evidence": "1-2 sentence explanation with specific numbers",
+  "suggested_action": "Specific action to take this week"
+}
+
+DETECTION RULES:
+1. **Sandbagging**: Rep consistently under-forecasts, then beats by >20%. Pipeline heavy but commit light.
+2. **Over-forecasting**: Commit grew but WoW movement shows deals slipping. High commit with low probability.
+3. **Whale dependency**: Single deal >30% of rep quota in commit. High concentration risk.
+4. **Category gaming**: Unusual shifts between best_case/commit without deal progression. Stage unchanged but category improved.
+5. **None**: No red flags detected.
+
+REQUIREMENTS:
+- Only flag HIGH severity if pattern is clear and current (this week's data)
+- Provide specific dollar amounts and percentages in evidence
+- Suggested actions must be executable this week (1:1 review, deal audit, etc.)
+- If no risks detected for a rep, you can omit them from output
+- Maximum 5 risk entries (prioritize highest severity)
+
+Return ONLY the JSON array, no other text.`,
+      outputKey: 'risk_classifications',
+    },
+
+    {
+      id: 'calculate-output-budget',
+      name: 'Calculate Dynamic Output Budget',
+      tier: 'compute',
+      dependsOn: ['classify-forecast-risks', 'gather-deal-concentration-risk'],
+      computeFn: 'calculateOutputBudget',
+      computeArgs: {},
+      outputKey: 'output_budget',
+    },
+
+    {
       id: 'synthesize-narrative',
-      name: 'Synthesize Forecast Narrative',
+      name: 'Synthesize Executive Forecast Narrative',
       tier: 'claude',
       dependsOn: [
         'check-quota-config',
+        'resolve-time-windows',
         'gather-forecast-data',
+        'gather-previous-forecast',
         'gather-wow-delta',
+        'gather-deal-concentration-risk',
         'prepare-summary',
+        'classify-forecast-risks',
+        'calculate-output-budget',
       ],
       claudePrompt: `You are a VP of Sales Operations providing a weekly forecast roll-up to sales leadership for {{business_model.company_name}}.
 
 {{forecast_summary.quotaNote}}
+
+TIME WINDOW:
+{{time_windows.analysisRange.quarter}} ({{time_windows.analysisRange.start}} to {{time_windows.analysisRange.end}})
 
 TEAM FORECAST:
 {{forecast_summary.teamSummary}}
@@ -88,42 +194,90 @@ REP-BY-REP BREAKDOWN:
 WEEK-OVER-WEEK CHANGES:
 {{forecast_summary.wowSummary}}
 
+CONCENTRATION RISK ANALYSIS:
+{{concentration_risk}}
+
+BEHAVIORAL RISK CLASSIFICATIONS (AI-detected):
+{{risk_classifications}}
+
+OUTPUT GUIDANCE:
+{{output_budget}}
+
 YOUR TASK:
-Write a concise executive forecast summary (300-500 words max). Structure it as:
+Write an executive forecast summary following the structure below. Use the output budget guidance to calibrate depth and word count.
 
-## Forecast Status
-- One-sentence verdict: Are we on track to hit quota?
-- Bear/Base/Bull scenarios with dollar amounts
-- Weighted forecast vs quota (if available)
+## Executive Summary (1-2 sentences)
+- One-sentence verdict: Are we on track to hit quota this quarter?
+- Bear/Base/Bull scenarios with specific dollar amounts
 
-## Category Analysis
+## Forecast Position vs Quota
+- **Bear Case**: $X (Y% of quota) — Only closed + commit
+- **Base Case**: $X (Y% of quota) — Closed + commit + 50% best case
+- **Bull Case**: $X (Y% of quota) — Closed + commit + best case
+- **Weighted Forecast**: $X (Y% of quota) — Probability-adjusted
+- **Risk-Adjusted Landing Zone**: Bear to Base range (explain why)
+
+If quota not configured, use absolute numbers and note the gap.
+
+## Category Breakdown & Confidence
 - How much is truly committed vs speculative?
-- Spread between bear and bull indicates forecast confidence
-- If spread > 30% of quota, flag as high volatility
+- Commit/Best Case ratio (higher = more confident forecast)
+- Spread analysis: Bull - Bear = $X (Y% of quota)
+  - If spread >30% quota: **High volatility** — forecast unreliable
+  - If spread 15-30%: **Medium volatility** — watch closely
+  - If spread <15%: **Low volatility** — stable forecast
 
-## Rep Spotlight
-- Which reps are driving the forecast? (name them, with amounts)
-- Who needs attention? (low commit, heavy pipeline but no conversion)
-- If quota data available, flag reps below 70% attainment
+## Concentration Risk
+- **Top 3 Deals**: List name, amount, category, owner, probability
+  - Combined weighted value: $X (Y% of base case)
+  - If >50%: **CRITICAL** — forecast fragile, mitigation required
+  - If 30-50%: **ELEVATED** — monitor closely
+- **Whale Deals** (>20% quota): Count and total exposure
+  - Flag any single deal >30% of rep quota
+  - Note dependency on specific reps or accounts
+
+## Rep Performance Spotlight
+- **Top Performers**: Name reps carrying the forecast with specific amounts
+  - Highlight reps with strong commit + conversion rates
+- **At-Risk Reps**: Name reps below 70% attainment (if quota available)
+  - Note pattern: heavy pipeline but no commit = needs coaching
+  - Note pattern: low activity = needs deals
 
 ## Week-over-Week Movement
-- What changed since last week?
-- Did commit grow or shrink? (direction matters)
-- Any category with >10% swing deserves commentary
+- What changed since last run?
+- **Commit change**: Up/down by $X (Y%)
+  - Direction matters: Growing commit = confidence. Shrinking = slippage.
+- **Category shifts**: Any >10% swing in commit/best case
+  - Did deals progress (good) or get pushed (bad)?
+- **New risks emerged**: Compare this week's risk classifications to last week
 
-## Top 3 Actions This Week
-- Ranked by revenue impact
-- Each must name a specific rep, deal category, or dollar amount
-- Must be actionable within 7 days
+## Behavioral Risks (AI-Detected)
+For each HIGH severity risk from risk_classifications:
+- Rep name + risk type (sandbagging/over-forecasting/whale dependency/gaming)
+- Evidence with specific numbers
+- Suggested action this week
 
-RULES:
+## Top 3 Actions This Week (Ranked by Revenue Impact)
+1. [Action] — Owner: [Rep Name] — Impact: $X — Why: [1 sentence]
+2. [Action] — Owner: [Rep Name] — Impact: $X — Why: [1 sentence]
+3. [Action] — Owner: [Rep Name] — Impact: $X — Why: [1 sentence]
+
+Each action must:
+- Be executable within 7 days
+- Have a specific owner (name a rep or leader)
+- Tie to a dollar amount or deal count
+- Address highest risk or opportunity
+
+STYLE RULES:
 - Lead with the verdict (on track / at risk / behind)
-- Use specific dollar amounts, percentages, and rep names
+- Use specific dollar amounts, percentages, rep names, and deal names
+- Every number needs context: "$500K commit (25% of $2M quota)"
 - If quotas not configured, acknowledge and use absolute numbers
 - If WoW not available (first run), note it and focus on current state
-- Every recommendation must be actionable this week
-- Don't repeat raw data — interpret it
-- Avoid generic phrases like "pipeline looks healthy" — be specific`,
+- Don't repeat raw data — interpret it and explain what it means
+- Avoid generic phrases like "pipeline looks healthy" — be specific about why
+- Prioritize high-severity risks and high-value opportunities
+- If concentration risk is high, make it prominent — this is a critical insight`,
       outputKey: 'narrative',
     },
   ],
@@ -135,5 +289,5 @@ RULES:
 
   outputFormat: 'markdown',
 
-  estimatedDuration: '30s',
+  estimatedDuration: '45s',
 };

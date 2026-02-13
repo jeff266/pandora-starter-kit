@@ -2289,6 +2289,157 @@ const prepareForecastSummary: ToolDefinition = {
   },
 };
 
+const gatherPreviousForecast: ToolDefinition = {
+  name: 'gatherPreviousForecast',
+  description: 'Retrieve the most recent previous forecast run for comparison and trend analysis.',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('gatherPreviousForecast', async () => {
+      const previousRun = await query(
+        `SELECT result, completed_at
+         FROM skill_runs
+         WHERE workspace_id = $1
+           AND skill_id = 'forecast-rollup'
+           AND status = 'completed'
+           AND run_id != $2
+         ORDER BY completed_at DESC
+         LIMIT 1`,
+        [context.workspaceId, context.runId]
+      );
+
+      if (previousRun.rows.length === 0) {
+        return {
+          available: false,
+          reason: 'No previous forecast run found',
+        };
+      }
+
+      const prevResult = previousRun.rows[0].result;
+      const prevDate = previousRun.rows[0].completed_at;
+
+      // Extract forecast_data from previous run
+      const prevForecastData = prevResult?.step_results?.forecast_data;
+
+      if (!prevForecastData?.team) {
+        return {
+          available: false,
+          reason: 'Previous run exists but has no forecast data',
+        };
+      }
+
+      return {
+        available: true,
+        runDate: prevDate,
+        team: prevForecastData.team,
+        byRep: prevForecastData.byRep || [],
+        dealCount: prevForecastData.dealCount,
+      };
+    }, params);
+  },
+};
+
+const gatherDealConcentrationRisk: ToolDefinition = {
+  name: 'gatherDealConcentrationRisk',
+  description: 'Analyze deal concentration risk by identifying whale deals (>20% quota) and top 3 deals by value.',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('gatherDealConcentrationRisk', async () => {
+      const quotaConfig = (context.stepResults as any).quota_config;
+      const forecast = (context.stepResults as any).forecast_data;
+
+      // Get all open deals sorted by amount
+      const deals = await query<{
+        id: string;
+        name: string;
+        amount: number | null;
+        probability: number | null;
+        forecast_category: string | null;
+        stage_normalized: string | null;
+        owner_email: string | null;
+        close_date: string | null;
+      }>(
+        `SELECT id, name, amount, probability, forecast_category, stage_normalized, owner_email, close_date
+         FROM deals
+         WHERE workspace_id = $1
+           AND stage_normalized NOT IN ('closed_lost', 'closed_won')
+           AND amount IS NOT NULL
+         ORDER BY amount DESC
+         LIMIT 50`,
+        [context.workspaceId]
+      );
+
+      const nameMap = await resolveOwnerNames(context.workspaceId);
+      const fmt = (n: number) => `$${(n || 0).toLocaleString('en-US')}`;
+
+      // Top 3 deals
+      const top3 = deals.rows.slice(0, 3).map(d => ({
+        name: d.name,
+        amount: d.amount || 0,
+        probability: d.probability || 0,
+        weighted: (d.amount || 0) * (d.probability || 0),
+        category: d.forecast_category || 'unknown',
+        owner: nameMap[d.owner_email || ''] || d.owner_email || 'Unknown',
+        closeDate: d.close_date,
+      }));
+
+      let whaleDeals: any[] = [];
+      let whaleThreshold = 0;
+
+      if (quotaConfig?.hasQuotas && quotaConfig.teamQuota) {
+        whaleThreshold = quotaConfig.teamQuota * 0.2; // 20% of team quota
+        whaleDeals = deals.rows
+          .filter(d => (d.amount || 0) >= whaleThreshold)
+          .map(d => ({
+            name: d.name,
+            amount: d.amount || 0,
+            percentOfQuota: ((d.amount || 0) / quotaConfig.teamQuota) * 100,
+            probability: d.probability || 0,
+            weighted: (d.amount || 0) * (d.probability || 0),
+            category: d.forecast_category || 'unknown',
+            owner: nameMap[d.owner_email || ''] || d.owner_email || 'Unknown',
+            closeDate: d.close_date,
+          }));
+      }
+
+      // Calculate concentration metrics
+      const totalPipeline = forecast?.team?.baseCase || 0;
+      const top3Total = top3.reduce((sum, d) => sum + d.weighted, 0);
+      const top3Concentration = totalPipeline > 0 ? (top3Total / totalPipeline) * 100 : 0;
+
+      const whaleTotal = whaleDeals.reduce((sum, d) => sum + d.weighted, 0);
+      const whaleConcentration = totalPipeline > 0 ? (whaleTotal / totalPipeline) * 100 : 0;
+
+      return {
+        top3Deals: top3,
+        top3Total: top3Total,
+        top3Concentration: top3Concentration,
+        whaleDealCount: whaleDeals.length,
+        whaleDeals: whaleDeals,
+        whaleThreshold: whaleThreshold,
+        whaleTotal: whaleTotal,
+        whaleConcentration: whaleConcentration,
+        hasQuotaConfig: quotaConfig?.hasQuotas || false,
+        riskLevel:
+          top3Concentration > 50 || whaleConcentration > 40
+            ? 'high'
+            : top3Concentration > 30 || whaleConcentration > 25
+            ? 'medium'
+            : 'low',
+      };
+    }, params);
+  },
+};
+
 // ============================================================================
 // Pipeline Waterfall Tools
 // ============================================================================
@@ -2956,6 +3107,8 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['forecastRollup', forecastRollup],
   ['forecastWoWDelta', forecastWoWDelta],
   ['prepareForecastSummary', prepareForecastSummary],
+  ['gatherPreviousForecast', gatherPreviousForecast],
+  ['gatherDealConcentrationRisk', gatherDealConcentrationRisk],
   ['waterfallAnalysis', waterfallAnalysisTool],
   ['waterfallDeltas', waterfallDeltasTool],
   ['topDealsInMotion', topDealsInMotionTool],
