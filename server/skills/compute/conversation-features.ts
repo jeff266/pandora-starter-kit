@@ -133,11 +133,11 @@ async function fuzzyMatchConversations(
 ): Promise<ConversationLinkage> {
   // Get deal date range and associated contacts
   const dealData = await query<{
-    created_date: string;
+    created_at: string;
     close_date: string;
     account_id: string;
   }>(
-    `SELECT created_date, close_date, account_id
+    `SELECT created_at, close_date, account_id
      FROM deals
      WHERE workspace_id = $1 AND id = $2`,
     [workspaceId, dealId]
@@ -147,7 +147,7 @@ async function fuzzyMatchConversations(
     return { dealId, conversationIds: [], linkMethod: 'fuzzy_email', confidence: 0 };
   }
 
-  const { created_date, close_date, account_id } = dealData.rows[0];
+  const { created_at, close_date, account_id } = dealData.rows[0];
 
   // Get contact emails associated with the deal
   const contactEmails = await query<{ email: string }>(
@@ -171,7 +171,7 @@ async function fuzzyMatchConversations(
          AND c.is_internal = FALSE
          AND c.account_id = a.id
        ORDER BY c.call_date`,
-      [workspaceId, dealId, account_id, created_date, close_date]
+      [workspaceId, dealId, account_id, created_at, close_date]
     );
 
     return {
@@ -184,7 +184,7 @@ async function fuzzyMatchConversations(
 
   // Match by participant email
   const emailMatch = await query<{ id: string }>(
-    `SELECT DISTINCT c.id
+    `SELECT DISTINCT c.id, c.call_date
      FROM conversations c
      WHERE c.workspace_id = $1
        AND c.call_date BETWEEN $2::date AND $3::date
@@ -194,7 +194,7 @@ async function fuzzyMatchConversations(
          WHERE LOWER(p->>'email') = ANY($4::text[])
        )
      ORDER BY c.call_date`,
-    [workspaceId, created_date, close_date, emails]
+    [workspaceId, created_at, close_date, emails]
   );
 
   return {
@@ -253,21 +253,21 @@ async function computeMetadataForDeal(
 ): Promise<ConversationMetadata> {
   // Get deal timing for context
   const dealTiming = await query<{
-    created_date: string;
+    created_at: string;
     close_date: string;
     sales_cycle_days: number;
   }>(
     `SELECT
-       created_date,
+       created_at,
        close_date,
-       EXTRACT(DAY FROM close_date - created_date)::int as sales_cycle_days
+       EXTRACT(DAY FROM close_date - created_at)::int as sales_cycle_days
      FROM deals
      WHERE workspace_id = $1 AND id = $2`,
     [workspaceId, dealId]
   );
 
-  const dealCreated = dealTiming.rows[0]?.created_date
-    ? new Date(dealTiming.rows[0].created_date)
+  const dealCreated = dealTiming.rows[0]?.created_at
+    ? new Date(dealTiming.rows[0].created_at)
     : null;
   const dealClosed = dealTiming.rows[0]?.close_date
     ? new Date(dealTiming.rows[0].close_date)

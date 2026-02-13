@@ -2087,17 +2087,22 @@ export async function discoverICP(workspaceId: string): Promise<ICPDiscoveryResu
   let featureMatrix = await buildFeatureMatrix(workspaceId);
 
   // Step 2.5: Extract conversation metadata (NEW)
-  const conversationData = await extractConversationMetadata(workspaceId, featureMatrix);
+  let conversationData: Awaited<ReturnType<typeof extractConversationMetadata>> = null;
+  try {
+    conversationData = await extractConversationMetadata(workspaceId, featureMatrix);
+  } catch (convErr) {
+    logger.warn('[Step 2.5] Conversation metadata extraction failed (non-fatal)', {
+      error: convErr instanceof Error ? convErr.message : String(convErr),
+    });
+  }
 
   if (conversationData) {
-    // Merge conversation metadata into feature matrix
     featureMatrix = mergeConversationMetadataIntoFeatures(featureMatrix, conversationData.metadataMap);
     logger.info('[Step 2.5] Conversation metadata merged', {
       tier: conversationData.coverage.tier,
       coverage: `${conversationData.coverage.conversationCoverage.toFixed(1)}%`,
     });
   } else {
-    // No conversations - apply null values
     featureMatrix = mergeConversationMetadataIntoFeatures(featureMatrix, null);
     logger.info('[Step 2.5] No conversation data - Tier 0 degradation');
   }
