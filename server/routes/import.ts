@@ -7,6 +7,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { query } from '../db.js';
 import { parseImportFile } from '../import/file-parser.js';
 import { heuristicMapColumns, type ColumnMapping } from '../import/heuristic-mapper.js';
+import { classifyColumns as aiClassifyColumns, type ClassificationResult } from '../import/ai-classifier.js';
+import { classifyStages, heuristicMapStages, type StageMappingResult } from '../import/stage-classifier.js';
 import { parseAmount, parseDate, parsePercentage, normalizeText } from '../import/value-parsers.js';
 import {
   applyDealImport, applyContactImport, applyAccountImport,
@@ -44,11 +46,41 @@ router.post('/:id/import/upload', upload.single('file'), async (req, res) => {
     }
 
     const parsed = parseImportFile(req.file.buffer, req.file.originalname);
-    const classification = heuristicMapColumns(
-      entityType as 'deal' | 'contact' | 'account',
-      parsed.headers,
-      parsed.sampleRows
-    );
+
+    // Try AI classification first, fall back to heuristic
+    let aiClassification: ClassificationResult | null = null;
+    let classificationSource = 'heuristic';
+    let warnings: string[] = [];
+
+    try {
+      aiClassification = await aiClassifyColumns(
+        entityType as 'deal' | 'contact' | 'account',
+        parsed.headers,
+        parsed.sampleRows,
+        workspaceId
+      );
+      classificationSource = 'ai';
+      console.log(`[Import] AI classification succeeded for ${entityType}`);
+    } catch (err: any) {
+      console.warn(`[Import] AI classification failed, using heuristic: ${err.message}`);
+    }
+
+    // Use AI classification if available, otherwise heuristic
+    const classification = aiClassification
+      ? convertAIClassificationToMapping(aiClassification, entityType)
+      : heuristicMapColumns(
+          entityType as 'deal' | 'contact' | 'account',
+          parsed.headers,
+          parsed.sampleRows
+        );
+
+    // Add confidence warnings for low-confidence AI mappings
+    if (aiClassification && classificationSource === 'ai') {
+      const confWarnings = buildConfidenceWarnings(aiClassification, entityType);
+      warnings.push(...confWarnings);
+    }
+
+    warnings.push(...(classification.warnings || []));
 
     const batchId = uuidv4();
 
@@ -64,15 +96,22 @@ router.post('/:id/import/upload', upload.single('file'), async (req, res) => {
         parsed.totalRows,
         JSON.stringify({
           mapping: classification.mapping,
-          unmappedColumns: classification.unmappedColumns,
-          dateFormat: parsed.detectedDateFormat,
+          unmappedColumns: classification.unmappedColumns || [],
+          dateFormat: aiClassification?.['date_format'] || parsed.detectedDateFormat,
           delimiter: parsed.detectedDelimiter,
           fileType: parsed.fileType,
           selectedSheet: parsed.selectedSheet,
           sheetNames: parsed.sheetNames,
-          source: 'heuristic',
+          source: classificationSource,
+          aiMetadata: aiClassification ? {
+            source_crm: aiClassification['source_crm'],
+            currency: aiClassification['currency'],
+            has_header_row: aiClassification['has_header_row'],
+            stage_values: (aiClassification as any).stage_values,
+            notes: aiClassification['notes'],
+          } : null,
         }),
-        classification.warnings,
+        warnings,
       ]
     );
 
@@ -89,14 +128,69 @@ router.post('/:id/import/upload', upload.single('file'), async (req, res) => {
       : [];
 
     let existingStageMappings: Record<string, string> = {};
+    let newStageMappings: Record<string, any> = {};
+    let stageMappingSource = 'existing';
+
     if (entityType === 'deal' && uniqueStages.length > 0) {
-      const mappings = await query<{ raw_stage: string; normalized_stage: string }>(
-        `SELECT raw_stage, normalized_stage FROM stage_mappings
+      // Load existing mappings from stage_mappings table
+      const mappings = await query<{ raw_stage: string; normalized_stage: string; is_open: boolean; display_order: number }>(
+        `SELECT raw_stage, normalized_stage, is_open, display_order FROM stage_mappings
          WHERE workspace_id = $1 AND source = 'csv_import'`,
         [workspaceId]
       );
       for (const m of mappings.rows) {
         existingStageMappings[m.raw_stage] = m.normalized_stage;
+      }
+
+      // Find unmapped stages
+      const unmappedStages = uniqueStages.filter(s => !existingStageMappings[s]);
+
+      // If there are unmapped stages, classify them with AI
+      if (unmappedStages.length > 0) {
+        console.log(`[Import] Classifying ${unmappedStages.length} unmapped stages with AI`);
+
+        try {
+          // Build sample deals by stage for AI context
+          const sampleDealsByStage: Record<string, any[]> = {};
+          for (const stage of unmappedStages) {
+            const stageDeals = parsed.sampleRows
+              .filter(row => {
+                const stageIdx = classification.mapping['stage']?.columnIndex;
+                return stageIdx !== undefined && row[stageIdx] === stage;
+              })
+              .slice(0, 3)
+              .map(row => ({
+                name: row[classification.mapping['name']?.columnIndex || 0],
+                amount: row[classification.mapping['amount']?.columnIndex || -1],
+                close_date: row[classification.mapping['close_date']?.columnIndex || -1],
+              }));
+            sampleDealsByStage[stage] = stageDeals;
+          }
+
+          const aiStageMapping = await classifyStages(
+            unmappedStages,
+            sampleDealsByStage,
+            workspaceId
+          );
+
+          newStageMappings = aiStageMapping.stageMapping;
+          stageMappingSource = 'ai';
+          console.log(`[Import] AI stage classification succeeded with confidence ${aiStageMapping.confidence}`);
+
+          if (aiStageMapping.confidence < 0.7) {
+            warnings.push(`Stage mapping confidence is low (${Math.round(aiStageMapping.confidence * 100)}%) — please verify`);
+          }
+
+          if (aiStageMapping.notes) {
+            warnings.push(`Stage Mapping Note: ${aiStageMapping.notes}`);
+          }
+        } catch (err: any) {
+          console.warn(`[Import] AI stage classification failed, using heuristic: ${err.message}`);
+          const heuristicMapping = heuristicMapStages(unmappedStages);
+          newStageMappings = heuristicMapping.stageMapping;
+          stageMappingSource = 'heuristic';
+          warnings.push('Stage mapping used heuristic fallback — please verify mappings');
+        }
       }
     }
 
@@ -108,10 +202,14 @@ router.post('/:id/import/upload', upload.single('file'), async (req, res) => {
       headers: parsed.headers,
       mapping: classification.mapping,
       unmappedColumns: classification.unmappedColumns,
-      warnings: classification.warnings,
+      warnings,
       previewRows,
-      uniqueStages,
-      existingStageMappings,
+      stageMapping: {
+        uniqueStages,
+        existingMappings: existingStageMappings,
+        newMappings: newStageMappings,
+        source: stageMappingSource,
+      },
       dateFormat: parsed.detectedDateFormat,
       sheetNames: parsed.sheetNames,
       selectedSheet: parsed.selectedSheet,
@@ -171,15 +269,24 @@ router.post('/:id/import/confirm', async (req, res) => {
     let stageMapping: StageMapping | null = null;
     if (overrides?.stageMapping && batchRow.entity_type === 'deal') {
       stageMapping = overrides.stageMapping;
-      for (const [rawStage, normalizedStage] of Object.entries(stageMapping!)) {
+      // Persist stage mappings with is_open and display_order
+      for (const [rawStage, mappingData] of Object.entries(stageMapping!)) {
+        const normalized = typeof mappingData === 'string' ? mappingData : mappingData.normalized;
+        const isOpen = typeof mappingData === 'object' ? mappingData.is_open : true;
+        const displayOrder = typeof mappingData === 'object' ? mappingData.display_order : 0;
+
         await query(
-          `INSERT INTO stage_mappings (workspace_id, source, raw_stage, normalized_stage)
-           VALUES ($1, 'csv_import', $2, $3)
+          `INSERT INTO stage_mappings (workspace_id, source, raw_stage, normalized_stage, is_open, display_order)
+           VALUES ($1, 'csv_import', $2, $3, $4, $5)
            ON CONFLICT (workspace_id, source, raw_stage) DO UPDATE SET
-             normalized_stage = EXCLUDED.normalized_stage, updated_at = NOW()`,
-          [workspaceId, rawStage, normalizedStage]
+             normalized_stage = EXCLUDED.normalized_stage,
+             is_open = EXCLUDED.is_open,
+             display_order = EXCLUDED.display_order,
+             updated_at = NOW()`,
+          [workspaceId, rawStage, normalized, isOpen, displayOrder]
         );
       }
+      console.log(`[Import] Persisted ${Object.keys(stageMapping).length} stage mappings`);
     }
 
     const excludeRows = new Set<number>(overrides?.excludeRows || []);
@@ -521,6 +628,79 @@ function transformAccountRows(
 }
 
 // ============================================================================
+// AI Classification Helpers
+// ============================================================================
+
+/**
+ * Convert AI classification result to the same format as heuristic mapper
+ */
+function convertAIClassificationToMapping(
+  aiClassification: ClassificationResult,
+  entityType: 'deal' | 'contact' | 'account'
+): ColumnMapping {
+  const mapping: Record<string, any> = {};
+  const unmappedColumns: string[] = aiClassification.unmapped_columns || [];
+
+  for (const [field, value] of Object.entries(aiClassification.mapping)) {
+    if (value.column_index !== null) {
+      mapping[field] = {
+        columnIndex: value.column_index,
+        columnHeader: value.column_header,
+        confidence: value.confidence,
+        source: 'ai',
+      };
+    }
+  }
+
+  return {
+    mapping,
+    unmappedColumns,
+    warnings: [],
+  };
+}
+
+/**
+ * Build warnings for low-confidence AI mappings
+ */
+function buildConfidenceWarnings(
+  aiClassification: ClassificationResult,
+  entityType: 'deal' | 'contact' | 'account'
+): string[] {
+  const warnings: string[] = [];
+
+  // Required fields by entity type
+  const requiredFields: Record<string, string[]> = {
+    deal: ['name', 'amount', 'stage', 'close_date'],
+    contact: ['email'],
+    account: ['name'],
+  };
+
+  const required = requiredFields[entityType] || [];
+
+  for (const [field, mapping] of Object.entries(aiClassification.mapping)) {
+    // Warn on low confidence for mapped fields
+    if (mapping.column_index !== null && mapping.confidence > 0 && mapping.confidence < 0.7) {
+      warnings.push(
+        `"${mapping.column_header}" mapped to ${field} with low confidence ` +
+        `(${Math.round(mapping.confidence * 100)}%) — please verify`
+      );
+    }
+
+    // Warn on missing required fields
+    if (required.includes(field) && mapping.confidence === 0) {
+      warnings.push(`Required field "${field}" was not detected — please map manually`);
+    }
+  }
+
+  // Add notes from AI if present
+  if (aiClassification.notes && aiClassification.notes.length > 0) {
+    warnings.push(`AI Note: ${aiClassification.notes}`);
+  }
+
+  return warnings;
+}
+
+// ============================================================================
 // Temp file cleanup
 // ============================================================================
 
@@ -547,5 +727,127 @@ export function cleanupTempFiles(): void {
     console.error('[Import] Temp cleanup error:', err);
   }
 }
+
+// ============================================================================
+// Stage Mapping CRUD API
+// ============================================================================
+
+// GET /api/workspaces/:id/import/stage-mapping
+router.get('/:id/import/stage-mapping', async (req, res) => {
+  try {
+    const workspaceId = req.params.id;
+
+    const mappings = await query<{
+      id: string;
+      source: string;
+      raw_stage: string;
+      normalized_stage: string;
+      is_open: boolean;
+      display_order: number;
+      created_at: string;
+      updated_at: string;
+    }>(
+      `SELECT id, source, raw_stage, normalized_stage, is_open, display_order, created_at, updated_at
+       FROM stage_mappings
+       WHERE workspace_id = $1
+       ORDER BY source, display_order, raw_stage`,
+      [workspaceId]
+    );
+
+    // Group by source
+    const grouped: Record<string, any[]> = {};
+    for (const m of mappings.rows) {
+      if (!grouped[m.source]) {
+        grouped[m.source] = [];
+      }
+      grouped[m.source].push({
+        id: m.id,
+        rawStage: m.raw_stage,
+        normalizedStage: m.normalized_stage,
+        isOpen: m.is_open,
+        displayOrder: m.display_order,
+        createdAt: m.created_at,
+        updatedAt: m.updated_at,
+      });
+    }
+
+    return res.json(grouped);
+  } catch (err) {
+    console.error('[Import] Get stage mappings error:', err);
+    return res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to get stage mappings' });
+  }
+});
+
+// PUT /api/workspaces/:id/import/stage-mapping
+router.put('/:id/import/stage-mapping', async (req, res) => {
+  try {
+    const workspaceId = req.params.id;
+    const { mappings, source } = req.body;
+
+    if (!Array.isArray(mappings)) {
+      return res.status(400).json({ error: 'mappings array is required' });
+    }
+
+    const sourceValue = source || 'csv_import';
+
+    // Bulk upsert
+    let upserted = 0;
+    for (const mapping of mappings) {
+      const { rawStage, normalized, isOpen, displayOrder } = mapping;
+
+      if (!rawStage || !normalized) {
+        continue;
+      }
+
+      await query(
+        `INSERT INTO stage_mappings (workspace_id, source, raw_stage, normalized_stage, is_open, display_order)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (workspace_id, source, raw_stage) DO UPDATE SET
+           normalized_stage = EXCLUDED.normalized_stage,
+           is_open = EXCLUDED.is_open,
+           display_order = EXCLUDED.display_order,
+           updated_at = NOW()`,
+        [
+          workspaceId,
+          sourceValue,
+          rawStage,
+          normalized,
+          isOpen !== undefined ? isOpen : true,
+          displayOrder !== undefined ? displayOrder : 0,
+        ]
+      );
+      upserted++;
+    }
+
+    return res.json({ upserted, source: sourceValue });
+  } catch (err) {
+    console.error('[Import] Put stage mappings error:', err);
+    return res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to update stage mappings' });
+  }
+});
+
+// DELETE /api/workspaces/:id/import/stage-mapping/:rawStage
+router.delete('/:id/import/stage-mapping/:rawStage', async (req, res) => {
+  try {
+    const workspaceId = req.params.id;
+    const rawStage = decodeURIComponent(req.params.rawStage);
+    const source = req.query.source as string || 'csv_import';
+
+    const result = await query(
+      `DELETE FROM stage_mappings
+       WHERE workspace_id = $1 AND source = $2 AND raw_stage = $3`,
+      [workspaceId, source, rawStage]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Stage mapping not found' });
+    }
+
+    return res.json({ deleted: true });
+  } catch (err) {
+    console.error('[Import] Delete stage mapping error:', err);
+    return res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to delete stage mapping' });
+  }
+});
 
 export default router;
