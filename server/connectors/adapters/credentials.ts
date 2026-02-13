@@ -1,6 +1,20 @@
 import { query } from '../../db.js';
 import { encryptCredentials, decryptCredentials, isEncrypted } from '../../lib/encryption.js';
 
+type ConnectorHook = (workspaceId: string, connectorName: string, credentials: Record<string, any>) => Promise<void>;
+type DisconnectHook = (workspaceId: string, connectorName: string) => Promise<void>;
+
+let _onConnectedHook: ConnectorHook | null = null;
+let _onDisconnectedHook: DisconnectHook | null = null;
+
+export function setOnConnectorConnectedHook(hook: ConnectorHook) {
+  _onConnectedHook = hook;
+}
+
+export function setOnConnectorDisconnectedHook(hook: DisconnectHook) {
+  _onDisconnectedHook = hook;
+}
+
 export interface StoredConnection {
   id: string;
   workspace_id: string;
@@ -58,11 +72,17 @@ export async function storeCredentials(
     [workspaceId, connectorName, authMethod, JSON.stringify(encrypted)]
   );
 
-  // Decrypt for return value (callers expect plain object)
   const row = result.rows[0];
   if (row.credentials && isEncrypted(row.credentials)) {
     row.credentials = decryptCredentials(row.credentials as any);
   }
+
+  if (_onConnectedHook) {
+    _onConnectedHook(workspaceId, connectorName, row.credentials).catch((err) => {
+      console.error('[credentials] onConnectedHook failed (non-fatal):', err instanceof Error ? err.message : err);
+    });
+  }
+
   return row;
 }
 

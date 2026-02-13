@@ -630,6 +630,41 @@ export class WorkflowService {
   }
 
   /**
+   * Find active workflows matching an action event's criteria
+   */
+  async findMatchingWorkflows(
+    workspaceId: string,
+    actionType: string,
+    severity: string,
+    sourceSkill?: string
+  ): Promise<WorkflowDefinition[]> {
+    const result = await this.db.query<WorkflowDefinition>(
+      `SELECT * FROM workflow_definitions
+       WHERE workspace_id = $1
+         AND status = 'active'
+         AND enabled = true
+         AND trigger_type = 'action_event'`,
+      [workspaceId]
+    );
+
+    return result.rows.filter((wf: any) => {
+      const config = wf.trigger_config;
+      if (!config.action_types || !config.action_types.includes(actionType)) {
+        return false;
+      }
+      if (config.severity_filter && !config.severity_filter.includes(severity)) {
+        return false;
+      }
+      if (config.source_skills && sourceSkill) {
+        if (!config.source_skills.includes(sourceSkill)) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }
+
+  /**
    * Get compiler context for workspace
    */
   async getCompilerContext(workspaceId: string): Promise<WorkflowCompilerContext> {
