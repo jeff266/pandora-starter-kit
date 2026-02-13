@@ -171,8 +171,6 @@ Return JSON with:
         'closed-lost',
         'call-highlights',
       ],
-      claudeTools: ['getDeal', 'queryDeals'],
-      maxToolCalls: 5,
       claudePrompt: `Write a weekly pipeline recap for leadership.
 
 Revenue Target: ${'$'}{{goals_and_targets.revenue_target}}
