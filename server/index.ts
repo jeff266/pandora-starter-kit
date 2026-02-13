@@ -110,7 +110,7 @@ function registerSkills(): void {
   );
 }
 
-async function initWorkflowEngine(): Promise<void> {
+async function initWorkflowEngine(): Promise<ActivePiecesClient | undefined> {
   const apBaseUrl = process.env.AP_BASE_URL;
   const apApiKey = process.env.AP_API_KEY;
   let apClient: ActivePiecesClient | undefined;
@@ -149,6 +149,7 @@ async function initWorkflowEngine(): Promise<void> {
   }
 
   console.log('[server] Workflow engine initialized (AP mode: ' + (apClient ? 'connected' : 'local-only') + ')');
+  return apClient;
 }
 
 async function start(): Promise<void> {
@@ -166,8 +167,8 @@ async function start(): Promise<void> {
   startScheduler();
   startSkillScheduler();
 
-  await initWorkflowEngine();
-  startWorkflowMonitor();
+  const apClient = await initWorkflowEngine();
+  startWorkflowMonitor(apClient);
 
   cleanupTempFiles();
   setInterval(cleanupTempFiles, 60 * 60 * 1000);
