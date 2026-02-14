@@ -1548,6 +1548,47 @@ const enrichWorstOffenders: ToolDefinition = {
   },
 };
 
+const truncateConversations: ToolDefinition = {
+  name: 'truncateConversations',
+  description: 'Truncate conversation transcripts to fit within DeepSeek token limits. Keeps metadata and trims transcript text.',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('truncateConversations', async () => {
+      const conversations = (context.stepResults as any).recent_conversations;
+      if (!conversations?.conversations || conversations.conversations.length === 0) {
+        return [];
+      }
+      const convos = conversations.conversations;
+      const maxTranscriptChars = Math.floor(40000 / Math.max(convos.length, 1));
+      return convos.map((c: any) => {
+        const trimmed: any = {
+          id: c.id,
+          title: c.title,
+          date: c.date || c.started_at,
+          participants: c.participants,
+          deal_id: c.deal_id,
+          account_id: c.account_id,
+          source: c.source,
+        };
+        if (c.transcript) {
+          trimmed.transcript = typeof c.transcript === 'string'
+            ? c.transcript.substring(0, maxTranscriptChars)
+            : JSON.stringify(c.transcript).substring(0, maxTranscriptChars);
+        }
+        if (c.source_data?.summary) {
+          trimmed.summary = c.source_data.summary;
+        }
+        return trimmed;
+      });
+    }, params);
+  },
+};
+
 const summarizeForClaude: ToolDefinition = {
   name: 'summarizeForClaude',
   description: 'Pre-summarize metrics into compact text for Claude prompt, replacing raw arrays with one-liners.',
@@ -1764,7 +1805,7 @@ Required weekly pipeline gen: ${weeklyGenStr}`;
 
         const activitiesResult = await query(
           `SELECT deal_id, activity_type, COUNT(*)::int as cnt,
-                  MAX(activity_date) as last_date
+                  MAX(timestamp) as last_date
            FROM activities
            WHERE workspace_id = $1 AND deal_id = ANY($2)
            GROUP BY deal_id, activity_type
@@ -1786,10 +1827,11 @@ Required weekly pipeline gen: ${weeklyGenStr}`;
         }
 
         const contactsResult = await query(
-          `SELECT c.deal_id, c.name, c.title, c.email
-           FROM contacts c
-           WHERE c.workspace_id = $1 AND c.deal_id = ANY($2)
-           ORDER BY c.deal_id`,
+          `SELECT dc.deal_id, COALESCE(c.first_name || ' ' || c.last_name, c.first_name, c.last_name, c.email) as name, c.title, c.email
+           FROM deal_contacts dc
+           JOIN contacts c ON c.id = dc.contact_id AND c.workspace_id = dc.workspace_id
+           WHERE dc.workspace_id = $1 AND dc.deal_id = ANY($2)
+           ORDER BY dc.deal_id`,
           [context.workspaceId, dealIds]
         );
 
@@ -3617,6 +3659,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['gatherQualityTrend', gatherQualityTrend],
   ['enrichWorstOffenders', enrichWorstOffenders],
   ['summarizeForClaude', summarizeForClaude],
+  ['truncateConversations', truncateConversations],
   ['checkQuotaConfig', checkQuotaConfig],
   ['coverageByRep', coverageByRepTool],
   ['coverageTrend', coverageTrendTool],

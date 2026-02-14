@@ -25,6 +25,7 @@ export const dealRiskReviewSkill: SkillDefinition = {
   requiredTools: [
     'queryDeals',
     'queryConversations',
+    'truncateConversations',
     'summarizeForClaude',
   ],
 
@@ -59,10 +60,20 @@ export const dealRiskReviewSkill: SkillDefinition = {
     },
 
     {
+      id: 'trim-conversations',
+      name: 'Truncate Conversations for DeepSeek',
+      tier: 'compute',
+      dependsOn: ['get-recent-conversations'],
+      computeFn: 'truncateConversations',
+      computeArgs: {},
+      outputKey: 'trimmed_conversations',
+    },
+
+    {
       id: 'extract-call-signals',
       name: 'Extract Risk Signals from Call Transcripts',
       tier: 'deepseek',
-      dependsOn: ['get-recent-conversations'],
+      dependsOn: ['trim-conversations'],
       deepseekPrompt: `You are analyzing sales call transcripts for risk signals.
 
 {{#unless dataFreshness.hasConversations}}
@@ -71,7 +82,7 @@ No conversation data available (file import workspace). Return empty JSON array:
 
 {{#if dataFreshness.hasConversations}}
 Conversations:
-{{{json recent_conversations}}}
+{{{json trimmed_conversations}}}
 {{/if}}
 
 Extract risk signals from these call transcripts. Look for:
