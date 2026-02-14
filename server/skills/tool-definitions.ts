@@ -60,6 +60,7 @@ import { prepareBowtieSummary, type BowtieSummary } from './compute/bowtie-analy
 import { preparePipelineGoalsSummary } from './compute/pipeline-goals.js';
 import { prepareProjectRecap } from './compute/project-recap.js';
 import { prepareStrategyInsights } from './compute/strategy-insights.js';
+import { runConfigAudit } from './compute/workspace-config-audit.js';
 import { query } from '../db.js';
 import { configLoader } from '../config/workspace-config-loader.js';
 import {
@@ -3716,6 +3717,28 @@ const prepareStrategyInsightsTool: ToolDefinition = {
 };
 
 // ============================================================================
+// Config Audit Tools
+// ============================================================================
+
+const runConfigAuditTool: ToolDefinition = {
+  name: 'runConfigAudit',
+  description: 'Run 8 drift checks comparing workspace configuration against live CRM data: roster, stages, velocity, win rate, segmentation, coverage target, stale threshold, field fill rates',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('runConfigAudit', async () => {
+      const result = await runConfigAudit(context.workspaceId);
+      console.log(`[ConfigAudit] Completed: ${result.checks_run} checks, ${result.findings.length} findings`);
+      return result;
+    }, params);
+  },
+};
+
+// ============================================================================
 // Tool Registry
 // ============================================================================
 
@@ -3796,6 +3819,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['preparePipelineGoalsSummary', preparePipelineGoalsSummaryTool],
   ['prepareProjectRecap', prepareProjectRecapTool],
   ['prepareStrategyInsights', prepareStrategyInsightsTool],
+  ['runConfigAudit', runConfigAuditTool],
 ]);
 
 // ============================================================================

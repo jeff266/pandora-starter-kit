@@ -18,6 +18,7 @@ import {
 import { inferWorkspaceConfig } from '../config/inference-engine.js';
 import { getInstantAuditResults } from '../config/instant-audit.js';
 import { getConfigSuggestions } from '../config/drift-detection.js';
+import { getAuditHistory } from '../skills/compute/workspace-config-audit.js';
 
 const router = Router();
 
@@ -533,6 +534,33 @@ router.get(
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       console.error('[Config Suggestions] Error:', message);
+      res.status(500).json({ error: message });
+    }
+  }
+);
+
+// ============================================================================
+// Config Audit History
+// ============================================================================
+
+router.get(
+  '/:workspaceId/config-audit/history',
+  async (req: Request<WorkspaceParams>, res: Response) => {
+    try {
+      const { workspaceId } = req.params;
+      const limit = parseInt(req.query.limit as string) || 12;
+
+      const history = await getAuditHistory(workspaceId, Math.min(limit, 50));
+
+      res.json({
+        success: true,
+        workspace_id: workspaceId,
+        runs: history,
+        count: history.length,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error('[Config Audit History] Error:', message);
       res.status(500).json({ error: message });
     }
   }

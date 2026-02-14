@@ -5,6 +5,15 @@
  * Replaces hardcoded assumptions about pipelines, win rates, thresholds, teams, etc.
  */
 
+// ===== META =====
+
+export interface ConfigMeta {
+  source: string;
+  confidence: number;
+  evidence: string;
+  last_validated?: string;
+}
+
 // ===== MAIN CONFIG =====
 
 export interface WorkspaceConfig {
