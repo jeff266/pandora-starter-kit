@@ -101,6 +101,6 @@ VALUES
    ARRAY['send_request'],
    ARRAY['catch_webhook']),
   ('@activepieces/piece-schedule', 'Schedule', NULL, 'available', false,
-   ARRAY[],
+   ARRAY[]::text[],
    ARRAY['every_hour', 'every_day', 'every_week', 'cron_expression'])
 ON CONFLICT (piece_name) DO NOTHING;

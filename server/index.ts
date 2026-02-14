@@ -43,6 +43,8 @@ import { getAdapterRegistry } from "./connectors/adapters/registry.js";
 import { MondayTaskAdapter } from "./connectors/monday/adapter.js";
 import { GoogleDriveDocumentAdapter } from "./connectors/google-drive/adapter.js";
 import { salesforceAdapter } from "./connectors/salesforce/adapter.js";
+import { gongAdapter } from "./connectors/gong/adapter.js";
+import { firefliesAdapter } from "./connectors/fireflies/adapter.js";
 import { startScheduler } from "./sync/scheduler.js";
 import { startSkillScheduler, stopSkillScheduler } from "./sync/skill-scheduler.js";
 import { registerBuiltInSkills } from "./skills/index.js";
@@ -108,6 +110,8 @@ function registerAdapters(): void {
   registry.register(new MondayTaskAdapter());
   registry.register(new GoogleDriveDocumentAdapter());
   registry.register(salesforceAdapter);
+  registry.register(gongAdapter);
+  registry.register(firefliesAdapter);
   const stats = registry.getStats();
   console.log(
     `[server] Registered ${stats.total} adapters: ${stats.sourceTypes.join(', ')}`
