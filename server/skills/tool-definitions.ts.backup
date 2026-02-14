@@ -63,7 +63,6 @@ import { prepareStrategyInsights } from './compute/strategy-insights.js';
 import { runConfigAudit } from './compute/workspace-config-audit.js';
 import { query } from '../db.js';
 import { configLoader } from '../config/workspace-config-loader.js';
-import { addConfigSuggestion } from '../config/config-suggestions.js';
 import {
   findConversationsWithoutDeals,
   getTopCWDConversations,
@@ -881,66 +880,6 @@ const aggregateStaleDeals: ToolDefinition = {
         }
       }
 
-      // FEEDBACK SIGNAL: Parking lot detection
-      if (staleItems.length >= 10) {
-        const totalStale = staleItems.length;
-        const sortedStages = Object.entries(byStage)
-          .sort((a, b) => b[1].count - a[1].count)
-          .slice(0, 3);
-
-        for (const [stageName, stats] of sortedStages) {
-          const concentration = stats.count / totalStale;
-          // If a stage has >40% of stale deals, it's likely a parking lot
-          if (concentration > 0.40 && stats.count >= 5) {
-            await addConfigSuggestion(context.workspaceId, {
-              source_skill: 'pipeline-hygiene',
-              section: 'pipelines',
-              path: 'pipelines[0].parking_lot_stages',
-              type: 'add',
-              message: `${Math.round(concentration * 100)}% of stale deals (${stats.count} of ${totalStale}) are in "${stageName}" stage`,
-              evidence: `${stats.count} deals worth $${Math.round(stats.totalValue / 1000)}K, avg ${Math.round(avgDaysStale)} days stale`,
-              confidence: Math.min(0.95, 0.6 + concentration),
-              suggested_value: [stageName],
-              current_value: null,
-            }).catch(err => console.error('[Feedback Signal] Error adding parking lot suggestion:', err));
-          }
-        }
-      }
-
-      // FEEDBACK SIGNAL: Stale threshold calibration
-      if (staleItems.length >= 10) {
-        const p75Index = Math.floor(staleItems.length * 0.75);
-        const sortedByDays = [...staleItems].sort((a, b) => a.daysStale - b.daysStale);
-        const p75Days = sortedByDays[p75Index]?.daysStale || 0;
-
-        // If P75 is significantly different from threshold, suggest adjustment
-        if (p75Days > staleDays * 2) {
-          await addConfigSuggestion(context.workspaceId, {
-            source_skill: 'pipeline-hygiene',
-            section: 'thresholds',
-            path: 'thresholds.stale_deal_days',
-            type: 'adjust',
-            message: `75% of stale deals are aging beyond ${p75Days} days (current threshold: ${staleDays} days)`,
-            evidence: `${staleItems.length} stale deals, P75=${p75Days}d, P50=${sortedByDays[Math.floor(staleItems.length * 0.5)]?.daysStale || 0}d`,
-            confidence: 0.7,
-            suggested_value: Math.round(p75Days * 0.8),
-            current_value: staleDays,
-          }).catch(err => console.error('[Feedback Signal] Error adding stale threshold suggestion:', err));
-        } else if (p75Days < staleDays * 0.5 && staleItems.length < 5) {
-          await addConfigSuggestion(context.workspaceId, {
-            source_skill: 'pipeline-hygiene',
-            section: 'thresholds',
-            path: 'thresholds.stale_deal_days',
-            type: 'adjust',
-            message: `Very few stale deals (${staleItems.length}) and P75 is only ${p75Days} days (threshold: ${staleDays} days). Consider tightening threshold.`,
-            evidence: `Only ${staleItems.length} stale deals, P75=${p75Days}d`,
-            confidence: 0.6,
-            suggested_value: Math.max(7, Math.round(p75Days * 1.2)),
-            current_value: staleDays,
-          }).catch(err => console.error('[Feedback Signal] Error adding stale threshold suggestion:', err));
-        }
-      }
-
       return {
         summary: { total: summary.total, totalValue: summary.totalValue, avgDaysStale },
         bySeverity,
@@ -1356,40 +1295,6 @@ const dealThreadingAnalysisTool: ToolDefinition = {
       // Map owner IDs to names in all sections
       const mapOwner = (owner: string) => resolveOwnerName(owner, nameMap);
 
-      // FEEDBACK SIGNAL: Threading rule calibration
-      if (threadingData.summary.totalOpenDeals >= 20) {
-        const singleThreadedPct = threadingData.summary.singleThreaded.count / threadingData.summary.totalOpenDeals;
-        const multiThreadedPct = threadingData.summary.multiThreaded.count / threadingData.summary.totalOpenDeals;
-
-        // If >70% of deals are actually multi-threaded, current threshold might be working
-        // If <30% are multi-threaded, threshold might be too strict or team isn't multi-threading
-        if (multiThreadedPct > 0.70) {
-          await addConfigSuggestion(context.workspaceId, {
-            source_skill: 'single-thread-alert',
-            section: 'thresholds',
-            path: 'thresholds.threading_requires_distinct',
-            type: 'confirm',
-            message: `${Math.round(multiThreadedPct * 100)}% of deals (${threadingData.summary.multiThreaded.count} of ${threadingData.summary.totalOpenDeals}) are multi-threaded. Current threading practices are strong.`,
-            evidence: `Single-threaded: ${threadingData.summary.singleThreaded.count} deals`,
-            confidence: 0.8,
-            suggested_value: null,
-            current_value: null,
-          }).catch(err => console.error('[Feedback Signal] Error adding threading confirmation:', err));
-        } else if (multiThreadedPct < 0.30) {
-          await addConfigSuggestion(context.workspaceId, {
-            source_skill: 'single-thread-alert',
-            section: 'thresholds',
-            path: 'thresholds.threading_requires_distinct',
-            type: 'alert',
-            message: `Only ${Math.round(multiThreadedPct * 100)}% of deals (${threadingData.summary.multiThreaded.count} of ${threadingData.summary.totalOpenDeals}) are multi-threaded. ${threadingData.summary.singleThreaded.count} deals at risk of single-threading.`,
-            evidence: `Critical: ${threadingData.criticalDeals.length} deals, Warning: ${threadingData.warningDeals.length} deals`,
-            confidence: 0.85,
-            suggested_value: null,
-            current_value: null,
-          }).catch(err => console.error('[Feedback Signal] Error adding threading alert:', err));
-        }
-      }
-
       return {
         summary: threadingData.summary,
         byStage: threadingData.byStage,
@@ -1474,46 +1379,6 @@ const dataQualityAuditTool: ToolDefinition = {
         .map(ob => ({ ...ob, owner: mapOwner(ob.owner) }))
         .filter(ob => ob.avgCompleteness < 80 || ob.criticalIssues > 5)
         .slice(0, 15);
-
-      // FEEDBACK SIGNAL: Required field discovery
-      for (const entity of ['deals', 'contacts', 'accounts'] as const) {
-        const fieldCompleteness = qualityData.byEntity[entity].fieldCompleteness || [];
-        for (const fieldData of fieldCompleteness) {
-          // If a field has >80% fill rate and is not already in required_fields, suggest it
-          if (fieldData.fillRate > 0.80 && fieldData.fillRate < 0.95) {
-            // High adoption but not enforced - likely should be required
-            await addConfigSuggestion(context.workspaceId, {
-              source_skill: 'data-quality-audit',
-              section: 'thresholds',
-              path: 'thresholds.required_fields',
-              type: 'add',
-              message: `${entity}.${fieldData.field} is filled in ${Math.round(fieldData.fillRate * 100)}% of records but not enforced as required`,
-              evidence: `${fieldData.filled} of ${fieldData.total} ${entity} have this field populated`,
-              confidence: 0.75,
-              suggested_value: `${entity}.${fieldData.field}`,
-              current_value: null,
-            }).catch(err => console.error('[Feedback Signal] Error adding required field suggestion:', err));
-          }
-        }
-      }
-
-      // FEEDBACK SIGNAL: Excluded owner detection (owners with systematic data quality issues)
-      for (const ownerData of filteredOwners) {
-        if (ownerData.avgCompleteness < 50 && ownerData.criticalIssues > 10) {
-          // Systematic neglect - might be an excluded/inactive user
-          await addConfigSuggestion(context.workspaceId, {
-            source_skill: 'data-quality-audit',
-            section: 'teams',
-            path: 'teams.excluded_owners',
-            type: 'add',
-            message: `${ownerData.owner} has ${ownerData.avgCompleteness}% avg completeness and ${ownerData.criticalIssues} critical issues - may be inactive`,
-            evidence: `Consistent data quality issues across ${ownerData.totalRecords} records`,
-            confidence: 0.65,
-            suggested_value: ownerData.owner,
-            current_value: null,
-          }).catch(err => console.error('[Feedback Signal] Error adding excluded owner suggestion:', err));
-        }
-      }
 
       return {
         ...qualityData,
@@ -2187,7 +2052,7 @@ const coverageByRepTool: ToolDefinition = {
         ?? (context.businessContext as any)?.definitions?.excluded_owners
         ?? [];
 
-      const coverageData = await coverageByRep(
+      return await coverageByRep(
         context.workspaceId,
         quarterStart,
         quarterEnd,
@@ -2195,80 +2060,6 @@ const coverageByRepTool: ToolDefinition = {
         coverageTarget,
         excludedOwners.length > 0 ? excludedOwners : undefined
       );
-
-      // FEEDBACK SIGNAL: Segmentation signal (deal size variance)
-      const dealSizeResult = await query<{ p25: number; p75: number; p95: number; count: number }>(
-        `SELECT
-          PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY amount) as p25,
-          PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY amount) as p75,
-          PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY amount) as p95,
-          COUNT(*) as count
-         FROM deals
-         WHERE workspace_id = $1
-           AND amount > 0
-           AND close_date >= $2 AND close_date <= $3
-           AND stage_normalized NOT IN ('closed_lost', 'closed_won')`,
-        [context.workspaceId, quarterStart, quarterEnd]
-      );
-
-      if (dealSizeResult.rows[0]?.count >= 20) {
-        const { p25, p75, p95 } = dealSizeResult.rows[0];
-        const variance = p95 / Math.max(p25, 1);
-
-        // If P95/P25 ratio > 20x, suggest segmentation
-        if (variance > 20) {
-          await addConfigSuggestion(context.workspaceId, {
-            source_skill: 'pipeline-coverage',
-            section: 'pipelines',
-            path: 'pipelines[0].segments',
-            type: 'add',
-            message: `Deal sizes vary widely: P95=$${Math.round(p95/1000)}K vs P25=$${Math.round(p25/1000)}K (${Math.round(variance)}x variance). Consider segmenting SMB vs Enterprise.`,
-            evidence: `${dealSizeResult.rows[0].count} deals, P25=$${Math.round(p25)}, P75=$${Math.round(p75)}, P95=$${Math.round(p95)}`,
-            confidence: 0.8,
-            suggested_value: [
-              { name: 'SMB', min: 0, max: p75 },
-              { name: 'Enterprise', min: p75, max: null }
-            ],
-            current_value: null,
-          }).catch(err => console.error('[Feedback Signal] Error adding segmentation suggestion:', err));
-        }
-      }
-
-      // FEEDBACK SIGNAL: Coverage target validation
-      if (coverageData.team && coverageData.team.coverageRatio) {
-        const actualCoverage = coverageData.team.coverageRatio;
-        const targetCoverage = coverageTarget || 3.0;
-        const delta = actualCoverage - targetCoverage;
-
-        // If team consistently over/under by >1.5x, suggest adjusting target
-        if (delta > 1.5) {
-          await addConfigSuggestion(context.workspaceId, {
-            source_skill: 'pipeline-coverage',
-            section: 'thresholds',
-            path: 'thresholds.coverage_target',
-            type: 'adjust',
-            message: `Team has ${actualCoverage.toFixed(1)}x coverage vs ${targetCoverage}x target. Consider raising target to challenge the team.`,
-            evidence: `Pipeline value: $${Math.round(coverageData.team.totalPipeline / 1000)}K, Quota: $${Math.round((coverageData.team.totalQuota || 0) / 1000)}K`,
-            confidence: 0.65,
-            suggested_value: Math.min(5.0, targetCoverage + 0.5),
-            current_value: targetCoverage,
-          }).catch(err => console.error('[Feedback Signal] Error adding coverage target suggestion:', err));
-        } else if (delta < -0.5 && coverageData.team.daysRemaining > 30) {
-          await addConfigSuggestion(context.workspaceId, {
-            source_skill: 'pipeline-coverage',
-            section: 'thresholds',
-            path: 'thresholds.coverage_target',
-            type: 'alert',
-            message: `Team has ${actualCoverage.toFixed(1)}x coverage vs ${targetCoverage}x target with ${coverageData.team.daysRemaining} days left in quarter. Coverage gap detected.`,
-            evidence: `Gap: $${Math.round((coverageData.team.gap || 0) / 1000)}K, ${coverageData.team.daysRemaining} days remaining`,
-            confidence: 0.9,
-            suggested_value: null,
-            current_value: targetCoverage,
-          }).catch(err => console.error('[Feedback Signal] Error adding coverage alert:', err));
-        }
-      }
-
-      return coverageData;
     }, params);
   },
 };
@@ -2735,30 +2526,6 @@ const forecastRollup: ToolDefinition = {
         }
       }
 
-      // FEEDBACK SIGNAL: Forecast category coverage
-      const totalDealsResult = await query<{ total: number }>(
-        `SELECT COUNT(*) as total FROM deals
-         WHERE workspace_id = $1 AND stage_normalized NOT IN ('closed_lost', 'closed_won')`,
-        [context.workspaceId]
-      );
-      const totalDeals = totalDealsResult.rows[0]?.total || 0;
-      const forecastedDeals = Object.values(categories).reduce((s, c) => s + c.count, 0);
-      const unforecastedDeals = totalDeals - forecastedDeals;
-
-      if (totalDeals >= 10 && unforecastedDeals > totalDeals * 0.3) {
-        await addConfigSuggestion(context.workspaceId, {
-          source_skill: 'forecast-rollup',
-          section: 'pipelines',
-          path: 'pipelines[0].forecast_categories',
-          type: 'alert',
-          message: `${unforecastedDeals} of ${totalDeals} deals (${Math.round((unforecastedDeals / totalDeals) * 100)}%) have no forecast_category. Forecast accuracy is limited.`,
-          evidence: `Only ${forecastedDeals} deals are categorized across closed/commit/best_case/pipeline`,
-          confidence: 0.85,
-          suggested_value: null,
-          current_value: null,
-        }).catch(err => console.error('[Feedback Signal] Error adding forecast category alert:', err));
-      }
-
       return {
         team: {
           closedWon,
@@ -3068,28 +2835,6 @@ const gatherDealConcentrationRisk: ToolDefinition = {
       const whaleTotal = whaleDeals.reduce((sum, d) => sum + d.weighted, 0);
       const whaleConcentration = totalPipeline > 0 ? (whaleTotal / totalPipeline) * 100 : 0;
 
-      const riskLevel =
-        top3Concentration > 50 || whaleConcentration > 40
-          ? 'high'
-          : top3Concentration > 30 || whaleConcentration > 25
-          ? 'medium'
-          : 'low';
-
-      // FEEDBACK SIGNAL: Risk concentration alert
-      if (riskLevel === 'high' && whaleDeals.length > 0) {
-        await addConfigSuggestion(context.workspaceId, {
-          source_skill: 'deal-risk-review',
-          section: 'thresholds',
-          path: 'thresholds.risk_concentration',
-          type: 'alert',
-          message: `High risk concentration: ${whaleDeals.length} whale deals (>20% of quota) represent ${Math.round(whaleConcentration)}% of forecast. Top 3 deals: ${Math.round(top3Concentration)}% of forecast.`,
-          evidence: `Whale deals: ${whaleDeals.map(d => `${d.name} ($${Math.round(d.amount/1000)}K)`).slice(0, 3).join(', ')}`,
-          confidence: 0.9,
-          suggested_value: null,
-          current_value: null,
-        }).catch(err => console.error('[Feedback Signal] Error adding risk concentration alert:', err));
-      }
-
       return {
         top3Deals: top3,
         top3Total: top3Total,
@@ -3100,7 +2845,12 @@ const gatherDealConcentrationRisk: ToolDefinition = {
         whaleTotal: whaleTotal,
         whaleConcentration: whaleConcentration,
         hasQuotaConfig: quotaConfig?.hasQuotas || false,
-        riskLevel,
+        riskLevel:
+          top3Concentration > 50 || whaleConcentration > 40
+            ? 'high'
+            : top3Concentration > 30 || whaleConcentration > 25
+            ? 'medium'
+            : 'low',
       };
     }, params);
   },
@@ -3236,38 +2986,6 @@ const waterfallDeltasTool: ToolDefinition = {
           const maxRate = max ? max.advanced / (max.startOfPeriod + max.entered) : 0;
           return rate > maxRate ? stage : max;
         }, null);
-
-      // FEEDBACK SIGNAL: Stage anomalies
-      if (biggestLeakage && biggestLeakage.fellOut >= 5) {
-        await addConfigSuggestion(context.workspaceId, {
-          source_skill: 'pipeline-waterfall',
-          section: 'pipelines',
-          path: 'pipelines[0].stages',
-          type: 'alert',
-          message: `"${biggestLeakage.stage}" has ${biggestLeakage.fellOut} deals falling out (highest leakage stage). Consider if this stage needs process improvement.`,
-          evidence: `$${Math.round((biggestLeakage.fellOutValue || 0) / 1000)}K in value fell out of this stage`,
-          confidence: 0.75,
-          suggested_value: null,
-          current_value: null,
-        }).catch(err => console.error('[Feedback Signal] Error adding stage leakage alert:', err));
-      }
-
-      if (biggestBottleneck) {
-        const bottleneckRate = parseFloat(((biggestBottleneck.advanced / (biggestBottleneck.startOfPeriod + biggestBottleneck.entered)) * 100).toFixed(0));
-        if (bottleneckRate < 30) {
-          await addConfigSuggestion(context.workspaceId, {
-            source_skill: 'pipeline-waterfall',
-            section: 'pipelines',
-            path: 'pipelines[0].stages',
-            type: 'alert',
-            message: `"${biggestBottleneck.stage}" has only ${bottleneckRate}% advance rate (biggest bottleneck). Deals are getting stuck here.`,
-            evidence: `${biggestBottleneck.advanced} of ${biggestBottleneck.startOfPeriod + biggestBottleneck.entered} deals advanced`,
-            confidence: 0.7,
-            suggested_value: null,
-            current_value: null,
-          }).catch(err => console.error('[Feedback Signal] Error adding bottleneck alert:', err));
-        }
-      }
 
       return {
         stageDeltas,
@@ -3927,36 +3645,6 @@ const prepareBowtieSummaryTool: ToolDefinition = {
     return safeExecute('prepareBowtieSummary', async () => {
       const result = await prepareBowtieSummary(context.workspaceId);
       console.log(`[BowtieAnalysis] Completed bowtie summary for workspace ${context.workspaceId}`);
-
-      // FEEDBACK SIGNAL: Funnel shape validation
-      if (result.bottlenecks?.weakestConversion && result.bottlenecks.weakestConversion.rate < 0.15) {
-        await addConfigSuggestion(context.workspaceId, {
-          source_skill: 'bowtie-analysis',
-          section: 'pipelines',
-          path: 'pipelines[0].funnel',
-          type: 'alert',
-          message: `Funnel bottleneck: "${result.bottlenecks.weakestConversion.stage}" has only ${Math.round(result.bottlenecks.weakestConversion.rate * 100)}% conversion rate.`,
-          evidence: `Weakest stage in funnel - consider process improvement or disqualification criteria`,
-          confidence: 0.75,
-          suggested_value: null,
-          current_value: null,
-        }).catch(err => console.error('[Feedback Signal] Error adding funnel bottleneck alert:', err));
-      }
-
-      if (result.conversions && result.conversions.totalFunnelEfficiency < 0.05) {
-        await addConfigSuggestion(context.workspaceId, {
-          source_skill: 'bowtie-analysis',
-          section: 'pipelines',
-          path: 'pipelines[0].funnel',
-          type: 'alert',
-          message: `Overall funnel efficiency is ${Math.round(result.conversions.totalFunnelEfficiency * 100)}%. Very few leads make it through the funnel.`,
-          evidence: `End-to-end conversion rate across all stages`,
-          confidence: 0.8,
-          suggested_value: null,
-          current_value: null,
-        }).catch(err => console.error('[Feedback Signal] Error adding funnel efficiency alert:', err));
-      }
-
       return result;
     }, params);
   },
@@ -3979,41 +3667,6 @@ const preparePipelineGoalsSummaryTool: ToolDefinition = {
     return safeExecute('preparePipelineGoalsSummary', async () => {
       const result = await preparePipelineGoalsSummary(context.workspaceId);
       console.log(`[PipelineGoals] Completed pipeline goals summary for workspace ${context.workspaceId}`);
-
-      // FEEDBACK SIGNAL: Quota period validation
-      // Check if there are quota records to validate period alignment
-      const quotaResult = await query<{ period_type: string; count: number }>(
-        `SELECT DISTINCT period_type, COUNT(*) as count
-         FROM quotas
-         WHERE workspace_id = $1
-         GROUP BY period_type`,
-        [context.workspaceId]
-      );
-
-      if (quotaResult.rows.length > 0) {
-        const periodTypes = quotaResult.rows.map(r => r.period_type);
-        const hasQuarterly = periodTypes.includes('quarterly');
-        const hasMonthly = periodTypes.includes('monthly');
-
-        // Get fiscal year config
-        const config = await configLoader.getConfig(context.workspaceId);
-        const fiscalYearMonth = config.cadence.fiscal_year_start_month;
-
-        if (hasQuarterly && fiscalYearMonth !== 1) {
-          await addConfigSuggestion(context.workspaceId, {
-            source_skill: 'pipeline-goals',
-            section: 'cadence',
-            path: 'cadence.fiscal_year_start_month',
-            type: 'confirm',
-            message: `Quarterly quotas detected with fiscal year starting in month ${fiscalYearMonth}. Confirm this matches your fiscal calendar.`,
-            evidence: `${quotaResult.rows.find(r => r.period_type === 'quarterly')?.count || 0} quarterly quota records found`,
-            confidence: 0.7,
-            suggested_value: fiscalYearMonth,
-            current_value: fiscalYearMonth,
-          }).catch(err => console.error('[Feedback Signal] Error adding fiscal year confirmation:', err));
-        }
-      }
-
       return result;
     }, params);
   },
