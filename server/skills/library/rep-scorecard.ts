@@ -248,4 +248,21 @@ Word budget: 700 words.`,
 
   outputFormat: 'markdown',
   estimatedDuration: '60s',
+
+  evidenceSchema: {
+    entity_type: 'rep',
+    columns: [
+      { key: 'rep_name', display: 'Rep Name', format: 'text' },
+      { key: 'overall_score', display: 'Overall Score', format: 'number' },
+      { key: 'closed_won', display: 'Closed Won', format: 'currency' },
+      { key: 'closed_won_count', display: 'Deals Won', format: 'number' },
+      { key: 'open_pipeline', display: 'Open Pipeline', format: 'currency' },
+      { key: 'open_deal_count', display: 'Open Deals', format: 'number' },
+      { key: 'quota_attainment', display: 'Quota Attainment %', format: 'percentage' },
+      { key: 'coverage_ratio', display: 'Coverage Ratio', format: 'number' },
+      { key: 'total_activities', display: 'Activities', format: 'number' },
+      { key: 'primary_gap', display: 'Primary Gap', format: 'text' },
+      { key: 'coaching_recommendation', display: 'Coaching Recommendation', format: 'text' },
+    ],
+  },
 };

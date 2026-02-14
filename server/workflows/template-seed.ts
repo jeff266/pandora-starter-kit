@@ -242,9 +242,26 @@ export const SEED_TEMPLATES: Omit<WorkflowTemplate, 'id' | 'created_at' | 'popul
  * Seed templates into database (idempotent)
  */
 export async function seedTemplates(db: Pool): Promise<void> {
-  logger.info('[TemplateSeed] Seeding workflow templates', {
+  logger.info('Seeding workflow templates', {
     count: SEED_TEMPLATES.length,
   });
+
+  // Check if workflow_templates table exists before attempting to seed
+  try {
+    const tableCheck = await db.query(
+      `SELECT EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_name = 'workflow_templates'
+      ) as exists`
+    );
+    if (!tableCheck.rows[0]?.exists) {
+      logger.warn('workflow_templates table does not exist, skipping seed (run migrations first)');
+      return;
+    }
+  } catch {
+    logger.warn('Could not check for workflow_templates table, skipping seed');
+    return;
+  }
 
   for (const template of SEED_TEMPLATES) {
     try {
@@ -304,12 +321,13 @@ export async function seedTemplates(db: Pool): Promise<void> {
         logger.debug('[TemplateSeed] Created template', { name: template.name });
       }
     } catch (error) {
-      logger.error('[TemplateSeed] Failed to seed template', {
-        name: template.name,
-        error: error instanceof Error ? error.message : String(error),
-      });
+      logger.error(
+        `Failed to seed template: ${template.name}`,
+        error instanceof Error ? error : undefined,
+        { name: template.name, detail: error instanceof Error ? undefined : String(error) }
+      );
     }
   }
 
-  logger.info('[TemplateSeed] Template seeding complete');
+  logger.info('Template seeding complete');
 }

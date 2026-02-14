@@ -292,4 +292,20 @@ WORD BUDGET ENFORCEMENT:
   slackTemplate: 'pipeline-coverage',
 
   estimatedDuration: '45s',
+
+  evidenceSchema: {
+    entity_type: 'rep',
+    columns: [
+      { key: 'rep_name', display: 'Rep Name', format: 'text' },
+      { key: 'rep_email', display: 'Email', format: 'text' },
+      { key: 'quota', display: 'Quota', format: 'currency' },
+      { key: 'open_pipeline', display: 'Open Pipeline', format: 'currency' },
+      { key: 'coverage_ratio', display: 'Coverage Ratio', format: 'number' },
+      { key: 'gap_to_quota', display: 'Gap to Quota', format: 'currency' },
+      { key: 'closed_won', display: 'Closed Won', format: 'currency' },
+      { key: 'risk_level', display: 'Risk Level', format: 'severity' },
+      { key: 'root_cause', display: 'Root Cause', format: 'text' },
+      { key: 'recommended_intervention', display: 'Recommended Intervention', format: 'text' },
+    ],
+  },
 };

@@ -71,6 +71,12 @@ import {
   type ConversationWithoutDeal,
   type CWDResult,
 } from '../analysis/conversation-without-deals.js';
+import {
+  checkWorkspaceHasConversations as checkConversations,
+} from './tools/check-workspace-has-conversations.js';
+import {
+  auditConversationDealCoverage as auditCWDCoverage,
+} from './tools/audit-conversation-deal-coverage.js';
 
 // ============================================================================
 // Helper: Safe Tool Execution
@@ -2423,7 +2429,7 @@ const prepareAtRiskReps: ToolDefinition = {
 
 const checkWorkspaceHasConversations: ToolDefinition = {
   name: 'checkWorkspaceHasConversations',
-  description: 'Check if workspace has conversation data (Gong/Fireflies connectors active)',
+  description: 'Check if workspace has external conversation data (Gong/Fireflies). Returns count, sources, and has_conversations boolean.',
   tier: 'compute',
   parameters: {
     type: 'object',
@@ -2432,22 +2438,14 @@ const checkWorkspaceHasConversations: ToolDefinition = {
   },
   execute: async (params, context) => {
     return safeExecute('checkWorkspaceHasConversations', async () => {
-      const result = await query(
-        `SELECT EXISTS(
-          SELECT 1 FROM conversations
-          WHERE workspace_id = $1
-          LIMIT 1
-        ) as has_conversations`,
-        [context.workspaceId]
-      );
-      return result.rows[0]?.has_conversations || false;
+      return checkConversations(context.workspaceId);
     }, params);
   },
 };
 
 const auditConversationDealCoverage: ToolDefinition = {
   name: 'auditConversationDealCoverage',
-  description: 'Find conversations linked to accounts but not deals (CWD), with severity classification and account enrichment',
+  description: 'Find conversations linked to accounts but not deals (CWD), with severity classification, account enrichment, and top examples. Returns has_conversation_data, summary (total_cwd, by_rep, by_severity, estimated_pipeline_gap), and top_examples.',
   tier: 'compute',
   parameters: {
     type: 'object',
@@ -2462,18 +2460,7 @@ const auditConversationDealCoverage: ToolDefinition = {
   execute: async (params, context) => {
     return safeExecute('auditConversationDealCoverage', async () => {
       const daysBack = (params as any).daysBack || 90;
-
-      // Get full CWD result
-      const cwdResult = await findConversationsWithoutDeals(context.workspaceId, daysBack);
-
-      // Get top 5 high-severity examples for DeepSeek classification
-      const topExamples = getTopCWDConversations(cwdResult.conversations, 5);
-
-      return {
-        has_conversation_data: true,
-        summary: cwdResult.summary,
-        top_examples: topExamples,
-      };
+      return auditCWDCoverage(context.workspaceId, daysBack);
     }, params);
   },
 };

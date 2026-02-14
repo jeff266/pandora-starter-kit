@@ -224,4 +224,20 @@ WORD BUDGET ENFORCEMENT:
   slackTemplate: 'single-thread-alert',
 
   estimatedDuration: '45s',
+
+  evidenceSchema: {
+    entity_type: 'deal',
+    columns: [
+      { key: 'deal_name', display: 'Deal Name', format: 'text' },
+      { key: 'amount', display: 'Amount', format: 'currency' },
+      { key: 'stage', display: 'Stage', format: 'text' },
+      { key: 'owner', display: 'Owner', format: 'text' },
+      { key: 'contact_count', display: 'Contacts Linked', format: 'number' },
+      { key: 'account_contact_count', display: 'Total Account Contacts', format: 'number' },
+      { key: 'risk_level', display: 'Threading Risk', format: 'severity' },
+      { key: 'likely_cause', display: 'Likely Cause', format: 'text' },
+      { key: 'has_expansion_contacts', display: 'Expansion Available', format: 'boolean' },
+      { key: 'recommended_action', display: 'Recommended Action', format: 'text' },
+    ],
+  },
 };

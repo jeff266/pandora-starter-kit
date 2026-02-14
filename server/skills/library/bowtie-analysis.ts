@@ -157,4 +157,18 @@ Keep it under 600 words. This is for the Monday ops review.`,
     type: 'narrative',
     sections: ['funnel_headline', 'bottleneck_fix', 'volume_vs_conversion', 'activity_prescription', 'metric_to_watch'],
   },
+
+  evidenceSchema: {
+    entity_type: 'stage',
+    columns: [
+      { key: 'stage_transition', display: 'Stage Transition', format: 'text' },
+      { key: 'conversion_rate', display: 'Conversion Rate', format: 'percentage' },
+      { key: 'prior_rate', display: 'Prior Period Rate', format: 'percentage' },
+      { key: 'delta', display: 'Delta', format: 'text' },
+      { key: 'volume', display: 'Deal Volume', format: 'number' },
+      { key: 'bottleneck_severity', display: 'Bottleneck Severity', format: 'severity' },
+      { key: 'root_cause', display: 'Root Cause', format: 'text' },
+      { key: 'intervention', display: 'Intervention', format: 'text' },
+    ],
+  },
 };

@@ -107,11 +107,20 @@ app.use("/api/workspaces", agentsWorkspaceRouter);
 
 function registerAdapters(): void {
   const registry = getAdapterRegistry();
-  registry.register(new MondayTaskAdapter());
-  registry.register(new GoogleDriveDocumentAdapter());
-  registry.register(salesforceAdapter);
-  registry.register(gongAdapter);
-  registry.register(firefliesAdapter);
+  const adapters = [
+    { name: 'monday', create: () => new MondayTaskAdapter() },
+    { name: 'google-drive', create: () => new GoogleDriveDocumentAdapter() },
+    { name: 'salesforce', create: () => salesforceAdapter },
+    { name: 'gong', create: () => gongAdapter },
+    { name: 'fireflies', create: () => firefliesAdapter },
+  ];
+  for (const { name, create } of adapters) {
+    try {
+      registry.register(create());
+    } catch (err) {
+      console.warn(`[server] Failed to register ${name} adapter:`, err instanceof Error ? err.message : err);
+    }
+  }
   const stats = registry.getStats();
   console.log(
     `[server] Registered ${stats.total} adapters: ${stats.sourceTypes.join(', ')}`

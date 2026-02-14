@@ -137,4 +137,20 @@ Keep it under 500 words. This is a manager's playbook for the week.`,
     type: 'narrative',
     sections: ['headline', 'reverse_math', 'weekly_targets', 'rep_prescriptions', 'biggest_lever'],
   },
+
+  evidenceSchema: {
+    entity_type: 'rep',
+    columns: [
+      { key: 'rep_name', display: 'Rep Name', format: 'text' },
+      { key: 'quota', display: 'Quota', format: 'currency' },
+      { key: 'won_this_month', display: 'Won This Month', format: 'currency' },
+      { key: 'open_pipeline', display: 'Open Pipeline', format: 'currency' },
+      { key: 'gap_to_quota', display: 'Gap to Quota', format: 'currency' },
+      { key: 'meetings_this_month', display: 'Meetings This Month', format: 'number' },
+      { key: 'calls_this_month', display: 'Calls This Month', format: 'number' },
+      { key: 'status', display: 'Status', format: 'text' },
+      { key: 'primary_gap', display: 'Primary Gap', format: 'text' },
+      { key: 'weekly_prescription', display: 'Weekly Prescription', format: 'text' },
+    ],
+  },
 };

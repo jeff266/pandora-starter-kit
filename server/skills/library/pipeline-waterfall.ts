@@ -294,4 +294,19 @@ Word budget: 600 words.
 
   outputFormat: 'markdown',
   estimatedDuration: '45s',
+
+  evidenceSchema: {
+    entity_type: 'deal',
+    columns: [
+      { key: 'deal_name', display: 'Deal Name', format: 'text' },
+      { key: 'amount', display: 'Amount', format: 'currency' },
+      { key: 'owner', display: 'Owner', format: 'text' },
+      { key: 'from_stage', display: 'From Stage', format: 'text' },
+      { key: 'to_stage', display: 'To Stage', format: 'text' },
+      { key: 'days_in_stage', display: 'Days in Stage', format: 'number' },
+      { key: 'movement_type', display: 'Movement Type', format: 'text' },
+      { key: 'velocity_vs_benchmark', display: 'Velocity vs Benchmark', format: 'text' },
+      { key: 'severity', display: 'Severity', format: 'severity' },
+    ],
+  },
 };

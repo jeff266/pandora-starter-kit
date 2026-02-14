@@ -336,4 +336,20 @@ STYLE RULES:
   outputFormat: 'markdown',
 
   estimatedDuration: '45s',
+
+  evidenceSchema: {
+    entity_type: 'deal',
+    columns: [
+      { key: 'deal_name', display: 'Deal Name', format: 'text' },
+      { key: 'amount', display: 'Amount', format: 'currency' },
+      { key: 'stage', display: 'Stage', format: 'text' },
+      { key: 'owner', display: 'Owner', format: 'text' },
+      { key: 'forecast_category', display: 'Forecast Category', format: 'text' },
+      { key: 'close_date', display: 'Close Date', format: 'date' },
+      { key: 'probability', display: 'Probability', format: 'percentage' },
+      { key: 'weighted_amount', display: 'Weighted Amount', format: 'currency' },
+      { key: 'risk_type', display: 'Behavioral Risk', format: 'text' },
+      { key: 'risk_severity', display: 'Risk Severity', format: 'severity' },
+    ],
+  },
 };

@@ -7,6 +7,7 @@ import type {
   SkillOutput,
 } from './types.js';
 import { AgentExecutionError } from './types.js';
+import type { SkillEvidence } from '../skills/types.js';
 import { getAgentRegistry } from './registry.js';
 import { getSkillRegistry } from '../skills/registry.js';
 import { getSkillRuntime } from '../skills/runtime.js';
@@ -61,6 +62,7 @@ export class AgentRuntime {
 
     const skillOutputs: Record<string, SkillOutput> = {};
     const skillResults: AgentSkillResult[] = [];
+    const skillEvidence: Record<string, SkillEvidence> = {};
 
     try {
       for (const step of agent.skills) {
@@ -121,7 +123,13 @@ export class AgentRuntime {
             tokenUsage: result.totalTokenUsage || null,
             duration: Date.now() - skillStart,
             cached: false,
+            evidence: result.evidence,
           };
+
+          // Accumulate evidence for downstream rendering (WorkbookGenerator, Command Center)
+          if (result.evidence) {
+            skillEvidence[step.outputKey] = result.evidence;
+          }
 
           skillResults.push({
             skillId: step.skillId,
@@ -187,6 +195,7 @@ export class AgentRuntime {
           synthesis: synthesisTokens.input + synthesisTokens.output,
           total: skillTokenTotal + synthesisTokens.input + synthesisTokens.output,
         },
+        skillEvidence: Object.keys(skillEvidence).length > 0 ? skillEvidence : undefined,
       };
 
       await this.logAgentRun(runId, agentId, workspaceId, result.status, result);
@@ -376,6 +385,24 @@ export class AgentRuntime {
           [runId, agentId, workspaceId, status]
         );
       } else {
+        // Serialize skill evidence with size safety check
+        let evidenceJson: string | null = null;
+        if (data?.skillEvidence && Object.keys(data.skillEvidence).length > 0) {
+          const raw = JSON.stringify(data.skillEvidence);
+          if (raw.length > 5_000_000) {
+            // Truncate evaluated_records if evidence exceeds 5MB
+            const truncated = { ...data.skillEvidence };
+            for (const [key, ev] of Object.entries(truncated) as [string, any][]) {
+              if (ev.evaluated_records?.length > 500) {
+                truncated[key] = { ...ev, evaluated_records: ev.evaluated_records.slice(0, 500), _truncated: true };
+              }
+            }
+            evidenceJson = JSON.stringify(truncated);
+          } else {
+            evidenceJson = raw;
+          }
+        }
+
         await query(
           `UPDATE agent_runs
            SET status = $1,
@@ -384,7 +411,8 @@ export class AgentRuntime {
                skill_results = $3,
                synthesized_output = $4,
                token_usage = $5,
-               error = $6
+               error = $6,
+               skill_evidence = COALESCE($8::jsonb, skill_evidence)
            WHERE id = $7`,
           [
             status,
@@ -394,6 +422,7 @@ export class AgentRuntime {
             JSON.stringify(data?.tokenUsage || {}),
             data?.error || null,
             runId,
+            evidenceJson,
           ]
         );
       }

@@ -5,6 +5,7 @@
  */
 
 import { getSkillRegistry as _getSkillRegistry } from './registry.js';
+import { registerAllEvidenceBuilders } from './evidence-builders/index.js';
 import { pipelineHygieneSkill } from './library/pipeline-hygiene.js';
 import { dealRiskReviewSkill } from './library/deal-risk-review.js';
 import { weeklyRecapSkill } from './library/weekly-recap.js';
@@ -35,6 +36,14 @@ export type {
   SkillExecutionContext,
   SkillStepResult,
   SkillResult,
+  SkillEvidence,
+  EvidenceClaim,
+  EvaluatedRecord,
+  DataSourceContribution,
+  SkillParameter,
+  EvidenceSchema,
+  EvidenceColumnDef,
+  EvidenceFormulaDef,
   ToolDefinition,
   DeepSeekConfig,
   DeepSeekResponse,
@@ -135,5 +144,8 @@ export function registerBuiltInSkills(): void {
   registry.register(strategyInsightsSkill);
   registry.register(workspaceConfigAuditSkill);
 
-  console.log('[Skills] Registered all built-in skills');
+  // Register evidence builders for "Show the Work" evidence assembly
+  registerAllEvidenceBuilders();
+
+  console.log('[Skills] Registered all built-in skills and evidence builders');
 }

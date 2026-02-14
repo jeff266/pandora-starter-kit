@@ -90,4 +90,16 @@ Keep it under 500 words. This is the "so what?" layer.`,
     type: 'narrative',
     sections: ['big_picture', 'patterns', 'leading_indicators', 'contradictions', 'recommendations', 'stop_doing'],
   },
+
+  evidenceSchema: {
+    entity_type: 'workspace',
+    columns: [
+      { key: 'workspace_name', display: 'Workspace', format: 'text' },
+      { key: 'insight_type', display: 'Insight Type', format: 'text' },
+      { key: 'finding', display: 'Finding', format: 'text' },
+      { key: 'source_skills', display: 'Source Skills', format: 'text' },
+      { key: 'severity', display: 'Severity', format: 'severity' },
+      { key: 'recommendation', display: 'Recommendation', format: 'text' },
+    ],
+  },
 };

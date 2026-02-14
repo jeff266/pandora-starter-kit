@@ -351,4 +351,19 @@ RULES:
   slackTemplate: 'data-quality-audit',
 
   estimatedDuration: '45s',
+
+  evidenceSchema: {
+    entity_type: 'deal',
+    columns: [
+      { key: 'entity_name', display: 'Record Name', format: 'text' },
+      { key: 'entity_type', display: 'Entity Type', format: 'text' },
+      { key: 'owner', display: 'Owner', format: 'text' },
+      { key: 'completeness_pct', display: 'Completeness %', format: 'percentage' },
+      { key: 'missing_fields', display: 'Missing Fields', format: 'text' },
+      { key: 'critical_fields_missing', display: 'Critical Fields Missing', format: 'number' },
+      { key: 'pattern', display: 'Quality Pattern', format: 'text' },
+      { key: 'recommended_fix', display: 'Recommended Fix', format: 'text' },
+      { key: 'severity', display: 'Severity', format: 'severity' },
+    ],
+  },
 };

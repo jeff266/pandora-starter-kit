@@ -50,4 +50,17 @@ export const contactRoleResolutionSkill: SkillDefinition = {
 
   outputFormat: 'markdown',
   estimatedDuration: '30s',
+
+  evidenceSchema: {
+    entity_type: 'contact',
+    columns: [
+      { key: 'contact_name', display: 'Contact Name', format: 'text' },
+      { key: 'email', display: 'Email', format: 'text' },
+      { key: 'title', display: 'Title', format: 'text' },
+      { key: 'deal_name', display: 'Deal', format: 'text' },
+      { key: 'resolved_role', display: 'Resolved Role', format: 'text' },
+      { key: 'resolution_source', display: 'Resolution Source', format: 'text' },
+      { key: 'confidence', display: 'Confidence', format: 'percentage' },
+    ],
+  },
 };

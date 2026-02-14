@@ -53,4 +53,17 @@ export const customFieldDiscoverySkill: SkillDefinition = {
 
   outputFormat: 'markdown',
   estimatedDuration: '15s',
+
+  evidenceSchema: {
+    entity_type: 'deal',
+    columns: [
+      { key: 'field_key', display: 'Field Key', format: 'text' },
+      { key: 'field_label', display: 'Field Label', format: 'text' },
+      { key: 'entity_type', display: 'Entity Type', format: 'text' },
+      { key: 'fill_rate', display: 'Fill Rate %', format: 'percentage' },
+      { key: 'unique_values', display: 'Unique Values', format: 'number' },
+      { key: 'icp_relevant', display: 'ICP Relevant', format: 'boolean' },
+      { key: 'scoring_weight', display: 'Scoring Weight', format: 'number' },
+    ],
+  },
 };

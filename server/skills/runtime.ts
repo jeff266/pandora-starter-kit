@@ -19,6 +19,7 @@ import type {
   SkillExecutionContext,
   SkillResult,
   SkillStepResult,
+  SkillEvidence,
 } from './types.js';
 import Handlebars from 'handlebars';
 import { getToolDefinition } from './tool-definitions.js';
@@ -36,6 +37,7 @@ import {
 import { estimateCost } from '../lib/token-tracker.js';
 import { query } from '../db.js';
 import { randomUUID } from 'crypto';
+import { getEvidenceBuilder } from './evidence-builder.js';
 
 // ============================================================================
 // Skill Runtime
@@ -170,7 +172,32 @@ export class SkillRuntime {
       const lastStep = sortedSteps[sortedSteps.length - 1];
       finalOutput = context.stepResults[lastStep.outputKey];
 
-      await this.logSkillRun(runId, skill.id, workspaceId, 'completed', finalOutput, undefined, context.metadata.tokenUsage);
+      // Assemble evidence from step results using registered builder
+      let evidence: SkillEvidence | undefined;
+      try {
+        const evidenceBuilderFn = getEvidenceBuilder(skill.id);
+        if (evidenceBuilderFn) {
+          evidence = await evidenceBuilderFn(context.stepResults, workspaceId, businessContext);
+          console.log(`[Skill Runtime] Evidence built for ${skill.id}: ${evidence.claims.length} claims, ${evidence.evaluated_records.length} records`);
+
+          // 5MB safety truncation — prevent oversized JSONB writes
+          if (evidence) {
+            const evidenceSize = JSON.stringify(evidence).length;
+            if (evidenceSize > 5_000_000) {
+              evidence.evaluated_records = evidence.evaluated_records.slice(0, 500);
+              (evidence as any)._truncated = true;
+              console.warn(
+                `[Skill Runtime] Evidence truncated for ${skill.id} (${evidenceSize} bytes → 500 records)`
+              );
+            }
+          }
+        }
+      } catch (err) {
+        console.warn(`[Skill Runtime] Evidence assembly failed for ${skill.id}:`, err instanceof Error ? err.message : err);
+        // Evidence failure is non-fatal — skill still returns its output
+      }
+
+      await this.logSkillRun(runId, skill.id, workspaceId, 'completed', finalOutput, undefined, context.metadata.tokenUsage, evidence);
 
       return {
         runId,
@@ -185,6 +212,7 @@ export class SkillRuntime {
         totalTokenUsage: context.metadata.tokenUsage,
         completedAt: new Date(),
         errors: context.metadata.errors.length > 0 ? context.metadata.errors : undefined,
+        evidence,
       };
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
@@ -639,7 +667,8 @@ Important:
     status: string,
     output?: any,
     error?: string,
-    tokenUsageData?: { compute: number; deepseek: number; claude: number; claudeCacheCreation?: number; claudeCacheRead?: number }
+    tokenUsageData?: { compute: number; deepseek: number; claude: number; claudeCacheCreation?: number; claudeCacheRead?: number },
+    evidence?: SkillEvidence
   ): Promise<void> {
     try {
       if (status === 'running') {
@@ -672,6 +701,12 @@ Important:
           },
         } : undefined;
 
+        // Build result_data with both narrative output and evidence
+        const resultData = output ? {
+          narrative: output,
+          ...(evidence ? { evidence } : {}),
+        } : null;
+
         await query(
           `UPDATE skill_runs
            SET status = $2, output = $3, error = $4, completed_at = NOW(),
@@ -680,7 +715,7 @@ Important:
           [
             runId,
             status,
-            output ? JSON.stringify(output) : null,
+            resultData ? JSON.stringify(resultData) : null,
             error,
             enhancedTokenUsage ? JSON.stringify(enhancedTokenUsage) : null,
           ]

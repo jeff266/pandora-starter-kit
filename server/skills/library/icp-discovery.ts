@@ -387,4 +387,19 @@ Keep it concise and actionable. Use real deal sizes and percentages from the dat
 
   outputFormat: 'slack',
   estimatedDuration: '90s',
+
+  evidenceSchema: {
+    entity_type: 'deal',
+    columns: [
+      { key: 'deal_name', display: 'Deal Name', format: 'text' },
+      { key: 'amount', display: 'Amount', format: 'currency' },
+      { key: 'outcome', display: 'Outcome', format: 'text' },
+      { key: 'industry', display: 'Industry', format: 'text' },
+      { key: 'company_size', display: 'Company Size', format: 'text' },
+      { key: 'personas_involved', display: 'Personas Involved', format: 'text' },
+      { key: 'icp_grade', display: 'ICP Grade', format: 'text' },
+      { key: 'win_rate_segment', display: 'Segment Win Rate', format: 'percentage' },
+      { key: 'lead_source', display: 'Lead Source', format: 'text' },
+    ],
+  },
 };

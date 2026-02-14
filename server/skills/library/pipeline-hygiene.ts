@@ -313,4 +313,28 @@ WORD BUDGET ENFORCEMENT:
   slackTemplate: 'pipeline-hygiene',
 
   estimatedDuration: '1m',
+
+  evidenceSchema: {
+    entity_type: 'deal',
+    columns: [
+      { key: 'deal_name', display: 'Deal Name', format: 'text' },
+      { key: 'amount', display: 'Amount', format: 'currency' },
+      { key: 'stage', display: 'Stage', format: 'text' },
+      { key: 'owner', display: 'Owner', format: 'text' },
+      { key: 'days_since_activity', display: 'Days Since Activity', format: 'number' },
+      { key: 'close_date', display: 'Close Date', format: 'date' },
+      { key: 'stale_flag', display: 'Stale Flag', format: 'text' },
+      { key: 'close_date_flag', display: 'Close Date Status', format: 'text' },
+      { key: 'root_cause', display: 'Root Cause', format: 'text' },
+      { key: 'suggested_action', display: 'Suggested Action', format: 'text' },
+      { key: 'severity', display: 'Severity', format: 'severity' },
+    ],
+    formulas: [
+      {
+        column: 'stale_flag',
+        excel_formula: '=IF(E{row}>={{threshold_sheet}}!B2,"stale","active")',
+        depends_on_parameter: 'stale_threshold_days',
+      },
+    ],
+  },
 };

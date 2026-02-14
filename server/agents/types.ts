@@ -51,6 +51,7 @@ export interface SkillOutput {
   tokenUsage: { compute: number; deepseek: number; claude: number } | null;
   duration: number;
   cached?: boolean; // True if output was reused from a recent run
+  evidence?: import('../skills/types.js').SkillEvidence;
 }
 
 export interface AgentSkillResult {
@@ -73,6 +74,8 @@ export interface AgentRunResult {
     synthesis: number;
     total: number;
   };
+  /** Accumulated evidence from all skills that produced it, keyed by skill outputKey */
+  skillEvidence?: Record<string, import('../skills/types.js').SkillEvidence>;
 }
 
 export class AgentExecutionError extends Error {

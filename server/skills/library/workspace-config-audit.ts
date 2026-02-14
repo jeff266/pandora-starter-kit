@@ -117,4 +117,16 @@ Keep the report under 400 words. Use specific numbers from the data. No generic 
       outputKey: 'report',
     },
   ],
+
+  evidenceSchema: {
+    entity_type: 'workspace',
+    columns: [
+      { key: 'check_name', display: 'Check', format: 'text' },
+      { key: 'severity', display: 'Severity', format: 'severity' },
+      { key: 'message', display: 'Finding', format: 'text' },
+      { key: 'priority', display: 'Priority', format: 'number' },
+      { key: 'impact', display: 'Impacted Skills', format: 'text' },
+      { key: 'action', display: 'Recommended Action', format: 'text' },
+    ],
+  },
 };

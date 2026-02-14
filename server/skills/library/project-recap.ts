@@ -26,4 +26,15 @@ export const projectRecapSkill: SkillDefinition = {
     type: 'narrative',
     sections: ['project_updates', 'cross_workspace_summary'],
   },
+
+  evidenceSchema: {
+    entity_type: 'workspace',
+    columns: [
+      { key: 'workspace_name', display: 'Workspace', format: 'text' },
+      { key: 'open_deals', display: 'Open Deals', format: 'number' },
+      { key: 'open_pipeline', display: 'Open Pipeline', format: 'currency' },
+      { key: 'won_this_month', display: 'Won This Month', format: 'currency' },
+      { key: 'project_status', display: 'Project Status', format: 'text' },
+    ],
+  },
 };

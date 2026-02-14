@@ -156,4 +156,19 @@ Keep it concise, actionable, and use real deal names and dollar amounts from the
 
   outputFormat: 'slack',
   estimatedDuration: '45s',
+
+  evidenceSchema: {
+    entity_type: 'deal',
+    columns: [
+      { key: 'deal_name', display: 'Deal Name', format: 'text' },
+      { key: 'amount', display: 'Amount', format: 'currency' },
+      { key: 'stage', display: 'Stage', format: 'text' },
+      { key: 'owner', display: 'Owner', format: 'text' },
+      { key: 'score', display: 'Lead Score', format: 'number' },
+      { key: 'grade', display: 'Grade', format: 'text' },
+      { key: 'primary_strength', display: 'Primary Strength', format: 'text' },
+      { key: 'primary_risk', display: 'Primary Risk', format: 'text' },
+      { key: 'recommended_action', display: 'Recommended Action', format: 'text' },
+    ],
+  },
 };

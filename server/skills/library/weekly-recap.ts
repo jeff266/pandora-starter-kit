@@ -229,4 +229,18 @@ Use actual deal names and dollar amounts.`,
   slackTemplate: 'weekly-recap',
 
   estimatedDuration: '3m',
+
+  evidenceSchema: {
+    entity_type: 'deal',
+    columns: [
+      { key: 'deal_name', display: 'Deal Name', format: 'text' },
+      { key: 'amount', display: 'Amount', format: 'currency' },
+      { key: 'stage', display: 'Stage', format: 'text' },
+      { key: 'owner', display: 'Owner', format: 'text' },
+      { key: 'outcome', display: 'Outcome', format: 'text' },
+      { key: 'close_date', display: 'Close Date', format: 'date' },
+      { key: 'created_at', display: 'Created', format: 'date' },
+      { key: 'stage_change', display: 'Stage Change', format: 'text' },
+    ],
+  },
 };

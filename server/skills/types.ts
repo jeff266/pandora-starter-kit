@@ -86,6 +86,9 @@ export interface SkillDefinition {
 
   /** Estimated execution duration */
   estimatedDuration: string;
+
+  /** Evidence schema declaring the shape of evaluated_records for this skill */
+  evidenceSchema?: EvidenceSchema;
 }
 
 // ============================================================================
@@ -278,6 +281,47 @@ export interface SkillParameter {
 
   /** Whether user can change in workspace settings */
   configurable: boolean;
+}
+
+// ============================================================================
+// Evidence Schema (Column Definitions for WorkbookGenerator)
+// ============================================================================
+
+/**
+ * Declares the shape of evaluated_records for a skill.
+ * The WorkbookGenerator reads this to build spreadsheet tabs dynamically.
+ */
+export interface EvidenceSchema {
+  /** Primary entity type this skill evaluates */
+  entity_type: 'deal' | 'contact' | 'account' | 'conversation' | 'rep' | 'stage' | 'workspace';
+
+  /** Column definitions for the data tab */
+  columns: EvidenceColumnDef[];
+
+  /** Optional Excel formulas for computed columns */
+  formulas?: EvidenceFormulaDef[];
+}
+
+export interface EvidenceColumnDef {
+  /** Field key matching evaluated_records.fields or top-level EvaluatedRecord properties */
+  key: string;
+
+  /** Display name for column header */
+  display: string;
+
+  /** Column format hint for rendering */
+  format: 'text' | 'number' | 'currency' | 'percentage' | 'date' | 'severity' | 'boolean';
+}
+
+export interface EvidenceFormulaDef {
+  /** Column key this formula populates */
+  column: string;
+
+  /** Excel formula template. Use {row} for current row, {{threshold_sheet}} for parameter sheet ref */
+  excel_formula: string;
+
+  /** Which parameter this formula depends on */
+  depends_on_parameter?: string;
 }
 
 // ============================================================================

@@ -203,4 +203,21 @@ Return as JSON array.`,
   outputFormat: 'structured',
 
   estimatedDuration: '2m',
+
+  evidenceSchema: {
+    entity_type: 'deal',
+    columns: [
+      { key: 'deal_name', display: 'Deal Name', format: 'text' },
+      { key: 'amount', display: 'Amount', format: 'currency' },
+      { key: 'stage', display: 'Stage', format: 'text' },
+      { key: 'owner', display: 'Owner', format: 'text' },
+      { key: 'close_date', display: 'Close Date', format: 'date' },
+      { key: 'risk_level', display: 'Risk Level', format: 'severity' },
+      { key: 'risk_score', display: 'Risk Score', format: 'number' },
+      { key: 'days_since_activity', display: 'Days Since Activity', format: 'number' },
+      { key: 'contact_count', display: 'Contacts', format: 'number' },
+      { key: 'risk_factors', display: 'Risk Factors', format: 'text' },
+      { key: 'recommended_action', display: 'Recommended Action', format: 'text' },
+    ],
+  },
 };
