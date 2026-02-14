@@ -32,6 +32,7 @@ import tokenUsageRouter from './routes/token-usage.js';
 import workflowsRouter, { setWorkflowService } from './routes/workflows.js';
 import projectUpdatesRouter from './routes/project-updates.js';
 import funnelRouter from './routes/funnel.js';
+import workspaceConfigRouter from './routes/workspace-config.js';
 import { ActivePiecesClient } from './workflows/ap-client.js';
 import { WorkflowService } from './workflows/workflow-service.js';
 import { seedTemplates } from './workflows/template-seed.js';
@@ -98,6 +99,7 @@ app.use("/api/workspaces", workflowsRouter);
 app.use("/api/workspaces", projectUpdatesRouter);
 app.use("/api/funnel", funnelRouter);
 app.use("/api/workspaces", funnelRouter);
+app.use("/api/workspaces", workspaceConfigRouter);
 app.use("/api", agentsGlobalRouter);
 app.use("/api/workspaces", agentsWorkspaceRouter);
 

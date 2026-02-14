@@ -1,4 +1,5 @@
 import { query } from '../db.js';
+import { configLoader } from '../config/workspace-config-loader.js';
 
 interface GroupStats {
   count: number;
@@ -433,6 +434,9 @@ export interface EnrichedDeal extends ThreadingDeal {
 // ============================================================================
 
 export async function dealThreadingAnalysis(workspaceId: string): Promise<ThreadingAnalysis> {
+  // Load workspace config for minimum contacts threshold
+  const minContacts = await configLoader.getMinimumContactsPerDeal(workspaceId);
+
   // Get all open deals with contact counts (PRIORITY: deal_contacts table, FALLBACK: legacy methods)
   const dealsResult = await query(`
     WITH deal_contact_roles AS (
@@ -523,9 +527,9 @@ export async function dealThreadingAnalysis(workspaceId: string): Promise<Thread
     ? Math.round(deals.reduce((sum, d) => sum + d.amount, 0) / totalOpenDeals)
     : 0;
 
-  const singleThreaded = deals.filter(d => d.contactCount <= 1);
-  const doubleThreaded = deals.filter(d => d.contactCount === 2);
-  const multiThreaded = deals.filter(d => d.contactCount >= 3);
+  const singleThreaded = deals.filter(d => d.contactCount < minContacts);
+  const doubleThreaded = deals.filter(d => d.contactCount === minContacts);
+  const multiThreaded = deals.filter(d => d.contactCount > minContacts);
 
   const singleThreadedValue = singleThreaded.reduce((sum, d) => sum + d.amount, 0);
   const totalPipelineValue = deals.reduce((sum, d) => sum + d.amount, 0);
@@ -555,7 +559,7 @@ export async function dealThreadingAnalysis(workspaceId: string): Promise<Thread
       ownerStats[deal.owner] = { totalDeals: 0, singleThreaded: 0 };
     }
     ownerStats[deal.owner].totalDeals++;
-    if (deal.contactCount <= 1) {
+    if (deal.contactCount < minContacts) {
       ownerStats[deal.owner].singleThreaded++;
     }
   }
@@ -1276,9 +1280,13 @@ export async function coverageByRep(
   quarterStart: Date,
   quarterEnd: Date,
   quotas?: { team?: number; byRep?: Record<string, number> },
-  coverageTarget: number = 3.0,
+  coverageTarget?: number,
   excludedOwners?: string[]
 ): Promise<CoverageByRep> {
+  // Load workspace config
+  const configCoverageTarget = coverageTarget ?? await configLoader.getCoverageTarget(workspaceId);
+  const staleThreshold = await configLoader.getStaleThreshold(workspaceId);
+
   const params: any[] = [workspaceId, quarterStart, quarterEnd];
   let excludeClause = '';
   if (excludedOwners && excludedOwners.length > 0) {
@@ -1297,8 +1305,8 @@ export async function coverageByRep(
       COALESCE(SUM(amount) FILTER (WHERE forecast_category = 'best_case' AND stage_normalized NOT IN ('closed_won', 'closed_lost')), 0) as best_case_value,
       COUNT(*) FILTER (WHERE stage_normalized = 'closed_won') as won_count,
       COALESCE(SUM(amount) FILTER (WHERE stage_normalized = 'closed_won'), 0) as closed_won,
-      COUNT(*) FILTER (WHERE last_activity_date < NOW() - INTERVAL '14 days' AND stage_normalized NOT IN ('closed_won', 'closed_lost')) as stale_deals,
-      COALESCE(SUM(amount) FILTER (WHERE last_activity_date < NOW() - INTERVAL '14 days' AND stage_normalized NOT IN ('closed_won', 'closed_lost')), 0) as stale_value
+      COUNT(*) FILTER (WHERE last_activity_date < NOW() - INTERVAL '${staleThreshold.warning} days' AND stage_normalized NOT IN ('closed_won', 'closed_lost')) as stale_deals,
+      COALESCE(SUM(amount) FILTER (WHERE last_activity_date < NOW() - INTERVAL '${staleThreshold.warning} days' AND stage_normalized NOT IN ('closed_won', 'closed_lost')), 0) as stale_value
     FROM deals
     WHERE workspace_id = $1
       AND (
@@ -1324,7 +1332,7 @@ export async function coverageByRep(
 
     // Calculate gap to hit coverage target
     const gap = quota !== null && remaining !== null && remaining > 0
-      ? Math.max(0, (remaining * coverageTarget) - pipeline)
+      ? Math.max(0, (remaining * configCoverageTarget) - pipeline)
       : null;
 
     // Determine status
@@ -1332,9 +1340,9 @@ export async function coverageByRep(
     if (quota === null) {
       status = 'unknown';
     } else if (coverageRatio !== null) {
-      if (coverageRatio >= coverageTarget) {
+      if (coverageRatio >= configCoverageTarget) {
         status = 'on_track';
-      } else if (coverageRatio >= coverageTarget * 0.6) {
+      } else if (coverageRatio >= configCoverageTarget * 0.6) {
         status = 'at_risk';
       } else {
         status = 'behind';
@@ -1377,7 +1385,7 @@ export async function coverageByRep(
     : null;
 
   const gap = totalQuota !== null && teamRemaining !== null && teamRemaining > 0
-    ? Math.max(0, (teamRemaining * coverageTarget) - totalPipeline)
+    ? Math.max(0, (teamRemaining * configCoverageTarget) - totalPipeline)
     : null;
 
   // Calculate quarter timing
@@ -1403,7 +1411,7 @@ export async function coverageByRep(
       totalBestCase: Math.round(totalBestCase),
       closedWon: Math.round(totalClosedWon),
       coverageRatio,
-      coverageTarget,
+      coverageTarget: configCoverageTarget,
       gap: gap !== null ? Math.round(gap) : null,
       daysInQuarter,
       daysElapsed,

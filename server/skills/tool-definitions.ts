@@ -61,6 +61,7 @@ import { preparePipelineGoalsSummary } from './compute/pipeline-goals.js';
 import { prepareProjectRecap } from './compute/project-recap.js';
 import { prepareStrategyInsights } from './compute/strategy-insights.js';
 import { query } from '../db.js';
+import { configLoader } from '../config/workspace-config-loader.js';
 import {
   findConversationsWithoutDeals,
   getTopCWDConversations,
@@ -795,7 +796,8 @@ const aggregateStaleDeals: ToolDefinition = {
   },
   execute: async (params, context) => {
     return safeExecute('aggregateStaleDeals', async () => {
-      const staleDays = params.staleDays || 14;
+      const staleThreshold = await configLoader.getStaleThreshold(context.workspaceId);
+      const staleDays = params.staleDays || staleThreshold.warning;
       const topN = params.topN || 20;
       const [deals, nameMap] = await Promise.all([
         dealTools.getStaleDeals(context.workspaceId, staleDays),
@@ -1969,7 +1971,7 @@ const checkQuotaConfig: ToolDefinition = {
       const quotas = (goals as any).quotas;
       const teamQuota = quotas?.team ?? (goals as any).quarterly_quota ?? null;
       const repQuotas = quotas?.byRep ?? null;
-      const coverageTarget = (goals as any).pipeline_coverage_target ?? 3.0;
+      const coverageTarget = (goals as any).pipeline_coverage_target ?? await configLoader.getCoverageTarget(context.workspaceId);
       const revenueTarget = (goals as any).revenue_target ?? null;
 
       const hasQuotas = teamQuota !== null || repQuotas !== null;
@@ -2036,7 +2038,7 @@ const coverageByRepTool: ToolDefinition = {
         ? new Date(params.quarterEnd)
         : new Date(timeWindows.analysisRange.end);
 
-      const coverageTarget = params.coverageTarget ?? quotaConfig?.coverageTarget ?? 3.0;
+      const coverageTarget = params.coverageTarget ?? quotaConfig?.coverageTarget ?? undefined;
 
       const quotas = params.quotas ?? (quotaConfig ? {
         team: quotaConfig.teamQuota ?? null,
