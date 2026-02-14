@@ -145,7 +145,8 @@ export async function repScorecard(
   periodEnd: Date,
   changeWindowStart: Date,
   changeWindowEnd: Date,
-  dataAvailability: DataAvailability
+  dataAvailability: DataAvailability,
+  staleDays: number = 14
 ): Promise<RepScorecardResult> {
   // Get all reps from deals table
   const repsResult = await query<{ owner: string }>(
@@ -174,7 +175,8 @@ export async function repScorecard(
       periodEnd,
       changeWindowStart,
       changeWindowEnd,
-      dataAvailability
+      dataAvailability,
+      staleDays
     );
     repMetrics.push(metrics);
   }
@@ -226,7 +228,8 @@ async function gatherRepMetrics(
   periodEnd: Date,
   changeWindowStart: Date,
   changeWindowEnd: Date,
-  dataAvailability: DataAvailability
+  dataAvailability: DataAvailability,
+  staleDays: number
 ): Promise<RepMetrics> {
   // Results metrics
   const resultsResult = await query<{
@@ -421,7 +424,7 @@ async function gatherRepMetrics(
      WHERE workspace_id = $1
        AND owner = $2
        AND stage_normalized NOT IN ('closed_won', 'closed_lost')
-       AND last_activity_date < NOW() - INTERVAL '14 days'`,
+       AND last_activity_date < NOW() - INTERVAL '${staleDays} days'`,
     [workspaceId, repName]
   );
 

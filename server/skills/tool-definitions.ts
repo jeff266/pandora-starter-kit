@@ -681,8 +681,9 @@ const computePipelineCoverage: ToolDefinition = {
   },
   execute: async (params, context) => {
     return safeExecute('computePipelineCoverage', async () => {
-      const snapshot = await generatePipelineSnapshot(context.workspaceId, params.quota, params.staleDaysThreshold);
-      const staleDays = params.staleDaysThreshold || 14;
+      const staleThreshold = await configLoader.getStaleThreshold(context.workspaceId);
+      const staleDays = params.staleDaysThreshold || staleThreshold.warning;
+      const snapshot = await generatePipelineSnapshot(context.workspaceId, params.quota, staleDays);
 
       // Load ICP scores for all open deals
       const icpResult = await query(
@@ -947,7 +948,8 @@ const computeOwnerPerformance: ToolDefinition = {
   },
   execute: async (params, context) => {
     return safeExecute('computeOwnerPerformance', async () => {
-      const staleDays = params.staleDays || 14;
+      const staleThreshold = await configLoader.getStaleThreshold(context.workspaceId);
+      const staleDays = params.staleDays || staleThreshold.warning;
 
       const [allDealsResult, staleDeals, nameMap] = await Promise.all([
         dealTools.queryDeals(context.workspaceId, { limit: 5000 }),
@@ -3147,6 +3149,9 @@ const prepareWaterfallSummaryTool: ToolDefinition = {
   },
   execute: async (params, context) => {
     return safeExecute('prepareWaterfallSummary', async () => {
+      const staleThreshold = await configLoader.getStaleThreshold(context.workspaceId);
+      const staleDays = staleThreshold.warning;
+
       const stageRows = await query(
         `SELECT stage_normalized, COUNT(*) as count, SUM(amount) as total_value
          FROM deals
@@ -3167,7 +3172,7 @@ const prepareWaterfallSummaryTool: ToolDefinition = {
       const staleRows = await query(
         `SELECT name, amount, owner, stage_normalized, EXTRACT(DAY FROM NOW() - last_activity_date)::int as days_since_activity
          FROM deals
-         WHERE workspace_id = $1 AND last_activity_date < NOW() - INTERVAL '14 days' AND stage_normalized NOT IN ('closed_won', 'closed_lost')
+         WHERE workspace_id = $1 AND last_activity_date < NOW() - INTERVAL '${staleDays} days' AND stage_normalized NOT IN ('closed_won', 'closed_lost')
          ORDER BY amount DESC
          LIMIT 5`,
         [context.workspaceId]
@@ -3272,13 +3277,16 @@ const repScorecardComputeTool: ToolDefinition = {
       const changeWindowStart = new Date(timeWindows.changeRange.start);
       const changeWindowEnd = new Date(timeWindows.changeRange.end);
 
+      const staleThreshold = await configLoader.getStaleThreshold(context.workspaceId);
+
       const result = await repScorecard(
         context.workspaceId,
         periodStart,
         periodEnd,
         changeWindowStart,
         changeWindowEnd,
-        dataAvailability
+        dataAvailability,
+        staleThreshold.warning
       );
 
       console.log(`[Rep Scorecard] Scored ${result.reps.length} reps. Top: ${result.top3[0]?.repName} (${result.top3[0]?.overallScore}), Bottom: ${result.bottom3[0]?.repName} (${result.bottom3[0]?.overallScore})`);
@@ -3304,6 +3312,9 @@ const prepareRepScorecardSummaryTool: ToolDefinition = {
         throw new Error('scorecard not found in context. Run repScorecardCompute first.');
       }
 
+      const staleThreshold = await configLoader.getStaleThreshold(context.workspaceId);
+      const staleDays = staleThreshold.warning;
+
       const [stageRows, recentWinsRows, atRiskRows, staleRows] = await Promise.all([
         query(
           `SELECT stage_normalized, COUNT(*) as count, SUM(amount) as total_value
@@ -3325,7 +3336,7 @@ const prepareRepScorecardSummaryTool: ToolDefinition = {
         ),
         query(
           `SELECT COUNT(*) as count, COALESCE(SUM(amount), 0) as total_value
-           FROM deals WHERE workspace_id = $1 AND last_activity_date < NOW() - INTERVAL '14 days' AND stage_normalized NOT IN ('closed_won', 'closed_lost')`,
+           FROM deals WHERE workspace_id = $1 AND last_activity_date < NOW() - INTERVAL '${staleDays} days' AND stage_normalized NOT IN ('closed_won', 'closed_lost')`,
           [context.workspaceId]
         ),
       ]);
