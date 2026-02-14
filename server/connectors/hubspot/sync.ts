@@ -4,6 +4,7 @@ import {
   transformDeal,
   transformContact,
   transformCompany,
+  transformEngagement,
   type NormalizedDeal,
   type NormalizedContact,
   type NormalizedAccount,
@@ -678,8 +679,38 @@ export async function initialSync(
 
     console.log(`[HubSpot Sync] Resolved FKs: ${accountIdMap.size} accounts, ${contactIdMap.size} contacts`);
 
-    totalStored = dealsStored + contactsStored + accountsStored;
-    console.log(`[HubSpot Sync] Stored ${dealsStored} deals, ${contactsStored} contacts, ${accountsStored} accounts`);
+    // Fetch and transform activities (must be after contacts and deals for FK resolution)
+    let rawEngagements: any[] = [];
+    try {
+      rawEngagements = await client.getAllEngagements();
+      console.log(`[HubSpot Sync] Fetched ${rawEngagements.length} engagements`);
+    } catch (err: any) {
+      errors.push(`Failed to fetch engagements: ${err.message}`);
+    }
+
+    const activityTransformResult = transformWithErrorCapture(
+      rawEngagements,
+      (e) => transformEngagement(e, workspaceId),
+      'HubSpot Engagements',
+      (e) => e.id
+    );
+
+    if (activityTransformResult.failed.length > 0) {
+      errors.push(`Activity transform failures: ${activityTransformResult.failed.length} records`);
+    }
+
+    const normalizedActivities = activityTransformResult.succeeded;
+
+    const activitiesStored = await upsertActivities(normalizedActivities).catch(err => {
+      console.error(`[HubSpot Sync] Failed to store activities:`, err.message);
+      errors.push(`Failed to store activities: ${err.message}`);
+      return 0;
+    });
+
+    console.log(`[HubSpot Sync] Stored ${activitiesStored} activities`);
+
+    totalStored = dealsStored + contactsStored + accountsStored + activitiesStored;
+    console.log(`[HubSpot Sync] Stored ${dealsStored} deals, ${contactsStored} contacts, ${accountsStored} accounts, ${activitiesStored} activities`);
 
     await updateConnectionSyncStatus(workspaceId, 'hubspot', totalStored, errors.length > 0 ? errors[0] : null);
 
@@ -842,7 +873,38 @@ export async function incrementalSync(
 
     await populateDealContactsFromAssociations(workspaceId, normalizedDeals, contactIdMap);
 
-    totalStored = dealsStored + contactsStored + accountsStored;
+    // Fetch activities updated since last sync
+    const lastSyncTimestamp = Math.floor(since.getTime());
+    let rawEngagements: any[] = [];
+    try {
+      rawEngagements = await hubspotClient.getAllEngagements(lastSyncTimestamp);
+      console.log(`[HubSpot Incremental Sync] Fetched ${rawEngagements.length} updated engagements`);
+    } catch (err: any) {
+      errors.push(`Failed to fetch engagements: ${err.message}`);
+    }
+
+    const activityTransformResult = transformWithErrorCapture(
+      rawEngagements,
+      (e) => transformEngagement(e, workspaceId),
+      'HubSpot Engagements',
+      (e) => e.id
+    );
+
+    if (activityTransformResult.failed.length > 0) {
+      errors.push(`Activity transform failures: ${activityTransformResult.failed.length} records`);
+    }
+
+    const normalizedActivities = activityTransformResult.succeeded;
+
+    const activitiesStored = await upsertActivities(normalizedActivities).catch(err => {
+      console.error(`[HubSpot Incremental Sync] Failed to store activities:`, err.message);
+      errors.push(`Failed to store activities: ${err.message}`);
+      return 0;
+    });
+
+    console.log(`[HubSpot Incremental Sync] Stored ${activitiesStored} activities`);
+
+    totalStored = dealsStored + contactsStored + accountsStored + activitiesStored;
     await updateConnectionSyncStatus(workspaceId, 'hubspot', totalStored, errors.length > 0 ? errors[0] : null);
 
   } catch (error) {
