@@ -324,7 +324,7 @@ export class SkillRuntime {
         systemPrompt,
         messages: [{ role: 'user', content: renderedPrompt }],
         schema: step.deepseekSchema,
-        maxTokens: 4096,
+        maxTokens: step.maxTokens || 4096,
         temperature: capability === 'reason' ? 0.7 : 0.1,
         _tracking: tracking,
       });
@@ -401,7 +401,8 @@ export class SkillRuntime {
       tools,
       maxToolCalls,
       step.tier,
-      tracking
+      tracking,
+      step.maxTokens || 4096
     );
   }
 
@@ -416,7 +417,8 @@ export class SkillRuntime {
     tools: ToolDef[],
     maxToolCalls: number,
     tier: string,
-    tracking?: TrackingContext
+    tracking?: TrackingContext,
+    maxTokens: number = 4096
   ): Promise<string> {
     const messages: LLMCallOptions['messages'] = [
       { role: 'user', content: userPrompt },
@@ -429,7 +431,7 @@ export class SkillRuntime {
         systemPrompt,
         messages,
         tools: tools.length > 0 ? tools : undefined,
-        maxTokens: 4096,
+        maxTokens,
         temperature: capability === 'reason' ? 0.7 : 0.1,
         _tracking: tracking,
       });
@@ -478,7 +480,7 @@ export class SkillRuntime {
     const finalResponse = await callLLM(context.workspaceId, capability, {
       systemPrompt,
       messages,
-      maxTokens: 4096,
+      maxTokens,
       temperature: capability === 'reason' ? 0.7 : 0.1,
       _tracking: tracking,
     });

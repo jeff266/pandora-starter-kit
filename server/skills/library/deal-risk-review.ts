@@ -41,7 +41,7 @@ export const dealRiskReviewSkill: SkillDefinition = {
         stageNormalized: ['awareness', 'qualification', 'evaluation', 'decision', 'negotiation'],
         sortBy: 'amount',
         sortDir: 'desc',
-        limit: 20,
+        limit: 10,
       },
       outputKey: 'open_deals',
     },
@@ -135,6 +135,7 @@ Return valid JSON array of signals.`,
       name: 'Assess Deal Risk',
       tier: 'claude',
       dependsOn: ['batch-deal-context'],
+      maxTokens: 2500,
       claudePrompt: `Review these deals for risk. All data is pre-fetched below — do NOT request additional tools.
 
 Sales cycle expectation: {{business_model.sales_cycle_days}} days

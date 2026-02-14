@@ -1,240 +1,298 @@
+import { query, getClient } from '../../db.js';
+import { HubSpotClient } from './client.js';
+import type { PropertyHistoryEntry } from './client.js';
+
+export interface BackfillResult {
+  total: number;
+  updated: number;
+  errors: number;
+  skipped: number;
+  historyEntriesCreated: number;
+}
+
 /**
- * HubSpot Stage History Backfill
+ * Backfill accurate stage_changed_at timestamps using HubSpot Property History API
  *
- * Pulls historical stage changes from HubSpot Property History API
- * for deals that haven't been backfilled yet.
- */
-
-import { query } from '../../db.js';
-import { hubspotFetch } from '../../utils/throttle.js';
-import { recordStageChanges, type StageChange } from './stage-tracker.js';
-
-interface DealToBackfill {
-  id: string;
-  source_id: string;
-  workspace_id: string;
-}
-
-interface HubSpotPropertyHistoryEntry {
-  value: string;
-  timestamp: string;
-  sourceType?: string;
-  sourceId?: string;
-}
-
-interface BackfillResult {
-  dealsProcessed: number;
-  transitionsRecorded: number;
-  errors: string[];
-}
-
-/**
- * Find the stage normalization function from transform.ts
- * This should be imported/reused from the transform logic
- */
-function normalizeStage(stageValue: string): string {
-  const normalized = stageValue.toLowerCase().trim();
-
-  // Map common HubSpot stages to normalized categories
-  if (normalized.includes('closed') && normalized.includes('won')) return 'closed_won';
-  if (normalized.includes('closed') && normalized.includes('lost')) return 'closed_lost';
-  if (normalized.includes('contract') || normalized.includes('negotiation')) return 'negotiation';
-  if (normalized.includes('proposal') || normalized.includes('quote')) return 'proposal';
-  if (normalized.includes('demo') || normalized.includes('presentation')) return 'demo';
-  if (normalized.includes('qualified') || normalized.includes('discovery')) return 'qualification';
-  if (normalized.includes('appointment') || normalized.includes('meeting')) return 'qualification';
-
-  // Default fallback
-  return 'pipeline';
-}
-
-/**
- * Backfill stage history for all deals in a workspace that haven't been backfilled
+ * For each deal, fetches the dealstage property history and:
+ * 1. Updates stage_changed_at to when the deal entered its current stage
+ * 2. Stores complete stage progression in deal_stage_history table
  */
 export async function backfillStageHistory(
   workspaceId: string,
   accessToken: string
 ): Promise<BackfillResult> {
-  // Find deals that haven't been backfilled yet
-  // A deal is "not backfilled" if it has zero rows with source = 'hubspot_history'
-  const unbackfilled = await query<DealToBackfill>(
-    `SELECT d.id, d.source_id, d.workspace_id
-     FROM deals d
-     WHERE d.workspace_id = $1
-       AND d.source = 'hubspot'
-       AND NOT EXISTS (
-         SELECT 1 FROM deal_stage_history dsh
-         WHERE dsh.deal_id = d.id AND dsh.source = 'hubspot_history'
-       )
-     ORDER BY d.created_at DESC`,
+  const hubspotClient = new HubSpotClient(accessToken);
+  console.log(\`[Stage History Backfill] Starting for workspace \${workspaceId}\`);
+
+  // Get all deals that need backfill
+  const dealsResult = await query<{
+    id: string;
+    source_id: string;
+    stage: string | null;
+    stage_normalized: string | null;
+    stage_changed_at: string | null;
+    created_date: string | null;
+  }>(
+    \`SELECT id, source_id, stage, stage_normalized, stage_changed_at, created_date
+     FROM deals
+     WHERE workspace_id = $1
+       AND source = 'hubspot'
+       AND (
+         stage_changed_at IS NULL
+         OR stage_changed_at = created_date
+         OR stage_changed_at >= NOW() - INTERVAL '7 days'
+       )\`,
     [workspaceId]
   );
 
-  if (unbackfilled.rows.length === 0) {
-    console.log(`[Stage Backfill] No deals to backfill for workspace ${workspaceId}`);
-    return { dealsProcessed: 0, transitionsRecorded: 0, errors: [] };
+  const deals = dealsResult.rows;
+  console.log(\`[Stage History Backfill] Found \${deals.length} deals to backfill\`);
+
+  if (deals.length === 0) {
+    return { total: 0, updated: 0, errors: 0, skipped: 0, historyEntriesCreated: 0 };
   }
 
-  console.log(`[Stage Backfill] Processing ${unbackfilled.rows.length} deals for workspace ${workspaceId}`);
+  // Process in batches to respect HubSpot rate limits (100 calls/10 seconds)
+  const BATCH_SIZE = 50;
+  const BATCH_DELAY_MS = 1000; // 1 second between batches
 
-  let totalTransitions = 0;
-  const errors: string[] = [];
+  let updated = 0;
+  let errors = 0;
+  let skipped = 0;
+  let historyEntriesCreated = 0;
 
-  // Process in batches to stay within rate limits
-  const batchSize = 10;
-  for (let i = 0; i < unbackfilled.rows.length; i += batchSize) {
-    const batch = unbackfilled.rows.slice(i, i + batchSize);
+  for (let i = 0; i < deals.length; i += BATCH_SIZE) {
+    const batch = deals.slice(i, i + BATCH_SIZE);
 
-    const batchResults = await Promise.allSettled(
-      batch.map(deal => fetchAndRecordDealStageHistory(deal, accessToken))
+    const results = await Promise.allSettled(
+      batch.map(deal => hubspotClient.getPropertyHistory('deals', deal.source_id, 'dealstage'))
     );
 
-    for (const result of batchResults) {
-      if (result.status === 'fulfilled') {
-        totalTransitions += result.value;
-      } else {
-        errors.push(result.reason?.message || 'Unknown error');
+    for (let j = 0; j < results.length; j++) {
+      const result = results[j];
+      const deal = batch[j];
+
+      if (result.status === 'rejected') {
+        console.error(\`[Stage History Backfill] Failed to fetch history for deal \${deal.source_id}:\`, result.reason);
+        errors++;
+        continue;
+      }
+
+      const history = result.value;
+
+      if (history.length === 0) {
+        // No history available
+        skipped++;
+        continue;
+      }
+
+      if (history.length === 1) {
+        // Deal has been in same stage since creation
+        // stage_changed_at = created_date is correct
+        skipped++;
+        continue;
+      }
+
+      // Most recent entry = current stage
+      // Its timestamp = when the deal entered this stage
+      const currentStageEntry = history[0];
+      const enteredCurrentStage = new Date(currentStageEntry.timestamp);
+
+      try {
+        // Update the deal's stage_changed_at
+        await query(
+          \`UPDATE deals SET
+            stage_changed_at = $1,
+            updated_at = NOW()
+           WHERE id = $2\`,
+          [enteredCurrentStage, deal.id]
+        );
+
+        updated++;
+
+        // Store complete stage history
+        const entriesCreated = await storeStageHistory(workspaceId, deal.id, history, deal.stage_normalized);
+        historyEntriesCreated += entriesCreated;
+
+      } catch (err) {
+        console.error(\`[Stage History Backfill] Failed to update deal \${deal.id}:\`, err);
+        errors++;
       }
     }
 
-    // Progress logging every 50 deals
-    if ((i + batchSize) % 50 === 0 || i + batchSize >= unbackfilled.rows.length) {
-      const processed = Math.min(i + batchSize, unbackfilled.rows.length);
-      console.log(`[Stage Backfill] Progress: ${processed}/${unbackfilled.rows.length} deals`);
+    // Rate limit pause between batches
+    if (i + BATCH_SIZE < deals.length) {
+      await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS));
     }
+
+    console.log(\`[Stage History Backfill] Processed \${Math.min(i + BATCH_SIZE, deals.length)}/\${deals.length} deals\`);
   }
 
-  console.log(`[Stage Backfill] Complete: ${unbackfilled.rows.length} deals, ${totalTransitions} transitions, ${errors.length} errors`);
-
-  return {
-    dealsProcessed: unbackfilled.rows.length,
-    transitionsRecorded: totalTransitions,
-    errors: errors.slice(0, 10), // Limit error array size
+  const result = {
+    total: deals.length,
+    updated,
+    errors,
+    skipped: deals.length - updated - errors,
+    historyEntriesCreated,
   };
+
+  console.log(\`[Stage History Backfill] Complete:\`, result);
+  return result;
 }
 
 /**
- * Fetch stage history for a single deal from HubSpot and record it
+ * Store complete stage progression in deal_stage_history table
+ * History entries are in reverse chronological order (most recent first)
  */
-async function fetchAndRecordDealStageHistory(
-  deal: DealToBackfill,
-  accessToken: string
+async function storeStageHistory(
+  workspaceId: string,
+  dealId: string,
+  history: PropertyHistoryEntry[],
+  currentStageNormalized: string | null
 ): Promise<number> {
+  if (history.length === 0) return 0;
+
+  const client = await getClient();
+
   try {
-    // Fetch property history from HubSpot
-    const response = await hubspotFetch(
-      `https://api.hubapi.com/crm/v3/objects/deals/${deal.source_id}?propertiesWithHistory=dealstage`,
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
+    await client.query('BEGIN');
+
+    let entriesCreated = 0;
+
+    // Reverse the history to process chronologically (oldest first)
+    const chronologicalHistory = [...history].reverse();
+
+    for (let i = 0; i < chronologicalHistory.length; i++) {
+      const entry = chronologicalHistory[i];
+      const enteredAt = new Date(entry.timestamp);
+
+      // Exit time is when the next stage started (or NULL if current stage)
+      const isCurrentStage = i === chronologicalHistory.length - 1;
+      const exitedAt = isCurrentStage ? null : new Date(chronologicalHistory[i + 1].timestamp);
+
+      // Calculate duration in days
+      let durationDays: number | null = null;
+      if (exitedAt) {
+        durationDays = (exitedAt.getTime() - enteredAt.getTime()) / (1000 * 60 * 60 * 24);
       }
-    );
 
-    if (!response.ok) {
-      throw new Error(`HubSpot API error: ${response.status} ${response.statusText}`);
+      // Use current stage normalized for the latest entry, otherwise try to normalize the stage value
+      const stageNormalized = isCurrentStage && currentStageNormalized
+        ? currentStageNormalized
+        : normalizeStageValue(entry.value);
+
+      await client.query(
+        \`INSERT INTO deal_stage_history (
+          workspace_id, deal_id, stage, stage_normalized,
+          entered_at, exited_at, duration_days,
+          source, source_user
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        ON CONFLICT (deal_id, stage, entered_at) DO NOTHING\`,
+        [
+          workspaceId,
+          dealId,
+          entry.value,
+          stageNormalized,
+          enteredAt,
+          exitedAt,
+          durationDays,
+          'hubspot',
+          entry.updatedByUserId || null,
+        ]
+      );
+
+      entriesCreated++;
     }
 
-    const data = await response.json();
-    const history: HubSpotPropertyHistoryEntry[] = data.propertiesWithHistory?.dealstage;
+    await client.query('COMMIT');
+    return entriesCreated;
 
-    if (!history || history.length === 0) {
-      return 0; // No history available
-    }
-
-    // Sort chronologically (API returns reverse-chronological)
-    const sorted = [...history].sort(
-      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-    );
-
-    // Build transitions
-    const transitions: StageChange[] = [];
-    for (let i = 0; i < sorted.length; i++) {
-      const entry = sorted[i];
-      const prevEntry = i > 0 ? sorted[i - 1] : null;
-
-      // Skip if stage didn't actually change (HubSpot records property updates even if value is same)
-      if (prevEntry && prevEntry.value === entry.value) continue;
-
-      const durationMs = prevEntry
-        ? new Date(entry.timestamp).getTime() - new Date(prevEntry.timestamp).getTime()
-        : null;
-
-      transitions.push({
-        dealId: deal.id,
-        dealSourceId: deal.source_id,
-        workspaceId: deal.workspace_id,
-        fromStage: prevEntry?.value ?? null,
-        fromStageNormalized: prevEntry ? normalizeStage(prevEntry.value) : null,
-        toStage: entry.value,
-        toStageNormalized: normalizeStage(entry.value),
-        changedAt: new Date(entry.timestamp),
-        durationMs,
-      });
-    }
-
-    // Record to database with source = 'hubspot_history'
-    if (transitions.length > 0) {
-      await recordStageChanges(transitions, 'hubspot_history');
-    }
-
-    return transitions.length;
-  } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    console.error(`[Stage Backfill] Failed to backfill deal ${deal.source_id}:`, errorMsg);
-    throw new Error(`Deal ${deal.source_id}: ${errorMsg}`);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error(\`[Stage History] Failed to store history for deal \${dealId}:\`, error);
+    throw error;
+  } finally {
+    client.release();
   }
+}
+
+/**
+ * Normalize HubSpot stage value to standard stage names
+ * This is a simplified version - the full normalization is in transform.ts
+ */
+function normalizeStageValue(stage: string): string | null {
+  if (!stage) return null;
+
+  const normalized = stage.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  // Map common HubSpot stages to normalized values
+  const stageMap: Record<string, string> = {
+    'appointmentscheduled': 'qualification',
+    'qualifiedtobuy': 'qualification',
+    'presentationscheduled': 'evaluation',
+    'decisionmakerboughtin': 'decision',
+    'contractsent': 'negotiation',
+    'closedwon': 'closed_won',
+    'closedlost': 'closed_lost',
+  };
+
+  return stageMap[normalized] || 'qualification';
 }
 
 /**
  * Get backfill statistics for a workspace
+ * Shows how many deals have accurate stage history
  */
 export async function getBackfillStats(workspaceId: string): Promise<{
-  totalTransitions: number;
+  totalDeals: number;
   dealsWithHistory: number;
-  dealsWithoutHistory: number;
-  oldestTransition: string | null;
-  newestTransition: string | null;
-  sourceBreakdown: Record<string, number>;
+  dealsNeedingBackfill: number;
+  totalHistoryEntries: number;
+  avgHistoryEntriesPerDeal: number;
 }> {
-  const stats = await query(
-    `SELECT
-      COUNT(*) as total_transitions,
-      COUNT(DISTINCT deal_id) as deals_with_history,
-      MIN(changed_at) as oldest_transition,
-      MAX(changed_at) as newest_transition
-     FROM deal_stage_history
-     WHERE workspace_id = $1`,
+  const totalResult = await query<{ count: string }>(
+    \`SELECT COUNT(*) as count FROM deals WHERE workspace_id = $1 AND source = 'hubspot'\`,
     [workspaceId]
   );
 
-  const sourceStats = await query(
-    `SELECT source, COUNT(*) as count
+  const withHistoryResult = await query<{ count: string }>(
+    \`SELECT COUNT(DISTINCT deal_id) as count
      FROM deal_stage_history
-     WHERE workspace_id = $1
-     GROUP BY source`,
+     WHERE workspace_id = $1\`,
     [workspaceId]
   );
 
-  const totalDeals = await query(
-    `SELECT COUNT(*) as total
+  const needingBackfillResult = await query<{ count: string }>(
+    \`SELECT COUNT(*) as count
      FROM deals
-     WHERE workspace_id = $1 AND source = 'hubspot'`,
+     WHERE workspace_id = $1
+       AND source = 'hubspot'
+       AND (
+         stage_changed_at IS NULL
+         OR stage_changed_at = created_date
+         OR stage_changed_at >= NOW() - INTERVAL '7 days'
+       )\`,
     [workspaceId]
   );
 
-  const sourceBreakdown: Record<string, number> = {};
-  for (const row of sourceStats.rows) {
-    sourceBreakdown[row.source] = Number(row.count);
-  }
+  const historyCountResult = await query<{ count: string }>(
+    \`SELECT COUNT(*) as count
+     FROM deal_stage_history
+     WHERE workspace_id = $1\`,
+    [workspaceId]
+  );
+
+  const totalDeals = parseInt(totalResult.rows[0]?.count || '0', 10);
+  const dealsWithHistory = parseInt(withHistoryResult.rows[0]?.count || '0', 10);
+  const dealsNeedingBackfill = parseInt(needingBackfillResult.rows[0]?.count || '0', 10);
+  const totalHistoryEntries = parseInt(historyCountResult.rows[0]?.count || '0', 10);
 
   return {
-    totalTransitions: Number(stats.rows[0]?.total_transitions || 0),
-    dealsWithHistory: Number(stats.rows[0]?.deals_with_history || 0),
-    dealsWithoutHistory: Number(totalDeals.rows[0]?.total || 0) - Number(stats.rows[0]?.deals_with_history || 0),
-    oldestTransition: stats.rows[0]?.oldest_transition || null,
-    newestTransition: stats.rows[0]?.newest_transition || null,
-    sourceBreakdown,
+    totalDeals,
+    dealsWithHistory,
+    dealsNeedingBackfill,
+    totalHistoryEntries,
+    avgHistoryEntriesPerDeal: dealsWithHistory > 0 ? totalHistoryEntries / dealsWithHistory : 0,
   };
 }

@@ -19,6 +19,10 @@ export class HubSpotClient {
     this.accessToken = accessToken;
   }
 
+  getAccessToken(): string {
+    return this.accessToken;
+  }
+
   private async request<T>(endpoint: string, options: RequestInit = {}, useSearchApi: boolean = false): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`;
 
@@ -553,4 +557,45 @@ export class HubSpotClient {
 
     return allRecords;
   }
+
+  /**
+   * Get property history for a specific object and property
+   * Uses HubSpot's propertiesWithHistory parameter to get historical values
+   *
+   * @param objectType - 'deals' | 'contacts' | 'companies'
+   * @param objectId - HubSpot object ID
+   * @param propertyName - Property to get history for (e.g., 'dealstage')
+   * @returns Array of property history entries in reverse chronological order (most recent first)
+   */
+  async getPropertyHistory(
+    objectType: 'deals' | 'contacts' | 'companies',
+    objectId: string,
+    propertyName: string
+  ): Promise<PropertyHistoryEntry[]> {
+    try {
+      const endpoint = `/crm/v3/objects/${objectType}/${objectId}?propertiesWithHistory=${propertyName}`;
+
+      const response = await this.request<{
+        propertiesWithHistory?: Record<string, PropertyHistoryEntry[]>;
+      }>(endpoint);
+
+      // Extract history for the requested property
+      const history = response.propertiesWithHistory?.[propertyName] || [];
+
+      // History is returned in reverse chronological order (most recent first)
+      return history;
+    } catch (error) {
+      console.warn(`[HubSpot] Failed to get property history for ${objectType}/${objectId}/${propertyName}:`,
+        error instanceof Error ? error.message : String(error));
+      return [];
+    }
+  }
+}
+
+export interface PropertyHistoryEntry {
+  value: string;
+  timestamp: string; // ISO 8601 timestamp
+  sourceType: string; // e.g., 'CRM_UI', 'WORKFLOWS', 'INTEGRATION'
+  sourceId: string | null;
+  updatedByUserId?: string;
 }
