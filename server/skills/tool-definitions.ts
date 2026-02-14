@@ -1704,6 +1704,53 @@ Required weekly pipeline gen: ${weeklyGenStr}`;
         };
       }
 
+      // Handle weekly-recap
+      if (skillId === 'weekly-recap') {
+        const pipeline = (context.stepResults as any).current_pipeline;
+        const closedWon = (context.stepResults as any).closed_won;
+        const closedLost = (context.stepResults as any).closed_lost;
+        const recentDeals = (context.stepResults as any).recent_deals;
+        const activity = (context.stepResults as any).weekly_activity;
+        const callHighlights = (context.stepResults as any).call_highlights;
+
+        const summarizeDealList = (deals: any, label: string, limit: number) => {
+          if (!deals?.deals || deals.deals.length === 0) return `${label}: None`;
+          const top = deals.deals.slice(0, limit).map((d: any) =>
+            `- ${d.name}: $${(d.amount || 0).toLocaleString()} | Stage: ${d.stage_normalized || d.stage} | Close: ${d.close_date || 'N/A'} | Owner: ${d.owner_name || 'Unknown'}`
+          );
+          const remaining = deals.deals.length - limit;
+          const extra = remaining > 0 ? `\n  ... and ${remaining} more` : '';
+          return `${label} (${deals.deals.length} total, $${(deals.summary?.totalValue || 0).toLocaleString()}):\n${top.join('\n')}${extra}`;
+        };
+
+        const pipelineSummary = pipeline
+          ? `Pipeline: $${(pipeline.totalValue || 0).toLocaleString()} across ${pipeline.totalDeals || 0} deals. Avg: $${(pipeline.avgDealSize || 0).toLocaleString()}.`
+          : 'Pipeline data not available.';
+
+        const activitySummary = activity
+          ? `Activity: ${JSON.stringify(activity)}`
+          : 'No activity data.';
+
+        const wonStr = summarizeDealList(closedWon, 'Closed Won', 10);
+        const lostStr = summarizeDealList(closedLost, 'Closed Lost', 10);
+        const newStr = summarizeDealList(recentDeals, 'Recent Deals', 10);
+
+        let callStr = 'No call highlights available.';
+        if (callHighlights && typeof callHighlights === 'object' && !callHighlights.error) {
+          callStr = JSON.stringify(callHighlights);
+          if (callStr.length > 2000) callStr = callStr.substring(0, 2000) + '...';
+        }
+
+        return {
+          pipelineSummary,
+          activitySummary,
+          wonDeals: wonStr,
+          lostDeals: lostStr,
+          newDeals: newStr,
+          callHighlights: callStr,
+        };
+      }
+
       return { summary: 'Unsupported skill for summarization' };
     }, params);
   },

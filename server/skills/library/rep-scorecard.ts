@@ -157,7 +157,7 @@ BUSINESS CONTEXT:
 {{businessContext}}
 
 DATA AVAILABILITY:
-{{data_availability}}
+{{{json data_availability}}}
 
 The scorecard is based on:
 {{#if data_availability.hasQuotas}}- Quota data ({{data_availability.quotaCount}} quotas){{/if}}

@@ -212,28 +212,28 @@ TIME SCOPE:
 - Last run: {{time_windows.lastRunAt}}
 
 PERIOD-OVER-PERIOD COMPARISON:
-{{period_comparison}}
+{{{json period_comparison}}}
 
 PIPELINE SUMMARY:
-{{pipeline_summary}}
+{{{json pipeline_summary}}}
 
 STAGE BREAKDOWN:
-{{stage_breakdown}}
+{{{json stage_breakdown}}}
 
 STALE DEALS (aggregated — summary + severity buckets + top 20 by amount):
-{{stale_deals_agg}}
+{{{json stale_deals_agg}}}
 
 DEALS CLOSING IN 30 DAYS (aggregated — summary + top 10 by amount):
-{{closing_soon_agg}}
+{{{json closing_soon_agg}}}
 
 ACTIVITY (change window):
-{{recent_activity}}
+{{{json recent_activity}}}
 
 OWNER PERFORMANCE (sorted by stale rate):
-{{owner_performance}}
+{{{json owner_performance}}}
 
 DEAL CLASSIFICATIONS (AI-analyzed root causes for top 30 deals):
-{{deal_classifications}}
+{{{json deal_classifications}}}
 
 {{#if pipeline_summary.icpSummary}}
 PIPELINE QUALITY (ICP Fit):

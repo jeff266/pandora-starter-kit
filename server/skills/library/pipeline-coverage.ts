@@ -130,7 +130,7 @@ Context:
 - Team coverage: {{coverage_data.team.coverageRatio}}x
 
 Reps to classify (only at-risk/behind reps, max 10):
-{{at_risk_reps}}
+{{{json at_risk_reps}}}
 
 If no at-risk reps provided, respond with: { "classifications": [], "skipped": true }
 
@@ -232,7 +232,7 @@ AT-RISK REP ANALYSIS:
 {{coverage_summary.riskClassifications}}
 
 SHADOW PIPELINE (Conversations Without Deals):
-{{cwd_by_rep}}
+{{{json cwd_by_rep}}}
 
 REPORT PARAMETERS:
 - Word budget: {{output_budget.wordBudget}} words maximum

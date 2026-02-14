@@ -74,7 +74,7 @@ No conversation data available (file import workspace). Return empty JSON array:
 
 {{#if dataFreshness.hasConversations}}
 Conversations:
-{{recent_conversations}}
+{{{json recent_conversations}}}
 {{/if}}
 
 Extract risk signals from these call transcripts. Look for:

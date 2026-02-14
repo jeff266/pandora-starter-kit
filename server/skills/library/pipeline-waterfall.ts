@@ -135,10 +135,10 @@ For each stage anomaly (>20% change from previous period), classify:
 
 Context:
 - Analysis period: {{time_windows.analysisStart}} to {{time_windows.analysisEnd}}
-- Velocity benchmarks: {{velocity_benchmarks}}
+- Velocity benchmarks: {{{json velocity_benchmarks}}}
 
 Items to classify:
-{{top_deals}}
+{{{json top_deals}}}
 
 Anomalies to classify:
 {{waterfall_deltas.anomalies}}
@@ -248,7 +248,7 @@ ANOMALIES:
 {{classifications.anomalyClassifications}}
 
 VELOCITY BENCHMARKS:
-{{velocity_benchmarks}}
+{{{json velocity_benchmarks}}}
 
 CURRENT PIPELINE SNAPSHOT:
 {{#each pipeline_context.stageDistribution}}

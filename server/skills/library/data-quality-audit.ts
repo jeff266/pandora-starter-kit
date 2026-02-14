@@ -116,7 +116,7 @@ OWNER DATA QUALITY:
 {{quality_metrics.ownerBreakdown}}
 
 TOP PROBLEM RECORDS:
-{{enriched_offenders}}
+{{{json enriched_offenders}}}
 
 {{#if cwd_data.has_conversation_data}}
 CONVERSATION COVERAGE GAPS (CWD):
@@ -274,10 +274,10 @@ BY ENTITY:
 {{quality_summary.entitySummaries}}
 
 TREND (vs last audit):
-{{quality_trend}}
+{{{json quality_trend}}}
 
 OWNER PATTERNS (from automated classification):
-{{quality_classifications}}
+{{{json quality_classifications}}}
 
 {{#if cwd_data.has_conversation_data}}
 CONVERSATION COVERAGE GAPS:

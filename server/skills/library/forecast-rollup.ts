@@ -109,16 +109,16 @@ export const forecastRollupSkill: SkillDefinition = {
       deepseekPrompt: `You are a sales forecast auditor analyzing rep behavior patterns for {{business_model.company_name}}.
 
 CURRENT FORECAST DATA:
-{{forecast_data}}
+{{{json forecast_data}}}
 
 PREVIOUS FORECAST (if available):
-{{previous_forecast}}
+{{{json previous_forecast}}}
 
 WEEK-OVER-WEEK CHANGES:
-{{wow_delta}}
+{{{json wow_delta}}}
 
 CONCENTRATION RISK:
-{{concentration_risk}}
+{{{json concentration_risk}}}
 
 YOUR TASK:
 Analyze the forecast data for behavioral red flags that indicate sandbagging, over-forecasting, or gaming.
@@ -203,10 +203,10 @@ WEEK-OVER-WEEK CHANGES:
 {{forecast_summary.wowSummary}}
 
 CONCENTRATION RISK ANALYSIS:
-{{concentration_risk}}
+{{{json concentration_risk}}}
 
 BEHAVIORAL RISK CLASSIFICATIONS (AI-detected):
-{{risk_classifications}}
+{{{json risk_classifications}}}
 
 {{#if forecast_data.icpForecast}}
 ICP-ADJUSTED FORECAST:
@@ -231,7 +231,7 @@ Grade-Adjusted Expected Value (based on historical close rates by ICP grade):
 {{/if}}
 
 OUTPUT GUIDANCE:
-{{output_budget}}
+{{{json output_budget}}}
 
 YOUR TASK:
 Write an executive forecast summary following the structure below. Use the output budget guidance to calibrate depth and word count.
