@@ -1,6 +1,7 @@
 import { getAgentRegistry } from './registry.js';
 import { pipelineStateAgent } from './definitions/pipeline-state.js';
 import { forecastCallPrepAgent } from './definitions/forecast-call-prep.js';
+import { bowtieReviewAgent } from './definitions/bowtie-review.js';
 
 export { AgentRegistry, getAgentRegistry } from './registry.js';
 export { AgentRuntime, getAgentRuntime } from './runtime.js';
@@ -18,5 +19,6 @@ export function registerBuiltInAgents(): void {
   const registry = getAgentRegistry();
   registry.register(pipelineStateAgent);
   registry.register(forecastCallPrepAgent);
+  registry.register(bowtieReviewAgent);
   console.log(`[Agents] Registered ${registry.list().length} agents`);
 }

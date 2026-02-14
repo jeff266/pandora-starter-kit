@@ -56,6 +56,8 @@ import {
 import { scoreLeads } from './compute/lead-scoring.js';
 import { resolveContactRoles, type ResolutionResult } from './compute/contact-role-resolution.js';
 import { discoverICP, type ICPDiscoveryResult } from './compute/icp-discovery.js';
+import { prepareBowtieSummary, type BowtieSummary } from './compute/bowtie-analysis.js';
+import { preparePipelineGoalsSummary } from './compute/pipeline-goals.js';
 import { query } from '../db.js';
 import {
   findConversationsWithoutDeals,
@@ -3611,6 +3613,50 @@ const discoverICPTool: ToolDefinition = {
 };
 
 // ============================================================================
+// Bowtie Analysis Tools
+// ============================================================================
+
+const prepareBowtieSummaryTool: ToolDefinition = {
+  name: 'prepareBowtieSummary',
+  description: 'Compute full bowtie funnel analysis: left-side funnel (lead→MQL→SQL→SAO→Won), conversion rates, right-side post-sale stages, bottlenecks, and activity correlation',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('prepareBowtieSummary', async () => {
+      const result = await prepareBowtieSummary(context.workspaceId);
+      console.log(`[BowtieAnalysis] Completed bowtie summary for workspace ${context.workspaceId}`);
+      return result;
+    }, params);
+  },
+};
+
+// ============================================================================
+// Pipeline Goals Tools
+// ============================================================================
+
+const preparePipelineGoalsSummaryTool: ToolDefinition = {
+  name: 'preparePipelineGoalsSummary',
+  description: 'Compute pipeline activity goals: reverse-math from quota to weekly activity targets, historical conversion rates, rep breakdown, and pace assessment',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('preparePipelineGoalsSummary', async () => {
+      const result = await preparePipelineGoalsSummary(context.workspaceId);
+      console.log(`[PipelineGoals] Completed pipeline goals summary for workspace ${context.workspaceId}`);
+      return result;
+    }, params);
+  },
+};
+
+// ============================================================================
 // Tool Registry
 // ============================================================================
 
@@ -3687,6 +3733,8 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['resolveContactRoles', resolveContactRolesTool],
   ['generateContactRoleReport', generateContactRoleReportTool],
   ['discoverICP', discoverICPTool],
+  ['prepareBowtieSummary', prepareBowtieSummaryTool],
+  ['preparePipelineGoalsSummary', preparePipelineGoalsSummaryTool],
 ]);
 
 // ============================================================================
