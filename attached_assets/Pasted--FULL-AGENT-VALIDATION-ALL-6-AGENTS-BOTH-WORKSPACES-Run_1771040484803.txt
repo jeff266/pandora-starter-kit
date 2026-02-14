@@ -1,0 +1,243 @@
+```
+FULL AGENT VALIDATION — ALL 6 AGENTS, BOTH WORKSPACES
+
+Run every agent against both Frontera and Imubit. Log results 
+in the exact format below. Do NOT fix anything — just report.
+
+---
+
+SETUP: Submit a project update for Frontera so Friday Recap 
+has data to work with:
+
+POST /api/workspaces/<frontera_id>/project-updates
+Body: {
+  "updates": [
+    {
+      "category": "infrastructure",
+      "items": [
+        "Agent runner framework deployed — 6 agents on cron",
+        "Token tracer live across all 17 skills",
+        "File import connector ready for Render CSV",
+        "Deal-risk-review optimized: 83K → 745 tokens (99% reduction)"
+      ]
+    },
+    {
+      "category": "client_work",
+      "items": [
+        "Frontera: 3,944 HubSpot activities synced, all skills validated",
+        "Imubit: ICP Discovery surfaced VP Sales 10x win signal",
+        "Render: File import connector built, awaiting first upload"
+      ]
+    },
+    {
+      "category": "metrics",
+      "items": [
+        "17 skills, 6 agents in production",
+        "3 workspaces configured (Frontera, Imubit, Render pending)",
+        "Avg skill cost: $0.07/run"
+      ]
+    }
+  ],
+  "notes": "Agent framework is the unlock. Full operating rhythm live."
+}
+
+---
+
+AGENT 1: PIPELINE STATE
+
+Frontera:
+POST /api/workspaces/<frontera_id>/agents/pipeline-state/run
+
+Imubit:
+POST /api/workspaces/<imubit_id>/agents/pipeline-state/run
+
+For each, log:
+- Skills executed (expected: pipeline-hygiene, single-thread-alert, deal-risk-review)
+- Per-skill status and duration
+- Total duration
+- Total tokens and estimated cost
+- First 300 chars of synthesized output
+- Does it name specific deals with dollar amounts?
+- Does it reference activity data? (Frontera should, Imubit may not)
+- Is the synthesis a unified narrative or concatenated outputs?
+
+---
+
+AGENT 2: FORECAST CALL PREP
+
+Frontera:
+POST /api/workspaces/<frontera_id>/agents/forecast-call-prep/run
+
+Imubit:
+POST /api/workspaces/<imubit_id>/agents/forecast-call-prep/run
+
+For each, log:
+- Skills executed (expected: forecast-rollup, deal-risk-review, rep-scorecard, lead-scoring)
+- Per-skill status and duration
+- Total duration and tokens
+- First 300 chars of synthesized output
+- Does it produce specific talking points for a forecast call?
+- Does it name deals to challenge and reps to press?
+- Does it include ICP fit insights from lead scoring?
+
+---
+
+AGENT 3: BOWTIE REVIEW
+
+Frontera:
+POST /api/workspaces/<frontera_id>/agents/bowtie-review/run
+
+Imubit:
+POST /api/workspaces/<imubit_id>/agents/bowtie-review/run
+
+For each, log:
+- Skills executed (expected: bowtie-analysis, pipeline-goals, deal-risk-review)
+- Per-skill status and duration
+- Total duration and tokens
+- First 300 chars of synthesized output
+- Does bowtie-analysis produce funnel conversion rates?
+- Does it identify a bottleneck?
+- For Imubit: does it detect post-sale stages (expansion, onboarding)?
+- For Frontera: does it note missing post-sale tracking?
+
+---
+
+AGENT 4: ATTAINMENT VS GOAL
+
+Frontera (has quota set):
+POST /api/workspaces/<frontera_id>/agents/attainment-vs-goal/run
+
+Imubit (no quota — should use trailing average):
+POST /api/workspaces/<imubit_id>/agents/attainment-vs-goal/run
+
+For each, log:
+- Skills executed (expected: pipeline-goals, forecast-rollup, pipeline-coverage, rep-scorecard)
+- Per-skill status and duration
+- Total duration and tokens
+- First 300 chars of synthesized output
+- Does it make a clear call: "will hit" or "will miss"?
+- Does it show quota vs attained vs gap?
+- For Imubit: does it flag "no quota configured"?
+- Does it name specific deals that must close?
+
+---
+
+AGENT 5: STRATEGY & INSIGHTS
+
+Run this AFTER agents 1-4 so it has fresh skill outputs to analyze.
+
+Frontera:
+POST /api/workspaces/<frontera_id>/agents/strategy-insights/run
+
+Imubit:
+POST /api/workspaces/<imubit_id>/agents/strategy-insights/run
+
+For each, log:
+- Skills executed (check what the agent definition includes)
+- Total duration and tokens
+- First 300 chars of output
+- How many prior skill outputs did it reference?
+- Does it identify cross-cutting patterns?
+- Does it include a contrarian take?
+- Does it reference cross-workspace data?
+- Is this genuinely insightful or just a summary of other outputs?
+
+---
+
+AGENT 6: FRIDAY RECAP
+
+Run this LAST (it benefits from strategy-insights having run).
+
+Frontera:
+POST /api/workspaces/<frontera_id>/agents/friday-recap/run
+
+Imubit:
+POST /api/workspaces/<imubit_id>/agents/friday-recap/run
+
+For each, log:
+- Skills executed (expected: weekly-recap, project-recap, pipeline-goals)
+- Per-skill status and duration
+- Total duration and tokens
+- First 300 chars of synthesized output
+- Does it include BOTH pipeline results AND project updates?
+- For Frontera: does it reference the project update we submitted?
+- For Imubit: does it gracefully handle no project update?
+- Does it read like an email a human would send?
+- Is there a subject line?
+
+---
+
+COMPILE FULL REPORT
+
+After all 12 runs (6 agents × 2 workspaces), generate:
+
+# Agent Validation Report — <timestamp>
+
+## Summary
+| Agent | Frontera | Imubit |
+|-------|----------|--------|
+| Pipeline State | PASS/FAIL, Xs, $X | PASS/FAIL, Xs, $X |
+| Forecast Call Prep | PASS/FAIL, Xs, $X | PASS/FAIL, Xs, $X |
+| Bowtie Review | PASS/FAIL, Xs, $X | PASS/FAIL, Xs, $X |
+| Attainment vs Goal | PASS/FAIL, Xs, $X | PASS/FAIL, Xs, $X |
+| Strategy & Insights | PASS/FAIL, Xs, $X | PASS/FAIL, Xs, $X |
+| Friday Recap | PASS/FAIL, Xs, $X | PASS/FAIL, Xs, $X |
+
+## Totals
+- Total runs: 12
+- Passed: X
+- Failed: X
+- Total duration: Xs
+- Total tokens: X
+- Total estimated cost: $X
+
+## Token Usage by Agent (both workspaces combined)
+| Agent | Avg Tokens | Avg Cost | Avg Duration |
+|-------|-----------|----------|--------------|
+| ... | ... | ... | ... |
+
+## Quality Assessment
+For each agent, rate 1-5:
+- Specificity: Does it name deals, reps, dollar amounts?
+- Actionability: Could someone take action based on this?
+- Narrative quality: Does it read like analysis, not data dump?
+- Cross-data synthesis: Does it connect insights across skills?
+
+## Issues Found
+List every failure, error, empty output, generic output, 
+or data mismatch:
+1. ...
+2. ...
+
+## Workspace Comparison
+- Which agents produced better output on Frontera vs Imubit?
+- Did activity data (Frontera has 3,944, Imubit has 0) 
+  noticeably improve output quality?
+- Did conversation data (Frontera has Gong) surface in any output?
+- Did ICP data (both have profiles) influence scoring references?
+
+## Duplicate Execution Check
+Did any skill run multiple times because multiple agents 
+include the same skill? Log if deal-risk-review or 
+pipeline-goals ran more than twice (once per workspace).
+If so, note the total token cost of the duplicates.
+
+---
+
+RUN ORDER (important):
+1. Submit project update
+2. Pipeline State (both workspaces)
+3. Forecast Call Prep (both workspaces)
+4. Bowtie Review (both workspaces)
+5. Attainment vs Goal (both workspaces)
+6. Strategy & Insights (both workspaces) — needs fresh outputs
+7. Friday Recap (both workspaces) — needs everything above
+
+DO NOT:
+- Fix any issues during this run
+- Skip any agent even if one fails
+- Post to Slack (use dryRun if available, otherwise just 
+  capture output — check if agent runner supports dryRun)
+- Run agents in parallel (sequential ensures strategy-insights 
+  has data from prior runs)
+```
