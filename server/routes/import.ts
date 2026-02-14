@@ -542,19 +542,19 @@ router.get('/:id/import/freshness', async (req, res) => {
   }
 });
 
-// POST /api/workspaces/:id/import/relink
-router.post('/:id/import/relink', async (req, res) => {
-  try {
-    const workspaceId = req.params.id;
-    console.log(`[Import] Running full re-link for workspace ${workspaceId}`);
-    const result = await relinkAll(workspaceId);
-    console.log(`[Import] Re-link complete:`, result);
-    return res.json(result);
-  } catch (err) {
-    console.error('[Import] Relink error:', err);
-    return res.status(500).json({ error: err instanceof Error ? err.message : 'Relink failed' });
-  }
-});
+// OLD relink endpoint - replaced by improved domain-first linking below
+// router.post('/:id/import/relink', async (req, res) => {
+//   try {
+//     const workspaceId = req.params.id;
+//     console.log(`[Import] Running full re-link for workspace ${workspaceId}`);
+//     const result = await relinkAll(workspaceId);
+//     console.log(`[Import] Re-link complete:`, result);
+//     return res.json(result);
+//   } catch (err) {
+//     console.error('[Import] Relink error:', err);
+//     return res.status(500).json({ error: err instanceof Error ? err.message : 'Relink failed' });
+//   }
+// });
 
 // ============================================================================
 // Helpers
