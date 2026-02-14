@@ -448,6 +448,24 @@ router.post('/:workspaceId/bowtie/discover', async (req: Request<WorkspaceParams
   }
 });
 
+router.put('/:workspaceId/bowtie', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    if (!(await validateWorkspace(req.params.workspaceId, res))) return;
+    const bowtieData = req.body;
+    bowtieData.status = 'confirmed';
+    const definitions = await getDefinitions(req.params.workspaceId) as Record<string, unknown>;
+    await updateContext(req.params.workspaceId, 'definitions', {
+      ...definitions,
+      bowtie_discovery: bowtieData,
+    }, 'user:manual');
+    res.json(bowtieData);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[Context] Bowtie PUT error:', message);
+    res.status(500).json({ error: message });
+  }
+});
+
 router.get('/:workspaceId/bowtie', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     if (!(await validateWorkspace(req.params.workspaceId, res))) return;

@@ -306,7 +306,6 @@ WORD BUDGET ENFORCEMENT:
   ],
 
   schedule: {
-    cron: '0 8 * * 1',
     trigger: 'on_demand',
   },
 

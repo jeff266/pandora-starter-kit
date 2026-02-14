@@ -97,7 +97,7 @@ async function executeSkill(
         JSON.stringify({}),
         result.stepData ? JSON.stringify(result.stepData) : null,
         result.output ? JSON.stringify(result.output) : null,
-        typeof result.output === 'string' ? result.output : null,
+        result.output ? (typeof result.output === 'string' ? result.output : JSON.stringify(result.output)) : null,
         JSON.stringify(result.steps),
         JSON.stringify(result.totalTokenUsage),
         result.totalDuration_ms,

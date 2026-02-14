@@ -67,7 +67,7 @@ const BOWTIE_PATTERNS: Record<BowtieCategory, RegExp[]> = {
 };
 
 function classifyStage(rawStage: string): { category: BowtieCategory; confidence: 'high' | 'medium' | 'low' } {
-  const stage = rawStage.trim();
+  const stage = rawStage.replace(/[^\x00-\x7F]/g, '').trim();
 
   for (const [category, patterns] of Object.entries(BOWTIE_PATTERNS)) {
     if (category === 'pre_sale') continue;
