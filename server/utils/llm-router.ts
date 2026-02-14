@@ -349,19 +349,13 @@ async function callAnthropic(
   };
 
   if (options.systemPrompt) {
-    // Enable prompt caching for system prompts ≥1024 tokens
-    // System prompts get cached for 5 minutes with ephemeral cache_control
-    if (options.systemPrompt.length >= 1024) {
-      requestBody.system = [
-        {
-          type: 'text',
-          text: options.systemPrompt,
-          cache_control: { type: 'ephemeral' }
-        }
-      ];
-    } else {
-      requestBody.system = options.systemPrompt;
-    }
+    requestBody.system = [
+      {
+        type: 'text',
+        text: options.systemPrompt,
+        cache_control: { type: 'ephemeral' }
+      }
+    ];
   }
 
   if (options.tools && options.tools.length > 0) {
@@ -369,6 +363,13 @@ async function callAnthropic(
   }
 
   const response = await client.messages.create(requestBody);
+  if (response.usage) {
+    const cacheCreate = (response.usage as any).cache_creation_input_tokens || 0;
+    const cacheRead = (response.usage as any).cache_read_input_tokens || 0;
+    if (cacheCreate > 0 || cacheRead > 0) {
+      console.log(`[Cache] ${model}: cache_create=${cacheCreate}, cache_read=${cacheRead}, input=${response.usage.input_tokens}`);
+    }
+  }
   return parseAnthropicResponse(response);
 }
 

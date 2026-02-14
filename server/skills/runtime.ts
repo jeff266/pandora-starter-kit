@@ -637,7 +637,7 @@ Important:
     status: string,
     output?: any,
     error?: string,
-    tokenUsageData?: { compute: number; deepseek: number; claude: number }
+    tokenUsageData?: { compute: number; deepseek: number; claude: number; claudeCacheCreation?: number; claudeCacheRead?: number }
   ): Promise<void> {
     try {
       if (status === 'running') {
@@ -652,6 +652,8 @@ Important:
           claude: tokenUsageData.claude,
           deepseek: tokenUsageData.deepseek,
           compute: tokenUsageData.compute,
+          claudeCacheCreation: tokenUsageData.claudeCacheCreation || 0,
+          claudeCacheRead: tokenUsageData.claudeCacheRead || 0,
           total_tokens: tokenUsageData.claude + tokenUsageData.deepseek + tokenUsageData.compute,
           input_tokens: 0,
           output_tokens: 0,
