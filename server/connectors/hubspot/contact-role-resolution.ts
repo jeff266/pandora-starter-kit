@@ -159,7 +159,7 @@ export async function resolveHubSpotContactRoles(
   hubspotClient: HubSpotClient,
   workspaceId: string
 ): Promise<RoleResolutionResult> {
-  console.log(`[Contact Role Resolution] Starting for workspace \${workspaceId}`);
+  console.log(`[Contact Role Resolution] Starting for workspace ${workspaceId}`);
 
   // Get all deals for this workspace
   const dealsResult = await query<{
@@ -176,7 +176,7 @@ export async function resolveHubSpotContactRoles(
   );
 
   const deals = dealsResult.rows;
-  console.log(`[Contact Role Resolution] Found \${deals.length} deals`);
+  console.log(`[Contact Role Resolution] Found ${deals.length} deals`);
 
   if (deals.length === 0) {
     return { created: 0, updated: 0, skipped: 0, total: 0 };
@@ -186,7 +186,7 @@ export async function resolveHubSpotContactRoles(
   const dealSourceIds = deals.map(d => d.source_id);
   const associationsMap = await hubspotClient.batchGetAssociations('deals', 'contacts', dealSourceIds);
 
-  console.log(`[Contact Role Resolution] Fetched associations for \${associationsMap.size} deals`);
+  console.log(`[Contact Role Resolution] Fetched associations for ${associationsMap.size} deals`);
 
   let created = 0;
   let updated = 0;

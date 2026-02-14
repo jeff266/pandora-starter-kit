@@ -7,8 +7,22 @@
  */
 
 import { query } from '../db.js';
-import { complete as llmComplete } from '../lib/llm-client.js';
+import { callLLM } from '../utils/llm-router.js';
 import { getTemplate, getAllTemplates } from './templates.js';
+
+// Wrapper for LLM completion
+async function llmComplete(options: any) {
+  const response = await callLLM({
+    messages: [
+      { role: 'system', content: options.systemPrompt || '' },
+      { role: 'user', content: options.userPrompt }
+    ],
+    model: 'fireworks/deepseek-v3p1',
+    maxTokens: options.maxTokens || 2000,
+  }, options._tracking || {});
+
+  return { content: response.content };
+}
 import type {
   FunnelDefinition,
   FunnelDiscoveryResult,

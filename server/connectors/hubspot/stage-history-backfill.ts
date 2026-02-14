@@ -22,7 +22,7 @@ export async function backfillStageHistory(
   accessToken: string
 ): Promise<BackfillResult> {
   const hubspotClient = new HubSpotClient(accessToken);
-  console.log(`[Stage History Backfill] Starting for workspace \${workspaceId}`);
+  console.log(`[Stage History Backfill] Starting for workspace ${workspaceId}`);
 
   // Get all deals that need backfill
   const dealsResult = await query<{
@@ -46,7 +46,7 @@ export async function backfillStageHistory(
   );
 
   const deals = dealsResult.rows;
-  console.log(`[Stage History Backfill] Found \${deals.length} deals to backfill`);
+  console.log(`[Stage History Backfill] Found ${deals.length} deals to backfill`);
 
   if (deals.length === 0) {
     return { total: 0, updated: 0, errors: 0, skipped: 0, historyEntriesCreated: 0 };
@@ -73,7 +73,7 @@ export async function backfillStageHistory(
       const deal = batch[j];
 
       if (result.status === 'rejected') {
-        console.error(`[Stage History Backfill] Failed to fetch history for deal \${deal.source_id}:`, result.reason);
+        console.error(`[Stage History Backfill] Failed to fetch history for deal ${deal.source_id}:`, result.reason);
         errors++;
         continue;
       }
@@ -115,7 +115,7 @@ export async function backfillStageHistory(
         historyEntriesCreated += entriesCreated;
 
       } catch (err) {
-        console.error(`[Stage History Backfill] Failed to update deal \${deal.id}:`, err);
+        console.error(`[Stage History Backfill] Failed to update deal ${deal.id}:`, err);
         errors++;
       }
     }
@@ -125,7 +125,7 @@ export async function backfillStageHistory(
       await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS));
     }
 
-    console.log(`[Stage History Backfill] Processed \${Math.min(i + BATCH_SIZE, deals.length)}/\${deals.length} deals`);
+    console.log(`[Stage History Backfill] Processed ${Math.min(i + BATCH_SIZE, deals.length)}/${deals.length} deals`);
   }
 
   const result = {
@@ -210,7 +210,7 @@ async function storeStageHistory(
 
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error(`[Stage History] Failed to store history for deal \${dealId}:`, error);
+    console.error(`[Stage History] Failed to store history for deal ${dealId}:`, error);
     throw error;
   } finally {
     client.release();
