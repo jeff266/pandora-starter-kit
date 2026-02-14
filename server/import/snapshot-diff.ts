@@ -90,15 +90,19 @@ export async function diffAndWriteStageHistory(
           type: 'changed',
         });
 
+        // Close previous stage entry
+        await query(
+          `UPDATE deal_stage_history
+           SET exited_at = NOW()
+           WHERE workspace_id = $1 AND deal_id = $2 AND stage = $3 AND exited_at IS NULL`,
+          [workspaceId, deal.id, old.stage]
+        );
+        // Insert new stage entry
         await query(
           `INSERT INTO deal_stage_history
-             (workspace_id, deal_id, deal_source_id, from_stage, from_stage_normalized, to_stage, to_stage_normalized, changed_at, source)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), 'file_import_diff')`,
-          [
-            workspaceId, deal.id, deal.source_id,
-            old.stage, old.stage_normalized,
-            deal.stage, deal.stage_normalized,
-          ]
+             (id, workspace_id, deal_id, stage, stage_normalized, entered_at, source)
+           VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW(), 'file_import_diff')`,
+          [workspaceId, deal.id, deal.stage, deal.stage_normalized]
         );
       }
 
@@ -116,9 +120,9 @@ export async function diffAndWriteStageHistory(
 
       await query(
         `INSERT INTO deal_stage_history
-           (workspace_id, deal_id, deal_source_id, from_stage, to_stage, to_stage_normalized, changed_at, source)
-         VALUES ($1, $2, $3, NULL, $4, $5, NOW(), 'file_import_new')`,
-        [workspaceId, deal.id, deal.source_id, deal.stage, deal.stage_normalized]
+           (id, workspace_id, deal_id, stage, stage_normalized, entered_at, source)
+         VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW(), 'file_import_new')`,
+        [workspaceId, deal.id, deal.stage, deal.stage_normalized]
       );
     }
   }

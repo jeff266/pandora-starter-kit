@@ -31,16 +31,15 @@ export class WorkspaceConfigLoader {
       return this.cache.get(workspaceId)!;
     }
 
-    const result = await query<{ value: WorkspaceConfig }>(
-      `SELECT value FROM context_layer
-       WHERE workspace_id = $1
-         AND category = 'settings'
-         AND key = 'workspace_config'`,
+    const result = await query<{ workspace_config: WorkspaceConfig }>(
+      `SELECT definitions->'workspace_config' as workspace_config
+       FROM context_layer
+       WHERE workspace_id = $1`,
       [workspaceId]
     );
 
     const config =
-      result.rows[0]?.value || this.getDefaults(workspaceId);
+      result.rows[0]?.workspace_config || this.getDefaults(workspaceId);
 
     this.cache.set(workspaceId, config);
     return config;

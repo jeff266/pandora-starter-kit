@@ -374,12 +374,12 @@ RESPOND WITH ONLY VALID JSON:
     updated_at: new Date(),
   };
 
-  // 6. Store in context_layer
+  // 6. Store in context_layer definitions JSONB
   await query(
-    `INSERT INTO context_layer (workspace_id, category, key, value, updated_at)
-     VALUES ($1, 'definitions', 'funnel', $2::jsonb, NOW())
-     ON CONFLICT (workspace_id, category, key)
-     DO UPDATE SET value = $2::jsonb, updated_at = NOW()`,
+    `UPDATE context_layer
+     SET definitions = jsonb_set(COALESCE(definitions, '{}'), '{funnel}', $2::jsonb),
+         updated_at = NOW()
+     WHERE workspace_id = $1`,
     [workspaceId, JSON.stringify(funnelDef)]
   );
 
@@ -402,13 +402,14 @@ RESPOND WITH ONLY VALID JSON:
  * Get the workspace's current funnel definition
  */
 export async function getFunnelDefinition(workspaceId: string): Promise<FunnelDefinition | null> {
-  const result = await query<{ value: FunnelDefinition }>(
-    `SELECT value FROM context_layer
-     WHERE workspace_id = $1 AND category = 'definitions' AND key = 'funnel'`,
+  const result = await query<{ funnel: FunnelDefinition }>(
+    `SELECT definitions->'funnel' as funnel
+     FROM context_layer
+     WHERE workspace_id = $1`,
     [workspaceId]
   );
 
-  return result.rows[0]?.value || null;
+  return result.rows[0]?.funnel || null;
 }
 
 /**
@@ -437,10 +438,10 @@ export async function saveFunnelDefinition(
   };
 
   await query(
-    `INSERT INTO context_layer (workspace_id, category, key, value, updated_at)
-     VALUES ($1, 'definitions', 'funnel', $2::jsonb, NOW())
-     ON CONFLICT (workspace_id, category, key)
-     DO UPDATE SET value = $2::jsonb, updated_at = NOW()`,
+    `UPDATE context_layer
+     SET definitions = jsonb_set(COALESCE(definitions, '{}'), '{funnel}', $2::jsonb),
+         updated_at = NOW()
+     WHERE workspace_id = $1`,
     [workspaceId, JSON.stringify(funnelDef)]
   );
 
@@ -452,8 +453,10 @@ export async function saveFunnelDefinition(
  */
 export async function deleteFunnelDefinition(workspaceId: string): Promise<void> {
   await query(
-    `DELETE FROM context_layer
-     WHERE workspace_id = $1 AND category = 'definitions' AND key = 'funnel'`,
+    `UPDATE context_layer
+     SET definitions = definitions - 'funnel',
+         updated_at = NOW()
+     WHERE workspace_id = $1`,
     [workspaceId]
   );
 }

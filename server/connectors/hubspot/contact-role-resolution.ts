@@ -166,10 +166,10 @@ export async function resolveHubSpotContactRoles(
     id: string;
     source_id: string;
     name: string;
-    created_date: string | null;
+    created_at: string | null;
     close_date: string | null;
   }>(
-    `SELECT id, source_id, name, created_date, close_date
+    `SELECT id, source_id, name, created_at, close_date
      FROM deals
      WHERE workspace_id = $1 AND source = 'hubspot'`,
     [workspaceId]
@@ -200,8 +200,8 @@ export async function resolveHubSpotContactRoles(
       continue;
     }
 
-    const dealMidpoint = deal.created_date && deal.close_date
-      ? new Date((new Date(deal.created_date).getTime() + new Date(deal.close_date).getTime()) / 2)
+    const dealMidpoint = deal.created_at && deal.close_date
+      ? new Date((new Date(deal.created_at).getTime() + new Date(deal.close_date).getTime()) / 2)
       : null;
 
     for (const contactSourceId of contactSourceIds) {
@@ -238,11 +238,11 @@ export async function resolveHubSpotContactRoles(
       // Upsert deal_contact
       const upsertResult = await query(
         `INSERT INTO deal_contacts (
-          workspace_id, deal_id, contact_id, buying_role,
+          workspace_id, deal_id, contact_id, source, buying_role,
           role_source, role_confidence, created_at, updated_at
         )
-        VALUES ($1, $2, $3, $4, 'inferred', $5, NOW(), NOW())
-        ON CONFLICT (workspace_id, deal_id, contact_id)
+        VALUES ($1, $2, $3, 'hubspot', $4, 'inferred', $5, NOW(), NOW())
+        ON CONFLICT (workspace_id, deal_id, contact_id, source)
         DO UPDATE SET
           buying_role = CASE
             WHEN deal_contacts.role_source = 'crm' THEN deal_contacts.buying_role

@@ -312,12 +312,12 @@ async function gatherRepMetrics(
 
   if (dataAvailability.hasStageHistory) {
     const velocityResult = await query<{ avg_duration_days: number }>(
-      `SELECT AVG(duration_in_previous_stage_ms / 86400000.0) as avg_duration_days
+      `SELECT AVG(duration_days) as avg_duration_days
        FROM deal_stage_history dsh
        JOIN deals d ON d.id = dsh.deal_id
        WHERE dsh.workspace_id = $1
          AND d.owner = $2
-         AND dsh.duration_in_previous_stage_ms IS NOT NULL`,
+         AND dsh.duration_days IS NOT NULL`,
       [workspaceId, repName]
     );
 

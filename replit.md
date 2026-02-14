@@ -63,6 +63,12 @@ Pandora is built on Node.js 20 with TypeScript 5+, utilizing Express.js and Post
 -   **Friday Recap Agent:** Composition agent (`friday-recap`) combining weekly-recap + project-recap + pipeline-goals. Friday 4 PM cron. Produces a two-half email: pipeline results + RevOps team accomplishments.
 -   **Strategy & Insights Agent:** Capstone agent (`strategy-insights`) combining strategy-insights skill + pipeline-hygiene + bowtie-analysis. Wednesday 9 AM cron. Identifies cross-cutting patterns across all skill outputs.
 
+## Recent Changes (Feb 14, 2026)
+-   **Deal Stage History Schema Migration:** Migrated all stage history queries from old schema (`from_stage/to_stage/changed_at/duration_in_previous_stage_ms`) to new residency-based schema (`stage/entered_at/exited_at/duration_days`). Updated `stage-history-queries.ts`, `rep-scorecard-analysis.ts`, `stage-tracker.ts`, `snapshot-diff.ts`. Uses LAG window functions for backward-compatible transition views.
+-   **Activities Column Fix:** Fixed `pipeline-goals.ts` `computeRepBreakdown` to use `actor` column instead of non-existent `owner` in activities table. Rep breakdown now returns correct count (4 reps).
+-   **Deal Contacts Source Constraint:** Fixed `contact-role-resolution.ts` UPSERT to include `source` column matching the `(workspace_id, deal_id, contact_id, source)` unique constraint.
+-   **Agent-Level Skill Caching Validated:** Confirmed 30-min TTL cache works correctly in agent runtime (not direct skill API). Verified with attainment-vs-goal agent reusing pipeline-goals output.
+
 ## External Dependencies
 
 -   **PostgreSQL (Neon):** Primary database.

@@ -270,12 +270,12 @@ export async function computeRepBreakdown(workspaceId: string) {
     );
 
     const activityResult = await query<any>(
-      `SELECT owner,
+      `SELECT actor as owner,
         COUNT(*)::int as activities,
         COUNT(*) FILTER (WHERE activity_type = 'meeting')::int as meetings,
         COUNT(*) FILTER (WHERE activity_type = 'call')::int as calls
        FROM activities WHERE workspace_id = $1 AND timestamp >= DATE_TRUNC('month', NOW())
-       GROUP BY owner`,
+       GROUP BY actor`,
       [workspaceId]
     );
 

@@ -31,15 +31,15 @@ export async function backfillStageHistory(
     stage: string | null;
     stage_normalized: string | null;
     stage_changed_at: string | null;
-    created_date: string | null;
+    created_at: string | null;
   }>(
-    `SELECT id, source_id, stage, stage_normalized, stage_changed_at, created_date
+    `SELECT id, source_id, stage, stage_normalized, stage_changed_at, created_at
      FROM deals
      WHERE workspace_id = $1
        AND source = 'hubspot'
        AND (
          stage_changed_at IS NULL
-         OR stage_changed_at = created_date
+         OR stage_changed_at = created_at
          OR stage_changed_at >= NOW() - INTERVAL '7 days'
        )`,
     [workspaceId]
@@ -270,7 +270,7 @@ export async function getBackfillStats(workspaceId: string): Promise<{
        AND source = 'hubspot'
        AND (
          stage_changed_at IS NULL
-         OR stage_changed_at = created_date
+         OR stage_changed_at = created_at
          OR stage_changed_at >= NOW() - INTERVAL '7 days'
        )`,
     [workspaceId]

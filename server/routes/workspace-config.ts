@@ -98,12 +98,11 @@ router.put(
         confirmed: true,
       } as WorkspaceConfig;
 
-      // Store in context_layer
       await query(
-        `INSERT INTO context_layer (workspace_id, category, key, value, updated_at)
-         VALUES ($1, 'settings', 'workspace_config', $2::jsonb, NOW())
-         ON CONFLICT (workspace_id, category, key)
-         DO UPDATE SET value = $2::jsonb, updated_at = NOW()`,
+        `UPDATE context_layer
+         SET definitions = jsonb_set(COALESCE(definitions, '{}'), '{workspace_config}', $2::jsonb),
+             updated_at = NOW()
+         WHERE workspace_id = $1`,
         [workspaceId, JSON.stringify(config)]
       );
 
@@ -177,12 +176,11 @@ router.patch(
         return;
       }
 
-      // Store
       await query(
-        `INSERT INTO context_layer (workspace_id, category, key, value, updated_at)
-         VALUES ($1, 'settings', 'workspace_config', $2::jsonb, NOW())
-         ON CONFLICT (workspace_id, category, key)
-         DO UPDATE SET value = $2::jsonb, updated_at = NOW()`,
+        `UPDATE context_layer
+         SET definitions = jsonb_set(COALESCE(definitions, '{}'), '{workspace_config}', $2::jsonb),
+             updated_at = NOW()
+         WHERE workspace_id = $1`,
         [workspaceId, JSON.stringify(updated)]
       );
 
@@ -250,10 +248,10 @@ router.delete(
       }
 
       await query(
-        `DELETE FROM context_layer
-         WHERE workspace_id = $1
-           AND category = 'settings'
-           AND key = 'workspace_config'`,
+        `UPDATE context_layer
+         SET definitions = definitions - 'workspace_config',
+             updated_at = NOW()
+         WHERE workspace_id = $1`,
         [workspaceId]
       );
 

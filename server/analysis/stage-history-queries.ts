@@ -35,7 +35,7 @@ export async function getDealStageHistory(
     to_stage: string;
     to_stage_normalized: string | null;
     changed_at: string;
-    duration_in_previous_stage_ms: string | null;
+    duration_days: string | null;
     source: string;
   }>(
     `SELECT
@@ -43,17 +43,17 @@ export async function getDealStageHistory(
       dsh.deal_id,
       d.name AS deal_name,
       d.amount AS deal_amount,
-      dsh.from_stage,
-      dsh.from_stage_normalized,
-      dsh.to_stage,
-      dsh.to_stage_normalized,
-      dsh.changed_at,
-      dsh.duration_in_previous_stage_ms,
+      LAG(dsh.stage) OVER (ORDER BY dsh.entered_at) AS from_stage,
+      LAG(dsh.stage_normalized) OVER (ORDER BY dsh.entered_at) AS from_stage_normalized,
+      dsh.stage AS to_stage,
+      dsh.stage_normalized AS to_stage_normalized,
+      dsh.entered_at AS changed_at,
+      dsh.duration_days,
       dsh.source
     FROM deal_stage_history dsh
     JOIN deals d ON d.id = dsh.deal_id AND d.workspace_id = $1
     WHERE dsh.workspace_id = $1 AND dsh.deal_id = $2
-    ORDER BY dsh.changed_at ASC`,
+    ORDER BY dsh.entered_at ASC`,
     [workspaceId, dealId]
   );
 
@@ -70,8 +70,8 @@ export async function getDealStageHistory(
     toStage: row.to_stage,
     toStageNormalized: row.to_stage_normalized,
     changedAt: row.changed_at,
-    durationInPreviousStageDays: row.duration_in_previous_stage_ms
-      ? parseFloat(row.duration_in_previous_stage_ms) / (1000 * 60 * 60 * 24)
+    durationInPreviousStageDays: row.duration_days
+      ? parseFloat(row.duration_days)
       : null,
     source: row.source,
   }));
@@ -115,28 +115,43 @@ export async function getStageTransitionsInWindow(
     to_stage: string;
     to_stage_normalized: string | null;
     changed_at: string;
-    duration_in_previous_stage_ms: string | null;
+    duration_days: string | null;
     source: string;
   }>(
     `SELECT
-      dsh.id AS history_id,
-      dsh.deal_id,
-      d.name AS deal_name,
-      d.owner AS deal_owner,
-      d.amount AS deal_amount,
-      dsh.from_stage,
-      dsh.from_stage_normalized,
-      dsh.to_stage,
-      dsh.to_stage_normalized,
-      dsh.changed_at,
-      dsh.duration_in_previous_stage_ms,
-      dsh.source
-    FROM deal_stage_history dsh
-    JOIN deals d ON d.id = dsh.deal_id AND d.workspace_id = $1
-    WHERE dsh.workspace_id = $1
-      AND dsh.changed_at >= $2
-      AND dsh.changed_at <= $3
-    ORDER BY dsh.changed_at ASC`,
+      sub.id AS history_id,
+      sub.deal_id,
+      sub.deal_name,
+      sub.deal_owner,
+      sub.deal_amount,
+      sub.from_stage,
+      sub.from_stage_normalized,
+      sub.stage AS to_stage,
+      sub.stage_normalized AS to_stage_normalized,
+      sub.entered_at AS changed_at,
+      sub.duration_days,
+      sub.source
+    FROM (
+      SELECT
+        dsh.id,
+        dsh.deal_id,
+        d.name AS deal_name,
+        d.owner AS deal_owner,
+        d.amount AS deal_amount,
+        dsh.stage,
+        dsh.stage_normalized,
+        dsh.entered_at,
+        dsh.duration_days,
+        dsh.source,
+        LAG(dsh.stage) OVER (PARTITION BY dsh.deal_id ORDER BY dsh.entered_at) AS from_stage,
+        LAG(dsh.stage_normalized) OVER (PARTITION BY dsh.deal_id ORDER BY dsh.entered_at) AS from_stage_normalized
+      FROM deal_stage_history dsh
+      JOIN deals d ON d.id = dsh.deal_id AND d.workspace_id = $1
+      WHERE dsh.workspace_id = $1
+    ) sub
+    WHERE sub.entered_at >= $2
+      AND sub.entered_at <= $3
+    ORDER BY sub.entered_at ASC`,
     [workspaceId, startDate.toISOString(), endDate.toISOString()]
   );
 
@@ -151,8 +166,8 @@ export async function getStageTransitionsInWindow(
     toStage: row.to_stage,
     toStageNormalized: row.to_stage_normalized,
     changedAt: row.changed_at,
-    durationInPreviousStageDays: row.duration_in_previous_stage_ms
-      ? parseFloat(row.duration_in_previous_stage_ms) / (1000 * 60 * 60 * 24)
+    durationInPreviousStageDays: row.duration_days
+      ? parseFloat(row.duration_days)
       : null,
     source: row.source,
   }));
@@ -174,11 +189,11 @@ export async function getStageConversionRates(
 
   if (options?.startDate) {
     params.push(options.startDate.toISOString());
-    dateFilter += ` AND dsh.changed_at >= $${params.length}`;
+    dateFilter += ` AND sub.entered_at >= $${params.length}`;
   }
   if (options?.endDate) {
     params.push(options.endDate.toISOString());
-    dateFilter += ` AND dsh.changed_at <= $${params.length}`;
+    dateFilter += ` AND sub.entered_at <= $${params.length}`;
   }
 
   const result = await query<{
@@ -188,20 +203,27 @@ export async function getStageConversionRates(
     avg_duration_days: string | null;
   }>(
     `SELECT
-      dsh.from_stage_normalized AS from_stage,
-      dsh.to_stage_normalized AS to_stage,
+      sub.from_stage_normalized AS from_stage,
+      sub.stage_normalized AS to_stage,
       COUNT(*) AS transition_count,
       CASE
-        WHEN AVG(dsh.duration_in_previous_stage_ms) IS NOT NULL
-        THEN ROUND((AVG(dsh.duration_in_previous_stage_ms) / (1000.0 * 60 * 60 * 24))::NUMERIC, 2)
+        WHEN AVG(sub.duration_days) IS NOT NULL
+        THEN ROUND(AVG(sub.duration_days)::NUMERIC, 2)
         ELSE NULL
       END AS avg_duration_days
-    FROM deal_stage_history dsh
-    WHERE dsh.workspace_id = $1
-      AND dsh.from_stage_normalized IS NOT NULL
-      AND dsh.to_stage_normalized IS NOT NULL
+    FROM (
+      SELECT
+        dsh.stage_normalized,
+        dsh.entered_at,
+        dsh.duration_days,
+        LAG(dsh.stage_normalized) OVER (PARTITION BY dsh.deal_id ORDER BY dsh.entered_at) AS from_stage_normalized
+      FROM deal_stage_history dsh
+      WHERE dsh.workspace_id = $1
+    ) sub
+    WHERE sub.from_stage_normalized IS NOT NULL
+      AND sub.stage_normalized IS NOT NULL
       ${dateFilter}
-    GROUP BY dsh.from_stage_normalized, dsh.to_stage_normalized
+    GROUP BY sub.from_stage_normalized, sub.stage_normalized
     ORDER BY transition_count DESC`,
     params
   );
@@ -248,35 +270,44 @@ export async function getRepStageMetrics(
 
   if (options?.startDate) {
     params.push(options.startDate.toISOString());
-    dateFilter += ` AND dsh.changed_at >= $${params.length}`;
+    dateFilter += ` AND sub.entered_at >= $${params.length}`;
   }
   if (options?.endDate) {
     params.push(options.endDate.toISOString());
-    dateFilter += ` AND dsh.changed_at <= $${params.length}`;
+    dateFilter += ` AND sub.entered_at <= $${params.length}`;
   }
 
   const result = await query<{
     deal_owner: string;
     from_stage_normalized: string | null;
     to_stage_normalized: string | null;
-    duration_in_previous_stage_ms: string | null;
+    duration_days: string | null;
   }>(
     `SELECT
-      d.owner AS deal_owner,
-      dsh.from_stage_normalized,
-      dsh.to_stage_normalized,
-      dsh.duration_in_previous_stage_ms
-    FROM deal_stage_history dsh
-    JOIN deals d ON d.id = dsh.deal_id AND d.workspace_id = $1
-    WHERE dsh.workspace_id = $1
+      sub.deal_owner,
+      sub.from_stage_normalized,
+      sub.stage_normalized AS to_stage_normalized,
+      sub.duration_days
+    FROM (
+      SELECT
+        d.owner AS deal_owner,
+        dsh.stage_normalized,
+        dsh.entered_at,
+        dsh.duration_days,
+        LAG(dsh.stage_normalized) OVER (PARTITION BY dsh.deal_id ORDER BY dsh.entered_at) AS from_stage_normalized
+      FROM deal_stage_history dsh
+      JOIN deals d ON d.id = dsh.deal_id AND d.workspace_id = $1
+      WHERE dsh.workspace_id = $1
+    ) sub
+    WHERE 1=1
       ${dateFilter}
-    ORDER BY d.owner`,
+    ORDER BY sub.deal_owner`,
     params
   );
 
   const repMap = new Map<string, {
     dealsMoved: number;
-    totalDurationMs: number;
+    totalDurationDays: number;
     durationCount: number;
     advanced: number;
     regressed: number;
@@ -287,7 +318,7 @@ export async function getRepStageMetrics(
     if (!repMap.has(owner)) {
       repMap.set(owner, {
         dealsMoved: 0,
-        totalDurationMs: 0,
+        totalDurationDays: 0,
         durationCount: 0,
         advanced: 0,
         regressed: 0,
@@ -296,8 +327,8 @@ export async function getRepStageMetrics(
     const stats = repMap.get(owner)!;
     stats.dealsMoved++;
 
-    if (row.duration_in_previous_stage_ms) {
-      stats.totalDurationMs += parseFloat(row.duration_in_previous_stage_ms);
+    if (row.duration_days) {
+      stats.totalDurationDays += parseFloat(row.duration_days);
       stats.durationCount++;
     }
 
@@ -318,7 +349,7 @@ export async function getRepStageMetrics(
       owner,
       dealsMoved: stats.dealsMoved,
       avgTimeInStageDays: stats.durationCount > 0
-        ? Math.round((stats.totalDurationMs / stats.durationCount / (1000 * 60 * 60 * 24)) * 100) / 100
+        ? Math.round((stats.totalDurationDays / stats.durationCount) * 100) / 100
         : null,
       stagesAdvanced: stats.advanced,
       stagesRegressed: stats.regressed,
@@ -409,17 +440,17 @@ export async function getAverageTimeInStage(
     deal_count: string;
   }>(
     `SELECT
-      dsh.to_stage_normalized AS stage,
-      ROUND((AVG(dsh.duration_in_previous_stage_ms) / (1000.0 * 60 * 60 * 24))::NUMERIC, 2) AS avg_days,
-      ROUND((PERCENTILE_CONT(0.5) WITHIN GROUP (
-        ORDER BY dsh.duration_in_previous_stage_ms
-      ) / (1000.0 * 60 * 60 * 24))::NUMERIC, 2) AS median_days,
+      dsh.stage_normalized AS stage,
+      ROUND(AVG(dsh.duration_days)::NUMERIC, 2) AS avg_days,
+      ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (
+        ORDER BY dsh.duration_days
+      )::NUMERIC, 2) AS median_days,
       COUNT(*) AS deal_count
     FROM deal_stage_history dsh
     WHERE dsh.workspace_id = $1
-      AND dsh.to_stage_normalized IS NOT NULL
-      AND dsh.duration_in_previous_stage_ms IS NOT NULL
-    GROUP BY dsh.to_stage_normalized
+      AND dsh.stage_normalized IS NOT NULL
+      AND dsh.duration_days IS NOT NULL
+    GROUP BY dsh.stage_normalized
     ORDER BY avg_days DESC`,
     [workspaceId]
   );

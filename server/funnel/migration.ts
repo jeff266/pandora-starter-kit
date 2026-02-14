@@ -32,10 +32,12 @@ interface BowtieDiscoveryLegacy {
  */
 export async function migrateBowtieToFunnel(workspaceId: string): Promise<boolean> {
   try {
-    // Check for existing bowtie_discovery
+    // Check for existing bowtie_discovery in definitions JSONB
     const existingBowtie = await query<{ value: BowtieDiscoveryLegacy }>(
-      `SELECT value FROM context_layer
-       WHERE workspace_id = $1 AND category = 'definitions' AND key = 'bowtie_discovery'`,
+      `SELECT definitions->'bowtie_discovery' as value
+       FROM context_layer
+       WHERE workspace_id = $1
+         AND definitions ? 'bowtie_discovery'`,
       [workspaceId]
     );
 
@@ -47,7 +49,8 @@ export async function migrateBowtieToFunnel(workspaceId: string): Promise<boolea
     // Check if funnel definition already exists
     const existingFunnel = await query(
       `SELECT 1 FROM context_layer
-       WHERE workspace_id = $1 AND category = 'definitions' AND key = 'funnel'`,
+       WHERE workspace_id = $1
+         AND definitions ? 'funnel'`,
       [workspaceId]
     );
 
@@ -149,10 +152,12 @@ export async function migrateBowtieToFunnel(workspaceId: string): Promise<boolea
       updated_at: new Date(),
     };
 
-    // Store funnel definition
+    // Store funnel definition in definitions JSONB
     await query(
-      `INSERT INTO context_layer (workspace_id, category, key, value, updated_at)
-       VALUES ($1, 'definitions', 'funnel', $2::jsonb, NOW())`,
+      `UPDATE context_layer
+       SET definitions = jsonb_set(COALESCE(definitions, '{}'), '{funnel}', $2::jsonb),
+           updated_at = NOW()
+       WHERE workspace_id = $1`,
       [workspaceId, JSON.stringify(funnel)]
     );
 
@@ -175,10 +180,10 @@ export async function migrateAllBowtiesToFunnel(): Promise<{ migrated: number; s
   console.log('[Migration] Starting bowtie → funnel migration for all workspaces...');
 
   try {
-    // Find all workspaces with bowtie_discovery
+    // Find all workspaces with bowtie_discovery in definitions
     const workspaces = await query<{ workspace_id: string }>(
       `SELECT DISTINCT workspace_id FROM context_layer
-       WHERE category = 'definitions' AND key = 'bowtie_discovery'`
+       WHERE definitions ? 'bowtie_discovery'`
     );
 
     let migrated = 0;

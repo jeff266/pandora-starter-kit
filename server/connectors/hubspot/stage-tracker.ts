@@ -86,7 +86,8 @@ export async function detectStageChanges(
 
 /**
  * Record stage changes to database
- * Uses ON CONFLICT DO NOTHING for idempotency
+ * New schema: records stage residency (stage, entered_at, exited_at, duration_days)
+ * For each change: close previous stage entry + insert new stage entry
  */
 export async function recordStageChanges(
   changes: StageChange[],
@@ -94,43 +95,38 @@ export async function recordStageChanges(
 ): Promise<number> {
   if (changes.length === 0) return 0;
 
-  // Build parameterized batch insert
-  const values: any[] = [];
-  const placeholders: string[] = [];
-  let paramIndex = 1;
+  let recorded = 0;
 
   for (const change of changes) {
-    placeholders.push(
-      `(gen_random_uuid(), $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, ` +
-      `$${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, ` +
-      `$${paramIndex++}, $${paramIndex++}, $${paramIndex++})`
+    const durationDays = change.durationMs != null
+      ? Math.round((change.durationMs / (1000 * 60 * 60 * 24)) * 100) / 100
+      : null;
+
+    // Close the previous stage entry (set exited_at and duration)
+    if (change.fromStage) {
+      await query(
+        `UPDATE deal_stage_history
+         SET exited_at = $1, duration_days = $2
+         WHERE workspace_id = $3 AND deal_id = $4
+           AND stage = $5 AND exited_at IS NULL`,
+        [change.changedAt.toISOString(), durationDays, change.workspaceId, change.dealId, change.fromStage]
+      );
+    }
+
+    // Insert new stage entry
+    const insertResult = await query(
+      `INSERT INTO deal_stage_history
+        (id, workspace_id, deal_id, stage, stage_normalized, entered_at, source, source_user)
+       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT DO NOTHING`,
+      [change.workspaceId, change.dealId, change.toStage, change.toStageNormalized,
+       change.changedAt.toISOString(), source, null]
     );
 
-    values.push(
-      change.workspaceId,
-      change.dealId,
-      change.dealSourceId,
-      change.fromStage,
-      change.fromStageNormalized,
-      change.toStage,
-      change.toStageNormalized,
-      change.changedAt,
-      change.durationMs,
-      source
-    );
+    recorded += insertResult.rowCount ?? 0;
   }
 
-  const result = await query(
-    `INSERT INTO deal_stage_history
-      (id, workspace_id, deal_id, deal_source_id, from_stage,
-       from_stage_normalized, to_stage, to_stage_normalized,
-       changed_at, duration_in_previous_stage_ms, source)
-     VALUES ${placeholders.join(', ')}
-     ON CONFLICT (deal_id, to_stage, changed_at) DO NOTHING`,
-    values
-  );
-
-  return result.rowCount ?? 0;
+  return recorded;
 }
 
 /**
