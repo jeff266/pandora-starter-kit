@@ -200,4 +200,32 @@ router.post('/:workspaceId/connectors/hubspot/populate-deal-contacts', async (re
   }
 });
 
+router.post('/:workspaceId/connectors/hubspot/resolve-contact-roles', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    const { workspaceId } = req.params;
+
+    // Get credentials from credential store
+    const credentials = await getConnectorCredentials(workspaceId, 'hubspot');
+    if (!credentials) {
+      res.status(404).json({ error: 'HubSpot credentials not found.' });
+      return;
+    }
+
+    const { HubSpotClient } = await import('../connectors/hubspot/client.js');
+    const { resolveHubSpotContactRoles } = await import('../connectors/hubspot/contact-role-resolution.js');
+
+    const client = new HubSpotClient(credentials.accessToken);
+    const result = await resolveHubSpotContactRoles(client, workspaceId);
+
+    res.json({
+      success: true,
+      ...result,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[HubSpot Route] Resolve contact roles error:', message);
+    res.status(500).json({ error: message });
+  }
+});
+
 export default router;

@@ -22,7 +22,7 @@ export async function backfillStageHistory(
   accessToken: string
 ): Promise<BackfillResult> {
   const hubspotClient = new HubSpotClient(accessToken);
-  console.log(\`[Stage History Backfill] Starting for workspace \${workspaceId}\`);
+  console.log(`[Stage History Backfill] Starting for workspace \${workspaceId}`);
 
   // Get all deals that need backfill
   const dealsResult = await query<{
@@ -33,7 +33,7 @@ export async function backfillStageHistory(
     stage_changed_at: string | null;
     created_date: string | null;
   }>(
-    \`SELECT id, source_id, stage, stage_normalized, stage_changed_at, created_date
+    `SELECT id, source_id, stage, stage_normalized, stage_changed_at, created_date
      FROM deals
      WHERE workspace_id = $1
        AND source = 'hubspot'
@@ -41,12 +41,12 @@ export async function backfillStageHistory(
          stage_changed_at IS NULL
          OR stage_changed_at = created_date
          OR stage_changed_at >= NOW() - INTERVAL '7 days'
-       )\`,
+       )`,
     [workspaceId]
   );
 
   const deals = dealsResult.rows;
-  console.log(\`[Stage History Backfill] Found \${deals.length} deals to backfill\`);
+  console.log(`[Stage History Backfill] Found \${deals.length} deals to backfill`);
 
   if (deals.length === 0) {
     return { total: 0, updated: 0, errors: 0, skipped: 0, historyEntriesCreated: 0 };
@@ -73,7 +73,7 @@ export async function backfillStageHistory(
       const deal = batch[j];
 
       if (result.status === 'rejected') {
-        console.error(\`[Stage History Backfill] Failed to fetch history for deal \${deal.source_id}:\`, result.reason);
+        console.error(`[Stage History Backfill] Failed to fetch history for deal \${deal.source_id}:`, result.reason);
         errors++;
         continue;
       }
@@ -101,10 +101,10 @@ export async function backfillStageHistory(
       try {
         // Update the deal's stage_changed_at
         await query(
-          \`UPDATE deals SET
+          `UPDATE deals SET
             stage_changed_at = $1,
             updated_at = NOW()
-           WHERE id = $2\`,
+           WHERE id = $2`,
           [enteredCurrentStage, deal.id]
         );
 
@@ -115,7 +115,7 @@ export async function backfillStageHistory(
         historyEntriesCreated += entriesCreated;
 
       } catch (err) {
-        console.error(\`[Stage History Backfill] Failed to update deal \${deal.id}:\`, err);
+        console.error(`[Stage History Backfill] Failed to update deal \${deal.id}:`, err);
         errors++;
       }
     }
@@ -125,7 +125,7 @@ export async function backfillStageHistory(
       await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS));
     }
 
-    console.log(\`[Stage History Backfill] Processed \${Math.min(i + BATCH_SIZE, deals.length)}/\${deals.length} deals\`);
+    console.log(`[Stage History Backfill] Processed \${Math.min(i + BATCH_SIZE, deals.length)}/\${deals.length} deals`);
   }
 
   const result = {
@@ -136,7 +136,7 @@ export async function backfillStageHistory(
     historyEntriesCreated,
   };
 
-  console.log(\`[Stage History Backfill] Complete:\`, result);
+  console.log(`[Stage History Backfill] Complete:`, result);
   return result;
 }
 
@@ -182,13 +182,13 @@ async function storeStageHistory(
         : normalizeStageValue(entry.value);
 
       await client.query(
-        \`INSERT INTO deal_stage_history (
+        `INSERT INTO deal_stage_history (
           workspace_id, deal_id, stage, stage_normalized,
           entered_at, exited_at, duration_days,
           source, source_user
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-        ON CONFLICT (deal_id, stage, entered_at) DO NOTHING\`,
+        ON CONFLICT (deal_id, stage, entered_at) DO NOTHING`,
         [
           workspaceId,
           dealId,
@@ -210,7 +210,7 @@ async function storeStageHistory(
 
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error(\`[Stage History] Failed to store history for deal \${dealId}:\`, error);
+    console.error(`[Stage History] Failed to store history for deal \${dealId}:`, error);
     throw error;
   } finally {
     client.release();
@@ -252,19 +252,19 @@ export async function getBackfillStats(workspaceId: string): Promise<{
   avgHistoryEntriesPerDeal: number;
 }> {
   const totalResult = await query<{ count: string }>(
-    \`SELECT COUNT(*) as count FROM deals WHERE workspace_id = $1 AND source = 'hubspot'\`,
+    `SELECT COUNT(*) as count FROM deals WHERE workspace_id = $1 AND source = 'hubspot'`,
     [workspaceId]
   );
 
   const withHistoryResult = await query<{ count: string }>(
-    \`SELECT COUNT(DISTINCT deal_id) as count
+    `SELECT COUNT(DISTINCT deal_id) as count
      FROM deal_stage_history
-     WHERE workspace_id = $1\`,
+     WHERE workspace_id = $1`,
     [workspaceId]
   );
 
   const needingBackfillResult = await query<{ count: string }>(
-    \`SELECT COUNT(*) as count
+    `SELECT COUNT(*) as count
      FROM deals
      WHERE workspace_id = $1
        AND source = 'hubspot'
@@ -272,14 +272,14 @@ export async function getBackfillStats(workspaceId: string): Promise<{
          stage_changed_at IS NULL
          OR stage_changed_at = created_date
          OR stage_changed_at >= NOW() - INTERVAL '7 days'
-       )\`,
+       )`,
     [workspaceId]
   );
 
   const historyCountResult = await query<{ count: string }>(
-    \`SELECT COUNT(*) as count
+    `SELECT COUNT(*) as count
      FROM deal_stage_history
-     WHERE workspace_id = $1\`,
+     WHERE workspace_id = $1`,
     [workspaceId]
   );
 

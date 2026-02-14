@@ -501,6 +501,66 @@ export class HubSpotClient {
   }
 
   /**
+   * Batch fetch associations for multiple objects
+   * More efficient than calling getAssociations() for each object individually
+   *
+   * @param fromObjectType - Source object type (e.g., 'deals')
+   * @param toObjectType - Target object type (e.g., 'contacts')
+   * @param objectIds - Array of source object IDs
+   * @returns Map of objectId -> array of associated object IDs
+   */
+  async batchGetAssociations(
+    fromObjectType: string,
+    toObjectType: string,
+    objectIds: string[]
+  ): Promise<Map<string, string[]>> {
+    const results = new Map<string, string[]>();
+
+    if (objectIds.length === 0) {
+      return results;
+    }
+
+    // HubSpot batch associations API allows up to 100 objects per request
+    const BATCH_SIZE = 100;
+
+    for (let i = 0; i < objectIds.length; i += BATCH_SIZE) {
+      const batch = objectIds.slice(i, i + BATCH_SIZE);
+
+      try {
+        const response = await this.request<{
+          results: Array<{
+            from: { id: string };
+            to: Array<{ toObjectId: string }>;
+          }>;
+        }>(
+          `/crm/v4/associations/${fromObjectType}/${toObjectType}/batch/read`,
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              inputs: batch.map(id => ({ id })),
+            }),
+          }
+        );
+
+        for (const result of response.results) {
+          const sourceId = result.from.id;
+          const targetIds = result.to.map(t => t.toObjectId);
+          results.set(sourceId, targetIds);
+        }
+      } catch (error) {
+        console.warn(`[HubSpot] Batch associations failed for ${fromObjectType} → ${toObjectType}:`,
+          error instanceof Error ? error.message : String(error));
+        // On failure, fall back to individual calls for this batch
+        for (const id of batch) {
+          results.set(id, await this.getAssociations(fromObjectType, toObjectType, id));
+        }
+      }
+    }
+
+    return results;
+  }
+
+  /**
    * Get activities (engagements) from HubSpot
    * Fetches emails, calls, meetings, notes, and tasks
    */

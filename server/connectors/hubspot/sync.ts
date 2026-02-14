@@ -739,6 +739,36 @@ export async function initialSync(
       }
     }
 
+    // Trigger contact role resolution if deal_contacts is empty or has missing roles
+    if (dealsStored > 0 && contactsStored > 0) {
+      const dealContactsCheck = await query<{ total: string; with_roles: string }>(
+        `SELECT
+          COUNT(*) as total,
+          COUNT(*) FILTER (WHERE buying_role IS NOT NULL) as with_roles
+         FROM deal_contacts
+         WHERE workspace_id = $1`,
+        [workspaceId]
+      );
+      const totalDealContacts = parseInt(dealContactsCheck.rows[0]?.total || '0', 10);
+      const dealContactsWithRoles = parseInt(dealContactsCheck.rows[0]?.with_roles || '0', 10);
+      const missingRoles = totalDealContacts - dealContactsWithRoles;
+
+      // Trigger if empty OR if >50% are missing roles
+      if (totalDealContacts === 0 || (totalDealContacts > 0 && missingRoles / totalDealContacts > 0.5)) {
+        console.log(`[HubSpot Sync] ${missingRoles}/${totalDealContacts} deal_contacts missing roles. Triggering contact role resolution...`);
+        const { resolveHubSpotContactRoles } = await import('./contact-role-resolution.js');
+
+        // Run async (don't block sync completion)
+        resolveHubSpotContactRoles(client, workspaceId)
+          .then(result => {
+            console.log(`[HubSpot Sync] Contact role resolution complete:`, result);
+          })
+          .catch(err => {
+            console.error(`[HubSpot Sync] Contact role resolution failed:`, err.message);
+          });
+      }
+    }
+
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Unknown sync error';
     errors.push(msg);
