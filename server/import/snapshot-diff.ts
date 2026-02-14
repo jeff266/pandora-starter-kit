@@ -151,8 +151,8 @@ export async function computeDeduplication(
 ): Promise<DeduplicationInfo> {
   const table = entityType === 'deal' ? 'deals' : entityType === 'contact' ? 'contacts' : 'accounts';
 
-  const existingResult = await query<{ id: string; source_id: string; name: string }>(
-    `SELECT id, source_id, ${entityType === 'contact' ? "CONCAT(first_name, ' ', last_name)" : 'name'} as name
+  const existingResult = await query<{ id: string; source_id: string; name: string; email: string | null }>(
+    `SELECT id, source_id, ${entityType === 'contact' ? "CONCAT(first_name, ' ', last_name)" : 'name'} as name${entityType === 'contact' ? ', email' : ", NULL as email"}
      FROM ${table}
      WHERE workspace_id = $1 AND source = 'csv_import'`,
     [workspaceId]
@@ -173,6 +173,7 @@ export async function computeDeduplication(
 
   const existingSourceIds = new Set(existingResult.rows.map(r => r.source_id));
   const existingNames = new Set(existingResult.rows.map(r => r.name?.toLowerCase().trim()).filter(Boolean));
+  const existingEmails = new Set(existingResult.rows.map(r => r.email?.toLowerCase().trim()).filter(Boolean));
 
   const externalIdIdx = mapping['external_id']?.columnIndex ?? mapping['external_id']?.column_index;
   const nameField = entityType === 'contact' ? 'email' : 'name';
@@ -193,7 +194,8 @@ export async function computeDeduplication(
 
     if (nameIdx !== undefined && nameIdx !== null) {
       const name = String(row[nameIdx] || '').toLowerCase().trim();
-      if (name && existingNames.has(name)) {
+      const matchSet = entityType === 'contact' && nameField === 'email' ? existingEmails : existingNames;
+      if (name && matchSet.has(name)) {
         matchingByName++;
       }
     }
