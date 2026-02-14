@@ -144,7 +144,7 @@ export async function updateDealStageCache(changes: StageChange[]): Promise<void
   const dealIds = changes.map(c => c.dealId);
   const caseStatements = {
     previousStage: changes.map((c, i) => `WHEN '${c.dealId}' THEN '${c.fromStage}'`).join(' '),
-    stageChangedAt: changes.map((c, i) => `WHEN '${c.dealId}' THEN '${c.changedAt.toISOString()}'`).join(' '),
+    stageChangedAt: changes.map((c, i) => `WHEN '${c.dealId}' THEN '${c.changedAt.toISOString()}'::timestamptz`).join(' '),
   };
 
   await query(
