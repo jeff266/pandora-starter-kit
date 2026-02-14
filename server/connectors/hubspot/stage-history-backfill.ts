@@ -18,9 +18,10 @@ export interface BackfillResult {
  * 2. Stores complete stage progression in deal_stage_history table
  */
 export async function backfillStageHistory(
-  hubspotClient: HubSpotClient,
-  workspaceId: string
+  workspaceId: string,
+  accessToken: string
 ): Promise<BackfillResult> {
+  const hubspotClient = new HubSpotClient(accessToken);
   console.log(\`[Stage History Backfill] Starting for workspace \${workspaceId}\`);
 
   // Get all deals that need backfill
@@ -237,4 +238,61 @@ function normalizeStageValue(stage: string): string | null {
   };
 
   return stageMap[normalized] || 'qualification';
+}
+
+/**
+ * Get backfill statistics for a workspace
+ * Shows how many deals have accurate stage history
+ */
+export async function getBackfillStats(workspaceId: string): Promise<{
+  totalDeals: number;
+  dealsWithHistory: number;
+  dealsNeedingBackfill: number;
+  totalHistoryEntries: number;
+  avgHistoryEntriesPerDeal: number;
+}> {
+  const totalResult = await query<{ count: string }>(
+    \`SELECT COUNT(*) as count FROM deals WHERE workspace_id = $1 AND source = 'hubspot'\`,
+    [workspaceId]
+  );
+
+  const withHistoryResult = await query<{ count: string }>(
+    \`SELECT COUNT(DISTINCT deal_id) as count
+     FROM deal_stage_history
+     WHERE workspace_id = $1\`,
+    [workspaceId]
+  );
+
+  const needingBackfillResult = await query<{ count: string }>(
+    \`SELECT COUNT(*) as count
+     FROM deals
+     WHERE workspace_id = $1
+       AND source = 'hubspot'
+       AND (
+         stage_changed_at IS NULL
+         OR stage_changed_at = created_date
+         OR stage_changed_at >= NOW() - INTERVAL '7 days'
+       )\`,
+    [workspaceId]
+  );
+
+  const historyCountResult = await query<{ count: string }>(
+    \`SELECT COUNT(*) as count
+     FROM deal_stage_history
+     WHERE workspace_id = $1\`,
+    [workspaceId]
+  );
+
+  const totalDeals = parseInt(totalResult.rows[0]?.count || '0', 10);
+  const dealsWithHistory = parseInt(withHistoryResult.rows[0]?.count || '0', 10);
+  const dealsNeedingBackfill = parseInt(needingBackfillResult.rows[0]?.count || '0', 10);
+  const totalHistoryEntries = parseInt(historyCountResult.rows[0]?.count || '0', 10);
+
+  return {
+    totalDeals,
+    dealsWithHistory,
+    dealsNeedingBackfill,
+    totalHistoryEntries,
+    avgHistoryEntriesPerDeal: dealsWithHistory > 0 ? totalHistoryEntries / dealsWithHistory : 0,
+  };
 }

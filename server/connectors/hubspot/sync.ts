@@ -714,6 +714,31 @@ export async function initialSync(
 
     await updateConnectionSyncStatus(workspaceId, 'hubspot', totalStored, errors.length > 0 ? errors[0] : null);
 
+    // Trigger stage history backfill if this is initial sync and deals have stale stage_changed_at
+    if (dealsStored > 0) {
+      const staleStageTimestamps = await query<{ count: string }>(
+        `SELECT COUNT(*) as count FROM deals
+         WHERE workspace_id = $1 AND source = 'hubspot'
+           AND (stage_changed_at IS NULL OR stage_changed_at = created_date)`,
+        [workspaceId]
+      );
+      const staleCount = parseInt(staleStageTimestamps.rows[0]?.count || '0', 10);
+
+      if (staleCount > 0) {
+        console.log(`[HubSpot Sync] ${staleCount} deals have stale stage_changed_at. Triggering stage history backfill...`);
+        const { backfillStageHistory } = await import('./stage-history-backfill.js');
+
+        // Run backfill async (don't block sync completion)
+        backfillStageHistory(workspaceId, client.getAccessToken())
+          .then(result => {
+            console.log(`[HubSpot Sync] Stage history backfill complete:`, result);
+          })
+          .catch(err => {
+            console.error(`[HubSpot Sync] Stage history backfill failed:`, err.message);
+          });
+      }
+    }
+
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Unknown sync error';
     errors.push(msg);

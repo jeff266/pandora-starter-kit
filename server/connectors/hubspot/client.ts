@@ -19,6 +19,10 @@ export class HubSpotClient {
     this.accessToken = accessToken;
   }
 
+  getAccessToken(): string {
+    return this.accessToken;
+  }
+
   private async request<T>(endpoint: string, options: RequestInit = {}, useSearchApi: boolean = false): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`;
 
