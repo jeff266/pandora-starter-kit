@@ -18,6 +18,10 @@ import { customFieldDiscoverySkill } from './library/custom-field-discovery.js';
 import { leadScoringSkill } from './library/lead-scoring.js';
 import { contactRoleResolutionSkill } from './library/contact-role-resolution.js';
 import { icpDiscoverySkill } from './library/icp-discovery.js';
+import { bowtieAnalysisSkill } from './library/bowtie-analysis.js';
+import { pipelineGoalsSkill } from './library/pipeline-goals.js';
+import { projectRecapSkill } from './library/project-recap.js';
+import { strategyInsightsSkill } from './library/strategy-insights.js';
 
 // Types
 export type {
@@ -76,6 +80,10 @@ export { customFieldDiscoverySkill } from './library/custom-field-discovery.js';
 export { leadScoringSkill } from './library/lead-scoring.js';
 export { contactRoleResolutionSkill } from './library/contact-role-resolution.js';
 export { icpDiscoverySkill } from './library/icp-discovery.js';
+export { bowtieAnalysisSkill } from './library/bowtie-analysis.js';
+export { pipelineGoalsSkill } from './library/pipeline-goals.js';
+export { projectRecapSkill } from './library/project-recap.js';
+export { strategyInsightsSkill } from './library/strategy-insights.js';
 
 // Formatters
 export {
@@ -119,6 +127,10 @@ export function registerBuiltInSkills(): void {
   registry.register(leadScoringSkill);
   registry.register(contactRoleResolutionSkill);
   registry.register(icpDiscoverySkill);
+  registry.register(bowtieAnalysisSkill);
+  registry.register(pipelineGoalsSkill);
+  registry.register(projectRecapSkill);
+  registry.register(strategyInsightsSkill);
 
   console.log('[Skills] Registered all built-in skills');
 }

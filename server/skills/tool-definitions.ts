@@ -56,6 +56,10 @@ import {
 import { scoreLeads } from './compute/lead-scoring.js';
 import { resolveContactRoles, type ResolutionResult } from './compute/contact-role-resolution.js';
 import { discoverICP, type ICPDiscoveryResult } from './compute/icp-discovery.js';
+import { prepareBowtieSummary, type BowtieSummary } from './compute/bowtie-analysis.js';
+import { preparePipelineGoalsSummary } from './compute/pipeline-goals.js';
+import { prepareProjectRecap } from './compute/project-recap.js';
+import { prepareStrategyInsights } from './compute/strategy-insights.js';
 import { query } from '../db.js';
 import {
   findConversationsWithoutDeals,
@@ -1548,6 +1552,47 @@ const enrichWorstOffenders: ToolDefinition = {
   },
 };
 
+const truncateConversations: ToolDefinition = {
+  name: 'truncateConversations',
+  description: 'Truncate conversation transcripts to fit within DeepSeek token limits. Keeps metadata and trims transcript text.',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('truncateConversations', async () => {
+      const conversations = (context.stepResults as any).recent_conversations;
+      if (!conversations?.conversations || conversations.conversations.length === 0) {
+        return [];
+      }
+      const convos = conversations.conversations;
+      const maxTranscriptChars = Math.floor(40000 / Math.max(convos.length, 1));
+      return convos.map((c: any) => {
+        const trimmed: any = {
+          id: c.id,
+          title: c.title,
+          date: c.date || c.started_at,
+          participants: c.participants,
+          deal_id: c.deal_id,
+          account_id: c.account_id,
+          source: c.source,
+        };
+        if (c.transcript) {
+          trimmed.transcript = typeof c.transcript === 'string'
+            ? c.transcript.substring(0, maxTranscriptChars)
+            : JSON.stringify(c.transcript).substring(0, maxTranscriptChars);
+        }
+        if (c.source_data?.summary) {
+          trimmed.summary = c.source_data.summary;
+        }
+        return trimmed;
+      });
+    }, params);
+  },
+};
+
 const summarizeForClaude: ToolDefinition = {
   name: 'summarizeForClaude',
   description: 'Pre-summarize metrics into compact text for Claude prompt, replacing raw arrays with one-liners.',
@@ -1748,6 +1793,106 @@ Required weekly pipeline gen: ${weeklyGenStr}`;
           lostDeals: lostStr,
           newDeals: newStr,
           callHighlights: callStr,
+        };
+      }
+
+      if (skillId === 'deal-risk-review') {
+        const openDeals = (context.stepResults as any).open_deals;
+        const callSignals = (context.stepResults as any).call_signals;
+
+        if (!openDeals?.deals || openDeals.deals.length === 0) {
+          return { dealProfiles: 'No open deals found.', signalsSummary: 'N/A' };
+        }
+
+        const deals = openDeals.deals.slice(0, 20);
+        const dealIds = deals.map((d: any) => d.id);
+
+        const activitiesResult = await query(
+          `SELECT deal_id, activity_type, COUNT(*)::int as cnt,
+                  MAX(timestamp) as last_date
+           FROM activities
+           WHERE workspace_id = $1 AND deal_id = ANY($2)
+           GROUP BY deal_id, activity_type
+           ORDER BY deal_id, last_date DESC`,
+          [context.workspaceId, dealIds]
+        );
+
+        const actByDeal = new Map<string, { types: string; lastActivity: string }>();
+        const actMap = new Map<string, { types: string[]; lastDate: string }>();
+        for (const row of activitiesResult.rows) {
+          const key = row.deal_id;
+          if (!actMap.has(key)) actMap.set(key, { types: [], lastDate: row.last_date });
+          const entry = actMap.get(key)!;
+          entry.types.push(`${row.activity_type}:${row.cnt}`);
+          if (new Date(row.last_date) > new Date(entry.lastDate)) entry.lastDate = row.last_date;
+        }
+        for (const [did, data] of actMap) {
+          actByDeal.set(did, { types: data.types.join(', '), lastActivity: data.lastDate });
+        }
+
+        const contactsResult = await query(
+          `SELECT dc.deal_id, COALESCE(c.first_name || ' ' || c.last_name, c.first_name, c.last_name, c.email) as name, c.title, c.email
+           FROM deal_contacts dc
+           JOIN contacts c ON c.id = dc.contact_id AND c.workspace_id = dc.workspace_id
+           WHERE dc.workspace_id = $1 AND dc.deal_id = ANY($2)
+           ORDER BY dc.deal_id`,
+          [context.workspaceId, dealIds]
+        );
+
+        const contactsByDeal = new Map<string, string[]>();
+        for (const row of contactsResult.rows) {
+          const key = row.deal_id;
+          if (!contactsByDeal.has(key)) contactsByDeal.set(key, []);
+          contactsByDeal.get(key)!.push(`${row.name || 'Unknown'}${row.title ? ' (' + row.title + ')' : ''}`);
+        }
+
+        const profiles = deals.map((d: any) => {
+          const act = actByDeal.get(d.id);
+          const contacts = contactsByDeal.get(d.id) || [];
+          const daysSinceActivity = act?.lastActivity
+            ? Math.floor((Date.now() - new Date(act.lastActivity).getTime()) / 86400000)
+            : null;
+          const daysSinceUpdate = d.updated_at
+            ? Math.floor((Date.now() - new Date(d.updated_at).getTime()) / 86400000)
+            : null;
+
+          return `DEAL: ${d.name} | $${(d.amount || 0).toLocaleString()} | Stage: ${d.stage_normalized || d.stage} | Close: ${d.close_date || 'N/A'} | Owner: ${d.owner_name || 'N/A'}
+  Activity: ${act ? `${act.types} | Last: ${daysSinceActivity}d ago` : `No activities | Updated: ${daysSinceUpdate !== null ? daysSinceUpdate + 'd ago' : 'N/A'}`}
+  Contacts (${contacts.length}): ${contacts.length > 0 ? contacts.slice(0, 5).join('; ') : 'None'}${contacts.length > 5 ? ` +${contacts.length - 5} more` : ''}
+  Single-threaded: ${contacts.length <= 1 ? 'YES' : 'No'}`;
+        });
+
+        let signalsSummary = 'No call signals available.';
+        if (Array.isArray(callSignals) && callSignals.length > 0) {
+          const byDeal = new Map<string, string[]>();
+          for (const s of callSignals) {
+            const key = s.dealId || 'unlinked';
+            if (!byDeal.has(key)) byDeal.set(key, []);
+            byDeal.get(key)!.push(`[${s.severity}] ${s.type}: ${s.context}`);
+          }
+          const parts: string[] = [];
+          for (const [did, signals] of byDeal) {
+            parts.push(`Deal ${did}: ${signals.join(' | ')}`);
+          }
+          signalsSummary = parts.join('\n');
+        }
+
+        const hasActivities = activitiesResult.rows.length > 0;
+        const hasContacts = contactsResult.rows.length > 0;
+
+        return {
+          dealProfiles: profiles.join('\n\n'),
+          signalsSummary,
+          dealCount: deals.length,
+          contactCoverage: hasContacts
+            ? `${deals.filter((d: any) => (contactsByDeal.get(d.id)?.length || 0) > 1).length}/${deals.length} multi-threaded`
+            : 'No contact data available',
+          dataAvailability: {
+            hasActivities,
+            hasContacts,
+            activityNote: hasActivities ? null : 'Activity data not available. Use deal updated_at as staleness proxy.',
+            contactNote: hasContacts ? null : 'Contact data not available. Skip single-threading analysis.',
+          },
         };
       }
 
@@ -3470,6 +3615,94 @@ const discoverICPTool: ToolDefinition = {
 };
 
 // ============================================================================
+// Bowtie Analysis Tools
+// ============================================================================
+
+const prepareBowtieSummaryTool: ToolDefinition = {
+  name: 'prepareBowtieSummary',
+  description: 'Compute full bowtie funnel analysis: left-side funnel (lead→MQL→SQL→SAO→Won), conversion rates, right-side post-sale stages, bottlenecks, and activity correlation',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('prepareBowtieSummary', async () => {
+      const result = await prepareBowtieSummary(context.workspaceId);
+      console.log(`[BowtieAnalysis] Completed bowtie summary for workspace ${context.workspaceId}`);
+      return result;
+    }, params);
+  },
+};
+
+// ============================================================================
+// Pipeline Goals Tools
+// ============================================================================
+
+const preparePipelineGoalsSummaryTool: ToolDefinition = {
+  name: 'preparePipelineGoalsSummary',
+  description: 'Compute pipeline activity goals: reverse-math from quota to weekly activity targets, historical conversion rates, rep breakdown, and pace assessment',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('preparePipelineGoalsSummary', async () => {
+      const result = await preparePipelineGoalsSummary(context.workspaceId);
+      console.log(`[PipelineGoals] Completed pipeline goals summary for workspace ${context.workspaceId}`);
+      return result;
+    }, params);
+  },
+};
+
+// ============================================================================
+// Project Recap Tools
+// ============================================================================
+
+const prepareProjectRecapTool: ToolDefinition = {
+  name: 'prepareProjectRecap',
+  description: 'Load and format project updates for the Friday recap, including cross-workspace summary',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('prepareProjectRecap', async () => {
+      const result = await prepareProjectRecap(context.workspaceId);
+      console.log(`[ProjectRecap] Loaded project recap (hasUpdates: ${result.hasUpdates})`);
+      return result;
+    }, params);
+  },
+};
+
+// ============================================================================
+// Strategy Insights Tools
+// ============================================================================
+
+const prepareStrategyInsightsTool: ToolDefinition = {
+  name: 'prepareStrategyInsights',
+  description: 'Gather recent skill/agent outputs, cross-workspace metrics, and trend data for strategic analysis',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('prepareStrategyInsights', async () => {
+      const result = await prepareStrategyInsights(context.workspaceId);
+      console.log(`[StrategyInsights] Gathered ${result.recentOutputs.skillCount} skill outputs, ${result.recentOutputs.agentCount} agent outputs`);
+      return result;
+    }, params);
+  },
+};
+
+// ============================================================================
 // Tool Registry
 // ============================================================================
 
@@ -3518,6 +3751,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['gatherQualityTrend', gatherQualityTrend],
   ['enrichWorstOffenders', enrichWorstOffenders],
   ['summarizeForClaude', summarizeForClaude],
+  ['truncateConversations', truncateConversations],
   ['checkQuotaConfig', checkQuotaConfig],
   ['coverageByRep', coverageByRepTool],
   ['coverageTrend', coverageTrendTool],
@@ -3545,6 +3779,10 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['resolveContactRoles', resolveContactRolesTool],
   ['generateContactRoleReport', generateContactRoleReportTool],
   ['discoverICP', discoverICPTool],
+  ['prepareBowtieSummary', prepareBowtieSummaryTool],
+  ['preparePipelineGoalsSummary', preparePipelineGoalsSummaryTool],
+  ['prepareProjectRecap', prepareProjectRecapTool],
+  ['prepareStrategyInsights', prepareStrategyInsightsTool],
 ]);
 
 // ============================================================================

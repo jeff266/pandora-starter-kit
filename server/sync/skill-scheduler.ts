@@ -11,6 +11,8 @@ import { getSkillRegistry } from '../skills/registry.js';
 import { getSkillRuntime } from '../skills/runtime.js';
 import { syncWorkspace } from './orchestrator.js';
 import type { SkillDefinition } from '../skills/types.js';
+import { getAgentRegistry } from '../agents/registry.js';
+import { getAgentRuntime } from '../agents/runtime.js';
 
 interface ScheduledSkill {
   skillId: string;
@@ -95,7 +97,7 @@ async function executeSkill(
         JSON.stringify({}),
         result.stepData ? JSON.stringify(result.stepData) : null,
         result.output ? JSON.stringify(result.output) : null,
-        typeof result.output === 'string' ? result.output : null,
+        result.output ? (typeof result.output === 'string' ? result.output : JSON.stringify(result.output)) : null,
         JSON.stringify(result.steps),
         JSON.stringify(result.totalTokenUsage),
         result.totalDuration_ms,
@@ -228,10 +230,72 @@ export function startSkillScheduler(): void {
     console.log(`[Skill Scheduler] Registered ${skillIds.join(', ')} on cron ${cronExpression}`);
   }
 
+  // Schedule agents with cron triggers
+  const agentRegistry = getAgentRegistry();
+  let agentCronCount = 0;
+  for (const agent of agentRegistry.list()) {
+    if (!agent.enabled || agent.trigger.type !== 'cron' || !agent.trigger.cron) continue;
+
+    const agentId = agent.id;
+    const agentCron = agent.trigger.cron;
+
+    const agentJob = cron.schedule(
+      agentCron,
+      async () => {
+        console.log(`[Agent Scheduler] Cron triggered for agent: ${agentId}`);
+
+        const workspacesResult = await query<{ id: string; name: string }>(
+          `SELECT DISTINCT w.id, w.name
+           FROM workspaces w
+           INNER JOIN connections c ON c.workspace_id = w.id
+           WHERE c.status IN ('connected', 'synced', 'error')
+           ORDER BY w.name`
+        );
+
+        const workspaces = agent.workspaceIds === 'all'
+          ? workspacesResult.rows
+          : workspacesResult.rows.filter(w => (agent.workspaceIds as string[]).includes(w.id));
+
+        if (workspaces.length === 0) {
+          console.log(`[Agent Scheduler] No matching workspaces for agent ${agentId}`);
+          return;
+        }
+
+        const agentRuntime = getAgentRuntime();
+        for (const workspace of workspaces) {
+          const activeRun = await query(
+            `SELECT id FROM agent_runs
+             WHERE agent_id = $1 AND workspace_id = $2 AND status = 'running'
+             LIMIT 1`,
+            [agentId, workspace.id]
+          );
+          if (activeRun.rows.length > 0) {
+            console.log(`[Agent Scheduler] Skipping agent ${agentId} for ${workspace.name} — already running`);
+            continue;
+          }
+
+          console.log(`[Agent Scheduler] Running agent ${agentId} for workspace ${workspace.name}`);
+          agentRuntime.executeAgent(agentId, workspace.id)
+            .then(result => console.log(`[Agent Scheduler] Agent ${agentId} completed for ${workspace.name} in ${result.duration}ms`))
+            .catch(err => console.error(`[Agent Scheduler] Agent ${agentId} failed for ${workspace.name}:`, err.message));
+        }
+      },
+      { timezone: 'UTC' }
+    );
+
+    scheduledSkills.push({
+      skillId: `agent:${agentId}`,
+      cronExpression: agentCron,
+      job: agentJob,
+    });
+    agentCronCount++;
+    console.log(`[Agent Scheduler] Registered agent ${agentId} on cron ${agentCron}`);
+  }
+
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   console.log(`[Skill Scheduler] Server timezone: ${timezone}`);
   console.log(`[Skill Scheduler] Cron expressions use UTC timezone`);
-  console.log(`[Skill Scheduler] ${scheduledSkills.length} cron schedule(s) registered`);
+  console.log(`[Skill Scheduler] ${scheduledSkills.length} cron schedule(s) registered (${agentCronCount} agent(s))`);
 }
 
 /**

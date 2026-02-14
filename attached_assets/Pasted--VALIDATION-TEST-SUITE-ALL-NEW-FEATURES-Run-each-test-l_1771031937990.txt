@@ -1,0 +1,275 @@
+```
+VALIDATION TEST SUITE — ALL NEW FEATURES
+
+Run each test, log results. Do NOT fix anything — just report 
+pass/fail with details.
+
+---
+
+TEST 1: AGENT RUNNER FRAMEWORK
+
+a. List agents:
+   GET /api/agents
+   
+   Expected: 2 agents returned (pipeline-state, forecast-call-prep)
+   Log: agent IDs, names, skill counts, trigger types
+
+b. Run Pipeline State agent on Imubit:
+   POST /api/workspaces/<imubit_id>/agents/pipeline-state/run
+   
+   Expected: 
+   - 3 skills execute (pipeline-hygiene, single-thread-alert, deal-risk-review)
+   - Synthesis produces a unified Monday morning brief
+   - Not just concatenated skill outputs — should read as one narrative
+   
+   Log:
+   - Total duration
+   - Per-skill duration and status
+   - Token usage (skills total + synthesis)
+   - First 500 chars of synthesized output
+   - Does it name specific Imubit deals and dollar amounts?
+
+c. Run Pipeline State agent on Frontera:
+   POST /api/workspaces/<frontera_id>/agents/pipeline-state/run
+   
+   Same checks as above. Verify it produces Frontera-specific 
+   deals, not Imubit data.
+
+d. Run Forecast Call Prep on Frontera:
+   POST /api/workspaces/<frontera_id>/agents/forecast-call-prep/run
+   
+   Expected: 4 skills execute (forecast-rollup, deal-risk-review, 
+   rep-scorecard, lead-scoring)
+   
+   Log:
+   - Did all 4 skills complete? Which were required vs optional?
+   - Total duration
+   - Token usage
+   - Does the synthesis include talking points and specific questions?
+
+e. Check agent run history:
+   GET /api/workspaces/<imubit_id>/agents/pipeline-state/runs
+   GET /api/workspaces/<frontera_id>/agents/runs
+   
+   Expected: runs from steps b/c/d appear with status, duration, tokens
+
+f. Check agent_runs table directly:
+   SELECT agent_id, workspace_id, status, duration_ms, 
+     token_usage->>'total' as total_tokens,
+     jsonb_array_length(skill_results) as skill_count,
+     LEFT(synthesized_output, 200) as preview
+   FROM agent_runs 
+   ORDER BY started_at DESC LIMIT 5;
+
+g. Dry run test:
+   POST /api/workspaces/<imubit_id>/agents/pipeline-state/run
+   Body: { "dryRun": true }
+   
+   Expected: skills execute, synthesis runs, but NO Slack delivery
+
+---
+
+TEST 2: DEAL-RISK-REVIEW TOKEN OPTIMIZATION
+
+a. Run deal-risk-review standalone on Imubit:
+   POST /api/workspaces/<imubit_id>/skills/deal-risk-review/run
+   
+   Log:
+   - Total token usage (input + output)
+   - Duration
+   - Was claudeTools used? (should be NO)
+   - How many deals assessed?
+
+   PASS criteria: total tokens < 15K (was 83K before fix)
+
+b. Run on Frontera:
+   POST /api/workspaces/<frontera_id>/skills/deal-risk-review/run
+   
+   Same checks. Also verify:
+   - Does it reference Gong conversation data for linked deals?
+   - Are Frontera deal names and amounts correct?
+
+c. Compare before/after:
+   | Metric | Before | After |
+   |--------|--------|-------|
+   | Total tokens | 83K | ? |
+   | Duration | ? | ? |
+   | Tool calls | 10 | 0 |
+   | Cost estimate | ~$1.00 | ? |
+
+d. Quality check — read the output:
+   - Does it still produce per-deal risk assessments?
+   - Are assessments specific (naming real risks, not generic)?
+   - Did the pre-compute step miss any data that the tool-calling 
+     approach would have caught?
+
+---
+
+TEST 3: SKILL CRON SCHEDULE AUDIT
+
+a. List all registered cron jobs:
+   Query whatever scheduler is used (node-cron, agenda, custom).
+   
+   Report the full schedule:
+   | Skill | Schedule | Next Run | Slack Delivery |
+   
+   Expected schedule:
+   - Monday 7 AM: pipeline-hygiene, single-thread-alert, 
+     pipeline-coverage, pipeline-waterfall, deal-risk-review, 
+     lead-scoring
+   - Monday 8 AM: rep-scorecard, forecast-rollup
+   - Friday 4 PM: weekly-recap
+   - 1st of month 6 AM: icp-discovery, data-quality-audit
+   - Post-sync: custom-field-discovery
+   - Monday 7 AM (agent): pipeline-state
+
+b. Verify no duplicate scheduling:
+   The pipeline-state agent runs pipeline-hygiene, single-thread-alert, 
+   and deal-risk-review at Monday 7 AM. Those same skills are also 
+   scheduled individually at Monday 7 AM.
+   
+   Question: will they run TWICE? Once as individual skills and 
+   once as part of the agent? Log how this is handled.
+   
+   If yes — this needs a decision: either the agent replaces the 
+   individual skill runs (preferred), or the individual runs are 
+   removed from the schedule for skills covered by agents.
+
+c. Verify Slack webhooks exist for both workspaces:
+   SELECT workspace_id, 
+     config->>'slack_webhook_url' as webhook,
+     config->>'slack_channel' as channel
+   FROM workspace_configs 
+   WHERE config->>'slack_webhook_url' IS NOT NULL;
+   
+   Both Imubit and Frontera should have webhooks configured.
+
+---
+
+TEST 4: BOWTIE STAGE DISCOVERY
+
+a. Run discovery for Frontera (HubSpot):
+   POST /api/workspaces/<frontera_id>/context/bowtie/discover
+   
+   Log:
+   - Which lifecycle stages were found?
+   - How many contacts per stage?
+   - What bowtie mapping was auto-detected?
+   - Were post-sale stages found (onboarding, expansion, renewal)?
+   - Confidence level per mapping
+
+b. Run discovery for Imubit (Salesforce):
+   POST /api/workspaces/<imubit_id>/context/bowtie/discover
+   
+   Log:
+   - Lead statuses found
+   - Opportunity stages found
+   - Bowtie mapping auto-detected
+   - Post-sale stages found
+
+c. Retrieve stored mappings:
+   GET /api/workspaces/<frontera_id>/context/bowtie
+   GET /api/workspaces/<imubit_id>/context/bowtie
+   
+   Expected: JSON with status "discovered", stage mappings 
+   with counts and confidence levels
+
+d. Test manual correction:
+   PUT /api/workspaces/<frontera_id>/context/bowtie
+   Body: Take the discovered mapping, change one stage 
+   (e.g., relabel what was auto-detected as SQL to SAO), 
+   set status to "confirmed"
+   
+   Then GET again — verify the correction persisted.
+
+e. Stage distribution data check:
+   For Frontera:
+   SELECT custom_fields->>'lifecyclestage' as stage, COUNT(*)
+   FROM contacts 
+   WHERE workspace_id = '<frontera_id>'
+     AND custom_fields->>'lifecyclestage' IS NOT NULL
+   GROUP BY 1 ORDER BY 2 DESC;
+
+   For Imubit:
+   SELECT status, COUNT(*) 
+   FROM leads 
+   WHERE workspace_id = '<imubit_id>'
+   GROUP BY 1 ORDER BY 2 DESC;
+
+   Do the discovery results match these raw counts?
+
+---
+
+TEST 5: HUBSPOT ACTIVITY SYNC (confirm wiring)
+
+a. Check activities exist for Frontera:
+   SELECT activity_type, COUNT(*) 
+   FROM activities 
+   WHERE workspace_id = '<frontera_id>'
+   GROUP BY 1 ORDER BY 2 DESC;
+   
+   Expected: emails, calls, meetings, notes with real counts
+
+b. Check linkage:
+   SELECT 
+     COUNT(*) as total,
+     COUNT(*) FILTER (WHERE deal_id IS NOT NULL) as linked_to_deals,
+     COUNT(*) FILTER (WHERE account_id IS NOT NULL) as linked_to_accounts,
+     COUNT(*) FILTER (WHERE contact_id IS NOT NULL) as linked_to_contacts
+   FROM activities 
+   WHERE workspace_id = '<frontera_id>';
+
+c. Check computed fields updated:
+   SELECT 
+     COUNT(*) FILTER (WHERE engagement_score IS NOT NULL AND engagement_score > 0) as has_engagement,
+     COUNT(*) FILTER (WHERE days_in_stage IS NOT NULL) as has_stage_days,
+     AVG(engagement_score) FILTER (WHERE engagement_score > 0) as avg_engagement
+   FROM deals 
+   WHERE workspace_id = '<frontera_id>';
+   
+   Engagement scores should now be non-zero for deals with activities.
+
+---
+
+COMPILE RESULTS
+
+After all tests, generate this summary:
+
+# Feature Validation Report — <timestamp>
+
+## Agent Runner
+- Pipeline State (Imubit): PASS/FAIL — <duration>, <tokens>, <key observation>
+- Pipeline State (Frontera): PASS/FAIL — <duration>, <tokens>
+- Forecast Call Prep (Frontera): PASS/FAIL — <duration>, <tokens>
+- Run history logging: PASS/FAIL
+- Dry run: PASS/FAIL
+- Duplicate scheduling issue: YES/NO — <details>
+
+## Deal Risk Review Optimization
+- Imubit tokens: <before> → <after> (<% reduction>)
+- Frontera tokens: <N>
+- Tool calls eliminated: YES/NO
+- Output quality maintained: YES/NO
+- Conversation data referenced (Frontera): YES/NO
+
+## Cron Schedule
+- All 13 skills scheduled: YES/NO
+- Missing schedules: <list>
+- Duplicate run risk: <details>
+- Slack webhooks configured: Imubit YES/NO, Frontera YES/NO
+
+## Bowtie Discovery
+- Frontera stages found: <list with counts>
+- Imubit stages found: <list with counts>
+- Auto-mapping quality: <assessment>
+- Manual correction working: YES/NO
+
+## HubSpot Activities
+- Activities synced: <total by type>
+- Deal linkage: <N>/<total>
+- Engagement scores populated: YES/NO
+
+## Issues Found
+1. ...
+2. ...
+```

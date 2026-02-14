@@ -58,7 +58,7 @@ async function handleSkillRun(workspaceId: string, skillId: string, params: any,
         typeof result.output === 'string' ? result.output
           : (result.output && typeof result.output === 'object' && typeof (result.output as any).report === 'string') ? (result.output as any).report
           : (result.output && typeof result.output === 'object' && typeof (result.output as any).narrative === 'string') ? (result.output as any).narrative
-          : null,
+          : result.output ? JSON.stringify(result.output) : null,
         JSON.stringify(result.steps),
         JSON.stringify(result.totalTokenUsage),
         result.totalDuration_ms,

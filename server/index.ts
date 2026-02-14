@@ -28,7 +28,9 @@ import configRouter from './routes/config.js';
 import importRouter, { cleanupTempFiles } from './routes/import.js';
 import dealInsightsRouter from './routes/deal-insights.js';
 import enrichmentRouter from './routes/enrichment.js';
+import tokenUsageRouter from './routes/token-usage.js';
 import workflowsRouter, { setWorkflowService } from './routes/workflows.js';
+import projectUpdatesRouter from './routes/project-updates.js';
 import { ActivePiecesClient } from './workflows/ap-client.js';
 import { WorkflowService } from './workflows/workflow-service.js';
 import { seedTemplates } from './workflows/template-seed.js';
@@ -44,6 +46,8 @@ import { startSkillScheduler, stopSkillScheduler } from "./sync/skill-scheduler.
 import { registerBuiltInSkills } from "./skills/index.js";
 import { getSkillRegistry } from "./skills/registry.js";
 import { startJobQueue } from "./jobs/queue.js";
+import { agentsGlobalRouter, agentsWorkspaceRouter } from './routes/agents.js';
+import { registerBuiltInAgents, getAgentRegistry } from './agents/index.js';
 
 dotenv.config();
 
@@ -88,7 +92,11 @@ app.use("/api/workspaces", configRouter);
 app.use("/api/workspaces", importRouter);
 app.use(dealInsightsRouter);
 app.use("/api/workspaces", enrichmentRouter);
+app.use("/api/workspaces", tokenUsageRouter);
 app.use("/api/workspaces", workflowsRouter);
+app.use("/api/workspaces", projectUpdatesRouter);
+app.use("/api", agentsGlobalRouter);
+app.use("/api/workspaces", agentsWorkspaceRouter);
 
 function registerAdapters(): void {
   const registry = getAdapterRegistry();
@@ -163,6 +171,7 @@ async function start(): Promise<void> {
 
   registerAdapters();
   registerSkills();
+  registerBuiltInAgents();
   startJobQueue();
   startScheduler();
   startSkillScheduler();

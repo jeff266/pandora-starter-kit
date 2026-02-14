@@ -1,0 +1,391 @@
+TOKEN USAGE TRACER — OBSERVABILITY FOR ALL LLM CALLS
+
+Build a token tracking system that instruments every LLM call 
+in Pandora. The goal: see exactly where tokens are spent per 
+skill, per phase, per workspace, with enough detail to catch 
+outliers like deal-risk-review burning 83K tokens.
+
+---
+
+PART 1: TOKEN TRACKING TABLE
+
+CREATE TABLE token_usage (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id),
+  
+  -- What triggered this call
+  skill_id TEXT,                    -- 'deal-risk-review', 'icp-discovery', etc.
+  skill_run_id UUID,                -- FK to skill_runs
+  phase TEXT,                       -- 'compute', 'classify', 'synthesize'
+  step_name TEXT,                   -- 'assess-risk', 'generate-report', etc.
+  
+  -- LLM details
+  provider TEXT NOT NULL,           -- 'claude', 'deepseek'
+  model TEXT NOT NULL,              -- 'claude-sonnet-4-20250514', 'deepseek-chat', etc.
+  
+  -- Token counts
+  input_tokens INTEGER NOT NULL,
+  output_tokens INTEGER NOT NULL,
+  total_tokens INTEGER GENERATED ALWAYS AS (input_tokens + output_tokens) STORED,
+  
+  -- Cost tracking (compute from token counts + model rates)
+  estimated_cost_usd NUMERIC(10,6),
+  
+  -- Payload diagnostics
+  prompt_chars INTEGER,             -- character count of full prompt sent
+  response_chars INTEGER,           -- character count of response
+  truncated BOOLEAN DEFAULT false,  -- was input truncated before sending?
+  
+  -- Context about what was sent
+  payload_summary JSONB DEFAULT '{}',
+  -- Example: { 
+  --   "deals_in_prompt": 15, 
+  --   "largest_field": "source_data", 
+  --   "largest_field_chars": 45000,
+  --   "sections": ["system_prompt", "deal_data", "activity_data"]
+  -- }
+  
+  -- Timing
+  latency_ms INTEGER,               -- time from request to response
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX idx_token_usage_workspace ON token_usage(workspace_id, created_at DESC);
+CREATE INDEX idx_token_usage_skill ON token_usage(skill_id, phase);
+CREATE INDEX idx_token_usage_cost ON token_usage(workspace_id, estimated_cost_usd DESC);
+
+---
+
+PART 2: INSTRUMENT THE LLM CLIENTS
+
+Find every place in the codebase that calls Claude or DeepSeek. 
+There should be centralized clients — likely:
+- server/lib/claude-client.ts (or similar)
+- server/lib/deepseek-client.ts (or similar)
+- Possibly direct fetch calls to API endpoints
+
+For each client, wrap the call to capture token usage:
+
+a. BEFORE the call, capture:
+   - prompt_chars: full prompt character count
+   - payload_summary: analyze what's being sent
+
+   function analyzePayload(messages: Message[]): PayloadSummary {
+     const summary: any = { sections: [] };
+     let totalChars = 0;
+     let largestField = '';
+     let largestFieldChars = 0;
+     
+     for (const msg of messages) {
+       const content = typeof msg.content === 'string' 
+         ? msg.content : JSON.stringify(msg.content);
+       const chars = content.length;
+       totalChars += chars;
+       summary.sections.push({ 
+         role: msg.role, 
+         chars,
+         // Detect common bloat patterns
+         hasSourceData: content.includes('source_data'),
+         hasTranscript: content.includes('transcript'),
+         hasRawJson: (content.match(/\{/g) || []).length > 50,
+       });
+       
+       if (chars > largestFieldChars) {
+         largestFieldChars = chars;
+         largestField = msg.role;
+       }
+     }
+     
+     summary.totalChars = totalChars;
+     summary.largestField = largestField;
+     summary.largestFieldChars = largestFieldChars;
+     summary.estimatedTokens = Math.ceil(totalChars / 4);
+     
+     return summary;
+   }
+
+b. AFTER the call, capture from the API response:
+   - input_tokens: response.usage.input_tokens
+   - output_tokens: response.usage.output_tokens
+   - latency_ms: Date.now() - startTime
+
+   Both Claude and DeepSeek return usage in the response body.
+
+c. COMPUTE estimated cost:
+
+   const RATES = {
+     'claude-sonnet-4-20250514': { input: 3.0, output: 15.0 },    // per 1M tokens
+     'claude-haiku-4-5-20251001': { input: 0.80, output: 4.0 },
+     'deepseek-chat': { input: 0.14, output: 0.28 },
+   };
+
+   function estimateCost(model: string, inputTokens: number, outputTokens: number): number {
+     const rate = RATES[model] || RATES['claude-sonnet-4-20250514'];
+     return (inputTokens * rate.input + outputTokens * rate.output) / 1_000_000;
+   }
+
+   Update these rates as pricing changes. The exact values don't 
+   matter as much as having relative cost visibility.
+
+d. INSERT to token_usage table:
+   
+   Fire-and-forget — don't await the insert, don't let tracking 
+   failures break skill execution:
+
+   trackTokenUsage({
+     workspaceId, skillId, skillRunId, phase, stepName,
+     provider, model, inputTokens, outputTokens,
+     estimatedCostUsd, promptChars, responseChars,
+     truncated, payloadSummary, latencyMs
+   }).catch(err => log.warn('Token tracking failed:', err.message));
+
+---
+
+PART 3: SKILL RUNTIME INTEGRATION
+
+The skill runtime already knows which skill, phase, and step 
+is executing. Pass this context through to the LLM clients.
+
+In server/skills/runtime.ts (or wherever skills execute):
+
+When calling Claude for synthesis:
+  const result = await claudeClient.complete({
+    messages,
+    // Add tracking context
+    _tracking: {
+      workspaceId,
+      skillId: skill.id,
+      skillRunId: runId,
+      phase: 'synthesize',
+      stepName: currentStep.name,
+    }
+  });
+
+When calling DeepSeek for classification:
+  const result = await deepseekClient.complete({
+    messages,
+    _tracking: {
+      workspaceId,
+      skillId: skill.id,
+      skillRunId: runId,
+      phase: 'classify',
+      stepName: currentStep.name,
+    }
+  });
+
+The _tracking object flows through to the instrumentation layer 
+and gets written to token_usage. If _tracking is missing (ad-hoc 
+calls outside skills), still track but with null skill fields.
+
+---
+
+PART 4: AGGREGATE QUERIES AND API ENDPOINTS
+
+Create server/routes/token-usage.ts:
+
+GET /api/workspaces/:id/token-usage/summary
+  Query params: ?period=7d|30d|90d (default 30d)
+
+  Returns:
+  {
+    period: "30d",
+    totalTokens: 482000,
+    totalCostUsd: 4.23,
+    bySkill: [
+      { 
+        skillId: "deal-risk-review", 
+        runs: 12, 
+        avgInputTokens: 78000, 
+        avgOutputTokens: 5000,
+        totalCostUsd: 1.89,
+        costPerRun: 0.16,
+        trend: "stable"  // or "increasing", "decreasing"
+      },
+      { 
+        skillId: "pipeline-hygiene", 
+        runs: 12, 
+        avgInputTokens: 8000, 
+        avgOutputTokens: 2400,
+        totalCostUsd: 0.42,
+        costPerRun: 0.035,
+        trend: "decreasing"
+      },
+      ...
+    ],
+    byProvider: {
+      claude: { tokens: 380000, costUsd: 3.80 },
+      deepseek: { tokens: 102000, costUsd: 0.43 }
+    },
+    byPhase: {
+      compute: { tokens: 0, costUsd: 0 },
+      classify: { tokens: 102000, costUsd: 0.43 },
+      synthesize: { tokens: 380000, costUsd: 3.80 }
+    }
+  }
+
+GET /api/workspaces/:id/token-usage/skill/:skillId
+  Detailed breakdown for one skill:
+
+  Returns:
+  {
+    skillId: "deal-risk-review",
+    last10Runs: [
+      {
+        runId: "abc-123",
+        timestamp: "2026-02-13T...",
+        phases: [
+          { phase: "classify", provider: "deepseek", input: 12000, output: 800, costUsd: 0.002 },
+          { phase: "synthesize", provider: "claude", input: 78000, output: 5000, costUsd: 0.31 }
+        ],
+        totalTokens: 95800,
+        totalCostUsd: 0.31,
+        payloadDiagnostics: {
+          largestSection: "deal_data",
+          largestSectionChars: 180000,
+          hasSourceData: true,
+          hasTranscript: false,
+          estimatedTokensBeforeSend: 95000
+        }
+      },
+      ...
+    ],
+    recommendations: []  // populated in Part 5
+  }
+
+GET /api/workspaces/:id/token-usage/anomalies
+  Find outliers:
+
+  SELECT skill_id, skill_run_id, total_tokens, estimated_cost_usd,
+    payload_summary
+  FROM token_usage
+  WHERE workspace_id = $1
+    AND total_tokens > (
+      SELECT AVG(total_tokens) + 2 * STDDEV(total_tokens)
+      FROM token_usage 
+      WHERE workspace_id = $1 AND skill_id = token_usage.skill_id
+    )
+  ORDER BY created_at DESC
+  LIMIT 20;
+
+  Returns runs that are 2+ standard deviations above the skill's 
+  average. These are the ones to investigate.
+
+---
+
+PART 5: AUTO-DIAGNOSTICS
+
+When a skill run's token usage exceeds thresholds, automatically 
+flag the issue:
+
+const THRESHOLDS = {
+  singleCallWarning: 50000,       // any single LLM call > 50K tokens
+  singleCallCritical: 100000,     // any single LLM call > 100K tokens  
+  skillRunWarning: 80000,         // total skill run > 80K tokens
+  skillRunCritical: 150000,       // total skill run > 150K tokens
+  costPerRunWarning: 0.50,        // single run costs > $0.50
+};
+
+After each tracked call, check:
+
+if (totalTokens > THRESHOLDS.singleCallWarning) {
+  log.warn(`[TOKEN ALERT] ${skillId}/${stepName}: ${totalTokens} tokens ` +
+    `($${cost.toFixed(4)}). Payload: ${JSON.stringify(payloadSummary)}`);
+  
+  // Store recommendation
+  const recommendations = [];
+  
+  if (payloadSummary.hasSourceData) {
+    recommendations.push(
+      'source_data detected in prompt. Strip raw CRM JSON ' +
+      'and send only computed summaries.'
+    );
+  }
+  
+  if (payloadSummary.hasTranscript) {
+    recommendations.push(
+      'Full transcript detected in prompt. Pre-summarize in ' +
+      'compute phase before sending to LLM.'
+    );
+  }
+  
+  if (payloadSummary.hasRawJson) {
+    recommendations.push(
+      'Heavy JSON structure in prompt. Convert to markdown ' +
+      'tables or flat summaries before LLM call.'
+    );
+  }
+  
+  if (payloadSummary.largestFieldChars > 50000) {
+    recommendations.push(
+      `Largest payload section is ${payloadSummary.largestFieldChars} chars. ` +
+      `Truncate or summarize to < 10K chars.`
+    );
+  }
+}
+
+Store recommendations in the token_usage row or a separate 
+diagnostics field.
+
+---
+
+PART 6: UPDATE SKILL_RUNS WITH COST DATA
+
+Also update the existing skill_runs table after each run with 
+aggregate token/cost data:
+
+  UPDATE skill_runs SET
+    token_usage = jsonb_build_object(
+      'total_tokens', $2,
+      'input_tokens', $3,
+      'output_tokens', $4,
+      'estimated_cost_usd', $5,
+      'by_provider', $6,
+      'by_phase', $7
+    )
+  WHERE id = $1;
+
+Check if skill_runs already has a token_usage column. If not:
+  ALTER TABLE skill_runs ADD COLUMN IF NOT EXISTS 
+    token_usage JSONB DEFAULT '{}';
+
+This means the skill run history endpoint automatically shows 
+cost per run without a separate query.
+
+---
+
+PART 7: TEST
+
+After instrumenting everything:
+
+1. Run deal-risk-review for Imubit:
+   POST /api/workspaces/<imubit_id>/skills/deal-risk-review/run
+
+2. Check token_usage table:
+   SELECT skill_id, phase, step_name, provider, model,
+     input_tokens, output_tokens, total_tokens,
+     estimated_cost_usd, prompt_chars, 
+     payload_summary->'largestFieldChars' as largest_section,
+     payload_summary->'hasSourceData' as has_source_data,
+     latency_ms
+   FROM token_usage
+   WHERE skill_run_id = '<run_id>'
+   ORDER BY created_at;
+
+   This should show exactly WHY deal-risk-review uses 83K tokens.
+
+3. Run pipeline-hygiene for comparison:
+   Check that a normal skill shows ~8-10K total tokens.
+
+4. Hit the summary endpoint:
+   GET /api/workspaces/<imubit_id>/token-usage/summary?period=7d
+
+5. Hit the anomalies endpoint:
+   GET /api/workspaces/<imubit_id>/token-usage/anomalies
+   deal-risk-review should appear as an outlier.
+
+DO NOT:
+- Fix the deal-risk-review token issue (just diagnose it)
+- Add rate limiting or token budgets (future feature)
+- Build a UI (API endpoints only for now)
+- Modify skill execution flow (tracking is passive/observational)
+- Let tracking failures break skill execution (always fire-and-forget)

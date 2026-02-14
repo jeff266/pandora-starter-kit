@@ -1,5 +1,12 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { query } from '../db.js';
+import {
+  analyzePayload,
+  estimateCost,
+  generateRecommendations,
+  trackTokenUsage,
+  type TrackingContext,
+} from '../lib/token-tracker.js';
 
 export type LLMCapability = 'extract' | 'reason' | 'generate' | 'classify';
 
@@ -38,7 +45,10 @@ export interface LLMCallOptions {
   schema?: Record<string, any>;
   maxTokens?: number;
   temperature?: number;
+  _tracking?: TrackingContext;
 }
+
+export type { TrackingContext };
 
 interface ProviderConfig {
   apiKey: string;
@@ -475,6 +485,18 @@ export async function callLLM(
 
   console.log(`[LLM Router] ${capability} → ${provider}/${model}`);
 
+  const allMessages: Array<{ role: string; content: any }> = [];
+  if (options.systemPrompt) {
+    allMessages.push({ role: 'system', content: options.systemPrompt });
+  }
+  for (const m of options.messages) {
+    allMessages.push({ role: m.role, content: m.content });
+  }
+  const payloadSummary = analyzePayload(allMessages);
+  const promptChars = payloadSummary.totalChars;
+
+  const startTime = Date.now();
+
   let response: LLMResponse;
 
   switch (provider) {
@@ -497,8 +519,32 @@ export async function callLLM(
       throw new Error(`Unsupported provider: ${provider}`);
   }
 
+  const latencyMs = Date.now() - startTime;
   const totalTokens = response.usage.input + response.usage.output;
   await trackUsage(workspaceId, totalTokens);
+
+  const tracking = options._tracking;
+  const costUsd = estimateCost(model, response.usage.input, response.usage.output);
+  const recommendations = generateRecommendations(totalTokens, costUsd, payloadSummary);
+
+  trackTokenUsage({
+    workspaceId: tracking?.workspaceId || workspaceId,
+    skillId: tracking?.skillId,
+    skillRunId: tracking?.skillRunId,
+    phase: tracking?.phase,
+    stepName: tracking?.stepName,
+    provider,
+    model,
+    inputTokens: response.usage.input,
+    outputTokens: response.usage.output,
+    estimatedCostUsd: costUsd,
+    promptChars,
+    responseChars: response.content.length,
+    truncated: false,
+    payloadSummary,
+    latencyMs,
+    recommendations,
+  }).catch(err => console.warn('[Token Tracker] Fire-and-forget failed:', err.message));
 
   return response;
 }
