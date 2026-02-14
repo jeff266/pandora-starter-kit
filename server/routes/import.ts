@@ -9,6 +9,8 @@ import { parseImportFile } from '../import/file-parser.js';
 import { heuristicMapColumns, type ColumnMapping } from '../import/heuristic-mapper.js';
 import { classifyColumns as aiClassifyColumns, type ClassificationResult } from '../import/ai-classifier.js';
 import { classifyStages, heuristicMapStages, type StageMappingResult } from '../import/stage-classifier.js';
+import { detectDedupStrategy } from '../import/dedup.js';
+import { linkDealsToAccounts, linkContactsToAccounts } from '../import/account-linker.js';
 import { parseAmount, parseDate, parsePercentage, normalizeText } from '../import/value-parsers.js';
 import {
   applyDealImport, applyContactImport, applyAccountImport, relinkAll,
@@ -82,6 +84,14 @@ router.post('/:id/import/upload', upload.single('file'), async (req, res) => {
     }
 
     warnings.push(...(classification.warnings || []));
+
+    // Add encoding warning if conversion happened
+    if (parsed.encodingConverted) {
+      warnings.push(
+        `File was encoded as ${parsed.detectedEncoding} and automatically converted to UTF-8. ` +
+        `Verify accented characters (é, ñ, ü) display correctly.`
+      );
+    }
 
     if (entityType === 'contact' || entityType === 'deal') {
       try {
@@ -212,6 +222,23 @@ router.post('/:id/import/upload', upload.single('file'), async (req, res) => {
       }
     }
 
+    // Detect deduplication strategy based on available columns
+    const dedupStrategyResult = detectDedupStrategy(
+      entityType as 'deal' | 'contact' | 'account',
+      classification.mapping
+    );
+
+    // Add warning if no dedup possible
+    if (dedupStrategyResult.strategy === 'none') {
+      warnings.unshift(
+        '⚠️ DUPLICATE RISK: No unique identifier detected in this file. ' +
+        'Re-importing will create duplicate records. Consider adding a ' +
+        'Record ID, Deal ID, or Email column to enable duplicate detection.'
+      );
+    } else if (dedupStrategyResult.warning) {
+      warnings.push(dedupStrategyResult.warning);
+    }
+
     let deduplication = null;
     try {
       deduplication = await computeDeduplication(
@@ -221,6 +248,11 @@ router.post('/:id/import/upload', upload.single('file'), async (req, res) => {
         parsed.headers,
         classification.mapping
       );
+
+      // Enhance deduplication with strategy info
+      (deduplication as any).dedupStrategy = dedupStrategyResult.strategy;
+      (deduplication as any).dedupKeyFields = dedupStrategyResult.keyFields;
+
       if (deduplication.existingRecords > 0) {
         warnings.push(
           `Found ${deduplication.existingRecords} existing imported ${entityType}s. ` +
@@ -988,6 +1020,50 @@ router.get('/:workspaceId/upgrade-status', async (req, res) => {
   } catch (err) {
     console.error('[Import] Get upgrade status error:', err);
     return res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to get upgrade status' });
+  }
+});
+
+// POST /api/workspaces/:id/import/relink
+// Re-link unlinked deals and contacts to accounts using improved domain-first matching
+router.post('/:id/import/relink', async (req, res) => {
+  try {
+    const workspaceId = req.params.id;
+
+    console.log(`[Import] Re-linking deals and contacts for workspace ${workspaceId}`);
+
+    // Link deals to accounts
+    const dealLinkResult = await linkDealsToAccounts(workspaceId);
+
+    console.log(
+      `[Import] Deal linking complete: ${dealLinkResult.linked} linked, ` +
+      `${dealLinkResult.unlinked} unlinked`
+    );
+    console.log(`[Import] Deal link tiers:`, dealLinkResult.byTier);
+
+    // Link contacts to accounts
+    const contactLinkResult = await linkContactsToAccounts(workspaceId);
+
+    console.log(
+      `[Import] Contact linking complete: ${contactLinkResult.linked} linked, ` +
+      `${contactLinkResult.unlinked} unlinked`
+    );
+    console.log(`[Import] Contact link tiers:`, contactLinkResult.byTier);
+
+    return res.json({
+      deals: {
+        linked: dealLinkResult.linked,
+        unlinked: dealLinkResult.unlinked,
+        byTier: dealLinkResult.byTier
+      },
+      contacts: {
+        linked: contactLinkResult.linked,
+        unlinked: contactLinkResult.unlinked,
+        byTier: contactLinkResult.byTier
+      }
+    });
+  } catch (err) {
+    console.error('[Import] Re-link error:', err);
+    return res.status(500).json({ error: err instanceof Error ? err.message : 'Re-link failed' });
   }
 });
 

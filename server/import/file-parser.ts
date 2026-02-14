@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import chardet from 'chardet';
 
 export interface ParseResult {
   headers: string[];
@@ -9,6 +10,85 @@ export interface ParseResult {
   detectedDateFormat: string | null;
   detectedDelimiter: string | null;
   fileType: 'csv' | 'xlsx' | 'xls';
+  detectedEncoding: string | null;
+  encodingConverted: boolean;
+}
+
+/**
+ * Strip UTF-8 BOM if present
+ */
+function stripBOM(buffer: Buffer): Buffer {
+  if (buffer.length >= 3 &&
+      buffer[0] === 0xEF &&
+      buffer[1] === 0xBB &&
+      buffer[2] === 0xBF) {
+    return buffer.subarray(3);
+  }
+  return buffer;
+}
+
+/**
+ * Detect and normalize file encoding to UTF-8.
+ * SheetJS handles Excel files (.xlsx/.xls) internally — this is for CSV only.
+ */
+function normalizeEncoding(buffer: Buffer, fileType: string): { buffer: Buffer; detected: string | null; converted: boolean } {
+  // Excel files handle encoding internally via SheetJS
+  if (fileType !== 'csv') {
+    return { buffer, detected: null, converted: false };
+  }
+
+  // Detect encoding
+  const detected = chardet.detect(buffer);
+
+  // Common CRM export encodings that need conversion
+  const needsConversion = [
+    'ISO-8859-1',
+    'windows-1252',
+    'windows-1250',
+    'ISO-8859-15',    // Western European with Euro sign
+    'ISO-8859-2',     // Central European
+  ];
+
+  if (!detected) {
+    // Can't detect — try as UTF-8, fall back to ISO-8859-1
+    console.warn('[File Parser] Could not detect encoding, assuming UTF-8');
+    return { buffer, detected: null, converted: false };
+  }
+
+  console.log(`[File Parser] Detected encoding: ${detected}`);
+
+  if (detected === 'UTF-8' || detected === 'ascii' || detected === 'ASCII') {
+    return { buffer, detected, converted: false };  // Already UTF-8 compatible
+  }
+
+  if (needsConversion.some(enc => detected.toLowerCase() === enc.toLowerCase())) {
+    console.log(`[File Parser] Converting from ${detected} to UTF-8`);
+
+    // Node.js TextDecoder handles these encodings natively
+    try {
+      // Map chardet names to TextDecoder names
+      const encodingMap: Record<string, string> = {
+        'ISO-8859-1': 'iso-8859-1',
+        'windows-1252': 'windows-1252',
+        'windows-1250': 'windows-1250',
+        'ISO-8859-15': 'iso-8859-15',
+        'ISO-8859-2': 'iso-8859-2',
+      };
+
+      const decoderName = encodingMap[detected] || detected.toLowerCase();
+      const decoder = new TextDecoder(decoderName);
+      const text = decoder.decode(buffer);
+      return { buffer: Buffer.from(text, 'utf-8'), detected, converted: true };
+    } catch (err) {
+      console.error(`[File Parser] Encoding conversion failed for ${detected}:`, err);
+      // Return original buffer — SheetJS might handle it, or we'll get a clear error
+      return { buffer, detected, converted: false };
+    }
+  }
+
+  // Unknown encoding — log it but try to proceed
+  console.warn(`[File Parser] Unexpected encoding: ${detected}. Trying as-is.`);
+  return { buffer, detected, converted: false };
 }
 
 export function parseImportFile(
@@ -22,17 +102,26 @@ export function parseImportFile(
     throw new Error('Unsupported file type. Please upload .xlsx, .xls, or .csv files.');
   }
 
+  const fileType = ext === 'csv' ? 'csv' : (ext === '.xlsx' ? 'xlsx' : 'xls');
+
+  // Normalize encoding BEFORE parsing
+  const { buffer: normalizedBuffer, detected: detectedEncoding, converted: encodingConverted } = normalizeEncoding(buffer, fileType);
+
+  // Strip BOM if present
+  const cleanBuffer = stripBOM(normalizedBuffer);
+
   let detectedDelimiter: string | null = null;
 
   if (ext === 'csv') {
-    detectedDelimiter = detectCsvDelimiter(buffer);
+    detectedDelimiter = detectCsvDelimiter(cleanBuffer);
   }
 
   let workbook: XLSX.WorkBook;
   try {
-    workbook = XLSX.read(buffer, {
+    workbook = XLSX.read(cleanBuffer, {
       type: 'buffer',
       cellDates: true,
+      codepage: 65001,     // Force UTF-8 interpretation for CSV
       ...(ext === 'csv' && detectedDelimiter === ';' ? { FS: ';' } : {}),
       ...(ext === 'csv' && detectedDelimiter === '\t' ? { FS: '\t' } : {}),
     });
@@ -75,6 +164,8 @@ export function parseImportFile(
     detectedDateFormat,
     detectedDelimiter,
     fileType: ext,
+    detectedEncoding,
+    encodingConverted,
   };
 }
 
