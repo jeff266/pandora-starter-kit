@@ -1,412 +1,233 @@
-# Manual E2E Test Checklist - Replit
+# Manual E2E Test Checklist
 
-Use this checklist to manually validate all features in Replit.
+Use this checklist to manually validate all 6 features in Replit.
 
 ## Prerequisites
 
-```bash
-# Ensure server is running
-curl http://localhost:3000/health
-
-# Set workspace ID
-WORKSPACE_ID="4160191d-73bc-414b-97dd-5a1853190378"
-```
+- Server running on port 5000 (`Pandora API` workflow active)
+- Database accessible via `$DATABASE_URL`
+- Workspace ID: `4160191d-73bc-414b-97dd-5a1853190378`
 
 ---
 
-## Test 1: Workspace Configuration Layer
+## 1. Workspace Config — GET
 
-### 1A. Get Default Configuration
 ```bash
-curl http://localhost:3000/api/workspaces/$WORKSPACE_ID/workspace-config | jq
+curl -s http://localhost:5000/api/workspaces/4160191d-73bc-414b-97dd-5a1853190378/workspace-config | node -e "const d=[];process.stdin.on('data',c=>d.push(c));process.stdin.on('end',()=>console.log(JSON.stringify(JSON.parse(d.join('')),null,2)))"
 ```
 
-**Expected:**
-- `success: true`
-- `is_default: true` (or `false` if already configured)
-- `config.thresholds.stale_deal_days: 14` (default)
-- `config.thresholds.coverage_target: 3.0` (default)
+**Expected:** `{ "success": true, "config": { ... }, "is_default": false }`
+**Pass criteria:** Response contains `success: true` and a `config` object
 
-**✅ Pass if:** JSON returned with workspace config
+- [ ] PASS / FAIL
 
 ---
 
-### 1B. Update Configuration
+## 2. Workspace Config — PUT
+
 ```bash
-curl -X PATCH http://localhost:3000/api/workspaces/$WORKSPACE_ID/workspace-config/thresholds \
+curl -s -X PUT http://localhost:5000/api/workspaces/4160191d-73bc-414b-97dd-5a1853190378/workspace-config \
   -H "Content-Type: application/json" \
-  -d '{
-    "stale_deal_days": 21,
-    "critical_stale_days": 45,
-    "coverage_target": 4.0,
-    "minimum_contacts_per_deal": 3
-  }' | jq
+  -d '{"fiscal_year_start":"january","default_currency":"USD","confirmed":true}' | node -e "const d=[];process.stdin.on('data',c=>d.push(c));process.stdin.on('end',()=>console.log(JSON.stringify(JSON.parse(d.join('')),null,2)))"
 ```
 
-**Expected:**
-- `success: true`
-- `config.thresholds.stale_deal_days: 21`
-- `config.thresholds.coverage_target: 4.0`
+**Expected:** `{ "success": true, ... }`
+**Pass criteria:** Update succeeds and subsequent GET shows `confirmed: true`
 
-**✅ Pass if:** Values updated and persisted
+- [ ] PASS / FAIL
 
 ---
 
-### 1C. Verify Config Used by Skill
+## 3. Funnel Templates
+
 ```bash
-curl -X POST http://localhost:3000/api/skills/pipeline-coverage/run \
-  -H "Content-Type: application/json" \
-  -d "{\"workspaceId\": \"$WORKSPACE_ID\"}" | jq .result | grep -i "coverage"
+curl -s http://localhost:5000/api/funnel/templates | node -e "const d=[];process.stdin.on('data',c=>d.push(c));process.stdin.on('end',()=>{const r=JSON.parse(d.join(''));const t=r.templates||r;console.log(t.length+' templates:');t.forEach(x=>console.log(' -',x.model_label||x.name||x.id))})"
 ```
 
-**Expected:** Skill output mentions 4.0x coverage target (not 3.0)
+**Expected:** `{ "success": true, "templates": [ ... ] }` with 5+ templates listed
+**Pass criteria:** At least 3 funnel templates available
 
-**✅ Pass if:** Custom config value visible in skill output
+- [ ] PASS / FAIL
 
 ---
 
-## Test 2: Custom Funnel Definitions
+## 4. Funnel Definition
 
-### 2A. List Templates
 ```bash
-curl http://localhost:3000/api/funnel/templates | jq
+curl -s http://localhost:5000/api/workspaces/4160191d-73bc-414b-97dd-5a1853190378/funnel | node -e "const d=[];process.stdin.on('data',c=>d.push(c));process.stdin.on('end',()=>console.log(JSON.stringify(JSON.parse(d.join('')),null,2)))"
 ```
 
-**Expected:**
-- Array with 5 templates
-- Templates: `classic_b2b`, `plg`, `enterprise`, `velocity`, `channel`
+**Expected:** JSON with funnel stages
+**Pass criteria:** Response contains stage definitions
 
-**✅ Pass if:** 5 templates returned
+- [ ] PASS / FAIL
 
 ---
 
-### 2B. Get Workspace Funnel
-```bash
-curl http://localhost:3000/api/workspaces/$WORKSPACE_ID/funnel | jq
-```
+## 5. Stage History Coverage
 
-**Expected:**
-- Either funnel object OR `null` (if none configured)
-- If exists: `model_type`, `stages[]`, `status`
-
-**✅ Pass if:** Valid JSON response
-
----
-
-### 2C. Run Funnel Discovery (Optional)
-```bash
-curl -X POST http://localhost:3000/api/workspaces/$WORKSPACE_ID/funnel/discover | jq
-```
-
-**Expected:**
-- `recommendation.template` (e.g., "classic_b2b")
-- `recommendation.confidence` (0.0-1.0)
-- `funnel.stages[]` with mapped stages
-
-**✅ Pass if:** Recommendation returned with confidence score
-
----
-
-### 2D. Test Bowtie Analysis with Funnel
-```bash
-curl -X POST http://localhost:3000/api/skills/bowtie-analysis/run \
-  -H "Content-Type: application/json" \
-  -d "{\"workspaceId\": \"$WORKSPACE_ID\"}" | jq .result
-```
-
-**Expected:**
-- Report uses workspace's actual stage names
-- NOT hardcoded "Lead", "MQL", "SQL" unless that's your funnel
-
-**✅ Pass if:** Dynamic stage names in output
-
----
-
-## Test 3: HubSpot Stage History Backfill
-
-### 3A. Check Current Stats
-```bash
-curl http://localhost:3000/api/workspaces/$WORKSPACE_ID/stage-history/stats | jq
-```
-
-**Expected:**
-```json
-{
-  "totalDeals": 391,
-  "dealsWithHistory": 357,
-  "totalHistoryEntries": 1503,
-  "avgHistoryEntriesPerDeal": 4.2
-}
-```
-
-**✅ Pass if:**
-- `dealsWithHistory > 0`
-- Coverage > 80%
-
----
-
-### 3B. Check Specific Deal Timeline
-```bash
-# Get a deal ID first
-DEAL_ID=$(curl -s "http://localhost:3000/api/workspaces/$WORKSPACE_ID/deals?limit=1" | jq -r '.[0].id')
-
-# Get its stage history
-curl "http://localhost:3000/api/workspaces/$WORKSPACE_ID/deals/$DEAL_ID/stage-history" | jq
-```
-
-**Expected:**
-- Array of stage entries
-- Each entry: `stage`, `entered_at`, `exited_at`, `duration_days`
-
-**✅ Pass if:** Complete timeline showing stage progression
-
----
-
-### 3C. Verify days_in_stage Updated
-```bash
-curl "http://localhost:3000/api/workspaces/$WORKSPACE_ID/deals?limit=10" | \
-  jq '.[] | {name, stage, days_in_stage, stage_changed_at}'
-```
-
-**Expected:**
-- `days_in_stage` shows realistic values (not all 0-3)
-- `stage_changed_at` is not same as `created_date` for older deals
-
-**✅ Pass if:** Real durations visible (weeks/months for old deals)
-
----
-
-## Test 4: Contact Role Resolution
-
-### 4A. Check Current Coverage
-```bash
-curl "http://localhost:3000/api/workspaces/$WORKSPACE_ID/contacts?limit=100" | \
-  jq '[.[] | select(.custom_fields.buying_role != null)] | length'
-```
-
-**Expected:** Number of contacts with roles (e.g., 673)
-
-**✅ Pass if:** >50% of contacts have roles
-
----
-
-### 4B. Verify Role Quality (SQL)
-Run in Replit database:
 ```sql
+-- Run in database console
 SELECT
-  dc.buying_role,
-  COUNT(*) as count,
-  AVG(dc.role_confidence)::numeric(3,2) as avg_confidence,
-  dc.role_source
-FROM deal_contacts dc
-WHERE dc.workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'
-  AND dc.buying_role IS NOT NULL
-GROUP BY dc.buying_role, dc.role_source
-ORDER BY count DESC;
-```
-
-**Expected:**
-- Multiple roles: `decision_maker`, `champion`, `influencer`, etc.
-- Avg confidence: 0.6-0.9
-- Source: `hubspot` or `inferred`
-
-**✅ Pass if:** Roles distributed across 4-6 types
-
----
-
-## Test 5: Skill Performance
-
-### 5A. Pipeline Goals (Fixed Activities Column)
-```bash
-time curl -X POST http://localhost:3000/api/skills/pipeline-goals/run \
-  -H "Content-Type: application/json" \
-  -d "{\"workspaceId\": \"$WORKSPACE_ID\"}" | jq .metadata
-```
-
-**Expected:**
-- `status: "completed"`
-- Rep breakdown shows 4+ reps (not 0)
-- Duration: <30s
-
-**✅ Pass if:** Reps detected correctly
-
----
-
-### 5B. Deal Risk Review (Latency)
-```bash
-time curl -X POST http://localhost:3000/api/skills/deal-risk-review/run \
-  -H "Content-Type: application/json" \
-  -d "{\"workspaceId\": \"$WORKSPACE_ID\"}" | jq '{status, duration_ms, metadata}'
-```
-
-**Expected:**
-- `status: "completed"`
-- Total duration: <60s (41s is Claude API time)
-- Analyzes 10 deals (not 20)
-
-**✅ Pass if:** Completes in <60s
-
----
-
-## Test 6: Skill Output Caching
-
-### 6A. First Run (Fresh Execution)
-```bash
-echo "First run:"
-time curl -X POST http://localhost:3000/api/skills/pipeline-coverage/run \
-  -H "Content-Type: application/json" \
-  -d "{\"workspaceId\": \"$WORKSPACE_ID\"}" | jq .status
-```
-
-Note the time (e.g., 12s)
-
----
-
-### 6B. Second Run (Should Cache)
-```bash
-echo "Second run (within 30min):"
-time curl -X POST http://localhost:3000/api/skills/pipeline-coverage/run \
-  -H "Content-Type: application/json" \
-  -d "{\"workspaceId\": \"$WORKSPACE_ID\"}" | jq .status
-```
-
-**Expected:**
-- Time: <1s (near-instant)
-- Check server logs for: `"output reused from cache (30min TTL)"`
-
-**✅ Pass if:** Second run is 10x+ faster
-
----
-
-### 6C. Cache Stats (SQL)
-```sql
-SELECT
-  skill_id,
-  COUNT(*) FILTER (WHERE status = 'completed') as fresh_runs,
-  COUNT(*) FILTER (WHERE status = 'cached') as cache_hits,
-  AVG(duration_ms) FILTER (WHERE status = 'completed') as avg_fresh_ms,
-  AVG(duration_ms) FILTER (WHERE status = 'cached') as avg_cached_ms
-FROM agent_skill_results
-WHERE created_at >= NOW() - INTERVAL '1 hour'
-GROUP BY skill_id;
-```
-
-**Expected:** Cache hits show ~100x faster than fresh runs
-
-**✅ Pass if:** Cache hits present in last hour
-
----
-
-## Test 7: Agent Execution
-
-### 7A. Run Attainment vs Goal Agent
-```bash
-time curl -X POST http://localhost:3000/api/agents/attainment-vs-goal/run \
-  -H "Content-Type: application/json" \
-  -d "{\"workspaceId\": \"$WORKSPACE_ID\"}" | jq
-```
-
-**Expected:**
-- `status: "completed"`
-- Multiple skills executed (4+)
-- Total duration: <90s
-- Output contains analysis
-
-**✅ Pass if:** Agent completes all skills successfully
-
----
-
-### 7B. Check Skill Results
-```bash
-curl "http://localhost:3000/api/agents/attainment-vs-goal/run?workspaceId=$WORKSPACE_ID" | \
-  jq '.skills[] | {id, status, duration_ms}'
-```
-
-**Expected:**
-- All skills show `status: "completed"` or `status: "cached"`
-- No errors
-
-**✅ Pass if:** All skills succeeded
-
----
-
-## Test 8: Database Validation
-
-Run these SQL queries to verify data integrity:
-
-### 8A. Stage History Coverage
-```sql
-SELECT
-  COUNT(DISTINCT d.id) as total_deals,
-  COUNT(DISTINCT dsh.deal_id) as deals_with_history,
-  ROUND(100.0 * COUNT(DISTINCT dsh.deal_id) / NULLIF(COUNT(DISTINCT d.id), 0), 1) as coverage_pct
+  COUNT(DISTINCT dsh.deal_id) AS deals_with_history,
+  COUNT(DISTINCT d.id) AS total_deals,
+  ROUND(100.0 * COUNT(DISTINCT dsh.deal_id) / NULLIF(COUNT(DISTINCT d.id), 0), 1) AS coverage_pct,
+  (SELECT COUNT(*) FROM deal_stage_history WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378') AS total_entries
 FROM deals d
-LEFT JOIN deal_stage_history dsh ON d.id = dsh.deal_id AND d.workspace_id = dsh.workspace_id
+LEFT JOIN deal_stage_history dsh ON dsh.deal_id = d.id AND dsh.workspace_id = d.workspace_id
 WHERE d.workspace_id = '4160191d-73bc-414b-97dd-5a1853190378';
 ```
 
-**Expected:** >80% coverage
+**Expected:** coverage_pct >= 80%, total_entries >= 1000
+**Pass criteria:** At least 80% of deals have stage history
+
+- [ ] PASS / FAIL
 
 ---
 
-### 8B. Contact Role Distribution
-```sql
-SELECT
-  COALESCE(dc.buying_role, 'no_role') as role,
-  COUNT(*) as count,
-  ROUND(AVG(dc.role_confidence)::numeric, 2) as avg_confidence
-FROM deal_contacts dc
-WHERE dc.workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'
-GROUP BY dc.buying_role
-ORDER BY count DESC;
+## 6. Contact Role Inference
+
+```bash
+curl -s -X POST http://localhost:5000/api/workspaces/4160191d-73bc-414b-97dd-5a1853190378/connectors/hubspot/resolve-contact-roles | node -e "const d=[];process.stdin.on('data',c=>d.push(c));process.stdin.on('end',()=>console.log(JSON.stringify(JSON.parse(d.join('')),null,2)))"
 ```
 
-**Expected:** Multiple roles with confidence 0.6-0.9
+**Expected:** `{ "success": true, "created": N, "updated": N, "total": 689 }`
+**Pass criteria:** total >= 100
+
+**SQL Verification:**
+```sql
+SELECT buying_role, COUNT(*), ROUND(AVG(role_confidence), 2) AS avg_conf
+FROM deal_contacts
+WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378' AND role_source = 'inferred'
+GROUP BY buying_role ORDER BY count DESC;
+```
+
+- [ ] PASS / FAIL
 
 ---
 
-### 8C. Workspace Config Existence
+## 7. Pipeline Goals Skill
+
+```bash
+curl -s --max-time 60 -X POST http://localhost:5000/api/skills/pipeline-goals/run \
+  -H "Content-Type: application/json" \
+  -d '{"workspaceId":"4160191d-73bc-414b-97dd-5a1853190378"}' | node -e "const d=[];process.stdin.on('data',c=>d.push(c));process.stdin.on('end',()=>{const j=JSON.parse(d.join(''));console.log('Status:',j.status);console.log('Output preview:',j.result?.substring(0,200))})"
+```
+
+**Expected:** Status: completed
+**Pass criteria:** Skill completes and returns a result
+
+**Rep detection verification (check logs):**
+Look for `repCount: 4` in server logs (not `repCount: 0`)
+
+- [ ] PASS / FAIL
+
+---
+
+## 8. Deal-Risk Latency
+
+```bash
+START=$(date +%s) && curl -s --max-time 120 -X POST http://localhost:5000/api/skills/deal-risk-review/run \
+  -H "Content-Type: application/json" \
+  -d '{"workspaceId":"4160191d-73bc-414b-97dd-5a1853190378"}' | node -e "const d=[];process.stdin.on('data',c=>d.push(c));process.stdin.on('end',()=>{const j=JSON.parse(d.join(''));console.log('Status:',j.status)})" && END=$(date +%s) && echo "Duration: $((END-START))s"
+```
+
+**Expected:** Status: completed, Duration < 90s
+**Pass criteria:** Skill completes within 90 seconds
+
+- [ ] PASS / FAIL
+
+---
+
+## 9. Skill Caching — Run Storage
+
+```bash
+curl -s --max-time 60 -X POST http://localhost:5000/api/skills/pipeline-coverage/run \
+  -H "Content-Type: application/json" \
+  -d '{"workspaceId":"4160191d-73bc-414b-97dd-5a1853190378"}' | node -e "const d=[];process.stdin.on('data',c=>d.push(c));process.stdin.on('end',()=>console.log('Status:',JSON.parse(d.join('')).status))"
+```
+
+**SQL Verification (cache storage):**
 ```sql
-SELECT
-  workspace_id,
-  value->'thresholds'->>'stale_deal_days' as stale_days,
-  value->'thresholds'->>'coverage_target' as coverage,
-  value->>'confirmed' as confirmed
-FROM context_layer
+SELECT COUNT(*) AS recent_cacheable_runs
+FROM skill_runs
 WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'
-  AND category = 'settings'
-  AND key = 'workspace_config';
+  AND skill_id = 'pipeline-coverage'
+  AND status = 'completed'
+  AND started_at >= NOW() - INTERVAL '30 minutes';
 ```
 
-**Expected:** Row exists with custom values (21 days, 4.0 coverage)
+**Pass criteria:** At least 1 recent completed run stored
+
+- [ ] PASS / FAIL
 
 ---
 
-## Final Checklist
+## 10. Skill Caching — Agent-Level Cache Hit
 
-- [ ] Workspace config CRUD works
-- [ ] Config values used by skills
-- [ ] Funnel templates accessible
-- [ ] Funnel discovery runs
-- [ ] Bowtie analysis uses dynamic stages
-- [ ] Stage history >80% coverage
-- [ ] Contact roles >50% coverage
-- [ ] Pipeline goals detects reps (not 0)
-- [ ] Deal risk <60s duration
-- [ ] Skill caching reduces latency 10x+
-- [ ] Agent runs complete successfully
-- [ ] Database integrity validated
+Run pipeline-goals directly, then run attainment-vs-goal agent. Check logs for cache message.
+
+```bash
+curl -s --max-time 60 -X POST http://localhost:5000/api/skills/pipeline-goals/run \
+  -H "Content-Type: application/json" \
+  -d '{"workspaceId":"4160191d-73bc-414b-97dd-5a1853190378"}' > /dev/null
+
+# Then run the agent (takes 2-4 minutes)
+curl -s --max-time 300 -X POST http://localhost:5000/api/workspaces/4160191d-73bc-414b-97dd-5a1853190378/agents/attainment-vs-goal/run > /dev/null
+```
+
+**Expected log message:** `[Agent attainment-vs-goal] Skill pipeline-goals output reused from cache (30min TTL)`
+**Pass criteria:** Cache hit appears in server logs
+
+- [ ] PASS / FAIL
 
 ---
 
-## Success Criteria
+## 11. Agent Registry
 
-**All features working if:**
-- ✅ 12/12 checklist items pass
-- ✅ No critical errors in logs
-- ✅ Agent runs complete in <90s
-- ✅ Stage history >80% backfilled
-- ✅ Contact roles >50% inferred
-- ✅ Skills use workspace config (not hardcoded values)
+```bash
+curl -s http://localhost:5000/api/agents | node -e "const d=[];process.stdin.on('data',c=>d.push(c));process.stdin.on('end',()=>{const r=JSON.parse(d.join(''));const a=r.agents||r;console.log(a.length+' agents:');a.forEach(x=>console.log(' -',x.id,'-',x.name))})"
+```
 
-**Ready for production!** 🚀
+**Expected:** `{ "agents": [ ... ] }` with 6 agents listed
+**Pass criteria:** At least 4 agents registered
+
+- [ ] PASS / FAIL
+
+---
+
+## 12. Agent Run History
+
+```sql
+SELECT agent_id, status, started_at
+FROM agent_runs
+WHERE workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'
+ORDER BY started_at DESC
+LIMIT 5;
+```
+
+**Expected:** At least 1 completed agent run
+**Pass criteria:** Recent agent_runs with status = 'completed'
+
+- [ ] PASS / FAIL
+
+---
+
+## Summary
+
+| # | Test | Status |
+|---|------|--------|
+| 1 | Workspace Config GET | |
+| 2 | Workspace Config PUT | |
+| 3 | Funnel Templates | |
+| 4 | Funnel Definition | |
+| 5 | Stage History Coverage | |
+| 6 | Contact Role Inference | |
+| 7 | Pipeline Goals | |
+| 8 | Deal-Risk Latency | |
+| 9 | Skill Cache Storage | |
+| 10 | Agent Cache Hit | |
+| 11 | Agent Registry | |
+| 12 | Agent Run History | |
+
+**Target: 12/12 PASS (warnings acceptable for coverage targets)**

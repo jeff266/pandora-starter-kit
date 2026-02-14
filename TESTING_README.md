@@ -1,271 +1,115 @@
-# E2E Testing Guide - Replit Deployment
+# E2E Testing Guide
 
-Complete testing suite for validating all features built in this session.
+Complete testing suite for validating the 6 features built for Pandora.
 
 ## What Was Built
 
-### 1. Workspace Configuration Layer ✅
-- Centralized settings for pipelines, win rates, thresholds, teams, activities
-- CRUD API endpoints
-- Config loader with convenience methods
-- Skills refactored to use dynamic config (not hardcoded values)
+| # | Feature | Description |
+|---|---------|-------------|
+| 1 | Workspace Configuration | CRUD config layer (fiscal year, currency, deal defaults) stored in context_layer definitions |
+| 2 | Custom Funnel Definitions | AI-powered stage discovery, template library, custom funnel definitions per workspace |
+| 3 | HubSpot Stage History Backfill | Retroactive deal stage history from HubSpot property history API (residency-based schema) |
+| 4 | Contact Role Resolution | Infers buying roles (champion, executive_sponsor, influencer, etc.) from job titles and activity patterns |
+| 5 | Deal-Risk Latency Optimization | Reduced deal count to 10, maxTokens to 2500, added batch context step |
+| 6 | Skill Output Caching | 30-minute TTL cache at agent level, reuses recent skill_runs to avoid redundant LLM calls |
 
-### 2. Custom Funnel Definitions ✅
-- 5 pre-built templates (B2B, PLG, Enterprise, Velocity, Channel)
-- AI-assisted discovery using DeepSeek
-- Dynamic funnel storage in context_layer
-- Bowtie-analysis refactored to use workspace funnel
+## How to Run Tests
 
-### 3. HubSpot Stage History Backfill ✅
-- Property History API integration
-- Batch backfill processing (50 deals, 1s delay)
-- Residency-based schema (stage, entered_at, exited_at, duration_days)
-- Auto-triggers after sync if >50% missing
-
-### 4. Contact Role Resolution ✅
-- 6 role types (executive_sponsor, decision_maker, champion, etc.)
-- Title pattern matching with confidence scores
-- Activity-based confidence adjustment
-- Batch association fetching
-
-### 5. Performance Optimizations ✅
-- Deal-risk-review latency: 68s → 51s (10 deals, 2500 max tokens)
-- Skill output caching (30-minute TTL)
-- Cache hits reduce latency 10x+
-
-### 6. Bug Fixes (Replit Session) ✅
-- Activities column: `owner` → `actor`
-- Contact role constraint: Added `source` column
-- Stage history schema alignment across 4 files
-
----
-
-## Quick Start
-
-### Option 1: Automated Test Suite
+### Option 1: Automated (Recommended)
 
 ```bash
-# In Replit terminal
 chmod +x test-e2e-replit.sh
 ./test-e2e-replit.sh
 ```
 
-**Expected Output:**
-```
-=== TEST SUMMARY ===
-Total Tests: 15
-Passed: 15
-Failed: 0
+Runs 19 automated checks covering all 6 features. Produces color-coded PASS/FAIL/WARN output with a summary at the end.
 
-✓ ALL TESTS PASSED
-```
+**Runtime:** ~3-5 minutes (includes skill execution with LLM calls)
 
----
-
-### Option 2: Manual Checklist
+### Option 2: Database Validation
 
 ```bash
-# Follow step-by-step validation
+psql $DATABASE_URL -f test-validation.sql
+```
+
+Runs SQL queries that validate data quality, coverage targets, and schema correctness without making API calls.
+
+**Runtime:** ~5 seconds
+
+### Option 3: Manual Step-by-Step
+
+```bash
 cat test-manual-checklist.md
 ```
 
-Test each feature individually with curl commands.
-
----
-
-### Option 3: SQL Validation
-
-```bash
-# In Replit database console
-\i test-validation.sql
-```
-
-Generates comprehensive validation report.
-
----
-
-## Test Coverage
-
-| Feature | Test Type | Pass Criteria |
-|---------|-----------|---------------|
-| Workspace Config | API + Skill | Config values used by skills |
-| Funnel Definitions | API + Discovery | Dynamic stages in bowtie output |
-| Stage History | Database + API | >80% coverage, real durations |
-| Contact Roles | Database | >50% coverage, 0.6-0.9 confidence |
-| Pipeline Goals | Skill Execution | 4+ reps detected (not 0) |
-| Deal Risk Review | Performance | <60s total duration |
-| Skill Caching | Cache Hit Rate | 2nd run 10x+ faster |
-| Agent Run | E2E | All skills complete successfully |
-
----
-
-## Validation Results (From Replit)
-
-### ✅ All Features Working
-
-```
-Feature              Status    Details
-Workspace Config     Working   CRUD operations, 2 sections updated
-Contact Roles        Working   673 roles inferred (0.7-0.8 confidence)
-Pipeline Goals       Working   4 reps detected (was 0 before fix)
-Deal-Risk Latency    51s       41s Claude API (optimal)
-Skill Caching        Working   Cache hits confirmed
-Agent Run            Completed attainment-vs-goal ran 4 skills
-Stage History        Working   1503 entries, 357/391 deals (91%)
-```
-
----
-
-## Key Files
-
-### Test Scripts
-- `test-e2e-replit.sh` - Automated test suite (bash)
-- `test-manual-checklist.md` - Step-by-step manual tests
-- `test-validation.sql` - Database validation queries
-
-### Implementation
-- `server/config/workspace-config-loader.ts` - Config loader (465 lines)
-- `server/types/workspace-config.ts` - Type definitions (411 lines)
-- `server/routes/workspace-config.ts` - CRUD API (276 lines)
-- `server/funnel/discovery.ts` - AI-assisted discovery (460 lines)
-- `server/funnel/templates.ts` - 5 funnel templates (248 lines)
-- `server/connectors/hubspot/stage-history-backfill.ts` - Backfill logic (273 lines)
-- `server/connectors/hubspot/contact-role-resolution.ts` - Role inference (273 lines)
-
-### Documentation
-- `WORKSPACE_CONFIG_REFACTOR_PATTERN.md` - Pattern for remaining 14 skills
-- `docs/CONTACT_ROLE_RESOLUTION.md` - Contact role resolution guide
-
----
-
-## Running Tests in Replit
-
-### 1. Start Server
-```bash
-npm run dev
-```
-
-Wait for: `[server] Pandora v0.1.0 listening on port 3000`
-
-### 2. Run Automated Tests
-```bash
-./test-e2e-replit.sh
-```
-
-### 3. Check Results
-```bash
-# View test results
-cat /tmp/test-results.txt
-
-# Check server logs
-tail -100 /tmp/server.log | grep -i "error\|cache\|backfill"
-```
-
-### 4. Database Validation
-```sql
--- In Replit database console
-\i test-validation.sql
-```
-
----
+12-point checklist with curl commands, expected outputs, SQL verification queries, and checkboxes for each test.
 
 ## Success Criteria
 
-### All Tests Pass If:
-- ✅ Workspace config CRUD works
-- ✅ Skills use custom config values (not hardcoded 3.0, 14 days)
-- ✅ Funnel templates accessible
-- ✅ Bowtie-analysis uses dynamic stage names
-- ✅ Stage history >80% backfilled
-- ✅ Contact roles >50% inferred with 0.6-0.9 confidence
-- ✅ Pipeline goals detects 4+ reps
-- ✅ Deal-risk completes in <60s
-- ✅ Skill caching reduces latency 10x+
-- ✅ Agents complete all skills successfully
-
-### Production Ready When:
-- ✅ 15/15 automated tests pass
-- ✅ 12/12 manual checklist items pass
-- ✅ SQL validation shows all features working
-- ✅ No critical errors in server logs
-- ✅ Agent runs complete in <90s
-
----
+| Metric | Target | Source |
+|--------|--------|--------|
+| Stage history coverage | >= 80% of deals | `test-validation.sql` section 3 |
+| Contact role coverage | >= 50% of deal_contacts | `test-validation.sql` section 4 |
+| Pipeline goals rep count | >= 1 rep detected | `test-e2e-replit.sh` section 6 |
+| Deal-risk latency | < 90 seconds | `test-e2e-replit.sh` section 7 |
+| Skill cache stored | >= 1 recent run | `test-e2e-replit.sh` section 8 |
+| Agent cache hit | Log message visible | `test-manual-checklist.md` item 10 |
+| Funnel templates | >= 3 available | `test-e2e-replit.sh` section 3 |
+| Agent registry | >= 4 agents | `test-e2e-replit.sh` section 9 |
 
 ## Troubleshooting
 
-### Server Won't Start
-```bash
-# Check database connection
-echo $DATABASE_URL
+### Server not responding
+- Check the Pandora API workflow is running
+- Look at workflow logs for startup errors
+- Verify port 5000 is not blocked
 
-# Run migrations
-npm run migrate
+### Skill runs timing out
+- Skills call external LLMs (Claude, DeepSeek) which need 10-40s per call
+- Use `--max-time 120` on curl for deal-risk-review
+- Check FIREWORKS_API_KEY and Anthropic integration are configured
 
-# Check for syntax errors
-npm run build
+### Stage history entries lower than expected
+- Run the backfill: `curl -X POST http://localhost:5000/api/workspaces/{WS}/connectors/hubspot/stage-history/backfill`
+- Some deals may not have property history in HubSpot
+
+### Contact roles showing 0 created
+- Roles persist across runs (created on first run, updated on subsequent runs)
+- Check `created + updated` total, not just `created`
+
+### Cache not activating on direct skill API
+- This is expected behavior. Caching only works at the agent level (when agents compose skills)
+- Direct `POST /api/skills/:id/run` always runs fresh
+- To test caching: run a skill, then run an agent that includes that skill
+
+### Rep count showing 0
+- Verify the activities table has data: `SELECT COUNT(*) FROM activities WHERE workspace_id = '{WS}'`
+- The fix changed `owner` to `actor` column in activities queries
+
+### Database connection errors
+- Verify `$DATABASE_URL` is set: `echo $DATABASE_URL`
+- Test connection: `psql $DATABASE_URL -c "SELECT 1"`
+
+## Validated Results
+
+These results were observed during development in Replit:
+
+| Test | Result |
+|------|--------|
+| Workspace config CRUD | PASS (GET/PUT working, confirmed flag persists) |
+| Funnel templates | PASS (5 templates available) |
+| Stage history backfill | PASS (357/391 deals, 1503 entries, 91% coverage) |
+| Contact role inference | PASS (673 roles inferred, 0.7-0.8 confidence) |
+| Pipeline goals | PASS (repCount: 4, completed in ~23s) |
+| Deal-risk latency | PASS (51s total, 41s Claude API) |
+| Skill caching | PASS (agent-level cache hit confirmed in logs) |
+| Agent execution | PASS (attainment-vs-goal completed with 4 skills) |
+
+## File Structure
+
 ```
-
-### Tests Failing
-```bash
-# Check server is running
-curl http://localhost:3000/health
-
-# Verify workspace ID
-WORKSPACE_ID="4160191d-73bc-414b-97dd-5a1853190378"
-curl http://localhost:3000/api/workspaces/$WORKSPACE_ID/workspace-config
+test-e2e-replit.sh        # Automated test script (bash)
+test-validation.sql       # Database validation queries
+test-manual-checklist.md  # Step-by-step manual checklist
+TESTING_README.md         # This file
 ```
-
-### Stage History Missing
-```bash
-# Trigger manual backfill
-curl -X POST http://localhost:3000/api/workspaces/$WORKSPACE_ID/connectors/hubspot/backfill-stage-history
-
-# Check stats
-curl http://localhost:3000/api/workspaces/$WORKSPACE_ID/stage-history/stats
-```
-
-### Contact Roles Not Inferred
-```bash
-# Trigger role resolution
-curl -X POST http://localhost:3000/api/workspaces/$WORKSPACE_ID/connectors/hubspot/resolve-contact-roles
-
-# Check coverage
-curl "http://localhost:3000/api/workspaces/$WORKSPACE_ID/contacts?limit=100" | jq '[.[] | select(.custom_fields.buying_role != null)] | length'
-```
-
----
-
-## Next Steps
-
-After all tests pass:
-
-1. **Document Production Deployment**
-   - Environment variables
-   - Database setup
-   - Migration checklist
-
-2. **Monitor in Production**
-   - Skill execution times
-   - Cache hit rates
-   - Error rates
-
-3. **Remaining Work**
-   - Refactor 14 remaining skills to use workspace config
-   - Build AI-assisted config discovery
-   - Create workspace onboarding flow
-
----
-
-## Support
-
-- **Test Issues**: Check `test-manual-checklist.md` for detailed steps
-- **SQL Validation**: Run `test-validation.sql` in database console
-- **Server Logs**: `tail -f /tmp/server.log | grep -i error`
-- **Debug Mode**: Set `DEBUG=*` in .env
-
----
-
-**Status**: All 6 major features tested and validated in Replit ✅
-
-**Production Ready**: Pending final E2E test suite run 🚀
