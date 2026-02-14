@@ -1,0 +1,60 @@
+Test Suite Components                                                
+                                                                       
+  1. test-e2e-replit.sh (Automated)                                    
+                                                                       
+  # In Replit, run:                                                    
+  ./test-e2e-replit.sh                                                 
+                                                                       
+  Tests 15 scenarios:                                                  
+  - ✅ Workspace config CRUD                                           
+  - ✅ Config values used by skills                                    
+  - ✅ Funnel templates & discovery                                    
+  - ✅ Stage history coverage                                          
+  - ✅ Contact role inference                                          
+  - ✅ Pipeline goals (rep detection)                                  
+  - ✅ Deal-risk latency                                               
+  - ✅ Skill caching (2 runs)                                          
+  - ✅ Agent execution                                                 
+                                                                       
+  Output: Color-coded pass/fail summary                                
+                                                                       
+  ---                                                                  
+  2. test-manual-checklist.md (Step-by-Step)                           
+                                                                       
+  # In Replit:                                                         
+  cat test-manual-checklist.md                                         
+                                                                       
+  12-point checklist with:                                             
+  - Curl commands for each feature                                     
+  - Expected outputs                                                   
+  - SQL validation queries                                             
+  - Pass/fail criteria                                                 
+                                                                       
+  ---                                                                  
+  3. test-validation.sql (Database)                                    
+                                                                       
+  -- In Replit database console:                                       
+  \i test-validation.sql                                               
+                                                                       
+  Validates:                                                           
+  - Workspace config existence                                         
+  - Funnel definition status                                           
+  - Stage history coverage (target >80%)                               
+  - Contact role coverage (target >50%)                                
+  - Recent skill/agent runs                                            
+  - Cache effectiveness                                                
+  - Data quality metrics                                               
+                                                                       
+  Output: Comprehensive validation report with ✓/✗/⚠ status            
+                                                                       
+  ---                                                                  
+  4. TESTING_README.md (Guide)                                         
+                                                                       
+  cat TESTING_README.md                                                
+                                                                       
+  Complete documentation:                                              
+  - What was built (6 features)                                        
+  - How to run tests (3 options)                                       
+  - Success criteria                                                   
+  - Troubleshooting                                                    
+  - Validated results from Replit                 
