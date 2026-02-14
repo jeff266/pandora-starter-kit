@@ -28,6 +28,7 @@ import configRouter from './routes/config.js';
 import importRouter, { cleanupTempFiles } from './routes/import.js';
 import dealInsightsRouter from './routes/deal-insights.js';
 import enrichmentRouter from './routes/enrichment.js';
+import tokenUsageRouter from './routes/token-usage.js';
 import workflowsRouter, { setWorkflowService } from './routes/workflows.js';
 import { ActivePiecesClient } from './workflows/ap-client.js';
 import { WorkflowService } from './workflows/workflow-service.js';
@@ -88,6 +89,7 @@ app.use("/api/workspaces", configRouter);
 app.use("/api/workspaces", importRouter);
 app.use(dealInsightsRouter);
 app.use("/api/workspaces", enrichmentRouter);
+app.use("/api/workspaces", tokenUsageRouter);
 app.use("/api/workspaces", workflowsRouter);
 
 function registerAdapters(): void {

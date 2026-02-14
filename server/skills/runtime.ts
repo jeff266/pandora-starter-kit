@@ -31,7 +31,9 @@ import {
   type LLMCallOptions,
   type LLMResponse,
   type ToolDef,
+  type TrackingContext,
 } from '../utils/llm-router.js';
+import { estimateCost } from '../lib/token-tracker.js';
 import { query } from '../db.js';
 import { randomUUID } from 'crypto';
 
@@ -162,7 +164,7 @@ export class SkillRuntime {
       const lastStep = sortedSteps[sortedSteps.length - 1];
       finalOutput = context.stepResults[lastStep.outputKey];
 
-      await this.logSkillRun(runId, skill.id, workspaceId, 'completed', finalOutput);
+      await this.logSkillRun(runId, skill.id, workspaceId, 'completed', finalOutput, undefined, context.metadata.tokenUsage);
 
       return {
         runId,
@@ -303,6 +305,14 @@ export class SkillRuntime {
 
     const maxToolCalls = step.maxToolCalls || 10;
 
+    const tracking: TrackingContext = {
+      workspaceId: context.workspaceId,
+      skillId: context.skillId,
+      skillRunId: context.runId,
+      phase: step.tier === 'claude' ? 'synthesize' : step.tier === 'deepseek' ? 'classify' : 'compute',
+      stepName: step.id,
+    };
+
     if (tools.length === 0 && !step.claudeTools) {
       const response = await callLLM(context.workspaceId, capability, {
         systemPrompt,
@@ -310,6 +320,7 @@ export class SkillRuntime {
         schema: step.deepseekSchema,
         maxTokens: 4096,
         temperature: capability === 'reason' ? 0.7 : 0.1,
+        _tracking: tracking,
       });
 
       const totalTokens = response.usage.input + response.usage.output;
@@ -384,7 +395,8 @@ export class SkillRuntime {
       renderedPrompt,
       tools,
       maxToolCalls,
-      step.tier
+      step.tier,
+      tracking
     );
   }
 
@@ -398,7 +410,8 @@ export class SkillRuntime {
     userPrompt: string,
     tools: ToolDef[],
     maxToolCalls: number,
-    tier: string
+    tier: string,
+    tracking?: TrackingContext
   ): Promise<string> {
     const messages: LLMCallOptions['messages'] = [
       { role: 'user', content: userPrompt },
@@ -413,6 +426,7 @@ export class SkillRuntime {
         tools: tools.length > 0 ? tools : undefined,
         maxTokens: 4096,
         temperature: capability === 'reason' ? 0.7 : 0.1,
+        _tracking: tracking,
       });
 
       const totalTokens = response.usage.input + response.usage.output;
@@ -462,6 +476,7 @@ export class SkillRuntime {
       messages,
       maxTokens: 4096,
       temperature: capability === 'reason' ? 0.7 : 0.1,
+      _tracking: tracking,
     });
     this.trackTokens(context, tier, finalResponse.usage.input + finalResponse.usage.output);
     return finalResponse.content;
@@ -610,7 +625,8 @@ Important:
     workspaceId: string,
     status: string,
     output?: any,
-    error?: string
+    error?: string,
+    tokenUsageData?: { compute: number; deepseek: number; claude: number }
   ): Promise<void> {
     try {
       if (status === 'running') {
@@ -621,11 +637,38 @@ Important:
           [runId, skillId, workspaceId, status]
         );
       } else {
+        const enhancedTokenUsage = tokenUsageData ? {
+          claude: tokenUsageData.claude,
+          deepseek: tokenUsageData.deepseek,
+          compute: tokenUsageData.compute,
+          total_tokens: tokenUsageData.claude + tokenUsageData.deepseek + tokenUsageData.compute,
+          input_tokens: 0,
+          output_tokens: 0,
+          estimated_cost_usd: estimateCost('claude-sonnet-4-5', tokenUsageData.claude, 0) +
+            estimateCost('deepseek-v3p1', tokenUsageData.deepseek, 0),
+          by_provider: {
+            claude: tokenUsageData.claude,
+            deepseek: tokenUsageData.deepseek,
+          },
+          by_phase: {
+            compute: tokenUsageData.compute,
+            classify: tokenUsageData.deepseek,
+            synthesize: tokenUsageData.claude,
+          },
+        } : undefined;
+
         await query(
           `UPDATE skill_runs
-           SET status = $2, output = $3, error = $4, completed_at = NOW()
+           SET status = $2, output = $3, error = $4, completed_at = NOW(),
+               token_usage = COALESCE($5::jsonb, token_usage)
            WHERE run_id = $1`,
-          [runId, status, output ? JSON.stringify(output) : null, error]
+          [
+            runId,
+            status,
+            output ? JSON.stringify(output) : null,
+            error,
+            enhancedTokenUsage ? JSON.stringify(enhancedTokenUsage) : null,
+          ]
         );
       }
     } catch (err) {

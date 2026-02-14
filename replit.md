@@ -51,6 +51,7 @@ Pandora is built on Node.js 20 with TypeScript 5+, utilizing Express.js and Post
 -   **Industry Normalization:** Maps various CRM and external data formats to consistent industry values.
 -   **Handlebars Template Engine:** Used in the skill runtime for flexible prompt rendering.
 -   **Workflow Engine:** Integrates with ActivePieces for workflow automation, including definition management, execution tracking, templates, and a connector registry.
+-   **Token Usage Tracking:** `token_usage` table with per-call instrumentation (workspace, skill, run, phase, step, provider, model, input/output tokens, cost, latency, payload diagnostics). Three API endpoints: summary (by skill/provider/phase), skill detail (last 10 runs with phase breakdown), anomalies (stddev-based outlier detection). Integrated into LLM router and skill runtime for automatic capture.
 
 ## External Dependencies
 
