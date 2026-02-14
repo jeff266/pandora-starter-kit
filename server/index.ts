@@ -31,6 +31,7 @@ import enrichmentRouter from './routes/enrichment.js';
 import tokenUsageRouter from './routes/token-usage.js';
 import workflowsRouter, { setWorkflowService } from './routes/workflows.js';
 import projectUpdatesRouter from './routes/project-updates.js';
+import funnelRouter from './routes/funnel.js';
 import { ActivePiecesClient } from './workflows/ap-client.js';
 import { WorkflowService } from './workflows/workflow-service.js';
 import { seedTemplates } from './workflows/template-seed.js';
@@ -95,6 +96,8 @@ app.use("/api/workspaces", enrichmentRouter);
 app.use("/api/workspaces", tokenUsageRouter);
 app.use("/api/workspaces", workflowsRouter);
 app.use("/api/workspaces", projectUpdatesRouter);
+app.use("/api/funnel", funnelRouter);
+app.use("/api/workspaces", funnelRouter);
 app.use("/api", agentsGlobalRouter);
 app.use("/api/workspaces", agentsWorkspaceRouter);
 
@@ -167,6 +170,14 @@ async function start(): Promise<void> {
   } catch (err) {
     console.error("[server] Failed to connect to database:", err);
     process.exit(1);
+  }
+
+  // Run funnel migration (bowtie_discovery → funnel definitions)
+  try {
+    const { migrateAllBowtiesToFunnel } = await import('./funnel/migration.js');
+    await migrateAllBowtiesToFunnel();
+  } catch (err) {
+    console.warn("[server] Funnel migration failed (non-fatal):", err instanceof Error ? err.message : err);
   }
 
   registerAdapters();
