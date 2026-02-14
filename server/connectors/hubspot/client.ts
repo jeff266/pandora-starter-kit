@@ -495,4 +495,62 @@ export class HubSpotClient {
       return [];
     }
   }
+
+  /**
+   * Get activities (engagements) from HubSpot
+   * Fetches emails, calls, meetings, notes, and tasks
+   */
+  async getAllEngagements(sinceTimestamp?: number): Promise<any[]> {
+    const engagementTypes = ['emails', 'calls', 'meetings', 'notes'];
+    const allEngagements: any[] = [];
+
+    for (const type of engagementTypes) {
+      try {
+        const engagements = await this.getEngagementsByType(type, sinceTimestamp);
+        allEngagements.push(...engagements.map(e => ({ ...e, engagement_type: type.slice(0, -1) }))); // Remove 's' from type
+        console.log(`[HubSpot] Fetched ${engagements.length} ${type}`);
+      } catch (error) {
+        console.warn(`[HubSpot] Failed to fetch ${type}:`, error instanceof Error ? error.message : String(error));
+      }
+    }
+
+    return allEngagements;
+  }
+
+  private async getEngagementsByType(type: string, sinceTimestamp?: number): Promise<any[]> {
+    const allRecords: any[] = [];
+    let after: string | undefined;
+
+    do {
+      let endpoint = `/crm/v3/objects/${type}?limit=100&properties=hs_timestamp,hs_email_subject,hs_email_text,hs_call_title,hs_call_body,hs_call_duration,hs_meeting_title,hs_meeting_body,hs_note_body&associations=contacts,deals,companies`;
+
+      if (after) {
+        endpoint += `&after=${after}`;
+      }
+
+      const response = await this.request<any>(endpoint);
+      allRecords.push(...response.results);
+      after = response.paging?.next?.after;
+
+      // Break if we've gone past sinceTimestamp
+      if (sinceTimestamp && response.results.length > 0) {
+        const oldestTimestamp = Math.min(...response.results.map((r: any) =>
+          parseInt(r.properties?.hs_timestamp || '0', 10)
+        ));
+        if (oldestTimestamp < sinceTimestamp) {
+          break;
+        }
+      }
+    } while (after);
+
+    // Filter by timestamp if provided
+    if (sinceTimestamp) {
+      return allRecords.filter(r => {
+        const timestamp = parseInt(r.properties?.hs_timestamp || '0', 10);
+        return timestamp >= sinceTimestamp;
+      });
+    }
+
+    return allRecords;
+  }
 }

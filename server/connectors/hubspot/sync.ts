@@ -211,6 +211,79 @@ async function populateDealContactsFromAssociations(
   return populated;
 }
 
+async function upsertActivities(activities: any[]): Promise<number> {
+  return upsertInBatches(activities, async (batch) => {
+    if (batch.length === 0) return 0;
+
+    const client = await getClient();
+    let stored = 0;
+    try {
+      await client.query('BEGIN');
+
+      for (const activity of batch) {
+        // Resolve contact_id and deal_id from source IDs
+        let contactId: string | null = null;
+        let dealId: string | null = null;
+
+        if (activity.contact_source_id) {
+          const contactResult = await client.query(
+            `SELECT id FROM contacts WHERE workspace_id = $1 AND source = 'hubspot' AND source_id = $2`,
+            [activity.workspace_id, activity.contact_source_id]
+          );
+          contactId = contactResult.rows[0]?.id || null;
+        }
+
+        if (activity.deal_source_id) {
+          const dealResult = await client.query(
+            `SELECT id FROM deals WHERE workspace_id = $1 AND source = 'hubspot' AND source_id = $2`,
+            [activity.workspace_id, activity.deal_source_id]
+          );
+          dealId = dealResult.rows[0]?.id || null;
+        }
+
+        await client.query(
+          `INSERT INTO activities (
+            workspace_id, source, source_id, source_data,
+            activity_type, subject, body, timestamp,
+            duration_seconds, contact_id, deal_id,
+            created_at, updated_at
+          ) VALUES (
+            $1, $2, $3, $4,
+            $5, $6, $7, $8,
+            $9, $10, $11,
+            NOW(), NOW()
+          )
+          ON CONFLICT (workspace_id, source, source_id) DO UPDATE SET
+            source_data = EXCLUDED.source_data,
+            activity_type = EXCLUDED.activity_type,
+            subject = EXCLUDED.subject,
+            body = EXCLUDED.body,
+            timestamp = EXCLUDED.timestamp,
+            duration_seconds = EXCLUDED.duration_seconds,
+            contact_id = EXCLUDED.contact_id,
+            deal_id = EXCLUDED.deal_id,
+            updated_at = NOW()`,
+          [
+            activity.workspace_id, activity.source, activity.source_id, JSON.stringify(activity.source_data),
+            activity.activity_type, activity.subject, activity.body, activity.timestamp,
+            activity.duration_seconds, contactId, dealId,
+          ]
+        );
+        stored++;
+      }
+
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    return stored;
+  });
+}
+
 export async function populateDealContactsFromSourceData(workspaceId: string): Promise<number> {
   const result = await query<{ deal_id: string; contact_source_ids: string[] }>(`
     SELECT d.id as deal_id, 
