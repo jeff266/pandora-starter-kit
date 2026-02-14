@@ -608,8 +608,8 @@ async function enrichClosedDealsInBatchParallel(
         };
       });
 
-    // Process in batches of 5 for DeepSeek
-    const batchSize = 5;
+    // Process in batches of 10 for DeepSeek (increased from 5 for better throughput)
+    const batchSize = 10;
     logger.info('Starting batched DeepSeek classification', {
       accountCount: accountsForClassification.length,
       batchSize,

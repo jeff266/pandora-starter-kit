@@ -4,6 +4,7 @@ import {
   transformDeal,
   transformContact,
   transformCompany,
+  transformEngagement,
   type NormalizedDeal,
   type NormalizedContact,
   type NormalizedAccount,
@@ -209,6 +210,79 @@ async function populateDealContactsFromAssociations(
     client.release();
   }
   return populated;
+}
+
+async function upsertActivities(activities: any[]): Promise<number> {
+  return upsertInBatches(activities, async (batch) => {
+    if (batch.length === 0) return 0;
+
+    const client = await getClient();
+    let stored = 0;
+    try {
+      await client.query('BEGIN');
+
+      for (const activity of batch) {
+        // Resolve contact_id and deal_id from source IDs
+        let contactId: string | null = null;
+        let dealId: string | null = null;
+
+        if (activity.contact_source_id) {
+          const contactResult = await client.query(
+            `SELECT id FROM contacts WHERE workspace_id = $1 AND source = 'hubspot' AND source_id = $2`,
+            [activity.workspace_id, activity.contact_source_id]
+          );
+          contactId = contactResult.rows[0]?.id || null;
+        }
+
+        if (activity.deal_source_id) {
+          const dealResult = await client.query(
+            `SELECT id FROM deals WHERE workspace_id = $1 AND source = 'hubspot' AND source_id = $2`,
+            [activity.workspace_id, activity.deal_source_id]
+          );
+          dealId = dealResult.rows[0]?.id || null;
+        }
+
+        await client.query(
+          `INSERT INTO activities (
+            workspace_id, source, source_id, source_data,
+            activity_type, subject, body, timestamp,
+            duration_seconds, contact_id, deal_id,
+            created_at, updated_at
+          ) VALUES (
+            $1, $2, $3, $4,
+            $5, $6, $7, $8,
+            $9, $10, $11,
+            NOW(), NOW()
+          )
+          ON CONFLICT (workspace_id, source, source_id) DO UPDATE SET
+            source_data = EXCLUDED.source_data,
+            activity_type = EXCLUDED.activity_type,
+            subject = EXCLUDED.subject,
+            body = EXCLUDED.body,
+            timestamp = EXCLUDED.timestamp,
+            duration_seconds = EXCLUDED.duration_seconds,
+            contact_id = EXCLUDED.contact_id,
+            deal_id = EXCLUDED.deal_id,
+            updated_at = NOW()`,
+          [
+            activity.workspace_id, activity.source, activity.source_id, JSON.stringify(activity.source_data),
+            activity.activity_type, activity.subject, activity.body, activity.timestamp,
+            activity.duration_seconds, contactId, dealId,
+          ]
+        );
+        stored++;
+      }
+
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    return stored;
+  });
 }
 
 export async function populateDealContactsFromSourceData(workspaceId: string): Promise<number> {
@@ -605,8 +679,38 @@ export async function initialSync(
 
     console.log(`[HubSpot Sync] Resolved FKs: ${accountIdMap.size} accounts, ${contactIdMap.size} contacts`);
 
-    totalStored = dealsStored + contactsStored + accountsStored;
-    console.log(`[HubSpot Sync] Stored ${dealsStored} deals, ${contactsStored} contacts, ${accountsStored} accounts`);
+    // Fetch and transform activities (must be after contacts and deals for FK resolution)
+    let rawEngagements: any[] = [];
+    try {
+      rawEngagements = await client.getAllEngagements();
+      console.log(`[HubSpot Sync] Fetched ${rawEngagements.length} engagements`);
+    } catch (err: any) {
+      errors.push(`Failed to fetch engagements: ${err.message}`);
+    }
+
+    const activityTransformResult = transformWithErrorCapture(
+      rawEngagements,
+      (e) => transformEngagement(e, workspaceId),
+      'HubSpot Engagements',
+      (e) => e.id
+    );
+
+    if (activityTransformResult.failed.length > 0) {
+      errors.push(`Activity transform failures: ${activityTransformResult.failed.length} records`);
+    }
+
+    const normalizedActivities = activityTransformResult.succeeded;
+
+    const activitiesStored = await upsertActivities(normalizedActivities).catch(err => {
+      console.error(`[HubSpot Sync] Failed to store activities:`, err.message);
+      errors.push(`Failed to store activities: ${err.message}`);
+      return 0;
+    });
+
+    console.log(`[HubSpot Sync] Stored ${activitiesStored} activities`);
+
+    totalStored = dealsStored + contactsStored + accountsStored + activitiesStored;
+    console.log(`[HubSpot Sync] Stored ${dealsStored} deals, ${contactsStored} contacts, ${accountsStored} accounts, ${activitiesStored} activities`);
 
     await updateConnectionSyncStatus(workspaceId, 'hubspot', totalStored, errors.length > 0 ? errors[0] : null);
 
@@ -769,7 +873,38 @@ export async function incrementalSync(
 
     await populateDealContactsFromAssociations(workspaceId, normalizedDeals, contactIdMap);
 
-    totalStored = dealsStored + contactsStored + accountsStored;
+    // Fetch activities updated since last sync
+    const lastSyncTimestamp = Math.floor(since.getTime());
+    let rawEngagements: any[] = [];
+    try {
+      rawEngagements = await hubspotClient.getAllEngagements(lastSyncTimestamp);
+      console.log(`[HubSpot Incremental Sync] Fetched ${rawEngagements.length} updated engagements`);
+    } catch (err: any) {
+      errors.push(`Failed to fetch engagements: ${err.message}`);
+    }
+
+    const activityTransformResult = transformWithErrorCapture(
+      rawEngagements,
+      (e) => transformEngagement(e, workspaceId),
+      'HubSpot Engagements',
+      (e) => e.id
+    );
+
+    if (activityTransformResult.failed.length > 0) {
+      errors.push(`Activity transform failures: ${activityTransformResult.failed.length} records`);
+    }
+
+    const normalizedActivities = activityTransformResult.succeeded;
+
+    const activitiesStored = await upsertActivities(normalizedActivities).catch(err => {
+      console.error(`[HubSpot Incremental Sync] Failed to store activities:`, err.message);
+      errors.push(`Failed to store activities: ${err.message}`);
+      return 0;
+    });
+
+    console.log(`[HubSpot Incremental Sync] Stored ${activitiesStored} activities`);
+
+    totalStored = dealsStored + contactsStored + accountsStored + activitiesStored;
     await updateConnectionSyncStatus(workspaceId, 'hubspot', totalStored, errors.length > 0 ? errors[0] : null);
 
   } catch (error) {

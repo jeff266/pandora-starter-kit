@@ -442,3 +442,72 @@ export function transformCompany(company: HubSpotCompany, workspaceId: string): 
     custom_fields: extractCustomFields(props, CORE_COMPANY_FIELDS),
   };
 }
+
+export interface NormalizedActivity {
+  workspace_id: string;
+  source: string;
+  source_id: string;
+  source_data: any;
+  activity_type: 'email' | 'call' | 'meeting' | 'note';
+  subject: string | null;
+  body: string | null;
+  timestamp: Date | null;
+  duration_seconds: number | null;
+  contact_source_id: string | null;
+  deal_source_id: string | null;
+}
+
+export function transformEngagement(engagement: any, workspaceId: string): NormalizedActivity {
+  const props = engagement.properties || {};
+  const type = engagement.engagement_type as 'email' | 'call' | 'meeting' | 'note';
+
+  // Extract subject and body based on engagement type
+  let subject: string | null = null;
+  let body: string | null = null;
+  let duration: number | null = null;
+
+  switch (type) {
+    case 'email':
+      subject = sanitizeText(props.hs_email_subject);
+      body = sanitizeText(props.hs_email_text);
+      break;
+    case 'call':
+      subject = sanitizeText(props.hs_call_title);
+      body = sanitizeText(props.hs_call_body);
+      duration = sanitizeNumber(props.hs_call_duration);
+      break;
+    case 'meeting':
+      subject = sanitizeText(props.hs_meeting_title);
+      body = sanitizeText(props.hs_meeting_body);
+      break;
+    case 'note':
+      subject = null;
+      body = sanitizeText(props.hs_note_body);
+      break;
+  }
+
+  // Extract first associated contact and deal (HubSpot engagements can have multiple)
+  const contactId = engagement.associations?.contacts?.results?.[0]?.id || null;
+  const dealId = engagement.associations?.deals?.results?.[0]?.id || null;
+
+  // Parse timestamp
+  const timestamp = parseDate(sanitizeDate(props.hs_timestamp));
+
+  return {
+    workspace_id: workspaceId,
+    source: 'hubspot',
+    source_id: engagement.id,
+    source_data: {
+      properties: props,
+      associations: engagement.associations,
+      type: type,
+    },
+    activity_type: type,
+    subject,
+    body,
+    timestamp,
+    duration_seconds: duration,
+    contact_source_id: contactId,
+    deal_source_id: dealId,
+  };
+}

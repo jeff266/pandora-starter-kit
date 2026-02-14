@@ -1069,6 +1069,19 @@ export function formatICPDiscovery(result: SkillResult): SlackBlock[] {
     });
   }
 
+  // Add Scoring Weights section
+  const weightsText = formatScoringWeights(result.stepData);
+  if (weightsText) {
+    blocks.push({ type: 'divider' });
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: weightsText,
+      },
+    });
+  }
+
   blocks.push({ type: 'divider' });
 
   if (sections.summary) {
@@ -1129,6 +1142,68 @@ export function formatICPDiscovery(result: SkillResult): SlackBlock[] {
   });
 
   return blocks;
+}
+
+function formatScoringWeights(stepData: any): string | null {
+  if (!stepData?.discovery_result?.scoringWeights) return null;
+
+  const weights = stepData.discovery_result.scoringWeights;
+  const lines: string[] = ['*⚖️ Lead Scoring Weights*', '_These weights are now applied to all open deals:_', ''];
+
+  // Persona weights
+  if (weights.personas && Object.keys(weights.personas).length > 0) {
+    lines.push('*Top Personas:*');
+    const topPersonas = Object.entries(weights.personas)
+      .sort(([, a]: any, [, b]: any) => (b as number) - (a as number))
+      .slice(0, 5);
+
+    for (const [persona, points] of topPersonas) {
+      lines.push(`• ${persona}: *+${points} points*`);
+    }
+    lines.push('');
+  }
+
+  // Industry weights
+  if (weights.industries && Object.keys(weights.industries).length > 0) {
+    lines.push('*Top Industries:*');
+    const topIndustries = Object.entries(weights.industries)
+      .sort(([, a]: any, [, b]: any) => (b as number) - (a as number))
+      .slice(0, 5);
+
+    for (const [industry, points] of topIndustries) {
+      lines.push(`• ${industry}: *+${points} points*`);
+    }
+    lines.push('');
+  }
+
+  // Lead source weights
+  if (weights.leadSources && Object.keys(weights.leadSources).length > 0) {
+    lines.push('*Lead Sources:*');
+    const topSources = Object.entries(weights.leadSources)
+      .sort(([, a]: any, [, b]: any) => (b as number) - (a as number))
+      .slice(0, 3);
+
+    for (const [source, points] of topSources) {
+      lines.push(`• ${source}: *+${points} points*`);
+    }
+    lines.push('');
+  }
+
+  // Committee bonuses (if available)
+  const discoveryResult = stepData.discovery_result;
+  if (discoveryResult?.committees && discoveryResult.committees.length > 0) {
+    const topCommittee = discoveryResult.committees[0];
+    if (topCommittee.personaNames && topCommittee.lift) {
+      const bonus = Math.round(topCommittee.lift * 5);
+      lines.push('*Ideal Committee Bonus:*');
+      lines.push(`• ${topCommittee.personaNames.join(' + ')}: *+${bonus} points* (${Math.round(topCommittee.winRate * 100)}% win rate)`);
+      lines.push('');
+    }
+  }
+
+  lines.push(`_Profile ID: \`${discoveryResult?.profileId || 'pending'}\`_`);
+
+  return lines.join('\n');
 }
 
 function parseICPReportSections(report: string): Partial<ICPReportSections> {
