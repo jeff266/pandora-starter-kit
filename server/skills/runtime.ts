@@ -106,7 +106,13 @@ export class SkillRuntime {
       stepResults: {},
       metadata: {
         startedAt: new Date(),
-        tokenUsage: { compute: 0, deepseek: 0, claude: 0 },
+        tokenUsage: {
+          compute: 0,
+          deepseek: 0,
+          claude: 0,
+          claudeCacheCreation: 0,
+          claudeCacheRead: 0,
+        },
         toolCallCount: 0,
         errors: [],
       },
@@ -312,8 +318,7 @@ export class SkillRuntime {
         temperature: capability === 'reason' ? 0.7 : 0.1,
       });
 
-      const totalTokens = response.usage.input + response.usage.output;
-      this.trackTokens(context, step.tier, totalTokens);
+      this.trackTokens(context, step.tier, response.usage);
 
       if (step.deepseekSchema && response.content) {
         try {
@@ -415,8 +420,7 @@ export class SkillRuntime {
         temperature: capability === 'reason' ? 0.7 : 0.1,
       });
 
-      const totalTokens = response.usage.input + response.usage.output;
-      this.trackTokens(context, tier, totalTokens);
+      this.trackTokens(context, tier, response.usage);
 
       if (response.stopReason === 'end_turn' || response.stopReason === 'max_tokens') {
         return response.content;
@@ -463,15 +467,22 @@ export class SkillRuntime {
       maxTokens: 4096,
       temperature: capability === 'reason' ? 0.7 : 0.1,
     });
-    this.trackTokens(context, tier, finalResponse.usage.input + finalResponse.usage.output);
+    this.trackTokens(context, tier, finalResponse.usage);
     return finalResponse.content;
   }
 
-  private trackTokens(context: SkillExecutionContext, tier: string, tokens: number): void {
+  private trackTokens(
+    context: SkillExecutionContext,
+    tier: string,
+    usage: { input: number; output: number; cacheCreation?: number; cacheRead?: number }
+  ): void {
+    const totalTokens = usage.input + usage.output;
     if (tier === 'claude') {
-      context.metadata.tokenUsage.claude += tokens;
+      context.metadata.tokenUsage.claude += totalTokens;
+      context.metadata.tokenUsage.claudeCacheCreation += usage.cacheCreation || 0;
+      context.metadata.tokenUsage.claudeCacheRead += usage.cacheRead || 0;
     } else if (tier === 'deepseek') {
-      context.metadata.tokenUsage.deepseek += tokens;
+      context.metadata.tokenUsage.deepseek += totalTokens;
     }
   }
 

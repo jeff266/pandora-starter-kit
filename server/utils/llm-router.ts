@@ -23,7 +23,12 @@ export interface LLMResponse {
   content: string;
   toolCalls?: ToolCall[];
   stopReason: 'end_turn' | 'tool_use' | 'max_tokens';
-  usage: { input: number; output: number };
+  usage: {
+    input: number;
+    output: number;
+    cacheCreation?: number;
+    cacheRead?: number;
+  };
 }
 
 export interface LLMCallOptions {
@@ -268,6 +273,8 @@ function parseAnthropicResponse(response: any): LLMResponse {
     usage: {
       input: response.usage?.input_tokens || 0,
       output: response.usage?.output_tokens || 0,
+      cacheCreation: response.usage?.cache_creation_input_tokens || 0,
+      cacheRead: response.usage?.cache_read_input_tokens || 0,
     },
   };
 }
@@ -332,7 +339,19 @@ async function callAnthropic(
   };
 
   if (options.systemPrompt) {
-    requestBody.system = options.systemPrompt;
+    // Enable prompt caching for system prompts ≥1024 tokens
+    // System prompts get cached for 5 minutes with ephemeral cache_control
+    if (options.systemPrompt.length >= 1024) {
+      requestBody.system = [
+        {
+          type: 'text',
+          text: options.systemPrompt,
+          cache_control: { type: 'ephemeral' }
+        }
+      ];
+    } else {
+      requestBody.system = options.systemPrompt;
+    }
   }
 
   if (options.tools && options.tools.length > 0) {
@@ -553,12 +572,77 @@ export async function updateLLMConfig(
   clearConfigCache(workspaceId);
 }
 
+// Claude pricing per 1M tokens (MTok)
+const CLAUDE_PRICING = {
+  input: 3.00,            // $3 per MTok input
+  output: 15.00,          // $15 per MTok output
+  cacheWrite: 3.75,       // $3.75 per MTok cache write (25% premium)
+  cacheRead: 0.30,        // $0.30 per MTok cache read (90% discount)
+};
+
+const DEEPSEEK_PRICING = {
+  input: 0.14,            // $0.14 per MTok
+  output: 0.28,           // $0.28 per MTok
+};
+
+export function estimateCost(usage: {
+  claude?: number;
+  deepseek?: number;
+  claudeCacheCreation?: number;
+  claudeCacheRead?: number;
+  claudeOutput?: number;
+  deepseekOutput?: number;
+}): number {
+  let cost = 0;
+
+  // Claude costs with caching
+  if (usage.claude) {
+    // Assume 40% input, 60% output split if not specified
+    const inputTokens = usage.claudeOutput
+      ? (usage.claude - usage.claudeOutput)
+      : usage.claude * 0.4;
+    const outputTokens = usage.claudeOutput || usage.claude * 0.6;
+
+    cost += (inputTokens / 1_000_000) * CLAUDE_PRICING.input;
+    cost += (outputTokens / 1_000_000) * CLAUDE_PRICING.output;
+  }
+
+  // Cache creation cost (25% premium over normal input)
+  if (usage.claudeCacheCreation) {
+    cost += (usage.claudeCacheCreation / 1_000_000) * CLAUDE_PRICING.cacheWrite;
+  }
+
+  // Cache read cost (90% discount)
+  if (usage.claudeCacheRead) {
+    cost += (usage.claudeCacheRead / 1_000_000) * CLAUDE_PRICING.cacheRead;
+  }
+
+  // DeepSeek costs
+  if (usage.deepseek) {
+    const inputTokens = usage.deepseekOutput
+      ? (usage.deepseek - usage.deepseekOutput)
+      : usage.deepseek * 0.4;
+    const outputTokens = usage.deepseekOutput || usage.deepseek * 0.6;
+
+    cost += (inputTokens / 1_000_000) * DEEPSEEK_PRICING.input;
+    cost += (outputTokens / 1_000_000) * DEEPSEEK_PRICING.output;
+  }
+
+  return cost;
+}
+
 export async function getLLMUsage(workspaceId: string): Promise<{
   tokensUsedThisMonth: number;
   budget: number;
   remaining: number;
   resetAt: string | null;
   perSkill: Array<{ skillId: string; totalTokens: number; runCount: number }>;
+  caching?: {
+    totalCacheReads: number;
+    totalCacheWrites: number;
+    estimatedSavings: number;
+    cacheHitRate: number;
+  };
 }> {
   const config = await loadConfig(workspaceId);
 
@@ -580,6 +664,31 @@ export async function getLLMUsage(workspaceId: string): Promise<{
     [workspaceId]
   );
 
+  // Calculate cache statistics
+  const cacheStats = await query<{
+    total_cache_reads: string;
+    total_cache_writes: string;
+    total_claude_tokens: string;
+  }>(
+    `SELECT
+      COALESCE(SUM((token_usage->>'claudeCacheRead')::int), 0) AS total_cache_reads,
+      COALESCE(SUM((token_usage->>'claudeCacheCreation')::int), 0) AS total_cache_writes,
+      COALESCE(SUM((token_usage->>'claude')::int), 0) AS total_claude_tokens
+     FROM skill_runs
+     WHERE workspace_id = $1
+       AND created_at >= date_trunc('month', NOW())
+       AND status = 'completed'`,
+    [workspaceId]
+  );
+
+  const cacheReads = parseInt(cacheStats.rows[0]?.total_cache_reads || '0', 10);
+  const cacheWrites = parseInt(cacheStats.rows[0]?.total_cache_writes || '0', 10);
+  const claudeTokens = parseInt(cacheStats.rows[0]?.total_claude_tokens || '0', 10);
+
+  // Estimate savings: cache reads would have cost 10x more without caching
+  const cacheSavings = (cacheReads / 1_000_000) * (CLAUDE_PRICING.input - CLAUDE_PRICING.cacheRead);
+  const cacheHitRate = claudeTokens > 0 ? cacheReads / claudeTokens : 0;
+
   return {
     tokensUsedThisMonth: config.tokens_used_this_month,
     budget: config.default_token_budget,
@@ -590,5 +699,11 @@ export async function getLLMUsage(workspaceId: string): Promise<{
       totalTokens: parseInt(r.total_tokens, 10) || 0,
       runCount: parseInt(r.run_count, 10) || 0,
     })),
+    caching: cacheReads > 0 || cacheWrites > 0 ? {
+      totalCacheReads: cacheReads,
+      totalCacheWrites: cacheWrites,
+      estimatedSavings: cacheSavings,
+      cacheHitRate,
+    } : undefined,
   };
 }
