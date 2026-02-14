@@ -58,6 +58,8 @@ import { resolveContactRoles, type ResolutionResult } from './compute/contact-ro
 import { discoverICP, type ICPDiscoveryResult } from './compute/icp-discovery.js';
 import { prepareBowtieSummary, type BowtieSummary } from './compute/bowtie-analysis.js';
 import { preparePipelineGoalsSummary } from './compute/pipeline-goals.js';
+import { prepareProjectRecap } from './compute/project-recap.js';
+import { prepareStrategyInsights } from './compute/strategy-insights.js';
 import { query } from '../db.js';
 import {
   findConversationsWithoutDeals,
@@ -3657,6 +3659,50 @@ const preparePipelineGoalsSummaryTool: ToolDefinition = {
 };
 
 // ============================================================================
+// Project Recap Tools
+// ============================================================================
+
+const prepareProjectRecapTool: ToolDefinition = {
+  name: 'prepareProjectRecap',
+  description: 'Load and format project updates for the Friday recap, including cross-workspace summary',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('prepareProjectRecap', async () => {
+      const result = await prepareProjectRecap(context.workspaceId);
+      console.log(`[ProjectRecap] Loaded project recap (hasUpdates: ${result.hasUpdates})`);
+      return result;
+    }, params);
+  },
+};
+
+// ============================================================================
+// Strategy Insights Tools
+// ============================================================================
+
+const prepareStrategyInsightsTool: ToolDefinition = {
+  name: 'prepareStrategyInsights',
+  description: 'Gather recent skill/agent outputs, cross-workspace metrics, and trend data for strategic analysis',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('prepareStrategyInsights', async () => {
+      const result = await prepareStrategyInsights(context.workspaceId);
+      console.log(`[StrategyInsights] Gathered ${result.recentOutputs.skillCount} skill outputs, ${result.recentOutputs.agentCount} agent outputs`);
+      return result;
+    }, params);
+  },
+};
+
+// ============================================================================
 // Tool Registry
 // ============================================================================
 
@@ -3735,6 +3781,8 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['discoverICP', discoverICPTool],
   ['prepareBowtieSummary', prepareBowtieSummaryTool],
   ['preparePipelineGoalsSummary', preparePipelineGoalsSummaryTool],
+  ['prepareProjectRecap', prepareProjectRecapTool],
+  ['prepareStrategyInsights', prepareStrategyInsightsTool],
 ]);
 
 // ============================================================================

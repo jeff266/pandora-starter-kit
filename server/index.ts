@@ -30,6 +30,7 @@ import dealInsightsRouter from './routes/deal-insights.js';
 import enrichmentRouter from './routes/enrichment.js';
 import tokenUsageRouter from './routes/token-usage.js';
 import workflowsRouter, { setWorkflowService } from './routes/workflows.js';
+import projectUpdatesRouter from './routes/project-updates.js';
 import { ActivePiecesClient } from './workflows/ap-client.js';
 import { WorkflowService } from './workflows/workflow-service.js';
 import { seedTemplates } from './workflows/template-seed.js';
@@ -93,6 +94,7 @@ app.use(dealInsightsRouter);
 app.use("/api/workspaces", enrichmentRouter);
 app.use("/api/workspaces", tokenUsageRouter);
 app.use("/api/workspaces", workflowsRouter);
+app.use("/api/workspaces", projectUpdatesRouter);
 app.use("/api", agentsGlobalRouter);
 app.use("/api/workspaces", agentsWorkspaceRouter);
 
