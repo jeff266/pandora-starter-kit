@@ -1,0 +1,330 @@
+ Test 1: Workspace Configuration Layer (NEW - Just Built)             
+                                                                       
+  1A. Get Default Config                                               
+                                                                       
+  # Get workspace config for Frontera (should return defaults)         
+  curl http://localhost:3000/api/workspaces/4160191d-73bc-414b-97dd-5a1
+  853190378/workspace-config | jq                                      
+                                                                       
+  Expected:                                                            
+  {                                                                    
+    "success": true,                                                   
+    "config": {                                                        
+      "workspace_id": "4160191d-73bc-414b-97dd-5a1853190378",          
+      "pipelines": [{ "id": "default", "name": "All Deals",            
+  "coverage_target": 3.0 }],                                           
+      "win_rate": { "won_values": ["closed_won"], "lookback_months": 6 
+  },                                                                   
+      "thresholds": { "stale_deal_days": 14, "coverage_target": 3.0 }  
+    },                                                                 
+    "is_default": true                                                 
+  }                                                                    
+                                                                       
+  1B. Update Config (Custom Coverage Target)                           
+                                                                       
+  curl -X PUT http://localhost:3000/api/workspaces/4160191d-73bc-414b-9
+  7dd-5a1853190378/workspace-config \                                  
+    -H "Content-Type: application/json" \                              
+    -d '{                                                              
+      "pipelines": [{                                                  
+        "id": "new_business",                                          
+        "name": "New Business",                                        
+        "type": "new_business",                                        
+        "filter": { "field": "pipeline", "values": ["default"] },      
+        "coverage_target": 4.0,                                        
+        "stage_probabilities": {},                                     
+        "loss_values": ["closed_lost"],                                
+        "included_in_default_scope": true                              
+      }],                                                              
+      "win_rate": {                                                    
+        "won_values": ["closed_won"],                                  
+        "lost_values": ["closed_lost"],                                
+        "excluded_values": [],                                         
+        "lookback_months": 12                                          
+      },                                                               
+      "thresholds": {                                                  
+        "stale_deal_days": 21,                                         
+        "critical_stale_days": 45,                                     
+        "coverage_target": 4.0,                                        
+        "minimum_contacts_per_deal": 3                                 
+      }                                                                
+    }' | jq                                                            
+                                                                       
+  Expected: "success": true, "confirmed": true                         
+                                                                       
+  1C. Test Skill Uses Config                                           
+                                                                       
+  # Run pipeline-coverage skill (should use coverage_target: 4.0 now,  
+  not 3.0)                                                             
+  curl -X POST http://localhost:3000/api/skills/pipeline-coverage/run \
+    -H "Content-Type: application/json" \                              
+    -d '{"workspaceId": "4160191d-73bc-414b-97dd-5a1853190378"}' | jq  
+  .result                                                              
+                                                                       
+  Check: Look for coverage target of 4.0 in the output, stale threshold
+   of 21 days                                                          
+                                                                       
+  ---                                                                  
+  Test 2: Custom Funnel Definitions                                    
+                                                                       
+  2A. Check Migrated Funnel                                            
+                                                                       
+  # Check if Frontera's bowtie_discovery was migrated                  
+  curl http://localhost:3000/api/workspaces/4160191d-73bc-414b-97dd-5a1
+  853190378/funnel | jq                                                
+                                                                       
+  Expected: FunnelDefinition with status "discovered" or null if no    
+  bowtie existed                                                       
+                                                                       
+  2B. List Templates                                                   
+                                                                       
+  curl http://localhost:3000/api/funnel/templates | jq                 
+                                                                       
+  Expected: 5 templates (classic_b2b, plg, enterprise, velocity,       
+  channel)                                                             
+                                                                       
+  2C. Run AI Discovery                                                 
+                                                                       
+  curl -X POST http://localhost:3000/api/workspaces/4160191d-73bc-414b-
+  97dd-5a1853190378/funnel/discover | jq                               
+                                                                       
+  Check:                                                               
+  - Which template recommended?                                        
+  - Confidence score?                                                  
+  - Stage mappings?                                                    
+                                                                       
+  2D. Run Bowtie-Analysis with Dynamic Funnel                          
+                                                                       
+  curl -X POST http://localhost:3000/api/skills/bowtie-analysis/run \  
+    -H "Content-Type: application/json" \                              
+    -d '{"workspaceId": "4160191d-73bc-414b-97dd-5a1853190378"}' | jq  
+  .result                                                              
+                                                                       
+  Check: Output should use workspace's actual stage names (not         
+  hardcoded Lead/MQL/SQL)                                              
+                                                                       
+  ---                                                                  
+  Test 3: HubSpot Stage History Backfill                               
+                                                                       
+  3A. Check Current State                                              
+                                                                       
+  # Check deals with zero days_in_stage (before backfill)              
+  curl "http://localhost:3000/api/workspaces/4160191d-73bc-414b-97dd-5a
+  1853190378/deals?limit=10" | jq '.[] | {name, stage, days_in_stage,  
+  stage_changed_at}'                                                   
+                                                                       
+  Expected: Most deals have days_in_stage: 0-3                         
+                                                                       
+  3B. Trigger Backfill                                                 
+                                                                       
+  curl -X POST http://localhost:3000/api/workspaces/4160191d-73bc-414b-
+  97dd-5a1853190378/connectors/hubspot/backfill-stage-history | jq     
+                                                                       
+  Expected: { "message": "Backfill started" }                          
+                                                                       
+  3C. Monitor Progress                                                 
+                                                                       
+  # Wait 30 seconds, then check stats                                  
+  sleep 30                                                             
+  curl http://localhost:3000/api/workspaces/4160191d-73bc-414b-97dd-5a1
+  853190378/stage-history/stats | jq                                   
+                                                                       
+  Expected:                                                            
+  {                                                                    
+    "totalDeals": 391,                                                 
+    "dealsWithHistory": 300,                                           
+    "totalHistoryEntries": 1200,                                       
+    "avgHistoryEntriesPerDeal": 4.0                                    
+  }                                                                    
+                                                                       
+  3D. Verify Deal Timeline                                             
+                                                                       
+  # Pick a deal ID from previous query                                 
+  curl "http://localhost:3000/api/workspaces/4160191d-73bc-414b-97dd-5a
+  1853190378/deals/DEAL_ID/stage-history" | jq                         
+                                                                       
+  Expected: Complete timeline showing stage progression                
+                                                                       
+  ---                                                                  
+  Test 4: Contact Role Resolution                                      
+                                                                       
+  4A. Check Current Contact Roles                                      
+                                                                       
+  # Query current state (many should have role = null)                 
+  curl "http://localhost:3000/api/workspaces/4160191d-73bc-414b-97dd-5a
+  1853190378/contacts?limit=20" | jq '.[] | {name, title, buying_role: 
+  .custom_fields.buying_role}'                                         
+                                                                       
+  Expected: Most have buying_role: null                                
+                                                                       
+  4B. Trigger Role Resolution                                          
+                                                                       
+  curl -X POST http://localhost:3000/api/workspaces/4160191d-73bc-414b-
+  97dd-5a1853190378/connectors/hubspot/resolve-contact-roles | jq      
+                                                                       
+  Expected:                                                            
+  {                                                                    
+    "success": true,                                                   
+    "processed": 150,                                                  
+    "resolved": 85,                                                    
+    "confidence_breakdown": {                                          
+      "high": 40,                                                      
+      "medium": 30,                                                    
+      "low": 15                                                        
+    }                                                                  
+  }                                                                    
+                                                                       
+  4C. Verify Role Inference                                            
+                                                                       
+  # Check deal_contacts table                                          
+  # (You'll need to query the database directly or build an endpoint)  
+                                                                       
+  SQL to run in Replit database:                                       
+  SELECT                                                               
+    d.name as deal_name,                                               
+    c.first_name || ' ' || c.last_name as contact_name,                
+    c.title,                                                           
+    dc.buying_role,                                                    
+    dc.role_confidence,                                                
+    dc.role_source                                                     
+  FROM deal_contacts dc                                                
+  JOIN deals d ON d.id = dc.deal_id                                    
+  JOIN contacts c ON c.id = dc.contact_id                              
+  WHERE d.workspace_id = '4160191d-73bc-414b-97dd-5a1853190378'        
+    AND dc.role_source = 'inferred'                                    
+  ORDER BY d.name, dc.role_confidence DESC                             
+  LIMIT 20;                                                            
+                                                                       
+  Expected: Roles inferred from titles (VP → decision_maker, Director →
+   influencer, etc.)                                                   
+                                                                       
+  ---                                                                  
+  Test 5: Deal-Risk-Review Latency Fix                                 
+                                                                       
+  5A. Baseline Test (Should be <40s now)                               
+                                                                       
+  time curl -X POST                                                    
+  http://localhost:3000/api/skills/deal-risk-review/run \              
+    -H "Content-Type: application/json" \                              
+    -d '{"workspaceId": "4160191d-73bc-414b-97dd-5a1853190378"}' | jq  
+                                                                       
+  Check:                                                               
+  - Duration in output (should be <40s)                                
+  - Only 10 deals analyzed (not 20)                                    
+  - maxTokens: 2500 in logs                                            
+                                                                       
+  ---                                                                  
+  Test 6: Skill Output Caching                                         
+                                                                       
+  6A. Run Pipeline-Goals (First Time - Fresh)                          
+                                                                       
+  curl -X POST http://localhost:3000/api/skills/pipeline-goals/run \   
+    -H "Content-Type: application/json" \                              
+    -d '{"workspaceId": "4160191d-73bc-414b-97dd-5a1853190378"}' | jq  
+  .metadata                                                            
+                                                                       
+  Check logs for: [Skill pipeline-goals] Executing (no cache)          
+                                                                       
+  Note duration: e.g., completed in 12000ms                            
+                                                                       
+  6B. Run Pipeline-Goals Again (Should Cache)                          
+                                                                       
+  # Immediately run again                                              
+  curl -X POST http://localhost:3000/api/skills/pipeline-goals/run \   
+    -H "Content-Type: application/json" \                              
+    -d '{"workspaceId": "4160191d-73bc-414b-97dd-5a1853190378"}' | jq  
+  .metadata                                                            
+                                                                       
+  Check logs for: [Skill pipeline-goals] Output reused from cache      
+  (30min TTL)                                                          
+                                                                       
+  Expected: Near-instant response (<100ms)                             
+                                                                       
+  6C. Run Multiple Agents (Cache Test)                                 
+                                                                       
+  # Run 3 agents that all use pipeline-goals skill                     
+  for agent in pipeline-state forecast-call-prep weekly-recap; do      
+    echo "Running agent: $agent"                                       
+    curl -X POST http://localhost:3000/api/agents/$agent/run \         
+      -H "Content-Type: application/json" \                            
+      -d '{"workspaceId": "4160191d-73bc-414b-97dd-5a1853190378"}' | jq
+   .status                                                             
+    sleep 2                                                            
+  done                                                                 
+                                                                       
+  Check logs:                                                          
+  - First agent: Fresh execution                                       
+  - Second agent: Cache hit                                            
+  - Third agent: Cache hit                                             
+                                                                       
+  6D. Query Cache Stats                                                
+                                                                       
+  -- Run in Replit database                                            
+  SELECT                                                               
+    skill_id,                                                          
+    COUNT(*) FILTER (WHERE status = 'completed') as fresh_runs,        
+    COUNT(*) FILTER (WHERE status = 'cached') as cache_hits,           
+    AVG(duration_ms) FILTER (WHERE status = 'completed') as            
+  avg_fresh_ms,                                                        
+    AVG(duration_ms) FILTER (WHERE status = 'cached') as avg_cached_ms 
+  FROM agent_skill_results                                             
+  WHERE created_at >= NOW() - INTERVAL '1 hour'                        
+  GROUP BY skill_id;                                                   
+                                                                       
+  Expected: Cache hits should be ~100x faster than fresh runs          
+                                                                       
+  ---                                                                  
+  Summary Checklist                                                    
+                                                                       
+  After running all tests, verify:                                     
+                                                                       
+  - Workspace Config: Coverage target changed from 3.0 → 4.0           
+  - Workspace Config: Stale threshold changed from 14 → 21 days        
+  - Workspace Config: Minimum contacts changed from 2 → 3              
+  - Funnel: Bowtie-analysis uses workspace-specific stage names        
+  - Funnel: AI discovery recommends appropriate template               
+  - Stage History: days_in_stage shows real durations (not 0)          
+  - Stage History: Deal timelines show complete progression            
+  - Contact Roles: 50%+ contacts have inferred roles                   
+  - Contact Roles: Confidence scores 0.3-0.9                           
+  - Deal-Risk: Completes in <40s (was 68s)                             
+  - Deal-Risk: Analyzes 10 deals (was 20)                              
+  - Cache: Second run of same skill is near-instant                    
+  - Cache: Multiple agents share cached skill output                   
+                                                                       
+  ---                                                                  
+  Quick Test Script                                                    
+                                                                       
+  Save this as test-all.sh:                                            
+                                                                       
+  #!/bin/bash                                                          
+  WORKSPACE_ID="4160191d-73bc-414b-97dd-5a1853190378"                  
+  BASE_URL="http://localhost:3000"                                     
+                                                                       
+  echo "=== Test 1: Workspace Config ==="                              
+  curl -s "$BASE_URL/api/workspaces/$WORKSPACE_ID/workspace-config" |  
+  jq .is_default                                                       
+                                                                       
+  echo -e "\n=== Test 2: Funnel Templates ==="                         
+  curl -s "$BASE_URL/api/funnel/templates" | jq 'length'               
+                                                                       
+  echo -e "\n=== Test 3: Stage History Stats ==="                      
+  curl -s "$BASE_URL/api/workspaces/$WORKSPACE_ID/stage-history/stats" 
+  | jq .dealsWithHistory                                               
+                                                                       
+  echo -e "\n=== Test 4: Run Bowtie Analysis ==="                      
+  curl -s -X POST "$BASE_URL/api/skills/bowtie-analysis/run" \         
+    -H "Content-Type: application/json" \                              
+    -d "{\"workspaceId\": \"$WORKSPACE_ID\"}" | jq .status             
+                                                                       
+  echo -e "\n=== Test 5: Cache Test (2 runs) ==="                      
+  time curl -s -X POST "$BASE_URL/api/skills/pipeline-goals/run" \     
+    -H "Content-Type: application/json" \                              
+    -d "{\"workspaceId\": \"$WORKSPACE_ID\"}" > /dev/null              
+  time curl -s -X POST "$BASE_URL/api/skills/pipeline-goals/run" \     
+    -H "Content-Type: application/json" \                              
+    -d "{\"workspaceId\": \"$WORKSPACE_ID\"}" > /dev/null              
+                                                                       
+  echo -e "\nAll tests complete!"                                      
+                                                                       
+  Run with: bash test-all.sh 
