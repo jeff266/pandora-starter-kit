@@ -1751,6 +1751,105 @@ Required weekly pipeline gen: ${weeklyGenStr}`;
         };
       }
 
+      if (skillId === 'deal-risk-review') {
+        const openDeals = (context.stepResults as any).open_deals;
+        const callSignals = (context.stepResults as any).call_signals;
+
+        if (!openDeals?.deals || openDeals.deals.length === 0) {
+          return { dealProfiles: 'No open deals found.', signalsSummary: 'N/A' };
+        }
+
+        const deals = openDeals.deals.slice(0, 20);
+        const dealIds = deals.map((d: any) => d.id);
+
+        const activitiesResult = await query(
+          `SELECT deal_id, activity_type, COUNT(*)::int as cnt,
+                  MAX(activity_date) as last_date
+           FROM activities
+           WHERE workspace_id = $1 AND deal_id = ANY($2)
+           GROUP BY deal_id, activity_type
+           ORDER BY deal_id, last_date DESC`,
+          [context.workspaceId, dealIds]
+        );
+
+        const actByDeal = new Map<string, { types: string; lastActivity: string }>();
+        const actMap = new Map<string, { types: string[]; lastDate: string }>();
+        for (const row of activitiesResult.rows) {
+          const key = row.deal_id;
+          if (!actMap.has(key)) actMap.set(key, { types: [], lastDate: row.last_date });
+          const entry = actMap.get(key)!;
+          entry.types.push(`${row.activity_type}:${row.cnt}`);
+          if (new Date(row.last_date) > new Date(entry.lastDate)) entry.lastDate = row.last_date;
+        }
+        for (const [did, data] of actMap) {
+          actByDeal.set(did, { types: data.types.join(', '), lastActivity: data.lastDate });
+        }
+
+        const contactsResult = await query(
+          `SELECT c.deal_id, c.name, c.title, c.email
+           FROM contacts c
+           WHERE c.workspace_id = $1 AND c.deal_id = ANY($2)
+           ORDER BY c.deal_id`,
+          [context.workspaceId, dealIds]
+        );
+
+        const contactsByDeal = new Map<string, string[]>();
+        for (const row of contactsResult.rows) {
+          const key = row.deal_id;
+          if (!contactsByDeal.has(key)) contactsByDeal.set(key, []);
+          contactsByDeal.get(key)!.push(`${row.name || 'Unknown'}${row.title ? ' (' + row.title + ')' : ''}`);
+        }
+
+        const profiles = deals.map((d: any) => {
+          const act = actByDeal.get(d.id);
+          const contacts = contactsByDeal.get(d.id) || [];
+          const daysSinceActivity = act?.lastActivity
+            ? Math.floor((Date.now() - new Date(act.lastActivity).getTime()) / 86400000)
+            : null;
+          const daysSinceUpdate = d.updated_at
+            ? Math.floor((Date.now() - new Date(d.updated_at).getTime()) / 86400000)
+            : null;
+
+          return `DEAL: ${d.name} | $${(d.amount || 0).toLocaleString()} | Stage: ${d.stage_normalized || d.stage} | Close: ${d.close_date || 'N/A'} | Owner: ${d.owner_name || 'N/A'}
+  Activity: ${act ? `${act.types} | Last: ${daysSinceActivity}d ago` : `No activities | Updated: ${daysSinceUpdate !== null ? daysSinceUpdate + 'd ago' : 'N/A'}`}
+  Contacts (${contacts.length}): ${contacts.length > 0 ? contacts.slice(0, 5).join('; ') : 'None'}${contacts.length > 5 ? ` +${contacts.length - 5} more` : ''}
+  Single-threaded: ${contacts.length <= 1 ? 'YES' : 'No'}`;
+        });
+
+        let signalsSummary = 'No call signals available.';
+        if (Array.isArray(callSignals) && callSignals.length > 0) {
+          const byDeal = new Map<string, string[]>();
+          for (const s of callSignals) {
+            const key = s.dealId || 'unlinked';
+            if (!byDeal.has(key)) byDeal.set(key, []);
+            byDeal.get(key)!.push(`[${s.severity}] ${s.type}: ${s.context}`);
+          }
+          const parts: string[] = [];
+          for (const [did, signals] of byDeal) {
+            parts.push(`Deal ${did}: ${signals.join(' | ')}`);
+          }
+          signalsSummary = parts.join('\n');
+        }
+
+        const hasActivities = activitiesResult.rows.length > 0;
+        const hasContacts = contactsResult.rows.length > 0;
+
+        return {
+          dealProfiles: profiles.join('\n\n'),
+          signalsSummary,
+          dealCount: deals.length,
+          contactCoverage: hasContacts
+            ? `${deals.filter((d: any) => (contactsByDeal.get(d.id)?.length || 0) > 1).length}/${deals.length} multi-threaded`
+            : 'No contact data available',
+          dataAvailability: {
+            hasActivities,
+            hasContacts,
+            activityNote: hasActivities ? null : 'Activity data not available. Use deal updated_at as staleness proxy.',
+            contactNote: hasContacts ? null : 'Contact data not available. Skip single-threading analysis.',
+          },
+        };
+      }
+
       return { summary: 'Unsupported skill for summarization' };
     }, params);
   },

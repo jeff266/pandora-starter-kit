@@ -7,6 +7,9 @@
  * Runs: After every sync (post_sync trigger)
  * Output: Structured JSON
  * Tier: Mixed (compute for data, DeepSeek for call extraction, Claude for assessment)
+ *
+ * Token optimization: Uses summarizeForClaude to batch-fetch activities/contacts
+ * for all 20 deals in 2 SQL queries instead of Claude tool calls (83K→<10K tokens).
  */
 
 import type { SkillDefinition } from '../types.js';
@@ -15,23 +18,19 @@ export const dealRiskReviewSkill: SkillDefinition = {
   id: 'deal-risk-review',
   name: 'Deal Risk Assessment',
   description: 'Reviews open deals for risk signals using activity data, call sentiment, stakeholder coverage, and velocity. Flags deals needing attention.',
-  version: '1.0.0',
+  version: '1.1.0',
   category: 'deals',
   tier: 'mixed',
 
   requiredTools: [
     'queryDeals',
-    'getActivityTimeline',
-    'getRecentCallsForDeal',
-    'getContactsForDeal',
-    'getStakeholderMap',
     'queryConversations',
+    'summarizeForClaude',
   ],
 
   requiredContext: ['business_model', 'goals_and_targets', 'definitions'],
 
   steps: [
-    // Step 1: Get top open deals
     {
       id: 'get-open-deals',
       name: 'Get Open Deals',
@@ -46,21 +45,19 @@ export const dealRiskReviewSkill: SkillDefinition = {
       outputKey: 'open_deals',
     },
 
-    // Step 2: Get recent conversations across all deals (returns empty if no conversation data)
     {
       id: 'get-recent-conversations',
       name: 'Get Recent Conversations',
       tier: 'compute',
       computeFn: 'queryConversations',
       computeArgs: {
-        startDate: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(), // Last 14 days
+        startDate: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(),
         hasTranscript: true,
         limit: 50,
       },
       outputKey: 'recent_conversations',
     },
 
-    // Step 3: Extract call signals with DeepSeek (handles empty conversation array)
     {
       id: 'extract-call-signals',
       name: 'Extract Risk Signals from Call Transcripts',
@@ -112,20 +109,22 @@ Return valid JSON array of signals.`,
       outputKey: 'call_signals',
     },
 
-    // Step 4: Assess risk with Claude
+    {
+      id: 'batch-deal-context',
+      name: 'Batch Fetch Deal Context (Activities + Contacts)',
+      tier: 'compute',
+      dependsOn: ['get-open-deals', 'extract-call-signals'],
+      computeFn: 'summarizeForClaude',
+      computeArgs: {},
+      outputKey: 'deal_context',
+    },
+
     {
       id: 'assess-risk',
       name: 'Assess Deal Risk',
       tier: 'claude',
-      dependsOn: ['get-open-deals', 'extract-call-signals'],
-      claudeTools: [
-        'getActivityTimeline',
-        'getContactsForDeal',
-        'getStakeholderMap',
-        'getDeal',
-      ],
-      maxToolCalls: 10,
-      claudePrompt: `Review these {{open_deals.length}} open deals for risk.
+      dependsOn: ['batch-deal-context'],
+      claudePrompt: `Review these deals for risk. All data is pre-fetched below — do NOT request additional tools.
 
 Sales cycle expectation: {{business_model.sales_cycle_days}} days
 Stale threshold: {{goals_and_targets.thresholds.stale_deal_days}} days
@@ -134,38 +133,35 @@ Stale threshold: {{goals_and_targets.thresholds.stale_deal_days}} days
 ⚠️ DATA FRESHNESS: {{dataFreshness.staleCaveat}}
 {{/if}}
 
-Open Deals:
-{{{json open_deals}}}
+DEAL PROFILES (with activity & contact data):
+{{{deal_context.dealProfiles}}}
+
+Contact coverage: {{deal_context.contactCoverage}}
+
+{{#if deal_context.dataAvailability.activityNote}}
+⚠️ {{deal_context.dataAvailability.activityNote}}
+{{/if}}
+{{#if deal_context.dataAvailability.contactNote}}
+⚠️ {{deal_context.dataAvailability.contactNote}}
+{{/if}}
 
 {{#if dataFreshness.hasConversations}}
-Call Risk Signals Extracted:
-{{{json call_signals}}}
+CALL RISK SIGNALS:
+{{{deal_context.signalsSummary}}}
 {{else}}
-NOTE: Conversation data not available (file import workspace). Call quality and sentiment signals skipped.
+NOTE: Conversation data not available. Call signals skipped.
 {{/if}}
 
 For each deal, assess:
-1. Activity recency: {{#if dataFreshness.hasActivities}}Compare last_activity_date to sales cycle expectations{{else}}Use deal updated_at as proxy (activity data not available){{/if}}
-2. Stakeholder coverage: {{#if dataFreshness.hasContacts}}Use tools to check if single-threaded or missing economic buyer{{else}}Contact data not available - skip stakeholder analysis{{/if}}
-3. Velocity: Are they moving through stages at expected pace?
+1. Activity recency vs sales cycle expectations{{#if deal_context.dataAvailability.activityNote}} (use updated_at as proxy){{/if}}
+2. Stakeholder coverage: single-threaded deals are high risk{{#if deal_context.dataAvailability.contactNote}} (SKIP - no contact data){{/if}}
+3. Velocity: stage progression vs expected pace
 {{#if dataFreshness.hasConversations}}
-4. Call signals: Match call_signals to dealId and factor into assessment
-{{else}}
-4. Call signals: SKIP (conversation data not available)
+4. Call signals: factor matched signals into assessment
 {{/if}}
-5. Data quality: Missing critical fields that indicate lack of qualification?
+5. Data quality: missing critical fields
 
-{{#unless dataFreshness.hasActivities}}
-IMPORTANT: Activity data not available. Use deal.updated_at as staleness proxy instead of last_activity_date.
-{{/unless}}
-
-{{#unless dataFreshness.hasContacts}}
-IMPORTANT: Contact data not available. Skip single-threading analysis.
-{{/unless}}
-
-You can call tools to get more details about any deal that looks concerning.
-
-Produce a risk assessment for each deal with this structure:
+Produce a risk assessment for each deal:
 {
   "dealId": "...",
   "dealName": "...",
@@ -173,27 +169,26 @@ Produce a risk assessment for each deal with this structure:
   "currentStage": "...",
   "closeDate": "...",
   "risk": "high" | "medium" | "low",
-  "riskScore": 75,  // 0-100, higher = more risk
+  "riskScore": 75,
   "factors": [
     "No activity in 18 days (stale)",
     "Single-threaded: only 1 contact",
-    "Competitor mentioned in last call (Salesforce)",
-    "Budget concerns raised"
+    "Competitor mentioned in last call"
   ],
-  "recommendedAction": "Re-engage immediately: schedule executive sponsor call, bring in SE for competitive positioning"
+  "recommendedAction": "Re-engage immediately: schedule executive sponsor call"
 }
 
-Sort results by risk (high first), then by amount (largest first).
+Sort by risk (high first), then by amount (largest first).
 Return as JSON array.`,
       outputKey: 'risk_assessment',
     },
   ],
 
   schedule: {
-    trigger: 'post_sync', // Run after every data sync
+    trigger: 'post_sync',
   },
 
   outputFormat: 'structured',
 
-  estimatedDuration: '3m',
+  estimatedDuration: '2m',
 };

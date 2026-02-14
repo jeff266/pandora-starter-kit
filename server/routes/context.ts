@@ -12,6 +12,7 @@ import {
   onboardWorkspace,
   type OnboardingAnswers,
 } from '../context/index.js';
+import { discoverBowtieStages, getBowtieDiscovery } from '../analysis/bowtie-discovery.js';
 
 const router = Router();
 
@@ -431,6 +432,34 @@ router.delete('/:workspaceId/quotas/periods/:periodId/reps/:repName', async (req
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.error('[Context] Delete rep quota error:', message);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.post('/:workspaceId/bowtie/discover', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    if (!(await validateWorkspace(req.params.workspaceId, res))) return;
+    const result = await discoverBowtieStages(req.params.workspaceId);
+    res.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[Context] Bowtie discovery error:', message);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.get('/:workspaceId/bowtie', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    if (!(await validateWorkspace(req.params.workspaceId, res))) return;
+    const result = await getBowtieDiscovery(req.params.workspaceId);
+    if (!result) {
+      res.json({ hasBowtieStages: false, message: 'Bowtie discovery has not been run yet. POST to /bowtie/discover to analyze.' });
+      return;
+    }
+    res.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[Context] Get bowtie error:', message);
     res.status(500).json({ error: message });
   }
 });

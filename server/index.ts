@@ -45,6 +45,8 @@ import { startSkillScheduler, stopSkillScheduler } from "./sync/skill-scheduler.
 import { registerBuiltInSkills } from "./skills/index.js";
 import { getSkillRegistry } from "./skills/registry.js";
 import { startJobQueue } from "./jobs/queue.js";
+import { agentsGlobalRouter, agentsWorkspaceRouter } from './routes/agents.js';
+import { registerBuiltInAgents, getAgentRegistry } from './agents/index.js';
 
 dotenv.config();
 
@@ -91,6 +93,8 @@ app.use(dealInsightsRouter);
 app.use("/api/workspaces", enrichmentRouter);
 app.use("/api/workspaces", tokenUsageRouter);
 app.use("/api/workspaces", workflowsRouter);
+app.use("/api", agentsGlobalRouter);
+app.use("/api/workspaces", agentsWorkspaceRouter);
 
 function registerAdapters(): void {
   const registry = getAdapterRegistry();
@@ -165,6 +169,7 @@ async function start(): Promise<void> {
 
   registerAdapters();
   registerSkills();
+  registerBuiltInAgents();
   startJobQueue();
   startScheduler();
   startSkillScheduler();
