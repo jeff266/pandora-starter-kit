@@ -138,7 +138,8 @@ const SUFFIX_PATTERN = new RegExp(
   'gi'
 );
 
-export function normalizeCompanyName(name: string): string {
+export function normalizeCompanyName(name: string | null | undefined): string {
+  if (!name) return '';
   let normalized = name.toLowerCase().trim();
 
   normalized = normalized.replace(SUFFIX_PATTERN, '');
