@@ -168,6 +168,119 @@ export interface SkillExecutionContext {
 }
 
 // ============================================================================
+// "Show the Work" Evidence Schema
+// ============================================================================
+
+/**
+ * Structured evidence array that powers "Show the Work" feature:
+ * - Slack messages with inline deal lists under each claim
+ * - Command Center drill-through from insight → specific records
+ * - Downloadable spreadsheets where every metric is a formula
+ */
+export interface SkillEvidence {
+  /** Each claim the narrative makes gets an evidence entry */
+  claims: EvidenceClaim[];
+
+  /** The full dataset the skill evaluated (for spreadsheet Tab 2) */
+  evaluated_records: EvaluatedRecord[];
+
+  /** What data sources contributed (for trust/transparency) */
+  data_sources: DataSourceContribution[];
+
+  /** The thresholds/parameters used (so users can see the assumptions) */
+  parameters: SkillParameter[];
+}
+
+export interface EvidenceClaim {
+  /** Unique ID for claim matching: e.g. "stale_deals" */
+  claim_id: string;
+
+  /** The claim text: "4 deals worth $380K are stale" */
+  claim_text: string;
+
+  /** Entity type this claim references */
+  entity_type: 'deal' | 'contact' | 'account' | 'conversation';
+
+  /** UUIDs of the specific records supporting this claim */
+  entity_ids: string[];
+
+  /** Metric name: "days_since_activity", "deal_amount", etc. */
+  metric_name: string;
+
+  /** Metric values: [41, 34, 67, 28] — one per entity */
+  metric_values: (number | string | null)[];
+
+  /** Threshold applied: "30 days", ">$50K", etc. */
+  threshold_applied: string;
+
+  /** Severity level */
+  severity: 'critical' | 'warning' | 'info';
+}
+
+export interface EvaluatedRecord {
+  /** Entity UUID */
+  entity_id: string;
+
+  /** Entity type */
+  entity_type: 'deal' | 'contact' | 'account' | 'conversation';
+
+  /** Display name */
+  entity_name: string;
+
+  /** Owner email */
+  owner_email: string | null;
+
+  /** Owner name */
+  owner_name: string | null;
+
+  /** Skill-specific fields as key-value pairs */
+  fields: Record<string, string | number | boolean | null>;
+
+  /** Computed flags (stale, past_due, single_threaded, etc.) */
+  flags: Record<string, string>;
+
+  /** Overall severity for this record */
+  severity: 'critical' | 'warning' | 'healthy';
+}
+
+export interface DataSourceContribution {
+  /** Source name: "salesforce", "gong", "fireflies", "hubspot" */
+  source: string;
+
+  /** Whether this source is connected */
+  connected: boolean;
+
+  /** Last sync timestamp (ISO format) */
+  last_sync: string | null;
+
+  /** Total records available from this source */
+  records_available: number;
+
+  /** Records this skill actually queried/used */
+  records_used: number;
+
+  /** Optional note: e.g. "Not connected — call data incomplete" */
+  note?: string;
+}
+
+export interface SkillParameter {
+  /** Internal parameter name: "stale_threshold_days" */
+  name: string;
+
+  /** Display name: "Stale Threshold (days)" */
+  display_name: string;
+
+  /** Current value */
+  value: number | string | boolean;
+
+  /** What this parameter controls */
+  description: string;
+
+  /** Whether user can change in workspace settings */
+  configurable: boolean;
+}
+
+// ============================================================================
 // Skill Result
 // ============================================================================
 
@@ -223,6 +336,9 @@ export interface SkillResult {
     step: string;
     error: string;
   }>;
+
+  /** Structured evidence for "Show the Work" */
+  evidence?: SkillEvidence;
 }
 
 // ============================================================================
