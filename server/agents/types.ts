@@ -25,6 +25,7 @@ export interface AgentSkillStep {
   timeout_seconds?: number;
   params?: Record<string, any>;
   outputKey: string;
+  cacheTtlMinutes?: number; // Cache skill output for this many minutes (default: 30)
 }
 
 export interface AgentTrigger {
@@ -49,11 +50,12 @@ export interface SkillOutput {
   summary: string;
   tokenUsage: { compute: number; deepseek: number; claude: number } | null;
   duration: number;
+  cached?: boolean; // True if output was reused from a recent run
 }
 
 export interface AgentSkillResult {
   skillId: string;
-  status: 'completed' | 'failed' | 'skipped';
+  status: 'completed' | 'failed' | 'skipped' | 'cached';
   duration: number;
   error?: string;
 }

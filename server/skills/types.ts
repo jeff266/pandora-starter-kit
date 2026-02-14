@@ -127,6 +127,8 @@ export interface SkillStep {
   claudeTools?: string[];
   /** Maximum tool calls before breaking loop (default: 10) */
   maxToolCalls?: number;
+  /** Maximum tokens for LLM response (default: 4096) */
+  maxTokens?: number;
 }
 
 // ============================================================================

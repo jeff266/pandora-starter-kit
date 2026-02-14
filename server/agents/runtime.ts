@@ -66,6 +66,45 @@ export class AgentRuntime {
       for (const step of agent.skills) {
         const skillStart = Date.now();
         try {
+          // Check for cached skill output
+          const cacheTtl = step.cacheTtlMinutes || 30;
+          const cached = await query(
+            `SELECT id, output_text, result, token_usage
+             FROM skill_runs
+             WHERE workspace_id = $1
+               AND skill_id = $2
+               AND status = 'completed'
+               AND started_at >= NOW() - ($3 || ' minutes')::interval
+             ORDER BY started_at DESC
+             LIMIT 1`,
+            [workspaceId, step.skillId, cacheTtl]
+          );
+
+          if (cached.rows.length > 0) {
+            // Reuse cached output
+            const cachedRun = cached.rows[0];
+            const cachedOutput = cachedRun.output_text || JSON.stringify(cachedRun.result);
+
+            skillOutputs[step.outputKey] = {
+              skillId: step.skillId,
+              output: cachedOutput,
+              summary: this.summarizeOutput(cachedOutput),
+              tokenUsage: cachedRun.token_usage || null,
+              duration: 0,
+              cached: true,
+            };
+
+            skillResults.push({
+              skillId: step.skillId,
+              status: 'cached',
+              duration: 0,
+            });
+
+            console.log(`[Agent ${agentId}] Skill ${step.skillId} output reused from cache (${cacheTtl}min TTL)`);
+            continue; // Skip execution
+          }
+
+          // No cache hit - execute skill
           const result = await this.runSkill(
             step.skillId,
             workspaceId,
@@ -81,6 +120,7 @@ export class AgentRuntime {
             summary: outputPreview,
             tokenUsage: result.totalTokenUsage || null,
             duration: Date.now() - skillStart,
+            cached: false,
           };
 
           skillResults.push({
