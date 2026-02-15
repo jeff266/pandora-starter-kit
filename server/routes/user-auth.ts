@@ -74,9 +74,13 @@ router.post('/login', async (req: Request, res: Response) => {
       [email, tokenHash, expiresAt]
     );
 
-    await sendMagicLink(email, token, isNewUser);
+    const emailResult = await sendMagicLink(email, token, isNewUser);
 
-    res.json({ status: 'sent', message: 'Check your email for a sign-in link' });
+    if (emailResult.sent) {
+      res.json({ status: 'sent', message: 'Check your email for a sign-in link' });
+    } else {
+      res.json({ status: 'sent', message: 'Check your email for a sign-in link', magic_url: emailResult.magicUrl });
+    }
   } catch (err) {
     console.error('[auth] Login error:', err instanceof Error ? err.message : err);
     res.status(500).json({ error: 'Failed to process login' });

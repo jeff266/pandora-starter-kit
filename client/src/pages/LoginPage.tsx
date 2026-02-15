@@ -12,6 +12,7 @@ export default function LoginPage() {
   const [apiKey, setApiKey] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [magicUrl, setMagicUrl] = useState<string | null>(null);
 
   if (isAuthenticated && workspaces.length === 0) {
     return <JoinScreen
@@ -71,6 +72,7 @@ export default function LoginPage() {
       } else if (result.status === 'waitlisted') {
         setScreen('waitlisted');
       } else if (result.status === 'sent') {
+        setMagicUrl(result.magic_url || null);
         setScreen('check_email');
       }
     } catch {
@@ -83,7 +85,8 @@ export default function LoginPage() {
     if (!name.trim()) { setError('Name is required'); return; }
     setLoading(true); setError('');
     try {
-      await login(email.trim(), name.trim());
+      const result = await login(email.trim(), name.trim());
+      setMagicUrl(result.magic_url || null);
       setScreen('check_email');
     } catch {
       setError('Something went wrong. Please try again.');
@@ -125,17 +128,41 @@ export default function LoginPage() {
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: 40, marginBottom: 16 }}>&#9993;</div>
           <h1 style={{ fontSize: 18, fontWeight: 700, color: colors.text, marginBottom: 8 }}>
-            Check your email
+            {magicUrl ? 'Sign in ready' : 'Check your email'}
           </h1>
-          <p style={{ fontSize: 13, color: colors.textMuted, lineHeight: 1.5 }}>
-            We sent a sign-in link to<br />
-            <strong style={{ color: colors.text }}>{email}</strong>
-          </p>
-          <p style={{ fontSize: 11, color: colors.textDim, marginTop: 12 }}>
-            Expires in 15 minutes
-          </p>
+          {magicUrl ? (
+            <>
+              <p style={{ fontSize: 13, color: colors.textMuted, lineHeight: 1.5, marginBottom: 16 }}>
+                Email delivery is not configured yet.<br />
+                Use the link below to sign in directly.
+              </p>
+              <a
+                href={magicUrl}
+                style={{
+                  display: 'inline-block', padding: '10px 24px',
+                  background: colors.accent, color: '#fff', borderRadius: 6,
+                  fontSize: 13, fontWeight: 600, textDecoration: 'none',
+                }}
+              >
+                Sign In Now
+              </a>
+              <p style={{ fontSize: 11, color: colors.textDim, marginTop: 12 }}>
+                Expires in 15 minutes
+              </p>
+            </>
+          ) : (
+            <>
+              <p style={{ fontSize: 13, color: colors.textMuted, lineHeight: 1.5 }}>
+                We sent a sign-in link to<br />
+                <strong style={{ color: colors.text }}>{email}</strong>
+              </p>
+              <p style={{ fontSize: 11, color: colors.textDim, marginTop: 12 }}>
+                Expires in 15 minutes
+              </p>
+            </>
+          )}
           <button
-            onClick={() => { setScreen('email'); setLoading(false); }}
+            onClick={() => { setScreen('email'); setMagicUrl(null); setLoading(false); }}
             style={{
               fontSize: 12, color: colors.accent, background: 'none',
               marginTop: 20, cursor: 'pointer', border: 'none',

@@ -22,7 +22,7 @@ export async function sendMagicLink(
   email: string,
   token: string,
   isNewUser: boolean
-): Promise<void> {
+): Promise<{ sent: boolean; magicUrl: string }> {
   const baseUrl = process.env.APP_URL || `https://${process.env.REPLIT_DEV_DOMAIN || 'localhost:5000'}`;
   const magicUrl = `${baseUrl}/api/auth/verify?token=${token}`;
 
@@ -56,9 +56,10 @@ export async function sendMagicLink(
     const client = getResendClient();
     await client.emails.send({ from: FROM_EMAIL, to: email, subject, html });
     console.log(`[email] Magic link sent to ${email}`);
+    return { sent: true, magicUrl };
   } catch (err) {
-    console.log(`[email] Resend failed, logging magic link to console`);
-    console.log(`\n[Auth] Magic link for ${email}:\n${magicUrl}\n`);
+    console.log(`[email] Resend failed (${err instanceof Error ? err.message : err}), returning magic link for dev access`);
+    return { sent: false, magicUrl };
   }
 }
 
