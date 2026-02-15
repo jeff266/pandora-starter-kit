@@ -67,6 +67,7 @@ import slackInteractionsRouter from './routes/slack-interactions.js';
 import analysisRouter from './routes/analysis.js';
 import userAuthRouter from './routes/user-auth.js';
 import membersRouter from './routes/members.js';
+import dealIntelligenceRouter from './routes/deal-intelligence.js';
 import { initRenderers } from './renderers/index.js';
 
 dotenv.config();
@@ -219,6 +220,7 @@ workspaceApiRouter.use(deliverablesRouter);
 workspaceApiRouter.use(downloadsRouter);
 workspaceApiRouter.use('/workspace-downloads', workspaceDownloadsRouter);
 workspaceApiRouter.use('/members', membersRouter);
+workspaceApiRouter.use(dealIntelligenceRouter);
 app.use("/api/workspaces", workspaceApiRouter);
 
 app.use("/api", skillsRouter);

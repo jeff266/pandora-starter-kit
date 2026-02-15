@@ -78,6 +78,8 @@ import {
 import {
   auditConversationDealCoverage as auditCWDCoverage,
 } from './tools/audit-conversation-deal-coverage.js';
+import { getDealRiskScore } from '../tools/deal-risk-score.js';
+import { getPipelineRiskSummary } from '../tools/pipeline-risk-summary.js';
 
 // ============================================================================
 // Helper: Safe Tool Execution
@@ -4074,6 +4076,50 @@ const runConfigAuditTool: ToolDefinition = {
 };
 
 // ============================================================================
+// Deal Intelligence Tools
+// ============================================================================
+
+const getDealRiskScoreTool: ToolDefinition = {
+  name: 'getDealRiskScore',
+  description: 'Get composite health score (0-100) for a single deal, aggregating active findings from all skills. Higher score = healthier.',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {
+      dealId: { type: 'string', description: 'The deal ID to score' },
+    },
+    required: ['dealId'],
+  },
+  execute: async (params, context) => {
+    return safeExecute('getDealRiskScore', () =>
+      getDealRiskScore(context.workspaceId, params.dealId), params);
+  },
+};
+
+const getPipelineRiskSummaryTool: ToolDefinition = {
+  name: 'getPipelineRiskSummary',
+  description: 'Get health scores for all open deals sorted by risk. Answers: which deals are most at risk? Optional rep filter.',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {
+      repEmail: { type: 'string', description: 'Optional: filter to one rep email' },
+      sortBy: { type: 'string', enum: ['score', 'amount', 'close_date'], description: 'Sort field (default: score ascending)' },
+      limit: { type: 'number', description: 'Max deals to return' },
+    },
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('getPipelineRiskSummary', () =>
+      getPipelineRiskSummary(context.workspaceId, {
+        repEmail: params.repEmail,
+        sortBy: params.sortBy,
+        limit: params.limit,
+      }), params);
+  },
+};
+
+// ============================================================================
 // Tool Registry
 // ============================================================================
 
@@ -4155,6 +4201,8 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['prepareProjectRecap', prepareProjectRecapTool],
   ['prepareStrategyInsights', prepareStrategyInsightsTool],
   ['runConfigAudit', runConfigAuditTool],
+  ['getDealRiskScore', getDealRiskScoreTool],
+  ['getPipelineRiskSummary', getPipelineRiskSummaryTool],
 ]);
 
 // ============================================================================

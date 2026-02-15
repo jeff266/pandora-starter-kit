@@ -79,6 +79,8 @@ Pandora is built on Node.js 20 with TypeScript 5+, using Express.js and PostgreS
     -   **Insights Feed:** Chronological findings list with filtering and pagination.
     -   **Error Boundary:** Global `ErrorBoundary` for crash recovery.
     -   **Design System:** Defined color scheme, skeleton loading, and consistent components.
+-   **Deal Intelligence Tools:** Zero-token compute tools for risk scoring. `getDealRiskScore` computes 0-100 health score from active findings (act=-25, watch=-10, notable=-3, info=-1). `getBatchDealRiskScores` queries once and partitions in memory. `getPipelineRiskSummary` batch-scores all open deals with stage breakdown and grade distribution. API endpoints: `GET /:workspaceId/deals/:dealId/risk-score` and `GET /:workspaceId/pipeline/risk-summary`.
+-   **Enhanced Deal Dossier:** `assembleDealDossier` now includes `coverage_gaps` (contacts never on calls, days since last call), `risk_score` (score/grade/signal_counts), and `data_availability` flags.
 -   **Startup Optimization:** Express starts immediately, readiness probe, parallelized registration steps, and migration/template seeding via `system_settings` table.
 -   **System Settings Table:** Stores server-level configuration like template seed version hash.
 

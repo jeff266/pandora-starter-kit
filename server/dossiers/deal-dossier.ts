@@ -1,4 +1,5 @@
 import { query } from '../db.js';
+import { getDealRiskScore } from '../tools/deal-risk-score.js';
 
 export interface DealDossier {
   deal: {
@@ -62,6 +63,23 @@ export interface DealDossier {
     threading: 'multi' | 'dual' | 'single';
     stage_velocity: 'fast' | 'normal' | 'slow';
     data_completeness: number;
+  };
+  coverage_gaps: {
+    contacts_never_called: Array<{ name: string; title: string | null; email: string | null }>;
+    days_since_last_call: number | null;
+    total_contacts: number;
+    contacts_on_calls: number;
+  };
+  risk_score: {
+    score: number;
+    grade: string;
+    signal_counts: { act: number; watch: number; notable: number; info: number };
+  };
+  data_availability: {
+    has_stage_history: boolean;
+    has_contacts: boolean;
+    has_conversations: boolean;
+    has_findings: boolean;
   };
 }
 
@@ -168,13 +186,14 @@ function computeHealthSignals(
 }
 
 export async function assembleDealDossier(workspaceId: string, dealId: string): Promise<DealDossier> {
-  const [deal, contacts, conversations, activities, stageHistory, findings] = await Promise.all([
+  const [deal, contacts, conversations, activities, stageHistory, findings, riskResult] = await Promise.all([
     getDealById(workspaceId, dealId),
     getContactsForDeal(workspaceId, dealId),
     getConversationsForDeal(workspaceId, dealId),
     getActivitiesForDeal(workspaceId, dealId),
     getStageHistoryForDeal(workspaceId, dealId),
     getFindingsForDeal(workspaceId, dealId),
+    getDealRiskScore(workspaceId, dealId).catch(() => null),
   ]);
 
   if (!deal) {
@@ -182,6 +201,52 @@ export async function assembleDealDossier(workspaceId: string, dealId: string): 
   }
 
   const health_signals = computeHealthSignals(deal, activities, contacts);
+
+  const mappedContacts = contacts.map((c: any) => ({
+    id: c.id,
+    name: (c.name || '').trim(),
+    email: c.email || '',
+    title: c.title ?? null,
+    role: c.role ?? null,
+    is_primary: c.is_primary === true,
+    last_activity_date: c.last_activity_date ? new Date(c.last_activity_date).toISOString() : null,
+  }));
+
+  const mappedConversations = conversations.map((cv: any) => ({
+    id: cv.id,
+    title: cv.title || '',
+    date: cv.call_date ? new Date(cv.call_date).toISOString() : '',
+    duration_minutes: cv.duration_seconds != null ? Math.round(cv.duration_seconds / 60) : null,
+    participants: Array.isArray(cv.participants) ? cv.participants : [],
+    link_method: cv.link_method || '',
+    summary: cv.summary ?? null,
+  }));
+
+  const participantEmails = new Set<string>();
+  for (const cv of mappedConversations) {
+    for (const p of cv.participants) {
+      if (p && p.includes('@')) participantEmails.add(p.toLowerCase());
+    }
+  }
+
+  const contacts_never_called = mappedContacts
+    .filter((c: any) => c.email && !participantEmails.has(c.email.toLowerCase()))
+    .map((c: any) => ({ name: c.name, title: c.title, email: c.email }));
+
+  let days_since_last_call: number | null = null;
+  if (mappedConversations.length > 0) {
+    const dates = mappedConversations
+      .map((cv: any) => cv.date ? new Date(cv.date).getTime() : 0)
+      .filter((t: number) => t > 0);
+    if (dates.length > 0) {
+      const mostRecent = Math.max(...dates);
+      days_since_last_call = Math.round((Date.now() - mostRecent) / (1000 * 60 * 60 * 24));
+    }
+  }
+
+  const contacts_on_calls = mappedContacts.filter(
+    (c: any) => c.email && participantEmails.has(c.email.toLowerCase())
+  ).length;
 
   return {
     deal: {
@@ -201,24 +266,8 @@ export async function assembleDealDossier(workspaceId: string, dealId: string): 
       source: deal.source ?? null,
       pipeline_name: deal.pipeline ?? null,
     },
-    contacts: contacts.map((c: any) => ({
-      id: c.id,
-      name: (c.name || '').trim(),
-      email: c.email || '',
-      title: c.title ?? null,
-      role: c.role ?? null,
-      is_primary: c.is_primary === true,
-      last_activity_date: c.last_activity_date ? new Date(c.last_activity_date).toISOString() : null,
-    })),
-    conversations: conversations.map((cv: any) => ({
-      id: cv.id,
-      title: cv.title || '',
-      date: cv.call_date ? new Date(cv.call_date).toISOString() : '',
-      duration_minutes: cv.duration_seconds != null ? Math.round(cv.duration_seconds / 60) : null,
-      participants: Array.isArray(cv.participants) ? cv.participants : [],
-      link_method: cv.link_method || '',
-      summary: cv.summary ?? null,
-    })),
+    contacts: mappedContacts,
+    conversations: mappedConversations,
     activities: activities.map((a: any) => ({
       id: a.id,
       type: a.activity_type || '',
@@ -241,5 +290,22 @@ export async function assembleDealDossier(workspaceId: string, dealId: string): 
       found_at: f.found_at ? new Date(f.found_at).toISOString() : '',
     })),
     health_signals,
+    coverage_gaps: {
+      contacts_never_called,
+      days_since_last_call,
+      total_contacts: mappedContacts.length,
+      contacts_on_calls,
+    },
+    risk_score: {
+      score: riskResult?.score ?? 100,
+      grade: riskResult?.grade ?? 'A',
+      signal_counts: riskResult?.signal_counts ?? { act: 0, watch: 0, notable: 0, info: 0 },
+    },
+    data_availability: {
+      has_stage_history: stageHistory.length > 0,
+      has_contacts: contacts.length > 0,
+      has_conversations: conversations.length > 0,
+      has_findings: findings.length > 0,
+    },
   };
 }
