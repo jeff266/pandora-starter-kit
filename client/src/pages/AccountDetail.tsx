@@ -4,7 +4,11 @@ import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import { formatCurrency, formatDate, formatTimeAgo, severityColor } from '../lib/format';
 import Skeleton from '../components/Skeleton';
-import { DossierNarrative, ScopedAnalysis } from '../components/shared';
+import { DossierNarrative } from '../components/shared';
+
+const SEVERITY_LABELS: Record<string, string> = {
+  act: 'Critical', watch: 'Warning', notable: 'Notable', info: 'Info',
+};
 
 export default function AccountDetail() {
   const { accountId } = useParams<{ accountId: string }>();
@@ -12,6 +16,12 @@ export default function AccountDetail() {
   const [dossier, setDossier] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [dismissingId, setDismissingId] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [askQuestion, setAskQuestion] = useState('');
+  const [askAnswer, setAskAnswer] = useState<any>(null);
+  const [askLoading, setAskLoading] = useState(false);
+  const [askError, setAskError] = useState('');
 
   const fetchDossier = async (withNarrative = false) => {
     if (!accountId) return;
@@ -33,6 +43,57 @@ export default function AccountDetail() {
   useEffect(() => {
     fetchDossier();
   }, [accountId]);
+
+  const dismissFinding = async (findingId: string) => {
+    setDismissingId(findingId);
+    try {
+      await api.patch(`/findings/${findingId}/resolve`, { resolution_method: 'user_dismissed' });
+      setDossier((prev: any) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          findings: (prev.findings || []).filter((f: any) => f.id !== findingId),
+        };
+      });
+    } catch (err: any) {
+      if (err.message?.includes('409') || err.message?.includes('already')) {
+        setDossier((prev: any) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            findings: (prev.findings || []).filter((f: any) => f.id !== findingId),
+          };
+        });
+      } else {
+        setToast({ message: 'Failed to resolve finding', type: 'error' });
+        setTimeout(() => setToast(null), 3000);
+      }
+    } finally {
+      setDismissingId(null);
+    }
+  };
+
+  const handleAsk = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!askQuestion.trim() || askLoading || !accountId) return;
+    setAskLoading(true);
+    setAskError('');
+    try {
+      const result = await api.post('/analyze', {
+        question: askQuestion.trim(),
+        scope: { type: 'account', entity_id: accountId },
+      });
+      setAskAnswer(result);
+    } catch (err: any) {
+      if (err.message?.includes('429') || err.message?.includes('rate limit')) {
+        setAskError('Analysis limit reached. Try again in a few minutes.');
+      } else {
+        setAskError(err.message || 'Failed to get answer');
+      }
+    } finally {
+      setAskLoading(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -79,6 +140,19 @@ export default function AccountDetail() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      {toast && (
+        <div style={{
+          position: 'fixed', top: 16, right: 16, zIndex: 1000,
+          padding: '10px 16px', borderRadius: 8,
+          background: toast.type === 'success' ? colors.greenSoft : colors.redSoft,
+          border: `1px solid ${toast.type === 'success' ? colors.green : colors.red}`,
+          color: toast.type === 'success' ? colors.green : colors.red,
+          fontSize: 12, fontWeight: 500,
+        }}>
+          {toast.message}
+        </div>
+      )}
+
       {/* Account Header */}
       <div style={{
         background: colors.surface,
@@ -179,6 +253,60 @@ export default function AccountDetail() {
             )}
           </Card>
 
+          {/* Findings */}
+          <Card title="Findings" count={findings.length}>
+            {findings.length === 0 ? (
+              <EmptyText>No findings for this account</EmptyText>
+            ) : (
+              findings.map((f: any, i: number) => (
+                <div key={f.id || i} style={{
+                  display: 'flex', gap: 8, padding: '8px 0',
+                  borderBottom: `1px solid ${colors.border}`,
+                  opacity: dismissingId === f.id ? 0.4 : 1,
+                  transition: 'opacity 0.3s',
+                }}>
+                  <span style={{
+                    width: 7, height: 7, borderRadius: '50%',
+                    background: severityColor(f.severity), marginTop: 5, flexShrink: 0,
+                    boxShadow: `0 0 6px ${severityColor(f.severity)}40`,
+                  }} />
+                  <div style={{ flex: 1 }}>
+                    <p style={{ fontSize: 13, color: colors.text }}>{f.message}</p>
+                    <div style={{ display: 'flex', gap: 8, marginTop: 4, alignItems: 'center' }}>
+                      <span style={{
+                        fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 3,
+                        background: `${severityColor(f.severity)}15`,
+                        color: severityColor(f.severity),
+                        textTransform: 'capitalize',
+                      }}>
+                        {SEVERITY_LABELS[f.severity] || f.severity}
+                      </span>
+                      <span style={{ fontSize: 11, color: colors.textMuted }}>
+                        {f.skill_id} · {formatTimeAgo(f.found_at)}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => dismissFinding(f.id)}
+                    disabled={dismissingId === f.id}
+                    style={{
+                      fontSize: 11, fontWeight: 500, padding: '4px 10px',
+                      borderRadius: 4, border: `1px solid ${colors.border}`,
+                      background: 'transparent', color: colors.textMuted,
+                      cursor: dismissingId === f.id ? 'not-allowed' : 'pointer',
+                      flexShrink: 0, alignSelf: 'center',
+                      transition: 'all 0.15s',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = colors.red; e.currentTarget.style.color = colors.red; }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = colors.border; e.currentTarget.style.color = colors.textMuted; }}
+                  >
+                    {dismissingId === f.id ? '...' : 'Dismiss'}
+                  </button>
+                </div>
+              ))
+            )}
+          </Card>
+
           {/* Conversations */}
           <Card title="Conversations" count={conversations.length}>
             {conversations.length === 0 ? (
@@ -255,30 +383,75 @@ export default function AccountDetail() {
             <DetailRow label="Created" value={account.created_at ? formatDate(account.created_at) : undefined} />
           </Card>
 
-          {/* Findings */}
-          <Card title="Findings" count={findings.length}>
-            {findings.length === 0 ? (
-              <EmptyText>No findings for this account</EmptyText>
-            ) : (
-              findings.map((f: any, i: number) => (
-                <div key={i} style={{ display: 'flex', gap: 8, padding: '6px 0', borderBottom: `1px solid ${colors.border}` }}>
-                  <span style={{
-                    width: 7, height: 7, borderRadius: '50%',
-                    background: severityColor(f.severity), marginTop: 4, flexShrink: 0,
-                  }} />
-                  <p style={{ fontSize: 12, color: colors.text }}>{f.message}</p>
-                </div>
-              ))
-            )}
-          </Card>
-
-          {/* Scoped Analysis */}
+          {/* Ask Pandora */}
           {accountId && (
-            <div style={{ marginTop: 0 }}>
-              <ScopedAnalysis
-                scope={{ type: 'account', entity_id: accountId }}
-                workspaceId=""
-              />
+            <div style={{
+              background: colors.surface,
+              border: `1px solid ${colors.border}`,
+              borderRadius: 10,
+              padding: 20,
+            }}>
+              <h3 style={{ fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 12 }}>
+                Ask Pandora
+              </h3>
+              <form onSubmit={handleAsk} style={{ display: 'flex', gap: 8 }}>
+                <input
+                  type="text"
+                  value={askQuestion}
+                  onChange={e => setAskQuestion(e.target.value)}
+                  placeholder="Ask about this account..."
+                  disabled={askLoading}
+                  style={{
+                    flex: 1, fontSize: 13, padding: '8px 12px',
+                    background: colors.surfaceRaised,
+                    border: `1px solid ${colors.border}`,
+                    borderRadius: 6, color: colors.text, outline: 'none',
+                  }}
+                />
+                <button
+                  type="submit"
+                  disabled={askLoading || !askQuestion.trim()}
+                  style={{
+                    fontSize: 12, fontWeight: 500, padding: '8px 16px',
+                    background: askLoading || !askQuestion.trim() ? colors.surfaceRaised : colors.accentSoft,
+                    color: askLoading || !askQuestion.trim() ? colors.textMuted : colors.accent,
+                    border: 'none', borderRadius: 6,
+                    cursor: askLoading || !askQuestion.trim() ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {askLoading ? 'Analyzing...' : 'Ask'}
+                </button>
+              </form>
+
+              {askError && (
+                <div style={{
+                  marginTop: 12, padding: 12, background: colors.redSoft,
+                  border: `1px solid ${colors.red}33`, borderRadius: 6,
+                  color: colors.red, fontSize: 12,
+                }}>
+                  {askError}
+                </div>
+              )}
+
+              {askAnswer && (
+                <div style={{
+                  marginTop: 12, padding: 16,
+                  background: colors.surfaceRaised,
+                  border: `1px solid ${colors.borderLight}`,
+                  borderRadius: 6,
+                }}>
+                  <p style={{ fontSize: 13, lineHeight: 1.6, color: colors.text, margin: 0, marginBottom: 12, whiteSpace: 'pre-wrap' }}>
+                    {askAnswer.answer}
+                  </p>
+                  <div style={{ display: 'flex', gap: 16, fontSize: 11, color: colors.textMuted, fontFamily: fonts.mono }}>
+                    {askAnswer.data_consulted && (
+                      <span>Data: {Object.values(askAnswer.data_consulted).filter((v: any) => typeof v === 'number' && v > 0).length} sources</span>
+                    )}
+                    {askAnswer.tokens_used && <span>{askAnswer.tokens_used} tokens</span>}
+                    {askAnswer.latency_ms && <span>{(askAnswer.latency_ms / 1000).toFixed(1)}s</span>}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -352,11 +525,8 @@ function HealthMetric({ label, value, color, detail }: { label: string; value: s
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
         <span style={{
-          width: 8,
-          height: 8,
-          borderRadius: '50%',
-          background: color,
-          boxShadow: `0 0 6px ${color}40`,
+          width: 8, height: 8, borderRadius: '50%',
+          background: color, boxShadow: `0 0 6px ${color}40`,
         }} />
         <span style={{ fontSize: 11, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase' }}>
           {label}

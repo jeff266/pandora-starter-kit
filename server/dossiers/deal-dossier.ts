@@ -136,7 +136,7 @@ async function getActivitiesForDeal(workspaceId: string, dealId: string) {
 
 async function getStageHistoryForDeal(workspaceId: string, dealId: string) {
   const result = await query(
-    `SELECT stage, entered_at, exited_at, duration_days
+    `SELECT stage, stage_normalized, entered_at, exited_at, duration_days
      FROM deal_stage_history
      WHERE workspace_id = $1 AND deal_id = $2
      ORDER BY entered_at ASC`,
@@ -183,6 +183,16 @@ function computeHealthSignals(
   const data_completeness = Math.round((filledCount / fields.length) * 100);
 
   return { activity_recency, threading, stage_velocity, data_completeness };
+}
+
+function formatStageLabel(rawStage: string, normalizedStage: string): string {
+  if (!rawStage) return normalizedStage || 'Unknown';
+  if (/^\d+$/.test(rawStage)) {
+    return normalizedStage
+      ? normalizedStage.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+      : 'Unknown Stage';
+  }
+  return rawStage;
 }
 
 export async function assembleDealDossier(workspaceId: string, dealId: string): Promise<DealDossier> {
@@ -277,6 +287,8 @@ export async function assembleDealDossier(workspaceId: string, dealId: string): 
     })),
     stage_history: stageHistory.map((sh: any) => ({
       stage: sh.stage || '',
+      stage_normalized: sh.stage_normalized || '',
+      stage_label: formatStageLabel(sh.stage, sh.stage_normalized),
       entered_at: sh.entered_at ? new Date(sh.entered_at).toISOString() : '',
       exited_at: sh.exited_at ? new Date(sh.exited_at).toISOString() : null,
       days_in_stage: sh.duration_days ?? 0,
