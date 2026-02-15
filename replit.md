@@ -74,13 +74,17 @@ Pandora is built on Node.js 20 with TypeScript 5+, using Express.js and PostgreS
     -   **Stack:** Vite 7 + React 19 + TypeScript, `react-router-dom`. Dark theme.
     -   **Dual Server Setup:** Vite dev server on port 5000, Express API on port 3001.
     -   **Authentication:** Magic link email auth with session tokens, role-based access, and member management.
-    -   **Command Center Home:** Displays headline metrics, annotated pipeline bar chart, active findings feed, and connector status.
-    -   **Detail Pages (Deal/Account):** Full dossier display with health signals, findings, contacts, timelines, and "Ask Pandora" integration.
-    -   **Skills Page:** Skills registry, last run status, manual trigger, and run history.
+    -   **Command Center Home:** Headline metrics (pipeline, weighted, coverage, win rate, findings), horizontal CSS pipeline bar chart with clickable stage bars (→ `/deals?stage=`), Findings by Rep section (→ `/deals?owner=`), active findings feed with "View all" link to Insights.
+    -   **Deals List:** Full-featured table with 8 sortable columns (name, amount, stage, owner, close date, health grade badge, days in stage, findings dots). Parallel fetch of risk-summary + deals endpoints. Filter bar: search, stage, owner, health grade, status (open/won/lost/all). Pagination (50/page). URL query param support (`?stage=`, `?owner=`, `?health=`).
+    -   **Accounts List:** Sortable 7-column table (name, domain, industry, open deals, pipeline, contacts, last activity). Filters: search (name/domain), industry, owner. Dynamic column visibility — fully-empty columns hidden. Pagination.
+    -   **Detail Pages (Deal/Account):** Full dossier display with health signals, findings with dismiss buttons, contacts, stage history with readable names, risk score badge (A-F), coverage gaps, timelines, and inline "Ask Pandora" scoped analysis. Breadcrumb navigation back to list pages.
+    -   **Skills Page:** Category-grouped 2-column grid layout. Each skill card shows name, schedule (humanized cron), last run status/duration, findings produced. Run Now button with toast feedback. Expandable run history (last 10 runs).
     -   **Connectors Page:** Connector list with sync status and record counts.
     -   **Insights Feed:** Chronological findings list with filtering and pagination.
     -   **Error Boundary:** Global `ErrorBoundary` for crash recovery.
     -   **Design System:** Defined color scheme, skeleton loading, and consistent components.
+    -   **Cross-Page Navigation:** Command Center stage bars → Deals list (pre-filtered). Rep names → Deals list (pre-filtered). Deal/Account detail breadcrumbs. Account deals link to Deal detail. Deal account link to Account detail.
+    -   **Format Utilities:** `formatSchedule()` with `humanizeCron()` converts cron expressions to human-readable (e.g., "Mons 8 AM"). `severityColor()` maps act/watch/notable/info to colors.
 -   **Deal Intelligence Tools:** Zero-token compute tools for risk scoring. `getDealRiskScore` computes 0-100 health score from active findings (act=-25, watch=-10, notable=-3, info=-1). `getBatchDealRiskScores` queries once and partitions in memory. `getPipelineRiskSummary` batch-scores all open deals with stage breakdown and grade distribution. API endpoints: `GET /:workspaceId/deals/:dealId/risk-score` and `GET /:workspaceId/pipeline/risk-summary`.
 -   **Enhanced Deal Dossier:** `assembleDealDossier` now includes `coverage_gaps` (contacts never on calls, days since last call), `risk_score` (score/grade/signal_counts), and `data_availability` flags.
 -   **Startup Optimization:** Express starts immediately, readiness probe, parallelized registration steps, and migration/template seeding via `system_settings` table.

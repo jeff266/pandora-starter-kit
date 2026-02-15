@@ -1,237 +1,504 @@
-import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
-import { formatCurrency, formatNumber } from '../lib/format';
-import { LoadingState, EmptyState, SeverityDot } from '../components/shared';
+import { formatCurrency, formatDate, formatTimeAgo, severityColor } from '../lib/format';
+import Skeleton from '../components/Skeleton';
 
-interface Deal {
+const PAGE_SIZE = 50;
+
+const GRADE_COLORS: Record<string, string> = {
+  A: '#22c55e', B: '#38bdf8', C: '#eab308', D: '#f97316', F: '#ef4444',
+};
+
+interface DealRow {
   id: string;
   name: string;
   amount: number;
   stage: string;
   stage_normalized: string;
-  owner_name?: string;
-  owner_email?: string;
-  days_in_stage?: number;
-  finding_count?: number;
-  critical_findings?: number;
+  owner: string;
+  close_date: string | null;
+  days_in_stage: number | null;
+  score: number;
+  grade: string;
+  signal_counts: { act: number; watch: number; notable: number; info: number };
+  is_closed: boolean;
+  status: string;
 }
 
-type SortField = 'amount' | 'stage' | 'days_in_stage' | 'finding_count';
+type SortField = 'name' | 'amount' | 'stage' | 'owner' | 'close_date' | 'health' | 'days_in_stage' | 'findings';
+type SortDir = 'asc' | 'desc';
+
+const DEFAULT_SORT: Record<SortField, SortDir> = {
+  name: 'asc', amount: 'desc', stage: 'asc', owner: 'asc',
+  close_date: 'asc', health: 'asc', days_in_stage: 'desc', findings: 'desc',
+};
 
 export default function DealList() {
   const navigate = useNavigate();
-  const [deals, setDeals] = useState<Deal[]>([]);
+  const [searchParams] = useSearchParams();
+  const [allDeals, setAllDeals] = useState<DealRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [sortBy, setSortBy] = useState<SortField>('amount');
 
-  useEffect(() => {
-    fetchDeals();
-  }, []);
+  const [search, setSearch] = useState('');
+  const [stageFilter, setStageFilter] = useState(searchParams.get('stage') || 'all');
+  const [ownerFilter, setOwnerFilter] = useState(searchParams.get('owner') || 'all');
+  const [healthFilter, setHealthFilter] = useState(searchParams.get('health') || 'all');
+  const [statusFilter, setStatusFilter] = useState('open');
 
-  const fetchDeals = async () => {
+  const [sortField, setSortField] = useState<SortField>('amount');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
+  const [page, setPage] = useState(0);
+
+  const fetchDeals = useCallback(async () => {
     setLoading(true);
     try {
-      const dealsData = await api.get('/deals?limit=500');
-      const raw = Array.isArray(dealsData) ? dealsData : dealsData.data || dealsData.deals || [];
-      const openDeals = raw.filter((d: any) =>
-        d.stage_normalized && !['closed_won', 'closed_lost'].includes(d.stage_normalized)
-      );
-      setDeals(openDeals);
+      const [riskData, dealsData] = await Promise.all([
+        api.get('/pipeline/risk-summary').catch(() => null),
+        api.get('/deals?limit=500'),
+      ]);
+
+      const riskDeals: DealRow[] = (riskData?.deals || []).map((d: any) => ({
+        id: d.deal_id,
+        name: d.deal_name || '',
+        amount: Number(d.amount) || 0,
+        stage: d.stage || '',
+        stage_normalized: d.stage || '',
+        owner: d.owner || '',
+        close_date: d.close_date,
+        days_in_stage: d.days_in_stage,
+        score: d.score ?? 100,
+        grade: d.grade || 'A',
+        signal_counts: d.signal_counts || { act: 0, watch: 0, notable: 0, info: 0 },
+        is_closed: false,
+        status: 'open',
+      }));
+
+      const riskDealIds = new Set(riskDeals.map(d => d.id));
+
+      const rawDeals = Array.isArray(dealsData) ? dealsData : dealsData.data || dealsData.deals || [];
+      const closedDeals: DealRow[] = rawDeals
+        .filter((d: any) => !riskDealIds.has(d.id))
+        .map((d: any) => ({
+          id: d.id,
+          name: d.name || '',
+          amount: Number(d.amount) || 0,
+          stage: d.stage_normalized || d.stage || '',
+          stage_normalized: d.stage_normalized || d.stage || '',
+          owner: d.owner_name || d.owner_email || d.owner || '',
+          close_date: d.close_date,
+          days_in_stage: d.days_in_stage ?? null,
+          score: 100,
+          grade: '\u2014',
+          signal_counts: { act: 0, watch: 0, notable: 0, info: 0 },
+          is_closed: ['closed_won', 'closed_lost'].includes(d.stage_normalized),
+          status: d.stage_normalized === 'closed_won' ? 'won' : d.stage_normalized === 'closed_lost' ? 'lost' : 'open',
+        }));
+
+      setAllDeals([...riskDeals, ...closedDeals]);
+      setError('');
     } catch (err: any) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  useEffect(() => { fetchDeals(); }, [fetchDeals]);
+
+  const uniqueStages = useMemo(() =>
+    Array.from(new Set(allDeals.map(d => d.stage).filter(Boolean))).sort(),
+  [allDeals]);
+
+  const uniqueOwners = useMemo(() =>
+    Array.from(new Set(allDeals.map(d => d.owner).filter(Boolean))).sort(),
+  [allDeals]);
+
+  const filtered = useMemo(() => {
+    let result = allDeals;
+
+    if (statusFilter === 'open') result = result.filter(d => !d.is_closed);
+    else if (statusFilter === 'won') result = result.filter(d => d.status === 'won');
+    else if (statusFilter === 'lost') result = result.filter(d => d.status === 'lost');
+
+    if (stageFilter !== 'all') {
+      result = result.filter(d =>
+        d.stage.toLowerCase().replace(/_/g, ' ') === stageFilter.toLowerCase().replace(/_/g, ' ')
+        || d.stage_normalized.toLowerCase() === stageFilter.toLowerCase()
+        || d.stage.toLowerCase() === stageFilter.toLowerCase()
+      );
+    }
+    if (ownerFilter !== 'all') {
+      result = result.filter(d => d.owner === ownerFilter);
+    }
+    if (healthFilter !== 'all') {
+      result = result.filter(d => d.grade === healthFilter);
+    }
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      result = result.filter(d => d.name.toLowerCase().includes(q));
+    }
+    return result;
+  }, [allDeals, statusFilter, stageFilter, ownerFilter, healthFilter, search]);
+
+  const sorted = useMemo(() => {
+    const arr = [...filtered];
+    arr.sort((a, b) => {
+      let cmp = 0;
+      switch (sortField) {
+        case 'name': cmp = a.name.localeCompare(b.name); break;
+        case 'amount': cmp = a.amount - b.amount; break;
+        case 'stage': cmp = a.stage.localeCompare(b.stage); break;
+        case 'owner': cmp = a.owner.localeCompare(b.owner); break;
+        case 'close_date': {
+          const da = a.close_date ? new Date(a.close_date).getTime() : 0;
+          const db = b.close_date ? new Date(b.close_date).getTime() : 0;
+          cmp = da - db;
+          break;
+        }
+        case 'health': cmp = a.score - b.score; break;
+        case 'days_in_stage': cmp = (a.days_in_stage || 0) - (b.days_in_stage || 0); break;
+        case 'findings': {
+          const fa = a.signal_counts.act + a.signal_counts.watch + a.signal_counts.notable + a.signal_counts.info;
+          const fb = b.signal_counts.act + b.signal_counts.watch + b.signal_counts.notable + b.signal_counts.info;
+          cmp = fa - fb;
+          break;
+        }
+      }
+      if (cmp === 0) cmp = a.name.localeCompare(b.name);
+      return sortDir === 'desc' ? -cmp : cmp;
+    });
+    return arr;
+  }, [filtered, sortField, sortDir]);
+
+  const totalPages = Math.ceil(sorted.length / PAGE_SIZE);
+  const pageDeals = sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
+  useEffect(() => { setPage(0); }, [search, stageFilter, ownerFilter, healthFilter, statusFilter]);
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDir(DEFAULT_SORT[field]);
+    }
   };
 
-  const sortedDeals = [...deals].sort((a, b) => {
-    switch (sortBy) {
-      case 'amount':
-        return (b.amount || 0) - (a.amount || 0);
-      case 'days_in_stage':
-        return (b.days_in_stage || 0) - (a.days_in_stage || 0);
-      case 'finding_count':
-        return (b.finding_count || 0) - (a.finding_count || 0);
-      default:
-        return 0;
-    }
-  });
+  const clearFilters = () => {
+    setSearch('');
+    setStageFilter('all');
+    setOwnerFilter('all');
+    setHealthFilter('all');
+    setStatusFilter('open');
+  };
 
-  if (loading) return <LoadingState message="Loading deals..." />;
+  const hasFilters = search || stageFilter !== 'all' || ownerFilter !== 'all' || healthFilter !== 'all' || statusFilter !== 'open';
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <Skeleton height={56} />
+        <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, overflow: 'hidden' }}>
+          <Skeleton height={40} />
+          {Array.from({ length: 10 }).map((_, i) => <Skeleton key={i} height={48} />)}
+        </div>
+      </div>
+    );
+  }
 
   if (error) {
     return (
-      <EmptyState
-        title="Failed to load deals"
-        description={error}
-        action={{
-          label: 'Retry',
-          onClick: fetchDeals,
-        }}
-      />
+      <div style={{ textAlign: 'center', padding: 60 }}>
+        <p style={{ fontSize: 15, color: colors.red }}>{error}</p>
+        <button onClick={fetchDeals} style={{ fontSize: 12, color: colors.accent, background: 'none', border: 'none', cursor: 'pointer', marginTop: 12 }}>
+          Retry
+        </button>
+      </div>
     );
   }
 
-  if (deals.length === 0) {
+  if (allDeals.length === 0) {
     return (
-      <EmptyState
-        title="No deals found"
-        description="Connect your CRM to see pipeline deals"
-        action={{
-          label: 'Go to Connectors',
-          onClick: () => navigate('/connectors'),
-        }}
-      />
+      <div style={{ textAlign: 'center', padding: 60 }}>
+        <p style={{ fontSize: 15, color: colors.textSecondary }}>No deals found</p>
+        <p style={{ fontSize: 12, color: colors.textMuted, marginTop: 8 }}>Connect your CRM from the Connectors page.</p>
+        <button onClick={() => navigate('/connectors')} style={{ fontSize: 12, color: colors.accent, background: 'none', border: 'none', cursor: 'pointer', marginTop: 12 }}>
+          Go to Connectors
+        </button>
+      </div>
     );
   }
+
+  const totalPipeline = filtered.reduce((s, d) => s + d.amount, 0);
+  const isCloseDatePast = (d: string | null, isClosed: boolean) => {
+    if (!d || isClosed) return false;
+    return new Date(d) < new Date();
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {/* Header with sort controls */}
-      <div
-        style={{
-          background: colors.surface,
-          border: `1px solid ${colors.border}`,
-          borderRadius: 10,
-          padding: 16,
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-        }}
-      >
+      {/* Header */}
+      <div style={{
+        background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, padding: 16,
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12,
+      }}>
         <div>
-          <h2 style={{ fontSize: 16, fontWeight: 600, color: colors.text, margin: 0 }}>
-            Open Deals
-          </h2>
+          <h2 style={{ fontSize: 16, fontWeight: 600, color: colors.text, margin: 0 }}>Deals</h2>
           <p style={{ fontSize: 12, color: colors.textMuted, margin: '4px 0 0' }}>
-            {formatNumber(deals.length)} deals • {formatCurrency(deals.reduce((sum, d) => sum + (d.amount || 0), 0))} total
+            Showing {filtered.length} of {allDeals.length} deals
+            {filtered.length > 0 && ` \u00B7 ${formatCurrency(totalPipeline)} pipeline`}
           </p>
         </div>
+      </div>
 
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <span style={{ fontSize: 11, color: colors.textMuted }}>Sort by:</span>
-          {(['amount', 'days_in_stage', 'finding_count'] as SortField[]).map((field) => (
-            <button
+      {/* Filter Bar */}
+      <div style={{
+        display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap',
+        background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, padding: '10px 16px',
+      }}>
+        <input
+          type="text"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search deals..."
+          style={{
+            fontSize: 12, padding: '6px 12px', width: 180,
+            background: colors.surfaceRaised, border: `1px solid ${colors.border}`,
+            borderRadius: 6, color: colors.text, outline: 'none',
+          }}
+        />
+        <FilterSelect label="Stage" value={stageFilter} onChange={setStageFilter}
+          options={[{ value: 'all', label: 'All' }, ...uniqueStages.map(s => ({ value: s, label: s.replace(/_/g, ' ') }))]} />
+        <FilterSelect label="Owner" value={ownerFilter} onChange={setOwnerFilter}
+          options={[{ value: 'all', label: 'All' }, ...uniqueOwners.map(o => ({ value: o, label: shortName(o) }))]} />
+        <FilterSelect label="Health" value={healthFilter} onChange={setHealthFilter}
+          options={[{ value: 'all', label: 'All' }, ...['A','B','C','D','F'].map(g => ({ value: g, label: g }))]} />
+        <FilterSelect label="Status" value={statusFilter} onChange={setStatusFilter}
+          options={[{ value: 'open', label: 'Open' }, { value: 'won', label: 'Won' }, { value: 'lost', label: 'Lost' }, { value: 'all', label: 'All' }]} />
+        {hasFilters && (
+          <button onClick={clearFilters} style={{
+            fontSize: 11, color: colors.accent, background: 'none', border: 'none', cursor: 'pointer', marginLeft: 4,
+          }}>
+            Clear filters
+          </button>
+        )}
+      </div>
+
+      {/* Table */}
+      <div style={{
+        background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, overflow: 'hidden',
+      }}>
+        {/* Header row */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: '25% 12% 13% 13% 10% 8% 8% 11%',
+          padding: '10px 20px',
+          background: colors.surfaceRaised,
+          borderBottom: `1px solid ${colors.border}`,
+        }}>
+          {([
+            ['name', 'Deal Name'],
+            ['amount', 'Amount'],
+            ['stage', 'Stage'],
+            ['owner', 'Owner'],
+            ['close_date', 'Close Date'],
+            ['health', 'Health'],
+            ['days_in_stage', 'Days'],
+            ['findings', 'Findings'],
+          ] as [SortField, string][]).map(([field, label]) => (
+            <div
               key={field}
-              onClick={() => setSortBy(field)}
+              onClick={() => handleSort(field)}
               style={{
-                fontSize: 11,
-                fontWeight: 500,
-                padding: '4px 10px',
-                borderRadius: 4,
-                background: sortBy === field ? colors.surfaceActive : 'transparent',
-                color: sortBy === field ? colors.text : colors.textMuted,
-                border: 'none',
-                cursor: 'pointer',
-                textTransform: 'capitalize',
+                fontSize: 10, fontWeight: 600, color: sortField === field ? colors.accent : colors.textMuted,
+                textTransform: 'uppercase', letterSpacing: '0.05em',
+                cursor: 'pointer', userSelect: 'none',
+                display: 'flex', alignItems: 'center', gap: 4,
               }}
             >
-              {field.replace(/_/g, ' ')}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Deals table */}
-      <div
-        style={{
-          background: colors.surface,
-          border: `1px solid ${colors.border}`,
-          borderRadius: 10,
-          overflow: 'hidden',
-        }}
-      >
-        {/* Table header */}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '2fr 1fr 1fr 1fr 80px 80px',
-            gap: 16,
-            padding: '12px 20px',
-            background: colors.surfaceRaised,
-            borderBottom: `1px solid ${colors.border}`,
-            fontSize: 10,
-            fontWeight: 600,
-            color: colors.textMuted,
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em',
-          }}
-        >
-          <div>Deal Name</div>
-          <div>Amount</div>
-          <div>Stage</div>
-          <div>Owner</div>
-          <div>Days</div>
-          <div>Findings</div>
-        </div>
-
-        {/* Table rows */}
-        {sortedDeals.map((deal) => (
-          <div
-            key={deal.id}
-            onClick={() => navigate(`/deals/${deal.id}`)}
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '2fr 1fr 1fr 1fr 80px 80px',
-              gap: 16,
-              padding: '14px 20px',
-              borderBottom: `1px solid ${colors.border}`,
-              borderLeft: deal.critical_findings && deal.critical_findings > 0
-                ? `2px solid ${colors.red}40`
-                : '2px solid transparent',
-              cursor: 'pointer',
-              transition: 'background 0.15s',
-            }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = colors.surfaceHover)}
-            onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-          >
-            <div style={{ fontSize: 13, fontWeight: 500, color: colors.text }}>
-              {deal.name}
-            </div>
-            <div style={{ fontSize: 13, fontFamily: fonts.mono, color: colors.text }}>
-              {formatCurrency(deal.amount || 0)}
-            </div>
-            <div>
-              <span
-                style={{
-                  fontSize: 10,
-                  fontWeight: 600,
-                  padding: '2px 8px',
-                  borderRadius: 4,
-                  background: colors.accentSoft,
-                  color: colors.accent,
-                  textTransform: 'capitalize',
-                }}
-              >
-                {deal.stage_normalized?.replace(/_/g, ' ') || deal.stage || '--'}
-              </span>
-            </div>
-            <div style={{ fontSize: 12, color: colors.textSecondary }}>
-              {deal.owner_name || deal.owner_email || '--'}
-            </div>
-            <div style={{ fontSize: 12, fontFamily: fonts.mono, color: colors.textMuted }}>
-              {deal.days_in_stage || 0}d
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              {deal.finding_count && deal.finding_count > 0 ? (
-                <>
-                  {deal.critical_findings && deal.critical_findings > 0 && (
-                    <SeverityDot severity="act" size={6} />
-                  )}
-                  <span style={{ fontSize: 11, fontFamily: fonts.mono, color: colors.textMuted }}>
-                    {deal.finding_count}
-                  </span>
-                </>
-              ) : (
-                <span style={{ fontSize: 11, color: colors.textDim }}>--</span>
+              {label}
+              {sortField === field && (
+                <span style={{ fontSize: 8 }}>{sortDir === 'asc' ? '\u25B2' : '\u25BC'}</span>
               )}
             </div>
+          ))}
+        </div>
+
+        {/* Data rows */}
+        {pageDeals.length === 0 ? (
+          <div style={{ padding: 32, textAlign: 'center' }}>
+            <p style={{ fontSize: 13, color: colors.textMuted }}>No deals match your filters.</p>
+            <button onClick={clearFilters} style={{
+              fontSize: 12, color: colors.accent, background: 'none', border: 'none', cursor: 'pointer', marginTop: 8,
+            }}>
+              Clear filters
+            </button>
           </div>
-        ))}
+        ) : (
+          pageDeals.map(deal => {
+            const totalFindings = deal.signal_counts.act + deal.signal_counts.watch + deal.signal_counts.notable + deal.signal_counts.info;
+            const pastDue = isCloseDatePast(deal.close_date, deal.is_closed);
+            const daysColor = (deal.days_in_stage || 0) > 45 ? colors.red : (deal.days_in_stage || 0) > 21 ? '#eab308' : colors.textMuted;
+
+            return (
+              <div
+                key={deal.id}
+                onClick={() => navigate(`/deals/${deal.id}`)}
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '25% 12% 13% 13% 10% 8% 8% 11%',
+                  padding: '12px 20px',
+                  borderBottom: `1px solid ${colors.border}`,
+                  cursor: 'pointer',
+                  transition: 'background 0.12s',
+                  alignItems: 'center',
+                }}
+                onMouseEnter={e => (e.currentTarget.style.background = colors.surfaceHover)}
+                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+              >
+                <div style={{ fontSize: 13, fontWeight: 500, color: colors.accent, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingRight: 8 }}>
+                  {deal.name || 'Unnamed'}
+                </div>
+                <div style={{ fontSize: 13, fontFamily: fonts.mono, color: colors.text }}>
+                  {deal.amount ? formatCurrency(deal.amount) : '\u2014'}
+                </div>
+                <div>
+                  <span style={{
+                    fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 4,
+                    background: colors.accentSoft, color: colors.accent, textTransform: 'capitalize',
+                  }}>
+                    {deal.stage?.replace(/_/g, ' ') || '\u2014'}
+                  </span>
+                </div>
+                <div style={{ fontSize: 12, color: colors.textSecondary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {shortName(deal.owner) || '\u2014'}
+                </div>
+                <div style={{ fontSize: 12, color: pastDue ? colors.red : colors.textMuted, fontWeight: pastDue ? 600 : 400 }}>
+                  {deal.close_date ? formatDate(deal.close_date) : '\u2014'}
+                </div>
+                <div>
+                  {deal.grade && deal.grade !== '\u2014' ? (
+                    <span style={{
+                      fontSize: 11, fontWeight: 700, fontFamily: fonts.mono,
+                      padding: '2px 8px', borderRadius: 4,
+                      background: `${GRADE_COLORS[deal.grade] || colors.textMuted}20`,
+                      color: GRADE_COLORS[deal.grade] || colors.textMuted,
+                    }}>
+                      {deal.grade}
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: 11, color: colors.textDim }}>\u2014</span>
+                  )}
+                </div>
+                <div style={{ fontSize: 12, fontFamily: fonts.mono, color: daysColor }}>
+                  {deal.days_in_stage != null ? `${Math.round(deal.days_in_stage)}` : '\u2014'}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  {totalFindings > 0 ? (
+                    <>
+                      {deal.signal_counts.act > 0 && (
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: severityColor('act'), display: 'inline-block' }} />
+                          <span style={{ fontSize: 10, fontFamily: fonts.mono, color: severityColor('act') }}>{deal.signal_counts.act}</span>
+                        </span>
+                      )}
+                      {deal.signal_counts.watch > 0 && (
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: severityColor('watch'), display: 'inline-block' }} />
+                          <span style={{ fontSize: 10, fontFamily: fonts.mono, color: severityColor('watch') }}>{deal.signal_counts.watch}</span>
+                        </span>
+                      )}
+                      {deal.signal_counts.notable > 0 && (
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: severityColor('notable'), display: 'inline-block' }} />
+                          <span style={{ fontSize: 10, fontFamily: fonts.mono, color: severityColor('notable') }}>{deal.signal_counts.notable}</span>
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <span style={{ fontSize: 11, color: colors.textDim }}>\u2014</span>
+                  )}
+                </div>
+              </div>
+            );
+          })
+        )}
       </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          padding: '8px 16px', background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10,
+        }}>
+          <span style={{ fontSize: 12, color: colors.textMuted }}>
+            Showing {page * PAGE_SIZE + 1}\u2013{Math.min((page + 1) * PAGE_SIZE, sorted.length)} of {sorted.length}
+          </span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              disabled={page === 0}
+              onClick={() => setPage(p => p - 1)}
+              style={{
+                fontSize: 12, padding: '4px 12px', borderRadius: 4,
+                background: page === 0 ? colors.surfaceRaised : colors.accentSoft,
+                color: page === 0 ? colors.textDim : colors.accent,
+                border: 'none', cursor: page === 0 ? 'default' : 'pointer',
+              }}
+            >
+              Previous
+            </button>
+            <button
+              disabled={page >= totalPages - 1}
+              onClick={() => setPage(p => p + 1)}
+              style={{
+                fontSize: 12, padding: '4px 12px', borderRadius: 4,
+                background: page >= totalPages - 1 ? colors.surfaceRaised : colors.accentSoft,
+                color: page >= totalPages - 1 ? colors.textDim : colors.accent,
+                border: 'none', cursor: page >= totalPages - 1 ? 'default' : 'pointer',
+              }}
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+function FilterSelect({ label, value, onChange, options }: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+}) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <span style={{ fontSize: 11, color: colors.textMuted }}>{label}:</span>
+      <select
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        style={{
+          fontSize: 11, padding: '5px 8px', borderRadius: 4,
+          background: colors.surfaceRaised, color: colors.text,
+          border: `1px solid ${colors.border}`,
+        }}
+      >
+        {options.map(o => (
+          <option key={o.value} value={o.value}>{o.label}</option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+function shortName(name: string): string {
+  if (!name) return '';
+  if (name.includes('@')) return name.split('@')[0];
+  const parts = name.trim().split(' ');
+  if (parts.length >= 2) return `${parts[0]} ${parts[parts.length - 1][0]}.`;
+  return parts[0];
 }

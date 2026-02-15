@@ -1,9 +1,8 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
-import { formatCurrency, formatNumber, formatPercent, formatTimeAgo, severityColor, severityBg } from '../lib/format';
+import { formatCurrency, formatNumber, formatPercent, formatTimeAgo, severityColor } from '../lib/format';
 import Skeleton, { SkeletonCard } from '../components/Skeleton';
 import { SeverityDot } from '../components/shared';
 
@@ -22,15 +21,6 @@ interface Finding {
   status: string;
 }
 
-interface AnnotatedFinding {
-  finding_id: string;
-  severity: 'act' | 'watch' | 'notable' | 'info';
-  message: string;
-  deal_id: string;
-  deal_name: string;
-  skill_id: string;
-}
-
 interface PipelineStage {
   stage: string;
   stage_normalized: string;
@@ -43,9 +33,7 @@ interface PipelineStage {
     watch: number;
     notable: number;
     info: number;
-    top_findings?: AnnotatedFinding[];
   };
-  annotated_findings?: AnnotatedFinding[];
 }
 
 export default function CommandCenter() {
@@ -53,13 +41,8 @@ export default function CommandCenter() {
   const [pipeline, setPipeline] = useState<any>(null);
   const [summary, setSummary] = useState<any>(null);
   const [findings, setFindings] = useState<Finding[]>([]);
-  const [allFindings, setAllFindings] = useState<Finding[]>([]);
   const [loading, setLoading] = useState({ pipeline: true, summary: true, findings: true });
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [severityFilter, setSeverityFilter] = useState<string>('all');
-  const [repFilter, setRepFilter] = useState<string>('all');
-  const [skillFilter, setSkillFilter] = useState<string>('all');
-  const [expandedStage, setExpandedStage] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     const load = async (key: string, fetcher: () => Promise<any>, setter: (d: any) => void) => {
@@ -76,10 +59,9 @@ export default function CommandCenter() {
 
     load('pipeline', () => api.get('/pipeline/snapshot'), setPipeline);
     load('summary', () => api.get('/findings/summary'), setSummary);
-    load('findings', () => api.get('/findings?status=active&sort=severity&limit=20'), d => {
-      const findingsArray = Array.isArray(d) ? d : d.findings || [];
-      setAllFindings(findingsArray);
-      setFindings(findingsArray);
+    load('findings', () => api.get('/findings?status=active&sort=severity&limit=15'), d => {
+      const arr = Array.isArray(d) ? d : d.findings || [];
+      setFindings(arr);
     });
   }, []);
 
@@ -88,21 +70,6 @@ export default function CommandCenter() {
     const interval = setInterval(fetchData, 300000);
     return () => clearInterval(interval);
   }, [fetchData]);
-
-  // Apply filters
-  useEffect(() => {
-    let filtered = [...allFindings];
-    if (severityFilter !== 'all') {
-      filtered = filtered.filter(f => f.severity === severityFilter);
-    }
-    if (repFilter !== 'all') {
-      filtered = filtered.filter(f => f.owner_email === repFilter || f.owner_name === repFilter);
-    }
-    if (skillFilter !== 'all') {
-      filtered = filtered.filter(f => f.skill_id === skillFilter);
-    }
-    setFindings(filtered);
-  }, [severityFilter, repFilter, skillFilter, allFindings]);
 
   const stageData: PipelineStage[] = pipeline?.by_stage || [];
   const totalPipeline = Number(pipeline?.total_pipeline) || 0;
@@ -115,16 +82,28 @@ export default function CommandCenter() {
   const winRate = pipeline?.win_rate?.trailing_90d;
   const coverage = pipeline?.coverage?.ratio;
 
-  // Extract unique reps and skills for filter dropdowns
-  const uniqueReps = Array.from(new Set(allFindings.map(f => f.owner_email || f.owner_name).filter(Boolean)));
-  const uniqueSkills = Array.from(new Set(allFindings.map(f => f.skill_id).filter(Boolean)));
+  const maxStageValue = Math.max(...stageData.map(s => s.total_value), 1);
+
+  const byOwner = summary?.by_owner;
+  const ownerRows = byOwner
+    ? Object.entries(byOwner)
+        .map(([owner, counts]: [string, any]) => ({
+          owner,
+          act: counts?.act || 0,
+          watch: counts?.watch || 0,
+          total: (counts?.act || 0) + (counts?.watch || 0),
+        }))
+        .filter(r => r.total > 0)
+        .sort((a, b) => b.total - a.total)
+        .slice(0, 8)
+    : [];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       {/* Headline Metrics */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16 }}>
         {loading.pipeline || loading.summary ? (
-          Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} height={100} />)
+          Array.from({ length: 5 }).map((_, i) => <SkeletonCard key={i} height={100} />)
         ) : (
           <>
             <MetricCard label="Total Pipeline" value={formatCurrency(totalPipeline)} />
@@ -137,12 +116,19 @@ export default function CommandCenter() {
               label="Win Rate (90d)"
               value={winRate != null ? formatPercent(Number(winRate)) : '--'}
             />
-            <div style={{
-              background: colors.surface,
-              border: `1px solid ${colors.border}`,
-              borderRadius: 10,
-              padding: 16,
-            }}>
+            <div
+              onClick={() => navigate('/insights')}
+              style={{
+                background: colors.surface,
+                border: `1px solid ${colors.border}`,
+                borderRadius: 10,
+                padding: 16,
+                cursor: 'pointer',
+                transition: 'border-color 0.15s',
+              }}
+              onMouseEnter={e => (e.currentTarget.style.borderColor = colors.accent)}
+              onMouseLeave={e => (e.currentTarget.style.borderColor = colors.border)}
+            >
               <div style={{ fontSize: 11, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                 Open Findings
               </div>
@@ -157,7 +143,7 @@ export default function CommandCenter() {
         )}
       </div>
 
-      {/* Annotated Pipeline Chart */}
+      {/* Pipeline by Stage — Horizontal CSS Bar Chart */}
       <div style={{
         background: colors.surface,
         border: `1px solid ${colors.border}`,
@@ -167,12 +153,12 @@ export default function CommandCenter() {
         <div style={{ marginBottom: 16 }}>
           <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>Pipeline by Stage</h3>
           <p style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
-            {formatCurrency(totalPipeline)} total • {stageData.reduce((sum, s) => sum + s.deal_count, 0)} deals across {stageData.length} stages
+            {formatCurrency(totalPipeline)} total \u00B7 {stageData.reduce((sum, s) => sum + s.deal_count, 0)} deals across {stageData.length} stages
           </p>
         </div>
         {loading.pipeline ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} height={32} />)}
+            {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} height={36} />)}
           </div>
         ) : errors.pipeline ? (
           <ErrorInline message={errors.pipeline} onRetry={fetchData} />
@@ -183,145 +169,126 @@ export default function CommandCenter() {
             onLink={() => navigate('/connectors')}
           />
         ) : (
-          <div>
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={stageData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={colors.border} />
-                <XAxis
-                  dataKey="stage"
-                  angle={-45}
-                  textAnchor="end"
-                  height={80}
-                  tick={{ fill: colors.textSecondary, fontSize: 11 }}
-                  tickFormatter={(value) => value?.replace(/_/g, ' ') || ''}
-                />
-                <YAxis
-                  tick={{ fill: colors.textSecondary, fontSize: 11 }}
-                  tickFormatter={(value) => formatCurrency(value).replace('.00', '')}
-                />
-                <Tooltip
-                  content={({ active, payload }) => {
-                    if (!active || !payload?.[0]) return null;
-                    const data = payload[0].payload as PipelineStage;
-                    return (
-                      <div style={{
-                        background: colors.surface,
-                        border: `1px solid ${colors.border}`,
-                        borderRadius: 6,
-                        padding: 12,
-                      }}>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: colors.text, marginBottom: 6 }}>
-                          {data.stage?.replace(/_/g, ' ') || 'Unknown'}
-                        </div>
-                        <div style={{ fontSize: 11, color: colors.textSecondary, display: 'flex', flexDirection: 'column', gap: 3 }}>
-                          <div>{formatCurrency(data.total_value)} total</div>
-                          <div>{formatCurrency(data.weighted_value)} weighted</div>
-                          <div>{data.deal_count} deals</div>
-                          {data.findings && (
-                            <div style={{ marginTop: 4, display: 'flex', gap: 6 }}>
-                              {data.findings.act > 0 && <span style={{ color: colors.red }}>{data.findings.act} act</span>}
-                              {data.findings.watch > 0 && <span style={{ color: colors.yellow }}>{data.findings.watch} watch</span>}
-                              {data.findings.notable > 0 && <span style={{ color: colors.purple }}>{data.findings.notable} notable</span>}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {stageData.map((stage, idx) => {
+              const pct = Math.max((stage.total_value / maxStageValue) * 100, 2);
+              const findingAct = stage.findings?.act || 0;
+              const findingWatch = stage.findings?.watch || 0;
+
+              return (
+                <div
+                  key={idx}
+                  onClick={() => navigate(`/deals?stage=${encodeURIComponent(stage.stage)}`)}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '120px 1fr auto',
+                    alignItems: 'center',
+                    gap: 12,
+                    padding: '6px 8px',
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                    transition: 'background 0.12s',
                   }}
-                />
-                <Bar dataKey="total_value" radius={[6, 6, 0, 0]}>
-                  {stageData.map((stage, index) => (
-                    <Cell key={`cell-${index}`} fill={colors.accent} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-
-            {/* Annotated Findings per Stage */}
-            <div style={{ marginTop: 20 }}>
-              {stageData.map((stage, idx) => {
-                const topFindings = stage.findings?.top_findings || stage.annotated_findings || [];
-                const hasFindings = topFindings.length > 0;
-                if (!hasFindings) return null;
-
-                const isExpanded = expandedStage === stage.stage;
-                const highestSeverity = topFindings.reduce((max: string, f: any) => {
-                  const severities: Record<string, number> = { act: 4, watch: 3, notable: 2, info: 1 };
-                  return (severities[f.severity] || 0) > (severities[max] || 0) ? f.severity : max;
-                }, 'info');
-
-                return (
-                  <div key={idx} style={{ marginBottom: 12 }}>
-                    <div
-                      onClick={() => setExpandedStage(isExpanded ? null : stage.stage)}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 10,
-                        padding: '8px 12px',
-                        background: colors.surfaceRaised,
-                        borderRadius: 6,
-                        cursor: 'pointer',
-                        border: `1px solid ${colors.border}`,
-                      }}
-                      onMouseEnter={e => (e.currentTarget.style.background = colors.surfaceHover)}
-                      onMouseLeave={e => (e.currentTarget.style.background = colors.surfaceRaised)}
-                    >
-                      <SeverityDot severity={highestSeverity as any} size={7} />
-                      <span style={{ fontSize: 12, fontWeight: 500, color: colors.text, textTransform: 'capitalize' }}>
-                        {stage.stage?.replace(/_/g, ' ')}
-                      </span>
-                      <span style={{ fontSize: 11, color: colors.textMuted, fontFamily: fonts.mono }}>
-                        {topFindings.length} finding{topFindings.length !== 1 ? 's' : ''}
-                      </span>
-                      <span style={{ marginLeft: 'auto', fontSize: 10, color: colors.textMuted }}>
-                        {isExpanded ? '▼' : '▶'}
-                      </span>
+                  onMouseEnter={e => (e.currentTarget.style.background = colors.surfaceHover)}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                >
+                  <span style={{ fontSize: 12, fontWeight: 500, color: colors.text, textTransform: 'capitalize', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {stage.stage?.replace(/_/g, ' ') || 'Unknown'}
+                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                    <div style={{ flex: 1, height: 20, background: colors.surfaceRaised, borderRadius: 4, overflow: 'hidden' }}>
+                      <div style={{
+                        width: `${pct}%`,
+                        height: '100%',
+                        background: `linear-gradient(90deg, ${colors.accent}, ${colors.accent}cc)`,
+                        borderRadius: 4,
+                        transition: 'width 0.5s ease',
+                      }} />
                     </div>
-
-                    {isExpanded && (
-                      <div style={{ marginTop: 8, marginLeft: 24, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        {topFindings.map((finding: any, fidx: number) => (
-                          <div
-                            key={fidx}
-                            onClick={() => finding.deal_id && navigate(`/deals/${finding.deal_id}`)}
-                            style={{
-                              padding: '8px 12px',
-                              background: colors.surface,
-                              borderRadius: 6,
-                              border: `1px solid ${colors.border}`,
-                              cursor: finding.deal_id ? 'pointer' : 'default',
-                            }}
-                            onMouseEnter={e => finding.deal_id && (e.currentTarget.style.background = colors.surfaceHover)}
-                            onMouseLeave={e => finding.deal_id && (e.currentTarget.style.background = colors.surface)}
-                          >
-                            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                              <SeverityDot severity={finding.severity} size={6} />
-                              <div style={{ flex: 1 }}>
-                                <p style={{ fontSize: 12, color: colors.text, lineHeight: 1.4 }}>
-                                  {finding.message}
-                                </p>
-                                <div style={{ display: 'flex', gap: 10, marginTop: 4, fontSize: 10, color: colors.textMuted }}>
-                                  <span>{finding.skill_id}</span>
-                                  {finding.deal_name && (
-                                    <span style={{ color: colors.accent, fontWeight: 500 }}>{finding.deal_name}</span>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}>
+                    <span style={{ fontSize: 12, fontFamily: fonts.mono, fontWeight: 600, color: colors.text, minWidth: 60, textAlign: 'right' }}>
+                      {formatCurrency(stage.total_value)}
+                    </span>
+                    <span style={{ fontSize: 11, color: colors.textMuted, minWidth: 55 }}>
+                      ({stage.deal_count} deal{stage.deal_count !== 1 ? 's' : ''})
+                    </span>
+                    {(findingAct > 0 || findingWatch > 0) && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 4 }}>
+                        {findingAct > 0 && (
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: severityColor('act'), display: 'inline-block' }} />
+                            <span style={{ fontSize: 10, fontFamily: fonts.mono, color: severityColor('act') }}>{findingAct}</span>
+                          </span>
+                        )}
+                        {findingWatch > 0 && (
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: severityColor('watch'), display: 'inline-block' }} />
+                            <span style={{ fontSize: 10, fontFamily: fonts.mono, color: severityColor('watch') }}>{findingWatch}</span>
+                          </span>
+                        )}
                       </div>
                     )}
                   </div>
-                );
-              })}
-            </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
 
-      {/* Findings Feed */}
+      {/* Findings by Rep */}
+      {ownerRows.length > 0 && (
+        <div style={{
+          background: colors.surface,
+          border: `1px solid ${colors.border}`,
+          borderRadius: 10,
+          padding: 20,
+        }}>
+          <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text, marginBottom: 12 }}>Findings by Rep</h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+            {ownerRows.map((row, i) => (
+              <div
+                key={i}
+                onClick={() => navigate(`/deals?owner=${encodeURIComponent(row.owner)}`)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 12,
+                  padding: '8px 8px',
+                  borderBottom: `1px solid ${colors.border}`,
+                  cursor: 'pointer',
+                  borderRadius: 4,
+                  transition: 'background 0.12s',
+                }}
+                onMouseEnter={e => (e.currentTarget.style.background = colors.surfaceHover)}
+                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+              >
+                <span style={{ fontSize: 12, fontWeight: 500, color: colors.text, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {row.owner}
+                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {row.act > 0 && (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: severityColor('act'), display: 'inline-block' }} />
+                      <span style={{ fontSize: 11, fontFamily: fonts.mono, color: severityColor('act') }}>{row.act}</span>
+                    </span>
+                  )}
+                  {row.watch > 0 && (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: severityColor('watch'), display: 'inline-block' }} />
+                      <span style={{ fontSize: 11, fontFamily: fonts.mono, color: severityColor('watch') }}>{row.watch}</span>
+                    </span>
+                  )}
+                </div>
+                <span style={{ fontSize: 11, fontFamily: fonts.mono, color: colors.textMuted, minWidth: 50, textAlign: 'right' }}>
+                  {row.total} total
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Active Findings Feed */}
       <div style={{
         background: colors.surface,
         border: `1px solid ${colors.border}`,
@@ -332,92 +299,20 @@ export default function CommandCenter() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>Active Findings</h3>
             <span style={{
-              fontSize: 10,
-              fontWeight: 600,
-              background: totalActive > 0 ? severityBg('act') : colors.accentSoft,
+              fontSize: 10, fontWeight: 600,
+              background: totalActive > 0 ? 'rgba(239,68,68,0.1)' : colors.accentSoft,
               color: totalActive > 0 ? colors.red : colors.accent,
-              padding: '2px 6px',
-              borderRadius: 8,
-              fontFamily: fonts.mono,
+              padding: '2px 6px', borderRadius: 8, fontFamily: fonts.mono,
             }}>
               {totalActive}
             </span>
           </div>
-        </div>
-
-        {/* Filter Controls */}
-        <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-          {/* Severity Filter */}
-          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-            <span style={{ fontSize: 11, color: colors.textMuted, marginRight: 4 }}>Severity:</span>
-            {['all', 'act', 'watch', 'notable', 'info'].map(sev => (
-              <button
-                key={sev}
-                onClick={() => setSeverityFilter(sev)}
-                style={{
-                  fontSize: 11,
-                  fontWeight: 500,
-                  padding: '4px 10px',
-                  borderRadius: 4,
-                  background: severityFilter === sev ? colors.surfaceActive : 'transparent',
-                  color: severityFilter === sev ? colors.text : colors.textMuted,
-                  border: 'none',
-                  cursor: 'pointer',
-                  textTransform: 'capitalize',
-                }}
-              >
-                {sev}
-              </button>
-            ))}
-          </div>
-
-          {/* Rep Filter */}
-          {uniqueReps.length > 0 && (
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-              <span style={{ fontSize: 11, color: colors.textMuted }}>Rep:</span>
-              <select
-                value={repFilter}
-                onChange={(e) => setRepFilter(e.target.value)}
-                style={{
-                  fontSize: 11,
-                  padding: '4px 8px',
-                  borderRadius: 4,
-                  background: colors.surfaceRaised,
-                  color: colors.text,
-                  border: `1px solid ${colors.border}`,
-                }}
-              >
-                <option value="all">All</option>
-                {uniqueReps.map((rep) => (
-                  <option key={rep} value={rep}>{rep}</option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {/* Skill Filter */}
-          {uniqueSkills.length > 0 && (
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-              <span style={{ fontSize: 11, color: colors.textMuted }}>Skill:</span>
-              <select
-                value={skillFilter}
-                onChange={(e) => setSkillFilter(e.target.value)}
-                style={{
-                  fontSize: 11,
-                  padding: '4px 8px',
-                  borderRadius: 4,
-                  background: colors.surfaceRaised,
-                  color: colors.text,
-                  border: `1px solid ${colors.border}`,
-                }}
-              >
-                <option value="all">All</option>
-                {uniqueSkills.map((skill) => (
-                  <option key={skill} value={skill}>{skill}</option>
-                ))}
-              </select>
-            </div>
-          )}
+          <button
+            onClick={() => navigate('/insights')}
+            style={{ fontSize: 11, color: colors.accent, background: 'none', border: 'none', cursor: 'pointer' }}
+          >
+            View all \u2192
+          </button>
         </div>
 
         {loading.findings ? (
@@ -427,17 +322,17 @@ export default function CommandCenter() {
         ) : errors.findings ? (
           <ErrorInline message={errors.findings} onRetry={fetchData} />
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 0, maxHeight: 500, overflow: 'auto' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 0, maxHeight: 400, overflow: 'auto' }}>
             {findings.length === 0 ? (
               <p style={{ fontSize: 12, color: colors.textMuted, textAlign: 'center', padding: 24 }}>
-                No findings match the current filters
+                No active findings
               </p>
             ) : (
               findings.map(f => (
                 <div
                   key={f.id}
                   style={{
-                    padding: '12px 0',
+                    padding: '10px 0',
                     borderBottom: `1px solid ${colors.border}`,
                     cursor: f.deal_id ? 'pointer' : 'default',
                   }}
@@ -448,20 +343,14 @@ export default function CommandCenter() {
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
                     <SeverityDot severity={f.severity as any} size={7} />
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{ fontSize: 13, color: colors.text, lineHeight: 1.4, marginBottom: 6 }}>
+                      <p style={{ fontSize: 13, color: colors.text, lineHeight: 1.4, marginBottom: 4 }}>
                         {f.message}
                       </p>
                       <div style={{ display: 'flex', gap: 12, fontSize: 11, color: colors.textMuted, flexWrap: 'wrap' }}>
                         <span style={{ fontWeight: 500 }}>{f.skill_name || f.skill_id}</span>
-                        {f.deal_name && (
-                          <span style={{ color: colors.accent }}>{f.deal_name}</span>
-                        )}
-                        {f.account_name && (
-                          <span>{f.account_name}</span>
-                        )}
-                        {(f.owner_name || f.owner_email) && (
-                          <span>{f.owner_name || f.owner_email}</span>
-                        )}
+                        {f.deal_name && <span style={{ color: colors.accent }}>{f.deal_name}</span>}
+                        {f.account_name && <span>{f.account_name}</span>}
+                        {(f.owner_name || f.owner_email) && <span>{f.owner_name || f.owner_email}</span>}
                         <span>{formatTimeAgo(f.found_at)}</span>
                       </div>
                     </div>
@@ -488,11 +377,8 @@ function MetricCard({ label, value, color }: { label: string; value: string; col
         {label}
       </div>
       <div style={{
-        fontSize: 24,
-        fontWeight: 700,
-        fontFamily: fonts.mono,
-        color: color || colors.text,
-        marginTop: 6,
+        fontSize: 24, fontWeight: 700, fontFamily: fonts.mono,
+        color: color || colors.text, marginTop: 6,
       }}>
         {value}
       </div>
@@ -505,9 +391,7 @@ function FindingBadge({ count, severity }: { count: number; severity: string }) 
     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
       <SeverityDot severity={severity as any} size={6} />
       <span style={{
-        fontSize: 14,
-        fontWeight: 600,
-        fontFamily: fonts.mono,
+        fontSize: 14, fontWeight: 600, fontFamily: fonts.mono,
         color: severityColor(severity),
       }}>
         {count}

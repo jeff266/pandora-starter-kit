@@ -67,13 +67,49 @@ export function severityBg(severity: string): string {
 }
 
 export function formatSchedule(schedule: any): string {
-  if (!schedule) return 'Manual';
-  if (typeof schedule === 'string') return schedule;
+  if (!schedule) return 'On demand';
+  if (typeof schedule === 'string') {
+    if (/^\d/.test(schedule)) return humanizeCron(schedule);
+    return schedule;
+  }
   if (typeof schedule === 'object') {
     if (schedule.description) return schedule.description;
-    if (schedule.cron) return schedule.cron;
+    if (schedule.trigger === 'on_demand') return 'On demand';
+    if (schedule.trigger === 'on_sync') return 'After each sync';
+    if (schedule.cron) return humanizeCron(schedule.cron);
     if (schedule.trigger) return String(schedule.trigger);
     return 'Scheduled';
   }
   return String(schedule);
+}
+
+function humanizeCron(cron: string): string {
+  const parts = cron.split(' ');
+  if (parts.length < 5) return cron;
+  const [min, hour, dom, , dow] = parts;
+  const h = parseInt(hour);
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+  const time = `${h12}${min !== '0' ? ':' + min.padStart(2, '0') : ''} ${ampm}`;
+
+  const dayNames: Record<string, string> = { '0': 'Sun', '1': 'Mon', '2': 'Tue', '3': 'Wed', '4': 'Thu', '5': 'Fri', '6': 'Sat' };
+
+  if (dow === '*' && dom === '*') return `Daily ${time}`;
+  if (dow === '*' && dom !== '*') {
+    const days = dom.split(',');
+    if (days.length === 1) return `${ordinal(parseInt(days[0]))} of month ${time}`;
+    return `${days.map(d => ordinal(parseInt(d))).join(', ')} of month ${time}`;
+  }
+  if (dow !== '*') {
+    const days = dow.split(',').map(d => dayNames[d] || d);
+    if (days.length === 1) return `${days[0]}s ${time}`;
+    return `${days.join(', ')} ${time}`;
+  }
+  return cron;
+}
+
+function ordinal(n: number): string {
+  const s = ['th', 'st', 'nd', 'rd'];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
 }

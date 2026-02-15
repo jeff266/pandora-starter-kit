@@ -140,6 +140,13 @@ export default function AccountDetail() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      <button
+        onClick={() => navigate('/accounts')}
+        style={{ fontSize: 12, color: colors.accent, background: 'none', border: 'none', cursor: 'pointer', alignSelf: 'flex-start', padding: 0 }}
+      >
+        \u2190 Back to Accounts
+      </button>
+
       {toast && (
         <div style={{
           position: 'fixed', top: 16, right: 16, zIndex: 1000,
