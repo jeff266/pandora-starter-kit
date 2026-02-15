@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { verifySlackSignature } from '../connectors/slack/signature.js';
 import { getSlackAppClient } from '../connectors/slack/slack-app-client.js';
 import { query } from '../db.js';
+import { assembleDealDossier, type DealDossier } from '../dossiers/deal-dossier.js';
 
 const router = Router();
 
@@ -125,7 +126,7 @@ async function handleSnooze(value: any, payload: any): Promise<void> {
 }
 
 async function handleDrillDeal(value: any, payload: any): Promise<void> {
-  const { workspace_id, deal_id, deal_name, run_id } = value;
+  const { workspace_id, deal_id, deal_name } = value;
   if (!workspace_id || !deal_id) return;
 
   const client = getSlackAppClient();
@@ -136,52 +137,8 @@ async function handleDrillDeal(value: any, payload: any): Promise<void> {
   }], { thread_ts: payload.message.ts });
 
   try {
-    const dealResult = await query(
-      `SELECT d.id, d.deal_name, d.amount, d.stage, d.close_date, d.owner,
-              d.health_score, d.deal_risk, d.velocity_score,
-              a.name as account_name
-       FROM deals d
-       LEFT JOIN accounts a ON d.account_id = a.id AND a.workspace_id = $1
-       WHERE d.id = $2 AND d.workspace_id = $1`,
-      [workspace_id, deal_id]
-    );
-
-    if (dealResult.rows.length === 0) {
-      if (thinking.ts) {
-        await client.updateMessage(workspace_id, {
-          channel: payload.channel.id,
-          ts: thinking.ts,
-          blocks: [{
-            type: 'section',
-            text: { type: 'mrkdwn', text: `Could not find deal "${deal_name || deal_id}".` },
-          }],
-        });
-      }
-      return;
-    }
-
-    const deal = dealResult.rows[0];
-
-    const contactsResult = await query(
-      `SELECT c.first_name, c.last_name, c.email, c.title, dc.role, dc.is_primary
-       FROM deal_contacts dc
-       JOIN contacts c ON dc.contact_id = c.id AND c.workspace_id = $1
-       WHERE dc.deal_id = $2 AND dc.workspace_id = $1
-       ORDER BY dc.is_primary DESC, c.last_name ASC
-       LIMIT 10`,
-      [workspace_id, deal_id]
-    );
-
-    const activitiesResult = await query(
-      `SELECT type, subject, activity_date
-       FROM activities
-       WHERE workspace_id = $1 AND deal_id = $2
-       ORDER BY activity_date DESC
-       LIMIT 5`,
-      [workspace_id, deal_id]
-    );
-
-    const blocks = buildDealDossierBlocks(deal, contactsResult.rows, activitiesResult.rows);
+    const dossier = await assembleDealDossier(workspace_id, deal_id);
+    const blocks = formatDossierForSlack(dossier);
 
     if (thinking.ts) {
       await client.updateMessage(workspace_id, {
@@ -191,24 +148,28 @@ async function handleDrillDeal(value: any, payload: any): Promise<void> {
       });
     }
 
-    console.log(`[slack-interactions] Drilled into deal ${deal_id} (${deal.deal_name})`);
+    console.log(`[slack-interactions] Drilled into deal ${deal_id} (${dossier.deal.name})`);
   } catch (err) {
     console.error('[slack-interactions] Drill deal error:', err);
+    const errMsg = err instanceof Error && err.message.includes('not found')
+      ? `Could not find deal "${deal_name || deal_id}".`
+      : `Error retrieving deal details. Please try again.`;
     if (thinking.ts) {
       await client.updateMessage(workspace_id, {
         channel: payload.channel.id,
         ts: thinking.ts,
         blocks: [{
           type: 'section',
-          text: { type: 'mrkdwn', text: `Error retrieving deal details. Please try again.` },
+          text: { type: 'mrkdwn', text: errMsg },
         }],
       });
     }
   }
 }
 
-function buildDealDossierBlocks(deal: any, contacts: any[], activities: any[]): any[] {
+function formatDossierForSlack(dossier: DealDossier): any[] {
   const blocks: any[] = [];
+  const { deal, contacts, activities, findings, health_signals } = dossier;
 
   const amount = deal.amount
     ? `$${(deal.amount / 1000).toFixed(deal.amount >= 1000000 ? 1 : 0)}${deal.amount >= 1000000 ? 'M' : 'K'}`
@@ -216,7 +177,7 @@ function buildDealDossierBlocks(deal: any, contacts: any[], activities: any[]): 
 
   blocks.push({
     type: 'header',
-    text: { type: 'plain_text', text: `${deal.deal_name}`, emoji: true },
+    text: { type: 'plain_text', text: deal.name, emoji: true },
   });
 
   const fields: any[] = [
@@ -229,33 +190,55 @@ function buildDealDossierBlocks(deal: any, contacts: any[], activities: any[]): 
     fields.push({ type: 'mrkdwn', text: `*Close Date:* ${closeDate}` });
   }
 
-  if (deal.account_name) {
-    fields.push({ type: 'mrkdwn', text: `*Account:* ${deal.account_name}` });
+  if (deal.owner_email) {
+    fields.push({ type: 'mrkdwn', text: `*Owner:* ${deal.owner_email}` });
+  }
+
+  if (deal.days_in_stage > 0) {
+    fields.push({ type: 'mrkdwn', text: `*Days in Stage:* ${deal.days_in_stage}` });
+  }
+
+  if (deal.pipeline_name) {
+    fields.push({ type: 'mrkdwn', text: `*Pipeline:* ${deal.pipeline_name}` });
   }
 
   blocks.push({ type: 'section', fields });
 
-  const scoreFields: string[] = [];
-  if (deal.health_score != null) scoreFields.push(`Health: ${deal.health_score}`);
-  if (deal.deal_risk != null) scoreFields.push(`Risk: ${Math.round(deal.deal_risk * 100)}%`);
-  if (deal.velocity_score != null) scoreFields.push(`Velocity: ${deal.velocity_score}`);
-  if (scoreFields.length > 0) {
+  const signalParts: string[] = [];
+  const recencyIcon = health_signals.activity_recency === 'active' ? '🟢' : health_signals.activity_recency === 'cooling' ? '🟡' : '🔴';
+  signalParts.push(`${recencyIcon} Activity: ${health_signals.activity_recency}`);
+  const threadIcon = health_signals.threading === 'multi' ? '🟢' : health_signals.threading === 'dual' ? '🟡' : '🔴';
+  signalParts.push(`${threadIcon} Threading: ${health_signals.threading}`);
+  const velocityIcon = health_signals.stage_velocity === 'fast' ? '🟢' : health_signals.stage_velocity === 'normal' ? '🟡' : '🔴';
+  signalParts.push(`${velocityIcon} Velocity: ${health_signals.stage_velocity}`);
+  signalParts.push(`📊 Data: ${health_signals.data_completeness}%`);
+
+  blocks.push({
+    type: 'context',
+    elements: [{ type: 'mrkdwn', text: signalParts.join('  |  ') }],
+  });
+
+  if (findings.length > 0) {
+    blocks.push({ type: 'divider' });
+    const severityEmoji: Record<string, string> = { act: '🔴', watch: '🟡', notable: '🔵', info: 'ℹ️' };
+    const findingLines = findings.slice(0, 5).map(f => {
+      const emoji = severityEmoji[f.severity] || '•';
+      return `${emoji} [${f.severity}] ${f.message}`;
+    }).join('\n');
     blocks.push({
-      type: 'context',
-      elements: [{ type: 'mrkdwn', text: scoreFields.join(' | ') }],
+      type: 'section',
+      text: { type: 'mrkdwn', text: `*Findings (${findings.length}):*\n${findingLines}` },
     });
   }
 
   if (contacts.length > 0) {
     blocks.push({ type: 'divider' });
-    const contactLines = contacts.map(c => {
-      const name = `${c.first_name || ''} ${c.last_name || ''}`.trim();
+    const contactLines = contacts.slice(0, 10).map(c => {
       const role = c.role ? ` (${c.role})` : '';
       const title = c.title ? ` — ${c.title}` : '';
       const primary = c.is_primary ? ' ★' : '';
-      return `• ${name}${role}${title}${primary}`;
+      return `• ${c.name}${role}${title}${primary}`;
     }).join('\n');
-
     blocks.push({
       type: 'section',
       text: { type: 'mrkdwn', text: `*Contacts (${contacts.length}):*\n${contactLines}` },
@@ -264,13 +247,12 @@ function buildDealDossierBlocks(deal: any, contacts: any[], activities: any[]): 
 
   if (activities.length > 0) {
     blocks.push({ type: 'divider' });
-    const activityLines = activities.map(a => {
-      const date = a.activity_date
-        ? new Date(a.activity_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    const activityLines = activities.slice(0, 5).map(a => {
+      const date = a.date
+        ? new Date(a.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
         : '?';
       return `• ${date} — ${a.type || 'Activity'}${a.subject ? `: ${a.subject}` : ''}`;
     }).join('\n');
-
     blocks.push({
       type: 'section',
       text: { type: 'mrkdwn', text: `*Recent Activity:*\n${activityLines}` },

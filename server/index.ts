@@ -36,6 +36,8 @@ import workflowsRouter, { setWorkflowService } from './routes/workflows.js';
 import projectUpdatesRouter from './routes/project-updates.js';
 import funnelRouter from './routes/funnel.js';
 import workspaceConfigRouter from './routes/workspace-config.js';
+import findingsRouter from './routes/findings.js';
+import dossiersRouter from './routes/dossiers.js';
 import { ActivePiecesClient } from './workflows/ap-client.js';
 import { WorkflowService } from './workflows/workflow-service.js';
 import { seedTemplates } from './workflows/template-seed.js';
@@ -57,6 +59,7 @@ import { agentsGlobalRouter, agentsWorkspaceRouter } from './routes/agents.js';
 import { registerBuiltInAgents, getAgentRegistry } from './agents/index.js';
 import slackEventsRouter from './routes/slack-events.js';
 import slackInteractionsRouter from './routes/slack-interactions.js';
+import analysisRouter from './routes/analysis.js';
 
 dotenv.config();
 
@@ -197,6 +200,9 @@ workspaceApiRouter.use(projectUpdatesRouter);
 workspaceApiRouter.use(funnelRouter);
 workspaceApiRouter.use(workspaceConfigRouter);
 workspaceApiRouter.use(agentsWorkspaceRouter);
+workspaceApiRouter.use(findingsRouter);
+workspaceApiRouter.use(dossiersRouter);
+workspaceApiRouter.use(analysisRouter);
 app.use("/api/workspaces", workspaceApiRouter);
 
 app.use("/api", skillsRouter);
