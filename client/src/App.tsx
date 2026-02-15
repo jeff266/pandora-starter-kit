@@ -19,6 +19,7 @@ import SkillsPage from './pages/SkillsPage';
 import SkillRunsPage from './pages/SkillRunsPage';
 import ConnectorsPage from './pages/ConnectorsPage';
 import InsightsPage from './pages/InsightsPage';
+import Actions from './pages/Actions';
 import { colors, fonts } from './styles/theme';
 
 const pageTitles: Record<string, string> = {
@@ -62,9 +63,10 @@ export default function App() {
   const fetchBadges = useCallback(async () => {
     if (!currentWorkspace) return;
     try {
-      const [skillsRes, findingsRes] = await Promise.allSettled([
+      const [skillsRes, findingsRes, actionsRes] = await Promise.allSettled([
         api.get('/skills'),
         api.get('/findings/summary'),
+        api.get('/action-items/summary'),
       ]);
       const newBadges: Record<string, number> = {};
       if (skillsRes.status === 'fulfilled') {
@@ -73,7 +75,11 @@ export default function App() {
       }
       if (findingsRes.status === 'fulfilled') {
         const summary = findingsRes.value;
-        newBadges['actions'] = summary?.by_severity?.act || 0;
+        newBadges['insights feed'] = summary?.total_active || 0;
+      }
+      if (actionsRes.status === 'fulfilled') {
+        const actionSummary = actionsRes.value;
+        newBadges['actions'] = Number(actionSummary?.open_total) || 0;
       }
       setBadges(newBadges);
       setLastRefreshed(new Date());
@@ -147,7 +153,7 @@ export default function App() {
             <Route path="/agent-builder" element={<Placeholder title="Agent Builder" />} />
             <Route path="/tools" element={<Placeholder title="Tools" />} />
             <Route path="/playbooks" element={<Placeholder title="Playbooks" />} />
-            <Route path="/actions" element={<Placeholder title="Actions" />} />
+            <Route path="/actions" element={<Actions />} />
             <Route path="/connectors/health" element={<Placeholder title="Connector Health" />} />
             <Route path="/data-dictionary" element={<Placeholder title="Data Dictionary" />} />
             <Route path="/marketplace" element={<Placeholder title="Marketplace" />} />
