@@ -165,6 +165,42 @@ export class SlackAppClient {
     }
   }
 
+  async openModal(
+    workspaceId: string,
+    triggerId: string,
+    view: Record<string, any>
+  ): Promise<{ ok: boolean; error?: string }> {
+    const botToken = await this.getBotToken(workspaceId);
+    if (!botToken) {
+      return { ok: false, error: 'Bot token required for modals' };
+    }
+
+    try {
+      const response = await fetch('https://slack.com/api/views.open', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${botToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          trigger_id: triggerId,
+          view,
+        }),
+      });
+
+      const data = await response.json() as any;
+      if (!data.ok) {
+        console.error('[slack-app] views.open error:', data.error);
+        return { ok: false, error: data.error };
+      }
+      return { ok: true };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[slack-app] openModal exception:', msg);
+      return { ok: false, error: msg };
+    }
+  }
+
   private async postViaAPI(
     botToken: string,
     channel: string,

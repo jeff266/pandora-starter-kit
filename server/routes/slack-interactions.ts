@@ -2,7 +2,10 @@ import { Router } from 'express';
 import { verifySlackSignature } from '../connectors/slack/signature.js';
 import { getSlackAppClient } from '../connectors/slack/slack-app-client.js';
 import { query } from '../db.js';
+import pool from '../db.js';
 import { assembleDealDossier, type DealDossier } from '../dossiers/deal-dossier.js';
+import { executeAction } from '../actions/executor.js';
+import { formatCurrency } from '../utils/format-currency.js';
 
 const router = Router();
 
@@ -27,6 +30,11 @@ router.post('/', async (req, res) => {
   res.status(200).json({});
 
   try {
+    if (payload.type === 'view_submission') {
+      await handleViewSubmission(payload);
+      return;
+    }
+
     const action = payload.actions?.[0];
     if (!action) return;
 
@@ -45,6 +53,14 @@ router.post('/', async (req, res) => {
         break;
       case 'drill_deal':
         await handleDrillDeal(value, payload);
+        break;
+      case 'pandora_execute_action':
+        await handleExecuteAction(value, payload);
+        break;
+      case 'pandora_dismiss_action':
+        await handleDismissAction(value, payload);
+        break;
+      case 'pandora_view_action':
         break;
       default:
         console.warn(`[slack-interactions] Unknown action: ${action.action_id}`);
@@ -171,9 +187,7 @@ function formatDossierForSlack(dossier: DealDossier): any[] {
   const blocks: any[] = [];
   const { deal, contacts, activities, findings, health_signals } = dossier;
 
-  const amount = deal.amount
-    ? `$${(deal.amount / 1000).toFixed(deal.amount >= 1000000 ? 1 : 0)}${deal.amount >= 1000000 ? 'M' : 'K'}`
-    : 'N/A';
+  const amount = deal.amount ? formatCurrency(deal.amount) : 'N/A';
 
   blocks.push({
     type: 'header',
@@ -260,6 +274,213 @@ function formatDossierForSlack(dossier: DealDossier): any[] {
   }
 
   return blocks;
+}
+
+async function handleExecuteAction(value: any, payload: any): Promise<void> {
+  const { action_id, workspace_id } = value;
+  if (!action_id || !workspace_id) return;
+
+  const client = getSlackAppClient();
+
+  const actionResult = await query<any>(
+    `SELECT * FROM actions WHERE id = $1 AND workspace_id = $2`,
+    [action_id, workspace_id]
+  );
+  if (actionResult.rows.length === 0) {
+    await client.postEphemeral(workspace_id, {
+      channel: payload.channel.id,
+      user: payload.user.id,
+      text: 'Action not found or already processed.',
+    });
+    return;
+  }
+
+  const action = actionResult.rows[0];
+  const isNotification = ['notify_rep', 'notify_manager'].includes(action.action_type);
+
+  if (isNotification) {
+    try {
+      const result = await executeAction(pool, {
+        actionId: action_id,
+        workspaceId: workspace_id,
+        actor: payload.user.username || payload.user.id,
+      });
+
+      if (result.success) {
+        await replaceActionButtons(client, workspace_id, payload, action_id,
+          `📨 *Notification sent* by <@${payload.user.id}>`);
+      } else {
+        await client.postEphemeral(workspace_id, {
+          channel: payload.channel.id,
+          user: payload.user.id,
+          text: `❌ Execution failed: ${result.error || 'Unknown error'}`,
+        });
+      }
+    } catch (err) {
+      console.error('[slack-interactions] Execute notification error:', err);
+      await client.postEphemeral(workspace_id, {
+        channel: payload.channel.id,
+        user: payload.user.id,
+        text: `❌ Error: ${(err as Error).message}`,
+      });
+    }
+    return;
+  }
+
+  const operations = action.execution_payload?.operations || action.recommended_steps || [];
+  const opBlocks = Array.isArray(operations)
+    ? operations.slice(0, 10).map((op: any) => ({
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: op.field
+            ? `*${op.field}:* ${op.current_value || '(empty)'} → *${op.proposed_value}*`
+            : typeof op === 'string' ? `• ${op}` : `• ${JSON.stringify(op)}`,
+        },
+      }))
+    : [];
+
+  const modalView = {
+    type: 'modal',
+    callback_id: 'pandora_execute_confirm',
+    private_metadata: JSON.stringify({
+      action_id,
+      workspace_id,
+      channel: payload.channel.id,
+      message_ts: payload.message?.ts,
+    }),
+    title: { type: 'plain_text', text: 'Confirm CRM Changes' },
+    submit: { type: 'plain_text', text: 'Confirm & Execute' },
+    close: { type: 'plain_text', text: 'Cancel' },
+    blocks: [
+      {
+        type: 'section',
+        text: { type: 'mrkdwn', text: `*${action.title}*\n${action.summary || ''}` },
+      },
+      { type: 'divider' },
+      ...opBlocks,
+      {
+        type: 'context',
+        elements: [{
+          type: 'mrkdwn',
+          text: `⚠️ This will update the record in ${action.metadata?.crm_source || 'your CRM'}. An audit note will be added.`,
+        }],
+      },
+    ],
+  };
+
+  await client.openModal(workspace_id, payload.trigger_id, modalView);
+}
+
+async function handleDismissAction(value: any, payload: any): Promise<void> {
+  const { action_id, workspace_id } = value;
+  if (!action_id || !workspace_id) return;
+
+  const client = getSlackAppClient();
+
+  try {
+    await query(
+      `UPDATE actions SET execution_status = 'dismissed', dismissed_reason = 'Dismissed via Slack', executed_by = $3, updated_at = now()
+       WHERE id = $1 AND workspace_id = $2 AND execution_status IN ('open', 'in_progress')`,
+      [action_id, workspace_id, payload.user.username || payload.user.id]
+    );
+
+    await query(
+      `INSERT INTO action_audit_log (workspace_id, action_id, event_type, actor, from_status, to_status, details)
+       VALUES ($1, $2, 'dismissed', $3, 'open', 'dismissed', $4)`,
+      [workspace_id, action_id, payload.user.username || payload.user.id,
+       JSON.stringify({ source: 'slack', user_id: payload.user.id })]
+    );
+
+    await replaceActionButtons(client, workspace_id, payload, action_id,
+      `⏭ *Dismissed* by <@${payload.user.id}>`);
+
+    console.log(`[slack-interactions] Action ${action_id} dismissed by ${payload.user.id}`);
+  } catch (err) {
+    console.error('[slack-interactions] Dismiss error:', err);
+    await client.postEphemeral(workspace_id, {
+      channel: payload.channel.id,
+      user: payload.user.id,
+      text: `❌ Error dismissing action: ${(err as Error).message}`,
+    });
+  }
+}
+
+async function handleViewSubmission(payload: any): Promise<void> {
+  if (payload.view?.callback_id !== 'pandora_execute_confirm') return;
+
+  const meta = safeParseJSON(payload.view.private_metadata);
+  if (!meta) return;
+
+  const { action_id, workspace_id, channel, message_ts } = meta;
+  const client = getSlackAppClient();
+
+  try {
+    const result = await executeAction(pool, {
+      actionId: action_id,
+      workspaceId: workspace_id,
+      actor: payload.user.username || payload.user.id,
+    });
+
+    if (result.success) {
+      if (channel && message_ts) {
+        await client.postMessage(workspace_id, channel, [{
+          type: 'context',
+          elements: [{
+            type: 'mrkdwn',
+            text: `✅ *Executed* by <@${payload.user.id}> • ${result.operations.length} operation(s) completed`,
+          }],
+        }], { thread_ts: message_ts });
+      }
+      console.log(`[slack-interactions] Action ${action_id} executed by ${payload.user.id}`);
+    } else {
+      await client.postEphemeral(workspace_id, {
+        channel: channel || '',
+        user: payload.user.id,
+        text: `❌ Execution failed: ${result.error || 'Unknown error'}`,
+      });
+    }
+  } catch (err) {
+    console.error('[slack-interactions] Modal submission error:', err);
+    if (meta.channel) {
+      await client.postEphemeral(workspace_id, {
+        channel: meta.channel,
+        user: payload.user.id,
+        text: `❌ Error executing action: ${(err as Error).message}`,
+      });
+    }
+  }
+}
+
+async function replaceActionButtons(
+  client: ReturnType<typeof getSlackAppClient>,
+  workspaceId: string,
+  payload: any,
+  actionId: string,
+  statusText: string
+): Promise<void> {
+  const existingBlocks: any[] = payload.message?.blocks || [];
+  const targetBlockId = `action_buttons_${actionId.slice(0, 8)}`;
+
+  const updatedBlocks = existingBlocks.map((block: any) => {
+    if (block.block_id === targetBlockId) {
+      return {
+        type: 'context',
+        block_id: `action_status_${actionId.slice(0, 8)}`,
+        elements: [{
+          type: 'mrkdwn',
+          text: `${statusText} • <!date^${Math.floor(Date.now() / 1000)}^{date_short_pretty} at {time}|just now>`,
+        }],
+      };
+    }
+    return block;
+  });
+
+  await client.updateMessage(workspaceId, {
+    channel: payload.channel.id,
+    ts: payload.message.ts,
+    blocks: updatedBlocks,
+  });
 }
 
 export default router;

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { getSkillRegistry } from '../skills/registry.js';
 import { getSkillRuntime } from '../skills/runtime.js';
-import { formatForSlack, buildActionButtons } from '../skills/formatters/slack-formatter.js';
+import { formatForSlack, buildActionButtons, buildPerActionButtons } from '../skills/formatters/slack-formatter.js';
 import { formatAsMarkdown } from '../skills/formatters/markdown-formatter.js';
 import { getSlackWebhook, postBlocks } from '../connectors/slack/client.js';
 import { getSlackAppClient } from '../connectors/slack/slack-app-client.js';
@@ -384,7 +384,37 @@ async function postSkillToSlack(workspaceId: string, skillId: string, result: Sk
       workspace_id: workspaceId,
       deals: extractTopDeals(result),
     });
-    const fullBlocks = [...blocks, ...actionButtons];
+
+    let perActionBlocks: any[] = [];
+    try {
+      const actionsResult = await query<any>(
+        `SELECT id, action_type, severity, title, summary, impact_amount
+         FROM actions WHERE workspace_id = $1 AND source_run_id = $2
+         ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END, impact_amount DESC NULLS LAST`,
+        [workspaceId, result.runId]
+      );
+      if (actionsResult.rows.length > 0) {
+        const appBaseUrl = process.env.REPLIT_DEV_DOMAIN
+          ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+          : 'https://pandora-starter-kit.replit.app';
+        perActionBlocks = buildPerActionButtons(
+          actionsResult.rows.map(r => ({
+            action_id: r.id,
+            workspace_id: workspaceId,
+            action_type: r.action_type,
+            severity: r.severity,
+            title: r.title,
+            summary: r.summary,
+            impact_amount: r.impact_amount ? Number(r.impact_amount) : undefined,
+          })),
+          appBaseUrl
+        );
+      }
+    } catch (err) {
+      console.error('[skills] Failed to query actions for Slack buttons:', err);
+    }
+
+    const fullBlocks = [...blocks, ...perActionBlocks, ...actionButtons];
 
     if (botToken) {
       const channel = await slackAppClient.getChannelForSkill(workspaceId, skillId);
@@ -411,6 +441,11 @@ async function postSkillToSlack(workspaceId: string, skillId: string, result: Sk
           `UPDATE skill_runs SET slack_message_ts = $1, slack_channel_id = $2 WHERE run_id = $3 AND workspace_id = $4`,
           [msgRef.ts, msgRef.channel, result.runId, workspaceId]
         ).catch(err => console.error('[skills] Failed to store Slack message ref:', err));
+        await query(
+          `INSERT INTO slack_messages (workspace_id, channel_id, message_ts, skill_run_id, message_type)
+           VALUES ($1, $2, $3, $4, 'skill_report')`,
+          [workspaceId, msgRef.channel, msgRef.ts, result.runId]
+        ).catch(err => console.error('[skills] Failed to store slack_message:', err));
         console.log(`[skills] Posted ${skillId} to Slack via bot API (ts: ${msgRef.ts})`);
       } else {
         console.error(`[skills] Slack bot post failed for ${skillId}:`, msgRef.error);

@@ -1504,6 +1504,79 @@ function parseICPReportSections(report: string): Partial<ICPReportSections> {
   return sections;
 }
 
+export interface ActionButtonData {
+  action_id: string;
+  workspace_id: string;
+  action_type: string;
+  severity: string;
+  title: string;
+  summary: string;
+  impact_amount?: number;
+}
+
+export function buildPerActionButtons(actions: ActionButtonData[], appBaseUrl: string): SlackBlock[] {
+  if (!actions || actions.length === 0) return [];
+
+  const blocks: SlackBlock[] = [];
+
+  blocks.push({ type: 'divider' } as any);
+  blocks.push({
+    type: 'section',
+    text: { type: 'mrkdwn', text: `*Recommended Actions (${actions.length})*` },
+  } as any);
+
+  for (const action of actions.slice(0, 5)) {
+    const severityIcon = action.severity === 'critical' ? '🔴' : action.severity === 'warning' ? '🟡' : '🔵';
+    const impactStr = action.impact_amount ? ` • ${formatCurrency(action.impact_amount)} at risk` : '';
+
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `${severityIcon} *${action.title}*${impactStr}\n${action.summary.slice(0, 200)}`,
+      },
+    } as any);
+
+    const elements: any[] = [];
+    const valuePayload = JSON.stringify({ action_id: action.action_id, workspace_id: action.workspace_id });
+
+    const isCRMWrite = ['update_field', 'update_close_date', 're_engage_deal', 'clean_data'].includes(action.action_type);
+    const isNotification = ['notify_rep', 'notify_manager'].includes(action.action_type);
+
+    if (action.severity === 'critical' || action.severity === 'warning') {
+      elements.push({
+        type: 'button',
+        text: { type: 'plain_text', text: isNotification ? '📨 Send Notification' : '✅ Execute in CRM', emoji: true },
+        style: 'primary',
+        action_id: 'pandora_execute_action',
+        value: valuePayload,
+      });
+
+      elements.push({
+        type: 'button',
+        text: { type: 'plain_text', text: '⏭ Dismiss', emoji: true },
+        action_id: 'pandora_dismiss_action',
+        value: valuePayload,
+      });
+    }
+
+    elements.push({
+      type: 'button',
+      text: { type: 'plain_text', text: '🔗 View in App', emoji: true },
+      action_id: 'pandora_view_action',
+      url: `${appBaseUrl}/actions?highlight=${action.action_id}`,
+    });
+
+    blocks.push({
+      type: 'actions',
+      block_id: `action_buttons_${action.action_id.slice(0, 8)}`,
+      elements,
+    } as any);
+  }
+
+  return blocks;
+}
+
 export interface ActionButtonContext {
   skill_id: string;
   run_id: string;
