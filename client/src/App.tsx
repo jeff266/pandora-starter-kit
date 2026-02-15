@@ -13,6 +13,8 @@ import MembersPage from './pages/MembersPage';
 import CommandCenter from './pages/CommandCenter';
 import DealDetail from './pages/DealDetail';
 import AccountDetail from './pages/AccountDetail';
+import DealList from './pages/DealList';
+import AccountList from './pages/AccountList';
 import SkillsPage from './pages/SkillsPage';
 import SkillRunsPage from './pages/SkillRunsPage';
 import ConnectorsPage from './pages/ConnectorsPage';
@@ -21,6 +23,8 @@ import { colors, fonts } from './styles/theme';
 
 const pageTitles: Record<string, string> = {
   '/': 'Command Center',
+  '/deals': 'Open Deals',
+  '/accounts': 'Accounts',
   '/agents': 'Agents',
   '/agent-builder': 'Agent Builder',
   '/skills': 'Skills',
@@ -129,7 +133,9 @@ export default function App() {
         <div style={{ flex: 1, overflow: 'auto', padding: '24px 28px' }}>
           <Routes>
             <Route path="/" element={<CommandCenter />} />
+            <Route path="/deals" element={<DealList />} />
             <Route path="/deals/:dealId" element={<DealDetail />} />
+            <Route path="/accounts" element={<AccountList />} />
             <Route path="/accounts/:accountId" element={<AccountDetail />} />
             <Route path="/skills" element={<SkillsPage />} />
             <Route path="/skills/:skillId/runs" element={<SkillRunsPage />} />
