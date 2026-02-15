@@ -4,10 +4,31 @@ import { query } from "../db.js";
 const router = Router();
 
 let apHealthChecker: (() => Promise<{ healthy: boolean; error?: string }>) | null = null;
+let isReady = false;
 
 export function setAPHealthChecker(checker: () => Promise<{ healthy: boolean; error?: string }>) {
   apHealthChecker = checker;
 }
+
+export function setServerReady() {
+  isReady = true;
+}
+
+export function getServerReady(): boolean {
+  return isReady;
+}
+
+router.get("/alive", (_req: Request, res: Response) => {
+  res.json({ status: "alive", timestamp: new Date().toISOString() });
+});
+
+router.get("/ready", (_req: Request, res: Response) => {
+  if (isReady) {
+    res.json({ status: "ready", timestamp: new Date().toISOString() });
+  } else {
+    res.status(503).json({ status: "initializing", timestamp: new Date().toISOString() });
+  }
+});
 
 router.get("/", async (_req: Request, res: Response) => {
   try {
@@ -17,6 +38,7 @@ router.get("/", async (_req: Request, res: Response) => {
       status: "ok",
       timestamp: new Date().toISOString(),
       version: "0.1.0",
+      ready: isReady,
       services: {
         database: "ok",
       },

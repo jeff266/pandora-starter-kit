@@ -177,10 +177,20 @@ export async function migrateBowtieToFunnel(workspaceId: string): Promise<boolea
  * Migrate all workspaces with bowtie_discovery data
  */
 export async function migrateAllBowtiesToFunnel(): Promise<{ migrated: number; skipped: number; errors: number }> {
-  console.log('[Migration] Starting bowtie → funnel migration for all workspaces...');
-
   try {
-    // Find all workspaces with bowtie_discovery in definitions
+    const pending = await query<{ cnt: string }>(
+      `SELECT count(*) as cnt FROM context_layer
+       WHERE definitions ? 'bowtie_discovery'
+         AND NOT (definitions ? 'funnel')`
+    );
+
+    if (parseInt(pending.rows[0]?.cnt || '0') === 0) {
+      console.log('[Migration] Already complete, skipping');
+      return { migrated: 0, skipped: 0, errors: 0 };
+    }
+
+    console.log('[Migration] Starting bowtie → funnel migration for all workspaces...');
+
     const workspaces = await query<{ workspace_id: string }>(
       `SELECT DISTINCT workspace_id FROM context_layer
        WHERE definitions ? 'bowtie_discovery'`

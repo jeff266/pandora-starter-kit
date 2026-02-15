@@ -5,6 +5,7 @@
  */
 
 import { Pool } from 'pg';
+import crypto from 'crypto';
 import { WorkflowTemplate, WorkflowTree } from './types.js';
 import { createLogger } from '../utils/logger.js';
 
@@ -238,15 +239,25 @@ export const SEED_TEMPLATES: Omit<WorkflowTemplate, 'id' | 'created_at' | 'popul
   },
 ];
 
+function computeTemplateHash(): string {
+  const content = JSON.stringify(SEED_TEMPLATES);
+  return crypto.createHash('sha256').update(content).digest('hex').slice(0, 16);
+}
+
+async function ensureSystemSettings(db: Pool): Promise<void> {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS system_settings (
+      key VARCHAR(255) PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TIMESTAMPTZ DEFAULT now()
+    )
+  `);
+}
+
 /**
- * Seed templates into database (idempotent)
+ * Seed templates into database (idempotent, skips if current)
  */
 export async function seedTemplates(db: Pool): Promise<void> {
-  logger.info('Seeding workflow templates', {
-    count: SEED_TEMPLATES.length,
-  });
-
-  // Check if workflow_templates table exists before attempting to seed
   try {
     const tableCheck = await db.query(
       `SELECT EXISTS (
@@ -262,6 +273,25 @@ export async function seedTemplates(db: Pool): Promise<void> {
     logger.warn('Could not check for workflow_templates table, skipping seed');
     return;
   }
+
+  const currentHash = computeTemplateHash();
+
+  try {
+    await ensureSystemSettings(db);
+    const stored = await db.query(
+      `SELECT value FROM system_settings WHERE key = 'template_seed_version'`
+    );
+    if (stored.rows.length > 0 && stored.rows[0].value === currentHash) {
+      logger.info('[TemplateSeed] Templates up to date, skipping');
+      return;
+    }
+  } catch {
+    // table might not exist yet, proceed with seeding
+  }
+
+  logger.info('Seeding workflow templates', {
+    count: SEED_TEMPLATES.length,
+  });
 
   for (const template of SEED_TEMPLATES) {
     try {
@@ -327,6 +357,17 @@ export async function seedTemplates(db: Pool): Promise<void> {
         { name: template.name, detail: error instanceof Error ? undefined : String(error) }
       );
     }
+  }
+
+  try {
+    await ensureSystemSettings(db);
+    await db.query(
+      `INSERT INTO system_settings (key, value, updated_at) VALUES ('template_seed_version', $1, now())
+       ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = now()`,
+      [currentHash]
+    );
+  } catch {
+    // non-fatal: hash storage failed
   }
 
   logger.info('Template seeding complete');

@@ -4,7 +4,7 @@ import cors from "cors";
 import rateLimit from "express-rate-limit";
 import { verifyConnection } from "./db.js";
 import { requireWorkspaceAccess } from "./middleware/auth.js";
-import healthRouter, { setAPHealthChecker } from "./routes/health.js";
+import healthRouter, { setAPHealthChecker, setServerReady } from "./routes/health.js";
 import workspacesRouter from "./routes/workspaces.js";
 import connectorsRouter from "./routes/connectors.js";
 import hubspotRouter from "./routes/hubspot.js";
@@ -293,15 +293,22 @@ async function initWorkflowEngine(): Promise<ActivePiecesClient | undefined> {
 }
 
 async function start(): Promise<void> {
+  const t0 = performance.now();
+
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`[server] Pandora v0.1.0 listening on port ${PORT} (accepting /health/alive)`);
+  });
+
+  let tDb: number;
   try {
     await verifyConnection();
+    tDb = performance.now();
     console.log("[server] Database connection verified");
   } catch (err) {
     console.error("[server] Failed to connect to database:", err);
     process.exit(1);
   }
 
-  // Run funnel migration (bowtie_discovery → funnel definitions)
   try {
     const { migrateAllBowtiesToFunnel } = await import('./funnel/migration.js');
     await migrateAllBowtiesToFunnel();
@@ -309,22 +316,39 @@ async function start(): Promise<void> {
     console.warn("[server] Funnel migration failed (non-fatal):", err instanceof Error ? err.message : err);
   }
 
-  registerAdapters();
-  registerSkills();
-  registerBuiltInAgents();
+  const tMigration = performance.now();
+
+  await Promise.all([
+    Promise.resolve(registerAdapters()),
+    Promise.resolve(registerSkills()),
+    Promise.resolve(registerBuiltInAgents()),
+    initWorkflowEngine().then(apClient => {
+      startWorkflowMonitor(apClient);
+    }),
+  ]);
+
+  const tRegistration = performance.now();
+
   startJobQueue();
   startScheduler();
   startSkillScheduler();
 
-  const apClient = await initWorkflowEngine();
-  startWorkflowMonitor(apClient);
+  const tSchedulers = performance.now();
 
   cleanupTempFiles();
   setInterval(cleanupTempFiles, 60 * 60 * 1000);
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`[server] Pandora v0.1.0 listening on port ${PORT}`);
-  });
+  setServerReady();
+
+  const tTotal = performance.now();
+  const dbMs = Math.round(tDb! - t0);
+  const migrationMs = Math.round(tMigration - tDb!);
+  const registrationMs = Math.round(tRegistration - tMigration);
+  const schedulerMs = Math.round(tSchedulers - tRegistration);
+  const totalMs = Math.round(tTotal - t0);
+  console.log(
+    `[server] Pandora v0.1.0 ready in ${totalMs}ms (db: ${dbMs}ms, migration: ${migrationMs}ms, registration: ${registrationMs}ms, schedulers: ${schedulerMs}ms)`
+  );
 }
 
 // Graceful shutdown
