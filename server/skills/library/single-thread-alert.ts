@@ -194,7 +194,9 @@ If you need to find expansion contacts at a specific account, use the queryConta
 
 {{voiceBlock}}
 
-After your report, emit an <actions> block containing a JSON array of specific, executable actions. Each action must have:
+MANDATORY: After your report, you MUST emit an <actions> block. This is required output — do not skip it even if tool calls were limited. Use the threading data already provided above to generate actions.
+
+Emit an <actions> block containing a JSON array of specific, executable actions. Each action must have:
 - action_type: one of "add_contact", "expand_thread", "flag_at_risk", "schedule_review"
 - severity: "critical" | "warning" | "info"
 - title: short action title
