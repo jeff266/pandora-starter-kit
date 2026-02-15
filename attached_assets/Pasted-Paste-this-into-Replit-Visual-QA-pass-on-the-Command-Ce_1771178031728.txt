@@ -1,0 +1,43 @@
+Paste this into Replit:
+
+---
+
+**Visual QA pass on the Command Center frontend. Claude Code built the UI — I need you to pull latest from GitHub, run it against live data, and fix anything that looks off.**
+
+Pull the latest commits, then:
+
+```bash
+git pull origin main
+npm install
+npm run dev
+```
+
+**Check each page against `pandora-platform.jsx` styling. Fix anything that doesn't match.**
+
+Pages to test with live data:
+
+1. **Command Center home (`/`):**
+   - Headline metrics row — do all 5 cards render with real numbers from pipeline/snapshot?
+   - Annotated pipeline chart — do bars appear for each stage? Do finding flags show on stages with findings? Click a flag — does it expand? Click a deal — does it navigate to `/deals/:id`?
+   - Findings feed — do 68 findings appear? Do severity dots use correct colors (act=red, watch=yellow, notable=purple, info=blue)? Do all three filters work (severity toggle, rep dropdown, skill dropdown)?
+
+2. **Deal list (`/deals`):** Does the table load with 132 deals? Does sorting work? Do deals with critical findings show red left border?
+
+3. **Deal detail (`/deals/:id`):** Click any deal from the list. Does the dossier load? Stage history timeline, contacts with engagement dots, conversations list, findings panel, coverage gaps. Does "Generate Summary" button work (calls dossier with `?narrative=true`)?
+
+4. **Account list (`/accounts`):** Does sorting by pipeline/findings/activity work? Does industry filter populate?
+
+5. **Account detail (`/accounts/:id`):** Click any account. Relationship health panel — do the 4 metrics render with correct colors? Deals table, contact list, conversation timeline?
+
+6. **Sidebar:** Does every nav item route correctly? Active item highlighted with accent border? "Coming Soon" placeholder for unbuilt pages?
+
+**Common things to fix:**
+- Overflow on long deal names or amounts
+- Chart labels overlapping on stages with short names
+- Empty states when a section has no data (should show "—" not blank)
+- Loading skeletons — should pulse at 50% opacity, not show blank white
+- Font loading — IBM Plex Sans should be imported, not falling back to system font
+
+**Don't rebuild anything.** Fix styling issues, missing edge cases, and API response shape mismatches only.
+
+---
