@@ -28,10 +28,7 @@ outputType = "webview"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = """
-PORT=3001 npx tsx server/index.ts &
-sleep 2
-npx vite --config client/vite.config.ts"""
+args = "bash -c \"PORT=3001 npx tsx server/index.ts & SERVER_PID=$!; sleep 4; npx vite --config client/vite.config.ts; kill $SERVER_PID 2>/dev/null\""
 waitForPort = 5000
 
 [[ports]]
