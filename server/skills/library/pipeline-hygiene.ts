@@ -263,7 +263,24 @@ STRUCTURE YOUR REPORT:
 
 If this is NOT the first run (lastRunAt exists), lead with what changed since last run before covering current state.
 
-{{voiceBlock}}`,
+{{voiceBlock}}
+
+After your report, emit an <actions> block containing a JSON array of specific, executable actions. Each action must have these fields:
+- action_type: one of "follow_up", "update_stage", "flag_at_risk", "schedule_review", "clean_up", "re_engage"
+- severity: "critical" | "warning" | "info"
+- title: short action title (e.g., "Re-engage stale Enterprise deal")
+- summary: 1-2 sentence explanation of why this action matters
+- recommended_steps: array of 1-3 concrete steps the rep should take
+- target_deal_name: exact deal name from the data (if deal-specific)
+- owner_email: deal owner email (if available)
+- impact_amount: deal amount at risk (number, no currency symbol)
+- urgency_label: "overdue" | "this_week" | "next_week"
+- urgency_days_stale: number of days since last activity (if applicable)
+
+Focus on the top 5-10 most impactful actions. Prioritize by deal amount and staleness. Example format:
+<actions>
+[{"action_type":"re_engage","severity":"critical","title":"Re-engage stale deal: Acme Corp","summary":"$500K deal with no activity in 45 days at Negotiation stage.","recommended_steps":["Schedule check-in call with champion","Update deal stage if no response in 5 days"],"target_deal_name":"Acme Corp","owner_email":"rep@company.com","impact_amount":500000,"urgency_label":"overdue","urgency_days_stale":45}]
+</actions>`,
       outputKey: 'hygiene_report',
     },
   ],

@@ -26,6 +26,7 @@ interface Action {
   summary?: string;
   recommended_steps?: string[];
   target_deal_name?: string;
+  target_entity_name?: string;
   deal_name?: string;
   target_deal_id?: string;
   owner_email?: string;
@@ -275,7 +276,7 @@ export default function Actions() {
           {filtered.map(action => {
             const sc = sevColors[action.severity] || colors.textMuted;
             const st = statusLabels[action.execution_status] || statusLabels.open;
-            const dealName = action.deal_name || action.target_deal_name;
+            const dealName = action.deal_name || action.target_entity_name || action.target_deal_name;
             return (
               <div
                 key={action.id}
@@ -296,12 +297,12 @@ export default function Actions() {
                   width: 7, height: 7, borderRadius: '50%', background: sc,
                   boxShadow: `0 0 6px ${sc}40`,
                 }} />
-                <div style={{ minWidth: 0 }}>
-                  <span style={{ fontSize: 13, fontWeight: 500, color: colors.text }}>{action.title}</span>
+                <div style={{ minWidth: 0, overflow: 'hidden' }}>
+                  <span style={{ fontSize: 13, fontWeight: 500, color: colors.text, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{action.title}</span>
                   <p style={{ fontSize: 11, color: colors.textMuted, marginTop: 1 }}>{action.source_skill}</p>
                 </div>
                 <span
-                  style={{ fontSize: 12, color: dealName ? colors.accent : colors.textDim, cursor: dealName ? 'pointer' : 'default' }}
+                  style={{ fontSize: 12, color: dealName ? colors.accent : colors.textDim, cursor: dealName ? 'pointer' : 'default', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                   onClick={e => {
                     if (action.target_deal_id) {
                       e.stopPropagation();
@@ -388,7 +389,7 @@ function ActionPanel({ action, onClose, onUpdateStatus, navigate }: {
 }) {
   const sc = sevColors[action.severity] || colors.textMuted;
   const st = statusLabels[action.execution_status] || statusLabels.open;
-  const dealName = action.deal_name || action.target_deal_name;
+  const dealName = action.deal_name || action.target_entity_name || action.target_deal_name;
 
   return (
     <div style={{

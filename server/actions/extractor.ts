@@ -102,37 +102,35 @@ export async function insertExtractedActions(
         `, [workspaceId, skillId, dealId]);
       }
 
-      // Insert new action
-      const expiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000); // 14 days
+      const metadata: Record<string, any> = {};
+      if (agentRunId) metadata.agent_run_id = agentRunId;
+      if (action.urgency_days_stale) metadata.urgency_days_stale = action.urgency_days_stale;
+      if (action.execution_payload?.crm_updates) metadata.crm_updates = action.execution_payload.crm_updates;
 
       const result = await db.query(`
         INSERT INTO actions (
-          workspace_id, skill_run_id, agent_run_id, source_skill,
+          workspace_id, source_run_id, source_skill,
           action_type, severity, title, summary, recommended_steps,
-          target_entity_type, target_entity_id, target_entity_name,
-          target_deal_id, target_account_id, owner_email,
-          impact_amount, urgency_label, urgency_days_stale,
-          execution_payload, expires_at
+          target_entity_name, target_deal_id, target_account_id,
+          owner_email, impact_amount, urgency_label,
+          execution_payload, metadata
         ) VALUES (
-          $1, $2, $3, $4,
-          $5, $6, $7, $8, $9,
-          $10, $11, $12,
-          $13, $14, $15,
-          $16, $17, $18,
-          $19, $20
+          $1, $2, $3,
+          $4, $5, $6, $7, $8,
+          $9, $10, $11,
+          $12, $13, $14,
+          $15, $16
         ) RETURNING id
       `, [
-        workspaceId, skillRunId, agentRunId, skillId,
+        workspaceId, skillRunId, skillId,
         action.action_type, action.severity, action.title,
-        action.summary || null, action.recommended_steps || null,
-        dealId ? 'deal' : accountId ? 'account' : null,
-        dealId || accountId || null,
+        action.summary || null,
+        action.recommended_steps ? JSON.stringify(action.recommended_steps) : null,
         action.target_deal_name || action.target_account_name || null,
         dealId, accountId, action.owner_email || null,
         action.impact_amount || null, action.urgency_label || null,
-        action.urgency_days_stale || null,
         action.execution_payload ? JSON.stringify(action.execution_payload) : null,
-        expiresAt.toISOString(),
+        Object.keys(metadata).length > 0 ? JSON.stringify(metadata) : null,
       ]);
 
       // Audit log: created
