@@ -60,6 +60,8 @@ import { registerBuiltInAgents, getAgentRegistry } from './agents/index.js';
 import slackEventsRouter from './routes/slack-events.js';
 import slackInteractionsRouter from './routes/slack-interactions.js';
 import analysisRouter from './routes/analysis.js';
+import userAuthRouter from './routes/user-auth.js';
+import membersRouter from './routes/members.js';
 
 dotenv.config();
 
@@ -156,6 +158,8 @@ app.use("/health", healthRouter);
 app.use("/api/slack/events", slackEventsRouter);
 app.use("/api/slack/interactions", slackInteractionsRouter);
 
+app.use("/api/auth", userAuthRouter);
+
 app.use("/api/workspaces", workspacesRouter);
 
 const workspaceApiRouter = express.Router();
@@ -203,6 +207,7 @@ workspaceApiRouter.use(agentsWorkspaceRouter);
 workspaceApiRouter.use(findingsRouter);
 workspaceApiRouter.use(dossiersRouter);
 workspaceApiRouter.use(analysisRouter);
+workspaceApiRouter.use('/members', membersRouter);
 app.use("/api/workspaces", workspaceApiRouter);
 
 app.use("/api", skillsRouter);
