@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { colors, fonts } from '../styles/theme';
 
-type Screen = 'email' | 'name' | 'check_email' | 'join';
+type Screen = 'email' | 'name' | 'check_email' | 'waitlisted' | 'join';
 
 export default function LoginPage() {
   const { login, joinWorkspace, isAuthenticated, workspaces, selectWorkspace } = useWorkspace();
@@ -68,6 +68,8 @@ export default function LoginPage() {
       const result = await login(email.trim());
       if (result.status === 'new_user') {
         setScreen('name');
+      } else if (result.status === 'waitlisted') {
+        setScreen('waitlisted');
       } else if (result.status === 'sent') {
         setScreen('check_email');
       }
@@ -87,6 +89,35 @@ export default function LoginPage() {
       setError('Something went wrong. Please try again.');
     } finally { setLoading(false); }
   };
+
+  if (screen === 'waitlisted') {
+    return (
+      <Shell>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 40, marginBottom: 16 }}>&#128640;</div>
+          <h1 style={{ fontSize: 18, fontWeight: 700, color: colors.text, marginBottom: 8 }}>
+            You're on the waitlist!
+          </h1>
+          <p style={{ fontSize: 13, color: colors.textMuted, lineHeight: 1.5 }}>
+            We're in private beta right now. We sent a confirmation to<br />
+            <strong style={{ color: colors.text }}>{email}</strong>
+          </p>
+          <p style={{ fontSize: 12, color: colors.textMuted, marginTop: 16, lineHeight: 1.5 }}>
+            We'll reach out as soon as a spot opens up.
+          </p>
+          <button
+            onClick={() => { setScreen('email'); setEmail(''); setLoading(false); }}
+            style={{
+              fontSize: 12, color: colors.accent, background: 'none',
+              marginTop: 20, cursor: 'pointer', border: 'none',
+            }}
+          >
+            Use a different email
+          </button>
+        </div>
+      </Shell>
+    );
+  }
 
   if (screen === 'check_email') {
     return (

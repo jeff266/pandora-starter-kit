@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import { query } from '../db.js';
-import { sendMagicLink } from '../services/email.js';
+import { sendMagicLink, sendWaitlistEmail, isAllowedEmail } from '../services/email.js';
 
 const router = Router();
 
@@ -35,6 +35,13 @@ router.post('/login', async (req: Request, res: Response) => {
 
     if (!checkRateLimit(email)) {
       res.status(429).json({ error: 'Too many login attempts. Please try again later.' });
+      return;
+    }
+
+    if (!isAllowedEmail(email)) {
+      const name = (req.body.name || '').trim();
+      await sendWaitlistEmail(email, name || undefined);
+      res.json({ status: 'waitlisted', message: "You've been added to the waitlist. We'll be in touch!" });
       return;
     }
 
