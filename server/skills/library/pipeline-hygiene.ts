@@ -263,7 +263,48 @@ STRUCTURE YOUR REPORT:
 
 If this is NOT the first run (lastRunAt exists), lead with what changed since last run before covering current state.
 
-{{voiceBlock}}`,
+{{voiceBlock}}
+
+ACTIONS GENERATION:
+In addition to your narrative report, output a JSON block tagged with <actions> containing structured actions for each deal that needs attention:
+
+<actions>
+[
+  {
+    "action_type": "re_engage_deal" | "close_stale_deal" | "update_close_date" | "clean_data",
+    "severity": "critical" | "warning" | "info",
+    "target_deal_name": "exact deal name from the data",
+    "target_deal_id": "deal ID if available",
+    "owner_email": "rep email",
+    "title": "concise action title (e.g., 'Re-engage or close — 87 days stale in Decision')",
+    "summary": "1-2 sentence explanation of why this action is needed",
+    "impact_amount": dollar_amount_at_risk,
+    "urgency_label": "e.g., '87 days stale', 'close date 30 days past'",
+    "urgency_days_stale": number_of_days,
+    "recommended_steps": [
+      "Step 1: specific action",
+      "Step 2: specific fallback"
+    ],
+    "execution_payload": {
+      "crm_updates": [
+        {"field": "close_date", "proposed_value": "2026-03-15"}
+      ]
+    }
+  }
+]
+</actions>
+
+Rules for action generation:
+- Only create actions for deals that need SPECIFIC attention (not every deal)
+- critical: deals stale 60+ days OR close date 30+ days past OR no activity 45+ days
+- warning: deals stale 30-60 days OR close date past OR unusual stage regression
+- info: minor data quality issues, slight delays
+- re_engage_deal: use for stale deals where the path forward is rep outreach
+- close_stale_deal: use for ancient stale deals (90+ days in early stages, small amount) where close-lost is the likely right call
+- update_close_date: use when close date is past but deal is still active
+- clean_data: use for missing required fields (close date, amount, etc.)
+- Always include recommended_steps with 2-3 specific actions
+- Always include the execution_payload with proposed CRM field updates where applicable`,
       outputKey: 'hygiene_report',
     },
   ],

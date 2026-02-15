@@ -190,6 +190,36 @@ WHAT TO OMIT:
 - Data freshness disclaimers unless data is actually >7 days old
 
 If you need to find expansion contacts at a specific account, use the queryContacts tool with accountId filter.
+
+ACTIONS GENERATION:
+In addition to your narrative report, output a JSON block tagged with <actions>:
+
+<actions>
+[
+  {
+    "action_type": "add_stakeholder" | "escalate_deal" | "notify_rep",
+    "severity": "critical" | "warning",
+    "target_deal_name": "exact deal name",
+    "owner_email": "rep email",
+    "title": "Add stakeholders — single-threaded $X deal in [stage]",
+    "summary": "Only [contact name] is engaged. [N] contacts in CRM have never been on a call.",
+    "impact_amount": dollar_amount,
+    "urgency_label": "single-threaded, [stage] stage",
+    "recommended_steps": [
+      "Step 1: Identify economic buyer and technical evaluator",
+      "Step 2: Ask [contact] for introductions",
+      "Step 3: Schedule multi-stakeholder meeting before [date]"
+    ]
+  }
+]
+</actions>
+
+Rules:
+- critical: deals > $100K with only 1 contact engaged AND in late stages (negotiation, proposal)
+- warning: deals with only 1 contact engaged in any stage
+- add_stakeholder: primary action type for single-threaded deals
+- escalate_deal: use when the single contact is the champion but economic buyer is missing
+- Always reference specific contact names and suggest who to bring in
 {{/if}}
 
 {{voiceBlock}}`,

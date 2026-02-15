@@ -42,6 +42,7 @@ import routerApiRouter from './routes/router.js';
 import deliverablesRouter from './routes/deliverables.js';
 import downloadsRouter from './routes/downloads.js';
 import workspaceDownloadsRouter from './routes/workspace-downloads.js';
+import actionItemsRouter from './routes/action-items.js';
 import { ActivePiecesClient } from './workflows/ap-client.js';
 import { WorkflowService } from './workflows/workflow-service.js';
 import { seedTemplates } from './workflows/template-seed.js';
@@ -56,6 +57,7 @@ import { gongAdapter } from "./connectors/gong/adapter.js";
 import { firefliesAdapter } from "./connectors/fireflies/adapter.js";
 import { startScheduler } from "./sync/scheduler.js";
 import { startSkillScheduler, stopSkillScheduler } from "./sync/skill-scheduler.js";
+import { startActionExpiryScheduler } from './actions/scheduler.js';
 import { registerBuiltInSkills } from "./skills/index.js";
 import { getSkillRegistry } from "./skills/registry.js";
 import { startJobQueue } from "./jobs/queue.js";
@@ -217,6 +219,7 @@ workspaceApiRouter.use(deliverablesRouter);
 workspaceApiRouter.use(downloadsRouter);
 workspaceApiRouter.use('/workspace-downloads', workspaceDownloadsRouter);
 workspaceApiRouter.use('/members', membersRouter);
+workspaceApiRouter.use(actionItemsRouter);
 app.use("/api/workspaces", workspaceApiRouter);
 
 app.use("/api", skillsRouter);
@@ -344,6 +347,8 @@ async function start(): Promise<void> {
   startSkillScheduler();
 
   const tSchedulers = performance.now();
+
+  startActionExpiryScheduler(pool);
 
   cleanupTempFiles();
   setInterval(cleanupTempFiles, 60 * 60 * 1000);

@@ -40,6 +40,7 @@ import { randomUUID } from 'crypto';
 import { getEvidenceBuilder } from './evidence-builder.js';
 import { configLoader } from '../config/workspace-config-loader.js';
 import { extractFindings, insertFindings } from '../findings/extractor.js';
+import { parseActionsFromOutput, insertExtractedActions } from '../actions/extractor.js';
 
 // ============================================================================
 // Skill Runtime
@@ -218,6 +219,27 @@ export class SkillRuntime {
         }
       } catch (err) {
         console.error(`[Findings] Extraction failed for ${skill.id}:`, err instanceof Error ? err.message : err);
+      }
+
+      // Extract actions from synthesis output
+      try {
+        if (finalOutput && typeof finalOutput === 'string') {
+          const pool = (await import('../db.js')).default;
+          const extractedActions = parseActionsFromOutput(finalOutput);
+          if (extractedActions.length > 0) {
+            await insertExtractedActions(
+              pool,
+              workspaceId,
+              skill.id,
+              runId,
+              undefined, // agentRunId
+              extractedActions
+            );
+            console.log(`[Actions] Extracted ${extractedActions.length} actions from ${skill.id} run ${runId}`);
+          }
+        }
+      } catch (err) {
+        console.error(`[Actions] Extraction failed for ${skill.id}:`, err instanceof Error ? err.message : err);
       }
 
       return {
