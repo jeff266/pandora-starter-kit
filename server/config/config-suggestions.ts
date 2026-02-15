@@ -1,13 +1,5 @@
-/**
- * Config Suggestions - Skill Feedback Signals (Prompt 3)
- *
- * Skills generate suggestions when they detect patterns that indicate
- * the config might be wrong or incomplete.
- */
-
 import { query } from '../db.js';
 import { configLoader } from './workspace-config-loader.js';
-import { v4 as uuidv4 } from 'uuid';
 
 export interface ConfigSuggestion {
   id: string;
@@ -15,152 +7,124 @@ export interface ConfigSuggestion {
   created_at: string;
   source_skill: string;
   source_run_id?: string;
-
   section: string;
   path: string;
-
   type: 'confirm' | 'adjust' | 'add' | 'remove' | 'alert';
   message: string;
   evidence: string;
   confidence: number;
-
   suggested_value?: any;
   current_value?: any;
-
   status: 'pending' | 'accepted' | 'dismissed';
   resolved_at?: string;
 }
 
-/**
- * Add a new config suggestion
- */
 export async function addConfigSuggestion(
   workspaceId: string,
   suggestion: Omit<ConfigSuggestion, 'id' | 'workspace_id' | 'created_at' | 'status'>
 ): Promise<void> {
-  const existing = await query<{ value: any }>(
-    `SELECT value FROM context_layer
-     WHERE workspace_id = $1 AND category = 'settings' AND key = 'config_suggestions'`,
-    [workspaceId]
+  const existing = await query(
+    `SELECT id FROM config_suggestions
+     WHERE workspace_id = $1 AND section = $2 AND path = $3 AND type = $4 AND status = 'pending'`,
+    [workspaceId, suggestion.section, suggestion.path, suggestion.type]
   );
 
-  const suggestions: ConfigSuggestion[] = existing.rows[0]?.value || [];
-
-  // Deduplicate: don't add if same section+path+type already pending
-  const isDuplicate = suggestions.some(s =>
-    s.status === 'pending' &&
-    s.section === suggestion.section &&
-    s.path === suggestion.path &&
-    s.type === suggestion.type
-  );
-  if (isDuplicate) {
+  if (existing.rows.length > 0) {
     console.log(`[Config Suggestions] Duplicate suggestion skipped: ${suggestion.path}`);
     return;
   }
 
-  const newSuggestion: ConfigSuggestion = {
-    ...suggestion,
-    id: uuidv4(),
-    workspace_id: workspaceId,
-    created_at: new Date().toISOString(),
-    status: 'pending',
-  };
-
-  suggestions.push(newSuggestion);
-
-  // Keep only last 50 suggestions (prune oldest dismissed)
-  const pruned = suggestions
-    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-    .slice(0, 50);
-
   await query(
-    `INSERT INTO context_layer (workspace_id, category, key, value, updated_at)
-     VALUES ($1, 'settings', 'config_suggestions', $2::jsonb, NOW())
-     ON CONFLICT (workspace_id, category, key)
-     DO UPDATE SET value = $2::jsonb, updated_at = NOW()`,
-    [workspaceId, JSON.stringify(pruned)]
+    `INSERT INTO config_suggestions
+       (workspace_id, source_skill, source_run_id, section, path, type, message, evidence, confidence, suggested_value, current_value)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+    [
+      workspaceId,
+      suggestion.source_skill,
+      suggestion.source_run_id || null,
+      suggestion.section,
+      suggestion.path,
+      suggestion.type,
+      suggestion.message,
+      suggestion.evidence || '',
+      suggestion.confidence,
+      suggestion.suggested_value ? JSON.stringify(suggestion.suggested_value) : null,
+      suggestion.current_value ? JSON.stringify(suggestion.current_value) : null,
+    ]
   );
+
+  const countResult = await query<{ cnt: string }>(
+    `SELECT COUNT(*) as cnt FROM config_suggestions WHERE workspace_id = $1`,
+    [workspaceId]
+  );
+  const total = parseInt(countResult.rows[0]?.cnt || '0', 10);
+  if (total > 50) {
+    await query(
+      `DELETE FROM config_suggestions
+       WHERE id IN (
+         SELECT id FROM config_suggestions
+         WHERE workspace_id = $1 AND status = 'dismissed'
+         ORDER BY created_at ASC
+         LIMIT $2
+       )`,
+      [workspaceId, total - 50]
+    );
+  }
 
   console.log(`[Config Suggestions] Added: ${suggestion.type} for ${suggestion.path} (confidence: ${suggestion.confidence})`);
 }
 
-/**
- * Get suggestions with optional filter
- */
 export async function getSuggestions(
   workspaceId: string,
   status?: 'pending' | 'accepted' | 'dismissed' | 'all'
 ): Promise<ConfigSuggestion[]> {
-  const result = await query<{ value: any }>(
-    `SELECT value FROM context_layer
-     WHERE workspace_id = $1 AND category = 'settings' AND key = 'config_suggestions'`,
-    [workspaceId]
-  );
+  let sql = `SELECT * FROM config_suggestions WHERE workspace_id = $1`;
+  const params: any[] = [workspaceId];
 
-  const all: ConfigSuggestion[] = result.rows[0]?.value || [];
+  if (status && status !== 'all') {
+    sql += ` AND status = $2`;
+    params.push(status);
+  }
 
-  if (!status || status === 'all') return all;
-  return all.filter(s => s.status === status);
+  sql += ` ORDER BY created_at DESC`;
+
+  const result = await query<any>(sql, params);
+  return result.rows.map(mapRow);
 }
 
-/**
- * Get pending suggestions (convenience method)
- */
 export async function getPendingSuggestions(workspaceId: string): Promise<ConfigSuggestion[]> {
   return getSuggestions(workspaceId, 'pending');
 }
 
-/**
- * Resolve a suggestion (accept or dismiss)
- */
 export async function resolveSuggestion(
   workspaceId: string,
   suggestionId: string,
   action: 'accepted' | 'dismissed'
 ): Promise<boolean> {
-  const result = await query<{ value: any }>(
-    `SELECT value FROM context_layer
-     WHERE workspace_id = $1 AND category = 'settings' AND key = 'config_suggestions'`,
-    [workspaceId]
+  const result = await query<any>(
+    `UPDATE config_suggestions SET status = $3, resolved_at = NOW()
+     WHERE id = $2 AND workspace_id = $1
+     RETURNING *`,
+    [workspaceId, suggestionId, action]
   );
 
-  const suggestions: ConfigSuggestion[] = result.rows[0]?.value || [];
-  const idx = suggestions.findIndex(s => s.id === suggestionId);
-
-  if (idx < 0) {
+  if (result.rows.length === 0) {
     console.log(`[Config Suggestions] Suggestion not found: ${suggestionId}`);
     return false;
   }
 
-  suggestions[idx].status = action;
-  suggestions[idx].resolved_at = new Date().toISOString();
-
-  // If accepted, apply the suggested value to config
-  if (action === 'accepted' && suggestions[idx].suggested_value !== undefined) {
-    await applyConfigSuggestion(workspaceId, suggestions[idx]);
+  if (action === 'accepted' && result.rows[0].suggested_value !== null) {
+    await applyConfigSuggestion(workspaceId, mapRow(result.rows[0]));
   }
-
-  await query(
-    `UPDATE context_layer SET value = $2::jsonb, updated_at = NOW()
-     WHERE workspace_id = $1 AND category = 'settings' AND key = 'config_suggestions'`,
-    [workspaceId, JSON.stringify(suggestions)]
-  );
 
   console.log(`[Config Suggestions] Resolved ${suggestionId} as ${action}`);
   return true;
 }
 
-/**
- * Apply a suggestion's value to the config
- */
 async function applyConfigSuggestion(workspaceId: string, suggestion: ConfigSuggestion): Promise<void> {
   const config = await configLoader.getConfig(workspaceId);
 
-  // Parse the path and apply the value
-  const pathParts = suggestion.path.split('.');
-
-  // Simple implementation - handle common cases
-  if (suggestion.section === 'thresholds' && pathParts[pathParts.length - 1] === 'stale_deal_days') {
+  if (suggestion.section === 'thresholds' && suggestion.path.endsWith('stale_deal_days')) {
     config.thresholds.stale_deal_days = suggestion.suggested_value;
   } else if (suggestion.section === 'pipelines' && suggestion.path.includes('parking_lot_stages')) {
     if (config.pipelines[0]) {
@@ -172,7 +136,6 @@ async function applyConfigSuggestion(workspaceId: string, suggestion: ConfigSugg
     config.thresholds.coverage_target = suggestion.suggested_value;
   }
 
-  // Update metadata
   config._meta[suggestion.path] = {
     source: 'confirmed',
     confidence: 1.0,
@@ -182,12 +145,11 @@ async function applyConfigSuggestion(workspaceId: string, suggestion: ConfigSugg
 
   config.updated_at = new Date().toISOString();
 
-  // Save
   await query(
-    `INSERT INTO context_layer (workspace_id, category, key, value, updated_at)
-     VALUES ($1, 'settings', 'workspace_config', $2::jsonb, NOW())
-     ON CONFLICT (workspace_id, category, key)
-     DO UPDATE SET value = $2::jsonb, updated_at = NOW()`,
+    `UPDATE context_layer
+     SET definitions = jsonb_set(COALESCE(definitions, '{}'::jsonb), '{workspace_config}', $2::jsonb),
+         updated_at = NOW()
+     WHERE workspace_id = $1`,
     [workspaceId, JSON.stringify(config)]
   );
 
@@ -195,27 +157,42 @@ async function applyConfigSuggestion(workspaceId: string, suggestion: ConfigSugg
   console.log(`[Config Suggestions] Applied suggestion to ${suggestion.path}`);
 }
 
-/**
- * Clear all suggestions for a workspace
- */
 export async function clearAllSuggestions(workspaceId: string): Promise<void> {
   await query(
-    `DELETE FROM context_layer
-     WHERE workspace_id = $1 AND category = 'settings' AND key = 'config_suggestions'`,
+    `DELETE FROM config_suggestions WHERE workspace_id = $1`,
     [workspaceId]
   );
-
   console.log(`[Config Suggestions] Cleared all suggestions for workspace ${workspaceId}`);
 }
 
-/**
- * Get top pending suggestion (for agent synthesis)
- */
 export async function getTopSuggestion(workspaceId: string): Promise<ConfigSuggestion | null> {
-  const pending = await getPendingSuggestions(workspaceId);
-  if (pending.length === 0) return null;
+  const result = await query<any>(
+    `SELECT * FROM config_suggestions
+     WHERE workspace_id = $1 AND status = 'pending'
+     ORDER BY confidence DESC
+     LIMIT 1`,
+    [workspaceId]
+  );
+  if (result.rows.length === 0) return null;
+  return mapRow(result.rows[0]);
+}
 
-  // Sort by confidence desc
-  pending.sort((a, b) => b.confidence - a.confidence);
-  return pending[0];
+function mapRow(row: any): ConfigSuggestion {
+  return {
+    id: row.id,
+    workspace_id: row.workspace_id,
+    created_at: row.created_at,
+    source_skill: row.source_skill,
+    source_run_id: row.source_run_id,
+    section: row.section,
+    path: row.path,
+    type: row.type,
+    message: row.message,
+    evidence: row.evidence,
+    confidence: parseFloat(row.confidence),
+    suggested_value: row.suggested_value,
+    current_value: row.current_value,
+    status: row.status,
+    resolved_at: row.resolved_at,
+  };
 }
