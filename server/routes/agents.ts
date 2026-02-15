@@ -2,6 +2,8 @@ import { Router, type Request, type Response } from 'express';
 import { getAgentRegistry } from '../agents/registry.js';
 import { getAgentRuntime } from '../agents/runtime.js';
 import { query } from '../db.js';
+import { generateWorkbook } from '../delivery/workbook-generator.js';
+import { getSkillRegistry } from '../skills/registry.js';
 import type { AgentDefinition } from '../agents/types.js';
 
 const agentsGlobalRouter = Router();
@@ -144,6 +146,75 @@ agentsWorkspaceRouter.get('/:workspaceId/agents/runs/all', async (req: Request, 
   );
 
   res.json({ runs: result.rows });
+});
+
+agentsWorkspaceRouter.get('/:workspaceId/agents/:agentId/runs/:runId/export', async (req: Request, res: Response) => {
+  try {
+    const { workspaceId, agentId, runId } = req.params;
+
+    const ws = await query('SELECT id, name FROM workspaces WHERE id = $1', [workspaceId]);
+    if (ws.rows.length === 0) {
+      return res.status(404).json({ error: 'Workspace not found' });
+    }
+
+    const result = await query(
+      `SELECT id, agent_id, skill_results, skill_evidence, started_at
+       FROM agent_runs
+       WHERE workspace_id = $1 AND agent_id = $2 AND id::text = $3::text`,
+      [workspaceId, agentId, runId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Agent run not found' });
+    }
+
+    const row = result.rows[0];
+    const skillResults = typeof row.skill_results === 'string' ? JSON.parse(row.skill_results) : row.skill_results;
+    const skillEvidenceRaw = typeof row.skill_evidence === 'string' ? JSON.parse(row.skill_evidence) : row.skill_evidence;
+
+    if (!skillEvidenceRaw || Object.keys(skillEvidenceRaw).length === 0) {
+      return res.status(404).json({ error: 'No evidence data available for this agent run' });
+    }
+
+    const agentRegistry = getAgentRegistry();
+    const agent = agentRegistry.get(agentId);
+    const skillRegistry = getSkillRegistry();
+
+    const skillEvidence: Record<string, { evidence: any; schema?: any; displayName?: string }> = {};
+    for (const [outputKey, evidence] of Object.entries(skillEvidenceRaw)) {
+      const skillStep = agent?.skills.find(s => s.outputKey === outputKey);
+      const skill = skillStep ? skillRegistry.get(skillStep.skillId) : null;
+      skillEvidence[outputKey] = {
+        evidence: evidence as any,
+        schema: skill?.evidenceSchema,
+        displayName: skill?.name || outputKey,
+      };
+    }
+
+    const narrative = skillResults
+      ? Object.values(skillResults as Record<string, any>)
+          .map((r: any) => r?.output || '')
+          .filter(Boolean)
+          .join('\n\n---\n\n')
+      : '';
+
+    const buffer = await generateWorkbook({
+      agentName: agent?.name || agentId,
+      runDate: row.started_at,
+      narrative,
+      workspaceName: ws.rows[0].name,
+      skillEvidence,
+    });
+
+    const filename = `${agentId}-${new Date(row.started_at).toISOString().split('T')[0]}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Cache-Control', 'no-cache');
+    return res.send(buffer);
+  } catch (err) {
+    console.error('[agents] Error exporting agent run:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 export { agentsGlobalRouter, agentsWorkspaceRouter };

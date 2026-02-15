@@ -6,6 +6,7 @@ import { formatAsMarkdown } from '../skills/formatters/markdown-formatter.js';
 import { getSlackWebhook, postBlocks } from '../connectors/slack/client.js';
 import { query } from '../db.js';
 import { runScheduledSkills } from '../sync/skill-scheduler.js';
+import { generateWorkbook } from '../delivery/workbook-generator.js';
 import type { SkillResult } from '../skills/types.js';
 
 const router = Router();
@@ -296,6 +297,56 @@ router.post('/:workspaceId/skills/run-all', async (req, res) => {
     });
   } catch (err) {
     console.error('[skills] Error running all skills:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.get('/:workspaceId/skills/:skillId/runs/:runId/export', async (req, res) => {
+  try {
+    const { workspaceId, skillId, runId } = req.params;
+
+    const ws = await query('SELECT id, name FROM workspaces WHERE id = $1', [workspaceId]);
+    if (ws.rows.length === 0) {
+      return res.status(404).json({ error: 'Workspace not found' });
+    }
+
+    const result = await query(
+      `SELECT run_id, skill_id, output, created_at
+       FROM skill_runs
+       WHERE workspace_id = $1 AND skill_id = $2 AND (run_id = $3 OR id::text = $3::text)`,
+      [workspaceId, skillId, runId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Skill run not found' });
+    }
+
+    const row = result.rows[0];
+    const outputData = typeof row.output === 'string' ? JSON.parse(row.output) : row.output;
+
+    if (!outputData?.evidence) {
+      return res.status(404).json({ error: 'No evidence data available for this run' });
+    }
+
+    const registry = getSkillRegistry();
+    const skill = registry.get(skillId);
+
+    const buffer = await generateWorkbook({
+      skillId,
+      runDate: row.created_at,
+      narrative: outputData.narrative || '',
+      workspaceName: ws.rows[0].name,
+      evidence: outputData.evidence,
+      evidenceSchema: skill?.evidenceSchema,
+    });
+
+    const filename = `${skillId}-${new Date(row.created_at).toISOString().split('T')[0]}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Cache-Control', 'no-cache');
+    return res.send(buffer);
+  } catch (err) {
+    console.error('[skills] Error exporting skill run:', err);
     return res.status(500).json({ error: 'Internal server error' });
   }
 });

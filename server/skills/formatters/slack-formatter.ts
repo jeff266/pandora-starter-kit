@@ -5,7 +5,7 @@
  * Provides both generic formatting and skill-specific templates.
  */
 
-import type { SkillResult, SkillDefinition } from '../types.js';
+import type { SkillResult, SkillDefinition, SkillEvidence, EvidenceClaim, EvaluatedRecord } from '../types.js';
 
 interface SlackBlock {
   type: string;
@@ -13,10 +13,15 @@ interface SlackBlock {
 }
 
 /**
- * Generic Slack formatter with skill-specific routing
+ * Generic Slack formatter with skill-specific routing.
+ * When evidence is present, renders structured claim blocks with deal lists
+ * and methodology footers. Falls back to narrative-based formatting otherwise.
  */
 export function formatForSlack(result: SkillResult, skill: SkillDefinition): SlackBlock[] {
-  // Route to skill-specific formatter if template is defined
+  if (result.evidence?.claims?.length) {
+    return formatWithEvidence(result, skill);
+  }
+
   if (skill.slackTemplate === 'pipeline-hygiene') {
     return formatPipelineHygiene(result, skill);
   } else if (skill.slackTemplate === 'weekly-recap') {
@@ -568,6 +573,250 @@ export function formatWeeklyRecap(result: SkillResult): SlackBlock[] {
       },
     ],
   });
+
+  return blocks;
+}
+
+// ============================================================================
+// Evidence-Aware Slack Formatter
+// ============================================================================
+
+function formatWithEvidence(result: SkillResult, skill: SkillDefinition): SlackBlock[] {
+  const evidence = result.evidence!;
+  const blocks: SlackBlock[] = [];
+
+  blocks.push({
+    type: 'header',
+    text: {
+      type: 'plain_text',
+      text: `${getStatusEmoji(result.status)} ${skill.name}`,
+      emoji: true,
+    },
+  });
+
+  blocks.push({
+    type: 'context',
+    elements: [{
+      type: 'mrkdwn',
+      text: `<!date^${Math.floor(result.completedAt.getTime() / 1000)}^{date_short_pretty} at {time}|${result.completedAt.toISOString()}>`,
+    }],
+  });
+
+  blocks.push({ type: 'divider' });
+
+  for (const claim of evidence.claims) {
+    const emoji = claim.severity === 'critical' ? '🔴'
+      : claim.severity === 'warning' ? '🟡' : 'ℹ️';
+
+    blocks.push({
+      type: 'section',
+      text: { type: 'mrkdwn', text: `${emoji} *${claim.claim_text}*` },
+    });
+
+    const entityLines = formatClaimEntityLines(claim, evidence.evaluated_records);
+    if (entityLines) {
+      blocks.push({
+        type: 'section',
+        text: { type: 'mrkdwn', text: entityLines },
+      });
+    }
+
+    if (claim.entity_ids.length > 5) {
+      blocks.push({
+        type: 'context',
+        elements: [{ type: 'mrkdwn', text: `_+ ${claim.entity_ids.length - 5} more_` }],
+      });
+    }
+  }
+
+  const narrative = typeof result.output === 'string'
+    ? result.output
+    : (result.output as any)?.narrative || '';
+
+  if (narrative && evidence.claims.length === 0) {
+    const sections = parseTextIntoSections(markdownToSlack(narrative));
+    for (const section of sections) {
+      blocks.push({
+        type: 'section',
+        text: { type: 'mrkdwn', text: section },
+      });
+    }
+  }
+
+  blocks.push({ type: 'divider' });
+
+  const sourceList = evidence.data_sources
+    .map(ds => `${ds.source} ${ds.connected ? '✓' : '✗'}${!ds.connected ? ' (not connected)' : ''}`)
+    .join(', ');
+
+  const thresholds = evidence.parameters
+    .filter(p => p.configurable)
+    .map(p => `${p.display_name}: ${p.value}`)
+    .join(', ');
+
+  blocks.push({
+    type: 'context',
+    elements: [{
+      type: 'mrkdwn',
+      text: `_Sources: ${sourceList}. ${thresholds ? `Thresholds: ${thresholds}.` : ''}_`,
+    }],
+  });
+
+  blocks.push({
+    type: 'context',
+    elements: [{
+      type: 'mrkdwn',
+      text: `⏱ ${formatDuration(result.totalDuration_ms)} | 💰 ${formatTokenCount(result.totalTokenUsage.claude)}k Claude + ${formatTokenCount(result.totalTokenUsage.deepseek)}k DeepSeek | Run \`${result.runId.slice(0, 8)}\``,
+    }],
+  });
+
+  if (blocks.length > 48) {
+    const trimmed = blocks.slice(0, 47);
+    trimmed.push({
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: '_Message truncated — view full report in Pandora_' }],
+    });
+    return trimmed;
+  }
+
+  return blocks;
+}
+
+function formatClaimEntityLines(claim: EvidenceClaim, records: EvaluatedRecord[]): string | null {
+  const lines = claim.entity_ids
+    .slice(0, 5)
+    .map((id, idx) => {
+      const record = records.find(r => r.entity_id === id);
+      if (!record) return null;
+
+      const amount = record.fields?.amount
+        ? `$${Math.round(Number(record.fields.amount) / 1000)}K` : '';
+      const owner = record.owner_name || '';
+      const metricValue = claim.metric_values?.[idx];
+      const metricLabel = claim.metric_name?.replace(/_/g, ' ') || '';
+
+      const parts = [record.entity_name];
+      if (amount) parts.push(amount);
+      if (owner) parts.push(owner);
+      if (metricValue !== undefined && metricLabel) parts.push(`${metricValue} ${metricLabel}`);
+
+      return `→ ${parts.join(' — ')}`;
+    })
+    .filter(Boolean);
+
+  return lines.length > 0 ? lines.join('\n') : null;
+}
+
+export function formatAgentWithEvidence(
+  narrative: string,
+  skillEvidence: Record<string, SkillEvidence>,
+  agentName: string,
+  duration: number
+): SlackBlock[] {
+  const blocks: SlackBlock[] = [];
+
+  blocks.push({
+    type: 'header',
+    text: { type: 'plain_text', text: `📊 ${agentName}`, emoji: true },
+  });
+
+  blocks.push({ type: 'divider' });
+
+  const narrativeSections = parseTextIntoSections(markdownToSlack(narrative));
+  for (const section of narrativeSections) {
+    blocks.push({
+      type: 'section',
+      text: { type: 'mrkdwn', text: section },
+    });
+  }
+
+  const allClaims: { skillKey: string; claim: EvidenceClaim; records: EvaluatedRecord[] }[] = [];
+  const allSources = new Map<string, { connected: boolean }>();
+  const allParams: { name: string; display_name: string; value: any }[] = [];
+
+  for (const [key, evidence] of Object.entries(skillEvidence)) {
+    for (const claim of evidence.claims) {
+      allClaims.push({ skillKey: key, claim, records: evidence.evaluated_records });
+    }
+    for (const ds of evidence.data_sources) {
+      if (!allSources.has(ds.source) || ds.connected) {
+        allSources.set(ds.source, { connected: ds.connected });
+      }
+    }
+    for (const p of evidence.parameters.filter(p => p.configurable)) {
+      if (!allParams.some(existing => existing.name === p.name)) {
+        allParams.push(p);
+      }
+    }
+  }
+
+  if (allClaims.length > 0) {
+    blocks.push({ type: 'divider' });
+    blocks.push({
+      type: 'section',
+      text: { type: 'mrkdwn', text: '*📋 Evidence Summary*' },
+    });
+
+    for (const { claim, records } of allClaims.slice(0, 10)) {
+      const emoji = claim.severity === 'critical' ? '🔴'
+        : claim.severity === 'warning' ? '🟡' : 'ℹ️';
+
+      blocks.push({
+        type: 'section',
+        text: { type: 'mrkdwn', text: `${emoji} *${claim.claim_text}*` },
+      });
+
+      const entityLines = formatClaimEntityLines(claim, records);
+      if (entityLines) {
+        blocks.push({
+          type: 'section',
+          text: { type: 'mrkdwn', text: entityLines },
+        });
+      }
+    }
+
+    if (allClaims.length > 10) {
+      blocks.push({
+        type: 'context',
+        elements: [{ type: 'mrkdwn', text: `_+ ${allClaims.length - 10} more claims in full report_` }],
+      });
+    }
+  }
+
+  blocks.push({ type: 'divider' });
+
+  const sourceList = Array.from(allSources.entries())
+    .map(([name, s]) => `${name} ${s.connected ? '✓' : '✗'}`)
+    .join(', ');
+
+  const thresholds = allParams
+    .map(p => `${p.display_name}: ${p.value}`)
+    .join(', ');
+
+  blocks.push({
+    type: 'context',
+    elements: [{
+      type: 'mrkdwn',
+      text: `_Sources: ${sourceList}. ${thresholds ? `Config: ${thresholds}.` : ''}_`,
+    }],
+  });
+
+  blocks.push({
+    type: 'context',
+    elements: [{
+      type: 'mrkdwn',
+      text: `⏱ ${formatDuration(duration)}`,
+    }],
+  });
+
+  if (blocks.length > 48) {
+    const trimmed = blocks.slice(0, 47);
+    trimmed.push({
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: '_Message truncated — view full report in Pandora_' }],
+    });
+    return trimmed;
+  }
 
   return blocks;
 }

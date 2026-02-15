@@ -29,33 +29,36 @@ export async function buildPipelineCoverageEvidence(
   const dataSources = await buildDataSources(workspaceId, ['hubspot', 'salesforce']);
   for (const ds of dataSources) eb.addDataSource(ds);
 
-  const coverageData = stepResults.coverage_analysis || stepResults.pipeline_summary || {};
-  const repBreakdown = coverageData.repBreakdown || coverageData.byOwner || coverageData.ownerCoverage || [];
+  const coverageData = stepResults.coverage_data || {};
+  const reps = coverageData.reps || [];
+  const team = coverageData.team || {};
 
   const repsBelowTarget: any[] = [];
 
-  const reps = Array.isArray(repBreakdown) ? repBreakdown : Object.entries(repBreakdown).map(([k, v]: [string, any]) => ({ ...v, owner: k }));
   for (const rep of reps) {
-    const ratio = rep.coverageRatio || rep.coverage_ratio || rep.ratio || 0;
-    const isBelow = ratio < coverageTarget;
-    const severity: 'critical' | 'warning' | 'healthy' = ratio < coverageTarget * 0.5 ? 'critical' : isBelow ? 'warning' : 'healthy';
+    const ratio = rep.coverageRatio ?? 0;
+    const isBelow = ratio !== null && ratio < coverageTarget;
+    const severity: 'critical' | 'warning' | 'healthy' = 
+      ratio !== null && ratio < coverageTarget * 0.5 ? 'critical' : 
+      isBelow ? 'warning' : 'healthy';
 
     if (isBelow) repsBelowTarget.push(rep);
 
     eb.addRecord(repToRecord(rep, {
-      rep_name: rep.name || rep.owner || rep.rep_name || '',
-      rep_email: rep.email || rep.owner || '',
+      rep_name: rep.name || rep.owner || '',
+      rep_email: rep.email || '',
       quota: rep.quota || 0,
-      open_pipeline: rep.pipelineValue || rep.pipeline_total || rep.openPipeline || 0,
+      open_pipeline: rep.pipeline || 0,
       coverage_ratio: ratio,
-      gap_to_quota: rep.gap || rep.gapToQuota || 0,
-      closed_won: rep.wonValue || rep.closedWon || rep.closed_won || 0,
-      deal_count: rep.dealCount || rep.deal_count || rep.openDeals || 0,
+      gap_to_quota: rep.gap || 0,
+      closed_won: rep.closedWon || 0,
+      deal_count: rep.dealCount || 0,
     }, {
       risk_level: severity,
       coverage_health: isBelow ? 'below_target' : 'above_target',
-      root_cause: rep.rootCause || (isBelow ? 'insufficient_pipeline' : 'on_track'),
-      recommended_intervention: rep.recommendation || (isBelow ? 'Accelerate pipeline generation' : 'Maintain pace'),
+      root_cause: rep.status === 'behind' ? 'insufficient_pipeline' : 
+                  rep.status === 'at_risk' ? 'marginal_coverage' : 'on_track',
+      recommended_intervention: isBelow ? 'Accelerate pipeline generation' : 'Maintain pace',
     }, severity));
   }
 
@@ -64,16 +67,15 @@ export async function buildPipelineCoverageEvidence(
       claim_id: 'reps_below_coverage',
       claim_text: `${repsBelowTarget.length} reps below ${coverageTarget}x coverage target`,
       entity_type: 'deal',
-      entity_ids: repsBelowTarget.map((r: any) => r.email || r.owner || ''),
+      entity_ids: repsBelowTarget.map((r: any) => r.email || r.name || ''),
       metric_name: 'coverage_ratio',
-      metric_values: repsBelowTarget.map((r: any) => r.coverageRatio || r.coverage_ratio || 0),
+      metric_values: repsBelowTarget.map((r: any) => r.coverageRatio ?? 0),
       threshold_applied: `${coverageTarget}x`,
-      severity: repsBelowTarget.some((r: any) => (r.coverageRatio || r.coverage_ratio || 0) < coverageTarget * 0.5) ? 'critical' : 'warning',
+      severity: repsBelowTarget.some((r: any) => (r.coverageRatio ?? 0) < coverageTarget * 0.5) ? 'critical' : 'warning',
     });
   }
 
-  // Team-level coverage
-  const teamCoverage = coverageData.coverageRatio || coverageData.teamCoverage;
+  const teamCoverage = team.coverageRatio;
   if (teamCoverage != null && teamCoverage < coverageTarget) {
     eb.addClaim({
       claim_id: 'team_coverage_gap',

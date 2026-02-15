@@ -22,37 +22,46 @@ export async function buildDealRiskReviewEvidence(
   const dataSources = await buildDataSources(workspaceId, ['hubspot', 'salesforce', 'gong', 'fireflies']);
   for (const ds of dataSources) eb.addDataSource(ds);
 
-  // The deal risk review skill uses a classify step that produces risk assessments
-  const riskData = stepResults.risk_assessments || stepResults.deal_classifications || [];
-  const allDeals = stepResults.all_deals || stepResults.pipeline_deals || [];
+  const openDeals = stepResults.open_deals || [];
+  const riskAssessment = stepResults.risk_assessment || {};
+  const dealContext = stepResults.deal_context || {};
 
   const riskMap = new Map<string, any>();
-  if (Array.isArray(riskData)) {
-    for (const r of riskData) {
-      riskMap.set((r.dealName || r.name || '').toLowerCase(), r);
+  if (riskAssessment.assessments && Array.isArray(riskAssessment.assessments)) {
+    for (const r of riskAssessment.assessments) {
+      const key = (r.dealName || r.deal_name || r.name || '').toLowerCase();
+      riskMap.set(key, r);
+    }
+  } else if (Array.isArray(riskAssessment)) {
+    for (const r of riskAssessment) {
+      const key = (r.dealName || r.deal_name || r.name || '').toLowerCase();
+      riskMap.set(key, r);
     }
   }
 
   const highRiskDeals: any[] = [];
+  const dealList = Array.isArray(openDeals) ? openDeals : (openDeals?.deals || []);
 
-  const dealList = Array.isArray(allDeals) ? allDeals : (allDeals?.topDeals || []);
   for (const deal of dealList) {
-    const name = (deal.name || deal.dealName || '').toLowerCase();
+    const name = (deal.name || deal.deal_name || deal.dealName || '').toLowerCase();
     const risk = riskMap.get(name);
-    const riskLevel = risk?.risk_level || risk?.riskLevel || (deal.riskScore > 70 ? 'high' : deal.riskScore > 40 ? 'medium' : 'low');
-    const severity: 'critical' | 'warning' | 'healthy' = riskLevel === 'high' ? 'critical' : riskLevel === 'medium' ? 'warning' : 'healthy';
+    const riskLevel = risk?.risk_level || risk?.riskLevel || 
+      (deal.deal_risk > 70 ? 'high' : deal.deal_risk > 40 ? 'medium' : 'low');
+    const severity: 'critical' | 'warning' | 'healthy' = 
+      riskLevel === 'high' || riskLevel === 'critical' ? 'critical' : 
+      riskLevel === 'medium' ? 'warning' : 'healthy';
 
     if (severity === 'critical') highRiskDeals.push(deal);
 
     eb.addRecord(dealToRecord(deal, {
-      deal_name: deal.name || deal.dealName || '',
+      deal_name: deal.name || deal.deal_name || deal.dealName || '',
       amount: deal.amount || 0,
       stage: deal.stage || deal.stage_normalized || '',
       owner: deal.owner || '',
       close_date: deal.close_date || deal.closeDate || null,
-      risk_score: deal.riskScore || risk?.score || 0,
-      days_since_activity: deal.daysStale || deal.days_since_activity || 0,
-      contact_count: deal.contactCount || deal.contact_count || 0,
+      risk_score: deal.deal_risk || risk?.score || 0,
+      days_since_activity: deal.days_stale || deal.daysStale || deal.days_since_activity || 0,
+      contact_count: deal.contact_count || deal.contactCount || 0,
     }, {
       risk_level: riskLevel,
       risk_factors: risk?.signals?.join(', ') || risk?.risk_factors || '',
@@ -61,13 +70,14 @@ export async function buildDealRiskReviewEvidence(
   }
 
   if (highRiskDeals.length > 0) {
+    const totalValue = highRiskDeals.reduce((s, d) => s + (d.amount || 0), 0);
     eb.addClaim({
       claim_id: 'high_risk_deals',
-      claim_text: `${highRiskDeals.length} deals flagged as high risk`,
+      claim_text: `${highRiskDeals.length} deals worth $${Math.round(totalValue / 1000)}K flagged as high risk`,
       entity_type: 'deal',
-      entity_ids: highRiskDeals.map((d: any) => d.id || d.dealId || ''),
+      entity_ids: highRiskDeals.map((d: any) => d.id || d.deal_id || d.dealId || ''),
       metric_name: 'risk_score',
-      metric_values: highRiskDeals.map((d: any) => d.riskScore || 0),
+      metric_values: highRiskDeals.map((d: any) => d.deal_risk || 0),
       threshold_applied: 'risk_level = high',
       severity: 'critical',
     });

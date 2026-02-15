@@ -27,6 +27,7 @@ import {
   formatContext,
   type SlackBlock,
 } from '../connectors/slack/client.js';
+import { formatAgentWithEvidence } from '../skills/formatters/slack-formatter.js';
 
 export class AgentRuntime {
   private static instance: AgentRuntime;
@@ -71,7 +72,7 @@ export class AgentRuntime {
           // Check for cached skill output
           const cacheTtl = step.cacheTtlMinutes || 30;
           const cached = await query(
-            `SELECT id, output_text, result, token_usage
+            `SELECT id, output_text, result, token_usage, output
              FROM skill_runs
              WHERE workspace_id = $1
                AND skill_id = $2
@@ -86,6 +87,7 @@ export class AgentRuntime {
             // Reuse cached output
             const cachedRun = cached.rows[0];
             const cachedOutput = cachedRun.output_text || JSON.stringify(cachedRun.result);
+            const cachedEvidence = cachedRun.output?.evidence || null;
 
             skillOutputs[step.outputKey] = {
               skillId: step.skillId,
@@ -94,7 +96,12 @@ export class AgentRuntime {
               tokenUsage: cachedRun.token_usage || null,
               duration: 0,
               cached: true,
+              evidence: cachedEvidence,
             };
+
+            if (cachedEvidence) {
+              skillEvidence[step.outputKey] = cachedEvidence;
+            }
 
             skillResults.push({
               skillId: step.skillId,
@@ -174,7 +181,7 @@ export class AgentRuntime {
       }
 
       if (!options?.dryRun && synthesizedOutput) {
-        await this.deliver(agent.delivery, synthesizedOutput, workspaceId, agent.name);
+        await this.deliver(agent.delivery, synthesizedOutput, workspaceId, agent.name, skillEvidence);
       }
 
       const skillTokenTotal = Object.values(skillOutputs).reduce((sum, s) => {
@@ -305,7 +312,8 @@ export class AgentRuntime {
     delivery: AgentDelivery,
     output: string,
     workspaceId: string,
-    agentName: string
+    agentName: string,
+    evidence?: Record<string, SkillEvidence>
   ): Promise<void> {
     switch (delivery.channel) {
       case 'slack': {
@@ -316,7 +324,9 @@ export class AgentRuntime {
         }
 
         if (delivery.format === 'slack') {
-          const blocks = this.formatSlackBlocks(output, agentName);
+          const blocks = evidence && Object.keys(evidence).length > 0
+            ? formatAgentWithEvidence(output, evidence, agentName, 0)
+            : this.formatSlackBlocks(output, agentName);
           await postBlocks(webhookUrl, blocks);
         } else {
           await postText(webhookUrl, `*${agentName}*\n\n${output}`);

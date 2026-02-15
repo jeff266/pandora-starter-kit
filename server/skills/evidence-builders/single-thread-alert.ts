@@ -19,23 +19,37 @@ export async function buildSingleThreadAlertEvidence(
   const dataSources = await buildDataSources(workspaceId, ['hubspot', 'salesforce', 'gong', 'fireflies']);
   for (const ds of dataSources) eb.addDataSource(ds);
 
-  const threadingData = stepResults.threading_analysis || stepResults.deal_classifications || [];
-  const allDeals = stepResults.all_deals || stepResults.pipeline_deals || [];
+  const threadingData = stepResults.threading_data || {};
+  const enrichedDeals = stepResults.enriched_deals || [];
+  const riskClassifications = stepResults.risk_classifications || [];
 
-  const threadMap = new Map<string, any>();
-  if (Array.isArray(threadingData)) {
-    for (const t of threadingData) {
-      threadMap.set((t.dealName || t.name || '').toLowerCase(), t);
+  const classMap = new Map<string, any>();
+  if (Array.isArray(riskClassifications)) {
+    for (const c of riskClassifications) {
+      const key = (c.dealName || c.name || '').toLowerCase();
+      classMap.set(key, c);
+    }
+  }
+
+  const criticalDeals = threadingData.criticalDeals || [];
+  const warningDeals = threadingData.warningDeals || [];
+  const allFlaggedDeals = [...criticalDeals, ...warningDeals];
+
+  const enrichedMap = new Map<string, any>();
+  if (Array.isArray(enrichedDeals)) {
+    for (const d of enrichedDeals) {
+      enrichedMap.set(d.dealId || d.id || '', d);
     }
   }
 
   const singleThreaded: any[] = [];
 
-  const dealList = Array.isArray(allDeals) ? allDeals : (allDeals?.topDeals || []);
-  for (const deal of dealList) {
+  for (const deal of allFlaggedDeals) {
+    const dealId = deal.dealId || deal.id || '';
     const name = (deal.name || deal.dealName || '').toLowerCase();
-    const thread = threadMap.get(name);
-    const contactCount = deal.contactCount || deal.contact_count || thread?.contact_count || 0;
+    const enriched = enrichedMap.get(dealId) || {};
+    const classification = classMap.get(name);
+    const contactCount = deal.contactCount || deal.contact_count || enriched.contactCount || 0;
     const isSingleThreaded = contactCount <= 1;
     const severity: 'critical' | 'warning' | 'healthy' = isSingleThreaded && (deal.amount || 0) > 50000
       ? 'critical' : isSingleThreaded ? 'warning' : 'healthy';
@@ -48,12 +62,12 @@ export async function buildSingleThreadAlertEvidence(
       stage: deal.stage || deal.stage_normalized || '',
       owner: deal.owner || '',
       contact_count: contactCount,
-      account_contact_count: deal.account_contact_count || thread?.account_contacts || 0,
+      account_contact_count: enriched.totalContactsAtAccount || deal.account_contact_count || 0,
     }, {
-      risk_level: severity,
-      likely_cause: thread?.likely_cause || (isSingleThreaded ? 'single_contact' : 'multi_threaded'),
-      has_expansion_contacts: String(thread?.has_expansion || false),
-      recommended_action: thread?.suggested_action || (isSingleThreaded ? 'Identify additional stakeholders' : 'No action needed'),
+      risk_level: classification?.risk_level || severity,
+      likely_cause: classification?.likely_cause || (isSingleThreaded ? 'single_contact' : 'multi_threaded'),
+      has_expansion_contacts: String(classification?.has_expansion_contacts || enriched.hasExpansionContacts || false),
+      recommended_action: classification?.recommended_action || (isSingleThreaded ? 'Identify additional stakeholders' : 'No action needed'),
     }, severity));
   }
 
@@ -63,7 +77,7 @@ export async function buildSingleThreadAlertEvidence(
       claim_id: 'single_threaded_deals',
       claim_text: `${singleThreaded.length} deals worth $${Math.round(totalValue / 1000)}K are single-threaded (≤1 contact)`,
       entity_type: 'deal',
-      entity_ids: singleThreaded.map((d: any) => d.id || d.dealId || ''),
+      entity_ids: singleThreaded.map((d: any) => d.dealId || d.id || ''),
       metric_name: 'contact_count',
       metric_values: singleThreaded.map((d: any) => d.contactCount || d.contact_count || 0),
       threshold_applied: '≤1 contact',
