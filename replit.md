@@ -65,8 +65,10 @@ Pandora is built on Node.js 20 with TypeScript 5+, using Express.js and PostgreS
 -   **Slack App Infrastructure:** Dual-mode `SlackAppClient`, signature verification, API endpoints for events and interactions, thread anchoring, message tracking, channel configuration, and snooze functionality. Action buttons (Reviewed/Snooze/Drill/Execute/Dismiss/View) are dynamically appended.
 -   **Shared Currency Formatting:** `formatCurrency()` utility handles M/K thresholds across the application.
 -   **Command Center Phase A (Backend):** Backend API for findings extraction, dossier assembly, and scoped analysis.
-    -   **Findings Infrastructure:** `findings` table with 7 per-skill extractors, auto-extraction, backfill script, and API endpoints for findings, summary, and pipeline snapshot.
+    -   **Findings Infrastructure:** `findings` table with 7 per-skill extractors, auto-extraction, backfill script, and API endpoints for findings, summary, pipeline snapshot, and resolve. Severity values in DB: `act/watch/notable/info`. API accepts both DB values and spec aliases (`critical`→`act`, `warning`→`watch`).
+    -   **Findings Resolve:** `PATCH /:workspaceId/findings/:findingId/resolve` — marks finding resolved with `resolution_method` (user_dismissed/action_taken/auto_cleared). Returns 404/409 for edge cases. Critical path for Slack Dismiss button.
     -   **Dossier Assemblers:** `assembleDealDossier()` and `assembleAccountDossier()` with parallel queries and health signal computation. API endpoints for deal and account dossiers.
+    -   **Enhanced Account Dossier:** `assembleAccountDossier` now includes `deal_summary` (open/won/lost counts+values), `contact_map` (by_seniority/by_role/engaged/dark), `relationship_health` (engagement_trend/coverage_gaps/overall), `data_availability` flags, and per-deal `health_status` from risk scores.
     -   **Scoped Analysis Engine:** `POST /analyze` endpoint with 5 scope types, Claude synthesis, rate limiting, and token usage tracking.
 -   **Command Center Phase B (Frontend):** React + TypeScript frontend providing a UI for all Phase A APIs.
     -   **Stack:** Vite 7 + React 19 + TypeScript, `react-router-dom`. Dark theme.
