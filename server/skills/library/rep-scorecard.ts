@@ -209,6 +209,36 @@ RULES:
 - If activity data is missing, note briefly and base scorecard on results and pipeline
 - Word budget: 700 words
 
+ACTIONS GENERATION:
+
+In addition to your narrative report, output a JSON block tagged with <actions>:
+
+<actions>
+[
+  {
+    "action_type": "notify_manager",
+    "severity": "critical" | "warning",
+    "target_entity_type": "rep",
+    "owner_email": "rep email",
+    "title": "Coaching needed: [Rep] — [primary gap]",
+    "summary": "Specific description of the gap and evidence",
+    "impact_amount": at_risk_pipeline_value,
+    "urgency_label": "immediate | this_quarter | developmental",
+    "recommended_steps": [
+      "Step 1: specific coaching action",
+      "Step 2: specific metric to track"
+    ]
+  }
+]
+</actions>
+
+Rules for actions:
+- critical: composite score < 40 AND declining, or quota attainment < 50% past mid-quarter
+- warning: composite score < 60 AND bottom quartile, or significant rank drop (3+ positions)
+- notify_manager for all coaching actions (not notify_rep — manager drives coaching)
+- Max 5 actions (one per bottom rep)
+- Don't create actions for reps who are improving (positive rank change) even if score is low
+
 {{voiceBlock}}`,
       outputKey: 'narrative',
     },

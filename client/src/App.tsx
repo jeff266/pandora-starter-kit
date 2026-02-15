@@ -19,6 +19,7 @@ import SkillsPage from './pages/SkillsPage';
 import SkillRunsPage from './pages/SkillRunsPage';
 import ConnectorsPage from './pages/ConnectorsPage';
 import InsightsPage from './pages/InsightsPage';
+import Actions from './pages/Actions';
 import { colors, fonts } from './styles/theme';
 
 const pageTitles: Record<string, string> = {
@@ -147,7 +148,7 @@ export default function App() {
             <Route path="/agent-builder" element={<Placeholder title="Agent Builder" />} />
             <Route path="/tools" element={<Placeholder title="Tools" />} />
             <Route path="/playbooks" element={<Placeholder title="Playbooks" />} />
-            <Route path="/actions" element={<Placeholder title="Actions" />} />
+            <Route path="/actions" element={<Actions />} />
             <Route path="/connectors/health" element={<Placeholder title="Connector Health" />} />
             <Route path="/data-dictionary" element={<Placeholder title="Data Dictionary" />} />
             <Route path="/marketplace" element={<Placeholder title="Marketplace" />} />

@@ -282,6 +282,33 @@ Rules:
 - Use markdown formatting with headers, bullet points, and bold text for emphasis
 
 Word budget: 600 words.
+
+ACTIONS GENERATION:
+
+In addition to your narrative report, output a JSON block tagged with <actions>:
+
+<actions>
+[
+  {
+    "action_type": "notify_rep" | "notify_manager" | "re_engage_deal",
+    "severity": "critical" | "warning",
+    "target_deal_name": "deal name",
+    "owner_email": "rep email",
+    "title": "Brief action title",
+    "summary": "Why this matters",
+    "impact_amount": dollar_value,
+    "urgency_label": "description of urgency",
+    "recommended_steps": ["Step 1", "Step 2"]
+  }
+]
+</actions>
+
+Rules for actions:
+- critical: surprise losses > $100K, stages with >30% increase in fall-out, bottleneck stages with >50% slowdown
+- warning: deals spending 2x+ avg time in a stage, stages with declining advance rates
+- re_engage_deal: for specific stalled deals identified in the waterfall
+- notify_manager: for systemic process issues (entire stage bottlenecked)
+- Don't create actions for healthy movement or stages operating normally
 {{/if}}
 
 {{voiceBlock}}`,

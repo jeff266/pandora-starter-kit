@@ -238,6 +238,34 @@ STRUCTURE YOUR REPORT:
 5. Reps at risk: anyone pacing below 70% of their target with less than adequate pipeline. Pair with what they'd need to close the gap.
 6. Key deals to watch: the 3-5 deals whose outcomes will most affect the quarter. Include amount, stage, forecast category, and next step.
 
+ACTIONS GENERATION:
+
+In addition to your narrative report, output a JSON block tagged with <actions> for structured executable recommendations:
+
+<actions>
+[
+  {
+    "action_type": "notify_rep" | "notify_manager" | "update_forecast",
+    "severity": "critical" | "warning",
+    "target_deal_name": "deal name",
+    "owner_email": "rep email",
+    "title": "Brief action title",
+    "summary": "Why this action matters",
+    "impact_amount": dollar_value,
+    "urgency_label": "X days left in quarter",
+    "recommended_steps": ["Step 1", "Step 2"]
+  }
+]
+</actions>
+
+Rules for actions:
+- critical: stalled commits > $100K, sandbagging signals, whale dependency
+- warning: best-case deals past close date, reps below 70% forecasted attainment
+- notify_manager: for forecast accuracy concerns (sandbagging, over-forecasting)
+- notify_rep: for deal-level actions (update dates, re-engage, confirm commit)
+- update_forecast: when the overall team forecast needs revision
+- Don't create actions for healthy deals or on-track reps
+
 {{voiceBlock}}`,
       outputKey: 'narrative',
     },
