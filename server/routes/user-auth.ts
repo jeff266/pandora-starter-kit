@@ -202,11 +202,11 @@ router.get('/me', async (req: Request, res: Response) => {
       SELECT
         w.id, w.name, w.slug,
         uw.role,
-        (SELECT count(*) FROM connector_configs cc
+        (SELECT count(*) FROM connections cc
          WHERE cc.workspace_id = w.id AND cc.status = 'connected') as connector_count,
         (SELECT count(*) FROM deals d
-         WHERE d.workspace_id = w.id AND d.is_open = true) as deal_count,
-        (SELECT max(cc.last_sync_at) FROM connector_configs cc
+         WHERE d.workspace_id = w.id AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')) as deal_count,
+        (SELECT max(cc.last_sync_at) FROM connections cc
          WHERE cc.workspace_id = w.id) as last_sync
       FROM user_workspaces uw
       JOIN workspaces w ON w.id = uw.workspace_id

@@ -34,8 +34,19 @@ export default function AccountList() {
   const fetchAccounts = async () => {
     setLoading(true);
     try {
-      const data = await api.get(`/accounts?sort=${sortBy}&limit=100`);
-      setAccounts(Array.isArray(data) ? data : data.accounts || []);
+      const data = await api.get(`/accounts?sort=${sortBy}&limit=200`);
+      const raw = Array.isArray(data) ? data : data.data || data.accounts || [];
+      setAccounts(raw.map((a: any) => ({
+        id: a.id,
+        name: a.name,
+        domain: a.domain,
+        industry: a.industry,
+        deal_count: a.open_deal_count || a.deal_count || 0,
+        total_pipeline: a.total_pipeline || a.annual_revenue || 0,
+        finding_count: a.finding_count || 0,
+        last_activity: a.last_activity || a.updated_at,
+        owner_email: a.owner,
+      })));
       setError('');
     } catch (err: any) {
       setError(err.message);
@@ -168,7 +179,7 @@ export default function AccountList() {
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: '2fr 1.5fr 1fr 1fr 1fr 1.2fr',
+            gridTemplateColumns: '2fr 1.5fr 1fr 0.8fr 1fr 0.8fr 1.2fr',
             gap: 16,
             padding: '12px 20px',
             background: colors.surfaceRaised,
@@ -196,7 +207,7 @@ export default function AccountList() {
             onClick={() => navigate(`/accounts/${account.id}`)}
             style={{
               display: 'grid',
-              gridTemplateColumns: '2fr 1.5fr 1fr 1fr 1fr 1.2fr',
+              gridTemplateColumns: '2fr 1.5fr 1fr 0.8fr 1fr 0.8fr 1.2fr',
               gap: 16,
               padding: '14px 20px',
               borderBottom: `1px solid ${colors.border}`,

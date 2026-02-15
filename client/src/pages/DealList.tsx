@@ -34,25 +34,12 @@ export default function DealList() {
   const fetchDeals = async () => {
     setLoading(true);
     try {
-      // Use existing deals endpoint - may need to enhance backend for finding counts
-      const data = await api.get('/pipeline/snapshot');
-      const allDeals: Deal[] = [];
-
-      // Extract deals from pipeline stages
-      if (data?.by_stage) {
-        for (const stage of data.by_stage) {
-          // This is a simplified version - in production we'd need a proper /deals list endpoint
-          // For now, we'll note this needs backend support
-        }
-      }
-
-      // Fallback: try to get deals directly if endpoint exists
-      try {
-        const dealsData = await api.get('/deals');
-        setDeals(Array.isArray(dealsData) ? dealsData : dealsData.deals || []);
-      } catch {
-        setDeals([]);
-      }
+      const dealsData = await api.get('/deals?limit=500');
+      const raw = Array.isArray(dealsData) ? dealsData : dealsData.data || dealsData.deals || [];
+      const openDeals = raw.filter((d: any) =>
+        d.stage_normalized && !['closed_won', 'closed_lost'].includes(d.stage_normalized)
+      );
+      setDeals(openDeals);
     } catch (err: any) {
       setError(err.message);
     } finally {

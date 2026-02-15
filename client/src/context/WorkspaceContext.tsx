@@ -100,6 +100,16 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const devSession = params.get('dev_session');
+    const devWorkspace = params.get('dev_workspace');
+    if (devSession) {
+      localStorage.setItem('pandora_session', devSession);
+      if (devWorkspace) localStorage.setItem('pandora_last_workspace', devWorkspace);
+      window.history.replaceState({}, '', window.location.pathname);
+      loadSession(devSession);
+      return;
+    }
     const stored = localStorage.getItem('pandora_session');
     if (stored) {
       loadSession(stored);

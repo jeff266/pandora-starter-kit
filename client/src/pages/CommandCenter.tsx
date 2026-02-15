@@ -43,6 +43,7 @@ interface PipelineStage {
     watch: number;
     notable: number;
     info: number;
+    top_findings?: AnnotatedFinding[];
   };
   annotated_findings?: AnnotatedFinding[];
 }
@@ -187,7 +188,7 @@ export default function CommandCenter() {
               <BarChart data={stageData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={colors.border} />
                 <XAxis
-                  dataKey="stage_normalized"
+                  dataKey="stage"
                   angle={-45}
                   textAnchor="end"
                   height={80}
@@ -239,19 +240,20 @@ export default function CommandCenter() {
             {/* Annotated Findings per Stage */}
             <div style={{ marginTop: 20 }}>
               {stageData.map((stage, idx) => {
-                const hasFindings = stage.annotated_findings && stage.annotated_findings.length > 0;
+                const topFindings = stage.findings?.top_findings || stage.annotated_findings || [];
+                const hasFindings = topFindings.length > 0;
                 if (!hasFindings) return null;
 
-                const isExpanded = expandedStage === stage.stage_normalized;
-                const highestSeverity = stage.annotated_findings!.reduce((max, f) => {
-                  const severities = { act: 4, watch: 3, notable: 2, info: 1 };
-                  return severities[f.severity] > severities[max] ? f.severity : max;
-                }, 'info' as 'act' | 'watch' | 'notable' | 'info');
+                const isExpanded = expandedStage === stage.stage;
+                const highestSeverity = topFindings.reduce((max: string, f: any) => {
+                  const severities: Record<string, number> = { act: 4, watch: 3, notable: 2, info: 1 };
+                  return (severities[f.severity] || 0) > (severities[max] || 0) ? f.severity : max;
+                }, 'info');
 
                 return (
                   <div key={idx} style={{ marginBottom: 12 }}>
                     <div
-                      onClick={() => setExpandedStage(isExpanded ? null : stage.stage_normalized)}
+                      onClick={() => setExpandedStage(isExpanded ? null : stage.stage)}
                       style={{
                         display: 'flex',
                         alignItems: 'center',
@@ -265,12 +267,12 @@ export default function CommandCenter() {
                       onMouseEnter={e => (e.currentTarget.style.background = colors.surfaceHover)}
                       onMouseLeave={e => (e.currentTarget.style.background = colors.surfaceRaised)}
                     >
-                      <SeverityDot severity={highestSeverity} size={7} />
+                      <SeverityDot severity={highestSeverity as any} size={7} />
                       <span style={{ fontSize: 12, fontWeight: 500, color: colors.text, textTransform: 'capitalize' }}>
                         {stage.stage?.replace(/_/g, ' ')}
                       </span>
                       <span style={{ fontSize: 11, color: colors.textMuted, fontFamily: fonts.mono }}>
-                        {stage.annotated_findings!.length} finding{stage.annotated_findings!.length !== 1 ? 's' : ''}
+                        {topFindings.length} finding{topFindings.length !== 1 ? 's' : ''}
                       </span>
                       <span style={{ marginLeft: 'auto', fontSize: 10, color: colors.textMuted }}>
                         {isExpanded ? '▼' : '▶'}
@@ -279,7 +281,7 @@ export default function CommandCenter() {
 
                     {isExpanded && (
                       <div style={{ marginTop: 8, marginLeft: 24, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        {stage.annotated_findings!.map((finding, fidx) => (
+                        {topFindings.map((finding: any, fidx: number) => (
                           <div
                             key={fidx}
                             onClick={() => finding.deal_id && navigate(`/deals/${finding.deal_id}`)}

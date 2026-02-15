@@ -19,6 +19,30 @@ interface WorkspaceParams {
 const mondayAdapter = new MondayTaskAdapter();
 const googleDriveAdapter = new GoogleDriveDocumentAdapter();
 
+router.get('/:workspaceId/connectors', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    const { workspaceId } = req.params;
+    const result = await dbQuery(
+      `SELECT id, connector_name as source_type, status, last_sync_at, error_message, metadata, created_at
+       FROM connections
+       WHERE workspace_id = $1
+       ORDER BY created_at DESC`,
+      [workspaceId]
+    );
+    const connectors = result.rows.map(r => {
+      const meta = r.metadata || {};
+      return {
+        ...r,
+        name: r.source_type,
+        record_counts: meta.record_counts || null,
+      };
+    });
+    res.json(connectors);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/:workspaceId/connectors/monday/connect', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
