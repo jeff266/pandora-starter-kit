@@ -112,9 +112,9 @@ const heavyOpLimiter = rateLimit({
   max: 5,
   standardHeaders: true,
   legacyHeaders: false,
-  validate: { ip: false, trustProxy: false },
+  validate: { ip: false, trustProxy: false, xForwardedForHeader: false },
   keyGenerator: (req) => {
-    return req.params?.workspaceId || req.ip || 'unknown';
+    return req.params?.workspaceId || 'global';
   },
   message: { error: 'Too many requests for this operation, please try again later' },
 });
