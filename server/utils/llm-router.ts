@@ -142,8 +142,7 @@ function getApiKey(config: LLMConfig, provider: string): { apiKey: string; baseU
   switch (provider) {
     case 'anthropic':
       return {
-        apiKey: process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY || '',
-        baseURL: process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL,
+        apiKey: process.env.ANTHROPIC_API_KEY || process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY || '',
       };
     case 'fireworks':
       return {

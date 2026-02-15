@@ -13,11 +13,11 @@ export class ClaudeClient {
   constructor(config: ClaudeConfig = {}) {
     const apiKey =
       config.apiKey ||
-      process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY ||
-      process.env.ANTHROPIC_API_KEY;
+      process.env.ANTHROPIC_API_KEY ||
+      process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY;
 
     const baseURL =
-      config.baseURL || process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL;
+      config.baseURL;
 
     if (!apiKey) {
       throw new Error(

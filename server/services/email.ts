@@ -4,39 +4,14 @@ const ALLOWED_EMAILS = new Set([
   'jeff@revopsimpact.us',
 ]);
 
-let connectionSettings: any;
+const FROM_EMAIL = 'Pandora <onboarding@resend.dev>';
 
-async function getCredentials() {
-  const hostname = process.env.REPLIT_CONNECTORS_HOSTNAME;
-  const xReplitToken = process.env.REPL_IDENTITY
-    ? 'repl ' + process.env.REPL_IDENTITY
-    : process.env.WEB_REPL_RENEWAL
-    ? 'depl ' + process.env.WEB_REPL_RENEWAL
-    : null;
-
-  if (!xReplitToken) {
-    throw new Error('X_REPLIT_TOKEN not found for repl/depl');
+function getResendClient(): Resend {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) {
+    throw new Error('RESEND_API_KEY not set');
   }
-
-  connectionSettings = await fetch(
-    'https://' + hostname + '/api/v2/connection?include_secrets=true&connector_names=resend',
-    {
-      headers: {
-        'Accept': 'application/json',
-        'X_REPLIT_TOKEN': xReplitToken
-      }
-    }
-  ).then(res => res.json()).then(data => data.items?.[0]);
-
-  if (!connectionSettings || (!connectionSettings.settings.api_key)) {
-    throw new Error('Resend not connected');
-  }
-  return { apiKey: connectionSettings.settings.api_key, fromEmail: connectionSettings.settings.from_email };
-}
-
-async function getResendClient(): Promise<{ client: Resend; fromEmail: string }> {
-  const { apiKey, fromEmail } = await getCredentials();
-  return { client: new Resend(apiKey), fromEmail: fromEmail || 'Pandora <onboarding@resend.dev>' };
+  return new Resend(apiKey);
 }
 
 export function isAllowedEmail(email: string): boolean {
@@ -78,8 +53,8 @@ export async function sendMagicLink(
   `;
 
   try {
-    const { client, fromEmail } = await getResendClient();
-    await client.emails.send({ from: fromEmail, to: email, subject, html });
+    const client = getResendClient();
+    await client.emails.send({ from: FROM_EMAIL, to: email, subject, html });
     console.log(`[email] Magic link sent to ${email}`);
   } catch (err) {
     console.log(`[email] Resend failed, logging magic link to console`);
@@ -115,8 +90,8 @@ export async function sendWaitlistEmail(email: string, name?: string): Promise<v
   `;
 
   try {
-    const { client, fromEmail } = await getResendClient();
-    await client.emails.send({ from: fromEmail, to: email, subject, html });
+    const client = getResendClient();
+    await client.emails.send({ from: FROM_EMAIL, to: email, subject, html });
     console.log(`[email] Waitlist email sent to ${email}`);
   } catch (err) {
     console.log(`[email] Failed to send waitlist email to ${email}:`, err instanceof Error ? err.message : err);
