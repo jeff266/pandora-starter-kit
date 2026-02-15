@@ -1,0 +1,124 @@
+Here's a test script to verify the Command Center        
+  endpoints. Create this file:                             
+                                                           
+  cat > test-command-center.sh << 'EOF'                    
+  #!/bin/bash                                              
+                                                           
+  echo "🧪 Testing Command Center A3-A4 Endpoints"         
+  echo "=========================================="        
+  echo ""                                                  
+                                                           
+  BASE_URL="http://localhost:3000/api"                     
+  # Get workspace ID from database                         
+  WORKSPACE_ID=$(psql $DATABASE_URL -t -c "SELECT id FROM  
+  workspaces LIMIT 1" | xargs)                             
+                                                           
+  if [ -z "$WORKSPACE_ID" ]; then                          
+    echo "❌ No workspace found. Create a workspace first."
+    exit 1                                                 
+  fi                                                       
+                                                           
+  echo "✓ Using workspace: $WORKSPACE_ID"                  
+  echo ""                                                  
+                                                           
+  # Test 1: Pipeline Snapshot                              
+  echo "1️⃣ Testing Pipeline Snapshot..."                   
+  RESPONSE=$(curl -s                                       
+  "$BASE_URL/workspaces/$WORKSPACE_ID/pipeline/snapshot")  
+  if echo "$RESPONSE" | grep -q "total_pipeline"; then     
+    echo "   ✅ Pipeline snapshot working"                 
+    echo "   Response: $(echo $RESPONSE | jq -c            
+  '{total_pipeline, total_deals, by_stage: (.by_stage |    
+  length)}')"                                              
+  else                                                     
+    echo "   ❌ Pipeline snapshot failed"                  
+    echo "   Response: $RESPONSE"                          
+  fi                                                       
+  echo ""                                                  
+                                                           
+  # Test 2: Findings Summary                               
+  echo "2️⃣ Testing Findings Summary..."                    
+  RESPONSE=$(curl -s                                       
+  "$BASE_URL/workspaces/$WORKSPACE_ID/findings/summary")   
+  if echo "$RESPONSE" | grep -q "total_active"; then       
+    echo "   ✅ Findings summary working"                  
+    echo "   Response: $(echo $RESPONSE | jq -c            
+  '{total_active, by_severity}')"                          
+  else                                                     
+    echo "   ❌ Findings summary failed"                   
+    echo "   Response: $RESPONSE"                          
+  fi                                                       
+  echo ""                                                  
+                                                           
+  # Test 3: Account List                                   
+  echo "3️⃣ Testing Account List..."                        
+  RESPONSE=$(curl -s "$BASE_URL/workspaces/$WORKSPACE_ID/ac
+  counts?sort=pipeline&limit=5")                           
+  if echo "$RESPONSE" | grep -q "accounts"; then           
+    ACCOUNT_COUNT=$(echo $RESPONSE | jq '.accounts |       
+  length')                                                 
+    echo "   ✅ Account list working ($ACCOUNT_COUNT       
+  accounts)"                                               
+    if [ "$ACCOUNT_COUNT" -gt 0 ]; then                    
+      ACCOUNT_ID=$(echo $RESPONSE | jq -r                  
+  '.accounts[0].id')                                       
+      echo "   First account ID: $ACCOUNT_ID"              
+    fi                                                     
+  else                                                     
+    echo "   ❌ Account list failed"                       
+    echo "   Response: $RESPONSE"                          
+  fi                                                       
+  echo ""                                                  
+                                                           
+  # Test 4: Deal Dossier (if deals exist)                  
+  echo "4️⃣ Testing Deal Dossier..."                        
+  DEAL_ID=$(psql $DATABASE_URL -t -c "SELECT id FROM deals 
+  WHERE workspace_id = '$WORKSPACE_ID' LIMIT 1" | xargs)   
+  if [ -z "$DEAL_ID" ]; then                               
+    echo "   ⚠️  No deals found, skipping dossier test"    
+  else                                                     
+    echo "   Testing with deal: $DEAL_ID"                  
+    RESPONSE=$(curl -s "$BASE_URL/workspaces/$WORKSPACE_ID/
+  deals/$DEAL_ID/dossier")                                 
+    if echo "$RESPONSE" | grep -q "deal"; then             
+      echo "   ✅ Deal dossier working"                    
+      echo "   Response: $(echo $RESPONSE | jq -c '{deal:  
+  .deal.name, contacts: (.contacts | length),              
+  conversations: (.conversations | length)}')"             
+    else                                                   
+      echo "   ❌ Deal dossier failed"                     
+      echo "   Response: $RESPONSE"                        
+    fi                                                     
+  fi                                                       
+  echo ""                                                  
+                                                           
+  # Test 5: Scoped Analysis                                
+  echo "5️⃣ Testing Scoped Analysis..."                     
+  RESPONSE=$(curl -s -X POST                               
+  "$BASE_URL/workspaces/$WORKSPACE_ID/analyze" \           
+    -H "Content-Type: application/json" \                  
+    -d '{                                                  
+      "question": "What is the current state of the        
+  pipeline?",                                              
+      "scope": {"type": "pipeline"}                        
+    }')                                                    
+  if echo "$RESPONSE" | grep -q "answer"; then             
+    echo "   ✅ Scoped analysis working"                   
+    echo "   Response: $(echo $RESPONSE | jq -c '{answer:  
+  (.answer | .[0:100]), tokens_used, latency_ms}')"        
+  else                                                     
+    echo "   ❌ Scoped analysis failed"                    
+    echo "   Response: $RESPONSE"                          
+  fi                                                       
+  echo ""                                                  
+                                                           
+  echo "=========================================="        
+  echo "✅ Command Center A3-A4 Test Complete"             
+  EOF                                                      
+                                                           
+  chmod +x test-command-center.sh                          
+  ./test-command-center.sh                                 
+                                                           
+  This will test all 5 core endpoints and show you the     
+  results. Make sure the server is running (npm run dev in 
+  another terminal) before running this. 

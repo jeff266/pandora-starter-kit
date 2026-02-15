@@ -5,7 +5,7 @@ integrations = ["javascript_anthropic_ai_integrations:2.0.0", "resend:1.0.0"]
 
 [nix]
 channel = "stable-25_05"
-packages = ["pm2"]
+packages = ["pm2", "nano"]
 
 [workflows]
 runButton = "Project"
