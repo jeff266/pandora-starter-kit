@@ -723,8 +723,9 @@ Important:
         } : undefined;
 
         // Build result_data with both narrative output and evidence
-        const resultData = output ? {
-          narrative: output,
+        // Save evidence even if output is null (e.g., when synthesis step fails)
+        const resultData = (output || evidence) ? {
+          ...(output ? { narrative: output } : {}),
           ...(evidence ? { evidence } : {}),
         } : null;
 

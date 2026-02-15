@@ -29,6 +29,7 @@ import {
 } from '../connectors/slack/client.js';
 import { getSlackAppClient } from '../connectors/slack/slack-app-client.js';
 import { formatAgentWithEvidence } from '../skills/formatters/slack-formatter.js';
+import { deliverToChannels, type DeliveryChannel } from './channels.js';
 
 export class AgentRuntime {
   private static instance: AgentRuntime;
@@ -181,8 +182,29 @@ export class AgentRuntime {
         synthesisTokens = synthesisResult.tokens;
       }
 
-      if (!options?.dryRun && synthesizedOutput) {
-        await this.deliver(agent.delivery, synthesizedOutput, workspaceId, agent.name, skillEvidence);
+      // Deliver results to channels (if not dry run)
+      if (!options?.dryRun) {
+        // Use new channel delivery system if agent has multi-channel support
+        // Otherwise fall back to legacy single-channel delivery
+        const hasMultiChannelConfig = agent.delivery && typeof (agent.delivery as any).channels !== 'undefined';
+
+        if (hasMultiChannelConfig && synthesizedOutput) {
+          const deliveryConfig = agent.delivery as any;
+          await deliverToChannels(
+            { ...result, runId, agentId, workspaceId } as any,
+            workspaceId,
+            agent.name,
+            {
+              channels: deliveryConfig.channels || ['slack'],
+              formats: deliveryConfig.formats,
+              download_ttl_hours: deliveryConfig.download_ttl_hours,
+              extract_findings: deliveryConfig.extract_findings !== false,
+            }
+          );
+        } else if (synthesizedOutput) {
+          // Legacy single-channel delivery
+          await this.deliver(agent.delivery, synthesizedOutput, workspaceId, agent.name, skillEvidence);
+        }
       }
 
       const skillTokenTotal = Object.values(skillOutputs).reduce((sum, s) => {

@@ -168,11 +168,13 @@ export function summarizeDeals(deals: any[]): DealSummary {
 }
 
 export interface StaleDealItem {
+  dealId: string;
   name: string;
   amount: number;
   stage: string;
   daysStale: number;
   owner: string;
+  closeDate: string | null;
   lastActivityType: string | null;
   contactCount: number | null;
 }
@@ -184,17 +186,20 @@ export function pickStaleDealFields(deal: any): StaleDealItem {
     : 999;
 
   return {
+    dealId: deal.id || deal.dealId || deal.deal_id || '',  // Include ID for evidence linking
     name: deal.deal_name || deal.name || 'Unnamed',
     amount: parseFloat(deal.amount) || 0,
     stage: deal.stage_normalized || deal.stage || 'Unknown',
     daysStale,
     owner: deal.owner || 'Unassigned',
+    closeDate: deal.close_date || null,  // Include close date for evidence
     lastActivityType: deal.last_activity_type || null,
     contactCount: deal.contact_count != null ? parseInt(deal.contact_count, 10) : null,
   };
 }
 
 export interface ClosingSoonItem {
+  dealId: string;
   name: string;
   amount: number;
   stage: string;
@@ -206,6 +211,7 @@ export interface ClosingSoonItem {
 
 export function pickClosingSoonFields(deal: any): ClosingSoonItem {
   return {
+    dealId: deal.id || deal.dealId || deal.deal_id || '',  // Include ID for evidence linking
     name: deal.deal_name || deal.name || 'Unnamed',
     amount: parseFloat(deal.amount) || 0,
     stage: deal.stage_normalized || deal.stage || 'Unknown',

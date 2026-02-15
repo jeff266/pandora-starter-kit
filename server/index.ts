@@ -38,6 +38,10 @@ import funnelRouter from './routes/funnel.js';
 import workspaceConfigRouter from './routes/workspace-config.js';
 import findingsRouter from './routes/findings.js';
 import dossiersRouter from './routes/dossiers.js';
+import routerApiRouter from './routes/router.js';
+import deliverablesRouter from './routes/deliverables.js';
+import downloadsRouter from './routes/downloads.js';
+import workspaceDownloadsRouter from './routes/workspace-downloads.js';
 import { ActivePiecesClient } from './workflows/ap-client.js';
 import { WorkflowService } from './workflows/workflow-service.js';
 import { seedTemplates } from './workflows/template-seed.js';
@@ -62,6 +66,7 @@ import slackInteractionsRouter from './routes/slack-interactions.js';
 import analysisRouter from './routes/analysis.js';
 import userAuthRouter from './routes/user-auth.js';
 import membersRouter from './routes/members.js';
+import { initRenderers } from './renderers/index.js';
 
 dotenv.config();
 
@@ -207,6 +212,10 @@ workspaceApiRouter.use(agentsWorkspaceRouter);
 workspaceApiRouter.use(findingsRouter);
 workspaceApiRouter.use(dossiersRouter);
 workspaceApiRouter.use(analysisRouter);
+workspaceApiRouter.use(routerApiRouter);
+workspaceApiRouter.use(deliverablesRouter);
+workspaceApiRouter.use(downloadsRouter);
+workspaceApiRouter.use('/workspace-downloads', workspaceDownloadsRouter);
 workspaceApiRouter.use('/members', membersRouter);
 app.use("/api/workspaces", workspaceApiRouter);
 
@@ -216,6 +225,7 @@ app.use("/api/auth/salesforce", salesforceAuthRouter);
 app.use("/api", quotasRouter);
 app.use("/api/funnel", funnelRouter);
 app.use("/api", agentsGlobalRouter);
+app.use("/api/downloads", downloadsRouter);
 
 app.use(dealInsightsRouter);
 
@@ -325,10 +335,10 @@ async function start(): Promise<void> {
     initWorkflowEngine().then(apClient => {
       startWorkflowMonitor(apClient);
     }),
+    initRenderers(),
   ]);
 
   const tRegistration = performance.now();
-
   startJobQueue();
   startScheduler();
   startSkillScheduler();

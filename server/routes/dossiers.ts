@@ -1,38 +1,144 @@
-import { Router, type Request, type Response } from 'express';
+/**
+ * Dossier API Routes
+ *
+ * Layer 2 (composed lookup, near-instant): Cross-table joins assembling
+ * everything known about one entity, with optional Claude narrative.
+ */
+
+import { Router } from 'express';
 import { assembleDealDossier } from '../dossiers/deal-dossier.js';
 import { assembleAccountDossier } from '../dossiers/account-dossier.js';
+import { query } from '../db.js';
 
-const router = Router();
+const router = Router({ mergeParams: true });
 
-router.get('/:workspaceId/deals/:dealId/dossier', async (req: Request, res: Response): Promise<void> => {
+/**
+ * GET /api/workspaces/:workspaceId/deals/:dealId/dossier
+ *
+ * Assembles complete deal dossier from 6+ tables.
+ * Optional narrative synthesis via ?narrative=true query param.
+ *
+ * Target latency: <2s without narrative, <5s with narrative
+ */
+router.get('/:workspaceId/deals/:dealId/dossier', async (req, res) => {
   try {
     const { workspaceId, dealId } = req.params;
+    const includeNarrative = req.query.narrative === 'true';
+
     const dossier = await assembleDealDossier(workspaceId, dealId);
+
+    // Optional narrative synthesis (can be added later)
+    if (includeNarrative) {
+      // TODO: Add narrative synthesis via callLLM
+      // const narrative = await synthesizeDealNarrative(workspaceId, dossier);
+      // dossier.narrative = narrative;
+    }
+
     res.json(dossier);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes('not found')) {
-      res.status(404).json({ error: msg });
-      return;
+    if ((err as Error).message.includes('not found')) {
+      return res.status(404).json({ error: (err as Error).message });
     }
-    console.error('[dossiers] Deal dossier error:', msg);
-    res.status(500).json({ error: msg });
+    console.error('[Deal Dossier]', err);
+    res.status(500).json({ error: (err as Error).message });
   }
 });
 
-router.get('/:workspaceId/accounts/:accountId/dossier', async (req: Request, res: Response): Promise<void> => {
+/**
+ * GET /api/workspaces/:workspaceId/accounts/:accountId/dossier
+ *
+ * Assembles complete account dossier with deals, contacts, conversations,
+ * relationship health, and findings.
+ */
+router.get('/:workspaceId/accounts/:accountId/dossier', async (req, res) => {
   try {
     const { workspaceId, accountId } = req.params;
+    const includeNarrative = req.query.narrative === 'true';
+
     const dossier = await assembleAccountDossier(workspaceId, accountId);
+
+    // Optional narrative synthesis (can be added later)
+    if (includeNarrative) {
+      // TODO: Add narrative synthesis via callLLM
+      // const narrative = await synthesizeAccountNarrative(workspaceId, dossier);
+      // dossier.narrative = narrative;
+    }
+
     res.json(dossier);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes('not found')) {
-      res.status(404).json({ error: msg });
-      return;
+    if ((err as Error).message.includes('not found')) {
+      return res.status(404).json({ error: (err as Error).message });
     }
-    console.error('[dossiers] Account dossier error:', msg);
-    res.status(500).json({ error: msg });
+    console.error('[Account Dossier]', err);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+/**
+ * GET /api/workspaces/:workspaceId/accounts
+ *
+ * Account list view for Command Center with sorting and filtering.
+ */
+router.get('/:workspaceId/accounts', async (req, res) => {
+  try {
+    const { workspaceId } = req.params;
+    const { sort, industry, owner, limit, offset } = req.query;
+
+    let orderBy = 'total_pipeline DESC NULLS LAST';
+    switch (sort) {
+      case 'name':
+        orderBy = 'a.name ASC';
+        break;
+      case 'findings':
+        orderBy = 'finding_count DESC NULLS LAST';
+        break;
+      case 'activity':
+        orderBy = 'last_activity DESC NULLS LAST';
+        break;
+      case 'deals':
+        orderBy = 'deal_count DESC';
+        break;
+    }
+
+    let whereClause = 'a.workspace_id = $1';
+    const params: any[] = [workspaceId];
+    let paramIdx = 2;
+
+    if (industry) {
+      whereClause += ` AND a.industry = $${paramIdx++}`;
+      params.push(industry);
+    }
+    if (owner) {
+      whereClause += ` AND a.owner_email = $${paramIdx++}`;
+      params.push(owner);
+    }
+
+    const result = await query(
+      `SELECT a.id, a.name, a.domain, a.industry, a.owner_email,
+              COUNT(DISTINCT d.id) as deal_count,
+              COALESCE(SUM(d.amount) FILTER (WHERE d.stage_normalized NOT IN ('closed_won', 'closed_lost')), 0) as total_pipeline,
+              COUNT(DISTINCT f.id) as finding_count,
+              MAX(COALESCE(c.started_at, c.call_date)) as last_activity
+       FROM accounts a
+       LEFT JOIN deals d ON d.account_id = a.id AND d.workspace_id = a.workspace_id
+       LEFT JOIN findings f ON f.account_id = a.id AND f.resolved_at IS NULL
+       LEFT JOIN conversations c ON c.account_id = a.id AND c.workspace_id = a.workspace_id
+       WHERE ${whereClause}
+       GROUP BY a.id
+       ORDER BY ${orderBy}
+       LIMIT $${paramIdx++}
+       OFFSET $${paramIdx++}`,
+      [
+        ...params,
+        Math.min(parseInt(limit as string) || 50, 200),
+        parseInt(offset as string) || 0,
+      ]
+    );
+
+    res.json({ accounts: result.rows, count: result.rows.length });
+  } catch (err) {
+    console.error('[Account List]', err);
+    res.status(500).json({ error: (err as Error).message });
   }
 });
 
