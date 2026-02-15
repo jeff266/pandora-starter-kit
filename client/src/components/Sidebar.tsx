@@ -22,6 +22,13 @@ const sections: NavSection[] = [
     ],
   },
   {
+    title: 'PIPELINE',
+    items: [
+      { label: 'Deals', path: '/deals', icon: '\u25C6' },
+      { label: 'Accounts', path: '/accounts', icon: '\u25C7' },
+    ],
+  },
+  {
     title: 'INTELLIGENCE',
     items: [
       { label: 'Agents', path: '/agents', icon: '\u25C8' },

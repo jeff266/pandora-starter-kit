@@ -25,14 +25,14 @@ async function takeScreenshot(url: string, outputPath: string) {
   try {
     const page = await browser.newPage();
 
-    // Set viewport to desktop size
-    await page.setViewport({ width: 1920, height: 1080 });
+    // Set viewport to 1440x900 per Phase B spec
+    await page.setViewport({ width: 1440, height: 900 });
 
     // Navigate to URL
     await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
 
     // Wait a bit for any animations
-    await page.waitForTimeout(1000);
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
     // Take screenshot
     const screenshotDir = path.dirname(outputPath);
