@@ -50,7 +50,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
         setApiCredentials(wsId, key);
         setWorkspace({ workspaceId: wsId, workspaceName: name, apiKey: key });
       }).catch(() => {
-        setWorkspace({ workspaceId: wsId, workspaceName: wsId.slice(0, 8), apiKey: key });
+        console.warn('[WorkspaceContext] Auto-login failed — invalid workspace or key');
       });
     }
   }, []);
