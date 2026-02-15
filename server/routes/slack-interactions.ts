@@ -328,17 +328,107 @@ async function handleExecuteAction(value: any, payload: any): Promise<void> {
   }
 
   const operations = action.execution_payload?.operations || action.recommended_steps || [];
-  const opBlocks = Array.isArray(operations)
-    ? operations.slice(0, 10).map((op: any) => ({
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: op.field
-            ? `*${op.field}:* ${op.current_value || '(empty)'} → *${op.proposed_value}*`
-            : typeof op === 'string' ? `• ${op}` : `• ${JSON.stringify(op)}`,
-        },
-      }))
-    : [];
+
+  let liveRecord: Record<string, any> | null = null;
+  let liveRecordName = '';
+  try {
+    if (action.target_deal_id) {
+      const dealResult = await query<any>(
+        `SELECT name, amount, stage, stage_normalized, close_date, owner, probability, forecast_category FROM deals WHERE id = $1 AND workspace_id = $2`,
+        [action.target_deal_id, workspace_id]
+      );
+      if (dealResult.rows.length > 0) {
+        liveRecord = dealResult.rows[0];
+        liveRecordName = liveRecord!.name || 'Deal';
+      }
+    } else if (action.target_account_id) {
+      const acctResult = await query<any>(
+        `SELECT name, industry, owner, annual_revenue FROM accounts WHERE id = $1 AND workspace_id = $2`,
+        [action.target_account_id, workspace_id]
+      );
+      if (acctResult.rows.length > 0) {
+        liveRecord = acctResult.rows[0];
+        liveRecordName = liveRecord!.name || 'Account';
+      }
+    }
+  } catch (err) {
+    console.warn('[slack-interactions] Failed to fetch live record for modal:', (err as Error).message);
+  }
+
+  const opBlocks: any[] = [];
+  if (Array.isArray(operations)) {
+    for (const op of operations.slice(0, 10)) {
+      if (!op.field) {
+        opBlocks.push({
+          type: 'section',
+          text: { type: 'mrkdwn', text: typeof op === 'string' ? `• ${op}` : `• ${JSON.stringify(op)}` },
+        });
+        continue;
+      }
+
+      const fieldKey = op.field.toLowerCase().replace(/\s+/g, '_');
+      let currentLive: string | null = null;
+      if (liveRecord) {
+        const val = liveRecord[fieldKey] ?? liveRecord[op.field];
+        if (val !== undefined && val !== null) {
+          currentLive = fieldKey === 'amount' ? formatCurrency(Number(val)) : String(val);
+        }
+      }
+      const proposedVal = fieldKey === 'amount' && op.proposed_value
+        ? formatCurrency(Number(op.proposed_value))
+        : op.proposed_value;
+      const staleVal = fieldKey === 'amount' && op.current_value
+        ? formatCurrency(Number(op.current_value))
+        : op.current_value;
+
+      const numericFields = ['amount', 'probability', 'annual_revenue'];
+      const fieldDrifted = currentLive != null && (
+        numericFields.includes(fieldKey)
+          ? Number(liveRecord![fieldKey] ?? liveRecord![op.field]) !== Number(op.current_value)
+          : currentLive.toLowerCase() !== String(staleVal || '').toLowerCase()
+      );
+      if (fieldDrifted) {
+        opBlocks.push({
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: `*${op.field}*\n_Current (live):_ ${currentLive}\n_When analyzed:_ ${staleVal || '(empty)'}\n_Proposed:_ *${proposedVal}*`,
+          },
+        });
+      } else {
+        opBlocks.push({
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: `*${op.field}:* ${currentLive || staleVal || '(empty)'} → *${proposedVal}*`,
+          },
+        });
+      }
+    }
+  }
+
+  const driftDetected = Array.isArray(operations) && liveRecord && operations.some((op: any) => {
+    if (!op.field || op.current_value === undefined || op.current_value === null) return false;
+    const fieldKey = op.field.toLowerCase().replace(/\s+/g, '_');
+    const val = liveRecord![fieldKey] ?? liveRecord![op.field];
+    if (val === undefined || val === null) return false;
+    const numericFields = ['amount', 'probability', 'annual_revenue'];
+    if (numericFields.includes(fieldKey)) {
+      return Number(val) !== Number(op.current_value);
+    }
+    return String(val).toLowerCase() !== String(op.current_value).toLowerCase();
+  });
+
+  const warningBlocks: any[] = [];
+  if (driftDetected) {
+    warningBlocks.push({
+      type: 'context',
+      elements: [{
+        type: 'mrkdwn',
+        text: `🔄 *Data has changed since this recommendation was generated.* Review the current values above before confirming.`,
+      }],
+    });
+  }
 
   const modalView = {
     type: 'modal',
@@ -357,8 +447,13 @@ async function handleExecuteAction(value: any, payload: any): Promise<void> {
         type: 'section',
         text: { type: 'mrkdwn', text: `*${action.title}*\n${action.summary || ''}` },
       },
+      ...(liveRecordName ? [{
+        type: 'context',
+        elements: [{ type: 'mrkdwn', text: `📋 Record: *${liveRecordName}* — values shown below are live from the database` }],
+      }] : []),
       { type: 'divider' },
       ...opBlocks,
+      ...warningBlocks,
       {
         type: 'context',
         elements: [{
