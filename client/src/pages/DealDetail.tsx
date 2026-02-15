@@ -69,7 +69,18 @@ export default function DealDetail() {
   const conversations = dossier.conversations || [];
   const stageHistory = dossier.stage_history || [];
   const narrative = dossier.narrative;
-  const coverageGaps = dossier.coverage_gaps || [];
+  const coverageGapsData = dossier.coverage_gaps || {};
+  const coverageGapMessages: string[] = [];
+  if (coverageGapsData.contacts_never_called?.length > 0) {
+    const names = coverageGapsData.contacts_never_called.map((c: any) => c.name || c.email).join(', ');
+    coverageGapMessages.push(`${coverageGapsData.contacts_never_called.length} contact(s) never on a call: ${names}`);
+  }
+  if (coverageGapsData.days_since_last_call != null && coverageGapsData.days_since_last_call > 14) {
+    coverageGapMessages.push(`${coverageGapsData.days_since_last_call} days since last call`);
+  }
+  if (coverageGapsData.total_contacts === 0) {
+    coverageGapMessages.push('No contacts linked to this deal');
+  }
 
   const healthItems = [
     { label: 'Activity', value: health.activity_recency?.status, color: statusColor(health.activity_recency?.status) },
@@ -152,10 +163,10 @@ export default function DealDetail() {
       )}
 
       {/* Coverage Gaps */}
-      {coverageGaps.length > 0 && (
+      {coverageGapMessages.length > 0 && (
         <div style={{
           background: colors.surface,
-          border: `1px solid ${colors.borderLight}`,
+          border: `1px solid ${colors.border}`,
           borderLeft: `3px solid ${colors.yellow}`,
           borderRadius: 10,
           padding: 16,
@@ -164,19 +175,10 @@ export default function DealDetail() {
             Coverage Gaps
           </h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {coverageGaps.map((gap: any, i: number) => (
+            {coverageGapMessages.map((msg: string, i: number) => (
               <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                <span style={{ fontSize: 16, marginTop: -2 }}>⚠️</span>
-                <div>
-                  <p style={{ fontSize: 13, color: colors.text, lineHeight: 1.4 }}>
-                    {gap.message || gap.gap_type}
-                  </p>
-                  {gap.recommendation && (
-                    <p style={{ fontSize: 12, color: colors.textMuted, marginTop: 4 }}>
-                      {gap.recommendation}
-                    </p>
-                  )}
-                </div>
+                <span style={{ color: colors.yellow, fontSize: 14, marginTop: 1, flexShrink: 0 }}>&#9888;</span>
+                <p style={{ fontSize: 13, color: colors.text, lineHeight: 1.4 }}>{msg}</p>
               </div>
             ))}
           </div>

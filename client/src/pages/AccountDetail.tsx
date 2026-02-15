@@ -121,39 +121,36 @@ export default function AccountDetail() {
             Relationship Health
           </h3>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
-            {relHealth.engagement && (
+            {relHealth.overall && (
               <HealthMetric
-                label="Engagement"
-                value={relHealth.engagement.status}
-                color={statusColor(relHealth.engagement.status)}
-                detail={relHealth.engagement.detail}
+                label="Overall"
+                value={relHealth.overall}
+                color={statusColor(relHealth.overall)}
               />
             )}
-            {relHealth.deal_velocity && (
+            {relHealth.engagement_trend && (
               <HealthMetric
-                label="Deal Velocity"
-                value={relHealth.deal_velocity.status}
-                color={statusColor(relHealth.deal_velocity.status)}
-                detail={relHealth.deal_velocity.detail}
-              />
-            )}
-            {relHealth.executive_access && (
-              <HealthMetric
-                label="Executive Access"
-                value={relHealth.executive_access.status}
-                color={statusColor(relHealth.executive_access.status)}
-                detail={relHealth.executive_access.detail}
-              />
-            )}
-            {relHealth.coverage_breadth && (
-              <HealthMetric
-                label="Coverage Breadth"
-                value={relHealth.coverage_breadth.status}
-                color={statusColor(relHealth.coverage_breadth.status)}
-                detail={relHealth.coverage_breadth.detail}
+                label="Engagement Trend"
+                value={relHealth.engagement_trend}
+                color={statusColor(relHealth.engagement_trend === 'increasing' ? 'strong' : relHealth.engagement_trend === 'declining' ? 'weak' : 'moderate')}
               />
             )}
           </div>
+          {relHealth.coverage_gaps && relHealth.coverage_gaps.length > 0 && (
+            <div style={{ marginTop: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: colors.textDim, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
+                Coverage Gaps
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {relHealth.coverage_gaps.map((gap: string, i: number) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ color: colors.yellow, fontSize: 13, flexShrink: 0 }}>&#9888;</span>
+                    <span style={{ fontSize: 12, color: colors.text }}>{gap}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

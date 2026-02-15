@@ -1,11 +1,15 @@
-export function formatCurrency(value: number): string {
-  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1_000) return `$${(value / 1_000).toFixed(0)}k`;
-  return `$${value.toFixed(0)}`;
+export function formatCurrency(value: number | string | null | undefined): string {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return '--';
+  if (num >= 1_000_000) return `$${(num / 1_000_000).toFixed(1)}M`;
+  if (num >= 1_000) return `$${(num / 1_000).toFixed(0)}k`;
+  return `$${num.toFixed(0)}`;
 }
 
-export function formatNumber(value: number): string {
-  return value.toLocaleString();
+export function formatNumber(value: number | string | null | undefined): string {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return '0';
+  return num.toLocaleString();
 }
 
 export function formatPercent(value: number): string {
@@ -14,6 +18,7 @@ export function formatPercent(value: number): string {
 
 export function formatTimeAgo(dateStr: string): string {
   const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return '--';
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   const diffMin = Math.floor(diffMs / 60000);
@@ -30,7 +35,9 @@ export function formatTimeAgo(dateStr: string): string {
 }
 
 export function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString('en-US', {
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return '--';
+  return date.toLocaleDateString('en-US', {
     month: 'short', day: 'numeric', year: 'numeric'
   });
 }
@@ -57,4 +64,16 @@ export function severityBg(severity: string): string {
     case 'notable': return 'rgba(59,130,246,0.12)';
     default: return 'rgba(90,101,120,0.1)';
   }
+}
+
+export function formatSchedule(schedule: any): string {
+  if (!schedule) return 'Manual';
+  if (typeof schedule === 'string') return schedule;
+  if (typeof schedule === 'object') {
+    if (schedule.description) return schedule.description;
+    if (schedule.cron) return schedule.cron;
+    if (schedule.trigger) return String(schedule.trigger);
+    return 'Scheduled';
+  }
+  return String(schedule);
 }
