@@ -12,12 +12,24 @@ interface SlackBlock {
   [key: string]: any;
 }
 
+function stripXmlBlocks(text: string): string {
+  return text
+    .replace(/<actions>[\s\S]*?<\/actions>/g, '')
+    .replace(/<evidence>[\s\S]*?<\/evidence>/g, '')
+    .replace(/<findings>[\s\S]*?<\/findings>/g, '')
+    .trim();
+}
+
 /**
  * Generic Slack formatter with skill-specific routing.
  * When evidence is present, renders structured claim blocks with deal lists
  * and methodology footers. Falls back to narrative-based formatting otherwise.
  */
 export function formatForSlack(result: SkillResult, skill: SkillDefinition): SlackBlock[] {
+  if (typeof result.output === 'string') {
+    result = { ...result, output: stripXmlBlocks(result.output) };
+  }
+
   if (result.evidence?.claims?.length) {
     return formatWithEvidence(result, skill);
   }
@@ -714,6 +726,7 @@ export function formatAgentWithEvidence(
   duration: number
 ): SlackBlock[] {
   const blocks: SlackBlock[] = [];
+  narrative = stripXmlBlocks(narrative);
 
   blocks.push({
     type: 'header',
