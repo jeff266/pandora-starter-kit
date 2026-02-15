@@ -56,8 +56,7 @@ CREATE INDEX idx_workspace_downloads_deliverable
 
 -- Cleanup job: find expired files
 CREATE INDEX idx_workspace_downloads_cleanup
-  ON workspace_downloads (expires_at)
-  WHERE expires_at IS NOT NULL AND expires_at < NOW();
+  ON workspace_downloads (expires_at);
 
 -- ============================================================================
 -- Comments
@@ -67,3 +66,7 @@ COMMENT ON TABLE workspace_downloads IS 'Persisted downloadable files from agent
 COMMENT ON COLUMN workspace_downloads.file_path IS 'Relative path within workspace storage directory (e.g., "downloads/2026/02/abc123.xlsx")';
 COMMENT ON COLUMN workspace_downloads.expires_at IS 'Null = permanent file, timestamp = auto-cleanup after expiry';
 COMMENT ON COLUMN workspace_downloads.is_public IS 'If true, accessible without authentication via public link';
+
+
+
+
