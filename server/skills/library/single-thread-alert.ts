@@ -138,10 +138,10 @@ Return valid JSON array with one object per deal:
       ],
       claudeTools: ['queryContacts'],
       maxToolCalls: 5,
-      claudePrompt: `You have pre-analyzed deal threading data for this workspace. All deals have been classified by contact coverage and expansion risk.
+      claudePrompt: `You are a senior RevOps analyst delivering a single-threading report for {{business_model.company_name}}.
 
 {{#if dataFreshness.isStale}}
-⚠️ DATA FRESHNESS: {{dataFreshness.staleCaveat}}
+Note: {{dataFreshness.staleCaveat}}
 {{/if}}
 
 {{#unless dataFreshness.hasContacts}}
@@ -176,42 +176,23 @@ REPORT PARAMETERS:
 - Depth: {{output_budget.reportDepth}}
 - Word budget: {{output_budget.wordBudget}} words maximum
 
-Produce a Single-Thread Risk Alert with these sections:
+STRUCTURE YOUR REPORT:
+1. Opening line: single-threading rate, dollar exposure, and trend vs last period (better/worse/stable). One sentence.
+2. Where risk concentrates: which stages have the most single-threaded value. Early-stage (Discovery, Qualification) single-threading is normal — mention briefly. Late-stage (Proposal, Negotiation) is where action has the highest ROI.
+3. Focus deals: highest-value late-stage single-threaded deals. For each: deal name, amount, stage, single contact's name and title, days in stage. If contactRoles available, include role information.
+4. Rep pattern (only if notable): if one rep is significantly different from team average, mention it. If it's consistent across reps, note it's a process pattern, not individual.
+5. One recommended action for this week. Be specific.
 
-1. TEAM PATTERN
-   - What % of pipeline is single-threaded
-   - Which stages have the highest single-threading rate
-   - Is this normal for the sales motion (e.g., SMB transactional vs Enterprise)
+WHAT TO OMIT:
+- Pipeline composition breakdown (single/double/multi counts) unless it changed meaningfully since last report
+- Deals in Discovery or Qualification unless they're >2x average deal size
+- The same number stated in different formats
+- Data freshness disclaimers unless data is actually >7 days old
 
-2. REP PATTERNS
-   - Which reps have the highest single-threading rates
-   - Call out reps who need coaching on multi-threading
-   - Highlight reps doing it well (low single-thread rate)
-
-3. CRITICAL DEALS
-   - For each critical/high risk classified deal:
-     * Deal name, amount, stage, current contact
-     * If contactRoles available: include role information (e.g., "Champion", "Decision Maker")
-     * Threading status: "Multi-threaded (3): Decision Maker, Champion, End User" or "Single-threaded (1): Economic Buyer" or "No contacts linked"
-     * Why it's risky (likely_cause from classification)
-     * Specific expansion action (cite recommended_action)
-     * If has_expansion_contacts: suggest using queryContacts to find expansion targets
-
-4. TOP 3 ACTIONS
-   - Ranked by revenue impact
-   - Each action must name specific deals or reps
-   - Include root cause and expected outcome
-   - Example: "Action 1: Expand Acme Corp ($220K, champion_only). Contact the VP Finance (available at account). Expected: Add decision-maker, reduce close risk."
-
-Be direct. Use actual deal names, dollar amounts, and rep names. No generic advice.
 If you need to find expansion contacts at a specific account, use the queryContacts tool with accountId filter.
+{{/if}}
 
-WORD BUDGET ENFORCEMENT:
-- {{output_budget.reportDepth}} report: {{output_budget.wordBudget}} words max
-- minimal: If <20% single-threaded and no critical deals, say "threading looks healthy" and stop
-- standard: Cover only sections with actionable items
-- detailed: Full coverage with specific examples and expansion playbook
-{{/if}}`,
+{{voiceBlock}}`,
       outputKey: 'threading_alert',
     },
   ],

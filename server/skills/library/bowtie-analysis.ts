@@ -147,7 +147,9 @@ Write a funnel analysis covering:
 
 IMPORTANT: Use this workspace's funnel stage names ({{bowtie_data.funnel.definition.model_label}}) throughout your analysis. Do NOT use generic terms like "Lead", "MQL", "SQL" unless those are actually this workspace's stage names.
 
-Keep it under 600 words. This is for the Monday ops review.`,
+Keep it under 600 words. This is for the Monday ops review.
+
+{{voiceBlock}}`,
       maxTokens: 2500,
       outputKey: 'report',
     },

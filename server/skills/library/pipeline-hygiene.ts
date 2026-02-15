@@ -195,14 +195,14 @@ Return valid JSON array with one object per deal:
       ],
       claudeTools: ['queryDeals', 'getDeal'],
       maxToolCalls: 3,
-      claudePrompt: `You have pre-analyzed pipeline data for this workspace. All raw data has been aggregated into structured summaries, and deals have been classified by root cause. Work from these summaries and classifications, not raw records.
+      claudePrompt: `You are a senior RevOps analyst delivering a pipeline hygiene report for {{business_model.company_name}}.
 
 {{#if dataFreshness.isStale}}
-⚠️ DATA FRESHNESS: {{dataFreshness.staleCaveat}}
+Note: {{dataFreshness.staleCaveat}}
 {{/if}}
 
 {{#unless dataFreshness.hasActivities}}
-NOTE: Activity data not available (file import workspace). Deal staleness based on last modification date, which may undercount truly stale deals. For better staleness detection, upload activity data or connect to your CRM.
+Note: Activity data not available (file import workspace). Deal staleness based on last modification date.
 {{/unless}}
 
 TIME SCOPE:
@@ -242,65 +242,28 @@ PIPELINE QUALITY (ICP Fit):
 - {{pipeline_summary.icpSummary.ab_grade_pct}}% of pipeline value is A/B-grade ICP fit
 - {{pipeline_summary.icpSummary.df_grade_pct}}% of pipeline value is D/F-grade (deprioritization candidates)
 {{#if pipeline_summary.icpSummary.high_fit_stale_count}}
-- ⚠️ {{pipeline_summary.icpSummary.high_fit_stale_count}} A-grade deals are stale — highest priority for recovery
-{{/if}}
-{{#if pipeline_summary.icpSummary.low_fit_active_count}}
-- {{pipeline_summary.icpSummary.low_fit_active_count}} D/F-grade deals consuming pipeline capacity
+- {{pipeline_summary.icpSummary.high_fit_stale_count}} A-grade deals are stale — highest priority for recovery
 {{/if}}
 
-When synthesizing, reference ICP grades in your recommendations:
+When synthesizing, reference ICP grades in recommendations:
 - Prioritize recovery actions for A/B-grade stale deals over C/D/F
-- Flag D/F-grade deals as deprioritization candidates, not just stale deals
-- Note if a rep's pipeline is heavily weighted toward low-fit deals
+- Flag D/F-grade deals as deprioritization candidates
 {{/if}}
 
 REPORT PARAMETERS:
 - Depth: {{output_budget.reportDepth}}
 - Word budget: {{output_budget.wordBudget}} words maximum
-- Complexity: {{output_budget.complexityScore}} (reasoning: {{output_budget.reasoning}})
 
-Produce a Pipeline Hygiene Report with these sections. IMPORTANT: Stay within your word budget. If pipeline is healthy with no significant changes, say so briefly and stop.
+STRUCTURE YOUR REPORT:
+1. Pipeline snapshot: total open pipeline, deal count, and how it compares to last period.
+2. Activity gaps: deals with no activity beyond the configured threshold. Group by stage — late-stage inactivity matters more than early-stage.
+3. Focus deals: the deals where re-engagement or cleanup would have the most impact this week. Include deal name, amount, stage, owner, and days since last activity.
+4. Data quality flags (only if notable): deals missing close dates, amounts, or other required fields. Brief mention, not the main story.
+5. One recommended action for pipeline cleanup this week.
 
-If this is NOT the first run (lastRunAt exists), LEAD with what CHANGED since last run before covering current state.
+If this is NOT the first run (lastRunAt exists), lead with what changed since last run before covering current state.
 
-1. PIPELINE HEALTH
-   - Coverage ratio vs {{goals_and_targets.pipeline_coverage_target}}x target (include period-over-period delta)
-   - Gap in dollars vs ${'$'}{{goals_and_targets.revenue_target}} revenue target
-   - Win rate trend and deal flow assessment (reference period comparison deltas)
-
-2. STALE DEAL CRISIS
-   - Severity breakdown: how many critical (30+ days), serious, warning, watch
-   - Total value at risk from stale deals
-   - Which stages have the most stale deals (pattern detection)
-   - Which reps have the worst stale rates (name them)
-   - Root cause breakdown from classifications: rep_neglect, prospect_stalled, data_hygiene, process_gap, etc.
-   - For each root cause category, cite specific deals and their recommended actions
-
-3. CLOSING THIS MONTH
-   - Total deals and value closing in 30 days
-   - Risk assessment from classifications: which deals have timing issues, data gaps, or other blockers
-   - Readiness assessment: realistic vs aspirational close dates based on activity and health scores
-
-4. REP PERFORMANCE
-   - Who's executing well (low stale rate, high activity)
-   - Who needs coaching (high stale rate, low activity, deals with rep_neglect classification)
-   - Activity patterns and pipeline distribution
-
-5. TOP 3 ACTIONS
-   - Ranked by revenue impact
-   - Each action must name specific deals or reps (use names from classifications)
-   - Include root cause and expected outcome if action is taken this week
-   - Example: "Action 1: Re-engage Acme Corp ($220K, stale 87 days, root cause: rep_neglect). Assign to manager for immediate outreach. Expected: move to disqualified or re-activate within 7 days."
-
-Be direct. Use actual deal names, dollar amounts, and rep names from the data and classifications. No generic advice.
-The classifications provide specific root causes and actions for each top deal — reference these directly.
-If you need to drill into a specific deal for more detail, use the available tools — but prefer the pre-analyzed summaries and classifications.
-
-WORD BUDGET ENFORCEMENT:
-- {{output_budget.reportDepth}} report: {{output_budget.wordBudget}} words max
-- minimal: Skip sections with no issues. Lead with "Pipeline healthy" if applicable.
-- standard: Cover only sections with actionable items.
-- detailed: Full coverage with specific examples and root cause analysis.`,
+{{voiceBlock}}`,
       outputKey: 'hygiene_report',
     },
   ],

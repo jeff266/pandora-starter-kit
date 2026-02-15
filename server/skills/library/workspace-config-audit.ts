@@ -113,7 +113,9 @@ Write a structured report:
 3. **Impact Assessment** — which skills/reports are affected by current config gaps
 4. **Recommendation** — one paragraph on whether config needs immediate attention
 
-Keep the report under 400 words. Use specific numbers from the data. No generic advice.`,
+Keep the report under 400 words. Use specific numbers from the data. No generic advice.
+
+{{voiceBlock}}`,
       outputKey: 'report',
     },
   ],

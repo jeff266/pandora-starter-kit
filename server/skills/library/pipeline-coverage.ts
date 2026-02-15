@@ -206,10 +206,10 @@ Each classification should be:
         'calculate-output-budget',
         'summarize-for-claude',
       ],
-      claudePrompt: `You are a VP of Revenue Operations analyzing pipeline coverage for {{business_model.company_name}}.
+      claudePrompt: `You are a senior RevOps analyst delivering pipeline coverage analysis for {{business_model.company_name}}.
 
 {{#if dataFreshness.isStale}}
-⚠️ DATA FRESHNESS: Coverage calculations based on data imported {{dataFreshness.daysSinceUpdate}} days ago. Re-upload latest CRM export for current coverage numbers.
+Note: Coverage calculations based on data imported {{dataFreshness.daysSinceUpdate}} days ago.
 {{/if}}
 
 REPORT PERIOD: {{time_windows.analysisRange.quarter}}
@@ -238,47 +238,19 @@ REPORT PARAMETERS:
 - Word budget: {{output_budget.wordBudget}} words maximum
 - Report depth: {{output_budget.reportDepth}}
 
-YOUR TASK:
-Produce a Pipeline Coverage Report. Include:
-
-1. TEAM HEADLINE
-   - One sentence verdict: are we on track to hit quota this quarter?
-   - Use specific coverage ratio and gap number
-
-2. COVERAGE GAP ANALYSIS
-   - How much new pipeline needs to be generated?
-   - By when? (use daysRemaining and requiredWeeklyPipelineGen)
-   - What's the weekly run rate needed?
-
-3. AT-RISK REPS
-   - Specific actions per rep from classifications
-   - Example: "Mike needs 3 new qualified opportunities worth $150K by end of month"
-   - Include their current coverage, gap, and recommended intervention
-   - If rep has conversations_without_deals_count > 0, mention shadow pipeline:
-     Example: "Sara shows 1.2x coverage, but has 3 untracked demo conversations at [accounts]. If these convert to deals, true coverage may be closer to 2.0x. Priority: create deals for demo conversations."
-
-4. PIPELINE QUALITY CONCERNS
-   - Flag reps with early-stage-heavy pipeline (>70% in awareness/qualification)
-   - These deals are at risk of not closing this quarter
-
-5. TOP 3 ACTIONS
-   - Ranked by revenue impact
-   - Must be actionable this week
-   - Each action must name specific reps or dollar amounts
+STRUCTURE YOUR REPORT:
+1. Team coverage: total coverage ratio vs target, gap in dollars, and trend direction. One paragraph.
+2. Rep-level view: table or list of each rep's coverage ratio, gap, and trend. Highlight anyone below 2x.
+3. At-risk reps: for each classified at-risk rep, include their coverage, gap, root cause, and the specific intervention from classifications. If a rep has conversations_without_deals_count > 0, note it as potential untracked pipeline.
+4. Pipeline quality: if any rep has >70% of pipeline in early stages, flag it as conversion risk.
+5. One recommended action for this week.
 
 RULES:
-- Use "{{time_windows.analysisRange.quarter}}" as the report period in the header — do NOT guess the quarter or year
-- Lead with the verdict (on track / at risk / behind)
-- Use specific dollar amounts, rep names, and deal counts
+- Use "{{time_windows.analysisRange.quarter}}" as the report period — do not guess the quarter or year
 - If quotas aren't configured, note this and show absolute numbers only
-- Every recommendation must be actionable this week
-- Don't repeat raw data — interpret it
 - Stay within word budget
 
-WORD BUDGET ENFORCEMENT:
-- minimal: If team is on track and <3 at-risk reps, keep it brief
-- standard: Focus on at-risk reps and quality issues
-- detailed: Full breakdown with trend analysis and specific interventions`,
+{{voiceBlock}}`,
       outputKey: 'coverage_report',
     },
   ],

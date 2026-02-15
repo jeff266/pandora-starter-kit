@@ -127,7 +127,9 @@ Write an activity goals briefing covering:
 5. The one activity that would have the biggest impact
 6. What "good" looks like this week (specific numbers)
 
-Keep it under 500 words. This is a manager's playbook for the week.`,
+Keep it under 500 words. This is a manager's playbook for the week.
+
+{{voiceBlock}}`,
       maxTokens: 2000,
       outputKey: 'report',
     },

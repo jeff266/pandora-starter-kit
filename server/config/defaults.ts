@@ -60,6 +60,11 @@ export function getDefaultConfig(workspaceId: string): WorkspaceConfig & { _meta
       icp_dimensions: [],
       scoring_model: 'auto',
     },
+    voice: {
+      detail_level: 'standard',
+      framing: 'balanced',
+      alert_threshold: 'watch_and_act',
+    },
     updated_at: new Date(),
     confirmed: false,
     _meta: {},

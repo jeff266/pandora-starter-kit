@@ -374,7 +374,9 @@ CRITICAL RULES:
 - Do NOT invent or rename industries. Use ONLY the exact industry names from the Industry Analysis section above.
 - Every number (win rate, deal size, count) you cite MUST come from the data above. If a metric is not in the data, do not fabricate it.
 
-Keep it concise and actionable. Use real deal sizes and percentages from the data.`,
+Keep it concise and actionable. Use real deal sizes and percentages from the data.
+
+{{voiceBlock}}`,
       outputKey: 'report',
       parseAs: 'markdown',
     },

@@ -142,7 +142,9 @@ Write a Slack-ready report covering:
 5. **Rep Comparison**: Whose deals score highest/lowest on average and why
 6. **One Custom Field Insight**: If a discovered field significantly differentiates scores (e.g., "Zoominfo-sourced deals score 23 points higher on average")
 
-Keep it concise, actionable, and use real deal names and dollar amounts from the data.`,
+Keep it concise, actionable, and use real deal names and dollar amounts from the data.
+
+{{voiceBlock}}`,
       model: 'sonnet',
       outputKey: 'report',
       parseAs: 'markdown',

@@ -38,6 +38,7 @@ import { estimateCost } from '../lib/token-tracker.js';
 import { query } from '../db.js';
 import { randomUUID } from 'crypto';
 import { getEvidenceBuilder } from './evidence-builder.js';
+import { configLoader } from '../config/workspace-config-loader.js';
 
 // ============================================================================
 // Skill Runtime
@@ -92,6 +93,14 @@ export class SkillRuntime {
       ...params?.timeConfig,
     };
 
+    let voiceBlock = '';
+    try {
+      const voiceConfig = await configLoader.getVoiceConfig(workspaceId);
+      voiceBlock = voiceConfig.promptBlock;
+    } catch (err) {
+      console.warn(`[Skill Runtime] Failed to load voice config for ${workspaceId}, using defaults`);
+    }
+
     const businessContext = {
       business_model: contextData?.business_model || {},
       team_structure: contextData?.team_structure || {},
@@ -100,6 +109,7 @@ export class SkillRuntime {
       operational_maturity: contextData?.operational_maturity || {},
       timeConfig: mergedTimeConfig,
       dataFreshness,
+      voiceBlock,
     };
 
     const context: SkillExecutionContext = {

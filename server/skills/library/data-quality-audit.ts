@@ -244,21 +244,17 @@ Each CWD classification object should have:
         'calculate-output-budget',
         'summarize-for-claude',
       ],
-      claudePrompt: `You are a RevOps operations analyst auditing CRM data quality for {{business_model.company_name}}.
+      claudePrompt: `You are a senior RevOps analyst auditing CRM data quality for {{business_model.company_name}}.
 
 {{#if dataFreshness.isStale}}
-⚠️ DATA FRESHNESS: {{dataFreshness.staleCaveat}}
+Note: {{dataFreshness.staleCaveat}}
 {{/if}}
 
 {{#if (eq dataFreshness.source 'file_import')}}
-DATA SOURCE: File import (CSV/Excel).
+Data source: File import (CSV/Excel).
 Available entities: {{#if dataFreshness.hasDeals}}deals{{/if}}{{#if dataFreshness.hasContacts}}, contacts{{/if}}{{#if dataFreshness.hasAccounts}}, accounts{{/if}}.
-{{#unless dataFreshness.hasActivities}}
-Activity data not available — activity-related quality checks will be skipped.
-{{/unless}}
-{{#unless dataFreshness.hasConversations}}
-Conversation data not available — conversation-deal coverage (CWD) audit will be skipped.
-{{/unless}}
+{{#unless dataFreshness.hasActivities}}Activity data not available.{{/unless}}
+{{#unless dataFreshness.hasConversations}}Conversation data not available.{{/unless}}
 {{/if}}
 
 TIME SCOPE:
@@ -294,50 +290,20 @@ REPORT PARAMETERS:
 - Depth: {{output_budget.reportDepth}}
 - Word budget: {{output_budget.wordBudget}} words maximum
 
-YOUR TASK:
-Produce a Data Quality Audit Report. Include:
-
-1. OVERALL HEALTH GRADE
-   - Grade A through F, based on critical field completeness:
-     A=95%+, B=85-94%, C=75-84%, D=60-74%, F=<60%
-   - One sentence summary of overall data health
-
-2. TOP 3 RISKS
-   - Specific problems that affect other analyses
-   - Example: "47 deals worth $2.1M have no close date — forecasting is unreliable"
-   - Include dollar amounts and record counts from the entity summaries
-
-3. PER-REP DATA QUALITY PATTERNS
-   - Use classifications to identify reps needing coaching
-   - Call out specific worst_field and recommended_fix for each
-   - Example: "John Smith (systematic_neglect, severity: critical) — missing close_date on 80% of deals. Fix: required_field_enforcement"
-
-4. TREND ANALYSIS
-   - Is quality improving or declining since last audit?
-   - Which fields got better, which got worse?
-   - Cite specific deltas from quality_trend
-
-5. TOP 5 ACTIONS
-   - Ranked by impact on data quality
-   - Each action must have clear owner and timeline
-   - Focus on critical fields that affect pipeline analysis, forecasting, and deal health scoring
-   - Example: "Action 1: Enforce required close_date field for all open deals (47 deals, $2.1M). Owner: Sales Ops. Timeline: This week."
+STRUCTURE YOUR REPORT:
+1. Health grade (A-F based on critical field completeness: A=95%+, B=85-94%, C=75-84%, D=60-74%, F=<60%) and one-line summary.
+2. Top data gaps: the 3 fields or patterns that most affect downstream analysis. Include record counts and dollar exposure.
+3. Per-rep patterns: which reps have the worst data quality and what their pattern is (from classifications). Brief — table format preferred.
+4. Trend: is quality improving or declining? Which fields changed most?
+5. One recommended action for this week — the single highest-impact fix.
 
 {{#if cwd_data.has_conversation_data}}
-6. CONVERSATION COVERAGE GAPS
-   - Include this section if CWD data exists
-   - For each high-severity item, name the rep, account, call type, and recommended action
-   - If you see a pattern across a single rep (e.g., multiple demo calls with no deals created), call that out as a process gap
-   - Estimate untracked pipeline based on high-severity CWD count
-   - Example: "Sara Bollman: Precious Care ABA (Clinical Demo, 47 min, Jan 15) — no deal exists at this account. Likely missing deal creation."
+6. Conversation coverage gaps: if CWD data exists, note the high-severity items and any rep-level patterns.
 {{/if}}
 
-RULES:
-- Use specific numbers, dollar amounts, and rep names
-- Every action must be specific enough to execute this week
-- If data quality is actually good (>90% critical completeness), say so briefly and focus on the few remaining gaps
-- Keep response under {{output_budget.wordBudget}} words
-- Do NOT request additional data via tools — all data you need is provided above`,
+Do not request additional data via tools — all data you need is provided above.
+
+{{voiceBlock}}`,
       outputKey: 'quality_report',
     },
   ],

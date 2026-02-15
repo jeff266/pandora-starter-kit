@@ -131,7 +131,7 @@ router.patch(
   async (req: Request<SectionParams>, res: Response) => {
     try {
       const { workspaceId, section } = req.params;
-      const sectionData = req.body;
+      let sectionData = req.body;
 
       // Verify workspace exists
       const wsCheck = await query('SELECT id FROM workspaces WHERE id = $1', [
@@ -154,6 +154,7 @@ router.patch(
         'cadence',
         'thresholds',
         'scoring',
+        'voice',
       ];
 
       if (!validSections.includes(section)) {
@@ -164,13 +165,34 @@ router.patch(
         return;
       }
 
+      if (section === 'voice') {
+        const validDetail = ['concise', 'standard', 'detailed'];
+        const validFraming = ['direct', 'balanced', 'diplomatic'];
+        const validThreshold = ['all', 'watch_and_act', 'act_only'];
+
+        if (sectionData.detail_level && !validDetail.includes(sectionData.detail_level)) {
+          res.status(400).json({ error: 'detail_level must be concise, standard, or detailed' });
+          return;
+        }
+        if (sectionData.framing && !validFraming.includes(sectionData.framing)) {
+          res.status(400).json({ error: 'framing must be direct, balanced, or diplomatic' });
+          return;
+        }
+        if (sectionData.alert_threshold && !validThreshold.includes(sectionData.alert_threshold)) {
+          res.status(400).json({ error: 'alert_threshold must be all, watch_and_act, or act_only' });
+          return;
+        }
+
+        const mergedVoice = { ...(existing.voice || {}), ...sectionData };
+        sectionData = mergedVoice;
+      }
+
       const updated = {
         ...existing,
         [section]: sectionData,
         updated_at: new Date(),
       };
 
-      // Validate
       const errors = validateWorkspaceConfig(updated);
       if (errors.length > 0) {
         res.status(400).json({

@@ -147,25 +147,14 @@ Respond with ONLY a JSON object: { "classifications": [...] }`,
       name: 'Synthesize Scorecard Report',
       tier: 'claude',
       dependsOn: ['compute-scorecard', 'classify-coaching-needs', 'prepare-team-context'],
-      claudePrompt: `You are a VP of Sales reviewing your team's weekly performance scorecard.
+      claudePrompt: `You are a senior RevOps analyst delivering the weekly rep scorecard for {{business_model.company_name}}.
 
 {{#if dataFreshness.isStale}}
-⚠️ DATA FRESHNESS: {{dataFreshness.staleCaveat}}
+Note: {{dataFreshness.staleCaveat}}
 {{/if}}
-
-BUSINESS CONTEXT:
-{{businessContext}}
 
 DATA AVAILABILITY:
 {{{json data_availability}}}
-
-The scorecard is based on:
-{{#if data_availability.hasQuotas}}- Quota data ({{data_availability.quotaCount}} quotas){{/if}}
-{{#if data_availability.hasActivities}}- Activity data ({{data_availability.activityCount}} activities){{/if}}
-{{#if data_availability.hasConversations}}- Conversation data ({{data_availability.conversationCount}} calls){{/if}}
-{{#if data_availability.hasStageHistory}}- Stage history ({{data_availability.stageHistoryCount}} transitions){{/if}}
-
-Do NOT mention missing data sources unless they would significantly change the analysis.
 
 TEAM SUMMARY:
 Total reps: {{scorecard.reps.length}}
@@ -201,42 +190,26 @@ RECENT WINS:
 - {{this.name}} (\${{this.amount}}, {{this.owner}})
 {{/each}}
 
-AT-RISK DEALS (deal_risk ≥ 70):
+AT-RISK DEALS (deal_risk >= 70):
 {{#each team_context.atRiskDeals}}
 - {{this.name}} (\${{this.amount}}, {{this.owner}}) — Risk: {{this.dealRisk}}, Stage: {{this.stage}}
 {{/each}}
 
 STALE DEALS (no activity >14 days): {{team_context.staleDealsSummary.count}} deals (\${{team_context.staleDealsSummary.totalValue}})
 
-Produce a Weekly Rep Scorecard Report:
+STRUCTURE YOUR REPORT:
+1. Team pulse: 2-3 sentences on overall team health and quarter pacing.
+2. Top performers: what the top reps are doing differently — specific behaviors, not just results.
+3. Coaching priorities: for each at-risk rep, the specific gap, evidence, and one recommended manager action. Frame constructively.
+4. Manager actions for this week: 3-5 specific actions with rep names.
 
-1. TEAM PULSE (2-3 sentences)
-   - Overall team health this week
-   - Quarter progress vs quota pacing (if quotas available)
-
-2. STANDOUT PERFORMERS
-   - What the top reps are doing differently (specific behaviors, not just "they closed more")
-   - Any patterns worth replicating across the team
-
-3. COACHING PRIORITIES
-   - For each at-risk rep: the specific gap, the evidence, and the recommended action for their manager
-   - Frame as coaching opportunities, not criticism
-   - Include specific 1:1 talking points
-
-4. THIS WEEK'S MANAGER ACTIONS (3-5 bullet points)
-   - Specific actions with specific rep names
-   - "Schedule pipeline review with [name] focused on [gap]"
-   - "Recognize [name] for [specific achievement]"
-
-Rules:
+RULES:
 - Use specific numbers and names throughout
-- Frame bottom performers constructively — focus on the gap, not the person
-- If quota data is missing, focus on relative performance (vs team average) instead of absolute attainment
-- If activity data is missing, acknowledge briefly: "Activity metrics unavailable — scorecard based on results and pipeline metrics"
-- Keep it actionable. Every paragraph should answer "so what?"
-- Use markdown formatting with headers, bullet points, and bold text for emphasis
+- If quota data is missing, focus on relative performance vs team average
+- If activity data is missing, note briefly and base scorecard on results and pipeline
+- Word budget: 700 words
 
-Word budget: 700 words.`,
+{{voiceBlock}}`,
       outputKey: 'narrative',
     },
   ],

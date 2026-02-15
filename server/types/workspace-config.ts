@@ -43,8 +43,39 @@ export interface WorkspaceConfig {
   /** Last update timestamp */
   updated_at: Date;
 
+  /** Voice and tone settings for skill output */
+  voice: VoiceConfig;
+
   /** Has user reviewed and confirmed this config? */
   confirmed: boolean;
+}
+
+// ===== VOICE CONFIG =====
+
+export interface VoiceConfig {
+  /**
+   * Controls how much detail skill outputs include.
+   * - concise: 1-2 short paragraphs, top 3 deals max, no breakdowns.
+   * - standard: 2-3 paragraphs, top 5 deals, stage breakdown if notable.
+   * - detailed: 3-4 paragraphs, top 5 deals with full context, breakdowns, trend comparison.
+   */
+  detail_level: 'concise' | 'standard' | 'detailed';
+
+  /**
+   * Controls how bluntly findings are stated.
+   * - direct: States facts without softening.
+   * - balanced: States facts with context.
+   * - diplomatic: Frames gaps as growth opportunities.
+   */
+  framing: 'direct' | 'balanced' | 'diplomatic';
+
+  /**
+   * Controls which severity tier triggers a Slack message.
+   * - all: every skill run posts to Slack.
+   * - watch_and_act: only posts when there's a Watch or Act finding.
+   * - act_only: only posts when specific deals need intervention this week.
+   */
+  alert_threshold: 'all' | 'watch_and_act' | 'act_only';
 }
 
 // ===== PIPELINE CONFIG =====

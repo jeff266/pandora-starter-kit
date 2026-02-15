@@ -175,14 +175,14 @@ Return ONLY the JSON array, no other text.`,
         'classify-forecast-risks',
         'calculate-output-budget',
       ],
-      claudePrompt: `You are a VP of Sales Operations providing a weekly forecast roll-up to sales leadership for {{business_model.company_name}}.
+      claudePrompt: `You are a senior RevOps analyst delivering the Monday morning forecast briefing for {{business_model.company_name}}.
 
 {{#if dataFreshness.isStale}}
-⚠️ DATA FRESHNESS: {{dataFreshness.staleCaveat}}
+Note: {{dataFreshness.staleCaveat}}
 {{/if}}
 
 {{#if (eq dataFreshness.source 'file_import')}}
-NOTE: Forecast based on file-imported data, not live CRM sync. Week-over-week comparison only available after multiple imports. Deal movements since last import are not reflected.
+Note: Forecast based on file-imported data, not live CRM sync.
 {{/if}}
 
 {{forecast_summary.quotaNote}}
@@ -215,13 +215,10 @@ ICP-ADJUSTED FORECAST:
   - \${{forecast_data.icpForecast.commit.cdf_grade}} in C/D/F-grade deals (lower confidence)
 - Best Case: \${{forecast_data.icpForecast.best_case.total}} total
   - \${{forecast_data.icpForecast.best_case.ab_grade}} in A/B-grade deals
-  - \${{forecast_data.icpForecast.best_case.cdf_grade}} in C/D/F-grade deals
 - Pipeline: \${{forecast_data.icpForecast.pipeline.total}} total
-  - \${{forecast_data.icpForecast.pipeline.ab_grade}} in A/B-grade deals
-  - \${{forecast_data.icpForecast.pipeline.cdf_grade}} in C/D/F-grade deals
 
 {{#if forecast_data.icpForecast.has_grade_adjusted}}
-Grade-Adjusted Expected Value (based on historical close rates by ICP grade):
+Grade-Adjusted Expected Value:
 {{#each forecast_data.icpForecast.grade_close_rates}}
   - {{@key}}-grade: {{this}}% close rate
 {{/each}}
@@ -233,97 +230,15 @@ Grade-Adjusted Expected Value (based on historical close rates by ICP grade):
 OUTPUT GUIDANCE:
 {{{json output_budget}}}
 
-YOUR TASK:
-Write an executive forecast summary following the structure below. Use the output budget guidance to calibrate depth and word count.
+STRUCTURE YOUR REPORT:
+1. Forecast summary: closed-won to date, commit pipeline, best case, total open. Compare each to last week.
+2. Category movement: deals that changed forecast category this week (upgrades and downgrades). Only the meaningful ones.
+3. Pacing: are we ahead or behind where we should be at this point in the quarter? Simple math, no drama.
+4. Concentration: if any single deal represents >20% of remaining quota, note it factually. It's worth knowing, not worth panicking about.
+5. Reps at risk: anyone pacing below 70% of their target with less than adequate pipeline. Pair with what they'd need to close the gap.
+6. Key deals to watch: the 3-5 deals whose outcomes will most affect the quarter. Include amount, stage, forecast category, and next step.
 
-## Executive Summary (1-2 sentences)
-- One-sentence verdict: Are we on track to hit quota this quarter?
-- Bear/Base/Bull scenarios with specific dollar amounts
-
-## Forecast Position vs Quota
-- **Bear Case**: $X (Y% of quota) — Only closed + commit
-- **Base Case**: $X (Y% of quota) — Closed + commit + 50% best case
-- **Bull Case**: $X (Y% of quota) — Closed + commit + best case
-- **Weighted Forecast**: $X (Y% of quota) — Probability-adjusted
-- **Risk-Adjusted Landing Zone**: Bear to Base range (explain why)
-
-If quota not configured, use absolute numbers and note the gap.
-
-## Category Breakdown & Confidence
-- How much is truly committed vs speculative?
-- Commit/Best Case ratio (higher = more confident forecast)
-- Spread analysis: Bull - Bear = $X (Y% of quota)
-  - If spread >30% quota: **High volatility** — forecast unreliable
-  - If spread 15-30%: **Medium volatility** — watch closely
-  - If spread <15%: **Low volatility** — stable forecast
-
-{{#if forecast_data.icpForecast}}
-## ICP Quality Analysis
-- **A/B-grade pipeline concentration**: What % of commit/best case is high-fit?
-  - If A/B < 50% of commit: Flag as **quality problem** even if total looks healthy
-  - If commit heavily C/D/F: Flag as **forecast risk** — lower close rates expected
-- **Grade-adjusted forecast**: If available, compare to raw forecast
-  - If grade-adjusted < raw: **Over-forecasting risk** — deals are lower quality
-  - If grade-adjusted > raw: **Under-forecasting** — deals are higher quality
-  - Note: Grade-adjusted only shown when 5+ closed deals per grade (enough data)
-{{/if}}
-
-## Concentration Risk
-- **Top 3 Deals**: List name, amount, category, owner, probability
-  - Combined weighted value: $X (Y% of base case)
-  - If >50%: **CRITICAL** — forecast fragile, mitigation required
-  - If 30-50%: **ELEVATED** — monitor closely
-- **Whale Deals** (>20% quota): Count and total exposure
-  - Flag any single deal >30% of rep quota
-  - Note dependency on specific reps or accounts
-
-## Rep Performance Spotlight
-- **Top Performers**: Name reps carrying the forecast with specific amounts
-  - Highlight reps with strong commit + conversion rates
-- **At-Risk Reps**: Name reps below 70% attainment (if quota available)
-  - Note pattern: heavy pipeline but no commit = needs coaching
-  - Note pattern: low activity = needs deals
-
-## Week-over-Week Movement
-- What changed since last run?
-- **Commit change**: Up/down by $X (Y%)
-  - Direction matters: Growing commit = confidence. Shrinking = slippage.
-- **Category shifts**: Any >10% swing in commit/best case
-  - Did deals progress (good) or get pushed (bad)?
-- **New risks emerged**: Compare this week's risk classifications to last week
-
-## Behavioral Risks (AI-Detected)
-For each HIGH severity risk from risk_classifications:
-- Rep name + risk type (sandbagging/over-forecasting/whale dependency/gaming)
-- Evidence with specific numbers
-- Suggested action this week
-
-## Top 3 Actions This Week (Ranked by Revenue Impact)
-1. [Action] — Owner: [Rep Name] — Impact: $X — Why: [1 sentence]
-2. [Action] — Owner: [Rep Name] — Impact: $X — Why: [1 sentence]
-3. [Action] — Owner: [Rep Name] — Impact: $X — Why: [1 sentence]
-
-Each action must:
-- Be executable within 7 days
-- Have a specific owner (name a rep or leader)
-- Tie to a dollar amount or deal count
-- Address highest risk or opportunity
-
-STYLE RULES:
-- Lead with the verdict (on track / at risk / behind)
-- Use specific dollar amounts, percentages, rep names, and deal names
-- Every number needs context: "$500K commit (25% of $2M quota)"
-- If quotas not configured, acknowledge and use absolute numbers
-- If WoW not available (first run), note it and focus on current state
-- Don't repeat raw data — interpret it and explain what it means
-- Avoid generic phrases like "pipeline looks healthy" — be specific about why
-- Prioritize high-severity risks and high-value opportunities
-- If concentration risk is high, make it prominent — this is a critical insight
-{{#if forecast_data.icpForecast}}
-- Reference ICP quality when assessing forecast confidence
-- If A/B-grade thin in commit, flag as quality problem
-- If grade-adjusted forecast available, compare to quota for realistic attainment
-{{/if}}`,
+{{voiceBlock}}`,
       outputKey: 'narrative',
     },
   ],

@@ -282,7 +282,9 @@ Rules:
 - Use markdown formatting with headers, bullet points, and bold text for emphasis
 
 Word budget: 600 words.
-{{/if}}`,
+{{/if}}
+
+{{voiceBlock}}`,
       outputKey: 'narrative',
     },
   ],

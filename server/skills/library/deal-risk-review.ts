@@ -191,7 +191,9 @@ Produce a risk assessment for each deal:
 }
 
 Sort by risk (high first), then by amount (largest first).
-Return as JSON array.`,
+Return as JSON array.
+
+{{voiceBlock}}`,
       outputKey: 'risk_assessment',
     },
   ],

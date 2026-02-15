@@ -60,6 +60,10 @@ Pandora is built on Node.js 20 with TypeScript 5+, utilizing Express.js and Post
 -   **Slack Formatter Upgrade:** `formatWithEvidence()` and `formatAgentWithEvidence()` render structured claim blocks with severity indicators.
 -   **WorkbookGenerator (Excel Export):** Multi-tab `.xlsx` export service with summary, methodology, and skill-specific data tabs.
 -   **Export API Endpoints:** `GET /api/workspaces/:id/skills/:skillId/runs/:runId/export` and `GET /api/workspaces/:id/agents/:agentId/runs/:runId/export` for `.xlsx` workbook exports.
+-   **Voice & Tone System:** Per-workspace voice configuration with 3 axes (detail_level: concise/standard/detailed, framing: direct/balanced/diplomatic, alert_threshold: all/watch_and_act/act_only). `buildVoicePromptBlock()` generates dynamic prompt instructions injected via `{{voiceBlock}}` Handlebars placeholder in all 15 skill synthesis prompts. Config stored in workspace_config JSONB `voice` section, managed via `PATCH /api/workspaces/:id/workspace-config/voice`.
+-   **Prompt Voice Rewrites:** All 6 high-priority skill prompts rewritten with professional, non-alarmist tone (single-thread-alert, pipeline-hygiene, forecast-rollup, pipeline-coverage, data-quality-audit, rep-scorecard). Removed ALL CAPS headers, emoji, and doom language. Restructured to STRUCTURE YOUR REPORT format.
+-   **Previous Run Comparison:** `getPreviousRun()` utility in `server/skills/previous-run.ts` fetches last completed skill_run with step outputs for delta analysis.
+-   **Severity Classification:** Reusable severity utilities in `server/skills/severity.ts` with `classifySeverity()`, `filterByAlertThreshold()`, `severityToIndicator()`, and `compareSeverity()` for consistent severity handling across skills and delivery layers.
 
 ## External Dependencies
 -   **PostgreSQL (Neon):** Primary database.

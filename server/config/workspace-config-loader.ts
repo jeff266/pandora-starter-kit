@@ -11,7 +11,9 @@ import type {
   PipelineConfig,
   WinRateResult,
   QuotaPeriodResult,
+  VoiceConfig,
 } from '../types/workspace-config.js';
+import { buildVoicePromptBlock } from './voice-prompt-block.js';
 
 /**
  * Workspace Configuration Loader
@@ -453,8 +455,32 @@ export class WorkspaceConfigLoader {
         icp_dimensions: [],
         scoring_model: 'auto',
       },
+      voice: {
+        detail_level: 'standard',
+        framing: 'balanced',
+        alert_threshold: 'watch_and_act',
+      },
       updated_at: new Date(),
       confirmed: false,
+    };
+  }
+
+  async getVoiceConfig(workspaceId: string): Promise<{
+    detail_level: string;
+    framing: string;
+    alert_threshold: string;
+    promptBlock: string;
+  }> {
+    const config = await this.getConfig(workspaceId);
+    const voice: VoiceConfig = config.voice || {
+      detail_level: 'standard',
+      framing: 'balanced',
+      alert_threshold: 'watch_and_act',
+    };
+
+    return {
+      ...voice,
+      promptBlock: buildVoicePromptBlock(voice),
     };
   }
 }

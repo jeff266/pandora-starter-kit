@@ -80,7 +80,9 @@ Top 3 actions ranked by expected impact. Each must be specific (name a deal, rep
 6. WHAT TO STOP DOING
 One thing the team should deprioritize based on the data.
 
-Keep it under 500 words. This is the "so what?" layer.`,
+Keep it under 500 words. This is the "so what?" layer.
+
+{{voiceBlock}}`,
       maxTokens: 2500,
       outputKey: 'report',
     },

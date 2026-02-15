@@ -215,7 +215,9 @@ Write a concise executive recap covering:
    - At-risk deals to focus on
 
 Tone: Direct, specific, numbers-first. No fluff.
-Use actual deal names and dollar amounts.`,
+Use actual deal names and dollar amounts.
+
+{{voiceBlock}}`,
       outputKey: 'weekly_recap',
     },
   ],
