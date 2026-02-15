@@ -4,7 +4,7 @@
  * Barrel exports for all renderers and registration functionality.
  */
 
-export { Renderer, RendererInput, RenderOutput, BrandingConfig, VoiceConfig, RenderOptions } from './types.js';
+export type { Renderer, RendererInput, RenderOutput, BrandingConfig, VoiceConfig, RenderOptions } from './types.js';
 export { registerRenderer, getRenderer, renderDeliverable, renderMultiple, getRegisteredFormats } from './registry.js';
 export { WorkbookGenerator } from './workbook-generator.js';
 export { PDFRenderer } from './pdf-renderer.js';
