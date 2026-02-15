@@ -1,0 +1,39 @@
+Test the Actions Page                                    
+                                                           
+  Visit: http://localhost:5000/actions (or your Replit URL 
+  + /actions)                                              
+                                                           
+  What to verify:                                          
+                                                           
+  1. Summary Cards Row (top of page)                       
+    - Shows 4 cards: Open Actions, Total Impact, Reps with 
+  Actions, Executed This Week                              
+    - Numbers should load (even if 0)                      
+  2. Filter Bar                                            
+    - Severity toggles: act (red), watch (yellow), notable 
+  (purple), info (blue)                                    
+    - Dropdowns for Status, Type, Rep, Skill               
+    - Sort buttons work                                    
+  3. Actions Queue Table                                   
+    - 8 columns visible                                    
+    - Left border color matches severity                   
+    - Rows are clickable                                   
+    - If no actions exist, should show empty state         
+  4. Sidebar Navigation                                    
+    - "Actions" appears after "Command Center"             
+    - Badge shows count of critical actions (if any exist) 
+    - Clicking navigates to /actions                       
+  5. API Endpoints (check browser console)                 
+    - No errors from                                       
+  /api/workspaces/:id/action-items/summary                 
+    - No errors from /api/workspaces/:id/action-items      
+                                                           
+  Expected behavior if no actions exist yet:               
+  - Summary cards show 0s                                  
+  - Table shows empty state message                        
+  - No errors in console                                   
+                                                           
+  The Actions Engine backend was already merged, so the    
+  endpoints should exist even if there's no data yet.      
+  Actions will be created when skills run and emit the     
+  <actions> blocks!               
