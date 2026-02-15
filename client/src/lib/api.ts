@@ -1,15 +1,15 @@
 let _workspaceId = '';
-let _apiKey = '';
+let _token = '';
 
-export function setApiCredentials(workspaceId: string, apiKey: string) {
+export function setApiCredentials(workspaceId: string, token: string) {
   _workspaceId = workspaceId;
-  _apiKey = apiKey;
+  _token = token;
 }
 
 async function request(method: string, path: string, body?: any) {
   const url = `/api/workspaces/${_workspaceId}${path}`;
   const headers: Record<string, string> = {
-    'Authorization': `Bearer ${_apiKey}`,
+    'Authorization': `Bearer ${_token}`,
   };
   if (body) {
     headers['Content-Type'] = 'application/json';
@@ -32,12 +32,3 @@ export const api = {
   patch: (path: string, body?: any) => request('PATCH', path, body),
   delete: (path: string) => request('DELETE', path),
 };
-
-export async function verifyWorkspace(workspaceId: string, apiKey: string): Promise<{ name: string }> {
-  const res = await fetch(`/api/workspaces/${workspaceId}`, {
-    headers: { 'Authorization': `Bearer ${apiKey}` },
-  });
-  if (!res.ok) throw new Error('Invalid workspace ID or API key');
-  const data = await res.json();
-  return { name: data.name || data.workspace?.name || workspaceId.slice(0, 8) };
-}

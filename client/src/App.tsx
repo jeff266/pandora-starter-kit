@@ -6,6 +6,10 @@ import Sidebar from './components/Sidebar';
 import TopBar from './components/TopBar';
 import Placeholder from './components/Placeholder';
 import LoginPage from './pages/LoginPage';
+import AuthCallback from './pages/AuthCallback';
+import WorkspacePicker from './pages/WorkspacePicker';
+import JoinWorkspace from './pages/JoinWorkspace';
+import MembersPage from './pages/MembersPage';
 import CommandCenter from './pages/CommandCenter';
 import DealDetail from './pages/DealDetail';
 import AccountDetail from './pages/AccountDetail';
@@ -13,7 +17,7 @@ import SkillsPage from './pages/SkillsPage';
 import SkillRunsPage from './pages/SkillRunsPage';
 import ConnectorsPage from './pages/ConnectorsPage';
 import InsightsPage from './pages/InsightsPage';
-import { colors } from './styles/theme';
+import { colors, fonts } from './styles/theme';
 
 const pageTitles: Record<string, string> = {
   '/': 'Command Center',
@@ -27,7 +31,7 @@ const pageTitles: Record<string, string> = {
   '/connectors': 'Connectors',
   '/connectors/health': 'Connector Health',
   '/data-dictionary': 'Data Dictionary',
-  '/users': 'Users & Teams',
+  '/members': 'Members',
   '/marketplace': 'Marketplace',
   '/settings': 'Settings',
 };
@@ -40,19 +44,19 @@ function getPageTitle(pathname: string): string {
 }
 
 export default function App() {
-  const { workspace, isAuthenticated } = useWorkspace();
+  const { token, isAuthenticated, isLoading, workspaces, currentWorkspace } = useWorkspace();
   const location = useLocation();
   const [badges, setBadges] = useState<Record<string, number>>({});
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
 
   useEffect(() => {
-    if (workspace) {
-      setApiCredentials(workspace.workspaceId, workspace.apiKey);
+    if (token && currentWorkspace) {
+      setApiCredentials(currentWorkspace.id, token);
     }
-  }, [workspace]);
+  }, [token, currentWorkspace]);
 
   const fetchBadges = useCallback(async () => {
-    if (!workspace) return;
+    if (!currentWorkspace) return;
     try {
       const [skillsRes, findingsRes] = await Promise.allSettled([
         api.get('/skills'),
@@ -70,7 +74,7 @@ export default function App() {
       setBadges(newBadges);
       setLastRefreshed(new Date());
     } catch {}
-  }, [workspace]);
+  }, [currentWorkspace]);
 
   useEffect(() => {
     fetchBadges();
@@ -78,8 +82,41 @@ export default function App() {
     return () => clearInterval(interval);
   }, [fetchBadges]);
 
+  if (location.pathname === '/auth/callback') {
+    return <AuthCallback />;
+  }
+
+  if (isLoading) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: colors.bg, fontFamily: fonts.sans }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ width: 32, height: 32, border: `3px solid ${colors.border}`, borderTopColor: colors.accent, borderRadius: '50%', animation: 'spin 0.8s linear infinite', margin: '0 auto 16px' }} />
+          <p style={{ fontSize: 14, color: colors.textSecondary }}>Loading...</p>
+        </div>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
+
   if (!isAuthenticated) {
     return <LoginPage />;
+  }
+
+  if (workspaces.length === 0) {
+    return (
+      <Routes>
+        <Route path="*" element={<JoinWorkspace />} />
+      </Routes>
+    );
+  }
+
+  if (currentWorkspace === null && workspaces.length > 1) {
+    return (
+      <Routes>
+        <Route path="/join" element={<JoinWorkspace />} />
+        <Route path="*" element={<WorkspacePicker />} />
+      </Routes>
+    );
   }
 
   const title = getPageTitle(location.pathname);
@@ -87,22 +124,9 @@ export default function App() {
   return (
     <div style={{ display: 'flex', height: '100vh', background: colors.bg }}>
       <Sidebar badges={badges} />
-      <main style={{
-        marginLeft: 220,
-        flex: 1,
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden',
-      }}>
-        <TopBar
-          title={title}
-          lastRefreshed={lastRefreshed}
-        />
-        <div style={{
-          flex: 1,
-          overflow: 'auto',
-          padding: '24px 28px',
-        }}>
+      <main style={{ marginLeft: 220, flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <TopBar title={title} lastRefreshed={lastRefreshed} />
+        <div style={{ flex: 1, overflow: 'auto', padding: '24px 28px' }}>
           <Routes>
             <Route path="/" element={<CommandCenter />} />
             <Route path="/deals/:dealId" element={<DealDetail />} />
@@ -111,6 +135,8 @@ export default function App() {
             <Route path="/skills/:skillId/runs" element={<SkillRunsPage />} />
             <Route path="/connectors" element={<ConnectorsPage />} />
             <Route path="/insights" element={<InsightsPage />} />
+            <Route path="/members" element={<MembersPage />} />
+            <Route path="/join" element={<JoinWorkspace />} />
             <Route path="/agents" element={<Placeholder title="Agents" />} />
             <Route path="/agent-builder" element={<Placeholder title="Agent Builder" />} />
             <Route path="/tools" element={<Placeholder title="Tools" />} />
@@ -118,7 +144,6 @@ export default function App() {
             <Route path="/actions" element={<Placeholder title="Actions" />} />
             <Route path="/connectors/health" element={<Placeholder title="Connector Health" />} />
             <Route path="/data-dictionary" element={<Placeholder title="Data Dictionary" />} />
-            <Route path="/users" element={<Placeholder title="Users & Teams" />} />
             <Route path="/marketplace" element={<Placeholder title="Marketplace" />} />
             <Route path="/settings" element={<Placeholder title="Settings" />} />
           </Routes>
