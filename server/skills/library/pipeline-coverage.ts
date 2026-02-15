@@ -250,6 +250,40 @@ RULES:
 - If quotas aren't configured, note this and show absolute numbers only
 - Stay within word budget
 
+ACTIONS GENERATION:
+
+In addition to your narrative report, output a JSON block tagged with <actions> for structured executable recommendations:
+
+<actions>
+[
+  {
+    "action_type": "notify_manager" | "notify_rep",
+    "severity": "critical" | "warning",
+    "target_entity_type": "rep",
+    "owner_email": "rep email",
+    "title": "Coverage gap: [Rep Name] at [X]x against $[quota] quota",
+    "summary": "[Rep] has $X pipeline against $Y quota ([N]x coverage). Need $Z more pipeline to reach 3x coverage target.",
+    "impact_amount": gap_amount_to_target,
+    "urgency_label": "[N]x coverage, [days] days left in quarter",
+    "recommended_steps": [
+      "Review rep's prospecting activity",
+      "Identify deals that can be accelerated",
+      "Discuss pipeline generation plan in next 1:1"
+    ]
+  }
+]
+</actions>
+
+Rules for action generation:
+- severity "critical": coverage < 1.5x with < 45 days left in quarter
+- severity "warning": coverage < 2.5x with < 60 days left in quarter
+- action_type "notify_manager": for reps with critical coverage gaps (immediate escalation)
+- action_type "notify_rep": for reps with warning-level gaps (they can self-correct)
+- Don't create actions for reps above 3x coverage (they're healthy)
+- Include specific dollar gap to reach 3x target in impact_amount
+- Calculate days_left_in_quarter from current date vs quarter end date
+- Only create actions for top 10 at-risk reps (prioritize by impact_amount DESC)
+
 {{voiceBlock}}`,
       outputKey: 'coverage_report',
     },

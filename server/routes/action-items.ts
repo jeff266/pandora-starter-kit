@@ -306,4 +306,111 @@ router.post('/api/workspaces/:workspaceId/action-items/:actionId/notify', async 
   }
 });
 
+// POST /api/workspaces/:id/action-items/:actionId/preview
+// Dry-run: show what WOULD change without writing to CRM
+router.post('/api/workspaces/:workspaceId/action-items/:actionId/preview', async (req, res) => {
+  try {
+    const { workspaceId, actionId } = req.params;
+    const { executeAction } = await import('../actions/executor.js');
+
+    const result = await executeAction(req.db, {
+      actionId,
+      workspaceId,
+      actor: req.body.actor || 'preview',
+      dryRun: true,
+    });
+
+    res.json(result);
+  } catch (err) {
+    console.error('[Action Preview]', err);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// POST /api/workspaces/:id/action-items/:actionId/execute
+// Execute the action: write to CRM, create audit note, update status
+router.post('/api/workspaces/:workspaceId/action-items/:actionId/execute', async (req, res) => {
+  try {
+    const { workspaceId, actionId } = req.params;
+    const { actor } = req.body;
+
+    if (!actor) {
+      return res.status(400).json({ error: 'actor is required (user email)' });
+    }
+
+    const { executeAction } = await import('../actions/executor.js');
+
+    const result = await executeAction(req.db, {
+      actionId,
+      workspaceId,
+      actor,
+      dryRun: false,
+    });
+
+    res.json(result);
+  } catch (err) {
+    console.error('[Action Execute]', err);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// GET /api/workspaces/:id/action-items/:actionId/operations
+// Show what operations this action would perform (without executing)
+router.get('/api/workspaces/:workspaceId/action-items/:actionId/operations', async (req, res) => {
+  try {
+    const { workspaceId, actionId } = req.params;
+
+    const actionResult = await req.db.query(
+      `SELECT a.*, d.source, d.source_id, d.external_id, d.name as deal_name
+       FROM actions a
+       LEFT JOIN deals d ON a.target_deal_id = d.id
+       WHERE a.id = $1 AND a.workspace_id = $2`,
+      [actionId, workspaceId]
+    );
+
+    if (actionResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Action not found' });
+    }
+
+    const action = actionResult.rows[0];
+    const payload = action.execution_payload || {};
+
+    const operations = [];
+
+    // CRM field changes
+    if (payload.crm_updates && Array.isArray(payload.crm_updates)) {
+      for (const update of payload.crm_updates) {
+        operations.push({
+          type: 'field_update',
+          crm: action.source || 'unknown',
+          deal: action.deal_name || action.target_entity_name,
+          field: update.field,
+          current_value: update.current_value || null,
+          proposed_value: update.proposed_value,
+        });
+      }
+    }
+
+    // Audit note
+    operations.push({
+      type: 'audit_note',
+      crm: action.source || 'unknown',
+      deal: action.deal_name || action.target_entity_name,
+      description: 'Pandora will add an audit note documenting this action and its source',
+    });
+
+    res.json({
+      action_id: action.id,
+      action_type: action.action_type,
+      executable: ['open', 'in_progress'].includes(action.execution_status),
+      has_crm_id: !!(action.source_id || action.external_id),
+      crm_source: action.source || null,
+      operations,
+    });
+  } catch (err) {
+    console.error('[Action Operations]', err);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 export default router;

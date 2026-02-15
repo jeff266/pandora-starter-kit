@@ -500,6 +500,103 @@ export class HubSpotClient {
     }
   }
 
+  // ==========================================================================
+  // Write Methods (CRM Write-Back)
+  // ==========================================================================
+
+  /**
+   * Update deal properties in HubSpot.
+   * Uses PATCH /crm/v3/objects/deals/{dealId}
+   *
+   * @param dealId - HubSpot deal ID (external_id from deals table)
+   * @param properties - Object with property names and values to update
+   * @returns Updated properties and success status
+   */
+  async updateDeal(
+    dealId: string,
+    properties: Record<string, any>
+  ): Promise<{ success: boolean; updated: Record<string, any>; error?: string }> {
+    try {
+      const response = await this.request<{ id: string; properties: Record<string, any> }>(
+        `/crm/v3/objects/deals/${dealId}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({ properties }),
+        }
+      );
+
+      console.log(`[HubSpot] Updated deal ${dealId}:`, Object.keys(properties).join(', '));
+
+      return {
+        success: true,
+        updated: response.properties,
+      };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error(`[HubSpot] Failed to update deal ${dealId}:`, errorMsg);
+
+      return {
+        success: false,
+        updated: {},
+        error: errorMsg,
+      };
+    }
+  }
+
+  /**
+   * Add a note/engagement to a deal in HubSpot.
+   * Uses POST /crm/v3/objects/notes + association
+   *
+   * @param dealId - HubSpot deal ID
+   * @param noteBody - Note text content
+   * @returns Note ID and success status
+   */
+  async addDealNote(
+    dealId: string,
+    noteBody: string
+  ): Promise<{ success: boolean; noteId?: string; error?: string }> {
+    try {
+      // Step 1: Create the note
+      const noteResponse = await this.request<{ id: string; properties: Record<string, any> }>(
+        '/crm/v3/objects/notes',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            properties: {
+              hs_note_body: noteBody,
+              hs_timestamp: new Date().toISOString(),
+            },
+          }),
+        }
+      );
+
+      const noteId = noteResponse.id;
+
+      // Step 2: Associate note with deal
+      await this.request(
+        `/crm/v3/objects/notes/${noteId}/associations/deals/${dealId}/note_to_deal`,
+        {
+          method: 'PUT',
+        }
+      );
+
+      console.log(`[HubSpot] Created note ${noteId} for deal ${dealId}`);
+
+      return {
+        success: true,
+        noteId,
+      };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error(`[HubSpot] Failed to add note to deal ${dealId}:`, errorMsg);
+
+      return {
+        success: false,
+        error: errorMsg,
+      };
+    }
+  }
+
   /**
    * Batch fetch associations for multiple objects
    * More efficient than calling getAssociations() for each object individually

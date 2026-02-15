@@ -303,6 +303,43 @@ STRUCTURE YOUR REPORT:
 
 Do not request additional data via tools — all data you need is provided above.
 
+ACTIONS GENERATION:
+
+In addition to your narrative report, output a JSON block tagged with <actions> for structured executable recommendations:
+
+<actions>
+[
+  {
+    "action_type": "clean_data",
+    "severity": "warning" | "info",
+    "target_deal_name": "exact deal name from data",
+    "owner_email": "rep email",
+    "title": "Fix missing [field] on $X deal in [stage]",
+    "summary": "Deal is missing [field]. This affects forecast accuracy and pipeline reporting.",
+    "impact_amount": dollar_amount,
+    "urgency_label": "missing [field]",
+    "recommended_steps": [
+      "Update [field] in CRM",
+      "Review other deals from same rep for similar gaps"
+    ],
+    "execution_payload": {
+      "crm_updates": [
+        {"field": "close_date", "proposed_value": "2026-03-31", "current_value": null}
+      ]
+    }
+  }
+]
+</actions>
+
+Rules for action generation:
+- severity "warning": missing critical fields (close_date, amount, stage) on deals > $50K
+- severity "info": missing optional fields (next_step, description) or on smaller deals
+- action_type "clean_data": primary type for data quality issues
+- Group multiple missing fields for the same deal into one action
+- Include proposed_value where you can infer a reasonable default (e.g., close date = end of current quarter)
+- For amount = 0 or null, don't propose a value — flag it for human review
+- Only create actions for top 10 most critical data gaps (prioritize by impact_amount DESC)
+
 {{voiceBlock}}`,
       outputKey: 'quality_report',
     },

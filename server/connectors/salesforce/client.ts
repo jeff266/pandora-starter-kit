@@ -831,6 +831,146 @@ export class SalesforceClient {
   }
 
   // ==========================================================================
+  // Write Methods (CRM Write-Back)
+  // ==========================================================================
+
+  /**
+   * Update opportunity fields in Salesforce.
+   * Uses PATCH /services/data/vXX.0/sobjects/Opportunity/{id}
+   *
+   * @param opportunityId - Salesforce Opportunity ID (18-char)
+   * @param fields - Fields to update (using Salesforce field names)
+   * @returns Success status and error if any
+   */
+  async updateOpportunity(
+    opportunityId: string,
+    fields: Record<string, any>
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      // Salesforce PATCH returns 204 No Content on success
+      const response = await fetch(
+        `${this.baseUrl}/sobjects/Opportunity/${opportunityId}`,
+        {
+          method: 'PATCH',
+          headers: {
+            'Authorization': `Bearer ${this.accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(fields),
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        const errorMsg = Array.isArray(errorData)
+          ? errorData.map(e => e.message).join(', ')
+          : 'Unknown error';
+        throw new Error(errorMsg);
+      }
+
+      logger.info('[Salesforce] Updated opportunity', {
+        opportunityId,
+        fields: Object.keys(fields).join(', '),
+      });
+
+      return { success: true };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      logger.error('[Salesforce] Failed to update opportunity', {
+        opportunityId,
+        error: errorMsg,
+      });
+
+      return {
+        success: false,
+        error: errorMsg,
+      };
+    }
+  }
+
+  /**
+   * Add a note (ContentNote) to an opportunity in Salesforce.
+   * Two-step: create note, then link via ContentDocumentLink.
+   *
+   * @param opportunityId - Salesforce Opportunity ID
+   * @param title - Note title
+   * @param body - Note body content
+   * @returns Note ID and success status
+   */
+  async addOpportunityNote(
+    opportunityId: string,
+    title: string,
+    body: string
+  ): Promise<{ success: boolean; noteId?: string; error?: string }> {
+    try {
+      // Step 1: Create ContentNote
+      // Body must be base64-encoded for Salesforce
+      const encodedBody = Buffer.from(body).toString('base64');
+
+      const noteResponse = await this.request<{ id: string; success: boolean }>(
+        '/sobjects/ContentNote',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            Title: title,
+            Content: encodedBody,
+          }),
+        }
+      );
+
+      const noteId = noteResponse.id;
+
+      // Step 2: Get ContentDocumentId (Salesforce requires this intermediate ID)
+      // ContentNote → ContentDocument → ContentDocumentLink
+      const docQuery = await this.query<{ ContentDocumentId: string }>(
+        `SELECT ContentDocumentId FROM ContentNote WHERE Id = '${noteId}'`
+      );
+
+      if (docQuery.records.length === 0) {
+        throw new Error('Failed to get ContentDocumentId for note');
+      }
+
+      const contentDocumentId = docQuery.records[0].ContentDocumentId;
+
+      // Step 3: Link ContentDocument to Opportunity
+      await this.request<{ id: string; success: boolean }>(
+        '/sobjects/ContentDocumentLink',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            ContentDocumentId: contentDocumentId,
+            LinkedEntityId: opportunityId,
+            ShareType: 'V', // Viewer
+            Visibility: 'AllUsers',
+          }),
+        }
+      );
+
+      logger.info('[Salesforce] Created note for opportunity', {
+        opportunityId,
+        noteId,
+        title,
+      });
+
+      return {
+        success: true,
+        noteId,
+      };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      logger.error('[Salesforce] Failed to add note to opportunity', {
+        opportunityId,
+        error: errorMsg,
+      });
+
+      return {
+        success: false,
+        error: errorMsg,
+      };
+    }
+  }
+
+  // ==========================================================================
   // Getters
   // ==========================================================================
 
