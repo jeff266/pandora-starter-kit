@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import { formatCurrency, formatDate, formatTimeAgo, severityColor } from '../lib/format';
 import Skeleton from '../components/Skeleton';
+import { DossierNarrative, ScopedAnalysis } from '../components/shared';
 
 export default function DealDetail() {
   const { dealId } = useParams<{ dealId: string }>();
@@ -11,34 +12,27 @@ export default function DealDetail() {
   const [dossier, setDossier] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [question, setQuestion] = useState('');
-  const [answer, setAnswer] = useState('');
-  const [asking, setAsking] = useState(false);
 
-  useEffect(() => {
+  const fetchDossier = async (withNarrative = false) => {
     if (!dealId) return;
     setLoading(true);
-    api.get(`/deals/${dealId}/dossier`)
-      .then(setDossier)
-      .catch(err => setError(err.message))
-      .finally(() => setLoading(false));
-  }, [dealId]);
-
-  const askPandora = async () => {
-    if (!question.trim() || asking) return;
-    setAsking(true);
     try {
-      const res = await api.post('/analyze', {
-        question: question.trim(),
-        scope: { type: 'deal', entity_id: dealId },
-      });
-      setAnswer(res.answer);
+      const url = withNarrative
+        ? `/deals/${dealId}/dossier?narrative=true`
+        : `/deals/${dealId}/dossier`;
+      const data = await api.get(url);
+      setDossier(data);
+      setError('');
     } catch (err: any) {
-      setAnswer(`Error: ${err.message}`);
+      setError(err.message);
     } finally {
-      setAsking(false);
+      setLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchDossier();
+  }, [dealId]);
 
   if (loading) {
     return (
@@ -74,6 +68,8 @@ export default function DealDetail() {
   const activities = dossier.activities || [];
   const conversations = dossier.conversations || [];
   const stageHistory = dossier.stage_history || [];
+  const narrative = dossier.narrative;
+  const coverageGaps = dossier.coverage_gaps || [];
 
   const healthItems = [
     { label: 'Activity', value: health.activity_recency?.status, color: statusColor(health.activity_recency?.status) },
@@ -146,6 +142,46 @@ export default function DealDetail() {
           ))}
         </div>
       </div>
+
+      {/* AI Narrative */}
+      {dealId && (
+        <DossierNarrative
+          narrative={narrative}
+          onGenerate={() => fetchDossier(true)}
+        />
+      )}
+
+      {/* Coverage Gaps */}
+      {coverageGaps.length > 0 && (
+        <div style={{
+          background: colors.surface,
+          border: `1px solid ${colors.borderLight}`,
+          borderLeft: `3px solid ${colors.yellow}`,
+          borderRadius: 10,
+          padding: 16,
+        }}>
+          <h3 style={{ fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 12 }}>
+            Coverage Gaps
+          </h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {coverageGaps.map((gap: any, i: number) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                <span style={{ fontSize: 16, marginTop: -2 }}>⚠️</span>
+                <div>
+                  <p style={{ fontSize: 13, color: colors.text, lineHeight: 1.4 }}>
+                    {gap.message || gap.gap_type}
+                  </p>
+                  {gap.recommendation && (
+                    <p style={{ fontSize: 12, color: colors.textMuted, marginTop: 4 }}>
+                      {gap.recommendation}
+                    </p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Two Column Layout */}
       <div style={{ display: 'grid', gridTemplateColumns: '1.8fr 1fr', gap: 16, alignItems: 'start' }}>
@@ -297,55 +333,15 @@ export default function DealDetail() {
             <DetailRow label="Last Modified" value={deal.updated_at ? formatDate(deal.updated_at) : undefined} />
           </Card>
 
-          {/* Ask Pandora */}
-          <Card title="Ask Pandora">
-            <div style={{ display: 'flex', gap: 8 }}>
-              <input
-                value={question}
-                onChange={e => setQuestion(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && askPandora()}
-                placeholder="Ask about this deal..."
-                style={{
-                  flex: 1,
-                  padding: '8px 12px',
-                  background: colors.surfaceRaised,
-                  border: `1px solid ${colors.border}`,
-                  borderRadius: 6,
-                  color: colors.text,
-                  fontSize: 12,
-                }}
+          {/* Scoped Analysis */}
+          {dealId && (
+            <div style={{ marginTop: 0 }}>
+              <ScopedAnalysis
+                scope={{ type: 'deal', entity_id: dealId }}
+                workspaceId=""
               />
-              <button
-                onClick={askPandora}
-                disabled={asking}
-                style={{
-                  padding: '8px 14px',
-                  background: asking ? colors.surfaceHover : colors.accent,
-                  color: '#fff',
-                  borderRadius: 6,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  opacity: asking ? 0.7 : 1,
-                }}
-              >
-                {asking ? '...' : 'Ask'}
-              </button>
             </div>
-            {answer && (
-              <div style={{
-                marginTop: 12,
-                padding: 12,
-                background: colors.surfaceRaised,
-                borderRadius: 8,
-                fontSize: 13,
-                color: colors.text,
-                lineHeight: 1.5,
-                whiteSpace: 'pre-wrap',
-              }}>
-                {answer}
-              </div>
-            )}
-          </Card>
+          )}
         </div>
       </div>
     </div>

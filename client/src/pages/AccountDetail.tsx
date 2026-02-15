@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import { formatCurrency, formatDate, formatTimeAgo, severityColor } from '../lib/format';
 import Skeleton from '../components/Skeleton';
+import { DossierNarrative, ScopedAnalysis } from '../components/shared';
 
 export default function AccountDetail() {
   const { accountId } = useParams<{ accountId: string }>();
@@ -12,13 +13,25 @@ export default function AccountDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  useEffect(() => {
+  const fetchDossier = async (withNarrative = false) => {
     if (!accountId) return;
     setLoading(true);
-    api.get(`/accounts/${accountId}/dossier`)
-      .then(setDossier)
-      .catch(err => setError(err.message))
-      .finally(() => setLoading(false));
+    try {
+      const url = withNarrative
+        ? `/accounts/${accountId}/dossier?narrative=true`
+        : `/accounts/${accountId}/dossier`;
+      const data = await api.get(url);
+      setDossier(data);
+      setError('');
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchDossier();
   }, [accountId]);
 
   if (loading) {
@@ -51,6 +64,8 @@ export default function AccountDetail() {
   const activities = dossier.activities || [];
   const findings = dossier.findings || [];
   const rel = dossier.relationship_summary || {};
+  const narrative = dossier.narrative;
+  const relHealth = dossier.relationship_health || {};
 
   const openDeals = deals.filter((d: any) => !['closed_won', 'closed_lost'].includes(d.stage_normalized));
   const closedDeals = deals.filter((d: any) => ['closed_won', 'closed_lost'].includes(d.stage_normalized));
@@ -85,6 +100,62 @@ export default function AccountDetail() {
           <MiniStat label="Won Value" value={formatCurrency(Number(rel.won_value) || 0)} />
         </div>
       </div>
+
+      {/* AI Narrative */}
+      {accountId && (
+        <DossierNarrative
+          narrative={narrative}
+          onGenerate={() => fetchDossier(true)}
+        />
+      )}
+
+      {/* Relationship Health Panel */}
+      {relHealth && Object.keys(relHealth).length > 0 && (
+        <div style={{
+          background: colors.surface,
+          border: `1px solid ${colors.border}`,
+          borderRadius: 10,
+          padding: 20,
+        }}>
+          <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text, marginBottom: 16 }}>
+            Relationship Health
+          </h3>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
+            {relHealth.engagement && (
+              <HealthMetric
+                label="Engagement"
+                value={relHealth.engagement.status}
+                color={statusColor(relHealth.engagement.status)}
+                detail={relHealth.engagement.detail}
+              />
+            )}
+            {relHealth.deal_velocity && (
+              <HealthMetric
+                label="Deal Velocity"
+                value={relHealth.deal_velocity.status}
+                color={statusColor(relHealth.deal_velocity.status)}
+                detail={relHealth.deal_velocity.detail}
+              />
+            )}
+            {relHealth.executive_access && (
+              <HealthMetric
+                label="Executive Access"
+                value={relHealth.executive_access.status}
+                color={statusColor(relHealth.executive_access.status)}
+                detail={relHealth.executive_access.detail}
+              />
+            )}
+            {relHealth.coverage_breadth && (
+              <HealthMetric
+                label="Coverage Breadth"
+                value={relHealth.coverage_breadth.status}
+                color={statusColor(relHealth.coverage_breadth.status)}
+                detail={relHealth.coverage_breadth.detail}
+              />
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Two Column */}
       <div style={{ display: 'grid', gridTemplateColumns: '1.8fr 1fr', gap: 16, alignItems: 'start' }}>
@@ -203,6 +274,16 @@ export default function AccountDetail() {
               ))
             )}
           </Card>
+
+          {/* Scoped Analysis */}
+          {accountId && (
+            <div style={{ marginTop: 0 }}>
+              <ScopedAnalysis
+                scope={{ type: 'account', entity_id: accountId }}
+                workspaceId=""
+              />
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -267,4 +348,41 @@ function MiniStat({ label, value }: { label: string; value: string }) {
 
 function EmptyText({ children }: { children: React.ReactNode }) {
   return <p style={{ fontSize: 12, color: colors.textMuted, padding: '8px 0' }}>{children}</p>;
+}
+
+function HealthMetric({ label, value, color, detail }: { label: string; value: string; color: string; detail?: string }) {
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <span style={{
+          width: 8,
+          height: 8,
+          borderRadius: '50%',
+          background: color,
+          boxShadow: `0 0 6px ${color}40`,
+        }} />
+        <span style={{ fontSize: 11, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase' }}>
+          {label}
+        </span>
+      </div>
+      <div style={{ fontSize: 16, fontWeight: 600, color: colors.text, textTransform: 'capitalize', marginBottom: 4 }}>
+        {value || '--'}
+      </div>
+      {detail && (
+        <p style={{ fontSize: 11, color: colors.textSecondary, lineHeight: 1.4 }}>
+          {detail}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function statusColor(status?: string): string {
+  if (!status) return colors.textMuted;
+  switch (status.toLowerCase()) {
+    case 'strong': case 'active': case 'fast': case 'multi': case 'broad': return colors.green;
+    case 'moderate': case 'cooling': case 'normal': case 'dual': return colors.yellow;
+    case 'weak': case 'stale': case 'slow': case 'single': case 'narrow': return colors.red;
+    default: return colors.textMuted;
+  }
 }
