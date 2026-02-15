@@ -1,0 +1,296 @@
+Perfect. Layers 1 and 2 are Replit work anyway — infrastructure and endpoint wiring. Let's start there.
+
+Give Replit this:
+
+---
+
+**Slack App Upgrade + Interactivity (Buttons & Modals)**
+
+We're upgrading from an incoming webhook to a full Slack app. This unlocks interactive buttons on action cards and (later) conversational thread replies.
+
+**What exists today:**
+- Incoming webhook URL stored in workspace config — used by `server/slack/` to post skill run results
+- `formatForSlack()` builds Block Kit messages
+- `stripXmlBlocks()` cleans XML from output before posting
+- Actions table with 35 real actions across 7 skills
+- Action executor (`server/actions/executor.ts`) can write to HubSpot/Salesforce
+
+**What we're building:**
+
+### Part 1: Replace webhook with bot token posting
+
+The incoming webhook can't update messages after posting (no `message_ts` returned reliably) and can't receive interactions. Switch to `chat.postMessage` with a bot token.
+
+1. Add new env vars (I'll provide values after creating the Slack app):
+   - `SLACK_BOT_TOKEN` — `xoxb-...`
+   - `SLACK_SIGNING_SECRET` — for verifying inbound requests
+
+2. Create `server/slack/slack-client.ts` — a thin wrapper around Slack Web API:
+   ```typescript
+   import { WebClient } from '@slack/web-api';
+   
+   const slack = new WebClient(process.env.SLACK_BOT_TOKEN);
+   
+   export async function postMessage(channel: string, blocks: any[], text: string, threadTs?: string) {
+     const result = await slack.chat.postMessage({ channel, blocks, text, thread_ts: threadTs });
+     return { ts: result.ts, channel: result.channel };
+   }
+   
+   export async function updateMessage(channel: string, ts: string, blocks: any[], text: string) {
+     await slack.chat.update({ channel, ts, blocks, text });
+   }
+   
+   export async function openModal(triggerId: string, view: any) {
+     await slack.views.open({ trigger_id: triggerId, view });
+   }
+   ```
+
+   Install: `npm install @slack/web-api`
+
+3. Update the existing Slack posting code to use `postMessage` instead of the webhook. Keep the webhook as a fallback if `SLACK_BOT_TOKEN` isn't set (backward compatibility for workspaces that haven't upgraded).
+
+4. **Critical:** When posting a skill run message, store the returned `message_ts` and `channel` so we can map thread replies back to skill runs later. Create a lightweight table:
+   ```sql
+   CREATE TABLE slack_messages (
+     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+     workspace_id UUID NOT NULL REFERENCES workspaces(id),
+     channel_id TEXT NOT NULL,
+     message_ts TEXT NOT NULL,
+     skill_run_id UUID REFERENCES skill_runs(id),
+     action_id UUID REFERENCES actions(id),
+     message_type TEXT NOT NULL DEFAULT 'skill_report',
+     created_at TIMESTAMPTZ DEFAULT now()
+   );
+   CREATE INDEX idx_slack_messages_ts ON slack_messages(channel_id, message_ts);
+   ```
+
+### Part 2: Add action buttons to Slack messages
+
+When the Slack formatter builds a message that includes actions (from the `<actions>` extraction), append Block Kit action buttons to each action card.
+
+**Button rules:**
+- `act` and `watch` severity actions get three buttons: Execute, Dismiss, View in Pandora
+- `notable` and `info` severity get one button: View in Pandora
+- `notify_rep` and `notify_manager` action types: Execute button labeled "Send Notification"
+- CRM write action types (`update_field`, `update_close_date`, `re_engage_deal`, `clean_data`): Execute button labeled "Execute in CRM"
+
+**Button block structure:**
+```typescript
+{
+  type: 'actions',
+  block_id: `action_buttons_${actionId}`,
+  elements: [
+    {
+      type: 'button',
+      text: { type: 'plain_text', text: '✅ Execute in CRM' },
+      style: 'primary',
+      action_id: 'pandora_execute_action',
+      value: JSON.stringify({ action_id: actionId, workspace_id: workspaceId }),
+    },
+    {
+      type: 'button',
+      text: { type: 'plain_text', text: '⏭ Dismiss' },
+      action_id: 'pandora_dismiss_action',
+      value: JSON.stringify({ action_id: actionId, workspace_id: workspaceId }),
+    },
+    {
+      type: 'button',
+      text: { type: 'plain_text', text: '🔗 View in App' },
+      action_id: 'pandora_view_action',
+      url: `https://pandora-starter-kit.replit.app/actions?highlight=${actionId}`,
+    },
+  ],
+}
+```
+
+The action buttons should appear below each action finding in the Slack message. If a skill run produces multiple actions, each action gets its own button row.
+
+### Part 3: Interaction handler endpoint
+
+Create `POST /api/slack/interactions` — this receives all button clicks and modal submissions.
+
+```typescript
+// server/slack/interactions.ts
+import crypto from 'crypto';
+
+export function verifySlackSignature(req: Request): boolean {
+  const timestamp = req.headers['x-slack-request-timestamp'];
+  const signature = req.headers['x-slack-signature'];
+  const body = req.rawBody; // need raw body for verification
+  
+  // Reject requests older than 5 minutes
+  if (Math.abs(Date.now() / 1000 - Number(timestamp)) > 300) return false;
+  
+  const sigBasestring = `v0:${timestamp}:${body}`;
+  const mySignature = 'v0=' + crypto
+    .createHmac('sha256', process.env.SLACK_SIGNING_SECRET!)
+    .update(sigBasestring)
+    .digest('hex');
+  
+  return crypto.timingSafeEqual(Buffer.from(mySignature), Buffer.from(signature as string));
+}
+```
+
+**Important:** The raw body must be preserved for signature verification. Add raw body parsing middleware for the `/api/slack/` routes:
+```typescript
+app.use('/api/slack/interactions', express.urlencoded({ extended: true, verify: (req, res, buf) => { req.rawBody = buf.toString(); } }));
+```
+
+**Interaction routing:**
+
+```typescript
+app.post('/api/slack/interactions', (req, res) => {
+  // Verify signature first
+  if (!verifySlackSignature(req)) return res.status(401).send('Invalid signature');
+  
+  const payload = JSON.parse(req.body.payload);
+  
+  // Acknowledge immediately (Slack requires response within 3 seconds)
+  res.status(200).send();
+  
+  // Route based on interaction type
+  if (payload.type === 'block_actions') {
+    handleBlockAction(payload);
+  } else if (payload.type === 'view_submission') {
+    handleModalSubmission(payload);
+  }
+});
+```
+
+### Part 4: Button click handlers
+
+**Execute button clicked (`pandora_execute_action`):**
+
+For notification actions (`notify_rep`, `notify_manager`): execute immediately, no modal.
+```typescript
+// Execute the notification
+await executeAction(actionId, { actor: slackUser.email });
+// Update the original message — replace buttons with status
+await updateMessage(channel, messageTs, updatedBlocks, '✅ Notification sent');
+```
+
+For CRM write actions: open a confirmation modal.
+```typescript
+// Fetch the action and its proposed operations
+const action = await getActionById(actionId);
+const operations = await getActionOperations(actionId);
+
+// Build modal showing proposed changes
+const modalView = {
+  type: 'modal',
+  callback_id: 'pandora_execute_confirm',
+  private_metadata: JSON.stringify({ action_id: actionId, channel, message_ts: messageTs }),
+  title: { type: 'plain_text', text: 'Confirm CRM Changes' },
+  submit: { type: 'plain_text', text: 'Confirm & Execute' },
+  close: { type: 'plain_text', text: 'Cancel' },
+  blocks: [
+    {
+      type: 'section',
+      text: { type: 'mrkdwn', text: `*${action.title}*\n${action.summary}` },
+    },
+    { type: 'divider' },
+    // Show each proposed change
+    ...operations.map(op => ({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*${op.field}:* ${op.current_value || '(empty)'} → *${op.proposed_value}*`,
+      },
+    })),
+    {
+      type: 'context',
+      elements: [{
+        type: 'mrkdwn',
+        text: `⚠️ This will update the record in ${action.crm_source || 'your CRM'}. An audit note will be added.`,
+      }],
+    },
+  ],
+};
+
+await openModal(payload.trigger_id, modalView);
+```
+
+**Dismiss button clicked (`pandora_dismiss_action`):**
+
+Execute immediately, no modal needed:
+```typescript
+await updateActionStatus(actionId, 'dismissed', { actor: slackUser.email });
+// Update original message — replace buttons with dismissed status
+await updateMessage(channel, messageTs, updatedBlocks, '⏭ Dismissed');
+```
+
+### Part 5: Modal submission handler
+
+When the user confirms the CRM write in the modal:
+
+```typescript
+async function handleModalSubmission(payload: any) {
+  if (payload.view.callback_id === 'pandora_execute_confirm') {
+    const { action_id, channel, message_ts } = JSON.parse(payload.view.private_metadata);
+    
+    try {
+      const result = await executeAction(action_id, { 
+        actor: payload.user.username || payload.user.id 
+      });
+      
+      // Update the original Slack message
+      const updatedBlocks = buildExecutedMessageBlocks(action_id, payload.user);
+      await updateMessage(channel, message_ts, updatedBlocks, 
+        `✅ Executed by ${payload.user.username}`);
+        
+    } catch (error) {
+      // Post ephemeral error message to the user
+      await postEphemeral(channel, payload.user.id, 
+        `❌ Execution failed: ${error.message}`);
+    }
+  }
+}
+```
+
+**When updating the original message after execute/dismiss:** Don't rebuild the entire message. Find the action's button block by `block_id` (`action_buttons_${actionId}`) and replace it with a context block:
+
+```typescript
+{
+  type: 'context',
+  block_id: `action_status_${actionId}`,
+  elements: [{
+    type: 'mrkdwn',
+    text: `✅ *Executed* by <@${userId}> • <!date^${Math.floor(Date.now()/1000)}^{date_short_pretty} at {time}|just now>`,
+  }],
+}
+```
+
+### Part 6: Resolving Slack user to Pandora actor
+
+When a button is clicked, Slack gives you `payload.user.id` (Slack user ID). You need to map this to an email for the audit log. Options:
+1. Call `slack.users.info({ user: userId })` to get the email — requires `users:read.email` scope
+2. Store a mapping table when users first interact
+3. Use the Slack username as the actor string (simpler for now)
+
+For the first pass, use option 3 (Slack username). We can add email resolution later.
+
+### Testing
+
+After building:
+1. Set the env vars (I'll provide after creating the Slack app)
+2. Run pipeline-hygiene → verify Slack message has buttons on action cards
+3. Click "Dismiss" → verify message updates, action status changes in DB
+4. Click "Execute" on a notification action → verify immediate execution
+5. Click "Execute" on a CRM write action → verify modal opens with proposed changes
+6. Confirm in modal → verify CRM write executes (use dry-run mode for safety) and message updates
+
+### Notes
+- Keep the incoming webhook as fallback. If `SLACK_BOT_TOKEN` is not set, use the webhook and skip buttons.
+- For the `message_ts` tracking, only store it for skill report messages and individual action messages — not every Slack post.
+- Slack's 3-second response requirement is strict. Acknowledge the interaction immediately, then process asynchronously.
+
+---
+
+After Replit builds this, you'll need to:
+1. Go to api.slack.com → create/upgrade your Slack app
+2. Enable interactivity, set the request URL
+3. Add bot token scopes
+4. Install to workspace
+5. Copy the bot token and signing secret into Replit env vars
+
+I can walk you through the Slack app setup step by step when you're ready.
