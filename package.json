@@ -58,6 +58,7 @@
   "devDependencies": {
     "@types/chardet": "^0.8.3",
     "@vitest/coverage-v8": "^4.0.18",
+    "puppeteer": "^24.37.3",
     "tsx": "^4.21.0",
     "vitest": "^4.0.18"
   }
