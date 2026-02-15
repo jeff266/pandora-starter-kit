@@ -1,0 +1,30 @@
+export const colors = {
+  bg: '#06080c',
+  bgSidebar: '#0a0d14',
+  surface: '#0f1219',
+  surfaceRaised: '#141820',
+  surfaceHover: '#1a1f2a',
+  surfaceActive: '#1e2436',
+  border: '#1a1f2b',
+  borderLight: '#242b3a',
+  borderFocus: '#3b82f6',
+  text: '#e8ecf4',
+  textSecondary: '#94a3b8',
+  textMuted: '#5a6578',
+  textDim: '#3a4252',
+  accent: '#3b82f6',
+  accentSoft: 'rgba(59,130,246,0.12)',
+  green: '#22c55e',
+  greenSoft: 'rgba(34,197,94,0.1)',
+  yellow: '#eab308',
+  yellowSoft: 'rgba(234,179,8,0.1)',
+  red: '#ef4444',
+  redSoft: 'rgba(239,68,68,0.1)',
+  purple: '#a78bfa',
+  orange: '#f97316',
+} as const;
+
+export const fonts = {
+  sans: "'IBM Plex Sans', -apple-system, sans-serif",
+  mono: "'IBM Plex Mono', 'SF Mono', monospace",
+} as const;
