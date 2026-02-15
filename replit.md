@@ -72,7 +72,7 @@ Pandora is built on Node.js 20 with TypeScript 5+, utilizing Express.js and Post
 -   **Command Center Phase B (Frontend):** Complete React + TypeScript frontend in `client/` directory providing UI for all Phase A APIs.
     -   **Stack:** Vite 7 + React 19 + TypeScript, `react-router-dom` for routing. Dark theme with IBM Plex Sans/Mono fonts.
     -   **Dual Server Setup:** Vite dev server on port 5000 (public), Express API on port 3001 (internal). Vite proxies `/api` to `http://localhost:3001`.
-    -   **Authentication:** Login page with workspace ID + API key. `WorkspaceContext` manages auth state, persists to localStorage, supports URL param auto-login (`?workspace=...&key=...`). API client sends `Authorization: Bearer` headers.
+    -   **Authentication:** Magic link email auth with session tokens. `WorkspaceContext` manages auth state, persists to localStorage. Dual auth middleware: API keys for Slack/webhooks, session tokens for users. Role-based access (admin/member/viewer). Member management (invite, role change, remove) restricted to session-only admin auth. Magic link tokens hashed (SHA-256) in DB. Rate limiting on login/verify endpoints.
     -   **Command Center Home:** Headline metrics (pipeline value, coverage ratio, win rate, active findings), annotated pipeline bar chart by stage with findings badges, active findings feed with severity filtering, connector status strip.
     -   **Deal Detail Page:** Full dossier display with health signals (activity recency, threading, stage velocity, data completeness), findings, contacts, stage history timeline, activity timeline, conversations, deal metadata. "Ask Pandora" scoped analysis integration.
     -   **Account Detail Page:** Account header with relationship summary, deals list (open/closed split), contact map grouped by role, conversations, activity timeline, findings, account details. Clickable navigation to deal detail.
@@ -81,6 +81,8 @@ Pandora is built on Node.js 20 with TypeScript 5+, utilizing Express.js and Post
     -   **Insights Feed:** Chronological findings list with severity filtering and pagination.
     -   **Error Boundary:** Global `ErrorBoundary` component wrapping the app at root level for crash recovery.
     -   **Design System:** Colors in `client/src/styles/theme.ts` (bg: #06080c, accent: #3b82f6, severity: act=#ef4444, watch=#f59e0b, notable=#3b82f6). Skeleton loading states, consistent card components, empty state messaging.
+-   **Startup Optimization:** Express starts listening immediately (accepting `/health/alive`). Readiness probe (`/health/ready`) returns 503 until all init completes, then 200. Registration steps (adapters, skills, agents, workflow engine) parallelized via `Promise.all`. Migration and template seeding skip when already complete (hash-based version check via `system_settings` table). Startup timing logged per phase.
+-   **System Settings Table:** `system_settings` (key VARCHAR PK, value TEXT, updated_at TIMESTAMPTZ) for storing server-level config like template seed version hash.
 
 ## External Dependencies
 -   **PostgreSQL (Neon):** Primary database.
