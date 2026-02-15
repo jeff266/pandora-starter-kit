@@ -1,9 +1,10 @@
 import { Router } from 'express';
 import { getSkillRegistry } from '../skills/registry.js';
 import { getSkillRuntime } from '../skills/runtime.js';
-import { formatForSlack } from '../skills/formatters/slack-formatter.js';
+import { formatForSlack, buildActionButtons } from '../skills/formatters/slack-formatter.js';
 import { formatAsMarkdown } from '../skills/formatters/markdown-formatter.js';
 import { getSlackWebhook, postBlocks } from '../connectors/slack/client.js';
+import { getSlackAppClient } from '../connectors/slack/slack-app-client.js';
 import { query } from '../db.js';
 import { runScheduledSkills } from '../sync/skill-scheduler.js';
 import { generateWorkbook } from '../delivery/workbook-generator.js';
@@ -74,21 +75,11 @@ async function handleSkillRun(workspaceId: string, skillId: string, params: any,
   }
 
   if (skill.outputFormat === 'slack') {
-    const webhookUrl = await getSlackWebhook(workspaceId);
-    if (webhookUrl) {
-      try {
-        const blocks = formatForSlack(result, skill);
-        const slackResult = await postBlocks(webhookUrl, blocks);
-        if (slackResult.ok) {
-          console.log(`[skills] Posted ${skillId} result to Slack for workspace ${workspaceId}`);
-        } else {
-          console.error(`[skills] Slack post failed for ${skillId}:`, slackResult.error);
-        }
-      } catch (slackErr) {
-        console.error('[skills] Slack post error:', slackErr);
-      }
+    const isSnoozed = await checkSnooze(workspaceId, skillId);
+    if (isSnoozed) {
+      console.log(`[skills] Skill ${skillId} is snoozed for workspace ${workspaceId}, skipping Slack post`);
     } else {
-      console.warn(`[skills] No Slack webhook configured for workspace ${workspaceId}, skipping post`);
+      await postSkillToSlack(workspaceId, skillId, result);
     }
   }
 
@@ -362,5 +353,95 @@ router.get('/:workspaceId/skills/:skillId/runs/:runId/export', async (req, res) 
     return res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+async function checkSnooze(workspaceId: string, skillId: string): Promise<boolean> {
+  try {
+    const result = await query(
+      `SELECT id FROM snooze_config
+       WHERE workspace_id = $1 AND skill_id = $2 AND snooze_until > now()
+       LIMIT 1`,
+      [workspaceId, skillId]
+    );
+    return result.rows.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+async function postSkillToSlack(workspaceId: string, skillId: string, result: SkillResult): Promise<void> {
+  const slackAppClient = getSlackAppClient();
+  const botToken = await slackAppClient.getBotToken(workspaceId);
+  const registry = getSkillRegistry();
+  const skill = registry.get(skillId);
+  if (!skill) return;
+
+  try {
+    const blocks = formatForSlack(result, skill);
+
+    const actionButtons = buildActionButtons({
+      skill_id: skillId,
+      run_id: result.runId,
+      workspace_id: workspaceId,
+      deals: extractTopDeals(result),
+    });
+    const fullBlocks = [...blocks, ...actionButtons];
+
+    if (botToken) {
+      const channel = await slackAppClient.getChannelForSkill(workspaceId, skillId);
+      if (!channel) {
+        console.warn(`[skills] No Slack channel configured for workspace ${workspaceId}`);
+        const webhookUrl = await getSlackWebhook(workspaceId);
+        if (webhookUrl) {
+          await postBlocks(webhookUrl, blocks);
+          console.log(`[skills] Posted ${skillId} to Slack via webhook (no channel config, buttons omitted)`);
+        }
+        return;
+      }
+
+      const msgRef = await slackAppClient.postMessage(workspaceId, channel, fullBlocks, {
+        metadata: {
+          skill_id: skillId,
+          run_id: result.runId,
+          workspace_id: workspaceId,
+        },
+      });
+
+      if (msgRef.ok && msgRef.ts) {
+        await query(
+          `UPDATE skill_runs SET slack_message_ts = $1, slack_channel_id = $2 WHERE run_id = $3 AND workspace_id = $4`,
+          [msgRef.ts, msgRef.channel, result.runId, workspaceId]
+        ).catch(err => console.error('[skills] Failed to store Slack message ref:', err));
+        console.log(`[skills] Posted ${skillId} to Slack via bot API (ts: ${msgRef.ts})`);
+      } else {
+        console.error(`[skills] Slack bot post failed for ${skillId}:`, msgRef.error);
+      }
+    } else {
+      const webhookUrl = await getSlackWebhook(workspaceId);
+      if (webhookUrl) {
+        await postBlocks(webhookUrl, blocks);
+        console.log(`[skills] Posted ${skillId} to Slack via webhook for workspace ${workspaceId}`);
+      } else {
+        console.warn(`[skills] No Slack webhook or bot token for workspace ${workspaceId}`);
+      }
+    }
+  } catch (slackErr) {
+    console.error('[skills] Slack post error:', slackErr);
+  }
+}
+
+function extractTopDeals(result: SkillResult): Array<{ id: string; name: string }> {
+  const deals: Array<{ id: string; name: string }> = [];
+
+  if (result.evidence?.evaluated_records) {
+    for (const record of result.evidence.evaluated_records) {
+      if (record.entity_type === 'deal' && record.entity_id && record.entity_name) {
+        deals.push({ id: record.entity_id, name: record.entity_name });
+        if (deals.length >= 3) break;
+      }
+    }
+  }
+
+  return deals;
+}
 
 export default router;

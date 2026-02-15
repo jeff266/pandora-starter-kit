@@ -55,6 +55,8 @@ import { getSkillRegistry } from "./skills/registry.js";
 import { startJobQueue } from "./jobs/queue.js";
 import { agentsGlobalRouter, agentsWorkspaceRouter } from './routes/agents.js';
 import { registerBuiltInAgents, getAgentRegistry } from './agents/index.js';
+import slackEventsRouter from './routes/slack-events.js';
+import slackInteractionsRouter from './routes/slack-interactions.js';
 
 dotenv.config();
 
@@ -130,7 +132,13 @@ const heavyOpLimiter = rateLimit({
   message: { error: 'Too many requests for this operation, please try again later' },
 });
 
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({
+  limit: '10mb',
+  verify: (req: any, _res, buf) => {
+    req.rawBody = buf.toString();
+  },
+}));
+app.use(express.urlencoded({ extended: true, verify: (req: any, _res, buf) => { req.rawBody = buf.toString(); } }));
 
 app.get("/", (_req, res) => {
   res.json({
@@ -141,6 +149,10 @@ app.get("/", (_req, res) => {
 });
 
 app.use("/health", healthRouter);
+
+app.use("/api/slack/events", slackEventsRouter);
+app.use("/api/slack/interactions", slackInteractionsRouter);
+
 app.use("/api/workspaces", workspacesRouter);
 
 const workspaceApiRouter = express.Router();

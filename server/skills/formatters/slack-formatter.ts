@@ -1490,6 +1490,69 @@ function parseICPReportSections(report: string): Partial<ICPReportSections> {
   return sections;
 }
 
+export interface ActionButtonContext {
+  skill_id: string;
+  run_id: string;
+  workspace_id: string;
+  deals?: Array<{ id: string; name: string }>;
+}
+
+export function buildActionButtons(ctx: ActionButtonContext): SlackBlock[] {
+  const blocks: SlackBlock[] = [];
+
+  const primaryElements: any[] = [
+    {
+      type: 'button',
+      text: { type: 'plain_text', text: '✓ Reviewed', emoji: true },
+      style: 'primary',
+      action_id: 'mark_reviewed',
+      value: JSON.stringify({
+        skill_id: ctx.skill_id,
+        run_id: ctx.run_id,
+        workspace_id: ctx.workspace_id,
+      }),
+    },
+    {
+      type: 'button',
+      text: { type: 'plain_text', text: 'Snooze 1 Week', emoji: true },
+      action_id: 'snooze_findings',
+      value: JSON.stringify({
+        skill_id: ctx.skill_id,
+        run_id: ctx.run_id,
+        workspace_id: ctx.workspace_id,
+        days: 7,
+      }),
+    },
+  ];
+
+  blocks.push({
+    type: 'actions',
+    block_id: `actions_${ctx.run_id.slice(0, 8)}`,
+    elements: primaryElements,
+  });
+
+  if (ctx.deals && ctx.deals.length > 0) {
+    const topDeals = ctx.deals.slice(0, 3);
+    blocks.push({
+      type: 'actions',
+      block_id: `deals_${ctx.run_id.slice(0, 8)}`,
+      elements: topDeals.map(deal => ({
+        type: 'button',
+        text: { type: 'plain_text', text: `🔍 ${deal.name.slice(0, 50)}`, emoji: true },
+        action_id: 'drill_deal',
+        value: JSON.stringify({
+          deal_id: deal.id,
+          deal_name: deal.name,
+          workspace_id: ctx.workspace_id,
+          run_id: ctx.run_id,
+        }),
+      })),
+    });
+  }
+
+  return blocks;
+}
+
 /**
  * Truncate section content to max length with ellipsis
  */

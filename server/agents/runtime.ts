@@ -27,6 +27,7 @@ import {
   formatContext,
   type SlackBlock,
 } from '../connectors/slack/client.js';
+import { getSlackAppClient } from '../connectors/slack/slack-app-client.js';
 import { formatAgentWithEvidence } from '../skills/formatters/slack-formatter.js';
 
 export class AgentRuntime {
@@ -317,19 +318,35 @@ export class AgentRuntime {
   ): Promise<void> {
     switch (delivery.channel) {
       case 'slack': {
-        const webhookUrl = delivery.slackWebhookUrl || await getSlackWebhook(workspaceId);
-        if (!webhookUrl) {
-          console.warn(`[Agent] No Slack webhook configured for workspace ${workspaceId}`);
-          return;
-        }
+        const slackAppClient = getSlackAppClient();
+        const botToken = await slackAppClient.getBotToken(workspaceId);
 
         if (delivery.format === 'slack') {
           const blocks = evidence && Object.keys(evidence).length > 0
             ? formatAgentWithEvidence(output, evidence, agentName, 0)
             : this.formatSlackBlocks(output, agentName);
-          await postBlocks(webhookUrl, blocks);
+
+          if (botToken) {
+            const channel = await slackAppClient.getDefaultChannel(workspaceId);
+            if (channel) {
+              await slackAppClient.postMessage(workspaceId, channel, blocks);
+            } else {
+              const webhookUrl = delivery.slackWebhookUrl || await getSlackWebhook(workspaceId);
+              if (webhookUrl) await postBlocks(webhookUrl, blocks);
+            }
+          } else {
+            const webhookUrl = delivery.slackWebhookUrl || await getSlackWebhook(workspaceId);
+            if (!webhookUrl) {
+              console.warn(`[Agent] No Slack webhook or bot token for workspace ${workspaceId}`);
+              return;
+            }
+            await postBlocks(webhookUrl, blocks);
+          }
         } else {
-          await postText(webhookUrl, `*${agentName}*\n\n${output}`);
+          const webhookUrl = delivery.slackWebhookUrl || await getSlackWebhook(workspaceId);
+          if (webhookUrl) {
+            await postText(webhookUrl, `*${agentName}*\n\n${output}`);
+          }
         }
         console.log(`[Agent] Delivered to Slack for workspace ${workspaceId}`);
         break;
