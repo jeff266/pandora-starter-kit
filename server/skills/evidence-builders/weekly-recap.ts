@@ -1,5 +1,6 @@
 import type { SkillEvidence } from '../types.js';
 import { EvidenceBuilder, buildDataSources, dealToRecord } from '../evidence-builder.js';
+import { formatCurrency } from '../../utils/format-currency.js';
 
 export async function buildWeeklyRecapEvidence(
   stepResults: Record<string, any>,

@@ -1,5 +1,6 @@
 import type { SkillEvidence } from '../types.js';
 import { EvidenceBuilder, buildDataSources, repToRecord } from '../evidence-builder.js';
+import { formatCurrency } from '../../utils/format-currency.js';
 
 export async function buildPipelineGoalsEvidence(
   stepResults: Record<string, any>,
