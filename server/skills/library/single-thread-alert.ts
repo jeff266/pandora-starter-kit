@@ -192,7 +192,23 @@ WHAT TO OMIT:
 If you need to find expansion contacts at a specific account, use the queryContacts tool with accountId filter.
 {{/if}}
 
-{{voiceBlock}}`,
+{{voiceBlock}}
+
+After your report, emit an <actions> block containing a JSON array of specific, executable actions. Each action must have:
+- action_type: one of "add_contact", "expand_thread", "flag_at_risk", "schedule_review"
+- severity: "critical" | "warning" | "info"
+- title: short action title
+- summary: 1-2 sentence explanation
+- recommended_steps: array of 1-3 concrete steps
+- target_deal_name: exact deal name from the data
+- owner_email: deal owner email (if available)
+- impact_amount: deal amount at risk (number, no currency symbol)
+- urgency_label: "overdue" | "this_week" | "next_week"
+
+Focus on the top 5-10 most impactful single-threaded deals. Example:
+<actions>
+[{"action_type":"expand_thread","severity":"critical","title":"Multi-thread $200K Acme deal","summary":"Enterprise deal with single contact at champion level. Loss of this contact would stall the deal.","recommended_steps":["Identify economic buyer via LinkedIn","Request introduction to procurement lead"],"target_deal_name":"Acme Corp","owner_email":"rep@company.com","impact_amount":200000,"urgency_label":"this_week"}]
+</actions>`,
       outputKey: 'threading_alert',
     },
   ],

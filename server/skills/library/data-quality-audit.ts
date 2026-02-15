@@ -303,7 +303,23 @@ STRUCTURE YOUR REPORT:
 
 Do not request additional data via tools — all data you need is provided above.
 
-{{voiceBlock}}`,
+{{voiceBlock}}
+
+After your report, emit an <actions> block containing a JSON array of specific, executable actions. Each action must have:
+- action_type: one of "fix_data", "clean_up", "update_field", "merge_duplicates"
+- severity: "critical" | "warning" | "info"
+- title: short action title
+- summary: 1-2 sentence explanation
+- recommended_steps: array of 1-3 concrete steps
+- target_deal_name: exact deal name (if deal-specific)
+- owner_email: deal owner email (if available)
+- impact_amount: deal amount affected (number, no currency symbol)
+- urgency_label: "overdue" | "this_week" | "next_week"
+
+Focus on the top 5-10 most impactful data quality issues. Example:
+<actions>
+[{"action_type":"fix_data","severity":"warning","title":"Add close dates to 5 late-stage deals","summary":"5 deals in Negotiation/Contract stage missing close dates, totaling $340K.","recommended_steps":["Review each deal and set realistic close dates","Update CRM fields this week"],"target_deal_name":"Multiple deals","owner_email":"rep@company.com","impact_amount":340000,"urgency_label":"this_week"}]
+</actions>`,
       outputKey: 'quality_report',
     },
   ],

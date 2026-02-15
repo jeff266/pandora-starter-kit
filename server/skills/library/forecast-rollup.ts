@@ -238,7 +238,23 @@ STRUCTURE YOUR REPORT:
 5. Reps at risk: anyone pacing below 70% of their target with less than adequate pipeline. Pair with what they'd need to close the gap.
 6. Key deals to watch: the 3-5 deals whose outcomes will most affect the quarter. Include amount, stage, forecast category, and next step.
 
-{{voiceBlock}}`,
+{{voiceBlock}}
+
+After your report, emit an <actions> block containing a JSON array of specific, executable actions. Each action must have:
+- action_type: one of "update_forecast", "accelerate_deal", "flag_at_risk", "schedule_review", "validate_commit"
+- severity: "critical" | "warning" | "info"
+- title: short action title
+- summary: 1-2 sentence explanation
+- recommended_steps: array of 1-3 concrete steps
+- target_deal_name: exact deal name (if deal-specific)
+- owner_email: rep email (if available)
+- impact_amount: deal or forecast amount (number, no currency symbol)
+- urgency_label: "overdue" | "this_week" | "next_week"
+
+Focus on the top 5-10 most impactful forecast risks or opportunities. Example:
+<actions>
+[{"action_type":"validate_commit","severity":"warning","title":"Validate $150K commit from Sara","summary":"3 committed deals totaling $150K have no activity in 14+ days.","recommended_steps":["Review deal status with Sara in 1:1","Downgrade to best case if no update by Friday"],"owner_email":"sara@company.com","impact_amount":150000,"urgency_label":"this_week"}]
+</actions>`,
       outputKey: 'narrative',
     },
   ],

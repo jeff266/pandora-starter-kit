@@ -209,7 +209,22 @@ RULES:
 - If activity data is missing, note briefly and base scorecard on results and pipeline
 - Word budget: 700 words
 
-{{voiceBlock}}`,
+{{voiceBlock}}
+
+After your report, emit an <actions> block containing a JSON array of specific, executable actions. Each action must have:
+- action_type: one of "coach_rep", "review_pipeline", "set_goal", "schedule_review"
+- severity: "critical" | "warning" | "info"
+- title: short action title
+- summary: 1-2 sentence explanation
+- recommended_steps: array of 1-3 concrete steps
+- owner_email: rep email
+- impact_amount: pipeline or quota amount (number, no currency symbol)
+- urgency_label: "overdue" | "this_week" | "next_week"
+
+Focus on the top 3-5 most impactful coaching actions. Example:
+<actions>
+[{"action_type":"coach_rep","severity":"warning","title":"Address Sara's stale deal ratio","summary":"Sara has 60% stale deal rate, highest on team. 8 deals with no activity in 21+ days.","recommended_steps":["Review stale deals in next 1:1","Set weekly pipeline hygiene cadence","Close or re-engage bottom 3 deals"],"owner_email":"sara@company.com","impact_amount":250000,"urgency_label":"this_week"}]
+</actions>`,
       outputKey: 'narrative',
     },
   ],

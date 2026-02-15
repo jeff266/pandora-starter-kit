@@ -284,7 +284,23 @@ Rules:
 Word budget: 600 words.
 {{/if}}
 
-{{voiceBlock}}`,
+{{voiceBlock}}
+
+After your report, emit an <actions> block containing a JSON array of specific, executable actions. Each action must have:
+- action_type: one of "investigate_churn", "accelerate_deal", "clean_up", "schedule_review"
+- severity: "critical" | "warning" | "info"
+- title: short action title
+- summary: 1-2 sentence explanation
+- recommended_steps: array of 1-3 concrete steps
+- target_deal_name: exact deal name (if deal-specific)
+- owner_email: rep email (if available)
+- impact_amount: deal or pipeline amount (number, no currency symbol)
+- urgency_label: "overdue" | "this_week" | "next_week"
+
+Focus on the top 3-5 most impactful pipeline flow issues. Example:
+<actions>
+[{"action_type":"investigate_churn","severity":"warning","title":"Investigate $400K in closed-lost deals","summary":"3 deals moved to closed-lost this period without documented loss reasons.","recommended_steps":["Add loss reasons to CRM","Schedule win/loss review meeting"],"owner_email":"rep@company.com","impact_amount":400000,"urgency_label":"this_week"}]
+</actions>`,
       outputKey: 'narrative',
     },
   ],

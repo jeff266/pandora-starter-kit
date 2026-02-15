@@ -250,7 +250,23 @@ RULES:
 - If quotas aren't configured, note this and show absolute numbers only
 - Stay within word budget
 
-{{voiceBlock}}`,
+{{voiceBlock}}
+
+After your report, emit an <actions> block containing a JSON array of specific, executable actions. Each action must have:
+- action_type: one of "generate_pipeline", "accelerate_deal", "flag_coverage_gap", "schedule_review"
+- severity: "critical" | "warning" | "info"
+- title: short action title
+- summary: 1-2 sentence explanation
+- recommended_steps: array of 1-3 concrete steps
+- target_deal_name: exact deal name (if deal-specific)
+- owner_email: rep email (if available)
+- impact_amount: coverage gap or deal amount (number, no currency symbol)
+- urgency_label: "overdue" | "this_week" | "next_week"
+
+Focus on the top 5-10 most impactful coverage gaps or acceleration opportunities. Example:
+<actions>
+[{"action_type":"flag_coverage_gap","severity":"critical","title":"Coverage ratio below 2x for Q1","summary":"Current pipeline covers only 1.4x of quota. Need $500K in new pipeline to reach 3x target.","recommended_steps":["Schedule pipeline generation sprint","Revisit dormant opportunities","Increase outbound activity"],"owner_email":"manager@company.com","impact_amount":500000,"urgency_label":"this_week"}]
+</actions>`,
       outputKey: 'coverage_report',
     },
   ],
