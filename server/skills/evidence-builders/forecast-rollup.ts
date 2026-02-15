@@ -56,7 +56,7 @@ export async function buildForecastRollupEvidence(
     if (stalledCommits.length > 0) {
       eb.addClaim({
         claim_id: 'stalled_commits',
-        claim_text: `${stalledCommits.length} commit deals worth $${Math.round(stalledCommits.reduce((s: number, d: any) => s + (d.amount || 0), 0) / 1000)}K show risk signals`,
+        claim_text: `${stalledCommits.length} commit deals worth ${formatCurrency(stalledCommits.reduce((s: number, d: any) => s + (d.amount || 0), 0))} show risk signals`,
         entity_type: 'deal',
         entity_ids: stalledCommits.map((d: any) => d.id || d.dealId || ''),
         metric_name: 'forecast_category',
@@ -72,7 +72,7 @@ export async function buildForecastRollupEvidence(
     if (commitTotal > 0 && topThreeValue / commitTotal > 0.6) {
       eb.addClaim({
         claim_id: 'concentrated_commit',
-        claim_text: `Top 3 deals represent ${Math.round(topThreeValue / commitTotal * 100)}% of commit ($${Math.round(topThreeValue / 1000)}K of $${Math.round(commitTotal / 1000)}K)`,
+        claim_text: `Top 3 deals represent ${Math.round(topThreeValue / commitTotal * 100)}% of commit (${formatCurrency(topThreeValue)} of ${formatCurrency(commitTotal)})`,
         entity_type: 'deal',
         entity_ids: topThree.map((d: any) => d.id || d.dealId || ''),
         metric_name: 'amount',

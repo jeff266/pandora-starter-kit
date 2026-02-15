@@ -74,7 +74,7 @@ export async function buildDealRiskReviewEvidence(
     const totalValue = highRiskDeals.reduce((s, d) => s + (d.amount || 0), 0);
     eb.addClaim({
       claim_id: 'high_risk_deals',
-      claim_text: `${highRiskDeals.length} deals worth $${Math.round(totalValue / 1000)}K flagged as high risk`,
+      claim_text: `${highRiskDeals.length} deals worth ${formatCurrency(totalValue)} flagged as high risk`,
       entity_type: 'deal',
       entity_ids: highRiskDeals.map((d: any) => d.id || d.deal_id || d.dealId || ''),
       metric_name: 'risk_score',

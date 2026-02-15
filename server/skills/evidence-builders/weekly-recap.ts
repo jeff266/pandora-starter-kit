@@ -55,7 +55,7 @@ export async function buildWeeklyRecapEvidence(
     const wonValue = dealsWon.reduce((s: number, d: any) => s + (d.amount || 0), 0);
     eb.addClaim({
       claim_id: 'deals_won',
-      claim_text: `${dealsWon.length} deals won worth $${Math.round(wonValue / 1000)}K this week`,
+      claim_text: `${dealsWon.length} deals won worth ${formatCurrency(wonValue)} this week`,
       entity_type: 'deal',
       entity_ids: dealsWon.map((d: any) => d.id || d.dealId || ''),
       metric_name: 'outcome',
@@ -69,7 +69,7 @@ export async function buildWeeklyRecapEvidence(
     const lostValue = dealsLost.reduce((s: number, d: any) => s + (d.amount || 0), 0);
     eb.addClaim({
       claim_id: 'deals_lost',
-      claim_text: `${dealsLost.length} deals lost worth $${Math.round(lostValue / 1000)}K this week`,
+      claim_text: `${dealsLost.length} deals lost worth ${formatCurrency(lostValue)} this week`,
       entity_type: 'deal',
       entity_ids: dealsLost.map((d: any) => d.id || d.dealId || ''),
       metric_name: 'outcome',

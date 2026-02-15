@@ -57,7 +57,7 @@ export async function buildPipelineGoalsEvidence(
   if (reverseMath.pipelineGap > 0) {
     eb.addClaim({
       claim_id: 'pipeline_gap',
-      claim_text: `$${Math.round(reverseMath.pipelineGap / 1000)}K more pipeline needed to hit target at current win rate`,
+      claim_text: `${formatCurrency(reverseMath.pipelineGap)} more pipeline needed to hit target at current win rate`,
       entity_type: 'deal',
       entity_ids: [],
       metric_name: 'pipeline_gap',

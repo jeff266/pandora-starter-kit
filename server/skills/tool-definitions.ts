@@ -9,6 +9,7 @@
  */
 
 import type { ToolDefinition, SkillExecutionContext } from './types.js';
+import { formatCurrency } from '../utils/format-currency.js';
 import * as dealTools from '../tools/deal-query.js';
 import * as contactTools from '../tools/contact-query.js';
 import * as accountTools from '../tools/account-query.js';
@@ -904,7 +905,7 @@ const aggregateStaleDeals: ToolDefinition = {
               path: 'pipelines[0].parking_lot_stages',
               type: 'add',
               message: `${Math.round(concentration * 100)}% of stale deals (${stats.count} of ${totalStale}) are in "${stageName}" stage`,
-              evidence: `${stats.count} deals worth $${Math.round(stats.totalValue / 1000)}K, avg ${Math.round(avgDaysStale)} days stale`,
+              evidence: `${stats.count} deals worth ${formatCurrency(stats.totalValue)}, avg ${Math.round(avgDaysStale)} days stale`,
               confidence: Math.min(0.95, 0.6 + concentration),
               suggested_value: [stageName],
               current_value: null,
@@ -1827,8 +1828,8 @@ Required weekly pipeline gen: ${weeklyGenStr}`;
         const reps = coverageData.reps.slice(0, 15);
         const repLines = reps.map((r: any) => {
           const coverage = r.coverageRatio !== null ? r.coverageRatio.toFixed(1) + 'x' : 'N/A';
-          const quota = r.quota !== null ? `$${Math.round(r.quota / 1000)}K` : 'N/A';
-          const pipeline = `$${Math.round(r.pipeline / 1000)}K`;
+          const quota = r.quota !== null ? formatCurrency(r.quota) : 'N/A';
+          const pipeline = formatCurrency(r.pipeline);
           const status = r.status;
           const statusEmoji = status === 'on_track' ? '✅' : status === 'at_risk' ? '⚠️' : status === 'behind' ? '🔴' : '❓';
           return `${statusEmoji} ${r.name} | ${pipeline} pipeline | ${coverage} coverage | Quota: ${quota}`;
@@ -1866,7 +1867,7 @@ Required weekly pipeline gen: ${weeklyGenStr}`;
             .slice(0, 5);
           const changeLines = topChanges.map((d: any) => {
             const coverageChange = d.coverageChange !== null ? `${d.coverageChange > 0 ? '+' : ''}${d.coverageChange.toFixed(1)}x` : '';
-            const pipelineChange = `$${Math.round(d.pipelineChange / 1000)}K`;
+            const pipelineChange = formatCurrency(d.pipelineChange);
             return `${d.name}: ${coverageChange} coverage, ${pipelineChange} pipeline`;
           });
           trendStr = 'Week-over-week changes:\n' + changeLines.join('\n');
@@ -2228,8 +2229,8 @@ const coverageByRepTool: ToolDefinition = {
             section: 'pipelines',
             path: 'pipelines[0].segments',
             type: 'add',
-            message: `Deal sizes vary widely: P95=$${Math.round(p95/1000)}K vs P25=$${Math.round(p25/1000)}K (${Math.round(variance)}x variance). Consider segmenting SMB vs Enterprise.`,
-            evidence: `${dealSizeResult.rows[0].count} deals, P25=$${Math.round(p25)}, P75=$${Math.round(p75)}, P95=$${Math.round(p95)}`,
+            message: `Deal sizes vary widely: P95=${formatCurrency(p95)} vs P25=${formatCurrency(p25)} (${Math.round(variance)}x variance). Consider segmenting SMB vs Enterprise.`,
+            evidence: `${dealSizeResult.rows[0].count} deals, P25=${formatCurrency(p25)}, P75=${formatCurrency(p75)}, P95=${formatCurrency(p95)}`,
             confidence: 0.8,
             suggested_value: [
               { name: 'SMB', min: 0, max: p75 },
@@ -2254,7 +2255,7 @@ const coverageByRepTool: ToolDefinition = {
             path: 'thresholds.coverage_target',
             type: 'adjust',
             message: `Team has ${actualCoverage.toFixed(1)}x coverage vs ${targetCoverage}x target. Consider raising target to challenge the team.`,
-            evidence: `Pipeline value: $${Math.round(coverageData.team.totalPipeline / 1000)}K, Quota: $${Math.round((coverageData.team.totalQuota || 0) / 1000)}K`,
+            evidence: `Pipeline value: ${formatCurrency(coverageData.team.totalPipeline)}, Quota: ${formatCurrency(coverageData.team.totalQuota || 0)}`,
             confidence: 0.65,
             suggested_value: Math.min(5.0, targetCoverage + 0.5),
             current_value: targetCoverage,
@@ -2266,7 +2267,7 @@ const coverageByRepTool: ToolDefinition = {
             path: 'thresholds.coverage_target',
             type: 'alert',
             message: `Team has ${actualCoverage.toFixed(1)}x coverage vs ${targetCoverage}x target with ${coverageData.team.daysRemaining} days left in quarter. Coverage gap detected.`,
-            evidence: `Gap: $${Math.round((coverageData.team.gap || 0) / 1000)}K, ${coverageData.team.daysRemaining} days remaining`,
+            evidence: `Gap: ${formatCurrency(coverageData.team.gap || 0)}, ${coverageData.team.daysRemaining} days remaining`,
             confidence: 0.9,
             suggested_value: null,
             current_value: targetCoverage,
@@ -3070,7 +3071,7 @@ const gatherDealConcentrationRisk: ToolDefinition = {
           path: 'thresholds.risk_concentration',
           type: 'alert',
           message: `High risk concentration: ${whaleDeals.length} whale deals (>20% of quota) represent ${Math.round(whaleConcentration)}% of forecast. Top 3 deals: ${Math.round(top3Concentration)}% of forecast.`,
-          evidence: `Whale deals: ${whaleDeals.map(d => `${d.name} ($${Math.round(d.amount/1000)}K)`).slice(0, 3).join(', ')}`,
+          evidence: `Whale deals: ${whaleDeals.map(d => `${d.name} (${formatCurrency(d.amount)})`).slice(0, 3).join(', ')}`,
           confidence: 0.9,
           suggested_value: null,
           current_value: null,
@@ -3232,7 +3233,7 @@ const waterfallDeltasTool: ToolDefinition = {
           path: 'pipelines[0].stages',
           type: 'alert',
           message: `"${biggestLeakage.stage}" has ${biggestLeakage.fellOut} deals falling out (highest leakage stage). Consider if this stage needs process improvement.`,
-          evidence: `$${Math.round((biggestLeakage.fellOutValue || 0) / 1000)}K in value fell out of this stage`,
+          evidence: `${formatCurrency(biggestLeakage.fellOutValue || 0)} in value fell out of this stage`,
           confidence: 0.75,
           suggested_value: null,
           current_value: null,

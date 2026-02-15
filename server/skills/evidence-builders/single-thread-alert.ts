@@ -76,7 +76,7 @@ export async function buildSingleThreadAlertEvidence(
     const totalValue = singleThreaded.reduce((s, d) => s + (d.amount || 0), 0);
     eb.addClaim({
       claim_id: 'single_threaded_deals',
-      claim_text: `${singleThreaded.length} deals worth $${Math.round(totalValue / 1000)}K are single-threaded (≤1 contact)`,
+      claim_text: `${singleThreaded.length} deals worth ${formatCurrency(totalValue)} are single-threaded (≤1 contact)`,
       entity_type: 'deal',
       entity_ids: singleThreaded.map((d: any) => d.dealId || d.id || ''),
       metric_name: 'contact_count',

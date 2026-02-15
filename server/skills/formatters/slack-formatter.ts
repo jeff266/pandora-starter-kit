@@ -6,6 +6,7 @@
  */
 
 import type { SkillResult, SkillDefinition, SkillEvidence, EvidenceClaim, EvaluatedRecord } from '../types.js';
+import { formatCurrency } from '../../utils/format-currency.js';
 
 interface SlackBlock {
   type: string;
@@ -702,7 +703,7 @@ function formatClaimEntityLines(claim: EvidenceClaim, records: EvaluatedRecord[]
       if (!record) return null;
 
       const amount = record.fields?.amount
-        ? `$${Math.round(Number(record.fields.amount) / 1000)}K` : '';
+        ? formatCurrency(Number(record.fields.amount)) : '';
       const owner = record.owner_name || '';
       const metricValue = claim.metric_values?.[idx];
       const metricLabel = claim.metric_name?.replace(/_/g, ' ') || '';

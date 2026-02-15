@@ -106,7 +106,7 @@ function extractPipelineHygiene(runId: string, workspaceId: string, result: Reco
         else severity = 'notable';
       }
 
-      const amountStr = amount ? ` ($${Math.round(amount / 1000)}K)` : '';
+      const amountStr = amount ? ` (${formatCurrency(amount)})` : '';
       findings.push(makeFinding(
         workspaceId, runId, skillId, severity, 'stale_deal',
         `${dealName}${amountStr} has had no activity for ${days} days`,
@@ -177,7 +177,7 @@ function extractSingleThreadAlert(runId: string, workspaceId: string, result: Re
       const classKey = dealName.toLowerCase();
       const enrichment = classMap.get(classKey) || classMap.get((deal.dealId || '').toLowerCase()) || {};
 
-      const amountStr = amount ? ` ($${Math.round(amount / 1000)}K)` : '';
+      const amountStr = amount ? ` (${formatCurrency(amount)})` : '';
       let msg = `${dealName}${amountStr} has only ${contactCount} contact${contactCount === 1 ? '' : 's'}`;
       if (enrichment.likely_cause) msg += ` — ${enrichment.likely_cause}`;
 
@@ -315,7 +315,7 @@ function extractForecastRollup(runId: string, workspaceId: string, result: Recor
       const amount = deal.amount || 0;
       const pctOfPipeline = deal.pct_of_pipeline || deal.percentOfPipeline || 0;
 
-      const amountStr = amount ? ` ($${Math.round(amount / 1000)}K)` : '';
+      const amountStr = amount ? ` (${formatCurrency(amount)})` : '';
       findings.push(makeFinding(
         workspaceId, runId, skillId, pctOfPipeline > 30 ? 'act' : 'watch', 'forecast_risk',
         `${dealName}${amountStr} represents ${pctOfPipeline}% of pipeline — concentration risk`,
@@ -351,7 +351,7 @@ function extractPipelineCoverage(runId: string, workspaceId: string, result: Rec
       else severity = 'notable';
 
       const coverageStr = typeof coverage === 'number' ? `${coverage.toFixed(1)}x` : String(coverage);
-      const pipelineStr = pipeline ? ` ($${Math.round(pipeline / 1000)}K pipeline)` : '';
+      const pipelineStr = pipeline ? ` (${formatCurrency(pipeline)} pipeline)` : '';
       findings.push(makeFinding(
         workspaceId, runId, skillId, severity, 'coverage_gap',
         `${name} has ${coverageStr} coverage${pipelineStr}`,
@@ -384,7 +384,7 @@ function extractPipelineCoverage(runId: string, workspaceId: string, result: Rec
 
       findings.push(makeFinding(
         workspaceId, runId, skillId, severity, 'coverage_gap',
-        `${name} has ${coverage.toFixed(1)}x coverage ($${Math.round(pipeline / 1000)}K pipeline)`,
+        `${name} has ${coverage.toFixed(1)}x coverage (${formatCurrency(pipeline)} pipeline)`,
         {
           owner_email: email,
           metadata: { coverage, pipeline, quota, deal_count: rep.dealCount, rep_name: name },
@@ -462,7 +462,7 @@ function extractDealRiskReview(runId: string, workspaceId: string, result: Recor
     else if (riskScore >= 40 || (Array.isArray(riskFactors) && riskFactors.length > 0)) severity = 'notable';
     else continue;
 
-    const amountStr = amount ? ` ($${Math.round(amount / 1000)}K)` : '';
+    const amountStr = amount ? ` (${formatCurrency(amount)})` : '';
     let msg = `${dealName}${amountStr} — risk score ${riskScore}`;
     if (Array.isArray(riskFactors) && riskFactors.length > 0) {
       const factorStrs = riskFactors.slice(0, 3).map((f: any) => typeof f === 'string' ? f : f.factor || f.name || '');

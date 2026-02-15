@@ -127,7 +127,7 @@ export async function buildPipelineHygieneEvidence(
   if ((staleSummary.total || 0) > 0) {
     eb.addClaim({
       claim_id: 'stale_deals',
-      claim_text: `${staleSummary.total} deals worth $${Math.round((staleSummary.totalValue || 0) / 1000)}K are stale (${staleThreshold}+ days, zero activity)`,
+      claim_text: `${staleSummary.total} deals worth ${formatCurrency(staleSummary.totalValue || 0)} are stale (${staleThreshold}+ days, zero activity)`,
       entity_type: 'deal',
       entity_ids: staleDeals.map((d: any) => d.dealId || d.id || ''),
       metric_name: 'days_since_activity',
@@ -141,7 +141,7 @@ export async function buildPipelineHygieneEvidence(
   if ((closingSummary.total || 0) > 0) {
     eb.addClaim({
       claim_id: 'closing_soon',
-      claim_text: `${closingSummary.total} deals worth $${Math.round((closingSummary.totalValue || 0) / 1000)}K closing within 30 days`,
+      claim_text: `${closingSummary.total} deals worth ${formatCurrency(closingSummary.totalValue || 0)} closing within 30 days`,
       entity_type: 'deal',
       entity_ids: closingDeals.map((d: any) => d.dealId || d.id || ''),
       metric_name: 'days_to_close',
