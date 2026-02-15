@@ -1,0 +1,34 @@
+Optimize server startup sequence for faster boot times
+Our server initialization is fully sequential — every step waits for the previous one to finish, even when there are no dependencies between them. This causes slow restarts and timeouts. Here's what I need:
+1. Parallelize independent registration steps
+After database connection and migrations complete, run these concurrently with Promise.all:
+
+Adapter registration (5 adapters)
+Skill registration (18 skills)
+Agent registration (6 agents)
+Template seeding (5 workflow templates)
+
+Then after all of those resolve, start the dependent services in order:
+
+Job queue
+Cron schedulers (skill + agent)
+Workflow engine + monitor
+
+2. Add a readiness probe endpoint
+Start the Express server listening on port 3001 IMMEDIATELY — before any initialization. Add two health endpoints:
+
+GET /health/alive — returns 200 as soon as the process is up
+GET /health/ready — returns 503 during initialization, 200 once all registration is complete and the server is fully ready to handle requests
+
+Use an internal isReady flag that flips to true after all init steps complete.
+3. Skip template seeding if already current
+The TemplateSeed step runs 5 upserts on every single restart. Add a version check — store a template_seed_version in the database (or a simple hash of template definitions). Only run the seed if the version has changed. Log [TemplateSeed] Templates up to date, skipping when skipped.
+4. Skip migrations that are already complete
+The bowtie→funnel migration checks all workspaces on every boot. Once all workspaces have been migrated, store a flag (e.g., migration_bowtie_funnel_complete in a settings table or env var) and skip the scan entirely on subsequent restarts. Log [Migration] Already complete, skipping when skipped.
+5. Add startup timing logs
+Add a timer that logs total initialization time:
+[server] Pandora v0.1.0 ready in 1847ms (db: 892ms, registration: 634ms, schedulers: 321ms)
+Break it into phases so we can see where time is spent and track improvements.
+Do not change any registration logic, skill definitions, adapter behavior, or cron schedules. This is purely a startup sequencing optimization.
+
+That should give Replit enough specificity to execute without touching anything it shouldn't. The last line is important — without it, Replit sometimes "helpfully" refactors things you didn't ask for. Opus 4.6Extended

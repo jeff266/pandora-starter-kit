@@ -5,11 +5,36 @@ import { sendMagicLink } from '../services/email.js';
 
 const router = Router();
 
+const loginAttempts = new Map<string, { count: number; resetAt: number }>();
+const LOGIN_RATE_LIMIT = 5;
+const LOGIN_RATE_WINDOW_MS = 15 * 60 * 1000;
+
+function checkRateLimit(key: string): boolean {
+  const now = Date.now();
+  const entry = loginAttempts.get(key);
+  if (!entry || now > entry.resetAt) {
+    loginAttempts.set(key, { count: 1, resetAt: now + LOGIN_RATE_WINDOW_MS });
+    return true;
+  }
+  if (entry.count >= LOGIN_RATE_LIMIT) return false;
+  entry.count++;
+  return true;
+}
+
+function hashToken(token: string): string {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
 router.post('/login', async (req: Request, res: Response) => {
   try {
     const email = (req.body.email || '').trim().toLowerCase();
     if (!email || !email.includes('@')) {
       res.status(400).json({ error: 'Valid email is required' });
+      return;
+    }
+
+    if (!checkRateLimit(email)) {
+      res.status(429).json({ error: 'Too many login attempts. Please try again later.' });
       return;
     }
 
@@ -34,11 +59,12 @@ router.post('/login', async (req: Request, res: Response) => {
     }
 
     const token = crypto.randomBytes(32).toString('hex');
+    const tokenHash = hashToken(token);
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
 
     await query(
       'INSERT INTO magic_links (email, token, expires_at) VALUES ($1, $2, $3)',
-      [email, token, expiresAt]
+      [email, tokenHash, expiresAt]
     );
 
     await sendMagicLink(email, token, isNewUser);
@@ -58,9 +84,17 @@ router.get('/verify', async (req: Request, res: Response) => {
       return;
     }
 
+    const ip = req.ip || 'unknown';
+    if (!checkRateLimit(`verify:${ip}`)) {
+      res.status(429).json({ error: 'Too many verification attempts. Please try again later.' });
+      return;
+    }
+
+    const tokenHash = hashToken(token);
+
     const linkResult = await query<{ id: string; email: string; used_at: Date | null; expires_at: Date }>(
       'SELECT id, email, used_at, expires_at FROM magic_links WHERE token = $1',
-      [token]
+      [tokenHash]
     );
 
     if (linkResult.rows.length === 0) {
