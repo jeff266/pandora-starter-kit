@@ -169,8 +169,15 @@ agentsWorkspaceRouter.get('/:workspaceId/agents/:agentId/runs/:runId/export', as
     }
 
     const row = result.rows[0];
-    const skillResults = typeof row.skill_results === 'string' ? JSON.parse(row.skill_results) : row.skill_results;
-    const skillEvidenceRaw = typeof row.skill_evidence === 'string' ? JSON.parse(row.skill_evidence) : row.skill_evidence;
+
+    let skillResults: any;
+    let skillEvidenceRaw: any;
+    try {
+      skillResults = typeof row.skill_results === 'string' ? JSON.parse(row.skill_results) : row.skill_results;
+      skillEvidenceRaw = typeof row.skill_evidence === 'string' ? JSON.parse(row.skill_evidence) : row.skill_evidence;
+    } catch {
+      return res.status(422).json({ error: 'Agent run data is malformed' });
+    }
 
     if (!skillEvidenceRaw || Object.keys(skillEvidenceRaw).length === 0) {
       return res.status(404).json({ error: 'No evidence data available for this agent run' });
@@ -206,7 +213,9 @@ agentsWorkspaceRouter.get('/:workspaceId/agents/:agentId/runs/:runId/export', as
       skillEvidence,
     });
 
-    const filename = `${agentId}-${new Date(row.started_at).toISOString().split('T')[0]}.xlsx`;
+    const safeAgentId = agentId.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const dateStr = new Date(row.started_at).toISOString().split('T')[0];
+    const filename = `pandora-${safeAgentId}-${dateStr}.xlsx`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('Cache-Control', 'no-cache');

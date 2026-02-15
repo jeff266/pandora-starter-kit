@@ -322,7 +322,13 @@ router.get('/:workspaceId/skills/:skillId/runs/:runId/export', async (req, res) 
     }
 
     const row = result.rows[0];
-    const outputData = typeof row.output === 'string' ? JSON.parse(row.output) : row.output;
+
+    let outputData: any;
+    try {
+      outputData = typeof row.output === 'string' ? JSON.parse(row.output) : row.output;
+    } catch {
+      return res.status(422).json({ error: 'Skill run output is malformed' });
+    }
 
     if (!outputData?.evidence) {
       return res.status(404).json({ error: 'No evidence data available for this run' });
@@ -340,7 +346,9 @@ router.get('/:workspaceId/skills/:skillId/runs/:runId/export', async (req, res) 
       evidenceSchema: skill?.evidenceSchema,
     });
 
-    const filename = `${skillId}-${new Date(row.created_at).toISOString().split('T')[0]}.xlsx`;
+    const safeSkillId = skillId.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const dateStr = new Date(row.created_at).toISOString().split('T')[0];
+    const filename = `pandora-${safeSkillId}-${dateStr}.xlsx`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('Cache-Control', 'no-cache');

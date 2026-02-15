@@ -1,6 +1,9 @@
 import express from "express";
 import dotenv from "dotenv";
+import cors from "cors";
+import rateLimit from "express-rate-limit";
 import { verifyConnection } from "./db.js";
+import { requireWorkspaceAccess } from "./middleware/auth.js";
 import healthRouter, { setAPHealthChecker } from "./routes/health.js";
 import workspacesRouter from "./routes/workspaces.js";
 import connectorsRouter from "./routes/connectors.js";
@@ -58,7 +61,65 @@ dotenv.config();
 const app = express();
 const PORT = parseInt(process.env.PORT || "3000", 10);
 
-app.use(express.json());
+const allowedOrigins = [
+  process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : '',
+  process.env.REPLIT_DOMAINS ? `https://${process.env.REPLIT_DOMAINS.split(',')[0]}` : '',
+  process.env.PANDORA_CUSTOM_DOMAIN || '',
+].filter(Boolean);
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.some(o => origin.startsWith(o))) {
+      callback(null, true);
+    } else {
+      callback(null, false);
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
+
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
+
+const globalLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later' },
+});
+app.use('/api/', globalLimiter);
+
+const authLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many auth attempts, please try again later' },
+});
+app.use('/api/auth/', authLimiter);
+
+const heavyOpLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: { ip: false, trustProxy: false },
+  keyGenerator: (req) => {
+    return req.params?.workspaceId || req.ip || 'unknown';
+  },
+  message: { error: 'Too many requests for this operation, please try again later' },
+});
+
+app.use(express.json({ limit: '10mb' }));
 
 app.get("/", (_req, res) => {
   res.json({
@@ -70,40 +131,59 @@ app.get("/", (_req, res) => {
 
 app.use("/health", healthRouter);
 app.use("/api/workspaces", workspacesRouter);
-app.use("/api/workspaces", hubspotRouter);
-app.use("/api/workspaces", gongRouter);
-app.use("/api/workspaces", firefliesRouter);
-app.use("/api/workspaces", connectorsRouter);
-app.use("/api/workspaces", actionsRouter);
-app.use("/api/workspaces", contextRouter);
-app.use("/api/workspaces", syncRouter);
-app.use("/api/workspaces", dataRouter);
-app.use("/api/workspaces", slackSettingsRouter);
-app.use("/api/workspaces", skillsRouter);
+
+const workspaceApiRouter = express.Router();
+workspaceApiRouter.use(requireWorkspaceAccess);
+
+workspaceApiRouter.use((req, _res, next) => {
+  const path = req.path;
+  if (
+    path.includes('/sync') ||
+    path.includes('/export') ||
+    path.endsWith('/run-all')
+  ) {
+    return heavyOpLimiter(req, _res, next);
+  }
+  next();
+});
+
+workspaceApiRouter.use(hubspotRouter);
+workspaceApiRouter.use(gongRouter);
+workspaceApiRouter.use(firefliesRouter);
+workspaceApiRouter.use(connectorsRouter);
+workspaceApiRouter.use(actionsRouter);
+workspaceApiRouter.use(contextRouter);
+workspaceApiRouter.use(syncRouter);
+workspaceApiRouter.use(dataRouter);
+workspaceApiRouter.use(slackSettingsRouter);
+workspaceApiRouter.use(skillsRouter);
+workspaceApiRouter.use(llmConfigRouter);
+workspaceApiRouter.use(salesforceSyncRouter);
+workspaceApiRouter.use(webhookConfigRouter);
+workspaceApiRouter.use(salesRosterRouter);
+workspaceApiRouter.use(linkerRouter);
+workspaceApiRouter.use(stageHistoryRouter);
+workspaceApiRouter.use(scoresRouter);
+workspaceApiRouter.use(icpRouter);
+workspaceApiRouter.use(configRouter);
+workspaceApiRouter.use(importRouter);
+workspaceApiRouter.use(enrichmentRouter);
+workspaceApiRouter.use(tokenUsageRouter);
+workspaceApiRouter.use(workflowsRouter);
+workspaceApiRouter.use(projectUpdatesRouter);
+workspaceApiRouter.use(funnelRouter);
+workspaceApiRouter.use(workspaceConfigRouter);
+workspaceApiRouter.use(agentsWorkspaceRouter);
+app.use("/api/workspaces", workspaceApiRouter);
+
 app.use("/api", skillsRouter);
-app.use("/api/workspaces", llmConfigRouter);
 app.use("/api/webhooks", webhooksRouter);
 app.use("/api/auth/salesforce", salesforceAuthRouter);
-app.use("/api/workspaces", salesforceSyncRouter);
-app.use("/api/workspaces", webhookConfigRouter);
-app.use("/api/workspaces", salesRosterRouter);
-app.use("/api/workspaces", linkerRouter);
 app.use("/api", quotasRouter);
-app.use("/api/workspaces", stageHistoryRouter);
-app.use("/api/workspaces", scoresRouter);
-app.use("/api/workspaces", icpRouter);
-app.use("/api/workspaces", configRouter);
-app.use("/api/workspaces", importRouter);
-app.use(dealInsightsRouter);
-app.use("/api/workspaces", enrichmentRouter);
-app.use("/api/workspaces", tokenUsageRouter);
-app.use("/api/workspaces", workflowsRouter);
-app.use("/api/workspaces", projectUpdatesRouter);
 app.use("/api/funnel", funnelRouter);
-app.use("/api/workspaces", funnelRouter);
-app.use("/api/workspaces", workspaceConfigRouter);
 app.use("/api", agentsGlobalRouter);
-app.use("/api/workspaces", agentsWorkspaceRouter);
+
+app.use(dealInsightsRouter);
 
 function registerAdapters(): void {
   const registry = getAdapterRegistry();
