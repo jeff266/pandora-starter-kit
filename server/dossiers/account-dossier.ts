@@ -1,4 +1,5 @@
 import { query } from '../db.js';
+import { getBatchDealRiskScores } from '../tools/deal-risk-score.js';
 
 export interface AccountDossier {
   account: {
@@ -9,6 +10,7 @@ export interface AccountDossier {
     employee_count: number | null;
     annual_revenue: number | null;
     owner_email: string | null;
+    created_at: string | null;
   };
   deals: Array<{
     id: string;
@@ -18,14 +20,31 @@ export interface AccountDossier {
     is_open: boolean;
     close_date: string | null;
     owner_email: string;
+    health_status: 'healthy' | 'at-risk' | 'critical';
   }>;
+  deal_summary: {
+    open_count: number;
+    open_pipeline: number;
+    won_count: number;
+    won_revenue: number;
+    lost_count: number;
+    avg_deal_size: number;
+  };
   contacts: Array<{
     id: string;
     name: string;
     email: string;
     title: string | null;
     role: string | null;
+    engagement_status: 'active' | 'dark' | 'unknown';
   }>;
+  contact_map: {
+    total: number;
+    by_seniority: Record<string, number>;
+    by_role: Record<string, number>;
+    engaged: number;
+    dark: number;
+  };
   conversations: Array<{
     id: string;
     title: string;
@@ -52,12 +71,24 @@ export interface AccountDossier {
     category: string;
     message: string;
     deal_name: string | null;
+    found_at: string | null;
   }>;
+  relationship_health: {
+    engagement_trend: 'increasing' | 'stable' | 'declining' | 'unknown';
+    coverage_gaps: string[];
+    overall: 'strong' | 'moderate' | 'weak' | 'unknown';
+  };
+  data_availability: {
+    has_deals: boolean;
+    has_contacts: boolean;
+    has_conversations: boolean;
+    has_findings: boolean;
+  };
 }
 
 async function getAccountById(workspaceId: string, accountId: string) {
   const result = await query(
-    `SELECT id, name, domain, industry, employee_count, annual_revenue, owner
+    `SELECT id, name, domain, industry, employee_count, annual_revenue, owner, created_at
      FROM accounts
      WHERE id = $1 AND workspace_id = $2`,
     [accountId, workspaceId]
@@ -104,14 +135,16 @@ async function getConversationsForAccount(workspaceId: string, accountId: string
   return result.rows;
 }
 
-async function getFindingsForAccount(workspaceId: string, accountId: string) {
+async function getFindingsForAccount(workspaceId: string, accountId: string, dealIds: string[]) {
   const result = await query(
-    `SELECT f.id, f.severity, f.category, f.message, d.name as deal_name
+    `SELECT f.id, f.severity, f.category, f.message, f.found_at, d.name as deal_name
      FROM findings f
      LEFT JOIN deals d ON f.deal_id = d.id AND d.workspace_id = $1
-     WHERE f.workspace_id = $1 AND f.account_id = $2 AND f.resolved_at IS NULL
+     WHERE f.workspace_id = $1
+       AND (f.account_id = $2 ${dealIds.length > 0 ? 'OR f.deal_id = ANY($3)' : ''})
+       AND f.resolved_at IS NULL
      ORDER BY CASE f.severity WHEN 'act' THEN 1 WHEN 'watch' THEN 2 WHEN 'notable' THEN 3 WHEN 'info' THEN 4 ELSE 5 END`,
-    [workspaceId, accountId]
+    dealIds.length > 0 ? [workspaceId, accountId, dealIds] : [workspaceId, accountId]
   );
   return result.rows;
 }
@@ -157,20 +190,116 @@ function computeRelationshipSummary(
   };
 }
 
+function classifySeniority(title: string | null): string {
+  if (!title) return 'unknown';
+  const t = title.toLowerCase();
+  if (/\b(ceo|cfo|cto|coo|cro|cmo|chief|president|founder|partner)\b/.test(t)) return 'executive';
+  if (/\b(vp|vice president|svp|evp|head of|director)\b/.test(t)) return 'senior_leader';
+  if (/\b(manager|lead|senior|principal|supervisor)\b/.test(t)) return 'manager';
+  if (/\b(analyst|specialist|associate|coordinator|engineer|developer|rep|representative)\b/.test(t)) return 'individual_contributor';
+  return 'other';
+}
+
+function computeEngagementTrend(conversations: any[]): 'increasing' | 'stable' | 'declining' | 'unknown' {
+  if (conversations.length < 2) return 'unknown';
+  const now = Date.now();
+  const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+  const recent = conversations.filter((cv: any) => {
+    const d = cv.call_date ? new Date(cv.call_date).getTime() : 0;
+    return d > 0 && (now - d) < thirtyDaysMs;
+  }).length;
+  const older = conversations.filter((cv: any) => {
+    const d = cv.call_date ? new Date(cv.call_date).getTime() : 0;
+    return d > 0 && (now - d) >= thirtyDaysMs && (now - d) < 2 * thirtyDaysMs;
+  }).length;
+  if (recent > older + 1) return 'increasing';
+  if (older > recent + 1) return 'declining';
+  return 'stable';
+}
+
 export async function assembleAccountDossier(workspaceId: string, accountId: string): Promise<AccountDossier> {
-  const [account, deals, contacts, conversations, findings] = await Promise.all([
+  const [account, deals, contacts, conversations] = await Promise.all([
     getAccountById(workspaceId, accountId),
     getDealsForAccount(workspaceId, accountId),
     getContactsForAccount(workspaceId, accountId),
     getConversationsForAccount(workspaceId, accountId),
-    getFindingsForAccount(workspaceId, accountId),
   ]);
 
   if (!account) {
     throw new Error(`Account ${accountId} not found in workspace ${workspaceId}`);
   }
 
+  const dealIds = deals.map((d: any) => d.id);
+  const openDeals = deals.filter((d: any) => !['closed_won', 'closed_lost'].includes(d.stage_normalized));
+  const openDealIds = openDeals.map((d: any) => d.id);
+
+  const [findings, riskScores] = await Promise.all([
+    getFindingsForAccount(workspaceId, accountId, dealIds),
+    openDealIds.length > 0
+      ? getBatchDealRiskScores(workspaceId, openDealIds).catch(() => [])
+      : Promise.resolve([]),
+  ]);
+
+  const riskMap = new Map<string, { score: number; grade: string }>();
+  for (const rs of riskScores) {
+    riskMap.set(rs.deal_id, { score: rs.score, grade: rs.grade });
+  }
+
   const relationship_summary = computeRelationshipSummary(deals, conversations, contacts);
+
+  const participantEmails = new Set<string>();
+  for (const cv of conversations) {
+    if (Array.isArray(cv.participants)) {
+      for (const p of cv.participants) {
+        if (p && p.includes('@')) participantEmails.add(p.toLowerCase());
+      }
+    }
+  }
+
+  const mappedContacts = contacts.map((c: any) => {
+    const email = c.email || '';
+    const isEngaged = email && participantEmails.has(email.toLowerCase());
+    return {
+      id: c.id,
+      name: (c.name || '').trim(),
+      email,
+      title: c.title ?? null,
+      role: c.role ?? null,
+      engagement_status: (isEngaged ? 'active' : email ? 'dark' : 'unknown') as 'active' | 'dark' | 'unknown',
+    };
+  });
+
+  const by_seniority: Record<string, number> = {};
+  const by_role: Record<string, number> = {};
+  for (const c of mappedContacts) {
+    const seniority = classifySeniority(c.title);
+    by_seniority[seniority] = (by_seniority[seniority] || 0) + 1;
+    if (c.role) {
+      by_role[c.role] = (by_role[c.role] || 0) + 1;
+    }
+  }
+  const engaged = mappedContacts.filter(c => c.engagement_status === 'active').length;
+  const dark = mappedContacts.filter(c => c.engagement_status === 'dark').length;
+
+  const coverage_gaps: string[] = [];
+  if (mappedContacts.length === 0) coverage_gaps.push('No contacts linked');
+  else if (!by_seniority['executive'] && !by_seniority['senior_leader']) coverage_gaps.push('No executive or senior leader contacts');
+  if (dark > 0 && dark >= mappedContacts.length * 0.5) coverage_gaps.push(`${dark} of ${mappedContacts.length} contacts have no recent calls`);
+  if (conversations.length === 0) coverage_gaps.push('No conversations linked');
+
+  const engagement_trend = computeEngagementTrend(conversations);
+  const hasActFindings = findings.some((f: any) => f.severity === 'act');
+  const hasWatchFindings = findings.some((f: any) => f.severity === 'watch');
+  let overall: 'strong' | 'moderate' | 'weak' | 'unknown' = 'unknown';
+  if (conversations.length > 0 || mappedContacts.length > 0) {
+    if (hasActFindings || (engagement_trend === 'declining' && dark > engaged)) overall = 'weak';
+    else if (hasWatchFindings || engagement_trend === 'declining' || dark > engaged) overall = 'moderate';
+    else overall = 'strong';
+  }
+
+  const wonDeals = deals.filter((d: any) => d.stage_normalized === 'closed_won');
+  const lostDeals = deals.filter((d: any) => d.stage_normalized === 'closed_lost');
+  const allAmounts = deals.filter((d: any) => d.amount > 0).map((d: any) => d.amount);
 
   return {
     account: {
@@ -181,23 +310,43 @@ export async function assembleAccountDossier(workspaceId: string, accountId: str
       employee_count: account.employee_count ?? null,
       annual_revenue: account.annual_revenue ?? null,
       owner_email: account.owner ?? null,
+      created_at: account.created_at ? new Date(account.created_at).toISOString() : null,
     },
-    deals: deals.map((d: any) => ({
-      id: d.id,
-      name: d.name || '',
-      amount: d.amount || 0,
-      stage: d.stage || '',
-      is_open: !['closed_won', 'closed_lost'].includes(d.stage_normalized),
-      close_date: d.close_date ? new Date(d.close_date).toISOString() : null,
-      owner_email: d.owner || '',
-    })),
-    contacts: contacts.map((c: any) => ({
-      id: c.id,
-      name: (c.name || '').trim(),
-      email: c.email || '',
-      title: c.title ?? null,
-      role: c.role ?? null,
-    })),
+    deals: deals.map((d: any) => {
+      const isOpen = !['closed_won', 'closed_lost'].includes(d.stage_normalized);
+      const risk = riskMap.get(d.id);
+      let health_status: 'healthy' | 'at-risk' | 'critical' = 'healthy';
+      if (isOpen && risk) {
+        if (risk.score < 50) health_status = 'critical';
+        else if (risk.score < 75) health_status = 'at-risk';
+      }
+      return {
+        id: d.id,
+        name: d.name || '',
+        amount: d.amount || 0,
+        stage: d.stage || '',
+        is_open: isOpen,
+        close_date: d.close_date ? new Date(d.close_date).toISOString() : null,
+        owner_email: d.owner || '',
+        health_status,
+      };
+    }),
+    deal_summary: {
+      open_count: openDeals.length,
+      open_pipeline: openDeals.reduce((s: number, d: any) => s + (d.amount || 0), 0),
+      won_count: wonDeals.length,
+      won_revenue: wonDeals.reduce((s: number, d: any) => s + (d.amount || 0), 0),
+      lost_count: lostDeals.length,
+      avg_deal_size: allAmounts.length > 0 ? Math.round(allAmounts.reduce((a: number, b: number) => a + b, 0) / allAmounts.length) : 0,
+    },
+    contacts: mappedContacts,
+    contact_map: {
+      total: mappedContacts.length,
+      by_seniority,
+      by_role,
+      engaged,
+      dark,
+    },
     conversations: conversations.map((cv: any) => ({
       id: cv.id,
       title: cv.title || '',
@@ -213,6 +362,18 @@ export async function assembleAccountDossier(workspaceId: string, accountId: str
       category: f.category || '',
       message: f.message || '',
       deal_name: f.deal_name ?? null,
+      found_at: f.found_at ? new Date(f.found_at).toISOString() : null,
     })),
+    relationship_health: {
+      engagement_trend,
+      coverage_gaps,
+      overall,
+    },
+    data_availability: {
+      has_deals: deals.length > 0,
+      has_contacts: contacts.length > 0,
+      has_conversations: conversations.length > 0,
+      has_findings: findings.length > 0,
+    },
   };
 }

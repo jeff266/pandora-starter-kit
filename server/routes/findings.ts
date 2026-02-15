@@ -84,7 +84,7 @@ router.get('/:workspaceId/findings', async (req: Request, res: Response): Promis
     }
 
     if (q.severity) {
-      const severities = (q.severity as string).split(',').map(s => s.trim()).filter(Boolean);
+      const severities = normalizeSeverities(q.severity as string);
       conditions.push(`f.severity = ANY($${paramIdx})`);
       params.push(severities);
       paramIdx++;
@@ -304,6 +304,59 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('[findings] Pipeline snapshot error:', msg);
+    res.status(500).json({ error: msg });
+  }
+});
+
+const SEVERITY_ALIASES: Record<string, string> = {
+  critical: 'act',
+  warning: 'watch',
+};
+
+function normalizeSeverities(input: string): string[] {
+  return input.split(',').map(s => {
+    const trimmed = s.trim().toLowerCase();
+    return SEVERITY_ALIASES[trimmed] || trimmed;
+  }).filter(Boolean);
+}
+
+router.patch('/:workspaceId/findings/:findingId/resolve', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { workspaceId, findingId } = req.params;
+    const { resolution_method } = req.body || {};
+
+    const validMethods = ['user_dismissed', 'action_taken', 'auto_cleared'];
+    const method = validMethods.includes(resolution_method) ? resolution_method : 'user_dismissed';
+
+    const result = await query(
+      `UPDATE findings
+       SET resolved_at = now(), resolution_method = $3
+       WHERE id = $1 AND workspace_id = $2 AND resolved_at IS NULL
+       RETURNING id, resolved_at, resolution_method, severity, category, message, deal_id, skill_id`,
+      [findingId, workspaceId, method]
+    );
+
+    if (result.rows.length === 0) {
+      const exists = await query(
+        'SELECT id, resolved_at FROM findings WHERE id = $1 AND workspace_id = $2',
+        [findingId, workspaceId]
+      );
+      if (exists.rows.length === 0) {
+        res.status(404).json({ error: 'Finding not found' });
+        return;
+      }
+      res.status(409).json({
+        error: 'Finding already resolved',
+        resolved_at: exists.rows[0].resolved_at,
+      });
+      return;
+    }
+
+    console.log(`[findings] Resolved finding ${findingId} via ${method}`);
+    res.json(result.rows[0]);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[findings] Resolve error:', msg);
     res.status(500).json({ error: msg });
   }
 });
