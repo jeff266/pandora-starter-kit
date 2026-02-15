@@ -8,6 +8,7 @@ import { query } from '../db.js';
 import { runScheduledSkills } from '../sync/skill-scheduler.js';
 import { generateWorkbook } from '../delivery/workbook-generator.js';
 import type { SkillResult } from '../skills/types.js';
+import { requireAuth } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -105,12 +106,15 @@ async function handleSkillRun(workspaceId: string, skillId: string, params: any,
   });
 }
 
-router.post('/skills/:skillId/run', async (req, res) => {
+router.post('/skills/:skillId/run', requireAuth, async (req, res) => {
   try {
     const { skillId } = req.params;
     const { workspaceId, params } = req.body || {};
     if (!workspaceId) {
       return res.status(400).json({ error: 'workspaceId is required in request body' });
+    }
+    if (req.workspace && req.workspace.id !== workspaceId) {
+      return res.status(403).json({ error: 'API key does not have access to this workspace' });
     }
     return await handleSkillRun(workspaceId, skillId, params, res);
   } catch (err) {

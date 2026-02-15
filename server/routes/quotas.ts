@@ -15,8 +15,10 @@ import {
   applyQuotas,
   type QuotaUploadPreview,
 } from '../quotas/upload-parser.js';
+import { requireWorkspaceAccess } from '../middleware/auth.js';
 
 const router = Router();
+router.use(requireWorkspaceAccess);
 
 // Configure multer for file uploads
 const upload = multer({

@@ -61,17 +61,28 @@ dotenv.config();
 const app = express();
 const PORT = parseInt(process.env.PORT || "3000", 10);
 
-const allowedOrigins = [
-  process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : '',
-  process.env.REPLIT_DOMAINS ? `https://${process.env.REPLIT_DOMAINS.split(',')[0]}` : '',
-  process.env.PANDORA_CUSTOM_DOMAIN || '',
-].filter(Boolean);
+const allowedOrigins = new Set(
+  [
+    process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : '',
+    ...(process.env.REPLIT_DOMAINS ? process.env.REPLIT_DOMAINS.split(',').map(d => `https://${d.trim()}`) : []),
+    process.env.PANDORA_CUSTOM_DOMAIN || '',
+  ].filter(Boolean)
+);
+
+if (allowedOrigins.size === 0) {
+  console.warn('[cors] No allowed origins configured — API-only mode (no browser CORS requests will be accepted)');
+}
 
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.some(o => origin.startsWith(o))) {
+    if (!origin) {
+      callback(null, true);
+      return;
+    }
+    if (allowedOrigins.has(origin)) {
       callback(null, true);
     } else {
+      console.warn(`[cors] Blocked request from origin: ${origin}`);
       callback(null, false);
     }
   },

@@ -5,6 +5,7 @@ import { query } from '../db.js';
 import { generateWorkbook } from '../delivery/workbook-generator.js';
 import { getSkillRegistry } from '../skills/registry.js';
 import type { AgentDefinition } from '../agents/types.js';
+import { requireAdmin } from '../middleware/auth.js';
 
 const agentsGlobalRouter = Router();
 const agentsWorkspaceRouter = Router();
@@ -35,7 +36,7 @@ agentsGlobalRouter.get('/agents/:agentId', (req: Request, res: Response) => {
   res.json(agent);
 });
 
-agentsGlobalRouter.post('/agents', (req: Request, res: Response) => {
+agentsGlobalRouter.post('/agents', requireAdmin, (req: Request, res: Response) => {
   try {
     const body = req.body as Partial<AgentDefinition>;
     if (!body.id || !body.name || !body.skills || !body.synthesis) {
@@ -65,7 +66,7 @@ agentsGlobalRouter.post('/agents', (req: Request, res: Response) => {
   }
 });
 
-agentsGlobalRouter.put('/agents/:agentId', (req: Request, res: Response) => {
+agentsGlobalRouter.put('/agents/:agentId', requireAdmin, (req: Request, res: Response) => {
   const registry = getAgentRegistry();
   const existing = registry.get(req.params.agentId);
   if (!existing) {
@@ -85,7 +86,7 @@ agentsGlobalRouter.put('/agents/:agentId', (req: Request, res: Response) => {
   res.json({ ok: true, agent: updated });
 });
 
-agentsGlobalRouter.delete('/agents/:agentId', (req: Request, res: Response) => {
+agentsGlobalRouter.delete('/agents/:agentId', requireAdmin, (req: Request, res: Response) => {
   const registry = getAgentRegistry();
   const removed = registry.remove(req.params.agentId);
   if (!removed) {

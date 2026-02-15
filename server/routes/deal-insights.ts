@@ -11,8 +11,10 @@ import { query } from '../db.js';
 import { detectFramework, getFrameworkInsightTypes, getDefaultInsightTypes } from '../analysis/framework-detector.js';
 import { extractInsightsFromConversations } from '../analysis/deal-insights-extractor.js';
 import { createLogger } from '../utils/logger.js';
+import { requireWorkspaceAccess } from '../middleware/auth.js';
 
 const router = express.Router();
+router.use(requireWorkspaceAccess);
 const logger = createLogger('DealInsightsAPI');
 
 // ============================================================================

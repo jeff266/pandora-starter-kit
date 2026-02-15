@@ -9,14 +9,36 @@ function generateApiKey(): string {
   return crypto.randomBytes(32).toString('hex');
 }
 
-router.get('/', requireAdmin, async (_req, res) => {
+router.get('/', requireAdmin, async (req, res) => {
   try {
+    const includeKeys = req.query.include_keys === 'true';
+    const columns = includeKeys
+      ? 'id, name, slug, plan, api_key, created_at, updated_at'
+      : 'id, name, slug, plan, created_at, updated_at';
     const result = await query(
-      'SELECT id, name, slug, plan, created_at, updated_at FROM workspaces ORDER BY created_at DESC'
+      `SELECT ${columns} FROM workspaces ORDER BY created_at DESC`
     );
     res.json({ workspaces: result.rows });
   } catch (err) {
     console.error('[workspaces] Error listing workspaces:', err instanceof Error ? err.message : err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.get('/:workspaceId/api-key', requireAdmin, async (req, res) => {
+  try {
+    const { workspaceId } = req.params;
+    const result = await query(
+      'SELECT id, name, api_key FROM workspaces WHERE id = $1',
+      [workspaceId]
+    );
+    if (result.rows.length === 0) {
+      res.status(404).json({ error: 'Workspace not found' });
+      return;
+    }
+    res.json({ workspace_id: result.rows[0].id, name: result.rows[0].name, api_key: result.rows[0].api_key });
+  } catch (err) {
+    console.error('[workspaces] Error retrieving API key:', err instanceof Error ? err.message : err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
