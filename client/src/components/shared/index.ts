@@ -8,3 +8,4 @@ export { default as EmptyState } from './EmptyState';
 export { default as LoadingState } from './LoadingState';
 export { default as DossierNarrative } from './DossierNarrative';
 export { default as ScopedAnalysis } from './ScopedAnalysis';
+export { default as AnalysisModal } from './AnalysisModal';
