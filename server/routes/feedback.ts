@@ -15,7 +15,7 @@ import {
   checkCategoryDismissals,
   boostConfigConfidence,
 } from '../feedback/dismiss-velocity.js';
-import { getSuggestions } from '../config/config-suggestions.js';
+import { getSuggestions, resolveSuggestion } from '../config/config-suggestions.js';
 
 const router = Router();
 
@@ -255,6 +255,48 @@ router.get('/:workspaceId/learning/summary', async (req: Request, res: Response)
   } catch (err) {
     console.error('[feedback] Error getting learning summary:', err);
     res.status(500).json({ error: 'Failed to get learning summary' });
+  }
+});
+
+router.get('/:workspaceId/config/suggestions', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { workspaceId } = req.params;
+    const status = (req.query.status as string) || 'pending';
+    const suggestions = await getSuggestions(workspaceId, status as any);
+    res.json({ suggestions });
+  } catch (err) {
+    console.error('[feedback] Error getting config suggestions:', err);
+    res.status(500).json({ error: 'Failed to get config suggestions' });
+  }
+});
+
+router.post('/:workspaceId/config/suggestions/:suggestionId/accept', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { workspaceId, suggestionId } = req.params;
+    const ok = await resolveSuggestion(workspaceId, suggestionId, 'accepted');
+    if (!ok) {
+      res.status(404).json({ error: 'Suggestion not found' });
+      return;
+    }
+    res.json({ ok: true, status: 'accepted' });
+  } catch (err) {
+    console.error('[feedback] Error accepting suggestion:', err);
+    res.status(500).json({ error: 'Failed to accept suggestion' });
+  }
+});
+
+router.post('/:workspaceId/config/suggestions/:suggestionId/dismiss', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { workspaceId, suggestionId } = req.params;
+    const ok = await resolveSuggestion(workspaceId, suggestionId, 'dismissed');
+    if (!ok) {
+      res.status(404).json({ error: 'Suggestion not found' });
+      return;
+    }
+    res.json({ ok: true, status: 'dismissed' });
+  } catch (err) {
+    console.error('[feedback] Error dismissing suggestion:', err);
+    res.status(500).json({ error: 'Failed to dismiss suggestion' });
   }
 });
 

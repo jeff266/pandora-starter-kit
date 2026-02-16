@@ -229,7 +229,7 @@ function computeEngagementTrend(conversations: any[]): 'increasing' | 'stable' |
 }
 
 export async function assembleAccountDossier(workspaceId: string, accountId: string): Promise<AccountDossier> {
-  const [account, deals, contacts, conversations, annotations] = await Promise.all([
+  const [account, deals, contacts, conversations, accountAnnotations] = await Promise.all([
     getAccountById(workspaceId, accountId),
     getDealsForAccount(workspaceId, accountId),
     getContactsForAccount(workspaceId, accountId),
@@ -244,6 +244,14 @@ export async function assembleAccountDossier(workspaceId: string, accountId: str
   const dealIds = deals.map((d: any) => d.id);
   const openDeals = deals.filter((d: any) => !['closed_won', 'closed_lost'].includes(d.stage_normalized));
   const openDealIds = openDeals.map((d: any) => d.id);
+
+  const dealAnnotationResults = await Promise.all(
+    dealIds.slice(0, 20).map((did: string) =>
+      getActiveAnnotations(workspaceId, 'deal', did).catch(() => [])
+    )
+  );
+  const dealAnnotations = dealAnnotationResults.flat();
+  const annotations = [...accountAnnotations, ...dealAnnotations];
 
   const [findings, riskScores] = await Promise.all([
     getFindingsForAccount(workspaceId, accountId, dealIds),
