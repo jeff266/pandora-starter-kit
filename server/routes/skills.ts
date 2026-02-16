@@ -446,6 +446,12 @@ async function postSkillToSlack(workspaceId: string, skillId: string, result: Sk
            VALUES ($1, $2, $3, $4, 'skill_report')`,
           [workspaceId, msgRef.channel, msgRef.ts, result.runId]
         ).catch(err => console.error('[skills] Failed to store slack_message:', err));
+        await query(
+          `INSERT INTO thread_anchors (workspace_id, channel_id, message_ts, skill_run_id, report_type)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (channel_id, message_ts) DO NOTHING`,
+          [workspaceId, msgRef.channel, msgRef.ts, result.runId, skillId]
+        ).catch(err => console.error('[skills] Failed to store thread_anchor:', err));
         console.log(`[skills] Posted ${skillId} to Slack via bot API (ts: ${msgRef.ts})`);
       } else {
         console.error(`[skills] Slack bot post failed for ${skillId}:`, msgRef.error);

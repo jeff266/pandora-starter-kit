@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { verifySlackSignature } from '../connectors/slack/signature.js';
 import { query } from '../db.js';
 import { getSlackAppClient } from '../connectors/slack/slack-app-client.js';
-import { classifyThreadReply, classifyDirectQuestion } from '../chat/intent-classifier.js';
+import { classifyThreadReply } from '../chat/intent-classifier.js';
 import {
   handleDrillDown,
   handleAddContext,
@@ -10,10 +10,7 @@ import {
   handleScopeFilter,
   handleAction,
 } from '../chat/reply-handlers.js';
-import {
-  handleDirectQuestion,
-  handleFollowUp,
-} from '../chat/question-handlers.js';
+import { handleConversationTurn } from '../chat/orchestrator.js';
 import {
   getConversationState,
   createConversationState,
@@ -75,30 +72,60 @@ async function resolveWorkspaceFromTeam(teamId: string): Promise<string | null> 
   return wsResult.rows.length > 0 ? wsResult.rows[0].id : null;
 }
 
-async function handleThreadedReply(event: any, teamId: string): Promise<void> {
-  const skillRun = await query<any>(
-    `SELECT sr.run_id, sr.skill_id, sr.workspace_id, sr.result
-     FROM skill_runs sr
-     WHERE sr.slack_message_ts = $1
-     AND sr.slack_channel_id = $2`,
-    [event.thread_ts, event.channel]
-  );
+interface ThreadAnchorRow {
+  workspace_id: string;
+  skill_run_id: string | null;
+  agent_run_id: string | null;
+  report_type: string | null;
+}
 
-  if (skillRun.rows.length === 0) {
+async function lookupThreadAnchor(channelId: string, messageTs: string): Promise<ThreadAnchorRow | null> {
+  const result = await query<ThreadAnchorRow>(
+    `SELECT workspace_id, skill_run_id, agent_run_id, report_type
+     FROM thread_anchors
+     WHERE channel_id = $1 AND message_ts = $2
+     LIMIT 1`,
+    [channelId, messageTs]
+  );
+  if (result.rows.length > 0) return result.rows[0];
+
+  const fallback = await query<any>(
+    `SELECT sr.run_id as skill_run_id, sr.skill_id as report_type, sr.workspace_id
+     FROM skill_runs sr
+     WHERE sr.slack_message_ts = $1 AND sr.slack_channel_id = $2
+     LIMIT 1`,
+    [messageTs, channelId]
+  );
+  if (fallback.rows.length > 0) {
+    return {
+      workspace_id: fallback.rows[0].workspace_id,
+      skill_run_id: fallback.rows[0].skill_run_id,
+      agent_run_id: null,
+      report_type: fallback.rows[0].report_type,
+    };
+  }
+
+  return null;
+}
+
+async function handleThreadedReply(event: any, teamId: string): Promise<void> {
+  const anchor = await lookupThreadAnchor(event.channel, event.thread_ts);
+
+  if (!anchor) {
     const existingState = await findConversationByThread(event.channel, event.thread_ts);
     if (existingState) {
-      const allowed = await checkRateLimit(existingState.workspace_id);
-      if (!allowed) {
-        await sendRateLimitMessage(existingState.workspace_id, event);
-        return;
-      }
-      await handleFollowUp(existingState.workspace_id, {
-        channel: event.channel,
-        thread_ts: event.thread_ts,
-        ts: event.ts,
-        user: event.user,
-        text: event.text || '',
+      const result = await handleConversationTurn({
+        surface: 'slack_thread',
+        workspaceId: existingState.workspace_id,
+        threadId: event.thread_ts,
+        channelId: event.channel,
+        message: event.text || '',
       });
+      const client = getSlackAppClient();
+      await client.postMessage(existingState.workspace_id, event.channel, [{
+        type: 'section',
+        text: { type: 'mrkdwn', text: result.answer },
+      }], { thread_ts: event.thread_ts });
       return;
     }
 
@@ -106,65 +133,97 @@ async function handleThreadedReply(event: any, teamId: string): Promise<void> {
     return;
   }
 
-  const run = skillRun.rows[0];
-  console.log(`[slack-events] Threaded reply on skill run ${run.run_id} (${run.skill_id})`);
+  const workspaceId = anchor.workspace_id;
+  console.log(`[slack-events] Threaded reply on ${anchor.report_type || 'unknown'} (skill: ${anchor.skill_run_id || 'N/A'}, agent: ${anchor.agent_run_id || 'N/A'})`);
 
-  const allowed = await checkRateLimit(run.workspace_id);
-  if (!allowed) {
-    await sendRateLimitMessage(run.workspace_id, event);
-    return;
-  }
-
-  let state = await getConversationState(run.workspace_id, event.channel, event.thread_ts);
-  if (!state) {
-    state = await createConversationState(
-      run.workspace_id, event.channel, event.thread_ts, 'slack', run.run_id
+  let skillRunResult: any = null;
+  if (anchor.skill_run_id) {
+    const runResult = await query<any>(
+      `SELECT run_id, skill_id, result FROM skill_runs WHERE run_id = $1`,
+      [anchor.skill_run_id]
     );
+    if (runResult.rows.length > 0) {
+      skillRunResult = runResult.rows[0];
+    }
   }
 
-  await appendMessage(run.workspace_id, event.channel, event.thread_ts, {
-    role: 'user',
-    content: event.text || '',
-    timestamp: new Date().toISOString(),
-  });
+  if (skillRunResult) {
+    const allowed = await checkRateLimit(workspaceId, 20);
+    if (!allowed) {
+      await sendRateLimitMessage(workspaceId, event);
+      return;
+    }
 
-  const intent = await classifyThreadReply(run.workspace_id, event.text || '', run.skill_id);
-  console.log(`[slack-events] Intent: ${intent.type}`, JSON.stringify(intent));
+    let state = await getConversationState(workspaceId, event.channel, event.thread_ts);
+    if (!state) {
+      state = await createConversationState(
+        workspaceId, event.channel, event.thread_ts, 'slack',
+        anchor.skill_run_id || undefined
+      );
+    }
 
-  const slackEvent = {
-    channel: event.channel,
-    thread_ts: event.thread_ts,
-    ts: event.ts,
-    user: event.user,
-    text: event.text || '',
-  };
+    await appendMessage(workspaceId, event.channel, event.thread_ts, {
+      role: 'user',
+      content: event.text || '',
+      timestamp: new Date().toISOString(),
+    });
 
-  const runRef = {
-    id: run.run_id,
-    run_id: run.run_id,
-    skill_id: run.skill_id,
-    workspace_id: run.workspace_id,
-    result: run.result,
-  };
+    const intent = await classifyThreadReply(workspaceId, event.text || '', skillRunResult.skill_id);
+    console.log(`[slack-events] Intent: ${intent.type}`, JSON.stringify(intent));
 
-  switch (intent.type) {
-    case 'drill_down':
-      await handleDrillDown(runRef, intent, slackEvent);
-      break;
-    case 'scope_filter':
-      await handleScopeFilter(runRef, intent, slackEvent);
-      break;
-    case 'add_context':
-      await handleAddContext(runRef, intent, slackEvent);
-      break;
-    case 'question':
-      await handleQuestion(runRef, slackEvent);
-      break;
-    case 'action':
-      await handleAction(runRef, intent, slackEvent);
-      break;
-    default:
-      await sendHelpMessage(run.workspace_id, event);
+    const slackEvent = {
+      channel: event.channel,
+      thread_ts: event.thread_ts,
+      ts: event.ts,
+      user: event.user,
+      text: event.text || '',
+    };
+
+    const runRef = {
+      id: skillRunResult.run_id,
+      run_id: skillRunResult.run_id,
+      skill_id: skillRunResult.skill_id,
+      workspace_id: workspaceId,
+      result: skillRunResult.result,
+    };
+
+    switch (intent.type) {
+      case 'drill_down':
+        await handleDrillDown(runRef, intent, slackEvent);
+        break;
+      case 'scope_filter':
+        await handleScopeFilter(runRef, intent, slackEvent);
+        break;
+      case 'add_context':
+        await handleAddContext(runRef, intent, slackEvent);
+        break;
+      case 'question':
+        await handleQuestion(runRef, slackEvent);
+        break;
+      case 'action':
+        await handleAction(runRef, intent, slackEvent);
+        break;
+      default:
+        await sendHelpMessage(workspaceId, event);
+    }
+  } else {
+    const result = await handleConversationTurn({
+      surface: 'slack_thread',
+      workspaceId,
+      threadId: event.thread_ts,
+      channelId: event.channel,
+      message: event.text || '',
+      anchor: anchor.agent_run_id ? {
+        agent_run_id: anchor.agent_run_id,
+        report_type: anchor.report_type || undefined,
+      } : undefined,
+    });
+
+    const client = getSlackAppClient();
+    await client.postMessage(workspaceId, event.channel, [{
+      type: 'section',
+      text: { type: 'mrkdwn', text: result.answer },
+    }], { thread_ts: event.thread_ts });
   }
 }
 
@@ -172,12 +231,6 @@ async function handleAppMention(event: any, teamId: string): Promise<void> {
   const workspaceId = await resolveWorkspaceFromTeam(teamId);
   if (!workspaceId) {
     console.warn('[slack-events] Could not resolve workspace for team:', teamId);
-    return;
-  }
-
-  const allowed = await checkRateLimit(workspaceId);
-  if (!allowed) {
-    await sendRateLimitMessage(workspaceId, event);
     return;
   }
 
@@ -194,42 +247,48 @@ async function handleAppMention(event: any, teamId: string): Promise<void> {
   if (event.thread_ts) {
     const existingState = await getConversationState(workspaceId, event.channel, event.thread_ts);
     if (existingState) {
-      await handleFollowUp(workspaceId, {
-        channel: event.channel,
-        thread_ts: event.thread_ts,
-        ts: event.ts,
-        user: event.user,
-        text: question,
+      const result = await handleConversationTurn({
+        surface: 'slack_thread',
+        workspaceId,
+        threadId: event.thread_ts,
+        channelId: event.channel,
+        message: question,
       });
+      const client = getSlackAppClient();
+      await client.postMessage(workspaceId, event.channel, [{
+        type: 'section',
+        text: { type: 'mrkdwn', text: result.answer },
+      }], { thread_ts: event.thread_ts });
       return;
     }
   }
 
-  const repResult = await query<any>(
-    `SELECT DISTINCT owner_email FROM deals
-     WHERE workspace_id = $1 AND status = 'open' AND owner_email IS NOT NULL
-     LIMIT 20`,
-    [workspaceId]
-  );
-  const repNames = repResult.rows.map((r: any) => r.owner_email);
+  const threadTs = event.thread_ts || event.ts;
+  const client = getSlackAppClient();
 
-  const skillIds = [
-    'pipeline-hygiene', 'deal-risk-review', 'pipeline-coverage',
-    'weekly-recap', 'single-thread-alert', 'data-quality-audit',
-    'forecast-rollup', 'rep-scorecard', 'pipeline-waterfall',
-    'bowtie-analysis', 'pipeline-goals',
-  ];
+  const thinking = await client.postMessage(workspaceId, event.channel, [{
+    type: 'context',
+    elements: [{ type: 'mrkdwn', text: `_Thinking..._` }],
+  }], { thread_ts: threadTs });
 
-  const route = await classifyDirectQuestion(workspaceId, question, skillIds, repNames);
-  console.log(`[slack-events] Direct question route: ${route.type}`, JSON.stringify(route));
-
-  await handleDirectQuestion(workspaceId, question, route, {
-    channel: event.channel,
-    thread_ts: event.thread_ts,
-    ts: event.ts,
-    user: event.user,
-    text: question,
+  const result = await handleConversationTurn({
+    surface: 'slack_dm',
+    workspaceId,
+    threadId: threadTs,
+    channelId: event.channel,
+    message: question,
   });
+
+  if (thinking.ts) {
+    await client.updateMessage(workspaceId, {
+      channel: event.channel,
+      ts: thinking.ts,
+      blocks: [{
+        type: 'section',
+        text: { type: 'mrkdwn', text: result.answer },
+      }],
+    });
+  }
 }
 
 async function findConversationByThread(

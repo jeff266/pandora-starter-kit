@@ -242,6 +242,14 @@ async function deliverToSlack(
         channel,
         blocks
       );
+      if (response.ts && response.channel) {
+        query(
+          `INSERT INTO thread_anchors (workspace_id, channel_id, message_ts, agent_run_id, report_type)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (channel_id, message_ts) DO NOTHING`,
+          [workspaceId, response.channel, response.ts, agentRunResult.runId, agentName]
+        ).catch(err => console.error('[channels] Failed to store thread_anchor:', err));
+      }
       return {
         channel: 'slack',
         status: 'success',
