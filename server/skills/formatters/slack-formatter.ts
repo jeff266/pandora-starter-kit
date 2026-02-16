@@ -1543,19 +1543,21 @@ export function buildPerActionButtons(actions: ActionButtonData[], appBaseUrl: s
     const isCRMWrite = ['update_field', 'update_close_date', 're_engage_deal', 'clean_data'].includes(action.action_type);
     const isNotification = ['notify_rep', 'notify_manager'].includes(action.action_type);
 
+    const shortId = action.action_id.slice(0, 8);
+
     if (action.severity === 'critical' || action.severity === 'warning') {
       elements.push({
         type: 'button',
         text: { type: 'plain_text', text: isNotification ? '📨 Send Notification' : '✅ Execute in CRM', emoji: true },
         style: 'primary',
-        action_id: 'pandora_execute_action',
+        action_id: `pandora_execute_action_${shortId}`,
         value: valuePayload,
       });
 
       elements.push({
         type: 'button',
         text: { type: 'plain_text', text: '⏭ Dismiss', emoji: true },
-        action_id: 'pandora_dismiss_action',
+        action_id: `pandora_dismiss_action_${shortId}`,
         value: valuePayload,
       });
     }
@@ -1563,7 +1565,7 @@ export function buildPerActionButtons(actions: ActionButtonData[], appBaseUrl: s
     elements.push({
       type: 'button',
       text: { type: 'plain_text', text: '🔗 View in App', emoji: true },
-      action_id: 'pandora_view_action',
+      action_id: `pandora_view_action_${shortId}`,
       url: `${appBaseUrl}/actions?highlight=${action.action_id}`,
     });
 
@@ -1623,10 +1625,10 @@ export function buildActionButtons(ctx: ActionButtonContext): SlackBlock[] {
     blocks.push({
       type: 'actions',
       block_id: `deals_${ctx.run_id.slice(0, 8)}`,
-      elements: topDeals.map(deal => ({
+      elements: topDeals.map((deal, idx) => ({
         type: 'button',
         text: { type: 'plain_text', text: `🔍 ${deal.name.slice(0, 50)}`, emoji: true },
-        action_id: 'drill_deal',
+        action_id: `drill_deal_${idx}`,
         value: JSON.stringify({
           deal_id: deal.id,
           deal_name: deal.name,

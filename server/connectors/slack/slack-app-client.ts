@@ -208,9 +208,16 @@ export class SlackAppClient {
     options?: SlackPostOptions
   ): Promise<SlackMessageRef> {
     try {
+      const sanitizedBlocks = blocks.map(block => {
+        if (block.type === 'section' && block.text?.text && block.text.text.length > 3000) {
+          return { ...block, text: { ...block.text, text: block.text.text.slice(0, 2990) + '…' } };
+        }
+        return block;
+      });
+
       const payload: any = {
         channel,
-        blocks,
+        blocks: sanitizedBlocks,
         text: 'Pandora update',
         unfurl_links: options?.unfurl_links ?? false,
         unfurl_media: options?.unfurl_media ?? false,
@@ -238,7 +245,7 @@ export class SlackAppClient {
 
       const data = await response.json() as any;
       if (!data.ok) {
-        console.error('[slack-app] chat.postMessage error:', data.error);
+        console.error('[slack-app] chat.postMessage error:', data.error, data.response_metadata?.messages?.slice(0, 3));
         return { ts: '', channel, ok: false, error: data.error };
       }
 

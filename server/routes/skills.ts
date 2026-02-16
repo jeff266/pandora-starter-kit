@@ -414,7 +414,14 @@ async function postSkillToSlack(workspaceId: string, skillId: string, result: Sk
       console.error('[skills] Failed to query actions for Slack buttons:', err);
     }
 
-    const fullBlocks = [...blocks, ...perActionBlocks, ...actionButtons];
+    let fullBlocks = [...blocks, ...perActionBlocks, ...actionButtons];
+    if (fullBlocks.length > 50) {
+      fullBlocks = fullBlocks.slice(0, 49);
+      fullBlocks.push({
+        type: 'context',
+        elements: [{ type: 'mrkdwn', text: '_Message truncated — view full report in Pandora_' }],
+      });
+    }
 
     if (botToken) {
       const channel = await slackAppClient.getChannelForSkill(workspaceId, skillId);

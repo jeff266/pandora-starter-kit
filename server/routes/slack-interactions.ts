@@ -44,26 +44,20 @@ router.post('/', async (req, res) => {
       return;
     }
 
-    switch (action.action_id) {
-      case 'mark_reviewed':
-        await handleMarkReviewed(value, payload);
-        break;
-      case 'snooze_findings':
-        await handleSnooze(value, payload);
-        break;
-      case 'drill_deal':
-        await handleDrillDeal(value, payload);
-        break;
-      case 'pandora_execute_action':
-        await handleExecuteAction(value, payload);
-        break;
-      case 'pandora_dismiss_action':
-        await handleDismissAction(value, payload);
-        break;
-      case 'pandora_view_action':
-        break;
-      default:
-        console.warn(`[slack-interactions] Unknown action: ${action.action_id}`);
+    const actionId = action.action_id;
+    if (actionId === 'mark_reviewed') {
+      await handleMarkReviewed(value, payload);
+    } else if (actionId === 'snooze_findings') {
+      await handleSnooze(value, payload);
+    } else if (actionId === 'drill_deal' || actionId.startsWith('drill_deal_')) {
+      await handleDrillDeal(value, payload);
+    } else if (actionId === 'pandora_execute_action' || actionId.startsWith('pandora_execute_action_')) {
+      await handleExecuteAction(value, payload);
+    } else if (actionId === 'pandora_dismiss_action' || actionId.startsWith('pandora_dismiss_action_')) {
+      await handleDismissAction(value, payload);
+    } else if (actionId === 'pandora_view_action' || actionId.startsWith('pandora_view_action_')) {
+    } else {
+      console.warn(`[slack-interactions] Unknown action: ${actionId}`);
     }
   } catch (err) {
     console.error('[slack-interactions] Error processing action:', err);
