@@ -9,8 +9,9 @@
  * 2. CRM Deal Fields (0.90) — champion__c, economic_buyer__c custom fields
  * 2.5. Conversation Participants (0.65) — contacts on calls
  * 3. Cross-Deal Pattern Match (0.70) — same contact, same role, same account
- * 4. Title-Based Inference (0.50) — CEO→decision_maker, Director→influencer, etc.
+ * 4. Title-Based Inference (0.50-0.70) — Apollo seniority > LinkedIn > CRM title parse
  * 5. Activity-Based Inference (0.40) — meeting patterns, email volume
+ * 6. Apollo Confidence Boost (+0.20) — confirms existing role via enrichment data
  */
 
 import { query } from '../../db.js';
@@ -896,6 +897,67 @@ async function discoverContactsFromAccount(workspaceId: string, dealId?: string,
 }
 
 // ============================================================================
+// Priority 6: Apollo Confidence Boost
+// ============================================================================
+
+/**
+ * Boost confidence for contacts whose existing role is confirmed by Apollo enrichment data.
+ * Seniority preference: Apollo (seniority_verified) > LinkedIn (linkedin_data) > CRM title parse.
+ * When Apollo confirms the same role that was inferred by a lower-confidence method,
+ * boost role_confidence by 0.2 (capped at 0.95).
+ */
+async function boostConfidenceWithApollo(workspaceId: string, dealId?: string): Promise<number> {
+  const dealFilter = dealId ? 'AND dc.deal_id = $2' : '';
+  const params = dealId ? [workspaceId, dealId] : [workspaceId];
+
+  const result = await query<{
+    id: string;
+    buying_role: string;
+    role_confidence: number;
+    role_source: string;
+    seniority_verified: string;
+    department_verified: string;
+    title: string;
+  }>(`
+    SELECT dc.id, dc.buying_role, dc.role_confidence, dc.role_source,
+           dc.seniority_verified, dc.department_verified, c.title
+    FROM deal_contacts dc
+    JOIN contacts c ON dc.contact_id = c.id AND dc.workspace_id = c.workspace_id
+    WHERE dc.workspace_id = $1
+      ${dealFilter}
+      AND dc.buying_role IS NOT NULL
+      AND dc.buying_role != 'unknown'
+      AND dc.seniority_verified IS NOT NULL
+      AND dc.department_verified IS NOT NULL
+      AND dc.role_source != 'enrichment_inference'
+      AND dc.role_confidence < 0.95
+  `, params);
+
+  let boosted = 0;
+
+  for (const row of result.rows) {
+    const apolloInferred = inferRoleFromEnrichment(row.seniority_verified, row.department_verified);
+    if (!apolloInferred) continue;
+
+    if (apolloInferred.role === row.buying_role) {
+      const newConfidence = Math.min(0.95, (row.role_confidence || 0) + 0.2);
+
+      await query(`
+        UPDATE deal_contacts
+        SET role_confidence = $1,
+            role_source = $2,
+            updated_at = NOW()
+        WHERE id = $3
+      `, [newConfidence, `${row.role_source}+apollo_confirmed`, row.id]);
+
+      boosted++;
+    }
+  }
+
+  return boosted;
+}
+
+// ============================================================================
 // Main Resolution Function
 // ============================================================================
 
@@ -937,6 +999,10 @@ export async function resolveContactRoles(
 
   // Priority 5: Activity-based inference
   stats.activityInference = await resolveActivityBasedInference(workspaceId, dealId);
+
+  // Priority 6: Apollo confidence boost — confirm existing roles with enrichment data
+  const apolloBoosted = await boostConfidenceWithApollo(workspaceId, dealId);
+  logger.info(`[Priority 6] Apollo-confirmed ${apolloBoosted} contact roles (+0.2 confidence)`);
 
   // Discovery: Unassociated contacts
   stats.activityDiscovery = await discoverContactsFromActivities(workspaceId, dealId);
