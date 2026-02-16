@@ -185,31 +185,71 @@ router.get('/:workspaceId/findings', async (req: Request, res: Response): Promis
   }
 });
 
+router.get('/:workspaceId/pipeline/pipelines', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { workspaceId } = req.params;
+    const result = await query(
+      `SELECT
+         COALESCE(pipeline, 'Unknown') as name,
+         count(*)::int as deal_count,
+         COALESCE(sum(amount), 0)::float as total_value
+       FROM deals
+       WHERE workspace_id = $1
+         AND stage_normalized NOT IN ('closed_won', 'closed_lost')
+       GROUP BY pipeline
+       ORDER BY sum(amount) DESC NULLS LAST`,
+      [workspaceId]
+    );
+    res.json({ pipelines: result.rows });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[findings] Pipelines list error:', msg);
+    res.status(500).json({ error: msg });
+  }
+});
+
 router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response): Promise<void> => {
   try {
     const { workspaceId } = req.params;
+    const pipelineFilter = req.query.pipeline as string | undefined;
+
+    const params: any[] = [workspaceId];
+    let pipelineClause = '';
+    if (pipelineFilter && pipelineFilter !== 'all') {
+      params.push(pipelineFilter);
+      pipelineClause = ` AND d.pipeline = $${params.length}`;
+    }
 
     const stageResult = await query(
       `SELECT
-         d.stage_normalized as stage,
+         COALESCE(d.stage, d.stage_normalized, 'Unknown') as stage,
+         d.stage_normalized,
          count(*)::int as deal_count,
          COALESCE(sum(d.amount), 0)::float as total_value,
          COALESCE(sum(d.amount * COALESCE(d.probability, 0.5)), 0)::float as weighted_value
        FROM deals d
        WHERE d.workspace_id = $1
          AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
-       GROUP BY d.stage_normalized
-       ORDER BY d.stage_normalized`,
-      [workspaceId]
+         ${pipelineClause}
+       GROUP BY d.stage, d.stage_normalized
+       ORDER BY sum(d.amount) DESC`,
+      params
     );
 
     const total_pipeline = stageResult.rows.reduce((s, r) => s + r.total_value, 0);
     const total_deals = stageResult.rows.reduce((s, r) => s + r.deal_count, 0);
     const weighted_pipeline = stageResult.rows.reduce((s, r) => s + r.weighted_value, 0);
 
+    const findingsParams: any[] = [workspaceId];
+    let findingsPipelineClause = '';
+    if (pipelineFilter && pipelineFilter !== 'all') {
+      findingsParams.push(pipelineFilter);
+      findingsPipelineClause = ` AND d.pipeline = $${findingsParams.length}`;
+    }
+
     const findingsByStage = await query(
       `SELECT
-         d.stage_normalized as stage,
+         COALESCE(d.stage, d.stage_normalized, 'Unknown') as stage,
          f.severity,
          count(*)::int as count
        FROM findings f
@@ -217,8 +257,9 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
        WHERE f.workspace_id = $1
          AND f.resolved_at IS NULL
          AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
-       GROUP BY d.stage_normalized, f.severity`,
-      [workspaceId]
+         ${findingsPipelineClause}
+       GROUP BY d.stage, d.stage_normalized, f.severity`,
+      findingsParams
     );
 
     const stageFindingsMap: Record<string, Record<string, number>> = {};
@@ -229,7 +270,7 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
 
     const topFindingsResult = await query(
       `SELECT
-         d.stage_normalized as stage,
+         COALESCE(d.stage, d.stage_normalized, 'Unknown') as stage,
          f.severity,
          f.category,
          f.message,
@@ -239,10 +280,11 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
        WHERE f.workspace_id = $1
          AND f.resolved_at IS NULL
          AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+         ${findingsPipelineClause}
          AND f.severity IN ('act', 'watch')
        ORDER BY CASE f.severity WHEN 'act' THEN 1 WHEN 'watch' THEN 2 ELSE 3 END, f.found_at DESC
        LIMIT 50`,
-      [workspaceId]
+      findingsParams
     );
 
     const topFindingsByStage: Record<string, Array<{ severity: string; category: string; message: string; deal_id: string }>> = {};
@@ -262,6 +304,7 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
       const sf = stageFindingsMap[row.stage] || {};
       return {
         stage: row.stage,
+        stage_normalized: row.stage_normalized,
         deal_count: row.deal_count,
         total_value: row.total_value,
         weighted_value: row.weighted_value,
@@ -274,6 +317,13 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
       };
     });
 
+    const winRateParams: any[] = [workspaceId];
+    let winRatePipelineClause = '';
+    if (pipelineFilter && pipelineFilter !== 'all') {
+      winRateParams.push(pipelineFilter);
+      winRatePipelineClause = ` AND pipeline = $${winRateParams.length}`;
+    }
+
     const winRateResult = await query(
       `SELECT
          count(*) FILTER (WHERE stage_normalized = 'closed_won' AND close_date >= now() - interval '90 days')::int as won_90,
@@ -281,8 +331,9 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
          count(*) FILTER (WHERE stage_normalized = 'closed_won' AND close_date >= now() - interval '120 days' AND close_date < now() - interval '30 days')::int as won_prev,
          count(*) FILTER (WHERE stage_normalized IN ('closed_won', 'closed_lost') AND close_date >= now() - interval '120 days' AND close_date < now() - interval '30 days')::int as total_closed_prev
        FROM deals
-       WHERE workspace_id = $1`,
-      [workspaceId]
+       WHERE workspace_id = $1
+         ${winRatePipelineClause}`,
+      winRateParams
     );
 
     const wr = winRateResult.rows[0];

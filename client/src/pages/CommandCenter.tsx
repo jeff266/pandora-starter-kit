@@ -44,8 +44,22 @@ export default function CommandCenter() {
   const [findings, setFindings] = useState<Finding[]>([]);
   const [loading, setLoading] = useState({ pipeline: true, summary: true, findings: true });
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [availablePipelines, setAvailablePipelines] = useState<Array<{ name: string; deal_count: number; total_value: number }>>([]);
+  const [selectedPipeline, setSelectedPipeline] = useState<string>(() => {
+    return localStorage.getItem('pandora_selected_pipeline') || 'all';
+  });
 
-  const fetchData = useCallback(async () => {
+  const fetchPipelines = useCallback(async () => {
+    try {
+      const data = await api.get('/pipeline/pipelines');
+      setAvailablePipelines(data.pipelines || []);
+    } catch {}
+  }, []);
+
+  const fetchData = useCallback(async (pipelineParam?: string) => {
+    const pFilter = pipelineParam ?? selectedPipeline;
+    const pipelineQs = pFilter && pFilter !== 'all' ? `?pipeline=${encodeURIComponent(pFilter)}` : '';
+
     const load = async (key: string, fetcher: () => Promise<any>, setter: (d: any) => void) => {
       try {
         const data = await fetcher();
@@ -58,19 +72,27 @@ export default function CommandCenter() {
       }
     };
 
-    load('pipeline', () => api.get('/pipeline/snapshot'), setPipeline);
+    load('pipeline', () => api.get(`/pipeline/snapshot${pipelineQs}`), setPipeline);
     load('summary', () => api.get('/findings/summary'), setSummary);
     load('findings', () => api.get('/findings?status=active&sort=severity&limit=15'), d => {
       const arr = Array.isArray(d) ? d : d.findings || [];
       setFindings(arr);
     });
-  }, []);
+  }, [selectedPipeline]);
+
+  const handlePipelineChange = useCallback((value: string) => {
+    setSelectedPipeline(value);
+    localStorage.setItem('pandora_selected_pipeline', value);
+    setLoading(prev => ({ ...prev, pipeline: true }));
+    fetchData(value);
+  }, [fetchData]);
 
   useEffect(() => {
+    fetchPipelines();
     fetchData();
-    const interval = setInterval(fetchData, 300000);
+    const interval = setInterval(() => fetchData(), 300000);
     return () => clearInterval(interval);
-  }, [fetchData]);
+  }, []);
 
   const stageData: PipelineStage[] = pipeline?.by_stage || [];
   const totalPipeline = Number(pipeline?.total_pipeline) || 0;
@@ -152,11 +174,39 @@ export default function CommandCenter() {
         borderRadius: 10,
         padding: 20,
       }}>
-        <div style={{ marginBottom: 16 }}>
-          <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>Pipeline by Stage</h3>
-          <p style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
-            {formatCurrency(totalPipeline)} total \u00B7 {stageData.reduce((sum, s) => sum + s.deal_count, 0)} deals across {stageData.length} stages
-          </p>
+        <div style={{ marginBottom: 16, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+          <div>
+            <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>Pipeline by Stage</h3>
+            <p style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
+              {formatCurrency(totalPipeline)} total {'\u00B7'} {stageData.reduce((sum, s) => sum + s.deal_count, 0)} deals across {stageData.length} stages
+            </p>
+          </div>
+          {availablePipelines.length > 1 && (
+            <select
+              value={selectedPipeline}
+              onChange={e => handlePipelineChange(e.target.value)}
+              style={{
+                fontSize: 12,
+                fontFamily: fonts.sans,
+                fontWeight: 500,
+                color: colors.text,
+                background: colors.surfaceRaised,
+                border: `1px solid ${colors.border}`,
+                borderRadius: 6,
+                padding: '5px 10px',
+                outline: 'none',
+                cursor: 'pointer',
+                minWidth: 140,
+              }}
+            >
+              <option value="all">All Pipelines</option>
+              {availablePipelines.map(p => (
+                <option key={p.name} value={p.name}>
+                  {p.name} ({p.deal_count})
+                </option>
+              ))}
+            </select>
+          )}
         </div>
         {loading.pipeline ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -180,10 +230,10 @@ export default function CommandCenter() {
               return (
                 <div
                   key={idx}
-                  onClick={() => navigate(`/deals?stage=${encodeURIComponent(stage.stage)}`)}
+                  onClick={() => navigate(`/deals?stage=${encodeURIComponent(stage.stage_normalized || stage.stage)}`)}
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: '120px 1fr auto',
+                    gridTemplateColumns: '160px 1fr auto',
                     alignItems: 'center',
                     gap: 12,
                     padding: '6px 8px',
@@ -194,8 +244,8 @@ export default function CommandCenter() {
                   onMouseEnter={e => (e.currentTarget.style.background = colors.surfaceHover)}
                   onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                 >
-                  <span style={{ fontSize: 12, fontWeight: 500, color: colors.text, textTransform: 'capitalize', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {stage.stage?.replace(/_/g, ' ') || 'Unknown'}
+                  <span style={{ fontSize: 12, fontWeight: 500, color: colors.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {stage.stage || 'Unknown'}
                   </span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                     <div style={{ flex: 1, height: 20, background: colors.surfaceRaised, borderRadius: 4, overflow: 'hidden' }}>
