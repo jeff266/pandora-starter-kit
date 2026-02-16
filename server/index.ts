@@ -68,6 +68,7 @@ import analysisRouter from './routes/analysis.js';
 import userAuthRouter from './routes/user-auth.js';
 import membersRouter from './routes/members.js';
 import dealIntelligenceRouter from './routes/deal-intelligence.js';
+import chatRouter from './routes/chat.js';
 import { initRenderers } from './renderers/index.js';
 
 dotenv.config();
@@ -221,6 +222,7 @@ workspaceApiRouter.use(downloadsRouter);
 workspaceApiRouter.use('/workspace-downloads', workspaceDownloadsRouter);
 workspaceApiRouter.use('/members', membersRouter);
 workspaceApiRouter.use(dealIntelligenceRouter);
+workspaceApiRouter.use(chatRouter);
 app.use("/api/workspaces", workspaceApiRouter);
 
 app.use("/api", skillsRouter);

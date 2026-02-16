@@ -1,7 +1,7 @@
 # Pandora — Multi-Tenant GTM Intelligence Platform
 
 ## Overview
-Pandora is a multi-tenant, agent-based platform designed to provide Go-To-Market (GTM) data analysis for RevOps teams. It integrates and normalizes GTM data from various sources such as CRM, call intelligence, task management, and document repositories into eight core entities. The platform then utilizes AI to generate actionable insights, with the goal of enhancing decision-making, refining GTM strategies, and improving overall business vision and market potential.
+Pandora is a multi-tenant, agent-based platform providing Go-To-Market (GTM) data analysis for RevOps teams. It integrates and normalizes GTM data from various sources (CRM, call intelligence, task management, document repositories) into eight core entities. The platform utilizes AI to generate actionable insights, aiming to enhance decision-making, refine GTM strategies, and improve overall business vision and market potential.
 
 ## User Preferences
 - Raw SQL with parameterized queries — no ORM
@@ -13,84 +13,29 @@ Pandora is a multi-tenant, agent-based platform designed to provide Go-To-Market
 Pandora is built on Node.js 20 with TypeScript 5+, using Express.js and PostgreSQL (Neon) via the `pg` client with raw SQL.
 
 **Core Architectural Patterns:**
--   **Multi-Tenancy:** Achieves strict data isolation using `workspace_id`.
+-   **Multi-Tenancy:** Strict data isolation using `workspace_id`.
 -   **Universal Adapter Pattern:** Standardizes data ingestion from diverse connectors.
 -   **Data Normalization:** Transforms raw data into 8 core entities: `deals`, `contacts`, `accounts`, `activities`, `conversations`, `tasks`, `calls`, and `documents`.
 -   **Context Layer:** A `context_layer` table, unique per workspace, stores business context in 5 JSONB sections for personalized AI analysis.
--   **Quota System:** Manages team and per-rep quotas.
--   **Computed Fields Engine:** Orchestrates batch computations for various scores (e.g., `velocity_score`, `deal_risk`, `engagement_score`).
--   **Stage Normalization:** Maps raw CRM stages to universal values.
 -   **Skill Framework:** A registry and runtime for AI-powered skills, employing a COMPUTE → CLASSIFY → SYNTHESIZE pattern with a three-tier AI system.
+-   **Computed Fields Engine:** Orchestrates batch computations for various scores (e.g., `velocity_score`, `deal_risk`, `engagement_score`).
 -   **Sync Infrastructure:** Supports scheduled and manual asynchronous data synchronizations.
+-   **Agent Runner Framework:** Composes multiple skills into unified briefings, synthesizing outputs into narratives for Slack delivery, with built-in agents and a scheduler.
+-   **Conversational Agent:** Multi-turn AI chat for Slack and Command Center with intent classification and dynamic reply/question handlers.
 
 **Key Design Decisions:**
--   **No ORM:** Direct `pg` client and raw SQL are used for optimal performance and control.
--   **Data Storage:** Raw API data is stored within a `source_data JSONB` column in entity tables.
--   **Upsert Pattern:** `ON CONFLICT DO UPDATE` is used for efficient data synchronization.
--   **On-Demand Transcript Fetching:** Call transcripts are fetched only when required.
--   **Two-Step Conversation Connect Flow:** Ensures only relevant calls from tracked representatives are synced.
--   **API Design:** RESTful API for managing workspaces, connectors, and actions.
--   **Query Layer:** Seven query modules with dynamic parameterized SQL, workspace scoping, and pagination.
--   **Slack Output Layer:** General-purpose Slack Block Kit client for automated skill result posting.
--   **Webhook Endpoints:** Inbound webhooks for skill triggers, run status, and event ingestion.
--   **Cross-Entity Linker:** A post-sync batch job resolves foreign keys between entities using a 3-tier matching process.
--   **Internal Meeting Filter:** Classifies conversations as internal/external post-sync.
--   **Deal Insights Extraction:** Extracts insights (next steps, objections, decision criteria) from conversation transcripts into a versioned `deal_insights` table using DeepSeek.
--   **LLM Integration:** Anthropic Claude is used for reasoning/generation, and Fireworks DeepSeek for extraction/classification, with token guardrails.
--   **Tier 2 Schema:** Includes `account_signals`, `icp_profiles`, and `lead_scores`.
--   **File Import Connector:** Manages CSV/Excel uploads, including DeepSeek classification and association inference.
--   **ICP Enrichment Pipeline:** A 6-step pipeline for closed deal analysis, involving contact role resolution, Apollo API enrichment, Serper Google search, and derived feature computation.
--   **Industry Normalization:** Maps various data formats to consistent industry values.
--   **Handlebars Template Engine:** Used in the skill runtime for flexible prompt rendering.
--   **Workflow Engine:** Integrates with ActivePieces for workflow automation.
--   **Token Usage Tracking:** A `token_usage` table tracks token consumption with API endpoints for summary, detail, and anomaly detection.
--   **Agent Runner Framework:** Composes multiple skills into unified briefings, synthesizing outputs into narratives for Slack delivery, with built-in agents and a scheduler.
--   **Deal Risk Token Optimization:** Optimized `deal-risk-review` by replacing multi-turn tool conversations with a `summarizeForClaude` compute step.
--   **Bowtie Stage Discovery:** Detects post-sale/bowtie stages in CRM data via pattern matching.
--   **Bowtie Analysis Skill:** Full-funnel bowtie analysis skill (`bowtie-analysis`) with 7 compute functions.
--   **Pipeline Goals Skill:** Reverse-math activity goals skill (`pipeline-goals`) with 5 compute functions.
--   **Project Updates & Recap:** `project_updates` table and `project-recap` skill for loading and formatting project updates.
--   **Strategy Insights Skill:** Cross-skill pattern analysis (`strategy-insights`) queries `skill_runs` and `agent_runs` for trend analysis.
--   **Composition Agents:** Includes `attainment-vs-goal`, `friday-recap`, and `strategy-insights` agents for specific analyses and reporting.
--   **Workspace Config System:** Provides config schema, loader, inference engine, instant audit, drift detection, and config suggestions.
--   **Workspace Config Audit Skill:** `workspace-config-audit` skill performs 8 drift checks and generates config suggestions.
--   **Evidence Infrastructure:** Full evidence population across all skills with `SkillEvidence` type, accumulating `skillEvidence` map in agent runs.
--   **Slack Formatter Upgrade:** `formatWithEvidence()` and `formatAgentWithEvidence()` render structured claim blocks with severity indicators.
--   **WorkbookGenerator (Excel Export):** Provides multi-tab `.xlsx` export services.
--   **Export API Endpoints:** `GET /api/workspaces/:id/skills/:skillId/runs/:runId/export` and `GET /api/workspaces/:id/agents/:agentId/runs/:runId/export` for `.xlsx` workbook exports.
--   **Voice & Tone System:** Per-workspace voice configuration with 3 axes (detail_level, framing, alert_threshold) dynamically injected into skill synthesis prompts via Handlebars.
--   **Prompt Voice Rewrites:** All 6 high-priority skill prompts rewritten for a professional, non-alarmist tone.
--   **Previous Run Comparison:** `getPreviousRun()` utility fetches last completed skill_run for delta analysis.
--   **Severity Classification:** Reusable severity utilities provide consistent severity handling.
--   **Slack App Infrastructure:** Dual-mode `SlackAppClient`, signature verification, API endpoints for events and interactions, thread anchoring, message tracking, channel configuration, and snooze functionality. Action buttons (Reviewed/Snooze/Drill/Execute/Dismiss/View) are dynamically appended.
--   **Shared Currency Formatting:** `formatCurrency()` utility handles M/K thresholds across the application.
--   **Command Center Phase A (Backend):** Backend API for findings extraction, dossier assembly, and scoped analysis.
-    -   **Findings Infrastructure:** `findings` table with 7 per-skill extractors, auto-extraction, backfill script, and API endpoints for findings, summary, pipeline snapshot, and resolve. Severity values in DB: `act/watch/notable/info`. API accepts both DB values and spec aliases (`critical`→`act`, `warning`→`watch`).
-    -   **Findings Resolve:** `PATCH /:workspaceId/findings/:findingId/resolve` — marks finding resolved with `resolution_method` (user_dismissed/action_taken/auto_cleared). Returns 404/409 for edge cases. Critical path for Slack Dismiss button.
-    -   **Dossier Assemblers:** `assembleDealDossier()` and `assembleAccountDossier()` with parallel queries and health signal computation. API endpoints for deal and account dossiers.
-    -   **Enhanced Account Dossier:** `assembleAccountDossier` now includes `deal_summary` (open/won/lost counts+values), `contact_map` (by_seniority/by_role/engaged/dark), `relationship_health` (engagement_trend/coverage_gaps/overall), `data_availability` flags, and per-deal `health_status` from risk scores.
-    -   **Scoped Analysis Engine:** `POST /analyze` endpoint with 5 scope types, Claude synthesis, rate limiting, and token usage tracking.
--   **Command Center Phase B (Frontend):** React + TypeScript frontend providing a UI for all Phase A APIs.
-    -   **Stack:** Vite 7 + React 19 + TypeScript, `react-router-dom`. Dark theme.
-    -   **Dual Server Setup:** Vite dev server on port 5000, Express API on port 3001.
-    -   **Authentication:** Magic link email auth with session tokens, role-based access, and member management.
-    -   **Command Center Home:** Headline metrics (pipeline, weighted, coverage, win rate, findings), horizontal CSS pipeline bar chart with clickable stage bars (→ `/deals?stage=`), Findings by Rep section (→ `/deals?owner=`), active findings feed with "View all" link to Insights.
-    -   **Deals List:** Full-featured table with 8 sortable columns (name, amount, stage, owner, close date, health grade badge, days in stage, findings dots). Parallel fetch of risk-summary + deals endpoints. Filter bar: search, stage, owner, health grade, status (open/won/lost/all). Pagination (50/page). URL query param support (`?stage=`, `?owner=`, `?health=`).
-    -   **Accounts List:** Sortable 7-column table (name, domain, industry, open deals, pipeline, contacts, last activity). Filters: search (name/domain), industry, owner. Dynamic column visibility — fully-empty columns hidden. Pagination.
-    -   **Detail Pages (Deal/Account):** Full dossier display with health signals, findings with dismiss buttons, contacts, stage history with readable names, risk score badge (A-F), coverage gaps, timelines, and inline "Ask Pandora" scoped analysis. Breadcrumb navigation back to list pages.
-    -   **Skills Page:** Category-grouped 2-column grid layout. Each skill card shows name, schedule (humanized cron), last run status/duration, findings produced. Run Now button with toast feedback. Expandable run history (last 10 runs).
-    -   **Connectors Page:** Connector list with sync status and record counts.
-    -   **Insights Feed:** Chronological findings list with filtering and pagination.
-    -   **Error Boundary:** Global `ErrorBoundary` for crash recovery.
-    -   **Design System:** Defined color scheme, skeleton loading, and consistent components.
-    -   **Cross-Page Navigation:** Command Center stage bars → Deals list (pre-filtered). Rep names → Deals list (pre-filtered). Deal/Account detail breadcrumbs. Account deals link to Deal detail. Deal account link to Account detail.
-    -   **Format Utilities:** `formatSchedule()` with `humanizeCron()` converts cron expressions to human-readable (e.g., "Mons 8 AM"). `severityColor()` maps act/watch/notable/info to colors.
-    -   **Connector Health Page:** `/connectors/health` — connector status cards (green/yellow/red by freshness), record inventory table, sync history log (30 entries), freshness alert banners, Sync Now buttons, expandable card details. Backend: `GET /:id/connectors/health` aggregates connections, entity counts, and sync_log.
-    -   **Settings Page:** `/settings` — vertical tab layout with three sections: Voice & Tone (radio buttons for detail_level/framing/alert_threshold with client-side preview and save), Skill Scheduling (skill list with schedule dropdowns and enable/disable toggles), Token Budget (period-selectable usage bar, by-skill breakdown table, graceful empty state).
--   **Deal Intelligence Tools:** Zero-token compute tools for risk scoring. `getDealRiskScore` computes 0-100 health score from active findings (act=-25, watch=-10, notable=-3, info=-1). `getBatchDealRiskScores` queries once and partitions in memory. `getPipelineRiskSummary` batch-scores all open deals with stage breakdown and grade distribution. API endpoints: `GET /:workspaceId/deals/:dealId/risk-score` and `GET /:workspaceId/pipeline/risk-summary`.
--   **Enhanced Deal Dossier:** `assembleDealDossier` now includes `coverage_gaps` (contacts never on calls, days since last call), `risk_score` (score/grade/signal_counts), and `data_availability` flags.
--   **Startup Optimization:** Express starts immediately, readiness probe, parallelized registration steps, and migration/template seeding via `system_settings` table.
--   **System Settings Table:** Stores server-level configuration like template seed version hash.
+-   **No ORM:** Direct `pg` client and raw SQL for optimal performance and control.
+-   **Data Storage:** Raw API data stored within a `source_data JSONB` column in entity tables.
+-   **Upsert Pattern:** `ON CONFLICT DO UPDATE` for efficient data synchronization.
+-   **LLM Integration:** Anthropic Claude for reasoning/generation, and Fireworks DeepSeek for extraction/classification, with token guardrails.
+-   **Cross-Entity Linker:** Post-sync batch job resolves foreign keys between entities.
+-   **ICP Enrichment Pipeline:** 6-step pipeline for closed deal analysis, including Apollo API enrichment and Serper Google search.
+-   **Token Usage Tracking:** `token_usage` table tracks token consumption.
+-   **Slack App Infrastructure:** Dual-mode `SlackAppClient`, signature verification, API endpoints for events and interactions, thread anchoring, message tracking, and channel configuration.
+-   **Command Center (Backend):** Backend API for findings extraction, dossier assembly (deals, accounts), and scoped analysis with Claude synthesis.
+-   **Command Center (Frontend):** React + TypeScript UI with Vite, featuring authentication, home dashboard, deals/accounts lists, detail pages, skills management, connectors health, insights feed, and settings.
+-   **Voice & Tone System:** Per-workspace voice configuration (detail_level, framing, alert_threshold) dynamically injected into skill synthesis prompts via Handlebars.
+-   **WorkbookGenerator:** Provides multi-tab `.xlsx` export services for skill and agent runs.
 
 ## External Dependencies
 -   **PostgreSQL (Neon):** Primary database.

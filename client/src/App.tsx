@@ -5,6 +5,7 @@ import { setApiCredentials, api } from './lib/api';
 import Sidebar from './components/Sidebar';
 import TopBar from './components/TopBar';
 import Placeholder from './components/Placeholder';
+import ChatPanel from './components/ChatPanel';
 import LoginPage from './pages/LoginPage';
 import AuthCallback from './pages/AuthCallback';
 import WorkspacePicker from './pages/WorkspacePicker';
@@ -55,6 +56,8 @@ export default function App() {
   const location = useLocation();
   const [badges, setBadges] = useState<Record<string, number>>({});
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatScope, setChatScope] = useState<{ type: string; entity_id?: string; entity_name?: string; rep_email?: string } | undefined>(undefined);
 
   useEffect(() => {
     if (token && currentWorkspace) {
@@ -163,6 +166,40 @@ export default function App() {
           </Routes>
         </div>
       </main>
+      {!chatOpen && (
+        <button
+          onClick={() => { setChatScope(undefined); setChatOpen(true); }}
+          style={{
+            position: 'fixed',
+            bottom: 24,
+            right: 24,
+            width: 52,
+            height: 52,
+            borderRadius: '50%',
+            backgroundColor: '#6488ea',
+            color: '#fff',
+            border: 'none',
+            fontSize: 22,
+            cursor: 'pointer',
+            boxShadow: '0 4px 16px rgba(100,136,234,0.4)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 999,
+            transition: 'transform 0.15s',
+          }}
+          title="Ask Pandora"
+          onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.08)')}
+          onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}
+        >
+          💬
+        </button>
+      )}
+      <ChatPanel
+        isOpen={chatOpen}
+        onClose={() => setChatOpen(false)}
+        scope={chatScope}
+      />
       <style>{`
         @keyframes skeleton-pulse {
           0%, 100% { opacity: 0.4; }
