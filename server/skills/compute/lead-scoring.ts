@@ -132,6 +132,9 @@ interface LeadScore {
   scoredAt: Date;
   previousScore?: number;
   scoreChange?: number;
+  icpProfileId?: string;
+  icpFitScore?: number;
+  icpFitDetails?: Record<string, any>;
 }
 
 interface ScoringResult {
@@ -1124,6 +1127,12 @@ function scoreDeal(
   // Assign grade using custom thresholds
   const grade = calculateGrade(normalizedScore, gradeThresholds);
 
+  const icpComponents = Object.entries(breakdown)
+    .filter(([key]) => key.startsWith('icp_'))
+    .reduce((acc, [key, val]) => { acc[key] = val; return acc; }, {} as Record<string, ScoreComponent>);
+
+  const icpFitScore = Object.values(icpComponents).reduce((sum, c) => sum + c.points, 0);
+
   return {
     entityType: 'deal',
     entityId: deal.id,
@@ -1132,6 +1141,8 @@ function scoreDeal(
     scoreGrade: grade,
     scoringMethod: icpWeights ? 'icp_point_based' : 'point_based',
     scoredAt: new Date(),
+    icpFitScore: icpWeights ? icpFitScore : undefined,
+    icpFitDetails: icpWeights ? icpComponents : undefined,
   };
 }
 
@@ -1214,9 +1225,11 @@ async function persistScore(workspaceId: string, score: LeadScore): Promise<void
     INSERT INTO lead_scores (
       workspace_id, entity_type, entity_id, total_score,
       score_breakdown, score_grade, scoring_method, scored_at,
+      icp_profile_id, icp_fit_score, icp_fit_details,
       previous_score, score_change, created_at, updated_at
     ) VALUES (
       $1, $2, $3, $4, $5, $6, $7, NOW(),
+      $8, $9, $10,
       (SELECT total_score FROM lead_scores
        WHERE workspace_id = $1 AND entity_type = $2 AND entity_id = $3),
       $4 - COALESCE(
@@ -1232,6 +1245,9 @@ async function persistScore(workspaceId: string, score: LeadScore): Promise<void
       score_breakdown = EXCLUDED.score_breakdown,
       score_grade = EXCLUDED.score_grade,
       scoring_method = EXCLUDED.scoring_method,
+      icp_profile_id = EXCLUDED.icp_profile_id,
+      icp_fit_score = EXCLUDED.icp_fit_score,
+      icp_fit_details = EXCLUDED.icp_fit_details,
       previous_score = lead_scores.total_score,
       score_change = EXCLUDED.total_score - lead_scores.total_score,
       scored_at = NOW(),
@@ -1244,6 +1260,9 @@ async function persistScore(workspaceId: string, score: LeadScore): Promise<void
     JSON.stringify(score.scoreBreakdown),
     score.scoreGrade,
     score.scoringMethod,
+    score.icpProfileId || null,
+    score.icpFitScore ?? null,
+    score.icpFitDetails ? JSON.stringify(score.icpFitDetails) : null,
   ]);
 }
 
@@ -1284,9 +1303,14 @@ export async function scoreLeads(workspaceId: string): Promise<ScoringResult> {
     ? amounts.sort((a, b) => a - b)[Math.floor(amounts.length / 2)]
     : 50000;
 
+  const icpProfileIdRef = icpProfile?.profile.id || null;
+
   const dealScores: LeadScore[] = [];
   for (const deal of dealFeatures) {
     const score = scoreDeal(deal, customFieldWeights, workspaceMedianAmount, hasConversationConnector, icpWeights, gradeThresholds);
+    if (icpProfileIdRef) {
+      score.icpProfileId = icpProfileIdRef;
+    }
     dealScores.push(score);
     await persistScore(workspaceId, score);
   }

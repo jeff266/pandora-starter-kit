@@ -1902,6 +1902,11 @@ async function persistICPProfile(
 ): Promise<string> {
   logger.info('[Step 10] Persisting ICP profile');
 
+  await query(`
+    UPDATE icp_profiles SET status = 'superseded'
+    WHERE workspace_id = $1 AND status = 'active'
+  `, [workspaceId]);
+
   const result = await query<{ id: string }>(`
     INSERT INTO icp_profiles (
       workspace_id, version, status,
@@ -1913,7 +1918,7 @@ async function persistICPProfile(
     ) VALUES (
       $1,
       COALESCE((SELECT MAX(version) FROM icp_profiles WHERE workspace_id = $1), 0) + 1,
-      'draft',
+      'active',
       $2::jsonb,
       $3::jsonb,
       $4::jsonb,
