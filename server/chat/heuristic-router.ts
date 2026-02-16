@@ -209,13 +209,13 @@ async function handleRepDeals(workspaceId: string, match: RegExpMatchArray): Pro
 async function handlePipelineSummary(workspaceId: string, _match: RegExpMatchArray): Promise<HeuristicResult> {
   const result = await query<any>(
     `SELECT
-       stage_normalized as stage,
+       COALESCE(stage, stage_normalized) as stage,
        count(*)::int as deal_count,
        COALESCE(sum(amount), 0)::float as total_value
      FROM deals
      WHERE workspace_id = $1 AND stage_normalized NOT IN ('closed_won', 'closed_lost')
-     GROUP BY stage_normalized
-     ORDER BY stage_normalized`,
+     GROUP BY COALESCE(stage, stage_normalized)
+     ORDER BY COALESCE(sum(amount), 0) DESC`,
     [workspaceId]
   );
 

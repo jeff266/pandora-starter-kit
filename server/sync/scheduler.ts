@@ -4,100 +4,139 @@ import { syncWorkspace } from './orchestrator.js';
 import { backfillHubSpotAssociations } from './backfill.js';
 import { getJobQueue } from '../jobs/queue.js';
 
+const INTERNAL_CONNECTORS = ['enrichment_config', 'csv_import'];
+
+const SYNC_SCHEDULES: Array<{
+  label: string;
+  cron: string;
+  connectorTypes: string[];
+}> = [
+  {
+    label: 'CRM (every 4 hours)',
+    cron: '0 */4 * * *',
+    connectorTypes: ['hubspot', 'salesforce'],
+  },
+  {
+    label: 'Call Intelligence (every 12 hours)',
+    cron: '0 */12 * * *',
+    connectorTypes: ['gong', 'fireflies'],
+  },
+  {
+    label: 'Task & Docs (daily at 3 AM UTC)',
+    cron: '0 3 * * *',
+    connectorTypes: ['monday', 'google-drive'],
+  },
+];
+
 export class SyncScheduler {
-  private task: cron.ScheduledTask | null = null;
+  private tasks: cron.ScheduledTask[] = [];
 
   start(): void {
-    this.task = cron.schedule('0 2 * * *', () => {
-      this.runDailySync().catch((err) => {
-        console.error('[Scheduler] Unhandled error in daily sync:', err);
+    for (const schedule of SYNC_SCHEDULES) {
+      const task = cron.schedule(schedule.cron, () => {
+        this.runConnectorSync(schedule.connectorTypes, schedule.label).catch((err) => {
+          console.error(`[Scheduler] Unhandled error in ${schedule.label} sync:`, err);
+        });
+      }, {
+        timezone: 'UTC',
       });
-    }, {
-      timezone: 'UTC',
-    });
+      this.tasks.push(task);
+    }
 
-    console.log('[Scheduler] Daily sync scheduled for 2:00 AM UTC');
+    const scheduleDescriptions = SYNC_SCHEDULES.map(s => s.label).join(', ');
+    console.log(`[Scheduler] Sync schedules registered: ${scheduleDescriptions}`);
   }
 
   stop(): void {
-    if (this.task) {
-      this.task.stop();
-      this.task = null;
-      console.log('[Scheduler] Stopped');
+    for (const task of this.tasks) {
+      task.stop();
     }
+    this.tasks = [];
+    console.log('[Scheduler] Stopped');
   }
 
-  async runDailySync(): Promise<void> {
-    const workspacesResult = await query<{ id: string; name: string }>(
-      `SELECT DISTINCT w.id, w.name
+  async runConnectorSync(connectorTypes: string[], label: string): Promise<void> {
+    const workspacesResult = await query<{ id: string; name: string; connector_name: string }>(
+      `SELECT DISTINCT w.id, w.name, c.connector_name
        FROM workspaces w
        INNER JOIN connections c ON c.workspace_id = w.id
-       WHERE c.status IN ('connected', 'synced', 'error')
-       ORDER BY w.name`
+       WHERE c.status IN ('connected', 'synced', 'healthy', 'error')
+         AND c.connector_name = ANY($1)
+       ORDER BY w.name`,
+      [connectorTypes]
     );
 
-    const workspaces = workspacesResult.rows;
-
-    if (workspaces.length === 0) {
-      console.log('[Scheduler] No workspaces with connected sources — skipping daily sync');
+    const rows = workspacesResult.rows;
+    if (rows.length === 0) {
+      console.log(`[Scheduler] ${label}: no workspaces with matching connectors — skipping`);
       return;
     }
 
-    console.log(`[Scheduler] Queueing daily sync jobs for ${workspaces.length} workspace(s)`);
+    const byWorkspace = new Map<string, { name: string; connectors: string[] }>();
+    for (const row of rows) {
+      if (!byWorkspace.has(row.id)) {
+        byWorkspace.set(row.id, { name: row.name, connectors: [] });
+      }
+      byWorkspace.get(row.id)!.connectors.push(row.connector_name);
+    }
+
+    console.log(`[Scheduler] ${label}: queueing sync for ${byWorkspace.size} workspace(s)`);
 
     const jobQueue = getJobQueue();
-    const jobIds: string[] = [];
+    let queued = 0;
 
-    // Create jobs for all workspaces (fire-and-forget, non-blocking)
-    for (const ws of workspaces) {
-      try {
-        // Check if sync already running for this workspace
-        const runningResult = await query<{ id: string }>(
-          `SELECT id FROM sync_log
-           WHERE workspace_id = $1 AND status IN ('pending', 'running')
-           LIMIT 1`,
-          [ws.id]
-        );
+    for (const [wsId, { name, connectors }] of byWorkspace) {
+      for (const connectorType of connectors) {
+        try {
+          const runningResult = await query<{ id: string }>(
+            `SELECT id FROM sync_log
+             WHERE workspace_id = $1 AND connector_type = $2 AND status IN ('pending', 'running')
+             LIMIT 1`,
+            [wsId, connectorType]
+          );
 
-        if (runningResult.rows.length > 0) {
-          console.log(`[Scheduler] Skipping ${ws.name} — sync already in progress`);
-          continue;
+          if (runningResult.rows.length > 0) {
+            console.log(`[Scheduler] Skipping ${name}/${connectorType} — sync already in progress`);
+            continue;
+          }
+
+          const logResult = await query<{ id: string }>(
+            `INSERT INTO sync_log (workspace_id, connector_type, sync_type, status, started_at)
+             VALUES ($1, $2, 'scheduled', 'pending', NOW())
+             RETURNING id`,
+            [wsId, connectorType]
+          );
+          const syncLogId = logResult.rows[0].id;
+
+          const jobId = await jobQueue.createJob({
+            workspaceId: wsId,
+            jobType: 'sync',
+            payload: {
+              connectorType,
+              syncLogId,
+            },
+            priority: 0,
+          });
+
+          queued++;
+          console.log(`[Scheduler] Queued ${connectorType} sync for ${name} (job: ${jobId})`);
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          console.error(`[Scheduler] Failed to queue ${connectorType} job for ${name}: ${msg}`);
         }
-
-        // Create sync_log entry
-        const logResult = await query<{ id: string }>(
-          `INSERT INTO sync_log (workspace_id, connector_type, sync_type, status, started_at)
-           VALUES ($1, 'all', 'scheduled', 'pending', NOW())
-           RETURNING id`,
-          [ws.id]
-        );
-        const syncLogId = logResult.rows[0].id;
-
-        // Create background job
-        const jobId = await jobQueue.createJob({
-          workspaceId: ws.id,
-          jobType: 'sync',
-          payload: {
-            connectorType: undefined, // sync all connectors
-            syncLogId,
-          },
-          priority: 0, // Scheduled syncs have normal priority
-        });
-
-        jobIds.push(jobId);
-        console.log(`[Scheduler] Queued sync job for ${ws.name} (job: ${jobId})`);
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        console.error(`[Scheduler] Failed to queue job for ${ws.name}: ${msg}`);
       }
     }
 
-    console.log(`[Scheduler] Daily sync jobs queued: ${jobIds.length}/${workspaces.length} workspaces`);
+    console.log(`[Scheduler] ${label}: ${queued} sync job(s) queued`);
+  }
+
+  async runDailySync(): Promise<void> {
+    const allConnectorTypes = SYNC_SCHEDULES.flatMap(s => s.connectorTypes);
+    await this.runConnectorSync(allConnectorTypes, 'Daily full sync');
   }
 }
 
 async function runPostSyncBackfill(workspaceId: string): Promise<void> {
-  // Check if HubSpot connection exists and needs backfill
   const connResult = await query<{ sync_cursor: any }>(
     `SELECT sync_cursor FROM connections
      WHERE workspace_id = $1 AND connector_name = 'hubspot' AND status IN ('connected', 'synced')`,

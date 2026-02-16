@@ -101,15 +101,15 @@ async function assemblePipelineContext(workspaceId: string) {
   const [stageResult, findingsResult] = await Promise.all([
     query(
       `SELECT
-         d.stage_normalized as stage,
+         COALESCE(d.stage, d.stage_normalized) as stage,
          count(*)::int as deal_count,
          COALESCE(sum(d.amount), 0)::float as total_value,
          COALESCE(sum(d.amount * COALESCE(d.probability, 0.5)), 0)::float as weighted_value
        FROM deals d
        WHERE d.workspace_id = $1
          AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
-       GROUP BY d.stage_normalized
-       ORDER BY d.stage_normalized`,
+       GROUP BY COALESCE(d.stage, d.stage_normalized)
+       ORDER BY COALESCE(sum(d.amount), 0) DESC`,
       [workspaceId]
     ),
     query(

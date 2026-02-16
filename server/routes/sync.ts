@@ -265,7 +265,7 @@ router.get('/:id/connectors/health', async (req: Request, res: Response): Promis
   const workspaceId = req.params.id;
 
   try {
-    const [connectorsResult, countsResult, syncHistoryResult] = await Promise.all([
+    const [connectorsResult, countsResult, syncHistoryResult, entitySourceCounts] = await Promise.all([
       query<{
         connector_name: string;
         status: string;
@@ -277,6 +277,7 @@ router.get('/:id/connectors/health', async (req: Request, res: Response): Promis
         `SELECT connector_name, status, last_sync_at, error_message, created_at, metadata
          FROM connections
          WHERE workspace_id = $1
+           AND connector_name NOT IN ('enrichment_config', 'csv_import')
          ORDER BY created_at`,
         [workspaceId]
       ),
@@ -312,42 +313,39 @@ router.get('/:id/connectors/health', async (req: Request, res: Response): Promis
          LIMIT 30`,
         [workspaceId]
       ),
+      query<{ entity: string; source: string; cnt: string }>(
+        `SELECT 'deals' as entity, source, count(*)::text as cnt FROM deals WHERE workspace_id = $1 GROUP BY source
+         UNION ALL
+         SELECT 'contacts', source, count(*)::text FROM contacts WHERE workspace_id = $1 GROUP BY source
+         UNION ALL
+         SELECT 'accounts', source, count(*)::text FROM accounts WHERE workspace_id = $1 GROUP BY source
+         UNION ALL
+         SELECT 'conversations', source, count(*)::text FROM conversations WHERE workspace_id = $1 GROUP BY source`,
+        [workspaceId]
+      ),
     ]);
+
+    const actualCounts: Record<string, Record<string, number>> = {};
+    for (const row of entitySourceCounts.rows) {
+      const src = row.source || 'unknown';
+      if (!actualCounts[src]) actualCounts[src] = {};
+      actualCounts[src][row.entity] = parseInt(row.cnt) || 0;
+    }
 
     const entitySources: Record<string, string[]> = {};
     const connectorRecords: Record<string, Record<string, number>> = {};
 
     for (const conn of connectorsResult.rows) {
       const name = conn.connector_name;
-      const meta = conn.metadata || {};
-      const rc = meta.record_counts || {};
+      connectorRecords[name] = actualCounts[name] || {};
 
-      connectorRecords[name] = {};
-
-      if (['hubspot', 'salesforce'].includes(name)) {
-        ['deals', 'contacts', 'accounts'].forEach(entity => {
+      for (const [entity, count] of Object.entries(connectorRecords[name])) {
+        if (count > 0) {
           if (!entitySources[entity]) entitySources[entity] = [];
-          entitySources[entity].push(name);
-          connectorRecords[name][entity] = rc[entity] || 0;
-        });
-      }
-
-      if (['gong', 'fireflies'].includes(name)) {
-        if (!entitySources['conversations']) entitySources['conversations'] = [];
-        entitySources['conversations'].push(name);
-        connectorRecords[name]['conversations'] = rc.conversations || 0;
-      }
-
-      if (name === 'monday') {
-        if (!entitySources['tasks']) entitySources['tasks'] = [];
-        entitySources['tasks'].push(name);
-        connectorRecords[name]['tasks'] = rc.tasks || 0;
-      }
-
-      if (name === 'google-drive') {
-        if (!entitySources['documents']) entitySources['documents'] = [];
-        entitySources['documents'].push(name);
-        connectorRecords[name]['documents'] = rc.documents || 0;
+          if (!entitySources[entity].includes(name)) {
+            entitySources[entity].push(name);
+          }
+        }
       }
     }
 

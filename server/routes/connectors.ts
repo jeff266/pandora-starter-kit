@@ -26,6 +26,7 @@ router.get('/:workspaceId/connectors', async (req: Request<WorkspaceParams>, res
       `SELECT id, connector_name as source_type, status, last_sync_at, error_message, metadata, created_at
        FROM connections
        WHERE workspace_id = $1
+         AND connector_name NOT IN ('enrichment_config', 'csv_import')
        ORDER BY created_at DESC`,
       [workspaceId]
     );
