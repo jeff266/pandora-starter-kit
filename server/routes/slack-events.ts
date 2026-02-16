@@ -21,6 +21,7 @@ import {
 const router = Router();
 
 router.post('/', async (req, res) => {
+  console.log('[slack-events] Incoming event:', req.body?.type, req.body?.event?.type || 'no-event');
   const signingSecretConfigured = !!process.env.SLACK_SIGNING_SECRET;
 
   if (req.body.type === 'url_verification') {
