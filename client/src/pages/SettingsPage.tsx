@@ -3,13 +3,14 @@ import { colors, fonts } from '../styles/theme';
 import { api } from '../lib/api';
 import Skeleton from '../components/Skeleton';
 
-type Tab = 'voice' | 'skills' | 'tokens' | 'learning';
+type Tab = 'voice' | 'skills' | 'tokens' | 'learning' | 'quotas';
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'voice', label: 'Voice & Tone' },
   { key: 'skills', label: 'Skills' },
   { key: 'tokens', label: 'Token Budget' },
   { key: 'learning', label: 'Learning' },
+  { key: 'quotas', label: 'Quotas' },
 ];
 
 const CRON_PRESETS = [
@@ -87,6 +88,7 @@ export default function SettingsPage() {
         {activeTab === 'skills' && <SkillsSection />}
         {activeTab === 'tokens' && <TokensSection />}
         {activeTab === 'learning' && <LearningSection />}
+        {activeTab === 'quotas' && <QuotasSection />}
       </div>
     </div>
   );
@@ -1223,6 +1225,720 @@ function LearningSection() {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function QuotasSection() {
+  const [quotas, setQuotas] = useState<any[]>([]);
+  const [periods, setPeriods] = useState<any[]>([]);
+  const [currentPeriodIdx, setCurrentPeriodIdx] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [preview, setPreview] = useState<any>(null);
+  const [previewSource, setPreviewSource] = useState<'csv' | 'hubspot' | null>(null);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [editingQuotaId, setEditingQuotaId] = useState<string | null>(null);
+  const [editAmount, setEditAmount] = useState('');
+  const [pendingGoals, setPendingGoals] = useState<any>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [hubspotConnected, setHubspotConnected] = useState(false);
+  const [teamTotal, setTeamTotal] = useState(0);
+  const [periodLabel, setPeriodLabel] = useState('');
+  const [repCount, setRepCount] = useState(0);
+  const [addName, setAddName] = useState('');
+  const [addEmail, setAddEmail] = useState('');
+  const [addAmount, setAddAmount] = useState('');
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const loadQuotas = (periodsArr?: any[], idx?: number) => {
+    const p = periodsArr || periods;
+    const i = idx ?? currentPeriodIdx;
+    let url = '/quotas';
+    if (p.length > 0 && p[i]) {
+      url += `?period_start=${p[i].start_date}&period_end=${p[i].end_date}`;
+    }
+    return api.get(url).then((data: any) => {
+      setQuotas(data.quotas || []);
+      setTeamTotal(data.teamTotal || 0);
+      setPeriodLabel(data.period || '');
+      setRepCount(data.repCount || 0);
+    }).catch(() => setQuotas([]));
+  };
+
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([
+      api.get('/quotas/periods').catch(() => []),
+      api.get('/quotas').catch(() => ({ quotas: [], teamTotal: 0, period: '', repCount: 0 })),
+      api.get('/quotas/pending-goals').catch(() => null),
+      api.get('/connectors/health').catch(() => []),
+    ]).then(([periodsData, quotasData, goalsData, healthData]) => {
+      const pArr = Array.isArray(periodsData) ? periodsData : periodsData?.periods || [];
+      setPeriods(pArr);
+      const now = new Date();
+      const curIdx = pArr.findIndex((p: any) => new Date(p.start_date) <= now && new Date(p.end_date) >= now);
+      setCurrentPeriodIdx(curIdx >= 0 ? curIdx : 0);
+      setQuotas(quotasData?.quotas || []);
+      setTeamTotal(quotasData?.teamTotal || 0);
+      setPeriodLabel(quotasData?.period || '');
+      setRepCount(quotasData?.repCount || 0);
+      setPendingGoals(goalsData);
+      const healthArr = Array.isArray(healthData) ? healthData : healthData?.connectors || [];
+      const hs = healthArr.find((c: any) => c.connector_name === 'hubspot' && c.status === 'healthy');
+      setHubspotConnected(!!hs);
+    }).catch(() => {
+      setError('Failed to load quota data');
+    }).finally(() => setLoading(false));
+  }, []);
+
+  const navigatePeriod = (dir: number) => {
+    const newIdx = currentPeriodIdx + dir;
+    if (newIdx < 0 || newIdx >= periods.length) return;
+    setCurrentPeriodIdx(newIdx);
+    loadQuotas(periods, newIdx);
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setError('');
+    setSyncing(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const result = await api.upload('/quotas/upload', formData);
+      setPreview(result);
+      setPreviewSource('csv');
+    } catch (err: any) {
+      setError(err.message || 'Upload failed');
+    } finally {
+      setSyncing(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleHubspotSync = async () => {
+    setError('');
+    setSyncing(true);
+    try {
+      const result = await api.post('/quotas/sync-hubspot');
+      setPreview(result);
+      setPreviewSource('hubspot');
+    } catch (err: any) {
+      if (err.message?.includes('missing_scope')) {
+        setError('HubSpot requires re-authorization with the goals scope. Please reconnect HubSpot in Connectors.');
+      } else {
+        setError(err.message || 'HubSpot sync failed');
+      }
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleConfirmImport = async () => {
+    setError('');
+    setSyncing(true);
+    try {
+      if (previewSource === 'csv') {
+        await api.post('/quotas/confirm', { uploadId: preview.uploadId, preview });
+      } else if (previewSource === 'hubspot') {
+        await api.post('/quotas/sync-hubspot/confirm', { goals: preview.goals });
+      }
+      setPreview(null);
+      setPreviewSource(null);
+      await loadQuotas();
+    } catch (err: any) {
+      setError(err.message || 'Import failed');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleDismissGoals = async () => {
+    try {
+      await api.post('/quotas/dismiss-pending-goals');
+      setPendingGoals(null);
+    } catch {}
+  };
+
+  const handleEditSave = async (quotaId: string) => {
+    try {
+      await api.put(`/quotas/${quotaId}`, { quota_amount: parseFloat(editAmount) });
+      setEditingQuotaId(null);
+      setEditAmount('');
+      await loadQuotas();
+    } catch (err: any) {
+      setError(err.message || 'Failed to update quota');
+    }
+  };
+
+  const handleDelete = async (quotaId: string) => {
+    if (!window.confirm('Delete this quota?')) return;
+    try {
+      await api.delete(`/quotas/${quotaId}`);
+      await loadQuotas();
+    } catch (err: any) {
+      setError(err.message || 'Failed to delete quota');
+    }
+  };
+
+  const handleAddQuota = async () => {
+    if (!addName || !addEmail || !addAmount) return;
+    setError('');
+    const currentPeriod = periods[currentPeriodIdx];
+    try {
+      await api.post('/quotas/add', {
+        rep_name: addName,
+        email: addEmail,
+        quota_amount: parseFloat(addAmount),
+        period_start: currentPeriod?.start_date,
+        period_end: currentPeriod?.end_date,
+      });
+      setShowAddForm(false);
+      setAddName('');
+      setAddEmail('');
+      setAddAmount('');
+      await loadQuotas();
+    } catch (err: any) {
+      setError(err.message || 'Failed to add quota');
+    }
+  };
+
+  const sourceBadge = (source: string) => {
+    const map: Record<string, { bg: string; color: string; label: string }> = {
+      hubspot_goals: { bg: 'rgba(59,130,246,0.15)', color: colors.accent, label: 'HubSpot' },
+      upload: { bg: 'rgba(148,163,184,0.15)', color: colors.textSecondary, label: 'Upload' },
+      manual: { bg: 'rgba(34,197,94,0.15)', color: colors.green, label: 'Manual' },
+    };
+    const s = map[source?.toLowerCase()] || map.manual;
+    return (
+      <span style={{
+        fontSize: 10,
+        fontWeight: 600,
+        color: s.color,
+        background: s.bg,
+        padding: '2px 8px',
+        borderRadius: 4,
+      }}>
+        {s.label}
+      </span>
+    );
+  };
+
+  const importButtons = (
+    <div style={{ display: 'flex', gap: 10 }}>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".csv,.xlsx,.xls"
+        onChange={handleFileUpload}
+        style={{ display: 'none' }}
+      />
+      <button
+        onClick={() => fileInputRef.current?.click()}
+        disabled={syncing}
+        style={{
+          fontSize: 12,
+          fontWeight: 600,
+          fontFamily: fonts.sans,
+          color: '#fff',
+          background: colors.accent,
+          border: 'none',
+          borderRadius: 6,
+          padding: '8px 16px',
+          cursor: syncing ? 'not-allowed' : 'pointer',
+          opacity: syncing ? 0.6 : 1,
+        }}
+        onMouseEnter={e => { if (!syncing) e.currentTarget.style.background = '#2563eb'; }}
+        onMouseLeave={e => { e.currentTarget.style.background = colors.accent; }}
+      >
+        Upload CSV / Excel
+      </button>
+      {hubspotConnected && (
+        <button
+          onClick={handleHubspotSync}
+          disabled={syncing}
+          style={{
+            fontSize: 12,
+            fontWeight: 600,
+            fontFamily: fonts.sans,
+            color: colors.accent,
+            background: 'transparent',
+            border: `1px solid ${colors.accent}`,
+            borderRadius: 6,
+            padding: '8px 16px',
+            cursor: syncing ? 'not-allowed' : 'pointer',
+            opacity: syncing ? 0.6 : 1,
+          }}
+          onMouseEnter={e => { if (!syncing) e.currentTarget.style.background = colors.accentSoft; }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+        >
+          {syncing ? 'Syncing...' : 'HubSpot Goals Sync'}
+        </button>
+      )}
+    </div>
+  );
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <Skeleton height={24} width={200} />
+        <Skeleton height={80} />
+        <Skeleton height={200} />
+      </div>
+    );
+  }
+
+  if (quotas.length === 0 && periods.length === 0) {
+    return (
+      <div style={{ maxWidth: 640 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 600, color: colors.text, marginBottom: 24 }}>Quotas</h2>
+        {error && (
+          <div style={{ padding: '8px 14px', marginBottom: 16, borderRadius: 8, background: colors.redSoft, border: `1px solid ${colors.red}`, color: colors.red, fontSize: 12, fontWeight: 500 }}>
+            {error}
+          </div>
+        )}
+        <div style={{
+          background: colors.surface,
+          border: `1px solid ${colors.border}`,
+          borderRadius: 10,
+          padding: 48,
+          textAlign: 'center',
+        }}>
+          <p style={{ fontSize: 15, fontWeight: 600, color: colors.text, marginBottom: 8 }}>No quotas set up yet.</p>
+          <p style={{ fontSize: 13, color: colors.textSecondary, lineHeight: 1.6, marginBottom: 24, maxWidth: 440, margin: '0 auto 24px' }}>
+            Quotas enable attainment tracking, gap analysis, and rep performance scoring across Pipeline Coverage and Forecast reports.
+          </p>
+          {importButtons}
+        </div>
+      </div>
+    );
+  }
+
+  const inputStyle: React.CSSProperties = {
+    fontSize: 12,
+    fontFamily: fonts.sans,
+    color: colors.text,
+    background: colors.surfaceRaised,
+    border: `1px solid ${colors.border}`,
+    borderRadius: 6,
+    padding: '6px 10px',
+    outline: 'none',
+  };
+
+  return (
+    <div style={{ maxWidth: 800 }}>
+      <h2 style={{ fontSize: 18, fontWeight: 600, color: colors.text, marginBottom: 24 }}>Quotas</h2>
+
+      {error && (
+        <div style={{ padding: '8px 14px', marginBottom: 16, borderRadius: 8, background: colors.redSoft, border: `1px solid ${colors.red}`, color: colors.red, fontSize: 12, fontWeight: 500 }}>
+          {error}
+        </div>
+      )}
+
+      {pendingGoals?.pending && (
+        <div style={{
+          padding: '12px 16px',
+          marginBottom: 16,
+          borderRadius: 8,
+          background: colors.yellowSoft,
+          border: `1px solid ${colors.yellow}`,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
+          flexWrap: 'wrap',
+        }}>
+          <span style={{ fontSize: 13, color: colors.yellow, fontWeight: 500 }}>
+            Pandora detected {pendingGoals.count || pendingGoals.goals?.length || 0} revenue goals in HubSpot. Import them as rep quotas?
+          </span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              onClick={() => {
+                if (pendingGoals?.preview) {
+                  setPreview(pendingGoals.preview);
+                  setPreviewSource('hubspot');
+                } else {
+                  handleHubspotSync();
+                }
+              }}
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                fontFamily: fonts.sans,
+                color: '#fff',
+                background: colors.yellow,
+                border: 'none',
+                borderRadius: 6,
+                padding: '5px 12px',
+                cursor: 'pointer',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.opacity = '0.85'; }}
+              onMouseLeave={e => { e.currentTarget.style.opacity = '1'; }}
+            >
+              Review & Import
+            </button>
+            <button
+              onClick={handleDismissGoals}
+              style={{
+                fontSize: 11,
+                fontWeight: 500,
+                fontFamily: fonts.sans,
+                color: colors.textMuted,
+                background: 'transparent',
+                border: `1px solid ${colors.border}`,
+                borderRadius: 6,
+                padding: '5px 12px',
+                cursor: 'pointer',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = colors.surfaceHover; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div style={{
+        background: colors.surface,
+        border: `1px solid ${colors.border}`,
+        borderRadius: 10,
+        padding: 20,
+        marginBottom: 16,
+      }}>
+        <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text, marginBottom: 12 }}>Import Quotas</h3>
+        {importButtons}
+      </div>
+
+      {preview && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.7)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+        }}>
+          <div style={{
+            background: colors.surface,
+            border: `1px solid ${colors.border}`,
+            borderRadius: 12,
+            padding: 24,
+            maxWidth: 700,
+            width: '90%',
+            maxHeight: '80vh',
+            overflow: 'auto',
+          }}>
+            <h3 style={{ fontSize: 16, fontWeight: 600, color: colors.text, marginBottom: 16 }}>
+              Preview — {preview.repCount || preview.goals?.length || 0} reps detected, {preview.period || ''}, {preview.periodType || ''}
+            </h3>
+            <div style={{ overflowX: 'auto', marginBottom: 16 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead>
+                  <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
+                    <th style={{ textAlign: 'left', padding: '8px 12px', color: colors.textSecondary, fontWeight: 500 }}>Rep Name</th>
+                    <th style={{ textAlign: 'left', padding: '8px 12px', color: colors.textSecondary, fontWeight: 500 }}>Email</th>
+                    <th style={{ textAlign: 'right', padding: '8px 12px', color: colors.textSecondary, fontWeight: 500 }}>Quota</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(preview.quotas || preview.goals || []).map((q: any, i: number) => (
+                    <tr key={i} style={{ borderBottom: `1px solid ${colors.border}` }}>
+                      <td style={{ padding: '8px 12px', color: colors.text }}>{q.rep_name || q.name}</td>
+                      <td style={{ padding: '8px 12px', color: colors.textSecondary }}>{q.email}</td>
+                      <td style={{ padding: '8px 12px', color: colors.text, textAlign: 'right' }}>${(q.quota_amount || q.amount || 0).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {preview.warnings && preview.warnings.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                {preview.warnings.map((w: string, i: number) => (
+                  <p key={i} style={{ fontSize: 12, color: colors.yellow, marginBottom: 4 }}>{w}</p>
+                ))}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => { setPreview(null); setPreviewSource(null); }}
+                style={{
+                  fontSize: 12,
+                  fontWeight: 500,
+                  fontFamily: fonts.sans,
+                  color: colors.textMuted,
+                  background: 'transparent',
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: 6,
+                  padding: '8px 16px',
+                  cursor: 'pointer',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = colors.surfaceHover; }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmImport}
+                disabled={syncing}
+                style={{
+                  fontSize: 12,
+                  fontWeight: 600,
+                  fontFamily: fonts.sans,
+                  color: '#fff',
+                  background: colors.accent,
+                  border: 'none',
+                  borderRadius: 6,
+                  padding: '8px 16px',
+                  cursor: syncing ? 'not-allowed' : 'pointer',
+                  opacity: syncing ? 0.6 : 1,
+                }}
+                onMouseEnter={e => { if (!syncing) e.currentTarget.style.background = '#2563eb'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = colors.accent; }}
+              >
+                {syncing ? 'Importing...' : 'Confirm & Import'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div style={{
+        background: colors.surface,
+        border: `1px solid ${colors.border}`,
+        borderRadius: 10,
+        overflow: 'hidden',
+        marginBottom: 16,
+      }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '14px 20px',
+          borderBottom: `1px solid ${colors.border}`,
+        }}>
+          <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text, margin: 0 }}>
+            Current Quotas — {periodLabel}
+          </h3>
+          {periods.length > 1 && (
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button
+                onClick={() => navigatePeriod(-1)}
+                disabled={currentPeriodIdx <= 0}
+                style={{
+                  fontSize: 14,
+                  fontFamily: fonts.sans,
+                  color: currentPeriodIdx <= 0 ? colors.textMuted : colors.text,
+                  background: 'transparent',
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: 4,
+                  padding: '2px 8px',
+                  cursor: currentPeriodIdx <= 0 ? 'not-allowed' : 'pointer',
+                }}
+                onMouseEnter={e => { if (currentPeriodIdx > 0) e.currentTarget.style.background = colors.surfaceHover; }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+              >
+                ‹
+              </button>
+              <button
+                onClick={() => navigatePeriod(1)}
+                disabled={currentPeriodIdx >= periods.length - 1}
+                style={{
+                  fontSize: 14,
+                  fontFamily: fonts.sans,
+                  color: currentPeriodIdx >= periods.length - 1 ? colors.textMuted : colors.text,
+                  background: 'transparent',
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: 4,
+                  padding: '2px 8px',
+                  cursor: currentPeriodIdx >= periods.length - 1 ? 'not-allowed' : 'pointer',
+                }}
+                onMouseEnter={e => { if (currentPeriodIdx < periods.length - 1) e.currentTarget.style.background = colors.surfaceHover; }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+              >
+                ›
+              </button>
+            </div>
+          )}
+        </div>
+
+        {quotas.length === 0 ? (
+          <div style={{ padding: 32, textAlign: 'center' }}>
+            <p style={{ fontSize: 13, color: colors.textMuted }}>No quotas for this period</p>
+          </div>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
+                <th style={{ textAlign: 'left', padding: '10px 16px', color: colors.textSecondary, fontWeight: 500 }}>Rep</th>
+                <th style={{ textAlign: 'left', padding: '10px 16px', color: colors.textSecondary, fontWeight: 500 }}>Email</th>
+                <th style={{ textAlign: 'right', padding: '10px 16px', color: colors.textSecondary, fontWeight: 500 }}>Quota</th>
+                <th style={{ textAlign: 'center', padding: '10px 16px', color: colors.textSecondary, fontWeight: 500 }}>Source</th>
+                <th style={{ textAlign: 'center', padding: '10px 16px', color: colors.textSecondary, fontWeight: 500 }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {quotas.map((q: any) => (
+                <tr key={q.id} style={{ borderBottom: `1px solid ${colors.border}` }}>
+                  <td style={{ padding: '10px 16px', color: colors.text, fontWeight: 500 }}>{q.rep_name}</td>
+                  <td style={{ padding: '10px 16px', color: colors.textSecondary }}>{q.email}</td>
+                  <td style={{ padding: '10px 16px', textAlign: 'right' }}>
+                    {editingQuotaId === q.id ? (
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
+                        <input
+                          type="number"
+                          value={editAmount}
+                          onChange={e => setEditAmount(e.target.value)}
+                          style={{ ...inputStyle, width: 100, textAlign: 'right' }}
+                          autoFocus
+                        />
+                        <button
+                          onClick={() => handleEditSave(q.id)}
+                          style={{ fontSize: 11, color: colors.green, background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
+                        >
+                          ✓
+                        </button>
+                        <button
+                          onClick={() => { setEditingQuotaId(null); setEditAmount(''); }}
+                          style={{ fontSize: 11, color: colors.textMuted, background: 'none', border: 'none', cursor: 'pointer' }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ) : (
+                      <span style={{ color: colors.text }}>${(q.quota_amount || 0).toLocaleString()}</span>
+                    )}
+                  </td>
+                  <td style={{ padding: '10px 16px', textAlign: 'center' }}>{sourceBadge(q.source)}</td>
+                  <td style={{ padding: '10px 16px', textAlign: 'center' }}>
+                    <div style={{ display: 'flex', justifyContent: 'center', gap: 8 }}>
+                      <button
+                        onClick={() => { setEditingQuotaId(q.id); setEditAmount(String(q.quota_amount || '')); }}
+                        title="Edit"
+                        style={{ fontSize: 13, color: colors.textSecondary, background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px' }}
+                        onMouseEnter={e => { e.currentTarget.style.color = colors.accent; }}
+                        onMouseLeave={e => { e.currentTarget.style.color = colors.textSecondary; }}
+                      >
+                        ✏
+                      </button>
+                      <button
+                        onClick={() => handleDelete(q.id)}
+                        title="Delete"
+                        style={{ fontSize: 13, color: colors.textSecondary, background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px' }}
+                        onMouseEnter={e => { e.currentTarget.style.color = colors.red; }}
+                        onMouseLeave={e => { e.currentTarget.style.color = colors.textSecondary; }}
+                      >
+                        🗑
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              <tr style={{ background: colors.surfaceRaised }}>
+                <td style={{ padding: '10px 16px', color: colors.text, fontWeight: 700 }} colSpan={2}>Team Total</td>
+                <td style={{ padding: '10px 16px', textAlign: 'right', color: colors.text, fontWeight: 700 }}>${teamTotal.toLocaleString()}</td>
+                <td colSpan={2} />
+              </tr>
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {!showAddForm ? (
+        <button
+          onClick={() => setShowAddForm(true)}
+          style={{
+            fontSize: 12,
+            fontWeight: 500,
+            fontFamily: fonts.sans,
+            color: colors.accent,
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            padding: 0,
+          }}
+          onMouseEnter={e => { e.currentTarget.style.textDecoration = 'underline'; }}
+          onMouseLeave={e => { e.currentTarget.style.textDecoration = 'none'; }}
+        >
+          + Add quota manually
+        </button>
+      ) : (
+        <div style={{
+          background: colors.surface,
+          border: `1px solid ${colors.border}`,
+          borderRadius: 10,
+          padding: 20,
+        }}>
+          <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text, marginBottom: 12 }}>Add Quota</h3>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+            <input
+              type="text"
+              placeholder="Rep Name"
+              value={addName}
+              onChange={e => setAddName(e.target.value)}
+              style={{ ...inputStyle, flex: 1, minWidth: 120 }}
+            />
+            <input
+              type="email"
+              placeholder="Email"
+              value={addEmail}
+              onChange={e => setAddEmail(e.target.value)}
+              style={{ ...inputStyle, flex: 1, minWidth: 140 }}
+            />
+            <input
+              type="number"
+              placeholder="Quota Amount"
+              value={addAmount}
+              onChange={e => setAddAmount(e.target.value)}
+              style={{ ...inputStyle, width: 130 }}
+            />
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              onClick={handleAddQuota}
+              style={{
+                fontSize: 12,
+                fontWeight: 600,
+                fontFamily: fonts.sans,
+                color: '#fff',
+                background: colors.accent,
+                border: 'none',
+                borderRadius: 6,
+                padding: '6px 16px',
+                cursor: 'pointer',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = '#2563eb'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = colors.accent; }}
+            >
+              Add
+            </button>
+            <button
+              onClick={() => { setShowAddForm(false); setAddName(''); setAddEmail(''); setAddAmount(''); }}
+              style={{
+                fontSize: 12,
+                fontWeight: 500,
+                fontFamily: fonts.sans,
+                color: colors.textMuted,
+                background: 'transparent',
+                border: `1px solid ${colors.border}`,
+                borderRadius: 6,
+                padding: '6px 16px',
+                cursor: 'pointer',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = colors.surfaceHover; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -32,4 +32,15 @@ export const api = {
   put: (path: string, body?: any) => request('PUT', path, body),
   patch: (path: string, body?: any) => request('PATCH', path, body),
   delete: (path: string) => request('DELETE', path),
+  upload: (path: string, formData: FormData) => {
+    const url = `/api/workspaces/${_workspaceId}${path}`;
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${_token}` },
+      body: formData,
+    }).then(res => {
+      if (!res.ok) return res.text().then(t => { throw new Error(t || `HTTP ${res.status}`); });
+      return res.json();
+    });
+  },
 };

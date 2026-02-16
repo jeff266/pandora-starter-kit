@@ -23,7 +23,7 @@ DROP CONSTRAINT IF EXISTS rep_quotas_source_check;
 
 ALTER TABLE rep_quotas
 ADD CONSTRAINT rep_quotas_source_check
-  CHECK (source IN ('manual', 'excel_upload', 'csv_upload', 'hubspot', 'salesforce'));
+  CHECK (source IN ('manual', 'excel_upload', 'csv_upload', 'hubspot', 'hubspot_goals', 'salesforce'));
 
 -- Update unique constraint to prefer email over name
 -- Drop old constraint

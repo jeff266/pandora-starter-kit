@@ -7,6 +7,7 @@
 import { Router, type Request, type Response } from 'express';
 import multer from 'multer';
 import path from 'path';
+import { v4 as uuidv4 } from 'uuid';
 import { query } from '../db.js';
 import {
   parseQuotaFile,
@@ -16,6 +17,12 @@ import {
   type QuotaUploadPreview,
 } from '../quotas/upload-parser.js';
 import { requireWorkspaceAccess } from '../middleware/auth.js';
+import {
+  fetchHubSpotGoals,
+  getPendingGoalsPreview,
+  clearPendingGoalsPreview,
+  type ResolvedQuota,
+} from '../connectors/hubspot/goals-sync.js';
 
 const router = Router();
 router.use(requireWorkspaceAccess);
@@ -299,6 +306,272 @@ router.delete(
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       console.error('[QuotaUpload] Delete batch error:', message);
+      res.status(500).json({ error: message });
+    }
+  }
+);
+
+router.post(
+  '/workspaces/:workspaceId/quotas/sync-hubspot',
+  async (req: Request<WorkspaceParams>, res: Response) => {
+    try {
+      const { workspaceId } = req.params;
+
+      const connCheck = await query(
+        `SELECT id FROM connections WHERE workspace_id = $1 AND connector_name = 'hubspot' AND status = 'healthy'`,
+        [workspaceId]
+      );
+
+      if (connCheck.rows.length === 0) {
+        res.status(400).json({ error: 'no_hubspot_connection' });
+        return;
+      }
+
+      const result = await fetchHubSpotGoals(workspaceId);
+
+      if (result.warnings.includes('missing_scope')) {
+        res.status(403).json({
+          error: 'missing_scope',
+          message: 'HubSpot connection needs re-authorization to access Goals',
+        });
+        return;
+      }
+
+      const teamTotal = result.goals.reduce((sum, g) => sum + g.quota_amount, 0);
+      const uniqueReps = new Set(result.goals.map(g => g.rep_email));
+      const uniquePeriods = [...new Set(result.goals.map(g => g.period_label))];
+
+      res.json({
+        source: 'hubspot_goals',
+        goals: result.goals,
+        warnings: result.warnings,
+        rawGoalCount: result.raw_count,
+        filteredCount: result.goals.length,
+        teamTotal,
+        repCount: uniqueReps.size,
+        periods: uniquePeriods,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error('[Quotas] Sync HubSpot error:', message);
+      res.status(500).json({ error: message });
+    }
+  }
+);
+
+router.post(
+  '/workspaces/:workspaceId/quotas/sync-hubspot/confirm',
+  async (req: Request<WorkspaceParams>, res: Response) => {
+    try {
+      const { workspaceId } = req.params;
+      const { goals } = req.body as { goals: ResolvedQuota[] };
+
+      if (!goals || !Array.isArray(goals) || goals.length === 0) {
+        res.status(400).json({ error: 'No goals provided' });
+        return;
+      }
+
+      const batchId = uuidv4();
+      let inserted = 0;
+      let updated = 0;
+      let skipped = 0;
+
+      for (const goal of goals) {
+        const existingPeriod = await query<{ id: string }>(
+          `SELECT id FROM quota_periods
+           WHERE workspace_id = $1 AND start_date = $2 AND end_date = $3 AND period_type = $4
+           LIMIT 1`,
+          [workspaceId, goal.period_start, goal.period_end, goal.period_type]
+        );
+
+        let periodId: string;
+
+        if (existingPeriod.rows.length > 0) {
+          periodId = existingPeriod.rows[0].id;
+        } else {
+          const newPeriod = await query<{ id: string }>(
+            `INSERT INTO quota_periods (workspace_id, name, period_type, start_date, end_date, team_quota)
+             VALUES ($1, $2, $3, $4, $5, 0)
+             RETURNING id`,
+            [workspaceId, goal.period_label, goal.period_type, goal.period_start, goal.period_end]
+          );
+          periodId = newPeriod.rows[0].id;
+        }
+
+        try {
+          const result = await query(
+            `INSERT INTO rep_quotas (period_id, rep_name, rep_email, quota_amount, source, upload_batch_id)
+             VALUES ($1, $2, $3, $4, 'hubspot_goals', $5)
+             ON CONFLICT (period_id, rep_email) WHERE rep_email IS NOT NULL
+             DO UPDATE SET
+               quota_amount = EXCLUDED.quota_amount,
+               rep_name = EXCLUDED.rep_name,
+               upload_batch_id = EXCLUDED.upload_batch_id,
+               updated_at = NOW()
+             WHERE rep_quotas.source = 'hubspot_goals'
+             RETURNING (xmax = 0) AS inserted`,
+            [periodId, goal.rep_name, goal.rep_email, goal.quota_amount, batchId]
+          );
+
+          if (result.rows.length === 0) {
+            skipped++;
+          } else if (result.rows[0].inserted) {
+            inserted++;
+          } else {
+            updated++;
+          }
+        } catch (error) {
+          console.error(`[Quotas] Failed to upsert HubSpot goal for ${goal.rep_name}:`, error);
+          skipped++;
+        }
+      }
+
+      res.json({ inserted, updated, skipped, batchId });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error('[Quotas] Confirm HubSpot sync error:', message);
+      res.status(500).json({ error: message });
+    }
+  }
+);
+
+router.delete(
+  '/workspaces/:workspaceId/quotas/:quotaId',
+  async (req: Request<QuotaIdParams>, res: Response) => {
+    try {
+      const { workspaceId, quotaId } = req.params;
+
+      const checkResult = await query(
+        `SELECT rq.id FROM rep_quotas rq
+         JOIN quota_periods qp ON qp.id = rq.period_id
+         WHERE rq.id = $1 AND qp.workspace_id = $2`,
+        [quotaId, workspaceId]
+      );
+
+      if (checkResult.rows.length === 0) {
+        res.status(404).json({ error: 'Quota not found' });
+        return;
+      }
+
+      await query(`DELETE FROM rep_quotas WHERE id = $1`, [quotaId]);
+
+      res.json({ success: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error('[Quotas] Delete quota error:', message);
+      res.status(500).json({ error: message });
+    }
+  }
+);
+
+router.get(
+  '/workspaces/:workspaceId/quotas/periods',
+  async (req: Request<WorkspaceParams>, res: Response) => {
+    try {
+      const { workspaceId } = req.params;
+
+      const result = await query<{
+        id: string;
+        name: string;
+        period_type: string;
+        start_date: string;
+        end_date: string;
+        team_quota: number;
+      }>(
+        `SELECT id, name, period_type, start_date, end_date, team_quota
+         FROM quota_periods
+         WHERE workspace_id = $1
+         ORDER BY start_date DESC`,
+        [workspaceId]
+      );
+
+      res.json({ periods: result.rows });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error('[Quotas] Get periods error:', message);
+      res.status(500).json({ error: message });
+    }
+  }
+);
+
+router.post(
+  '/workspaces/:workspaceId/quotas/add',
+  async (req: Request<WorkspaceParams>, res: Response) => {
+    try {
+      const { workspaceId } = req.params;
+      const { rep_name, rep_email, quota_amount, period_start, period_end, period_type, period_label } = req.body;
+
+      if (!rep_name || !quota_amount || !period_start || !period_end || !period_type) {
+        res.status(400).json({ error: 'Missing required fields' });
+        return;
+      }
+
+      const existingPeriod = await query<{ id: string }>(
+        `SELECT id FROM quota_periods
+         WHERE workspace_id = $1 AND start_date = $2 AND end_date = $3 AND period_type = $4
+         LIMIT 1`,
+        [workspaceId, period_start, period_end, period_type]
+      );
+
+      let periodId: string;
+
+      if (existingPeriod.rows.length > 0) {
+        periodId = existingPeriod.rows[0].id;
+      } else {
+        const newPeriod = await query<{ id: string }>(
+          `INSERT INTO quota_periods (workspace_id, name, period_type, start_date, end_date, team_quota)
+           VALUES ($1, $2, $3, $4, $5, 0)
+           RETURNING id`,
+          [workspaceId, period_label || `${period_type} period`, period_type, period_start, period_end]
+        );
+        periodId = newPeriod.rows[0].id;
+      }
+
+      const result = await query<{ id: string }>(
+        `INSERT INTO rep_quotas (period_id, rep_name, rep_email, quota_amount, source)
+         VALUES ($1, $2, $3, $4, 'manual')
+         RETURNING id`,
+        [periodId, rep_name, rep_email || null, quota_amount]
+      );
+
+      res.json({ success: true, quotaId: result.rows[0].id });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error('[Quotas] Add quota error:', message);
+      res.status(500).json({ error: message });
+    }
+  }
+);
+
+router.get(
+  '/workspaces/:workspaceId/quotas/pending-goals',
+  async (req: Request<WorkspaceParams>, res: Response) => {
+    try {
+      const { workspaceId } = req.params;
+      const preview = await getPendingGoalsPreview(workspaceId);
+
+      res.json({
+        pending: preview !== null,
+        preview,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error('[Quotas] Get pending goals error:', message);
+      res.status(500).json({ error: message });
+    }
+  }
+);
+
+router.post(
+  '/workspaces/:workspaceId/quotas/dismiss-pending-goals',
+  async (req: Request<WorkspaceParams>, res: Response) => {
+    try {
+      const { workspaceId } = req.params;
+      await clearPendingGoalsPreview(workspaceId);
+      res.json({ success: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error('[Quotas] Dismiss pending goals error:', message);
       res.status(500).json({ error: message });
     }
   }

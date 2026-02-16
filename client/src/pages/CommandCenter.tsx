@@ -5,6 +5,7 @@ import { colors, fonts } from '../styles/theme';
 import { formatCurrency, formatNumber, formatPercent, formatTimeAgo, severityColor } from '../lib/format';
 import Skeleton, { SkeletonCard } from '../components/Skeleton';
 import { SeverityDot } from '../components/shared';
+import QuotaBanner from '../components/QuotaBanner';
 
 interface Finding {
   id: string;
@@ -100,6 +101,7 @@ export default function CommandCenter() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      <QuotaBanner />
       {/* Headline Metrics */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16 }}>
         {loading.pipeline || loading.summary ? (
