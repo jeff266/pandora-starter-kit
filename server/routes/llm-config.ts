@@ -27,8 +27,14 @@ router.post('/:id/llm/config', async (req: Request, res: Response) => {
           res.status(400).json({ error: `Invalid capability '${key}'. Must be one of: ${validCapabilities.join(', ')}` });
           return;
         }
-        if (!routing[key].includes('/')) {
-          res.status(400).json({ error: `Invalid routing format for '${key}': must be 'provider/model'` });
+        const entry = routing[key];
+        const primaryRoute = typeof entry === 'string' ? entry : entry?.primary;
+        if (!primaryRoute || !primaryRoute.includes('/')) {
+          res.status(400).json({ error: `Invalid routing format for '${key}': must be 'provider/model' or { primary: 'provider/model' }` });
+          return;
+        }
+        if (typeof entry === 'object' && entry.fallback && !entry.fallback.includes('/')) {
+          res.status(400).json({ error: `Invalid fallback format for '${key}': must be 'provider/model'` });
           return;
         }
       }

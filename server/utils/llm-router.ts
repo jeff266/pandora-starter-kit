@@ -7,6 +7,7 @@ import {
   trackTokenUsage,
   type TrackingContext,
 } from '../lib/token-tracker.js';
+import { logTrainingPair } from '../training/index.js';
 
 export type LLMCapability = 'extract' | 'reason' | 'generate' | 'classify';
 
@@ -46,6 +47,12 @@ export interface LLMCallOptions {
   maxTokens?: number;
   temperature?: number;
   _tracking?: TrackingContext;
+  metadata?: {
+    skillId?: string;
+    skillRunId?: string;
+    sourceContext?: string;
+    structuredInput?: any;
+  };
 }
 
 export type { TrackingContext };
@@ -56,9 +63,11 @@ interface ProviderConfig {
   enabled: boolean;
 }
 
+type RoutingEntry = string | { primary: string; fallback?: string | null };
+
 interface LLMConfig {
   providers: Record<string, ProviderConfig>;
-  routing: Record<string, string>;
+  routing: Record<string, RoutingEntry>;
   default_token_budget: number;
   tokens_used_this_month: number;
 }
@@ -92,10 +101,10 @@ async function loadConfig(workspaceId: string): Promise<LLMConfig> {
     const defaultConfig: LLMConfig = {
       providers: {},
       routing: {
-        extract: 'fireworks/deepseek-v3p1',
-        reason: 'anthropic/claude-sonnet-4-20250514',
-        generate: 'anthropic/claude-sonnet-4-20250514',
-        classify: 'fireworks/deepseek-v3p1',
+        extract: { primary: 'fireworks/deepseek-v3p1', fallback: null },
+        reason: { primary: 'anthropic/claude-sonnet-4-20250514', fallback: null },
+        generate: { primary: 'anthropic/claude-sonnet-4-20250514', fallback: null },
+        classify: { primary: 'fireworks/deepseek-v3p1', fallback: null },
       },
       default_token_budget: 50000,
       tokens_used_this_month: 0,
@@ -116,21 +125,50 @@ async function loadConfig(workspaceId: string): Promise<LLMConfig> {
   return config;
 }
 
-function resolveProvider(config: LLMConfig, capability: LLMCapability): { provider: string; model: string } {
-  const route = config.routing[capability];
-  if (!route) {
-    throw new Error(`No routing configured for capability '${capability}'`);
-  }
-
+function parseRoute(route: string): { provider: string; model: string } {
   const slashIndex = route.indexOf('/');
   if (slashIndex === -1) {
     throw new Error(`Invalid routing format '${route}' — expected 'provider/model'`);
   }
-
   return {
     provider: route.substring(0, slashIndex),
     model: route.substring(slashIndex + 1),
   };
+}
+
+interface ResolvedRoute {
+  provider: string;
+  model: string;
+  fallbackProvider?: string;
+  fallbackModel?: string;
+}
+
+function resolveProvider(config: LLMConfig, capability: LLMCapability): ResolvedRoute {
+  const entry = config.routing[capability];
+  if (!entry) {
+    throw new Error(`No routing configured for capability '${capability}'`);
+  }
+
+  if (typeof entry === 'string') {
+    return parseRoute(entry);
+  }
+
+  const primary = parseRoute(entry.primary);
+  if (entry.fallback) {
+    const fb = parseRoute(entry.fallback);
+    return { ...primary, fallbackProvider: fb.provider, fallbackModel: fb.model };
+  }
+  return primary;
+}
+
+function isRetryableError(err: unknown): boolean {
+  const e = err as any;
+  const status = e?.status || e?.response?.status;
+  if (typeof status === 'number') {
+    return status >= 500 || status === 429;
+  }
+  const code = e?.code;
+  return code === 'ECONNABORTED' || code === 'ETIMEDOUT' || code === 'ECONNREFUSED';
 }
 
 function getApiKey(config: LLMConfig, provider: string): { apiKey: string; baseURL?: string } {
@@ -468,22 +506,52 @@ export function toolResultMessage(toolCallId: string, result: any): LLMCallOptio
   };
 }
 
+/**
+ * Call a specific provider/model. Used by callLLM for both primary and fallback.
+ */
+async function callProviderByName(
+  providerName: string,
+  modelName: string,
+  options: LLMCallOptions,
+  config: LLMConfig
+): Promise<LLMResponse> {
+  const { apiKey, baseURL } = getApiKey(config, providerName);
+
+  if (!apiKey) {
+    throw new Error(
+      `No API key for provider '${providerName}' — add a key to workspace LLM config or set platform env var`
+    );
+  }
+
+  switch (providerName) {
+    case 'anthropic':
+      return await callAnthropic(modelName, options, apiKey, baseURL);
+    case 'fireworks':
+    case 'openai':
+      return await callOpenAICompatible(
+        modelName,
+        options,
+        apiKey,
+        baseURL || (providerName === 'fireworks'
+          ? 'https://api.fireworks.ai/inference/v1'
+          : 'https://api.openai.com/v1'),
+        providerName
+      );
+    default:
+      throw new Error(`Unsupported provider: ${providerName}`);
+  }
+}
+
 export async function callLLM(
   workspaceId: string,
   capability: LLMCapability,
   options: LLMCallOptions
 ): Promise<LLMResponse> {
   const config = await loadConfig(workspaceId);
-  const { provider, model } = resolveProvider(config, capability);
-  const { apiKey, baseURL } = getApiKey(config, provider);
+  const resolved = resolveProvider(config, capability);
+  const { provider, model, fallbackProvider, fallbackModel } = resolved;
 
-  if (!apiKey) {
-    throw new Error(
-      `No API key for provider '${provider}' — add a key to workspace LLM config or set platform env var`
-    );
-  }
-
-  console.log(`[LLM Router] ${capability} → ${provider}/${model}`);
+  console.log(`[LLM Router] ${capability} → ${provider}/${model}${fallbackProvider ? ` (fallback: ${fallbackProvider}/${fallbackModel})` : ''}`);
 
   const allMessages: Array<{ role: string; content: any }> = [];
   if (options.systemPrompt) {
@@ -498,25 +566,20 @@ export async function callLLM(
   const startTime = Date.now();
 
   let response: LLMResponse;
+  let usedProvider = provider;
+  let usedModel = model;
 
-  switch (provider) {
-    case 'anthropic':
-      response = await callAnthropic(model, options, apiKey, baseURL);
-      break;
-    case 'fireworks':
-    case 'openai':
-      response = await callOpenAICompatible(
-        model,
-        options,
-        apiKey,
-        baseURL || (provider === 'fireworks'
-          ? 'https://api.fireworks.ai/inference/v1'
-          : 'https://api.openai.com/v1'),
-        provider
-      );
-      break;
-    default:
-      throw new Error(`Unsupported provider: ${provider}`);
+  try {
+    response = await callProviderByName(provider, model, options, config);
+  } catch (err) {
+    if (fallbackProvider && fallbackModel && isRetryableError(err)) {
+      console.warn(`[LLM Router] ${provider}/${model} failed, falling back to ${fallbackProvider}/${fallbackModel}`);
+      usedProvider = fallbackProvider;
+      usedModel = fallbackModel;
+      response = await callProviderByName(fallbackProvider, fallbackModel, options, config);
+    } else {
+      throw err;
+    }
   }
 
   const latencyMs = Date.now() - startTime;
@@ -524,7 +587,7 @@ export async function callLLM(
   await trackUsage(workspaceId, totalTokens);
 
   const tracking = options._tracking;
-  const costUsd = estimateCost(model, response.usage.input, response.usage.output);
+  const costUsd = estimateCost(usedModel, response.usage.input, response.usage.output);
   const recommendations = generateRecommendations(totalTokens, costUsd, payloadSummary);
 
   trackTokenUsage({
@@ -533,8 +596,8 @@ export async function callLLM(
     skillRunId: tracking?.skillRunId,
     phase: tracking?.phase,
     stepName: tracking?.stepName,
-    provider,
-    model,
+    provider: usedProvider,
+    model: usedModel,
     inputTokens: response.usage.input,
     outputTokens: response.usage.output,
     estimatedCostUsd: costUsd,
@@ -546,11 +609,36 @@ export async function callLLM(
     recommendations,
   }).catch(err => console.warn('[Token Tracker] Fire-and-forget failed:', err.message));
 
+  // Fire-and-forget training pair capture
+  const userMsg = options.messages.find(m => m.role === 'user');
+  const userPromptText = userMsg
+    ? (typeof userMsg.content === 'string' ? userMsg.content : JSON.stringify(userMsg.content))
+    : '';
+
+  if (userPromptText) {
+    logTrainingPair({
+      workspaceId,
+      capability,
+      provider: `${usedProvider}/${usedModel}`,
+      model: usedModel,
+      skillId: options.metadata?.skillId || options._tracking?.skillId,
+      skillRunId: options.metadata?.skillRunId || options._tracking?.skillRunId,
+      sourceContext: options.metadata?.sourceContext,
+      systemPrompt: options.systemPrompt,
+      userPrompt: userPromptText,
+      assistantResponse: response.content,
+      inputSchema: options.metadata?.structuredInput,
+      inputTokens: response.usage.input,
+      outputTokens: response.usage.output,
+      latencyMs,
+    }).catch(() => {});
+  }
+
   return response;
 }
 
 export async function getLLMConfig(workspaceId: string): Promise<{
-  routing: Record<string, string>;
+  routing: Record<string, RoutingEntry>;
   providers: Record<string, { connected: boolean }>;
   budget: { total: number; used: number; remaining: number };
 }> {
@@ -583,7 +671,7 @@ export async function getLLMConfig(workspaceId: string): Promise<{
 export async function updateLLMConfig(
   workspaceId: string,
   updates: {
-    routing?: Record<string, string>;
+    routing?: Record<string, RoutingEntry>;
     providers?: Record<string, { apiKey?: string; baseURL?: string; enabled?: boolean }>;
     default_token_budget?: number;
   }
