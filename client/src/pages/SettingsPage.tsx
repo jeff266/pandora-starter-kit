@@ -1261,7 +1261,8 @@ function QuotasSection() {
     return api.get(url).then((data: any) => {
       setQuotas(data.quotas || []);
       setTeamTotal(data.teamTotal || 0);
-      setPeriodLabel(data.period || '');
+      const per = data.period;
+      setPeriodLabel(typeof per === 'object' && per !== null ? per.name || '' : per || '');
       setRepCount(data.repCount || 0);
     }).catch(() => setQuotas([]));
   };
@@ -1281,7 +1282,8 @@ function QuotasSection() {
       setCurrentPeriodIdx(curIdx >= 0 ? curIdx : 0);
       setQuotas(quotasData?.quotas || []);
       setTeamTotal(quotasData?.teamTotal || 0);
-      setPeriodLabel(quotasData?.period || '');
+      const qp = quotasData?.period;
+      setPeriodLabel(typeof qp === 'object' && qp !== null ? qp.name || '' : qp || '');
       setRepCount(quotasData?.repCount || 0);
       setPendingGoals(goalsData);
       const healthArr = Array.isArray(healthData) ? healthData : healthData?.connectors || [];
