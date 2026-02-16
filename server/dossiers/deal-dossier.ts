@@ -18,6 +18,7 @@ export interface DealDossier {
     probability: number | null;
     forecast_category: string | null;
     source: string | null;
+    source_id: string | null;
     pipeline_name: string | null;
   };
   contacts: Array<{
@@ -286,6 +287,7 @@ export async function assembleDealDossier(workspaceId: string, dealId: string): 
       probability: deal.probability ?? null,
       forecast_category: deal.forecast_category ?? null,
       source: deal.source ?? null,
+      source_id: deal.source_id ?? null,
       pipeline_name: deal.pipeline ?? null,
     },
     contacts: mappedContacts,

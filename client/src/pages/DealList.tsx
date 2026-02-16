@@ -26,6 +26,21 @@ interface DealRow {
   signal_counts: { act: number; watch: number; notable: number; info: number };
   is_closed: boolean;
   status: string;
+  pipeline: string;
+  source_id: string | null;
+  source: string | null;
+}
+
+function buildCrmUrl(crm: string | null, portalId: number | null, instanceUrl: string | null, sourceId: string | null, dealSource: string | null): string | null {
+  if (!crm || !sourceId) return null;
+  if (crm === 'hubspot' && dealSource === 'hubspot' && portalId) {
+    return `https://app.hubspot.com/contacts/${portalId}/deal/${sourceId}`;
+  }
+  if (crm === 'salesforce' && dealSource === 'salesforce' && instanceUrl) {
+    const host = instanceUrl.replace(/^https?:\/\//, '');
+    return `https://${host}/lightning/r/Opportunity/${sourceId}/view`;
+  }
+  return null;
 }
 
 type SortField = 'name' | 'amount' | 'stage' | 'owner' | 'close_date' | 'health' | 'days_in_stage' | 'findings';
@@ -48,10 +63,12 @@ export default function DealList() {
   const [ownerFilter, setOwnerFilter] = useState(searchParams.get('owner') || 'all');
   const [healthFilter, setHealthFilter] = useState(searchParams.get('health') || 'all');
   const [statusFilter, setStatusFilter] = useState('open');
+  const [pipelineFilter, setPipelineFilter] = useState(() => localStorage.getItem('pandora_deals_pipeline') || 'all');
 
   const [sortField, setSortField] = useState<SortField>('amount');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [page, setPage] = useState(0);
+  const [crmInfo, setCrmInfo] = useState<{ crm: string | null; portalId?: number | null; instanceUrl?: string | null }>({ crm: null });
 
   const fetchDeals = useCallback(async () => {
     setLoading(true);
@@ -75,6 +92,9 @@ export default function DealList() {
         signal_counts: d.signal_counts || { act: 0, watch: 0, notable: 0, info: 0 },
         is_closed: false,
         status: 'open',
+        pipeline: d.pipeline || '',
+        source_id: d.source_id ?? null,
+        source: d.source ?? null,
       }));
 
       const riskDealIds = new Set(riskDeals.map(d => d.id));
@@ -92,10 +112,13 @@ export default function DealList() {
           close_date: d.close_date,
           days_in_stage: d.days_in_stage ?? null,
           score: 100,
-          grade: '\u2014',
+          grade: '—',
           signal_counts: { act: 0, watch: 0, notable: 0, info: 0 },
           is_closed: ['closed_won', 'closed_lost'].includes(d.stage_normalized),
           status: d.stage_normalized === 'closed_won' ? 'won' : d.stage_normalized === 'closed_lost' ? 'lost' : 'open',
+          pipeline: d.pipeline || d.source_data?.pipeline || '',
+          source_id: d.source_id ?? null,
+          source: d.source ?? null,
         }));
 
       setAllDeals([...riskDeals, ...closedDeals]);
@@ -107,7 +130,10 @@ export default function DealList() {
     }
   }, []);
 
-  useEffect(() => { fetchDeals(); }, [fetchDeals]);
+  useEffect(() => {
+    fetchDeals();
+    api.get('/crm/link-info').then(setCrmInfo).catch(() => {});
+  }, [fetchDeals]);
 
   const uniqueStages = useMemo(() =>
     Array.from(new Set(allDeals.map(d => d.stage).filter(Boolean))).sort(),
@@ -115,6 +141,10 @@ export default function DealList() {
 
   const uniqueOwners = useMemo(() =>
     Array.from(new Set(allDeals.map(d => d.owner).filter(Boolean))).sort(),
+  [allDeals]);
+
+  const uniquePipelines = useMemo(() =>
+    Array.from(new Set(allDeals.map(d => d.pipeline).filter(Boolean))).sort(),
   [allDeals]);
 
   const filtered = useMemo(() => {
@@ -137,12 +167,15 @@ export default function DealList() {
     if (healthFilter !== 'all') {
       result = result.filter(d => d.grade === healthFilter);
     }
+    if (pipelineFilter !== 'all') {
+      result = result.filter(d => d.pipeline === pipelineFilter);
+    }
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       result = result.filter(d => d.name.toLowerCase().includes(q));
     }
     return result;
-  }, [allDeals, statusFilter, stageFilter, ownerFilter, healthFilter, search]);
+  }, [allDeals, statusFilter, stageFilter, ownerFilter, healthFilter, pipelineFilter, search]);
 
   const sorted = useMemo(() => {
     const arr = [...filtered];
@@ -177,7 +210,7 @@ export default function DealList() {
   const totalPages = Math.ceil(sorted.length / PAGE_SIZE);
   const pageDeals = sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
-  useEffect(() => { setPage(0); }, [search, stageFilter, ownerFilter, healthFilter, statusFilter]);
+  useEffect(() => { setPage(0); }, [search, stageFilter, ownerFilter, healthFilter, statusFilter, pipelineFilter]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -194,9 +227,11 @@ export default function DealList() {
     setOwnerFilter('all');
     setHealthFilter('all');
     setStatusFilter('open');
+    setPipelineFilter('all');
+    localStorage.removeItem('pandora_deals_pipeline');
   };
 
-  const hasFilters = search || stageFilter !== 'all' || ownerFilter !== 'all' || healthFilter !== 'all' || statusFilter !== 'open';
+  const hasFilters = search || stageFilter !== 'all' || ownerFilter !== 'all' || healthFilter !== 'all' || statusFilter !== 'open' || pipelineFilter !== 'all';
 
   if (loading) {
     return (
@@ -251,7 +286,7 @@ export default function DealList() {
           <h2 style={{ fontSize: 16, fontWeight: 600, color: colors.text, margin: 0 }}>Deals</h2>
           <p style={{ fontSize: 12, color: colors.textMuted, margin: '4px 0 0' }}>
             Showing {filtered.length} of {allDeals.length} deals
-            {filtered.length > 0 && ` \u00B7 ${formatCurrency(totalPipeline)} pipeline`}
+            {filtered.length > 0 && ` · ${formatCurrency(totalPipeline)} pipeline`}
           </p>
         </div>
       </div>
@@ -272,6 +307,8 @@ export default function DealList() {
             borderRadius: 6, color: colors.text, outline: 'none',
           }}
         />
+        <FilterSelect label="Pipeline" value={pipelineFilter} onChange={(v) => { setPipelineFilter(v); localStorage.setItem('pandora_deals_pipeline', v); }}
+          options={[{ value: 'all', label: 'All' }, ...uniquePipelines.map(p => ({ value: p, label: p }))]} />
         <FilterSelect label="Stage" value={stageFilter} onChange={setStageFilter}
           options={[{ value: 'all', label: 'All' }, ...uniqueStages.map(s => ({ value: s, label: s.replace(/_/g, ' ') }))]} />
         <FilterSelect label="Owner" value={ownerFilter} onChange={setOwnerFilter}
@@ -361,28 +398,52 @@ export default function DealList() {
                 onMouseEnter={e => (e.currentTarget.style.background = colors.surfaceHover)}
                 onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
               >
-                <div style={{ fontSize: 13, fontWeight: 500, color: colors.accent, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingRight: 8 }}>
-                  {deal.name || 'Unnamed'}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, overflow: 'hidden', paddingRight: 8 }}>
+                  <span style={{ fontSize: 13, fontWeight: 500, color: colors.accent, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {deal.name || 'Unnamed'}
+                  </span>
+                  {(() => {
+                    const crmUrl = buildCrmUrl(crmInfo.crm, crmInfo.portalId ?? null, crmInfo.instanceUrl ?? null, deal.source_id, deal.source);
+                    if (!crmUrl) return null;
+                    return (
+                      <a
+                        href={crmUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={crmInfo.crm === 'hubspot' ? 'Open in HubSpot' : 'Open in Salesforce'}
+                        onClick={e => e.stopPropagation()}
+                        style={{ display: 'inline-flex', flexShrink: 0, color: `${colors.accent}99`, transition: 'color 0.15s' }}
+                        onMouseEnter={e => { e.currentTarget.style.color = colors.accent; }}
+                        onMouseLeave={e => { e.currentTarget.style.color = `${colors.accent}99`; }}
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                          <polyline points="15 3 21 3 21 9" />
+                          <line x1="10" y1="14" x2="21" y2="3" />
+                        </svg>
+                      </a>
+                    );
+                  })()}
                 </div>
                 <div style={{ fontSize: 13, fontFamily: fonts.mono, color: colors.text }}>
-                  {deal.amount ? formatCurrency(deal.amount) : '\u2014'}
+                  {deal.amount ? formatCurrency(deal.amount) : '—'}
                 </div>
                 <div>
                   <span style={{
                     fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 4,
                     background: colors.accentSoft, color: colors.accent, textTransform: 'capitalize',
                   }}>
-                    {deal.stage?.replace(/_/g, ' ') || '\u2014'}
+                    {deal.stage?.replace(/_/g, ' ') || '—'}
                   </span>
                 </div>
                 <div style={{ fontSize: 12, color: colors.textSecondary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {shortName(deal.owner) || '\u2014'}
+                  {shortName(deal.owner) || '—'}
                 </div>
                 <div style={{ fontSize: 12, color: pastDue ? colors.red : colors.textMuted, fontWeight: pastDue ? 600 : 400 }}>
-                  {deal.close_date ? formatDate(deal.close_date) : '\u2014'}
+                  {deal.close_date ? formatDate(deal.close_date) : '—'}
                 </div>
                 <div>
-                  {deal.grade && deal.grade !== '\u2014' ? (
+                  {deal.grade && deal.grade !== '—' ? (
                     <span style={{
                       fontSize: 11, fontWeight: 700, fontFamily: fonts.mono,
                       padding: '2px 8px', borderRadius: 4,
@@ -392,11 +453,11 @@ export default function DealList() {
                       {deal.grade}
                     </span>
                   ) : (
-                    <span style={{ fontSize: 11, color: colors.textDim }}>\u2014</span>
+                    <span style={{ fontSize: 11, color: colors.textDim }}>—</span>
                   )}
                 </div>
                 <div style={{ fontSize: 12, fontFamily: fonts.mono, color: daysColor }}>
-                  {deal.days_in_stage != null ? `${Math.round(deal.days_in_stage)}` : '\u2014'}
+                  {deal.days_in_stage != null ? `${Math.round(deal.days_in_stage)}` : '—'}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                   {totalFindings > 0 ? (
@@ -421,7 +482,7 @@ export default function DealList() {
                       )}
                     </>
                   ) : (
-                    <span style={{ fontSize: 11, color: colors.textDim }}>\u2014</span>
+                    <span style={{ fontSize: 11, color: colors.textDim }}>—</span>
                   )}
                 </div>
               </div>

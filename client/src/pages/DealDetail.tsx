@@ -32,6 +32,28 @@ function gradeBg(grade: string): string {
   }
 }
 
+function buildCrmUrl(crm: string | null, portalId: number | null, instanceUrl: string | null, sourceId: string | null, dealSource: string | null): string | null {
+  if (!crm || !sourceId) return null;
+  if (crm === 'hubspot' && dealSource === 'hubspot' && portalId) {
+    return `https://app.hubspot.com/contacts/${portalId}/deal/${sourceId}`;
+  }
+  if (crm === 'salesforce' && dealSource === 'salesforce' && instanceUrl) {
+    const host = instanceUrl.replace(/^https?:\/\//, '');
+    return `https://${host}/lightning/r/Opportunity/${sourceId}/view`;
+  }
+  return null;
+}
+
+function ExternalLinkIcon({ size = 12, color = 'currentColor' }: { size?: number; color?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+      <polyline points="15 3 21 3 21 9" />
+      <line x1="10" y1="14" x2="21" y2="3" />
+    </svg>
+  );
+}
+
 export default function DealDetail() {
   const { dealId } = useParams<{ dealId: string }>();
   const navigate = useNavigate();
@@ -44,6 +66,7 @@ export default function DealDetail() {
   const [askAnswer, setAskAnswer] = useState<any>(null);
   const [askLoading, setAskLoading] = useState(false);
   const [askError, setAskError] = useState('');
+  const [crmInfo, setCrmInfo] = useState<{ crm: string | null; portalId?: number | null; instanceUrl?: string | null }>({ crm: null });
 
   const fetchDossier = async (withNarrative = false) => {
     if (!dealId) return;
@@ -64,6 +87,7 @@ export default function DealDetail() {
 
   useEffect(() => {
     fetchDossier();
+    api.get('/crm/link-info').then(setCrmInfo).catch(() => {});
   }, [dealId]);
 
   const dismissFinding = async (findingId: string) => {
@@ -179,7 +203,7 @@ export default function DealDetail() {
         onClick={() => navigate('/deals')}
         style={{ fontSize: 12, color: colors.accent, background: 'none', border: 'none', cursor: 'pointer', alignSelf: 'flex-start', padding: 0 }}
       >
-        \u2190 Back to Deals
+        ← Back to Deals
       </button>
 
       {toast && (
@@ -237,31 +261,59 @@ export default function DealDetail() {
             </div>
           </div>
 
-          {/* Risk Score Badge */}
-          {riskScore && riskScore.grade && (
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 8,
-              padding: '8px 14px', borderRadius: 8,
-              background: gradeBg(riskScore.grade),
-              border: `1px solid ${gradeColor(riskScore.grade)}30`,
-            }}>
-              <span style={{
-                fontSize: 20, fontWeight: 700,
-                color: gradeColor(riskScore.grade),
-                fontFamily: fonts.mono,
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {(() => {
+              const crmUrl = buildCrmUrl(crmInfo.crm, crmInfo.portalId ?? null, crmInfo.instanceUrl ?? null, deal.source_id, deal.source);
+              if (!crmUrl) return null;
+              const label = crmInfo.crm === 'hubspot' ? 'Open in HubSpot' : 'Open in Salesforce';
+              return (
+                <a
+                  href={crmUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    fontSize: 11, fontWeight: 500, padding: '6px 12px',
+                    borderRadius: 6, textDecoration: 'none',
+                    background: colors.accentSoft, color: colors.accent,
+                    border: `1px solid ${colors.accent}30`,
+                    transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = `${colors.accent}25`; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = colors.accentSoft; }}
+                >
+                  {label}
+                  <ExternalLinkIcon size={11} color={colors.accent} />
+                </a>
+              );
+            })()}
+
+            {/* Risk Score Badge */}
+            {riskScore && riskScore.grade && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '8px 14px', borderRadius: 8,
+                background: gradeBg(riskScore.grade),
+                border: `1px solid ${gradeColor(riskScore.grade)}30`,
               }}>
-                {riskScore.grade}
-              </span>
-              <div style={{ display: 'flex', flexDirection: 'column' }}>
-                <span style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase' }}>
-                  Health
+                <span style={{
+                  fontSize: 20, fontWeight: 700,
+                  color: gradeColor(riskScore.grade),
+                  fontFamily: fonts.mono,
+                }}>
+                  {riskScore.grade}
                 </span>
-                <span style={{ fontSize: 14, fontWeight: 600, fontFamily: fonts.mono, color: colors.text }}>
-                  {riskScore.score}
-                </span>
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <span style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase' }}>
+                    Health
+                  </span>
+                  <span style={{ fontSize: 14, fontWeight: 600, fontFamily: fonts.mono, color: colors.text }}>
+                    {riskScore.score}
+                  </span>
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         {/* Health Signals */}

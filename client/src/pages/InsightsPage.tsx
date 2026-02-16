@@ -5,6 +5,18 @@ import { colors, fonts } from '../styles/theme';
 import { formatDateTime, formatTimeAgo, severityColor, severityBg } from '../lib/format';
 import Skeleton from '../components/Skeleton';
 
+function buildCrmUrl(crm: string | null, portalId: number | null, instanceUrl: string | null, sourceId: string | null, dealSource: string | null): string | null {
+  if (!crm || !sourceId) return null;
+  if (crm === 'hubspot' && dealSource === 'hubspot' && portalId) {
+    return `https://app.hubspot.com/contacts/${portalId}/deal/${sourceId}`;
+  }
+  if (crm === 'salesforce' && dealSource === 'salesforce' && instanceUrl) {
+    const host = instanceUrl.replace(/^https?:\/\//, '');
+    return `https://${host}/lightning/r/Opportunity/${sourceId}/view`;
+  }
+  return null;
+}
+
 export default function InsightsPage() {
   const navigate = useNavigate();
   const [findings, setFindings] = useState<any[]>([]);
@@ -19,6 +31,7 @@ export default function InsightsPage() {
   });
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
   const [confirmedIds, setConfirmedIds] = useState<Set<string>>(new Set());
+  const [crmInfo, setCrmInfo] = useState<{ crm: string | null; portalId?: number | null; instanceUrl?: string | null }>({ crm: null });
 
   const limit = 30;
 
@@ -60,6 +73,10 @@ export default function InsightsPage() {
   useEffect(() => {
     fetchFindings(true);
   }, [filters.severity, filters.status, filters.skill]);
+
+  useEffect(() => {
+    api.get('/crm/link-info').then(setCrmInfo).catch(() => {});
+  }, []);
 
   const confirmFinding = async (findingId: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -169,9 +186,35 @@ export default function InsightsPage() {
                       <p style={{ fontSize: 13, color: colors.text, lineHeight: 1.4 }}>
                         {f.message}
                       </p>
-                      <div style={{ display: 'flex', gap: 12, marginTop: 3, fontSize: 11, color: colors.textMuted }}>
+                      <div style={{ display: 'flex', gap: 12, marginTop: 3, fontSize: 11, color: colors.textMuted, alignItems: 'center' }}>
                         <span>{f.skill_id}</span>
-                        {f.deal_name && <span style={{ color: colors.accent }}>{f.deal_name}</span>}
+                        {f.deal_name && (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                            <span style={{ color: colors.accent }}>{f.deal_name}</span>
+                            {(() => {
+                              const crmUrl = buildCrmUrl(crmInfo.crm, crmInfo.portalId ?? null, crmInfo.instanceUrl ?? null, f.deal_source_id, f.deal_source);
+                              if (!crmUrl) return null;
+                              return (
+                                <a
+                                  href={crmUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  title={crmInfo.crm === 'hubspot' ? 'Open in HubSpot' : 'Open in Salesforce'}
+                                  onClick={e => e.stopPropagation()}
+                                  style={{ display: 'inline-flex', color: `${colors.accent}99`, transition: 'color 0.15s' }}
+                                  onMouseEnter={e => { e.currentTarget.style.color = colors.accent; }}
+                                  onMouseLeave={e => { e.currentTarget.style.color = `${colors.accent}99`; }}
+                                >
+                                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                                    <polyline points="15 3 21 3 21 9" />
+                                    <line x1="10" y1="14" x2="21" y2="3" />
+                                  </svg>
+                                </a>
+                              );
+                            })()}
+                          </span>
+                        )}
                         {f.owner_email && <span>{f.owner_email}</span>}
                         <span>{f.found_at ? formatTimeAgo(f.found_at) : ''}</span>
                         {isResolved && <span style={{ color: colors.green }}>Resolved</span>}

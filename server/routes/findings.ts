@@ -1,7 +1,74 @@
 import { Router, type Request, type Response } from 'express';
 import { query } from '../db.js';
+import { getConnectorCredentials } from '../lib/credential-store.js';
+import { HubSpotClient } from '../connectors/hubspot/client.js';
 
 const router = Router();
+
+router.get('/:workspaceId/crm/link-info', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { workspaceId } = req.params;
+    const connResult = await query(
+      `SELECT connector_name, metadata FROM connections
+       WHERE workspace_id = $1 AND connector_name IN ('hubspot', 'salesforce') AND status IN ('active', 'healthy')
+       LIMIT 1`,
+      [workspaceId]
+    );
+
+    if (connResult.rows.length === 0) {
+      res.json({ crm: null });
+      return;
+    }
+
+    const conn = connResult.rows[0];
+    const crm = conn.connector_name;
+
+    if (crm === 'hubspot') {
+      let portalId = conn.metadata?.portalId;
+      if (!portalId) {
+        try {
+          const creds = await getConnectorCredentials(workspaceId, 'hubspot');
+          if (creds?.access_token) {
+            const client = new HubSpotClient(creds.access_token);
+            const testResult = await client.testConnection();
+            if (testResult.success && testResult.accountInfo?.portalId) {
+              portalId = testResult.accountInfo.portalId;
+              await query(
+                `UPDATE connections SET metadata = jsonb_set(COALESCE(metadata, '{}'), '{portalId}', $1::jsonb)
+                 WHERE workspace_id = $2 AND connector_name = 'hubspot'`,
+                [JSON.stringify(portalId), workspaceId]
+              );
+            }
+          }
+        } catch (err) {
+          console.warn('[crm] Failed to fetch HubSpot portalId:', err instanceof Error ? err.message : String(err));
+        }
+      }
+      res.json({ crm: 'hubspot', portalId: portalId ? Number(portalId) : null });
+      return;
+    }
+
+    if (crm === 'salesforce') {
+      let instanceUrl: string | null = null;
+      try {
+        const creds = await getConnectorCredentials(workspaceId, 'salesforce');
+        if (creds?.instance_url) {
+          instanceUrl = creds.instance_url;
+        }
+      } catch (err) {
+        console.warn('[crm] Failed to get Salesforce instanceUrl:', err instanceof Error ? err.message : String(err));
+      }
+      res.json({ crm: 'salesforce', instanceUrl });
+      return;
+    }
+
+    res.json({ crm: null });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[crm] Link info error:', msg);
+    res.status(500).json({ error: msg });
+  }
+});
 
 const SEVERITY_ORDER: Record<string, number> = { act: 1, watch: 2, notable: 3, info: 4 };
 
@@ -165,7 +232,9 @@ router.get('/:workspaceId/findings', async (req: Request, res: Response): Promis
 
     const dataParams = [...params, limit, offset];
     const dataResult = await query(
-      `SELECT f.* FROM findings f
+      `SELECT f.*, d.source_id as deal_source_id, d.source as deal_source
+       FROM findings f
+       LEFT JOIN deals d ON d.id = f.deal_id AND d.workspace_id = f.workspace_id
        WHERE ${whereClause}
        ORDER BY ${orderClause}
        LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`,

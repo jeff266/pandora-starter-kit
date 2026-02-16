@@ -6,6 +6,7 @@ import { formatCurrency, formatNumber, formatPercent, formatTimeAgo, severityCol
 import Skeleton, { SkeletonCard } from '../components/Skeleton';
 import { SeverityDot } from '../components/shared';
 import QuotaBanner from '../components/QuotaBanner';
+import { useWorkspace } from '../context/WorkspaceContext';
 
 interface Finding {
   id: string;
@@ -39,6 +40,7 @@ interface PipelineStage {
 
 export default function CommandCenter() {
   const navigate = useNavigate();
+  const { isAuthenticated, isLoading: authLoading } = useWorkspace();
   const [pipeline, setPipeline] = useState<any>(null);
   const [summary, setSummary] = useState<any>(null);
   const [findings, setFindings] = useState<Finding[]>([]);
@@ -88,11 +90,12 @@ export default function CommandCenter() {
   }, [fetchData]);
 
   useEffect(() => {
+    if (!isAuthenticated || authLoading) return;
     fetchPipelines();
     fetchData();
     const interval = setInterval(() => fetchData(), 300000);
     return () => clearInterval(interval);
-  }, []);
+  }, [isAuthenticated, authLoading, fetchPipelines, fetchData]);
 
   const stageData: PipelineStage[] = pipeline?.by_stage || [];
   const totalPipeline = Number(pipeline?.total_pipeline) || 0;
@@ -126,7 +129,7 @@ export default function CommandCenter() {
       <QuotaBanner />
       {/* Headline Metrics */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16 }}>
-        {loading.pipeline || loading.summary ? (
+        {authLoading || loading.pipeline || loading.summary ? (
           Array.from({ length: 5 }).map((_, i) => <SkeletonCard key={i} height={100} />)
         ) : (
           <>
@@ -178,7 +181,7 @@ export default function CommandCenter() {
           <div>
             <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>Pipeline by Stage</h3>
             <p style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
-              {formatCurrency(totalPipeline)} total {'\u00B7'} {stageData.reduce((sum, s) => sum + s.deal_count, 0)} deals across {stageData.length} stages
+              {formatCurrency(totalPipeline)} total {'·'} {stageData.reduce((sum, s) => sum + s.deal_count, 0)} deals across {stageData.length} stages
             </p>
           </div>
           {availablePipelines.length > 1 && (
@@ -208,7 +211,7 @@ export default function CommandCenter() {
             </select>
           )}
         </div>
-        {loading.pipeline ? (
+        {authLoading || loading.pipeline ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} height={36} />)}
           </div>
@@ -363,11 +366,11 @@ export default function CommandCenter() {
             onClick={() => navigate('/insights')}
             style={{ fontSize: 11, color: colors.accent, background: 'none', border: 'none', cursor: 'pointer' }}
           >
-            View all \u2192
+            View all →
           </button>
         </div>
 
-        {loading.findings ? (
+        {authLoading || loading.findings ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} height={48} />)}
           </div>

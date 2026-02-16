@@ -290,31 +290,31 @@ export default function AccountList() {
                 {account.name || 'Unnamed'}
               </div>
               <div style={{ fontSize: 12, color: colors.textSecondary, fontFamily: fonts.mono, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {account.domain || '\u2014'}
+                {account.domain || '—'}
               </div>
               {hasIndustryData && (
                 <div style={{ fontSize: 12, color: colors.textMuted }}>
-                  {account.industry || '\u2014'}
+                  {account.industry || '—'}
                 </div>
               )}
               {hasDealData && (
                 <div style={{ fontSize: 12, fontFamily: fonts.mono, color: colors.text }}>
-                  {account.open_deal_count || '\u2014'}
+                  {account.open_deal_count || '—'}
                 </div>
               )}
               {hasPipelineData && (
                 <div style={{ fontSize: 12, fontFamily: fonts.mono, color: colors.text }}>
-                  {account.total_pipeline ? formatCurrency(account.total_pipeline) : '\u2014'}
+                  {account.total_pipeline ? formatCurrency(account.total_pipeline) : '—'}
                 </div>
               )}
               {hasContactData && (
                 <div style={{ fontSize: 12, fontFamily: fonts.mono, color: colors.textMuted }}>
-                  {account.contact_count || '\u2014'}
+                  {account.contact_count || '—'}
                 </div>
               )}
               {hasActivityData && (
                 <div style={{ fontSize: 11, color: colors.textMuted }}>
-                  {account.last_activity ? formatTimeAgo(account.last_activity) : '\u2014'}
+                  {account.last_activity ? formatTimeAgo(account.last_activity) : '—'}
                 </div>
               )}
             </div>

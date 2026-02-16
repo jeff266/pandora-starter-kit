@@ -196,10 +196,10 @@ export default function SkillsPage() {
                         {skill.lastRunAt && (
                           <span>
                             Last run: {formatTimeAgo(skill.lastRunAt)}
-                            {skill.lastRunDuration != null && ` \u00B7 ${(skill.lastRunDuration / 1000).toFixed(1)}s`}
-                            {' \u00B7 '}
+                            {skill.lastRunDuration != null && ` · ${(skill.lastRunDuration / 1000).toFixed(1)}s`}
+                            {' · '}
                             <span style={{ color: skill.lastRunStatus === 'failed' ? colors.red : colors.green }}>
-                              {skill.lastRunStatus === 'completed' ? '\u2705' : skill.lastRunStatus === 'failed' ? '\u274C' : '\u23F3'} {skill.lastRunStatus || 'unknown'}
+                              {skill.lastRunStatus === 'completed' ? '✅' : skill.lastRunStatus === 'failed' ? '❌' : '⏳'} {skill.lastRunStatus || 'unknown'}
                             </span>
                           </span>
                         )}

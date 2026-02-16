@@ -29,6 +29,9 @@ interface PipelineRiskSummary {
     grade: string;
     signal_counts: { act: number; watch: number; notable: number; info: number };
     top_signal: string | null;
+    source_id: string | null;
+    source: string | null;
+    pipeline: string | null;
   }>;
   filter: {
     rep_email: string | null;
@@ -59,7 +62,7 @@ export async function getPipelineRiskSummary(
   }
 
   const dealsResult = await query(
-    `SELECT id, name, amount, stage, stage_normalized, owner, close_date, days_in_stage
+    `SELECT id, name, amount, stage, stage_normalized, owner, close_date, days_in_stage, source_id, source, pipeline
      FROM deals
      WHERE workspace_id = $1 AND stage_normalized NOT IN ('closed_won', 'closed_lost')${whereExtra}
      ORDER BY amount DESC NULLS LAST`,
@@ -103,6 +106,9 @@ export async function getPipelineRiskSummary(
       grade: risk?.grade ?? 'A',
       signal_counts: risk?.signal_counts ?? { act: 0, watch: 0, notable: 0, info: 0 },
       top_signal: risk?.signals?.[0]?.message ?? null,
+      source_id: d.source_id ?? null,
+      source: d.source ?? null,
+      pipeline: d.pipeline ?? null,
     };
   });
 
