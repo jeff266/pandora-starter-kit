@@ -13,6 +13,16 @@ const PATTERNS: Array<{
   strategy: string;
 }> = [
   {
+    regex: /^how many deals/i,
+    handler: handleDealCount,
+    strategy: 'deal_count',
+  },
+  {
+    regex: /^how many (open|active|closed|won|lost) deals/i,
+    handler: handleDealCount,
+    strategy: 'deal_count',
+  },
+  {
     regex: /^how many (stale|at[- ]risk|flagged) deals/i,
     handler: handleStaleDealCount,
     strategy: 'findings_count',
@@ -73,6 +83,42 @@ export async function tryHeuristic(
   return { matched: false };
 }
 
+async function handleDealCount(workspaceId: string, match: RegExpMatchArray): Promise<HeuristicResult> {
+  const statusFilter = match[1]?.toLowerCase();
+  let whereClause = 'workspace_id = $1';
+  if (statusFilter === 'open' || statusFilter === 'active') {
+    whereClause += ` AND stage_normalized NOT IN ('closed_won', 'closed_lost')`;
+  } else if (statusFilter === 'closed' || statusFilter === 'won') {
+    whereClause += ` AND stage_normalized = 'closed_won'`;
+  } else if (statusFilter === 'lost') {
+    whereClause += ` AND stage_normalized = 'closed_lost'`;
+  }
+
+  const result = await query<any>(
+    `SELECT count(*)::int as total,
+       count(*) FILTER (WHERE stage_normalized NOT IN ('closed_won', 'closed_lost'))::int as open,
+       count(*) FILTER (WHERE stage_normalized = 'closed_won')::int as won,
+       count(*) FILTER (WHERE stage_normalized = 'closed_lost')::int as lost
+     FROM deals WHERE ${whereClause}`,
+    [workspaceId]
+  );
+
+  const row = result.rows[0];
+  if (!row) return { matched: true, answer: 'No deals found in your workspace.' };
+
+  if (statusFilter) {
+    return {
+      matched: true,
+      answer: `You have **${row.total}** ${statusFilter} deals.`,
+    };
+  }
+
+  return {
+    matched: true,
+    answer: `You have **${row.total}** deals total: **${row.open}** open, **${row.won}** won, **${row.lost}** lost.`,
+  };
+}
+
 async function handleStaleDealCount(workspaceId: string, _match: RegExpMatchArray): Promise<HeuristicResult> {
   const result = await query<any>(
     `SELECT
@@ -125,20 +171,20 @@ async function handleRepDeals(workspaceId: string, match: RegExpMatchArray): Pro
   if (!repName || repName.length < 2) return { matched: false };
 
   const repResult = await query<any>(
-    `SELECT DISTINCT owner_email FROM deals
-     WHERE workspace_id = $1 AND status = 'open'
-     AND (LOWER(owner_email) LIKE $2 OR LOWER(owner) LIKE $2)
+    `SELECT DISTINCT owner FROM deals
+     WHERE workspace_id = $1 AND stage_normalized NOT IN ('closed_won', 'closed_lost')
+     AND LOWER(owner) LIKE $2
      LIMIT 1`,
     [workspaceId, `%${repName.toLowerCase()}%`]
   );
 
   if (repResult.rows.length === 0) return { matched: false };
 
-  const repEmail = repResult.rows[0].owner_email;
+  const repEmail = repResult.rows[0].owner;
   const dealsResult = await query<any>(
     `SELECT name, stage, amount, close_date
      FROM deals
-     WHERE workspace_id = $1 AND owner_email = $2 AND status = 'open'
+     WHERE workspace_id = $1 AND owner = $2 AND stage_normalized NOT IN ('closed_won', 'closed_lost')
      ORDER BY amount DESC NULLS LAST
      LIMIT 15`,
     [workspaceId, repEmail]

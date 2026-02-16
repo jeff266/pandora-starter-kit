@@ -180,13 +180,13 @@ async function handleDataQuery(
   if (filters.rep) {
     scopeType = 'rep';
     const repResult = await query<any>(
-      `SELECT DISTINCT owner_email FROM deals
-       WHERE workspace_id = $1 AND LOWER(owner_email) LIKE $2
+      `SELECT DISTINCT owner FROM deals
+       WHERE workspace_id = $1 AND LOWER(owner) LIKE $2
        LIMIT 1`,
       [workspaceId, `%${filters.rep.toLowerCase()}%`]
     );
     if (repResult.rows.length > 0) {
-      repEmail = repResult.rows[0].owner_email;
+      repEmail = repResult.rows[0].owner;
     }
   } else if (route.entities?.includes('pipeline') || route.metrics?.includes('pipeline')) {
     scopeType = 'pipeline';

@@ -151,12 +151,12 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
     } else {
       if (!inputScope && !anchor) {
         const repResult = await query<any>(
-          `SELECT DISTINCT owner_email FROM deals
-           WHERE workspace_id = $1 AND status = 'open' AND owner_email IS NOT NULL
+          `SELECT DISTINCT owner FROM deals
+           WHERE workspace_id = $1 AND stage_normalized NOT IN ('closed_won', 'closed_lost') AND owner IS NOT NULL
            LIMIT 20`,
           [workspaceId]
         );
-        const repNames = repResult.rows.map((r: any) => r.owner_email);
+        const repNames = repResult.rows.map((r: any) => r.owner);
 
         const skillIds = [
           'pipeline-hygiene', 'deal-risk-review', 'pipeline-coverage',
@@ -169,13 +169,13 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
 
         if (route.type === 'data_query' && route.filters?.rep) {
           const repMatch = await query<any>(
-            `SELECT DISTINCT owner_email FROM deals
-             WHERE workspace_id = $1 AND LOWER(owner_email) LIKE $2 LIMIT 1`,
+            `SELECT DISTINCT owner FROM deals
+             WHERE workspace_id = $1 AND LOWER(owner) LIKE $2 LIMIT 1`,
             [workspaceId, `%${route.filters.rep.toLowerCase()}%`]
           );
           if (repMatch.rows.length > 0) {
             scopeType = 'rep';
-            repEmail = repMatch.rows[0].owner_email;
+            repEmail = repMatch.rows[0].owner;
           }
         } else if (route.type === 'skill_trigger' && route.skill_id) {
           const lastRun = await query<any>(
@@ -317,10 +317,12 @@ async function updateTurnMetrics(
          jsonb_set(
            context,
            '{turn_count}',
-           to_jsonb(COALESCE((context->>'turn_count')::int, 0) + 1)
+           to_jsonb(COALESCE((context->>'turn_count')::int, 0) + 1),
+           true
          ),
          '{total_token_cost}',
-         to_jsonb(COALESCE((context->>'total_token_cost')::int, 0) + $4)
+         to_jsonb(COALESCE((context->>'total_token_cost')::int, 0) + $4),
+         true
        ),
        updated_at = now()
        WHERE workspace_id = $1 AND channel_id = $2 AND thread_ts = $3`,

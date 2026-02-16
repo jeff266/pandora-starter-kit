@@ -138,7 +138,8 @@ export async function updateContext(
   if (result.rows.length === 0) return;
 
   const current = result.rows[0].context || {};
-  const merged: ConversationContext = {
+  const merged = {
+    ...current,
     entities_discussed: [
       ...new Set([...(current.entities_discussed || []), ...(updates.entities_discussed || [])])
     ],

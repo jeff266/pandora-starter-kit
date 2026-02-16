@@ -70,9 +70,9 @@ export async function handleDrillDown(
       });
     } else if (intent.entity_type === 'rep') {
       const repResult = await query<any>(
-        `SELECT DISTINCT owner_email FROM deals
-         WHERE workspace_id = $1 AND status = 'open'
-         AND LOWER(owner_email) LIKE $2
+        `SELECT DISTINCT owner FROM deals
+         WHERE workspace_id = $1 AND stage_normalized NOT IN ('closed_won', 'closed_lost')
+         AND LOWER(owner) LIKE $2
          LIMIT 1`,
         [run.workspace_id, `%${(intent.entity_name || '').toLowerCase()}%`]
       );
@@ -83,7 +83,7 @@ export async function handleDrillDown(
         return;
       }
 
-      const repEmail = repResult.rows[0].owner_email;
+      const repEmail = repResult.rows[0].owner;
       const analysis = await runScopedAnalysis({
         workspace_id: run.workspace_id,
         question: `Give a concise overview of this rep's pipeline, performance, and any notable findings.`,
@@ -374,8 +374,8 @@ function formatDealDossierForThread(dossier: any): any[] {
   if (deal.close_date) {
     fields.push({ type: 'mrkdwn', text: `*Close:* ${new Date(deal.close_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` });
   }
-  if (deal.owner_email) {
-    fields.push({ type: 'mrkdwn', text: `*Owner:* ${deal.owner_email}` });
+  if (deal.owner) {
+    fields.push({ type: 'mrkdwn', text: `*Owner:* ${deal.owner}` });
   }
   blocks.push({ type: 'section', fields });
 
