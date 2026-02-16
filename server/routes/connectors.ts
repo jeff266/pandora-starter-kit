@@ -346,4 +346,77 @@ router.post('/:workspaceId/connectors/google-drive/content/:sourceId', async (re
   }
 });
 
+router.get('/:workspaceId/connectors/status', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    const { workspaceId } = req.params;
+
+    const connResult = await dbQuery(
+      `SELECT connector_name, status, last_sync_at, error_message, metadata
+       FROM connections
+       WHERE workspace_id = $1
+         AND connector_name NOT IN ('enrichment_config', 'csv_import')
+       ORDER BY created_at DESC`,
+      [workspaceId]
+    );
+
+    const [dealsResult, contactsResult, accountsResult, conversationsResult] = await Promise.all([
+      dbQuery(
+        `SELECT source, count(*)::int as count FROM deals WHERE workspace_id = $1 GROUP BY source`,
+        [workspaceId]
+      ),
+      dbQuery(
+        `SELECT source, count(*)::int as count FROM contacts WHERE workspace_id = $1 GROUP BY source`,
+        [workspaceId]
+      ),
+      dbQuery(
+        `SELECT source, count(*)::int as count FROM accounts WHERE workspace_id = $1 GROUP BY source`,
+        [workspaceId]
+      ),
+      dbQuery(
+        `SELECT source, count(*)::int as count FROM conversations WHERE workspace_id = $1 GROUP BY source`,
+        [workspaceId]
+      ),
+    ]);
+
+    const countsBySource = (rows: any[], connectorName: string): number => {
+      const row = rows.find((r: any) => r.source === connectorName);
+      return row ? row.count : 0;
+    };
+
+    const connectors = connResult.rows.map(conn => {
+      const now = Date.now();
+      const lastSync = conn.last_sync_at ? new Date(conn.last_sync_at).getTime() : 0;
+      const hoursSinceSync = lastSync ? (now - lastSync) / (1000 * 60 * 60) : Infinity;
+
+      let health: 'green' | 'yellow' | 'red';
+      if (conn.status === 'error' || !lastSync) {
+        health = 'red';
+      } else if (hoursSinceSync > 24 || (conn.error_message && conn.status !== 'error')) {
+        health = 'yellow';
+      } else {
+        health = 'green';
+      }
+
+      return {
+        type: conn.connector_name,
+        status: conn.status,
+        last_sync_at: conn.last_sync_at,
+        record_counts: {
+          deals: countsBySource(dealsResult.rows, conn.connector_name),
+          contacts: countsBySource(contactsResult.rows, conn.connector_name),
+          accounts: countsBySource(accountsResult.rows, conn.connector_name),
+          conversations: countsBySource(conversationsResult.rows, conn.connector_name),
+        },
+        health,
+        last_error: conn.error_message || null,
+      };
+    });
+
+    res.json({ connectors });
+  } catch (err: any) {
+    console.error('[connectors] Status error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;

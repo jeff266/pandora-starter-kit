@@ -2,6 +2,9 @@ import { Router, type Request, type Response } from 'express';
 import { query } from '../db.js';
 import { getConnectorCredentials } from '../lib/credential-store.js';
 import { HubSpotClient } from '../connectors/hubspot/client.js';
+import { extractFindings, insertFindings } from '../findings/extractor.js';
+import { generatePipelineSnapshot } from '../analysis/pipeline-snapshot.js';
+import { getGoals } from '../context/index.js';
 
 const router = Router();
 
@@ -282,6 +285,33 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
     const { workspaceId } = req.params;
     const pipelineFilter = req.query.pipeline as string | undefined;
 
+    let quota: number | null = null;
+    let staleDaysThreshold = 21;
+
+    try {
+      const goals = await getGoals(workspaceId);
+      if (goals.revenue_target) quota = goals.revenue_target as number;
+      const thresholds = (goals.thresholds ?? {}) as Record<string, unknown>;
+      if (typeof thresholds.stale_deal_days === 'number') staleDaysThreshold = thresholds.stale_deal_days;
+    } catch {
+    }
+
+    const [snapshot, findingsSummaryResult] = await Promise.all([
+      generatePipelineSnapshot(workspaceId, quota ?? undefined, staleDaysThreshold),
+      query(
+        `SELECT severity, count(*)::int as count
+         FROM findings
+         WHERE workspace_id = $1 AND resolved_at IS NULL
+         GROUP BY severity`,
+        [workspaceId]
+      ),
+    ]);
+
+    const findings_summary: Record<string, number> = { act: 0, watch: 0, notable: 0, info: 0 };
+    for (const row of findingsSummaryResult.rows) {
+      findings_summary[row.severity] = row.count;
+    }
+
     const params: any[] = [workspaceId];
     let pipelineClause = '';
     if (pipelineFilter && pipelineFilter !== 'all') {
@@ -411,15 +441,17 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
     const win_trend = trailing_90d > prev_rate + 0.02 ? 'up' : trailing_90d < prev_rate - 0.02 ? 'down' : 'stable';
 
     res.json({
+      snapshot,
       total_pipeline,
       total_deals,
       weighted_pipeline,
       by_stage,
-      coverage: { ratio: null, quota: null, pipeline: total_pipeline },
+      coverage: { ratio: snapshot.coverageRatio, quota, pipeline: total_pipeline },
       win_rate: {
         trailing_90d: Math.round(trailing_90d * 1000) / 1000,
         trend: win_trend,
       },
+      findings_summary,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -477,6 +509,143 @@ router.patch('/:workspaceId/findings/:findingId/resolve', async (req: Request, r
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('[findings] Resolve error:', msg);
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.post('/:workspaceId/findings/:findingId/snooze', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { workspaceId, findingId } = req.params;
+    const { days } = req.body || {};
+    const snoozeDays = typeof days === 'number' && days > 0 ? days : 7;
+
+    const result = await query(
+      `UPDATE findings
+       SET snoozed_until = now() + ($3 || ' days')::interval
+       WHERE id = $1 AND workspace_id = $2
+       RETURNING *`,
+      [findingId, workspaceId, String(snoozeDays)]
+    );
+
+    if (result.rows.length === 0) {
+      res.status(404).json({ error: 'Finding not found' });
+      return;
+    }
+
+    console.log(`[findings] Snoozed finding ${findingId} for ${snoozeDays} days`);
+    res.json(result.rows[0]);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[findings] Snooze error:', msg);
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.patch('/:workspaceId/findings/:findingId', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { workspaceId, findingId } = req.params;
+    const body = req.body || {};
+
+    const setClauses: string[] = [];
+    const params: unknown[] = [findingId, workspaceId];
+    let paramIdx = 3;
+
+    if (body.resolved_at !== undefined) {
+      if (body.resolved_at === 'now') {
+        setClauses.push('resolved_at = now()');
+      } else {
+        setClauses.push(`resolved_at = $${paramIdx}::timestamptz`);
+        params.push(body.resolved_at);
+        paramIdx++;
+      }
+    }
+
+    if (body.snoozed_until !== undefined) {
+      setClauses.push(`snoozed_until = $${paramIdx}::timestamptz`);
+      params.push(body.snoozed_until);
+      paramIdx++;
+    }
+
+    if (body.assigned_to !== undefined) {
+      setClauses.push(`assigned_to = $${paramIdx}`);
+      params.push(body.assigned_to);
+      paramIdx++;
+    }
+
+    if (setClauses.length === 0) {
+      res.status(400).json({ error: 'No valid fields provided. Accepted: resolved_at, snoozed_until, assigned_to' });
+      return;
+    }
+
+    const result = await query(
+      `UPDATE findings SET ${setClauses.join(', ')} WHERE id = $1 AND workspace_id = $2 RETURNING *`,
+      params
+    );
+
+    if (result.rows.length === 0) {
+      res.status(404).json({ error: 'Finding not found' });
+      return;
+    }
+
+    console.log(`[findings] Updated finding ${findingId}: ${setClauses.join(', ')}`);
+    res.json(result.rows[0]);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[findings] Patch error:', msg);
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.post('/:workspaceId/admin/backfill-findings', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { workspaceId } = req.params;
+
+    const runsResult = await query(
+      `SELECT sr.run_id, sr.skill_id, sr.result, sr.created_at
+       FROM skill_runs sr
+       WHERE sr.workspace_id = $1
+         AND sr.status = 'completed'
+         AND sr.result IS NOT NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM findings f WHERE f.skill_run_id = sr.run_id AND f.workspace_id = $1
+         )
+       ORDER BY sr.created_at ASC`,
+      [workspaceId]
+    );
+
+    let totalFindings = 0;
+    let processedRuns = 0;
+    let skippedRuns = 0;
+
+    for (const run of runsResult.rows) {
+      try {
+        const resultData = typeof run.result === 'string' ? JSON.parse(run.result) : run.result;
+        const findings = extractFindings(run.skill_id, run.run_id, workspaceId, resultData);
+
+        if (findings.length === 0) {
+          skippedRuns++;
+          continue;
+        }
+
+        const inserted = await insertFindings(findings);
+        totalFindings += inserted;
+        processedRuns++;
+      } catch (err) {
+        console.error(`[backfill] Error processing run ${run.run_id} (${run.skill_id}):`, err instanceof Error ? err.message : err);
+        skippedRuns++;
+      }
+    }
+
+    console.log(`[backfill] Backfilled ${totalFindings} findings from ${processedRuns} runs for workspace ${workspaceId}`);
+    res.json({
+      total_findings: totalFindings,
+      runs_processed: processedRuns,
+      runs_skipped: skippedRuns,
+      runs_checked: runsResult.rows.length,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[backfill] Error:', msg);
     res.status(500).json({ error: msg });
   }
 });

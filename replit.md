@@ -34,8 +34,8 @@ Pandora is built on Node.js 20 with TypeScript 5+, using Express.js and PostgreS
 -   **ICP Enrichment Pipeline:** 6-step pipeline for closed deal analysis, including Apollo API enrichment and Serper Google search.
 -   **Token Usage Tracking:** `token_usage` table tracks token consumption.
 -   **Slack App Infrastructure:** Dual-mode `SlackAppClient`, signature verification, API endpoints for events and interactions, thread anchoring, message tracking, and channel configuration.
--   **Command Center (Backend):** Backend API for findings extraction, dossier assembly (deals, accounts), and scoped analysis with Claude synthesis.
--   **Command Center (Frontend):** React + TypeScript UI with Vite, featuring authentication, home dashboard, deals/accounts lists, detail pages, skills management, connectors health, insights feed, and settings.
+-   **Command Center (Backend):** Backend API for findings extraction, dossier assembly (deals, accounts), scoped analysis with Claude synthesis, findings snooze/resolve/PATCH endpoints, pipeline snapshot with quota & findings summary, connectors status with health indicators, backfill-findings admin route, and analyze suggestions.
+-   **Command Center (Frontend):** React + TypeScript UI with Vite, featuring authentication, home dashboard with Recharts pipeline visualization and finding action buttons (snooze/resolve), deals/accounts lists, detail pages with ask-about-entity and stage history, skills management with run history, connectors page with sync buttons and health indicators, insights feed with finding detail expansion and actionability badges, TopBar with time range selector and refresh button, connector status strip, and settings.
 -   **Voice & Tone System:** Per-workspace voice configuration (detail_level, framing, alert_threshold) dynamically injected into skill synthesis prompts via Handlebars.
 -   **WorkbookGenerator:** Provides multi-tab `.xlsx` export services for skill and agent runs.
 

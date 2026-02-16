@@ -32,6 +32,8 @@ export default function InsightsPage() {
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
   const [confirmedIds, setConfirmedIds] = useState<Set<string>>(new Set());
   const [crmInfo, setCrmInfo] = useState<{ crm: string | null; portalId?: number | null; instanceUrl?: string | null }>({ crm: null });
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [snoozedIds, setSnoozedIds] = useState<Set<string>>(new Set());
 
   const limit = 30;
 
@@ -109,6 +111,16 @@ export default function InsightsPage() {
     }
   };
 
+  const snoozeFinding = async (findingId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await api.post(`/findings/${findingId}/snooze`, { days: 7 });
+      setSnoozedIds(prev => new Set(prev).add(findingId));
+    } catch (err) {
+      console.error('Failed to snooze finding:', err);
+    }
+  };
+
   const grouped = groupByDate(findings);
 
   return (
@@ -164,104 +176,279 @@ export default function InsightsPage() {
               </div>
               {items.map((f: any, i: number) => {
                 const isResolved = f.status === 'resolved';
+                const isExpanded = expandedId === f.id;
+                const isSnoozed = snoozedIds.has(f.id);
+                const getActionabilityColor = (actionability: string) => {
+                  switch (actionability) {
+                    case 'immediate': return colors.red;
+                    case 'soon': return colors.yellow;
+                    case 'monitor': return colors.accent;
+                    default: return colors.textMuted;
+                  }
+                };
+                const getActionabilityBg = (actionability: string) => {
+                  switch (actionability) {
+                    case 'immediate': return colors.redSoft;
+                    case 'soon': return colors.yellowSoft;
+                    case 'monitor': return colors.accentSoft;
+                    default: return 'transparent';
+                  }
+                };
                 return (
                   <div
                     key={f.id || i}
                     style={{
-                      display: 'flex', gap: 10, padding: '10px 16px',
                       borderBottom: `1px solid ${colors.border}`,
-                      opacity: isResolved ? 0.5 : dismissedIds.has(f.id) ? 0.4 : 1,
-                      cursor: f.deal_id ? 'pointer' : 'default',
+                      opacity: isResolved ? 0.5 : isSnoozed ? 0.3 : dismissedIds.has(f.id) ? 0.4 : 1,
+                      transition: 'opacity 0.3s',
                     }}
-                    onClick={() => f.deal_id && navigate(`/deals/${f.deal_id}`)}
-                    onMouseEnter={e => (e.currentTarget.style.background = colors.surfaceHover)}
-                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                   >
-                    <span style={{
-                      width: 7, height: 7, borderRadius: '50%',
-                      background: severityColor(f.severity), marginTop: 5, flexShrink: 0,
-                      boxShadow: `0 0 6px ${severityColor(f.severity)}40`,
-                    }} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{ fontSize: 13, color: colors.text, lineHeight: 1.4 }}>
-                        {f.message}
-                      </p>
-                      <div style={{ display: 'flex', gap: 12, marginTop: 3, fontSize: 11, color: colors.textMuted, alignItems: 'center' }}>
-                        <span>{f.skill_id}</span>
-                        {f.deal_name && (
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                            <span style={{ color: colors.accent }}>{f.deal_name}</span>
-                            {(() => {
-                              const crmUrl = buildCrmUrl(crmInfo.crm, crmInfo.portalId ?? null, crmInfo.instanceUrl ?? null, f.deal_source_id, f.deal_source);
-                              if (!crmUrl) return null;
-                              return (
-                                <a
-                                  href={crmUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  title={crmInfo.crm === 'hubspot' ? 'Open in HubSpot' : 'Open in Salesforce'}
-                                  onClick={e => e.stopPropagation()}
-                                  style={{ display: 'inline-flex', color: `${colors.accent}99`, transition: 'color 0.15s' }}
-                                  onMouseEnter={e => { e.currentTarget.style.color = colors.accent; }}
-                                  onMouseLeave={e => { e.currentTarget.style.color = `${colors.accent}99`; }}
-                                >
-                                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                                    <polyline points="15 3 21 3 21 9" />
-                                    <line x1="10" y1="14" x2="21" y2="3" />
-                                  </svg>
-                                </a>
-                              );
-                            })()}
-                          </span>
-                        )}
-                        {f.owner_email && <span>{f.owner_email}</span>}
-                        <span>{f.found_at ? formatTimeAgo(f.found_at) : ''}</span>
-                        {isResolved && <span style={{ color: colors.green }}>Resolved</span>}
+                    <div
+                      style={{
+                        display: 'flex', gap: 10, padding: '10px 16px',
+                        cursor: 'pointer',
+                      }}
+                      onClick={() => !isResolved && setExpandedId(isExpanded ? null : f.id)}
+                      onMouseEnter={e => !isResolved && (e.currentTarget.style.background = colors.surfaceHover)}
+                      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                    >
+                      <span style={{
+                        width: 7, height: 7, borderRadius: '50%',
+                        background: severityColor(f.severity), marginTop: 5, flexShrink: 0,
+                        boxShadow: `0 0 6px ${severityColor(f.severity)}40`,
+                      }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ fontSize: 13, color: colors.text, lineHeight: 1.4 }}>
+                          {f.message}
+                        </p>
+                        <div style={{ display: 'flex', gap: 12, marginTop: 3, fontSize: 11, color: colors.textMuted, alignItems: 'center' }}>
+                          <span>{f.skill_id}</span>
+                          {f.deal_name && (
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                              <a
+                                href={`/deals/${f.deal_id}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  navigate(`/deals/${f.deal_id}`);
+                                }}
+                                style={{ color: colors.accent, textDecoration: 'none', cursor: 'pointer' }}
+                              >
+                                {f.deal_name}
+                              </a>
+                              {(() => {
+                                const crmUrl = buildCrmUrl(crmInfo.crm, crmInfo.portalId ?? null, crmInfo.instanceUrl ?? null, f.deal_source_id, f.deal_source);
+                                if (!crmUrl) return null;
+                                return (
+                                  <a
+                                    href={crmUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    title={crmInfo.crm === 'hubspot' ? 'Open in HubSpot' : 'Open in Salesforce'}
+                                    onClick={e => e.stopPropagation()}
+                                    style={{ display: 'inline-flex', color: `${colors.accent}99`, transition: 'color 0.15s' }}
+                                    onMouseEnter={e => { e.currentTarget.style.color = colors.accent; }}
+                                    onMouseLeave={e => { e.currentTarget.style.color = `${colors.accent}99`; }}
+                                  >
+                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                                      <polyline points="15 3 21 3 21 9" />
+                                      <line x1="10" y1="14" x2="21" y2="3" />
+                                    </svg>
+                                  </a>
+                                );
+                              })()}
+                            </span>
+                          )}
+                          {f.owner_email && <span>{f.owner_email}</span>}
+                          <span>{f.found_at ? formatTimeAgo(f.found_at) : ''}</span>
+                          {isResolved && <span style={{ color: colors.green }}>Resolved</span>}
+                        </div>
                       </div>
+                      {!isResolved && (
+                        <div style={{ display: 'flex', gap: 4, flexShrink: 0, alignItems: 'center' }}>
+                          {confirmedIds.has(f.id) ? (
+                            <span style={{ fontSize: 11, color: colors.green, fontWeight: 500 }}>Confirmed</span>
+                          ) : dismissedIds.has(f.id) ? (
+                            <span style={{ fontSize: 11, color: colors.textMuted, fontWeight: 500 }}>Dismissed</span>
+                          ) : (
+                            <>
+                              <button
+                                onClick={(e) => confirmFinding(f.id, e)}
+                                style={{
+                                  fontSize: 11,
+                                  fontWeight: 500,
+                                  padding: '3px 8px',
+                                  borderRadius: 4,
+                                  background: 'transparent',
+                                  border: `1px solid ${colors.border}`,
+                                  color: colors.green,
+                                  cursor: 'pointer',
+                                }}
+                                title="Confirm this is accurate"
+                              >
+                                Confirm
+                              </button>
+                              <button
+                                onClick={(e) => dismissFinding(f.id, f.severity, f.category, e)}
+                                style={{
+                                  fontSize: 11,
+                                  fontWeight: 500,
+                                  padding: '3px 8px',
+                                  borderRadius: 4,
+                                  background: 'transparent',
+                                  border: `1px solid ${colors.border}`,
+                                  color: colors.textMuted,
+                                  cursor: 'pointer',
+                                }}
+                                title="Dismiss - not relevant"
+                              >
+                                Dismiss
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    {!isResolved && (
-                      <div style={{ display: 'flex', gap: 4, flexShrink: 0, alignItems: 'center' }}>
-                        {confirmedIds.has(f.id) ? (
-                          <span style={{ fontSize: 11, color: colors.green, fontWeight: 500 }}>Confirmed</span>
-                        ) : dismissedIds.has(f.id) ? (
-                          <span style={{ fontSize: 11, color: colors.textMuted, fontWeight: 500 }}>Dismissed</span>
-                        ) : (
-                          <>
-                            <button
-                              onClick={(e) => confirmFinding(f.id, e)}
-                              style={{
+                    
+                    {/* Expanded content */}
+                    {isExpanded && (
+                      <div
+                        style={{
+                          maxHeight: '500px',
+                          overflow: 'hidden',
+                          transition: 'max-height 0.3s ease',
+                          padding: '12px 16px',
+                          background: colors.surfaceRaised,
+                          borderTop: `1px solid ${colors.border}`,
+                        }}
+                      >
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                          {/* Full message */}
+                          <div>
+                            <p style={{ fontSize: 11, fontWeight: 600, color: colors.textDim, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                              Details
+                            </p>
+                            <p style={{ fontSize: 12, color: colors.text, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                              {f.message}
+                            </p>
+                          </div>
+
+                          {/* Metric info */}
+                          {(f.metric_value !== null || f.metric_context) && (
+                            <div style={{ display: 'flex', gap: 16 }}>
+                              {f.metric_value !== null && (
+                                <div>
+                                  <p style={{ fontSize: 10, fontWeight: 600, color: colors.textDim, marginBottom: 2, textTransform: 'uppercase' }}>Metric</p>
+                                  <p style={{ fontSize: 12, color: colors.text, fontWeight: 500 }}>{f.metric_value}</p>
+                                </div>
+                              )}
+                              {f.metric_context && (
+                                <div>
+                                  <p style={{ fontSize: 10, fontWeight: 600, color: colors.textDim, marginBottom: 2, textTransform: 'uppercase' }}>Context</p>
+                                  <p style={{ fontSize: 12, color: colors.text, fontWeight: 500 }}>{f.metric_context}</p>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Entity info */}
+                          {(f.entity_type || f.entity_name) && (
+                            <div style={{ display: 'flex', gap: 16 }}>
+                              {f.entity_type && (
+                                <div>
+                                  <p style={{ fontSize: 10, fontWeight: 600, color: colors.textDim, marginBottom: 2, textTransform: 'uppercase' }}>Entity Type</p>
+                                  <p style={{ fontSize: 12, color: colors.text, fontWeight: 500, textTransform: 'capitalize' }}>{f.entity_type}</p>
+                                </div>
+                              )}
+                              {f.entity_name && (
+                                <div>
+                                  <p style={{ fontSize: 10, fontWeight: 600, color: colors.textDim, marginBottom: 2, textTransform: 'uppercase' }}>Entity Name</p>
+                                  <p style={{ fontSize: 12, color: colors.text, fontWeight: 500 }}>{f.entity_name}</p>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Actionability badge */}
+                          {f.actionability && (
+                            <div>
+                              <p style={{ fontSize: 10, fontWeight: 600, color: colors.textDim, marginBottom: 4, textTransform: 'uppercase' }}>Actionability</p>
+                              <span style={{
+                                display: 'inline-block',
                                 fontSize: 11,
-                                fontWeight: 500,
-                                padding: '3px 8px',
+                                fontWeight: 600,
+                                padding: '4px 10px',
                                 borderRadius: 4,
-                                background: 'transparent',
-                                border: `1px solid ${colors.border}`,
-                                color: colors.green,
-                                cursor: 'pointer',
-                              }}
-                              title="Confirm this is accurate"
-                            >
-                              Confirm
-                            </button>
-                            <button
-                              onClick={(e) => dismissFinding(f.id, f.severity, f.category, e)}
-                              style={{
-                                fontSize: 11,
-                                fontWeight: 500,
-                                padding: '3px 8px',
-                                borderRadius: 4,
-                                background: 'transparent',
-                                border: `1px solid ${colors.border}`,
-                                color: colors.textMuted,
-                                cursor: 'pointer',
-                              }}
-                              title="Dismiss - not relevant"
-                            >
-                              Dismiss
-                            </button>
-                          </>
-                        )}
+                                background: getActionabilityBg(f.actionability),
+                                color: getActionabilityColor(f.actionability),
+                                textTransform: 'capitalize',
+                              }}>
+                                {f.actionability}
+                              </span>
+                            </div>
+                          )}
+
+                          {/* Snooze and navigation buttons */}
+                          <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                            {isSnoozed ? (
+                              <span style={{ fontSize: 11, color: colors.green, fontWeight: 500 }}>Snoozed for 7 days</span>
+                            ) : (
+                              <>
+                                <button
+                                  onClick={(e) => snoozeFinding(f.id, e)}
+                                  style={{
+                                    fontSize: 11,
+                                    fontWeight: 500,
+                                    padding: '6px 12px',
+                                    borderRadius: 4,
+                                    background: 'transparent',
+                                    border: `1px solid ${colors.border}`,
+                                    color: colors.textSecondary,
+                                    cursor: 'pointer',
+                                    transition: 'all 0.15s',
+                                  }}
+                                  onMouseEnter={e => {
+                                    e.currentTarget.style.borderColor = colors.accent;
+                                    e.currentTarget.style.color = colors.accent;
+                                  }}
+                                  onMouseLeave={e => {
+                                    e.currentTarget.style.borderColor = colors.border;
+                                    e.currentTarget.style.color = colors.textSecondary;
+                                  }}
+                                >
+                                  Snooze 7 days
+                                </button>
+                                {(f.deal_id || f.account_id) && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (f.deal_id) {
+                                        navigate(`/deals/${f.deal_id}`);
+                                      } else if (f.account_id) {
+                                        navigate(`/accounts/${f.account_id}`);
+                                      }
+                                    }}
+                                    style={{
+                                      fontSize: 11,
+                                      fontWeight: 500,
+                                      padding: '6px 12px',
+                                      borderRadius: 4,
+                                      background: colors.accent,
+                                      border: 'none',
+                                      color: '#fff',
+                                      cursor: 'pointer',
+                                      transition: 'opacity 0.15s',
+                                    }}
+                                    onMouseEnter={e => { e.currentTarget.style.opacity = '0.8'; }}
+                                    onMouseLeave={e => { e.currentTarget.style.opacity = '1'; }}
+                                  >
+                                    View {f.deal_id ? 'Deal' : 'Account'}
+                                  </button>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     )}
                   </div>

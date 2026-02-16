@@ -1,5 +1,6 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import { formatCurrency, formatNumber, formatPercent, formatTimeAgo, severityColor } from '../lib/format';
@@ -44,6 +45,7 @@ export default function CommandCenter() {
   const [pipeline, setPipeline] = useState<any>(null);
   const [summary, setSummary] = useState<any>(null);
   const [findings, setFindings] = useState<Finding[]>([]);
+  const [connectorStatus, setConnectorStatus] = useState<any[]>([]);
   const [loading, setLoading] = useState({ pipeline: true, summary: true, findings: true });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [availablePipelines, setAvailablePipelines] = useState<Array<{ name: string; deal_count: number; total_value: number }>>([]);
@@ -80,6 +82,10 @@ export default function CommandCenter() {
       const arr = Array.isArray(d) ? d : d.findings || [];
       setFindings(arr);
     });
+
+    api.get('/connectors/status').then(d => {
+      setConnectorStatus(Array.isArray(d) ? d : d.connectors || []);
+    }).catch(() => {});
   }, [selectedPipeline]);
 
   const handlePipelineChange = useCallback((value: string) => {
@@ -108,8 +114,6 @@ export default function CommandCenter() {
   const winRate = pipeline?.win_rate?.trailing_90d;
   const coverage = pipeline?.coverage?.ratio;
 
-  const maxStageValue = Math.max(...stageData.map(s => s.total_value), 1);
-
   const byOwner = summary?.by_owner;
   const ownerRows = byOwner
     ? Object.entries(byOwner)
@@ -123,6 +127,48 @@ export default function CommandCenter() {
         .sort((a, b) => b.total - a.total)
         .slice(0, 8)
     : [];
+
+  const handleSnoozeFinding = async (findingId: string, days: number) => {
+    try {
+      await api.post(`/findings/${findingId}/snooze`, { days });
+      setFindings(prev => prev.filter(f => f.id !== findingId));
+    } catch {}
+  };
+
+  const handleResolveFinding = async (findingId: string) => {
+    try {
+      await api.patch(`/findings/${findingId}/resolve`, { resolution_method: 'user_dismissed' });
+      setFindings(prev => prev.filter(f => f.id !== findingId));
+    } catch {}
+  };
+
+  const handleBarClick = (data: any) => {
+    const d = data?.payload || data;
+    if (d?.stage_normalized || d?.stage) {
+      navigate(`/deals?stage=${encodeURIComponent(d.stage_normalized || d.stage)}`);
+    }
+  };
+
+  const CustomTooltip = ({ active, payload }: any) => {
+    if (!active || !payload?.length) return null;
+    const d = payload[0].payload as PipelineStage;
+    return (
+      <div style={{
+        background: colors.surfaceRaised,
+        border: `1px solid ${colors.border}`,
+        borderRadius: 8,
+        padding: '10px 14px',
+        fontSize: 12,
+        color: colors.text,
+        fontFamily: fonts.sans,
+      }}>
+        <div style={{ fontWeight: 600, marginBottom: 6 }}>{d.stage}</div>
+        <div style={{ color: colors.textSecondary }}>Deals: <span style={{ fontFamily: fonts.mono, color: colors.text }}>{d.deal_count}</span></div>
+        <div style={{ color: colors.textSecondary }}>Total: <span style={{ fontFamily: fonts.mono, color: colors.text }}>{formatCurrency(d.total_value)}</span></div>
+        <div style={{ color: colors.textSecondary }}>Weighted: <span style={{ fontFamily: fonts.mono, color: colors.text }}>{formatCurrency(d.weighted_value)}</span></div>
+      </div>
+    );
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
@@ -170,7 +216,7 @@ export default function CommandCenter() {
         )}
       </div>
 
-      {/* Pipeline by Stage — Horizontal CSS Bar Chart */}
+      {/* Pipeline by Stage — Recharts Horizontal Bar Chart */}
       <div style={{
         background: colors.surface,
         border: `1px solid ${colors.border}`,
@@ -224,71 +270,66 @@ export default function CommandCenter() {
             onLink={() => navigate('/connectors')}
           />
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {stageData.map((stage, idx) => {
-              const pct = Math.max((stage.total_value / maxStageValue) * 100, 2);
-              const findingAct = stage.findings?.act || 0;
-              const findingWatch = stage.findings?.watch || 0;
-
-              return (
-                <div
-                  key={idx}
-                  onClick={() => navigate(`/deals?stage=${encodeURIComponent(stage.stage_normalized || stage.stage)}`)}
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: '160px 1fr auto',
-                    alignItems: 'center',
-                    gap: 12,
-                    padding: '6px 8px',
-                    borderRadius: 6,
-                    cursor: 'pointer',
-                    transition: 'background 0.12s',
-                  }}
-                  onMouseEnter={e => (e.currentTarget.style.background = colors.surfaceHover)}
-                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+          <>
+            <ResponsiveContainer width="100%" height={Math.max(stageData.length * 50, 200)}>
+              <BarChart
+                layout="vertical"
+                data={stageData}
+                margin={{ top: 0, right: 20, bottom: 0, left: 0 }}
+              >
+                <XAxis
+                  type="number"
+                  hide
+                />
+                <YAxis
+                  type="category"
+                  dataKey="stage"
+                  width={140}
+                  tick={{ fontSize: 12, fill: colors.text, fontFamily: fonts.sans }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <Tooltip content={<CustomTooltip />} cursor={{ fill: colors.surfaceHover }} />
+                <Bar
+                  dataKey="total_value"
+                  fill={colors.accent}
+                  radius={[0, 4, 4, 0]}
+                  cursor="pointer"
+                  onClick={(data: any) => handleBarClick(data)}
                 >
-                  <span style={{ fontSize: 12, fontWeight: 500, color: colors.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {stage.stage || 'Unknown'}
-                  </span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                    <div style={{ flex: 1, height: 20, background: colors.surfaceRaised, borderRadius: 4, overflow: 'hidden' }}>
-                      <div style={{
-                        width: `${pct}%`,
-                        height: '100%',
-                        background: `linear-gradient(90deg, ${colors.accent}, ${colors.accent}cc)`,
-                        borderRadius: 4,
-                        transition: 'width 0.5s ease',
-                      }} />
+                  {stageData.map((_, idx) => (
+                    <Cell key={idx} fill={colors.accent} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+
+            {stageData.some(s => (s.findings?.act || 0) > 0 || (s.findings?.watch || 0) > 0) && (
+              <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {stageData.filter(s => (s.findings?.act || 0) > 0 || (s.findings?.watch || 0) > 0).map((stage, idx) => (
+                  <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 4 }}>
+                    <span style={{ fontSize: 11, fontWeight: 500, color: colors.textSecondary, minWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {stage.stage}
+                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {(stage.findings?.act || 0) > 0 && (
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: severityColor('act'), display: 'inline-block' }} />
+                          <span style={{ fontSize: 10, fontFamily: fonts.mono, color: severityColor('act') }}>{stage.findings!.act}</span>
+                        </span>
+                      )}
+                      {(stage.findings?.watch || 0) > 0 && (
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: severityColor('watch'), display: 'inline-block' }} />
+                          <span style={{ fontSize: 10, fontFamily: fonts.mono, color: severityColor('watch') }}>{stage.findings!.watch}</span>
+                        </span>
+                      )}
                     </div>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}>
-                    <span style={{ fontSize: 12, fontFamily: fonts.mono, fontWeight: 600, color: colors.text, minWidth: 60, textAlign: 'right' }}>
-                      {formatCurrency(stage.total_value)}
-                    </span>
-                    <span style={{ fontSize: 11, color: colors.textMuted, minWidth: 55 }}>
-                      ({stage.deal_count} deal{stage.deal_count !== 1 ? 's' : ''})
-                    </span>
-                    {(findingAct > 0 || findingWatch > 0) && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 4 }}>
-                        {findingAct > 0 && (
-                          <span style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: severityColor('act'), display: 'inline-block' }} />
-                            <span style={{ fontSize: 10, fontFamily: fonts.mono, color: severityColor('act') }}>{findingAct}</span>
-                          </span>
-                        )}
-                        {findingWatch > 0 && (
-                          <span style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: severityColor('watch'), display: 'inline-block' }} />
-                            <span style={{ fontSize: 10, fontFamily: fonts.mono, color: severityColor('watch') }}>{findingWatch}</span>
-                          </span>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -384,37 +425,222 @@ export default function CommandCenter() {
               </p>
             ) : (
               findings.map(f => (
-                <div
+                <FindingRow
                   key={f.id}
-                  style={{
-                    padding: '10px 0',
-                    borderBottom: `1px solid ${colors.border}`,
-                    cursor: f.deal_id ? 'pointer' : 'default',
-                  }}
-                  onClick={() => f.deal_id && navigate(`/deals/${f.deal_id}`)}
-                  onMouseEnter={e => (e.currentTarget.style.background = colors.surfaceHover)}
-                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                >
-                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-                    <SeverityDot severity={f.severity as any} size={7} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{ fontSize: 13, color: colors.text, lineHeight: 1.4, marginBottom: 4 }}>
-                        {f.message}
-                      </p>
-                      <div style={{ display: 'flex', gap: 12, fontSize: 11, color: colors.textMuted, flexWrap: 'wrap' }}>
-                        <span style={{ fontWeight: 500 }}>{f.skill_name || f.skill_id}</span>
-                        {f.deal_name && <span style={{ color: colors.accent }}>{f.deal_name}</span>}
-                        {f.account_name && <span>{f.account_name}</span>}
-                        {(f.owner_name || f.owner_email) && <span>{f.owner_name || f.owner_email}</span>}
-                        <span>{formatTimeAgo(f.found_at)}</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                  finding={f}
+                  onSnooze={handleSnoozeFinding}
+                  onResolve={handleResolveFinding}
+                  onNavigate={navigate}
+                />
               ))
             )}
           </div>
         )}
+      </div>
+
+      {/* Connector Status Strip */}
+      {connectorStatus.length > 0 && (
+        <div style={{
+          background: colors.surface,
+          border: `1px solid ${colors.border}`,
+          borderRadius: 10,
+          padding: '14px 20px',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+            <h3 style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>Connected Sources</h3>
+            <button
+              onClick={() => navigate('/connectors/health')}
+              style={{ fontSize: 11, color: colors.accent, background: 'none', border: 'none', cursor: 'pointer' }}
+            >
+              View health →
+            </button>
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
+            {connectorStatus.map((c: any, i: number) => {
+              const dotColor = c.health === 'healthy' ? colors.green : c.health === 'warning' ? colors.yellow : colors.red;
+              return (
+                <div
+                  key={i}
+                  onClick={() => navigate('/connectors/health')}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    cursor: 'pointer',
+                    padding: '4px 10px',
+                    borderRadius: 6,
+                    border: `1px solid ${colors.border}`,
+                    transition: 'border-color 0.12s',
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.borderColor = colors.borderLight)}
+                  onMouseLeave={e => (e.currentTarget.style.borderColor = colors.border)}
+                >
+                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: dotColor, display: 'inline-block', flexShrink: 0 }} />
+                  <span style={{ fontSize: 12, fontWeight: 500, color: colors.text }}>{c.name || c.connector_name}</span>
+                  {c.last_sync_at && (
+                    <span style={{ fontSize: 10, color: colors.textMuted }}>{formatTimeAgo(c.last_sync_at)}</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FindingRow({ finding, onSnooze, onResolve, onNavigate }: {
+  finding: Finding;
+  onSnooze: (id: string, days: number) => void;
+  onResolve: (id: string) => void;
+  onNavigate: (path: string) => void;
+}) {
+  const [showSnooze, setShowSnooze] = useState(false);
+  const snoozeRef = useRef<HTMLDivElement>(null);
+  const f = finding;
+
+  useEffect(() => {
+    if (!showSnooze) return;
+    const handler = (e: MouseEvent) => {
+      if (snoozeRef.current && !snoozeRef.current.contains(e.target as Node)) {
+        setShowSnooze(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showSnooze]);
+
+  return (
+    <div
+      style={{
+        padding: '10px 0',
+        borderBottom: `1px solid ${colors.border}`,
+        cursor: f.deal_id ? 'pointer' : 'default',
+        position: 'relative',
+      }}
+      className="finding-row"
+      onClick={() => f.deal_id && onNavigate(`/deals/${f.deal_id}`)}
+      onMouseEnter={e => {
+        e.currentTarget.style.background = colors.surfaceHover;
+        const btns = e.currentTarget.querySelector('.finding-actions') as HTMLElement;
+        if (btns) btns.style.opacity = '1';
+      }}
+      onMouseLeave={e => {
+        e.currentTarget.style.background = 'transparent';
+        const btns = e.currentTarget.querySelector('.finding-actions') as HTMLElement;
+        if (btns) btns.style.opacity = '0';
+        setShowSnooze(false);
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+        <SeverityDot severity={f.severity as any} size={7} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p style={{ fontSize: 13, color: colors.text, lineHeight: 1.4, marginBottom: 4 }}>
+            {f.message}
+          </p>
+          <div style={{ display: 'flex', gap: 12, fontSize: 11, color: colors.textMuted, flexWrap: 'wrap' }}>
+            <span style={{ fontWeight: 500 }}>{f.skill_name || f.skill_id}</span>
+            {f.deal_name && <span style={{ color: colors.accent }}>{f.deal_name}</span>}
+            {f.account_name && <span>{f.account_name}</span>}
+            {(f.owner_name || f.owner_email) && <span>{f.owner_name || f.owner_email}</span>}
+            <span>{formatTimeAgo(f.found_at)}</span>
+          </div>
+        </div>
+
+        <div
+          className="finding-actions"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            opacity: 0,
+            transition: 'opacity 0.15s',
+            flexShrink: 0,
+          }}
+          onClick={e => e.stopPropagation()}
+        >
+          <div ref={snoozeRef} style={{ position: 'relative' }}>
+            <button
+              onClick={() => setShowSnooze(!showSnooze)}
+              title="Snooze"
+              style={{
+                background: 'none',
+                border: `1px solid ${colors.border}`,
+                borderRadius: 4,
+                padding: '3px 6px',
+                cursor: 'pointer',
+                fontSize: 11,
+                color: colors.textSecondary,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 3,
+              }}
+            >
+              💤
+            </button>
+            {showSnooze && (
+              <div style={{
+                position: 'absolute',
+                right: 0,
+                top: '100%',
+                marginTop: 4,
+                background: colors.surfaceRaised,
+                border: `1px solid ${colors.border}`,
+                borderRadius: 6,
+                padding: 4,
+                zIndex: 100,
+                minWidth: 100,
+                boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+              }}>
+                {[
+                  { label: '1 day', days: 1 },
+                  { label: '3 days', days: 3 },
+                  { label: '1 week', days: 7 },
+                  { label: '2 weeks', days: 14 },
+                ].map(opt => (
+                  <button
+                    key={opt.days}
+                    onClick={() => { onSnooze(f.id, opt.days); setShowSnooze(false); }}
+                    style={{
+                      display: 'block',
+                      width: '100%',
+                      textAlign: 'left',
+                      padding: '5px 8px',
+                      fontSize: 11,
+                      color: colors.text,
+                      background: 'none',
+                      border: 'none',
+                      borderRadius: 4,
+                      cursor: 'pointer',
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.background = colors.surfaceHover)}
+                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <button
+            onClick={() => onResolve(f.id)}
+            title="Resolve"
+            style={{
+              background: 'none',
+              border: `1px solid ${colors.border}`,
+              borderRadius: 4,
+              padding: '3px 6px',
+              cursor: 'pointer',
+              fontSize: 11,
+              color: colors.green,
+              display: 'flex',
+              alignItems: 'center',
+            }}
+          >
+            ✓
+          </button>
+        </div>
       </div>
     </div>
   );

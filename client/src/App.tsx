@@ -140,7 +140,7 @@ export default function App() {
     <div style={{ display: 'flex', height: '100vh', background: colors.bg }}>
       <Sidebar badges={badges} />
       <main style={{ marginLeft: 220, flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <TopBar title={title} lastRefreshed={lastRefreshed} />
+        <TopBar title={title} lastRefreshed={lastRefreshed} onRefresh={fetchBadges} />
         <div style={{ flex: 1, overflow: 'auto', padding: '24px 28px' }}>
           <Routes>
             <Route path="/" element={<CommandCenter />} />

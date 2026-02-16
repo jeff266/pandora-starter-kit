@@ -86,4 +86,30 @@ router.post('/:workspaceId/analyze', analysisLimiter, async (req: Request, res: 
   }
 });
 
+router.get('/:workspaceId/analyze/suggestions', async (req: Request, res: Response): Promise<void> => {
+  try {
+    res.json({
+      pipeline: [
+        "What's the biggest risk to this quarter's number?",
+        "Which deals are most likely to slip?",
+        "Where is pipeline concentrated?",
+      ],
+      deal: [
+        "What happened with this deal recently?",
+        "Who are we talking to and who's missing?",
+        "What are the blockers?",
+      ],
+      account: [
+        "How is our relationship health?",
+        "Which contacts are going dark?",
+        "What's the full history with this account?",
+      ],
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[analysis] Suggestions error:', msg);
+    res.status(500).json({ error: msg });
+  }
+});
+
 export default router;
