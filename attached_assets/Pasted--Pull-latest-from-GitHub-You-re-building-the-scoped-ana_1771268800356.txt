@@ -1,0 +1,237 @@
+```
+Pull latest from GitHub.
+
+You're building the scoped analysis endpoint — the "ask about this deal" 
+AI feature that lets users ask natural language questions scoped to a 
+specific entity or the whole pipeline.
+
+Read:
+- server/dossiers/deal-dossier.ts (you just built this)
+- server/dossiers/account-dossier.ts (you just built this)
+- The pipeline snapshot endpoint you built earlier
+- server/llm/ — understand how Claude calls work (provider adapters, 
+  token tracking, workspace config)
+- server/findings/ — the findings API
+
+
+1. SCOPED ANALYSIS SERVICE
+
+Create server/analysis/scoped-analysis.ts
+
+Export:
+
+async function analyzeQuestion(
+  workspaceId: string,
+  question: string,
+  scope: {
+    type: 'deal' | 'account' | 'pipeline' | 'rep';
+    entityId?: string;
+    ownerEmail?: string;
+  }
+): Promise<AnalysisResult>
+
+The AnalysisResult type:
+
+interface AnalysisResult {
+  answer: string;
+  data_consulted: string[];
+  confidence: 'high' | 'medium' | 'low';
+  suggested_followups: string[];
+  tokens_used: number;
+  latency_ms: number;
+}
+
+Implementation:
+
+Step 1 — Gather context based on scope type:
+
+  if (scope.type === 'deal') {
+    // Use assembleDealDossier — no narrative (we're generating our own)
+    const dossier = await assembleDealDossier(workspaceId, scope.entityId);
+    context = compressDealContext(dossier);
+    dataSources = dossier.metadata.data_sources_consulted;
+  }
+  
+  if (scope.type === 'account') {
+    const dossier = await assembleAccountDossier(workspaceId, scope.entityId);
+    context = compressAccountContext(dossier);
+    dataSources = dossier.metadata.data_sources_consulted;
+  }
+  
+  if (scope.type === 'pipeline') {
+    // Use pipeline snapshot + recent findings summary
+    const snapshot = await getPipelineSnapshot(workspaceId, timeRange);
+    const findings = await getRecentFindings(workspaceId, { limit: 50 });
+    context = compressPipelineContext(snapshot, findings);
+    dataSources = ['pipeline_snapshot', 'findings'];
+  }
+  
+  if (scope.type === 'rep') {
+    // Get rep's deals + findings + pipeline metrics
+    const deals = await getRepDeals(workspaceId, scope.ownerEmail);
+    const findings = await getRepFindings(workspaceId, scope.ownerEmail);
+    context = compressRepContext(deals, findings, scope.ownerEmail);
+    dataSources = ['deals', 'findings', 'contacts'];
+  }
+
+Step 2 — Compress context to ~4K tokens max:
+
+Create a compressDealContext(dossier) function that produces a compact 
+text block. Example output:
+
+  DEAL: Acme Corp Enterprise License
+  Amount: $450,000 | Stage: Negotiation (32 days) | Close: 2026-03-15
+  Owner: sarah@company.com
+  
+  CONTACTS (4):
+  - Jane Smith, VP Engineering, active, Champion
+  - Bob Lee, CFO, fading, Economic Buyer
+  - Maria Garcia, Director, dark, Technical Evaluator
+  - Tom Chen, Manager, active, End User
+  
+  CONVERSATIONS (3 recent):
+  - Feb 10: "Technical Deep Dive" (45min) — linked via email match
+  - Jan 28: "Budget Discussion" (30min) — linked via CRM
+  - Jan 15: "Discovery Call" (60min) — linked via CRM
+  
+  FINDINGS (2 active):
+  - CRITICAL: Single-threaded — only 1 of 4 contacts engaged in last 30d
+  - WARNING: Stage duration 32 days exceeds 21-day benchmark
+  
+  COVERAGE GAPS:
+  - Bob Lee (CFO) and Maria Garcia (Director) never called
+  - 1 unlinked call matching account domain
+  
+  STAGE HISTORY:
+  - Discovery → Qualification (12 days)
+  - Qualification → Negotiation (18 days, current)
+
+Similar compact formats for compressAccountContext, compressPipelineContext, 
+and compressRepContext. Strip IDs, keep only what's needed for the AI to 
+reason about the question.
+
+Step 3 — Call Claude:
+
+System prompt:
+
+  You are a revenue operations analyst. Answer the user's question 
+  using ONLY the data provided below. Be specific — cite deal names, 
+  contact names, dollar amounts, and dates. If the data doesn't contain 
+  enough information to answer confidently, say so and explain what 
+  additional data would help.
+  
+  Keep your answer to 2-4 sentences unless the question requires more 
+  detail. No bullet points unless listing specific items. No hyperbole.
+  
+  After your answer, on a new line starting with "CONFIDENCE:", rate 
+  your confidence as HIGH (data directly answers the question), MEDIUM 
+  (data partially answers, some inference needed), or LOW (limited data, 
+  significant inference).
+  
+  On another new line starting with "FOLLOWUPS:", suggest 2-3 natural 
+  follow-up questions the user might ask next, separated by pipes (|).
+
+User message:
+
+  CONTEXT:
+  {compressed context}
+  
+  QUESTION: {question}
+
+Step 4 — Parse the response:
+
+Split Claude's response to extract:
+- answer: everything before "CONFIDENCE:"
+- confidence: parse the confidence line
+- suggested_followups: split the FOLLOWUPS line by "|" and trim
+
+If parsing fails, use the full response as the answer with 
+confidence = 'medium' and empty followups.
+
+
+2. QUESTION SUGGESTIONS
+
+Create a function that returns pre-built question templates:
+
+function getAnalysisSuggestions(scope: string): string[]
+
+For scope 'deal':
+  - "What's the biggest risk to closing this deal?"
+  - "Who on the buying committee haven't we engaged?"
+  - "How does this deal's velocity compare to won deals?"
+  - "What should the rep focus on this week?"
+
+For scope 'account':
+  - "How healthy is our relationship with this account?"
+  - "Which contacts are going dark?"
+  - "What's the total pipeline exposure here?"
+  - "Are there deals that should be consolidated or split?"
+
+For scope 'pipeline':
+  - "Where will I land this quarter?"
+  - "Which deals are most at risk of slipping?"
+  - "Where are the biggest coverage gaps across the team?"
+  - "What changed in the pipeline this week?"
+
+For scope 'rep':
+  - "How is this rep tracking against quota?"
+  - "Which of their deals need immediate attention?"
+  - "Are they single-threaded on any deals?"
+  - "What's their pipeline coverage ratio?"
+
+
+3. API ENDPOINTS
+
+Add to server/routes/ (new file or extend existing analysis routes):
+
+POST /api/workspaces/:id/analyze
+  Body: { 
+    question: string, 
+    scope: { type: string, entityId?: string, ownerEmail?: string } 
+  }
+  Returns: AnalysisResult JSON
+  
+  Validations:
+  - question must be non-empty, max 500 characters
+  - scope.type must be one of: deal, account, pipeline, rep
+  - scope.entityId required for deal and account types
+  - scope.ownerEmail required for rep type
+  
+  Rate limit: 10 requests per workspace per minute.
+  Implement with a simple in-memory counter per workspace that resets 
+  every 60 seconds. If exceeded, return 429 with:
+  { error: "Rate limit exceeded. Maximum 10 analysis requests per minute." }
+
+GET /api/workspaces/:id/analyze/suggestions?scope=deal
+  Returns: { suggestions: string[] }
+
+
+4. VERIFY
+
+Test against Imubit data:
+
+- POST /analyze with scope deal + a real deal ID
+  Question: "What's the biggest risk to closing this deal?"
+  Verify: answer references actual deal data, contacts, findings
+
+- POST /analyze with scope pipeline
+  Question: "Which deals are most at risk?"
+  Verify: answer references specific deals by name and amount
+
+- POST /analyze with scope account + a real account ID
+  Question: "How healthy is our relationship?"
+  Verify: answer uses relationship_health metrics
+
+- GET /analyze/suggestions?scope=deal
+  Verify: returns the question templates
+
+- Test rate limiting: fire 11 rapid requests
+  Verify: 11th returns 429
+
+- Test bad input: empty question, invalid scope type, missing entityId
+  Verify: proper 400 errors
+
+Log all responses and fix issues.
+```
+
+Last backend piece. Once this lands, every API the frontend needs is live. Prompt 7 (deal + account detail pages) is pure UI wiring after this.
