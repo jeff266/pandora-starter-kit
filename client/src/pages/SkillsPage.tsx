@@ -112,6 +112,7 @@ export default function SkillsPage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      <style>{`@keyframes pandora-spin { to { transform: rotate(360deg); } }`}</style>
       {toast && (
         <div style={{
           position: 'fixed', top: 16, right: 16, zIndex: 1000,
@@ -185,8 +186,17 @@ export default function SkillsPage() {
                             color: '#fff', opacity: isRunning ? 0.6 : 1,
                             border: 'none', cursor: isRunning ? 'not-allowed' : 'pointer',
                             flexShrink: 0, marginLeft: 12,
+                            display: 'flex', alignItems: 'center', gap: 6,
                           }}
                         >
+                          {isRunning && (
+                            <span style={{
+                              width: 12, height: 12, border: '2px solid rgba(255,255,255,0.3)',
+                              borderTopColor: '#fff', borderRadius: '50%',
+                              display: 'inline-block',
+                              animation: 'pandora-spin 0.8s linear infinite',
+                            }} />
+                          )}
                           {isRunning ? 'Running...' : 'Run Now \u25B6'}
                         </button>
                       </div>

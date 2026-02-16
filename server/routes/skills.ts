@@ -135,29 +135,67 @@ router.get('/:workspaceId/skills', async (req, res) => {
     }
 
     const registry = getSkillRegistry();
-    const skills = registry.listAll();
+    const skills = registry.getAll();
 
-    const lastRuns = await query(
-      `SELECT DISTINCT ON (skill_id) skill_id, created_at
+    const lastRuns = await query<{
+      skill_id: string;
+      created_at: string;
+      status: string;
+      duration_ms: number | null;
+    }>(
+      `SELECT DISTINCT ON (skill_id) skill_id, created_at, status, duration_ms
        FROM skill_runs
        WHERE workspace_id = $1
        ORDER BY skill_id, created_at DESC`,
       [workspaceId]
     );
 
-    const lastRunMap = new Map<string, string>();
+    const lastRunMap = new Map<string, { at: string; status: string; duration: number | null }>();
     for (const row of lastRuns.rows) {
-      lastRunMap.set(row.skill_id, row.created_at);
+      lastRunMap.set(row.skill_id, { at: row.created_at, status: row.status, duration: row.duration_ms });
     }
 
-    const result = skills.map(s => ({
-      id: s.id,
-      name: s.name,
-      category: s.category,
-      tier: s.tier,
-      schedule: s.schedule,
-      lastRunAt: lastRunMap.get(s.id) || null,
-    }));
+    // Fetch findings counts for each skill's most recent completed run
+    const findingsCounts = await query<{
+      skill_id: string;
+      severity: string;
+      cnt: string;
+    }>(
+      `SELECT sr.skill_id, f.severity, COUNT(*)::text AS cnt
+       FROM findings f
+       JOIN skill_runs sr ON f.source_run_id = sr.run_id AND f.workspace_id = sr.workspace_id
+       WHERE sr.workspace_id = $1
+         AND sr.created_at = (
+           SELECT MAX(sr2.created_at) FROM skill_runs sr2
+           WHERE sr2.workspace_id = sr.workspace_id AND sr2.skill_id = sr.skill_id AND sr2.status = 'completed'
+         )
+         AND f.status = 'open'
+       GROUP BY sr.skill_id, f.severity`,
+      [workspaceId]
+    ).catch(() => ({ rows: [] as { skill_id: string; severity: string; cnt: string }[] }));
+
+    const findingsMap = new Map<string, Record<string, number>>();
+    for (const row of findingsCounts.rows) {
+      if (!findingsMap.has(row.skill_id)) findingsMap.set(row.skill_id, {});
+      const alias = row.severity === 'critical' ? 'act' : row.severity === 'warning' ? 'watch' : row.severity === 'info' ? 'notable' : row.severity;
+      findingsMap.get(row.skill_id)![alias] = parseInt(row.cnt, 10);
+    }
+
+    const result = skills.map(s => {
+      const last = lastRunMap.get(s.id);
+      return {
+        id: s.id,
+        name: s.name,
+        description: s.description,
+        category: s.category,
+        tier: s.tier,
+        schedule: s.schedule,
+        lastRunAt: last?.at || null,
+        lastRunStatus: last?.status || null,
+        lastRunDuration: last?.duration || null,
+        lastRunFindings: findingsMap.get(s.id) || null,
+      };
+    });
 
     return res.json(result);
   } catch (err) {
