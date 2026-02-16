@@ -12,6 +12,15 @@ const GRADE_COLORS: Record<string, string> = {
   A: '#22c55e', B: '#38bdf8', C: '#eab308', D: '#f97316', F: '#ef4444',
 };
 
+function gradeFromScore(score: number | null): string {
+  if (score == null) return '—';
+  if (score >= 90) return 'A';
+  if (score >= 75) return 'B';
+  if (score >= 50) return 'C';
+  if (score >= 25) return 'D';
+  return 'F';
+}
+
 interface DealRow {
   id: string;
   name: string;
@@ -102,24 +111,27 @@ export default function DealList() {
       const rawDeals = Array.isArray(dealsData) ? dealsData : dealsData.data || dealsData.deals || [];
       const closedDeals: DealRow[] = rawDeals
         .filter((d: any) => !riskDealIds.has(d.id))
-        .map((d: any) => ({
-          id: d.id,
-          name: d.name || '',
-          amount: Number(d.amount) || 0,
-          stage: d.stage_normalized || d.stage || '',
-          stage_normalized: d.stage_normalized || d.stage || '',
-          owner: d.owner_name || d.owner_email || d.owner || '',
-          close_date: d.close_date,
-          days_in_stage: d.days_in_stage ?? null,
-          score: 100,
-          grade: '—',
-          signal_counts: { act: 0, watch: 0, notable: 0, info: 0 },
-          is_closed: ['closed_won', 'closed_lost'].includes(d.stage_normalized),
-          status: d.stage_normalized === 'closed_won' ? 'won' : d.stage_normalized === 'closed_lost' ? 'lost' : 'open',
-          pipeline: d.pipeline || d.source_data?.pipeline || '',
-          source_id: d.source_id ?? null,
-          source: d.source ?? null,
-        }));
+        .map((d: any) => {
+          const effectiveScore = d.health_score != null ? Number(d.health_score) : 100;
+          return {
+            id: d.id,
+            name: d.name || '',
+            amount: Number(d.amount) || 0,
+            stage: d.stage || d.stage_normalized || '',
+            stage_normalized: d.stage_normalized || d.stage || '',
+            owner: d.owner_name || d.owner_email || d.owner || '',
+            close_date: d.close_date,
+            days_in_stage: d.days_in_stage ?? null,
+            score: effectiveScore,
+            grade: gradeFromScore(effectiveScore),
+            signal_counts: { act: 0, watch: 0, notable: 0, info: 0 },
+            is_closed: ['closed_won', 'closed_lost'].includes(d.stage_normalized),
+            status: d.stage_normalized === 'closed_won' ? 'won' : d.stage_normalized === 'closed_lost' ? 'lost' : 'open',
+            pipeline: d.pipeline || d.source_data?.pipeline || '',
+            source_id: d.source_id ?? null,
+            source: d.source ?? null,
+          };
+        });
 
       setAllDeals([...riskDeals, ...closedDeals]);
       setError('');

@@ -1,6 +1,14 @@
 import { query } from '../db.js';
 import { getBatchDealRiskScores } from './deal-risk-score.js';
 
+function computeGradeFromScore(score: number): 'A' | 'B' | 'C' | 'D' | 'F' {
+  if (score >= 90) return 'A';
+  if (score >= 75) return 'B';
+  if (score >= 50) return 'C';
+  if (score >= 25) return 'D';
+  return 'F';
+}
+
 interface PipelineRiskSummary {
   summary: {
     total_deals: number;
@@ -62,7 +70,7 @@ export async function getPipelineRiskSummary(
   }
 
   const dealsResult = await query(
-    `SELECT id, name, amount, stage, stage_normalized, owner, close_date, days_in_stage, source_id, source, pipeline
+    `SELECT id, name, amount, stage, stage_normalized, owner, close_date, days_in_stage, source_id, source, pipeline, health_score
      FROM deals
      WHERE workspace_id = $1 AND stage_normalized NOT IN ('closed_won', 'closed_lost')${whereExtra}
      ORDER BY amount DESC NULLS LAST`,
@@ -94,16 +102,19 @@ export async function getPipelineRiskSummary(
 
   const mergedDeals = rawDeals.map(d => {
     const risk = scoreMap.get(d.id);
+    const dbHealthScore = d.health_score != null ? Number(d.health_score) : null;
+    const effectiveScore = risk?.score ?? dbHealthScore ?? 100;
+    const effectiveGrade = risk?.grade ?? computeGradeFromScore(effectiveScore);
     return {
       deal_id: d.id,
       deal_name: d.name || '',
       amount: d.amount != null ? Number(d.amount) : null,
-      stage: d.stage_normalized || d.stage || '',
+      stage: d.stage || d.stage_normalized || '',
       owner: d.owner || '',
       close_date: d.close_date ? new Date(d.close_date).toISOString() : null,
       days_in_stage: d.days_in_stage != null ? Number(d.days_in_stage) : null,
-      score: risk?.score ?? 100,
-      grade: risk?.grade ?? 'A',
+      score: effectiveScore,
+      grade: effectiveGrade,
       signal_counts: risk?.signal_counts ?? { act: 0, watch: 0, notable: 0, info: 0 },
       top_signal: risk?.signals?.[0]?.message ?? null,
       source_id: d.source_id ?? null,
