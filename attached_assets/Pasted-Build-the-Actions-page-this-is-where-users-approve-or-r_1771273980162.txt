@@ -1,0 +1,57 @@
+Build the Actions page — this is where users approve or reject 
+actions that agents recommend.
+
+Read:
+- server/actions/ — existing actions service and types
+- server/agents/playbook-executor.ts — the action handlers 
+  (notify_rep, update_deal_stage, create_follow_up_task, 
+  update_contact_field)
+- The existing Actions nav item in the sidebar
+
+The Actions page shows pending actions that need human approval.
+
+Layout:
+
+FILTER BAR:
+- Status tabs: Pending (default), Executed, Failed, All
+- Filter by: agent, action type, severity
+- Sort by: created_at desc
+
+ACTION CARDS (each pending action):
+- Header: action type as readable label + severity badge
+- Entity: deal/account/contact name (linked to detail page)
+- Summary: what the agent wants to do and why
+- Evidence: the finding that triggered this action
+- Impact: dollar amount if available
+- Agent attribution: which agent recommended this
+
+ACTION BUTTONS (for pending status):
+- "Approve & Execute" (green) — calls the playbook executor 
+  to fire the action (CRM write, Slack DM, etc). On success, 
+  card moves to Executed with timestamp.
+- "Reject" (red outline) — sets status to rejected with 
+  optional reason input. Card moves to rejected state.
+- "Snooze" — delays action for 1d/3d/7d
+
+EXECUTED STATE:
+- Shows green checkmark, executed_at timestamp, executed_by
+- If CRM write: shows "Updated in HubSpot/Salesforce" with 
+  link to CRM record
+- Shows crm_write_log entry if available
+
+FAILED STATE:
+- Shows error message
+- "Retry" button
+
+API:
+- GET /api/workspaces/:id/actions?status=pending
+- PATCH /api/workspaces/:id/actions/:actionId 
+  Body: { status: 'approved' } or { status: 'rejected', reason }
+- POST /api/workspaces/:id/actions/:actionId/execute
+  Calls the playbook executor handler for this action type
+  Returns execution result
+
+Wire the sidebar Actions badge to show count of pending actions.
+
+Test with Imubit — run a skill, verify findings create actions 
+via playbook, verify actions appear on the page, approve one.
