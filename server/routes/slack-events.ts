@@ -55,15 +55,6 @@ router.post('/', async (req, res) => {
 });
 
 async function resolveWorkspaceFromTeam(teamId: string): Promise<string | null> {
-  const result = await query<any>(
-    `SELECT cc.workspace_id FROM connector_configs cc
-     WHERE cc.source_type = 'slack_app'
-     AND cc.credentials->>'team_id' = $1
-     LIMIT 1`,
-    [teamId]
-  );
-  if (result.rows.length > 0) return result.rows[0].workspace_id;
-
   const slackChannelResult = await query<any>(
     `SELECT workspace_id FROM slack_channel_config LIMIT 1`
   );

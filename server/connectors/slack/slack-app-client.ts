@@ -35,7 +35,7 @@ export class SlackAppClient {
     if (creds?.bot_token) {
       return creds.bot_token;
     }
-    return null;
+    return process.env.SLACK_BOT_TOKEN || null;
   }
 
   async getDefaultChannel(workspaceId: string): Promise<string | null> {
