@@ -1,0 +1,44 @@
+First)
+Three instances of the same unicode rendering bug:
+
+Command Center — Pipeline by Stage subtitle shows literal \u00B7 instead of · (middot)
+Deals page — Health column shows literal \u2014 instead of — (em dash)
+Deals page — Findings column shows literal \u2014 instead of — (em dash)
+These are all the same root cause — unicode escapes in string literals not being rendered. Likely a template or constant file where these characters are defined as escape sequences instead of actual Unicode characters. Do a global search for \u00B7 and \u2014 in the frontend code and replace with the actual characters · and —.
+
+Also while you're on the Deals page: it needs a Pipeline filter dropdown alongside Stage, Owner, Health, and Status. Same ask as the Command Center pipeline selector — this is critical for multi-pipeline orgs.
+
+
+
+Second)
+
+
+
+Feature request: Add a "View in CRM" link/button for deals across the UI. The deep-link URLs are deterministic:
+
+HubSpot: https://app.hubspot.com/contacts/{portalId}/deal/{source_id}
+Salesforce: https://{instance}.lightning.force.com/lightning/r/Opportunity/{source_id}/view
+The source_id on each deal is the CRM record ID. The portal ID (HubSpot) or instance URL (Salesforce) should be stored on the connector config or fetchable from it.
+
+Places to add it:
+
+Insights Feed — small external link icon next to each finding's deal name
+Deals list — icon in the row or on the deal name link
+Deal dossier/detail page — prominent "Open in HubSpot/Salesforce" button in the header
+Opens in a new tab. Show the CRM logo (HubSpot sprocket or Salesforce cloud) as the icon so users instantly know where it goes. For file-imported deals with no CRM connection, don't show the button.
+
+
+
+Third) 
+
+
+
+Command Center shows {"error":"Authentication required"} in red on Pipeline by Stage and Active Findings sections on initial load. Clicking Retry loads the data fine. This is a race condition — the page is firing API requests before the auth session is ready.
+
+This is not acceptable for production. Fix options:
+
+Best: Don't render data sections until auth is confirmed. Show skeleton/loading states until the auth context is ready, then fire the API calls.
+Alternative: Add automatic retry with backoff on 401 responses (retry once after 500ms before showing error state). The user should never see an auth error on a page they're already logged into.
+Option 1 is the right fix. The page should gate data fetching on auth readiness, not fire-and-hope.
+
+Also one more unicode bug: Active Findings section shows View all \u2192 instead of View all →. Same global search-and-replace fix as the others.
