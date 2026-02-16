@@ -917,12 +917,10 @@ async function boostConfidenceWithApollo(workspaceId: string, dealId?: string): 
     role_source: string;
     seniority_verified: string;
     department_verified: string;
-    title: string;
   }>(`
     SELECT dc.id, dc.buying_role, dc.role_confidence, dc.role_source,
-           dc.seniority_verified, dc.department_verified, c.title
+           dc.seniority_verified, dc.department_verified
     FROM deal_contacts dc
-    JOIN contacts c ON dc.contact_id = c.id AND dc.workspace_id = c.workspace_id
     WHERE dc.workspace_id = $1
       ${dealFilter}
       AND dc.buying_role IS NOT NULL
@@ -930,6 +928,7 @@ async function boostConfidenceWithApollo(workspaceId: string, dealId?: string): 
       AND dc.seniority_verified IS NOT NULL
       AND dc.department_verified IS NOT NULL
       AND dc.role_source != 'enrichment_inference'
+      AND dc.role_source NOT LIKE '%+apollo_confirmed'
       AND dc.role_confidence < 0.95
   `, params);
 
