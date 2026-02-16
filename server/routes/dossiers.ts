@@ -8,6 +8,7 @@
 import { Router } from 'express';
 import { assembleDealDossier } from '../dossiers/deal-dossier.js';
 import { assembleAccountDossier } from '../dossiers/account-dossier.js';
+import { synthesizeDealNarrative, synthesizeAccountNarrative } from '../dossiers/narrative.js';
 import { query } from '../db.js';
 
 const router = Router({ mergeParams: true });
@@ -21,19 +22,28 @@ const router = Router({ mergeParams: true });
  * Target latency: <2s without narrative, <5s with narrative
  */
 router.get('/:workspaceId/deals/:dealId/dossier', async (req, res) => {
+  const startTime = Date.now();
   try {
     const { workspaceId, dealId } = req.params;
-    const includeNarrative = req.query.narrative === 'true';
+    const includeNarrative = req.query.narrative === 'true' ||
+      req.headers['x-include-narrative'] === 'true';
 
-    const dossier = await assembleDealDossier(workspaceId, dealId);
+    const dossier = await assembleDealDossier(workspaceId, dealId, { includeNarrative });
 
-    // Optional narrative synthesis (can be added later)
     if (includeNarrative) {
-      // TODO: Add narrative synthesis via callLLM
-      // const narrative = await synthesizeDealNarrative(workspaceId, dossier);
-      // dossier.narrative = narrative;
+      try {
+        const narrative = await synthesizeDealNarrative(workspaceId, dossier);
+        (dossier as any).narrative = narrative;
+      } catch (err) {
+        console.error('[Deal Dossier] Narrative synthesis failed:', (err as Error).message);
+        (dossier as any).narrative = null;
+      }
     }
 
+    const duration = Date.now() - startTime;
+    console.log(`[Deal Dossier] ${dealId} assembled in ${duration}ms (narrative: ${includeNarrative})`);
+
+    res.set('Cache-Control', 'private, max-age=300');
     res.json(dossier);
   } catch (err) {
     if ((err as Error).message.includes('not found')) {
@@ -51,19 +61,28 @@ router.get('/:workspaceId/deals/:dealId/dossier', async (req, res) => {
  * relationship health, and findings.
  */
 router.get('/:workspaceId/accounts/:accountId/dossier', async (req, res) => {
+  const startTime = Date.now();
   try {
     const { workspaceId, accountId } = req.params;
-    const includeNarrative = req.query.narrative === 'true';
+    const includeNarrative = req.query.narrative === 'true' ||
+      req.headers['x-include-narrative'] === 'true';
 
-    const dossier = await assembleAccountDossier(workspaceId, accountId);
+    const dossier = await assembleAccountDossier(workspaceId, accountId, { includeNarrative });
 
-    // Optional narrative synthesis (can be added later)
     if (includeNarrative) {
-      // TODO: Add narrative synthesis via callLLM
-      // const narrative = await synthesizeAccountNarrative(workspaceId, dossier);
-      // dossier.narrative = narrative;
+      try {
+        const narrative = await synthesizeAccountNarrative(workspaceId, dossier);
+        (dossier as any).narrative = narrative;
+      } catch (err) {
+        console.error('[Account Dossier] Narrative synthesis failed:', (err as Error).message);
+        (dossier as any).narrative = null;
+      }
     }
 
+    const duration = Date.now() - startTime;
+    console.log(`[Account Dossier] ${accountId} assembled in ${duration}ms (narrative: ${includeNarrative})`);
+
+    res.set('Cache-Control', 'private, max-age=300');
     res.json(dossier);
   } catch (err) {
     if ((err as Error).message.includes('not found')) {

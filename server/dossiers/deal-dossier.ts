@@ -19,7 +19,11 @@ export interface DealDossier {
     forecast_category: string | null;
     source: string | null;
     source_id: string | null;
+    source_url: string | null;
     pipeline_name: string | null;
+    account_name: string | null;
+    account_id: string | null;
+    custom_fields: Record<string, any>;
   };
   contacts: Array<{
     id: string;
@@ -29,6 +33,10 @@ export interface DealDossier {
     role: string | null;
     is_primary: boolean;
     last_activity_date: string | null;
+    seniority: string | null;
+    buying_role: string | null;
+    role_confidence: number | null;
+    engagement_level: 'active' | 'fading' | 'dark';
   }>;
   conversations: Array<{
     id: string;
@@ -59,6 +67,8 @@ export interface DealDossier {
     message: string;
     skill_id: string;
     found_at: string;
+    resolved_at: string | null;
+    actionability: string;
   }>;
   health_signals: {
     activity_recency: 'active' | 'cooling' | 'stale';
@@ -71,6 +81,7 @@ export interface DealDossier {
     days_since_last_call: number | null;
     total_contacts: number;
     contacts_on_calls: number;
+    unlinked_calls: number;
   };
   risk_score: {
     score: number;
@@ -86,6 +97,13 @@ export interface DealDossier {
     created_by: string | null;
     expires_at: string | null;
   }>;
+  enrichment: {
+    buying_committee_size: number;
+    roles_identified: string[];
+    icp_fit_score: number | null;
+    account_signals: any[];
+  } | null;
+  narrative: string | null;
   hasUserContext: boolean;
   data_availability: {
     has_stage_history: boolean;
@@ -93,14 +111,21 @@ export interface DealDossier {
     has_conversations: boolean;
     has_findings: boolean;
   };
+  metadata: {
+    assembled_at: string;
+    data_sources_consulted: string[];
+    assembly_duration_ms: number;
+  };
 }
 
 async function getDealById(workspaceId: string, dealId: string) {
   const result = await query(
     `SELECT d.*,
             EXTRACT(day FROM now() - d.stage_changed_at) as calculated_days_in_stage,
-            EXTRACT(day FROM now() - d.created_at) as days_open
+            EXTRACT(day FROM now() - d.created_at) as days_open,
+            a.domain as account_domain, a.name as account_name, a.id as account_id
      FROM deals d
+     LEFT JOIN accounts a ON d.account_id = a.id AND a.workspace_id = $2
      WHERE d.id = $1 AND d.workspace_id = $2`,
     [dealId, workspaceId]
   );
@@ -110,7 +135,8 @@ async function getDealById(workspaceId: string, dealId: string) {
 async function getContactsForDeal(workspaceId: string, dealId: string) {
   const result = await query(
     `SELECT c.id, COALESCE(c.first_name, '') || ' ' || COALESCE(c.last_name, '') as name,
-            c.email, c.title, dc.role, dc.is_primary, c.last_activity_date
+            c.email, c.title, dc.role, dc.is_primary, c.last_activity_date,
+            dc.buying_role, dc.role_confidence, dc.seniority_verified
      FROM deal_contacts dc
      JOIN contacts c ON dc.contact_id = c.id AND c.workspace_id = $1
      WHERE dc.deal_id = $2 AND dc.workspace_id = $1
@@ -159,13 +185,53 @@ async function getStageHistoryForDeal(workspaceId: string, dealId: string) {
 
 async function getFindingsForDeal(workspaceId: string, dealId: string) {
   const result = await query(
-    `SELECT f.id, f.severity, f.category, f.message, f.skill_id, f.found_at
+    `SELECT f.id, f.severity, f.category, f.message, f.skill_id, f.found_at, f.resolved_at, f.actionability
      FROM findings f
      WHERE f.workspace_id = $1 AND f.deal_id = $2 AND f.resolved_at IS NULL
      ORDER BY CASE f.severity WHEN 'act' THEN 1 WHEN 'watch' THEN 2 WHEN 'notable' THEN 3 WHEN 'info' THEN 4 ELSE 5 END`,
     [workspaceId, dealId]
   );
   return result.rows;
+}
+
+async function getDealEnrichment(workspaceId: string, dealId: string) {
+  const result = await query(
+    `SELECT dc.buying_role, dc.role_confidence, dc.seniority_verified,
+            c.first_name, c.last_name, c.email, c.title
+     FROM deal_contacts dc
+     JOIN contacts c ON dc.contact_id = c.id AND c.workspace_id = $1
+     WHERE dc.deal_id = $2 AND dc.workspace_id = $1
+       AND dc.buying_role IS NOT NULL`,
+    [workspaceId, dealId]
+  );
+  if (result.rows.length === 0) return null;
+
+  const roles_identified = [...new Set(result.rows.map((r: any) => r.buying_role).filter(Boolean))];
+  const avgConfidence = result.rows.reduce((s: number, r: any) => s + (Number(r.role_confidence) || 0), 0) / result.rows.length;
+
+  return {
+    buying_committee_size: result.rows.length,
+    roles_identified,
+    icp_fit_score: avgConfidence > 0 ? Math.round(avgConfidence * 100) : null,
+    account_signals: [],
+  };
+}
+
+async function getUnlinkedCallCount(workspaceId: string, dealId: string, accountDomain: string | null): Promise<number> {
+  if (!accountDomain) return 0;
+  try {
+    const result = await query(
+      `SELECT COUNT(*)::int as cnt FROM conversations cv
+       WHERE cv.workspace_id = $1 AND cv.deal_id IS NULL
+         AND cv.account_id = (SELECT account_id FROM deals WHERE id = $2 AND workspace_id = $1)
+         AND EXISTS (
+           SELECT 1 FROM unnest(cv.participants) p
+           WHERE p LIKE $3
+         )`,
+      [workspaceId, dealId, `%@${accountDomain}`]
+    );
+    return result.rows[0]?.cnt || 0;
+  } catch { return 0; }
 }
 
 function computeHealthSignals(
@@ -207,33 +273,56 @@ function formatStageLabel(rawStage: string, normalizedStage: string): string {
   return rawStage;
 }
 
-export async function assembleDealDossier(workspaceId: string, dealId: string): Promise<DealDossier> {
-  const [deal, contacts, conversations, activities, stageHistory, findings, riskResult, annotations] = await Promise.all([
+export async function assembleDealDossier(
+  workspaceId: string,
+  dealId: string,
+  options?: { includeNarrative?: boolean }
+): Promise<DealDossier> {
+  const startTime = Date.now();
+  const [deal, contacts, conversations, activities, stageHistory, findings, riskResult, annotations, enrichment] = await Promise.all([
     getDealById(workspaceId, dealId),
-    getContactsForDeal(workspaceId, dealId),
-    getConversationsForDeal(workspaceId, dealId),
-    getActivitiesForDeal(workspaceId, dealId),
-    getStageHistoryForDeal(workspaceId, dealId),
-    getFindingsForDeal(workspaceId, dealId),
+    getContactsForDeal(workspaceId, dealId).catch(e => { console.error('[DealDossier] contacts error:', e.message); return []; }),
+    getConversationsForDeal(workspaceId, dealId).catch(e => { console.error('[DealDossier] conversations error:', e.message); return []; }),
+    getActivitiesForDeal(workspaceId, dealId).catch(e => { console.error('[DealDossier] activities error:', e.message); return []; }),
+    getStageHistoryForDeal(workspaceId, dealId).catch(e => { console.error('[DealDossier] stageHistory error:', e.message); return []; }),
+    getFindingsForDeal(workspaceId, dealId).catch(e => { console.error('[DealDossier] findings error:', e.message); return []; }),
     getDealRiskScore(workspaceId, dealId).catch(() => null),
     getActiveAnnotations(workspaceId, 'deal', dealId).catch(() => []),
+    getDealEnrichment(workspaceId, dealId).catch(e => { console.error('[DealDossier] enrichment error:', e.message); return null; }),
   ]);
 
   if (!deal) {
     throw new Error(`Deal ${dealId} not found in workspace ${workspaceId}`);
   }
 
+  const accountDomain = deal?.account_domain || null;
+  const unlinkedCalls = await getUnlinkedCallCount(workspaceId, dealId, accountDomain).catch(() => 0);
+
   const health_signals = computeHealthSignals(deal, activities, contacts);
 
-  const mappedContacts = contacts.map((c: any) => ({
-    id: c.id,
-    name: (c.name || '').trim(),
-    email: c.email || '',
-    title: c.title ?? null,
-    role: c.role ?? null,
-    is_primary: c.is_primary === true,
-    last_activity_date: c.last_activity_date ? new Date(c.last_activity_date).toISOString() : null,
-  }));
+  const mappedContacts = contacts.map((c: any) => {
+    const engagement_level = (() => {
+      if (!c.last_activity_date) return 'dark' as const;
+      const daysSince = (Date.now() - new Date(c.last_activity_date).getTime()) / (1000*60*60*24);
+      if (daysSince <= 14) return 'active' as const;
+      if (daysSince <= 30) return 'fading' as const;
+      return 'dark' as const;
+    })();
+
+    return {
+      id: c.id,
+      name: (c.name || '').trim(),
+      email: c.email || '',
+      title: c.title ?? null,
+      role: c.role ?? null,
+      is_primary: c.is_primary === true,
+      last_activity_date: c.last_activity_date ? new Date(c.last_activity_date).toISOString() : null,
+      seniority: c.seniority_verified ?? null,
+      buying_role: c.buying_role ?? null,
+      role_confidence: c.role_confidence ? Number(c.role_confidence) : null,
+      engagement_level,
+    };
+  });
 
   const mappedConversations = conversations.map((cv: any) => ({
     id: cv.id,
@@ -288,7 +377,11 @@ export async function assembleDealDossier(workspaceId: string, dealId: string): 
       forecast_category: deal.forecast_category ?? null,
       source: deal.source ?? null,
       source_id: deal.source_id ?? null,
+      source_url: deal.source_url ?? null,
       pipeline_name: deal.pipeline ?? null,
+      account_name: deal.account_name ?? null,
+      account_id: deal.account_id ?? null,
+      custom_fields: deal.custom_fields || {},
     },
     contacts: mappedContacts,
     conversations: mappedConversations,
@@ -314,6 +407,8 @@ export async function assembleDealDossier(workspaceId: string, dealId: string): 
       message: f.message || '',
       skill_id: f.skill_id || '',
       found_at: f.found_at ? new Date(f.found_at).toISOString() : '',
+      resolved_at: f.resolved_at ? new Date(f.resolved_at).toISOString() : null,
+      actionability: f.actionability ?? 'monitor',
     })),
     health_signals,
     coverage_gaps: {
@@ -321,6 +416,7 @@ export async function assembleDealDossier(workspaceId: string, dealId: string): 
       days_since_last_call,
       total_contacts: mappedContacts.length,
       contacts_on_calls,
+      unlinked_calls: unlinkedCalls,
     },
     risk_score: {
       score: riskResult?.score ?? 100,
@@ -336,12 +432,23 @@ export async function assembleDealDossier(workspaceId: string, dealId: string): 
       created_by: a.created_by ?? null,
       expires_at: a.expires_at ? new Date(a.expires_at).toISOString() : null,
     })),
+    enrichment: enrichment ?? null,
+    narrative: null,
     hasUserContext: annotations.length > 0,
     data_availability: {
       has_stage_history: stageHistory.length > 0,
       has_contacts: contacts.length > 0,
       has_conversations: conversations.length > 0,
       has_findings: findings.length > 0,
+    },
+    metadata: {
+      assembled_at: new Date().toISOString(),
+      data_sources_consulted: [
+        'deals', 'deal_contacts', 'contacts', 'conversations', 'activities',
+        'deal_stage_history', 'findings',
+        ...(enrichment ? ['deal_contacts_enrichment'] : []),
+      ],
+      assembly_duration_ms: Date.now() - startTime,
     },
   };
 }

@@ -12,6 +12,9 @@ export interface AccountDossier {
     annual_revenue: number | null;
     owner_email: string | null;
     created_at: string | null;
+    source: string | null;
+    source_id: string | null;
+    source_url: string | null;
   };
   deals: Array<{
     id: string;
@@ -37,6 +40,11 @@ export interface AccountDossier {
     email: string;
     title: string | null;
     role: string | null;
+    seniority: string;
+    buying_role: string | null;
+    last_activity_date: string | null;
+    conversation_count: number;
+    engagement_level: 'active' | 'fading' | 'dark';
     engagement_status: 'active' | 'dark' | 'unknown';
   }>;
   contact_map: {
@@ -53,6 +61,9 @@ export interface AccountDossier {
     duration_minutes: number | null;
     participants: string[];
     linked_deal_name: string | null;
+    link_method: string | null;
+    source: string;
+    summary: string | null;
   }>;
   relationship_summary: {
     total_deals: number;
@@ -75,9 +86,16 @@ export interface AccountDossier {
     found_at: string | null;
   }>;
   relationship_health: {
-    engagement_trend: 'increasing' | 'stable' | 'declining' | 'unknown';
+    overall: 'healthy' | 'at_risk' | 'declining' | 'cold';
+    engagement_trend: 'increasing' | 'stable' | 'decreasing' | 'no_data';
+    total_conversations: number;
+    conversations_last_30d: number;
+    conversations_last_90d: number;
+    unique_contacts_engaged: number;
+    total_contacts_known: number;
+    coverage_percentage: number;
+    days_since_last_interaction: number | null;
     coverage_gaps: string[];
-    overall: 'strong' | 'moderate' | 'weak' | 'unknown';
   };
   annotations: Array<{
     id: string;
@@ -95,11 +113,17 @@ export interface AccountDossier {
     has_conversations: boolean;
     has_findings: boolean;
   };
+  narrative: string | null;
+  metadata: {
+    assembled_at: string;
+    data_sources_consulted: string[];
+    assembly_duration_ms: number;
+  };
 }
 
 async function getAccountById(workspaceId: string, accountId: string) {
   const result = await query(
-    `SELECT id, name, domain, industry, employee_count, annual_revenue, owner, created_at
+    `SELECT id, name, domain, industry, employee_count, annual_revenue, owner, created_at, source, source_id
      FROM accounts
      WHERE id = $1 AND workspace_id = $2`,
     [accountId, workspaceId]
@@ -122,7 +146,8 @@ async function getContactsForAccount(workspaceId: string, accountId: string) {
   const result = await query(
     `SELECT DISTINCT ON (c.id) c.id,
             COALESCE(c.first_name, '') || ' ' || COALESCE(c.last_name, '') as name,
-            c.email, c.title, dc.role
+            c.email, c.title, dc.role, dc.buying_role, dc.seniority_verified,
+            c.last_activity_date
      FROM contacts c
      LEFT JOIN deal_contacts dc ON dc.contact_id = c.id AND dc.workspace_id = $1
      WHERE c.workspace_id = $1 AND c.account_id = $2
@@ -135,12 +160,13 @@ async function getContactsForAccount(workspaceId: string, accountId: string) {
 async function getConversationsForAccount(workspaceId: string, accountId: string) {
   const result = await query(
     `SELECT cv.id, cv.title, cv.call_date, cv.duration_seconds, cv.participants,
+            cv.link_method, cv.source, cv.summary,
             d.name as linked_deal_name
      FROM conversations cv
      LEFT JOIN deals d ON cv.deal_id = d.id AND d.workspace_id = $1
      WHERE cv.workspace_id = $1 AND cv.account_id = $2
      ORDER BY cv.call_date DESC
-     LIMIT 20`,
+     LIMIT 30`,
     [workspaceId, accountId]
   );
   return result.rows;
@@ -228,12 +254,25 @@ function computeEngagementTrend(conversations: any[]): 'increasing' | 'stable' |
   return 'stable';
 }
 
-export async function assembleAccountDossier(workspaceId: string, accountId: string): Promise<AccountDossier> {
+function computeEngagementLevel(lastActivityDate: string | null): 'active' | 'fading' | 'dark' {
+  if (!lastActivityDate) return 'dark';
+  const daysSince = (Date.now() - new Date(lastActivityDate).getTime()) / (1000*60*60*24);
+  if (daysSince <= 14) return 'active';
+  if (daysSince <= 30) return 'fading';
+  return 'dark';
+}
+
+export async function assembleAccountDossier(
+  workspaceId: string,
+  accountId: string,
+  options?: { includeNarrative?: boolean }
+): Promise<AccountDossier> {
+  const startTime = Date.now();
   const [account, deals, contacts, conversations, accountAnnotations] = await Promise.all([
     getAccountById(workspaceId, accountId),
-    getDealsForAccount(workspaceId, accountId),
-    getContactsForAccount(workspaceId, accountId),
-    getConversationsForAccount(workspaceId, accountId),
+    getDealsForAccount(workspaceId, accountId).catch(e => { console.error('[AccountDossier] deals error:', e.message); return []; }),
+    getContactsForAccount(workspaceId, accountId).catch(e => { console.error('[AccountDossier] contacts error:', e.message); return []; }),
+    getConversationsForAccount(workspaceId, accountId).catch(e => { console.error('[AccountDossier] conversations error:', e.message); return []; }),
     getActiveAnnotations(workspaceId, 'account', accountId).catch(() => []),
   ]);
 
@@ -268,10 +307,15 @@ export async function assembleAccountDossier(workspaceId: string, accountId: str
   const relationship_summary = computeRelationshipSummary(deals, conversations, contacts);
 
   const participantEmails = new Set<string>();
+  const participantCounts = new Map<string, number>();
   for (const cv of conversations) {
     if (Array.isArray(cv.participants)) {
       for (const p of cv.participants) {
-        if (p && p.includes('@')) participantEmails.add(p.toLowerCase());
+        if (p?.includes('@')) {
+          const lower = p.toLowerCase();
+          participantEmails.add(lower);
+          participantCounts.set(lower, (participantCounts.get(lower) || 0) + 1);
+        }
       }
     }
   }
@@ -285,6 +329,11 @@ export async function assembleAccountDossier(workspaceId: string, accountId: str
       email,
       title: c.title ?? null,
       role: c.role ?? null,
+      seniority: classifySeniority(c.title),
+      buying_role: c.buying_role ?? c.role ?? null,
+      last_activity_date: c.last_activity_date ? new Date(c.last_activity_date).toISOString() : null,
+      conversation_count: participantCounts.get((email || '').toLowerCase()) || 0,
+      engagement_level: computeEngagementLevel(c.last_activity_date),
       engagement_status: (isEngaged ? 'active' : email ? 'dark' : 'unknown') as 'active' | 'dark' | 'unknown',
     };
   });
@@ -307,14 +356,59 @@ export async function assembleAccountDossier(workspaceId: string, accountId: str
   if (dark > 0 && dark >= mappedContacts.length * 0.5) coverage_gaps.push(`${dark} of ${mappedContacts.length} contacts have no recent calls`);
   if (conversations.length === 0) coverage_gaps.push('No conversations linked');
 
-  const engagement_trend = computeEngagementTrend(conversations);
-  const hasActFindings = findings.some((f: any) => f.severity === 'act');
-  const hasWatchFindings = findings.some((f: any) => f.severity === 'watch');
-  let overall: 'strong' | 'moderate' | 'weak' | 'unknown' = 'unknown';
-  if (conversations.length > 0 || mappedContacts.length > 0) {
-    if (hasActFindings || (engagement_trend === 'declining' && dark > engaged)) overall = 'weak';
-    else if (hasWatchFindings || engagement_trend === 'declining' || dark > engaged) overall = 'moderate';
-    else overall = 'strong';
+  const now = Date.now();
+  const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+  const ninetyDaysMs = 90 * 24 * 60 * 60 * 1000;
+
+  const conversations_last_30d = conversations.filter((cv: any) => {
+    const d = cv.call_date ? new Date(cv.call_date).getTime() : 0;
+    return d > 0 && (now - d) < thirtyDaysMs;
+  }).length;
+
+  const conversations_last_90d = conversations.filter((cv: any) => {
+    const d = cv.call_date ? new Date(cv.call_date).getTime() : 0;
+    return d > 0 && (now - d) < ninetyDaysMs;
+  }).length;
+
+  const conversations_30_60d = conversations.filter((cv: any) => {
+    const d = cv.call_date ? new Date(cv.call_date).getTime() : 0;
+    return d > 0 && (now - d) >= thirtyDaysMs && (now - d) < 2 * thirtyDaysMs;
+  }).length;
+
+  let days_since_last_interaction: number | null = null;
+  const convDates = conversations.map((cv: any) => cv.call_date ? new Date(cv.call_date).getTime() : 0).filter((t: number) => t > 0);
+  if (convDates.length > 0) {
+    days_since_last_interaction = Math.round((now - Math.max(...convDates)) / (1000*60*60*24));
+  }
+
+  const unique_contacts_engaged = participantEmails.size;
+  const total_contacts_known = mappedContacts.length;
+  const coverage_percentage = total_contacts_known > 0
+    ? Math.round((unique_contacts_engaged / total_contacts_known) * 100)
+    : 0;
+
+  let engagement_trend: 'increasing' | 'stable' | 'decreasing' | 'no_data' = 'no_data';
+  if (conversations_last_30d > 0 || conversations_30_60d > 0) {
+    if (conversations_last_30d > conversations_30_60d * 1.2) engagement_trend = 'increasing';
+    else if (conversations_30_60d > conversations_last_30d * 1.2) engagement_trend = 'decreasing';
+    else engagement_trend = 'stable';
+  }
+
+  let overall: 'healthy' | 'at_risk' | 'declining' | 'cold' = 'cold';
+  if (days_since_last_interaction !== null) {
+    if (days_since_last_interaction > 60) {
+      overall = 'cold';
+    } else if (engagement_trend === 'decreasing' && days_since_last_interaction > 30) {
+      overall = 'declining';
+    } else if (engagement_trend === 'decreasing' || coverage_percentage < 30) {
+      overall = 'at_risk';
+    } else if ((engagement_trend === 'stable' || engagement_trend === 'increasing') && coverage_percentage > 50 && days_since_last_interaction < 14) {
+      overall = 'healthy';
+    } else {
+      overall = 'at_risk';
+    }
+  } else if (conversations.length === 0) {
+    overall = 'cold';
   }
 
   const wonDeals = deals.filter((d: any) => d.stage_normalized === 'closed_won');
@@ -331,6 +425,9 @@ export async function assembleAccountDossier(workspaceId: string, accountId: str
       annual_revenue: account.annual_revenue ?? null,
       owner_email: account.owner ?? null,
       created_at: account.created_at ? new Date(account.created_at).toISOString() : null,
+      source: account.source ?? null,
+      source_id: account.source_id ?? null,
+      source_url: null,
     },
     deals: deals.map((d: any) => {
       const isOpen = !['closed_won', 'closed_lost'].includes(d.stage_normalized);
@@ -374,6 +471,9 @@ export async function assembleAccountDossier(workspaceId: string, accountId: str
       duration_minutes: cv.duration_seconds != null ? Math.round(cv.duration_seconds / 60) : null,
       participants: Array.isArray(cv.participants) ? cv.participants : [],
       linked_deal_name: cv.linked_deal_name ?? null,
+      link_method: cv.link_method ?? null,
+      source: cv.source ?? 'unknown',
+      summary: cv.summary ?? null,
     })),
     relationship_summary,
     findings: findings.map((f: any) => ({
@@ -385,9 +485,16 @@ export async function assembleAccountDossier(workspaceId: string, accountId: str
       found_at: f.found_at ? new Date(f.found_at).toISOString() : null,
     })),
     relationship_health: {
-      engagement_trend,
-      coverage_gaps,
       overall,
+      engagement_trend,
+      total_conversations: conversations.length,
+      conversations_last_30d,
+      conversations_last_90d,
+      unique_contacts_engaged,
+      total_contacts_known,
+      coverage_percentage,
+      days_since_last_interaction,
+      coverage_gaps,
     },
     annotations: annotations.map((a: any) => ({
       id: a.id,
@@ -404,6 +511,12 @@ export async function assembleAccountDossier(workspaceId: string, accountId: str
       has_contacts: contacts.length > 0,
       has_conversations: conversations.length > 0,
       has_findings: findings.length > 0,
+    },
+    narrative: null,
+    metadata: {
+      assembled_at: new Date().toISOString(),
+      data_sources_consulted: ['accounts', 'deals', 'contacts', 'deal_contacts', 'conversations', 'findings'],
+      assembly_duration_ms: Date.now() - startTime,
     },
   };
 }
