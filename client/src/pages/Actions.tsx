@@ -18,6 +18,13 @@ interface ActionsSummary {
   by_rep: Array<{ owner_email: string; action_count: number; critical_count: number }>;
 }
 
+interface CRMOperation {
+  type: 'crm_update' | 'crm_note' | 'slack_notify';
+  target: string;
+  result: any;
+  error?: string;
+}
+
 interface Action {
   id: string;
   action_type: string;
@@ -29,12 +36,22 @@ interface Action {
   target_entity_name?: string;
   deal_name?: string;
   target_deal_id?: string;
+  target_account_id?: string;
   owner_email?: string;
   impact_amount?: number;
   urgency_label?: string;
   execution_status: string;
-  created_at: string;
+  execution_result?: CRMOperation[];
+  executed_at?: string;
+  executed_by?: string;
+  snoozed_until?: string;
+  dismissed_reason?: string;
   source_skill: string;
+  source_run_id?: string;
+  created_at: string;
+  execution_payload?: {
+    crm_updates?: Array<{ field: string; current_value: any; proposed_value: any }>;
+  };
 }
 
 const sevColors: Record<string, string> = {
@@ -44,12 +61,31 @@ const sevColors: Record<string, string> = {
   info: '#3b82f6',
 };
 
-const statusLabels: Record<string, { color: string; label: string }> = {
-  open: { color: '#6b7280', label: 'Open' },
-  in_progress: { color: '#3b82f6', label: 'In Progress' },
-  executed: { color: '#22c55e', label: 'Executed' },
-  dismissed: { color: '#4b5563', label: 'Dismissed' },
+const statusConfig: Record<string, { color: string; label: string; bg: string }> = {
+  open: { color: '#6b7280', label: 'Open', bg: 'rgba(107,114,128,0.1)' },
+  in_progress: { color: '#3b82f6', label: 'In Progress', bg: 'rgba(59,130,246,0.1)' },
+  executed: { color: '#22c55e', label: 'Executed', bg: 'rgba(34,197,94,0.1)' },
+  dismissed: { color: '#4b5563', label: 'Dismissed', bg: 'rgba(75,85,99,0.1)' },
+  rejected: { color: '#ef4444', label: 'Rejected', bg: 'rgba(239,68,68,0.1)' },
+  snoozed: { color: '#a78bfa', label: 'Snoozed', bg: 'rgba(167,139,250,0.1)' },
+  failed: { color: '#f97316', label: 'Failed', bg: 'rgba(249,115,22,0.1)' },
 };
+
+const statusTabs = [
+  { key: 'pending', label: 'Pending', match: ['open', 'in_progress'] },
+  { key: 'snoozed', label: 'Snoozed', match: ['snoozed'] },
+  { key: 'executed', label: 'Executed', match: ['executed'] },
+  { key: 'rejected', label: 'Rejected', match: ['rejected', 'dismissed'] },
+  { key: 'all', label: 'All', match: [] },
+];
+
+const snoozeDurations = [
+  { label: '1 day', days: 1 },
+  { label: '3 days', days: 3 },
+  { label: '1 week', days: 7 },
+  { label: '2 weeks', days: 14 },
+  { label: '1 month', days: 30 },
+];
 
 export default function Actions() {
   const navigate = useNavigate();
@@ -59,11 +95,17 @@ export default function Actions() {
   const [selectedAction, setSelectedAction] = useState<Action | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
+  const [activeTab, setActiveTab] = useState('pending');
   const [severityFilter, setSeverityFilter] = useState<string[]>(['critical', 'warning', 'notable', 'info']);
-  const [statusFilter, setStatusFilter] = useState('open');
   const [repFilter, setRepFilter] = useState('all');
+  const [typeFilter, setTypeFilter] = useState('all');
   const [skillFilter, setSkillFilter] = useState('all');
   const [sortBy, setSortBy] = useState<'severity' | 'impact' | 'age'>('severity');
+
+  const showToast = useCallback((message: string, type: 'success' | 'error') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 4000);
+  }, []);
 
   const fetchData = useCallback(async () => {
     try {
@@ -81,14 +123,17 @@ export default function Actions() {
     }
   }, []);
 
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+  useEffect(() => { fetchData(); }, [fetchData]);
 
+  const tabMatch = statusTabs.find(t => t.key === activeTab);
   const filtered = actions
     .filter(a => severityFilter.includes(a.severity))
-    .filter(a => statusFilter === 'all' || a.execution_status === statusFilter)
+    .filter(a => {
+      if (activeTab === 'all') return true;
+      return tabMatch?.match.includes(a.execution_status) ?? false;
+    })
     .filter(a => repFilter === 'all' || a.owner_email === repFilter)
+    .filter(a => typeFilter === 'all' || a.action_type === typeFilter)
     .filter(a => skillFilter === 'all' || a.source_skill === skillFilter)
     .sort((a, b) => {
       if (sortBy === 'severity') {
@@ -101,23 +146,73 @@ export default function Actions() {
       return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     });
 
+  const tabCounts: Record<string, number> = {};
+  for (const tab of statusTabs) {
+    if (tab.key === 'all') {
+      tabCounts[tab.key] = actions.length;
+    } else {
+      tabCounts[tab.key] = actions.filter(a => tab.match.includes(a.execution_status)).length;
+    }
+  }
+
   const reps = Array.from(new Set(actions.map(a => a.owner_email).filter((x): x is string => !!x)));
+  const types = Array.from(new Set(actions.map(a => a.action_type).filter((x): x is string => !!x)));
   const skills = Array.from(new Set(actions.map(a => a.source_skill).filter((x): x is string => !!x)));
 
-  async function updateStatus(actionId: string, status: string) {
+  async function handleExecute(actionId: string) {
     try {
-      await api.put(`/action-items/${actionId}/status`, {
-        status,
-        actor: 'user',
-      });
-      setToast({ message: `Action ${status === 'dismissed' ? 'dismissed' : 'updated'}`, type: 'success' });
-      setTimeout(() => setToast(null), 3000);
+      const result = await api.post(`/action-items/${actionId}/execute`, { actor: 'user' });
+      if (result.success) {
+        showToast('Action executed — CRM updated', 'success');
+      } else {
+        showToast(result.error || 'Execution failed', 'error');
+      }
       setSelectedAction(null);
       await fetchData();
     } catch (err: any) {
-      setToast({ message: err.message || 'Failed to update', type: 'error' });
-      setTimeout(() => setToast(null), 5000);
+      showToast(err.message || 'Failed to execute', 'error');
     }
+  }
+
+  async function handleReject(actionId: string, reason: string) {
+    try {
+      await api.put(`/action-items/${actionId}/status`, {
+        status: 'rejected',
+        actor: 'user',
+        reason,
+      });
+      showToast('Action rejected', 'success');
+      setSelectedAction(null);
+      await fetchData();
+    } catch (err: any) {
+      showToast(err.message || 'Failed to reject', 'error');
+    }
+  }
+
+  async function handleSnooze(actionId: string, days: number) {
+    try {
+      await api.post(`/action-items/${actionId}/snooze`, { days, actor: 'user' });
+      showToast(`Snoozed for ${days} day${days > 1 ? 's' : ''}`, 'success');
+      setSelectedAction(null);
+      await fetchData();
+    } catch (err: any) {
+      showToast(err.message || 'Failed to snooze', 'error');
+    }
+  }
+
+  async function handleReopen(actionId: string) {
+    try {
+      await api.put(`/action-items/${actionId}/status`, { status: 'open', actor: 'user' });
+      showToast('Action reopened', 'success');
+      setSelectedAction(null);
+      await fetchData();
+    } catch (err: any) {
+      showToast(err.message || 'Failed to reopen', 'error');
+    }
+  }
+
+  async function handleRetry(actionId: string) {
+    await handleExecute(actionId);
   }
 
   if (loading) {
@@ -138,9 +233,9 @@ export default function Actions() {
         <div style={{
           position: 'fixed', top: 16, right: 16, zIndex: 1000,
           padding: '10px 16px', borderRadius: 8,
-          background: toast.type === 'success' ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
-          border: `1px solid ${toast.type === 'success' ? '#22c55e' : '#ef4444'}`,
-          color: toast.type === 'success' ? '#22c55e' : '#ef4444',
+          background: toast.type === 'success' ? colors.greenSoft : colors.redSoft,
+          border: `1px solid ${toast.type === 'success' ? colors.green : colors.red}`,
+          color: toast.type === 'success' ? colors.green : colors.red,
           fontSize: 12, fontWeight: 500,
         }}>
           {toast.message}
@@ -180,8 +275,44 @@ export default function Actions() {
       </div>
 
       <div style={{
+        display: 'flex', gap: 2,
+        background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10,
+        padding: 4,
+      }}>
+        {statusTabs.map(tab => {
+          const active = activeTab === tab.key;
+          const count = tabCounts[tab.key] || 0;
+          return (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              style={{
+                flex: 1, padding: '8px 12px', borderRadius: 8,
+                background: active ? colors.surfaceActive : 'transparent',
+                color: active ? colors.text : colors.textMuted,
+                fontSize: 12, fontWeight: active ? 600 : 500,
+                cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                transition: 'all 0.15s',
+              }}
+            >
+              {tab.label}
+              {count > 0 && (
+                <span style={{
+                  fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 10,
+                  background: active ? colors.accent : colors.surfaceHover,
+                  color: active ? '#fff' : colors.textMuted,
+                }}>
+                  {count}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      <div style={{
         display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
-        background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, padding: '10px 16px',
+        background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, padding: '8px 16px',
       }}>
         <div style={{ display: 'flex', gap: 4 }}>
           {(['critical', 'warning', 'notable', 'info'] as const).map(sev => {
@@ -208,8 +339,8 @@ export default function Actions() {
 
         <div style={{ width: 1, height: 20, background: colors.border }} />
 
-        <SelectFilter value={statusFilter} onChange={setStatusFilter}
-          options={[['all', 'All Status'], ['open', 'Open'], ['in_progress', 'In Progress'], ['executed', 'Executed'], ['dismissed', 'Dismissed']]} />
+        <SelectFilter value={typeFilter} onChange={setTypeFilter}
+          options={[['all', 'All Types'], ...types.map(t => [t, t.replace(/_/g, ' ')])]} />
 
         <SelectFilter value={repFilter} onChange={setRepFilter}
           options={[['all', 'All Reps'], ...reps.map(r => [r, r.split('@')[0]])]} />
@@ -275,8 +406,11 @@ export default function Actions() {
 
           {filtered.map(action => {
             const sc = sevColors[action.severity] || colors.textMuted;
-            const st = statusLabels[action.execution_status] || statusLabels.open;
+            const hasFailed = action.execution_result?.some(op => op.error);
+            const effectiveStatus = hasFailed && action.execution_status !== 'executed' ? 'failed' : action.execution_status;
+            const st = statusConfig[effectiveStatus] || statusConfig.open;
             const dealName = action.deal_name || action.target_entity_name || action.target_deal_name;
+
             return (
               <div
                 key={action.id}
@@ -298,8 +432,12 @@ export default function Actions() {
                   boxShadow: `0 0 6px ${sc}40`,
                 }} />
                 <div style={{ minWidth: 0, overflow: 'hidden' }}>
-                  <span style={{ fontSize: 13, fontWeight: 500, color: colors.text, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{action.title}</span>
-                  <p style={{ fontSize: 11, color: colors.textMuted, marginTop: 1 }}>{action.source_skill}</p>
+                  <span style={{ fontSize: 13, fontWeight: 500, color: colors.text, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {action.title}
+                  </span>
+                  <p style={{ fontSize: 11, color: colors.textMuted, marginTop: 1 }}>
+                    {action.action_type.replace(/_/g, ' ')} &middot; {action.source_skill}
+                  </p>
                 </div>
                 <span
                   style={{ fontSize: 12, color: dealName ? colors.accent : colors.textDim, cursor: dealName ? 'pointer' : 'default', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
@@ -322,7 +460,7 @@ export default function Actions() {
                 <span style={{ fontSize: 11, color: colors.textMuted }}>{formatTimeAgo(action.created_at)}</span>
                 <span style={{
                   fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 4,
-                  background: `${st.color}15`, color: st.color,
+                  background: st.bg, color: st.color,
                   justifySelf: 'start',
                 }}>
                   {st.label}
@@ -337,7 +475,11 @@ export default function Actions() {
         <ActionPanel
           action={selectedAction}
           onClose={() => setSelectedAction(null)}
-          onUpdateStatus={updateStatus}
+          onExecute={handleExecute}
+          onReject={handleReject}
+          onSnooze={handleSnooze}
+          onReopen={handleReopen}
+          onRetry={handleRetry}
           navigate={navigate}
         />
       )}
@@ -381,15 +523,40 @@ function SelectFilter({ value, onChange, options }: {
   );
 }
 
-function ActionPanel({ action, onClose, onUpdateStatus, navigate }: {
+function ActionPanel({ action, onClose, onExecute, onReject, onSnooze, onReopen, onRetry, navigate }: {
   action: Action;
   onClose: () => void;
-  onUpdateStatus: (id: string, status: string) => void;
+  onExecute: (id: string) => void;
+  onReject: (id: string, reason: string) => void;
+  onSnooze: (id: string, days: number) => void;
+  onReopen: (id: string) => void;
+  onRetry: (id: string) => void;
   navigate: (path: string) => void;
 }) {
+  const [rejectReason, setRejectReason] = useState('');
+  const [showReject, setShowReject] = useState(false);
+  const [showSnooze, setShowSnooze] = useState(false);
+  const [executing, setExecuting] = useState(false);
+  const [showExecLog, setShowExecLog] = useState(false);
+
   const sc = sevColors[action.severity] || colors.textMuted;
-  const st = statusLabels[action.execution_status] || statusLabels.open;
+  const hasFailed = action.execution_result?.some(op => op.error);
+  const effectiveStatus = hasFailed && action.execution_status !== 'executed' ? 'failed' : action.execution_status;
+  const st = statusConfig[effectiveStatus] || statusConfig.open;
   const dealName = action.deal_name || action.target_entity_name || action.target_deal_name;
+
+  const isActionable = ['open', 'in_progress'].includes(action.execution_status);
+  const isExecuted = action.execution_status === 'executed';
+  const isFailed = hasFailed && !isExecuted;
+  const canReopen = ['dismissed', 'rejected', 'snoozed'].includes(action.execution_status);
+
+  const hasCRMPayload = action.execution_payload?.crm_updates && action.execution_payload.crm_updates.length > 0;
+
+  async function handleExecuteClick() {
+    setExecuting(true);
+    await onExecute(action.id);
+    setExecuting(false);
+  }
 
   return (
     <div style={{
@@ -398,18 +565,18 @@ function ActionPanel({ action, onClose, onUpdateStatus, navigate }: {
     }} onClick={onClose}>
       <div
         style={{
-          width: 460, height: '100%', overflowY: 'auto',
+          width: 480, height: '100%', overflowY: 'auto',
           background: colors.surface, borderLeft: `1px solid ${colors.border}`, padding: 24,
         }}
         onClick={e => e.stopPropagation()}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
             <span style={{
               width: 10, height: 10, borderRadius: '50%', background: sc,
               boxShadow: `0 0 8px ${sc}40`, flexShrink: 0,
             }} />
-            <div>
+            <div style={{ minWidth: 0 }}>
               <h3 style={{ fontSize: 16, fontWeight: 700, color: colors.text }}>{action.title}</h3>
               <p style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
                 {action.action_type.replace(/_/g, ' ')} &middot; {action.source_skill}
@@ -421,38 +588,45 @@ function ActionPanel({ action, onClose, onUpdateStatus, navigate }: {
           </button>
         </div>
 
-        <span style={{
-          fontSize: 10, fontWeight: 600, padding: '3px 10px', borderRadius: 4,
-          background: `${st.color}15`, color: st.color, display: 'inline-block', marginBottom: 16,
-        }}>
-          {st.label}
-        </span>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+          <span style={{
+            fontSize: 10, fontWeight: 600, padding: '3px 10px', borderRadius: 4,
+            background: st.bg, color: st.color,
+          }}>
+            {st.label}
+          </span>
+          <span style={{
+            fontSize: 10, fontWeight: 600, padding: '3px 10px', borderRadius: 4,
+            background: `${sc}15`, color: sc,
+            textTransform: 'capitalize',
+          }}>
+            {action.severity}
+          </span>
+          {action.snoozed_until && action.execution_status === 'snoozed' && (
+            <span style={{
+              fontSize: 10, fontWeight: 500, padding: '3px 10px', borderRadius: 4,
+              background: 'rgba(167,139,250,0.1)', color: colors.purple,
+            }}>
+              Until {new Date(action.snoozed_until).toLocaleDateString()}
+            </span>
+          )}
+        </div>
 
         {action.summary && (
           <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: colors.textDim, marginBottom: 6, textTransform: 'uppercase' }}>Summary</div>
+            <SectionLabel>Summary</SectionLabel>
             <p style={{ fontSize: 13, color: colors.textSecondary, lineHeight: 1.5 }}>{action.summary}</p>
           </div>
         )}
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
-          <div style={{ background: colors.surfaceRaised, borderRadius: 8, padding: 12 }}>
-            <div style={{ fontSize: 11, color: colors.textDim }}>Impact</div>
-            <div style={{ fontSize: 18, fontWeight: 700, fontFamily: fonts.mono, color: colors.text, marginTop: 4 }}>
-              {action.impact_amount ? formatCurrency(Number(action.impact_amount)) : '--'}
-            </div>
-          </div>
-          <div style={{ background: colors.surfaceRaised, borderRadius: 8, padding: 12 }}>
-            <div style={{ fontSize: 11, color: colors.textDim }}>Urgency</div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: colors.text, marginTop: 4, textTransform: 'capitalize' }}>
-              {action.urgency_label || '--'}
-            </div>
-          </div>
+          <InfoCard label="Impact" value={action.impact_amount ? formatCurrency(Number(action.impact_amount)) : '--'} mono />
+          <InfoCard label="Urgency" value={action.urgency_label || '--'} />
         </div>
 
         {dealName && (
           <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: colors.textDim, marginBottom: 6, textTransform: 'uppercase' }}>Deal</div>
+            <SectionLabel>Deal</SectionLabel>
             <span
               style={{ fontSize: 13, color: colors.accent, cursor: action.target_deal_id ? 'pointer' : 'default' }}
               onClick={() => action.target_deal_id && navigate(`/deals/${action.target_deal_id}`)}
@@ -462,22 +636,56 @@ function ActionPanel({ action, onClose, onUpdateStatus, navigate }: {
           </div>
         )}
 
+        {action.target_account_id && (
+          <div style={{ marginBottom: 16 }}>
+            <SectionLabel>Account</SectionLabel>
+            <span
+              style={{ fontSize: 13, color: colors.accent, cursor: 'pointer' }}
+              onClick={() => navigate(`/accounts/${action.target_account_id}`)}
+            >
+              View Account
+            </span>
+          </div>
+        )}
+
         {action.owner_email && (
           <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: colors.textDim, marginBottom: 6, textTransform: 'uppercase' }}>Owner</div>
+            <SectionLabel>Owner</SectionLabel>
             <span style={{ fontSize: 13, color: colors.textSecondary }}>{action.owner_email}</span>
+          </div>
+        )}
+
+        {hasCRMPayload && (
+          <div style={{ marginBottom: 16 }}>
+            <SectionLabel>Proposed CRM Changes</SectionLabel>
+            <div style={{
+              background: colors.surfaceRaised, borderRadius: 8, padding: 12,
+              border: `1px solid ${colors.border}`,
+            }}>
+              {action.execution_payload!.crm_updates!.map((u, i) => (
+                <div key={i} style={{
+                  display: 'flex', alignItems: 'center', gap: 8, fontSize: 12,
+                  padding: '4px 0',
+                  borderBottom: i < action.execution_payload!.crm_updates!.length - 1 ? `1px solid ${colors.border}` : 'none',
+                }}>
+                  <span style={{ color: colors.textMuted, fontFamily: fonts.mono }}>{u.field}</span>
+                  <span style={{ color: colors.textDim }}>:</span>
+                  <span style={{ color: colors.red, textDecoration: 'line-through', fontFamily: fonts.mono }}>{String(u.current_value ?? '--')}</span>
+                  <span style={{ color: colors.textDim }}>&#x2192;</span>
+                  <span style={{ color: colors.green, fontFamily: fonts.mono, fontWeight: 600 }}>{String(u.proposed_value)}</span>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
         {action.recommended_steps && action.recommended_steps.length > 0 && (
           <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: colors.textDim, marginBottom: 8, textTransform: 'uppercase' }}>
-              Recommended Steps
-            </div>
+            <SectionLabel>Recommended Steps</SectionLabel>
             <ol style={{ paddingLeft: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 6 }}>
               {action.recommended_steps.map((step, idx) => (
                 <li key={idx} style={{ display: 'flex', gap: 8, fontSize: 12 }}>
-                  <span style={{ color: colors.accent, fontWeight: 600 }}>{idx + 1}.</span>
+                  <span style={{ color: colors.accent, fontWeight: 600, flexShrink: 0 }}>{idx + 1}.</span>
                   <span style={{ color: colors.textSecondary, lineHeight: 1.4 }}>{step}</span>
                 </li>
               ))}
@@ -485,50 +693,232 @@ function ActionPanel({ action, onClose, onUpdateStatus, navigate }: {
           </div>
         )}
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 24 }}>
-          {(action.execution_status === 'open') && (
+        {isExecuted && (
+          <div style={{ marginBottom: 16 }}>
+            <SectionLabel>Execution Details</SectionLabel>
+            <div style={{
+              background: 'rgba(34,197,94,0.06)', borderRadius: 8, padding: 12,
+              border: `1px solid rgba(34,197,94,0.15)`,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <span style={{ fontSize: 14 }}>&#x2705;</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: colors.green }}>Successfully executed</span>
+              </div>
+              {action.executed_by && (
+                <div style={{ fontSize: 11, color: colors.textMuted, marginBottom: 4 }}>
+                  By: {action.executed_by}
+                </div>
+              )}
+              {action.executed_at && (
+                <div style={{ fontSize: 11, color: colors.textMuted }}>
+                  {new Date(action.executed_at).toLocaleString()}
+                </div>
+              )}
+              {action.execution_result && action.execution_result.length > 0 && (
+                <>
+                  <button
+                    onClick={() => setShowExecLog(!showExecLog)}
+                    style={{
+                      fontSize: 11, color: colors.accent, background: 'none', cursor: 'pointer',
+                      marginTop: 8, padding: 0,
+                    }}
+                  >
+                    {showExecLog ? 'Hide' : 'Show'} execution log ({action.execution_result.length} operations)
+                  </button>
+                  {showExecLog && (
+                    <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {action.execution_result.map((op, i) => (
+                        <OperationLogEntry key={i} op={op} />
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
+        {isFailed && action.execution_result && (
+          <div style={{ marginBottom: 16 }}>
+            <SectionLabel>Execution Errors</SectionLabel>
+            <div style={{
+              background: 'rgba(249,115,22,0.06)', borderRadius: 8, padding: 12,
+              border: `1px solid rgba(249,115,22,0.15)`,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <span style={{ fontSize: 14 }}>&#x26A0;&#xFE0F;</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: colors.orange }}>Execution failed</span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {action.execution_result.map((op, i) => (
+                  <OperationLogEntry key={i} op={op} />
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {action.dismissed_reason && ['dismissed', 'rejected'].includes(action.execution_status) && (
+          <div style={{ marginBottom: 16 }}>
+            <SectionLabel>{action.execution_status === 'rejected' ? 'Rejection Reason' : 'Dismiss Reason'}</SectionLabel>
+            <p style={{ fontSize: 12, color: colors.textMuted, fontStyle: 'italic' }}>
+              {action.dismissed_reason}
+            </p>
+          </div>
+        )}
+
+        <div style={{
+          display: 'flex', flexDirection: 'column', gap: 8, marginTop: 24,
+          paddingTop: 16, borderTop: `1px solid ${colors.border}`,
+        }}>
+          {isActionable && (
+            <>
+              <button
+                onClick={handleExecuteClick}
+                disabled={executing}
+                style={{
+                  width: '100%', padding: '10px 16px', borderRadius: 8,
+                  background: executing ? colors.surfaceHover : colors.green,
+                  color: executing ? colors.textMuted : '#fff',
+                  fontSize: 13, fontWeight: 600, cursor: executing ? 'not-allowed' : 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                }}
+              >
+                {executing ? (
+                  <>
+                    <span style={{ display: 'inline-block', width: 14, height: 14, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                    Executing...
+                  </>
+                ) : (
+                  <>&#x2705; Approve &amp; Execute</>
+                )}
+              </button>
+
+              {!showSnooze && !showReject && (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    onClick={() => setShowSnooze(true)}
+                    style={{
+                      flex: 1, padding: '8px 12px', borderRadius: 8,
+                      background: colors.surfaceHover, color: colors.purple,
+                      fontSize: 12, fontWeight: 500, cursor: 'pointer',
+                    }}
+                  >
+                    Snooze
+                  </button>
+                  <button
+                    onClick={() => setShowReject(true)}
+                    style={{
+                      flex: 1, padding: '8px 12px', borderRadius: 8,
+                      background: colors.surfaceHover, color: colors.red,
+                      fontSize: 12, fontWeight: 500, cursor: 'pointer',
+                    }}
+                  >
+                    Reject
+                  </button>
+                </div>
+              )}
+
+              {showSnooze && (
+                <div style={{
+                  background: colors.surfaceRaised, borderRadius: 8, padding: 12,
+                  border: `1px solid ${colors.border}`,
+                }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: colors.textDim, marginBottom: 8, textTransform: 'uppercase' }}>
+                    Snooze Duration
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {snoozeDurations.map(d => (
+                      <button
+                        key={d.days}
+                        onClick={() => onSnooze(action.id, d.days)}
+                        style={{
+                          padding: '5px 12px', borderRadius: 6,
+                          background: colors.surfaceHover, color: colors.purple,
+                          fontSize: 11, fontWeight: 500, cursor: 'pointer',
+                          border: `1px solid ${colors.border}`,
+                        }}
+                      >
+                        {d.label}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => setShowSnooze(false)}
+                    style={{
+                      fontSize: 11, color: colors.textMuted, background: 'none', cursor: 'pointer',
+                      marginTop: 8, padding: 0,
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+
+              {showReject && (
+                <div style={{
+                  background: colors.surfaceRaised, borderRadius: 8, padding: 12,
+                  border: `1px solid ${colors.border}`,
+                }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: colors.textDim, marginBottom: 8, textTransform: 'uppercase' }}>
+                    Rejection Reason
+                  </div>
+                  <textarea
+                    value={rejectReason}
+                    onChange={e => setRejectReason(e.target.value)}
+                    placeholder="Why is this action not relevant?"
+                    style={{
+                      width: '100%', minHeight: 60, padding: 8, borderRadius: 6,
+                      background: colors.surfaceHover, color: colors.text,
+                      border: `1px solid ${colors.border}`, fontSize: 12,
+                      resize: 'vertical', fontFamily: fonts.sans,
+                    }}
+                  />
+                  <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                    <button
+                      onClick={() => {
+                        onReject(action.id, rejectReason || 'No reason provided');
+                      }}
+                      style={{
+                        padding: '6px 16px', borderRadius: 6,
+                        background: colors.red, color: '#fff',
+                        fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                      }}
+                    >
+                      Confirm Reject
+                    </button>
+                    <button
+                      onClick={() => { setShowReject(false); setRejectReason(''); }}
+                      style={{
+                        padding: '6px 16px', borderRadius: 6,
+                        background: colors.surfaceHover, color: colors.textMuted,
+                        fontSize: 12, cursor: 'pointer',
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {isFailed && (
             <button
-              onClick={() => onUpdateStatus(action.id, 'in_progress')}
+              onClick={() => onRetry(action.id)}
               style={{
                 width: '100%', padding: '10px 16px', borderRadius: 8,
-                background: colors.accent, color: '#fff',
+                background: colors.orange, color: '#fff',
                 fontSize: 13, fontWeight: 600, cursor: 'pointer',
               }}
             >
-              Mark In Progress
+              &#x1F504; Retry Execution
             </button>
           )}
-          {(action.execution_status === 'open' || action.execution_status === 'in_progress') && (
+
+          {canReopen && (
             <button
-              onClick={() => onUpdateStatus(action.id, 'executed')}
-              style={{
-                width: '100%', padding: '10px 16px', borderRadius: 8,
-                background: colors.surfaceHover, color: colors.text,
-                fontSize: 13, fontWeight: 600, cursor: 'pointer',
-              }}
-            >
-              Mark as Executed
-            </button>
-          )}
-          {(action.execution_status === 'open' || action.execution_status === 'in_progress') && (
-            <button
-              onClick={() => {
-                if (confirm('Dismiss this action?')) {
-                  onUpdateStatus(action.id, 'dismissed');
-                }
-              }}
-              style={{
-                width: '100%', padding: '8px 16px', borderRadius: 8,
-                background: 'transparent', color: colors.textMuted,
-                fontSize: 12, cursor: 'pointer',
-              }}
-            >
-              Dismiss
-            </button>
-          )}
-          {action.execution_status === 'dismissed' && (
-            <button
-              onClick={() => onUpdateStatus(action.id, 'open')}
+              onClick={() => onReopen(action.id)}
               style={{
                 width: '100%', padding: '10px 16px', borderRadius: 8,
                 background: colors.surfaceHover, color: colors.text,
@@ -540,6 +930,71 @@ function ActionPanel({ action, onClose, onUpdateStatus, navigate }: {
           )}
         </div>
       </div>
+
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{
+      fontSize: 11, fontWeight: 600, color: colors.textDim,
+      marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em',
+    }}>
+      {children}
+    </div>
+  );
+}
+
+function InfoCard({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div style={{ background: colors.surfaceRaised, borderRadius: 8, padding: 12 }}>
+      <div style={{ fontSize: 11, color: colors.textDim }}>{label}</div>
+      <div style={{
+        fontSize: mono ? 18 : 14, fontWeight: mono ? 700 : 600,
+        fontFamily: mono ? fonts.mono : fonts.sans,
+        color: colors.text, marginTop: 4, textTransform: mono ? 'none' : 'capitalize',
+      }}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function OperationLogEntry({ op }: { op: CRMOperation }) {
+  const opLabels: Record<string, string> = {
+    crm_update: 'CRM Update',
+    crm_note: 'CRM Note',
+    slack_notify: 'Slack Notification',
+  };
+  const success = !op.error;
+
+  return (
+    <div style={{
+      background: colors.surfaceHover, borderRadius: 6, padding: 8,
+      border: `1px solid ${op.error ? 'rgba(239,68,68,0.2)' : colors.border}`,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+        <span style={{ fontSize: 12 }}>{success ? '\u2713' : '\u2717'}</span>
+        <span style={{
+          fontSize: 11, fontWeight: 600,
+          color: success ? colors.green : colors.red,
+        }}>
+          {opLabels[op.type] || op.type}
+        </span>
+        <span style={{ fontSize: 10, color: colors.textDim, fontFamily: fonts.mono }}>
+          {op.target}
+        </span>
+      </div>
+      {op.error && (
+        <div style={{
+          fontSize: 11, color: colors.red, fontFamily: fonts.mono,
+          padding: '4px 6px', background: 'rgba(239,68,68,0.06)', borderRadius: 4, marginTop: 4,
+        }}>
+          {op.error}
+        </div>
+      )}
     </div>
   );
 }

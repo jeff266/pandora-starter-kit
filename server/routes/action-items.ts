@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from 'express';
-import { query as dbQuery } from '../db.js';
+import dbPool, { query as dbQuery } from '../db.js';
+import { executeAction } from '../actions/executor.js';
 
 const router = Router();
 
@@ -193,7 +194,7 @@ router.put('/:workspaceId/action-items/:actionId/status', async (req: Request<Wo
     const { workspaceId, actionId } = req.params;
     const { status, actor, reason, details } = req.body;
 
-    const validStatuses = ['open', 'in_progress', 'executed', 'dismissed'];
+    const validStatuses = ['open', 'in_progress', 'executed', 'dismissed', 'rejected', 'snoozed'];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
     }
@@ -209,10 +210,12 @@ router.put('/:workspaceId/action-items/:actionId/status', async (req: Request<Wo
     const fromStatus = current.rows[0].execution_status;
 
     const validTransitions: Record<string, string[]> = {
-      open: ['in_progress', 'executed', 'dismissed'],
-      in_progress: ['open', 'executed', 'dismissed'],
+      open: ['in_progress', 'executed', 'dismissed', 'rejected', 'snoozed'],
+      in_progress: ['open', 'executed', 'dismissed', 'rejected'],
       executed: [],
       dismissed: ['open'],
+      rejected: ['open'],
+      snoozed: ['open', 'dismissed', 'rejected'],
       expired: [],
       superseded: [],
     };
@@ -236,6 +239,18 @@ router.put('/:workspaceId/action-items/:actionId/status', async (req: Request<Wo
       updateFields.push(`dismissed_reason = $${idx++}`);
       updateParams.push(reason || 'user_dismissed');
     }
+    if (status === 'rejected') {
+      updateFields.push(`dismissed_reason = $${idx++}`);
+      updateParams.push(reason || 'user_rejected');
+    }
+    if (status === 'snoozed') {
+      const snoozeDays = req.body.snooze_days || 7;
+      updateFields.push(`snoozed_until = now() + ($${idx++} || ' days')::interval`);
+      updateParams.push(String(snoozeDays));
+    }
+    if (status === 'open') {
+      updateFields.push(`snoozed_until = NULL`);
+    }
 
     await dbQuery(
       `UPDATE actions SET ${updateFields.join(', ')} WHERE id = $1 AND workspace_id = $2`,
@@ -250,6 +265,72 @@ router.put('/:workspaceId/action-items/:actionId/status', async (req: Request<Wo
     res.json({ success: true, from_status: fromStatus, to_status: status });
   } catch (err) {
     console.error('[Action Item Status Update]', err);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+router.post('/:workspaceId/action-items/:actionId/execute', async (req: Request<WorkspaceParams & { actionId: string }>, res: Response) => {
+  try {
+    const { workspaceId, actionId } = req.params;
+    const { actor = 'user', dry_run = false } = req.body;
+
+    const result = await executeAction(dbPool, {
+      actionId,
+      workspaceId,
+      actor,
+      dryRun: dry_run,
+    });
+
+    if (result.success) {
+      console.log(`[Action Execute] Action ${actionId} executed successfully by ${actor}`);
+    } else {
+      console.warn(`[Action Execute] Action ${actionId} execution failed:`, result.error);
+    }
+
+    res.json(result);
+  } catch (err) {
+    console.error('[Action Execute]', err);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+router.post('/:workspaceId/action-items/:actionId/snooze', async (req: Request<WorkspaceParams & { actionId: string }>, res: Response) => {
+  try {
+    const { workspaceId, actionId } = req.params;
+    const { days = 7, actor = 'user' } = req.body;
+
+    const snoozeDays = typeof days === 'number' && days > 0 ? days : 7;
+
+    const current = await dbQuery(
+      `SELECT execution_status FROM actions WHERE id = $1 AND workspace_id = $2`,
+      [actionId, workspaceId]
+    );
+    if (current.rows.length === 0) {
+      return res.status(404).json({ error: 'Action not found' });
+    }
+
+    const fromStatus = current.rows[0].execution_status;
+    if (!['open', 'in_progress'].includes(fromStatus)) {
+      return res.status(400).json({ error: `Cannot snooze action in '${fromStatus}' status` });
+    }
+
+    await dbQuery(`
+      UPDATE actions SET
+        execution_status = 'snoozed',
+        snoozed_until = now() + ($3 || ' days')::interval,
+        updated_at = now()
+      WHERE id = $1 AND workspace_id = $2
+    `, [actionId, workspaceId, String(snoozeDays)]);
+
+    await dbQuery(`
+      INSERT INTO action_audit_log (workspace_id, action_id, event_type, actor, from_status, to_status, details)
+      VALUES ($1, $2, 'snoozed', $3, $4, 'snoozed', $5)
+    `, [workspaceId, actionId, actor, fromStatus, JSON.stringify({ snooze_days: snoozeDays })]);
+
+    console.log(`[Action Snooze] Action ${actionId} snoozed for ${snoozeDays} days by ${actor}`);
+    res.json({ success: true, snoozed_days: snoozeDays });
+  } catch (err) {
+    console.error('[Action Snooze]', err);
     res.status(500).json({ error: (err as Error).message });
   }
 });
