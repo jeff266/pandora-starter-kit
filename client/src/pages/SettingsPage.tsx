@@ -3,12 +3,13 @@ import { colors, fonts } from '../styles/theme';
 import { api } from '../lib/api';
 import Skeleton from '../components/Skeleton';
 
-type Tab = 'voice' | 'skills' | 'tokens';
+type Tab = 'voice' | 'skills' | 'tokens' | 'learning';
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'voice', label: 'Voice & Tone' },
   { key: 'skills', label: 'Skills' },
   { key: 'tokens', label: 'Token Budget' },
+  { key: 'learning', label: 'Learning' },
 ];
 
 const CRON_PRESETS = [
@@ -85,6 +86,7 @@ export default function SettingsPage() {
         {activeTab === 'voice' && <VoiceSection />}
         {activeTab === 'skills' && <SkillsSection />}
         {activeTab === 'tokens' && <TokensSection />}
+        {activeTab === 'learning' && <LearningSection />}
       </div>
     </div>
   );
@@ -821,6 +823,406 @@ function TokensSection() {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+interface LearningSummary {
+  annotations: {
+    active: number;
+    byType: Record<string, number>;
+    byEntity: Record<string, number>;
+    expiringIn30Days: number;
+    recentlyAdded: Array<{
+      entity_name: string | null;
+      content: string;
+      source: string;
+      created_at: string;
+      annotation_type: string;
+      entity_type: string;
+    }>;
+  };
+  feedbackSignals: {
+    last30Days: {
+      thumbs_up: number;
+      thumbs_down: number;
+      dismiss: number;
+      confirm: number;
+      correct: number;
+      total: number;
+    };
+    byWeek: Array<{ week_start: string; count: number }>;
+  };
+  configSuggestions: {
+    pending: number;
+    accepted: number;
+    dismissed: number;
+    fromFeedback: number;
+    fromSkills: number;
+    items: Array<{
+      id: string;
+      message: string;
+      confidence: number;
+      source_skill: string;
+      created_at: string;
+    }>;
+  };
+  health: {
+    learningRate: 'growing' | 'stable' | 'declining';
+    annotationCoverage: number;
+    configConfidence: number;
+  };
+}
+
+function timeAgo(dateStr: string): string {
+  const now = Date.now();
+  const then = new Date(dateStr).getTime();
+  const diffMs = now - then;
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return 'just now';
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffH = Math.floor(diffMin / 60);
+  if (diffH < 24) return `${diffH}h ago`;
+  const diffD = Math.floor(diffH / 24);
+  if (diffD < 30) return `${diffD}d ago`;
+  const diffMo = Math.floor(diffD / 30);
+  return `${diffMo}mo ago`;
+}
+
+const SIGNAL_COLORS: Record<string, string> = {
+  thumbs_up: '#22c55e',
+  thumbs_down: '#ef4444',
+  confirm: '#3b82f6',
+  correct: '#eab308',
+  dismiss: '#5a6578',
+};
+
+const SIGNAL_LABELS: Record<string, string> = {
+  thumbs_up: 'Thumbs Up',
+  thumbs_down: 'Thumbs Down',
+  confirm: 'Confirm',
+  correct: 'Correction',
+  dismiss: 'Dismiss',
+};
+
+function LearningSection() {
+  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<LearningSummary | null>(null);
+  const [isEmpty, setIsEmpty] = useState(false);
+
+  useEffect(() => {
+    api.get('/learning/summary')
+      .then((d: any) => {
+        if (!d || (d.feedbackSignals?.last30Days?.total === 0 && d.annotations?.active === 0)) {
+          setIsEmpty(true);
+          setData(null);
+        } else {
+          setData(d);
+        }
+      })
+      .catch(() => {
+        setIsEmpty(true);
+        setData(null);
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  const resolveSuggestion = async (id: string, action: 'accepted' | 'dismissed') => {
+    try {
+      await api.post(`/workspace-config/suggestions/${id}/resolve`, { action });
+      setData(prev => prev ? {
+        ...prev,
+        configSuggestions: {
+          ...prev.configSuggestions,
+          items: prev.configSuggestions.items.filter(s => s.id !== id),
+          pending: prev.configSuggestions.pending - 1,
+          [action]: (prev.configSuggestions as any)[action] + 1,
+        }
+      } : prev);
+    } catch (err) {
+      console.error('Failed to resolve suggestion:', err);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <Skeleton height={24} width={200} />
+        <div style={{ display: 'flex', gap: 12 }}>
+          {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} height={90} style={{ flex: 1 }} />)}
+        </div>
+        <Skeleton height={160} />
+        <div style={{ display: 'flex', gap: 12 }}>
+          <Skeleton height={200} style={{ flex: 1 }} />
+          <Skeleton height={200} style={{ flex: 1 }} />
+        </div>
+        <Skeleton height={160} />
+      </div>
+    );
+  }
+
+  if (isEmpty || !data) {
+    return (
+      <div style={{ maxWidth: 640 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 600, color: colors.text, marginBottom: 24 }}>Workspace Learning</h2>
+        <div style={{
+          background: colors.surface,
+          border: `1px solid ${colors.border}`,
+          borderRadius: 10,
+          padding: 40,
+          textAlign: 'center',
+        }}>
+          <p style={{ fontSize: 13, color: colors.textMuted, lineHeight: 1.6 }}>
+            No feedback signals yet. As you interact with Pandora, the system will start learning from your feedback.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const { annotations, feedbackSignals, configSuggestions, health } = data;
+  const byWeek = feedbackSignals.byWeek || [];
+  const maxWeekCount = Math.max(...byWeek.map(w => w.count), 1);
+  const last30 = feedbackSignals.last30Days;
+  const signalTypes = ['thumbs_up', 'thumbs_down', 'confirm', 'correct', 'dismiss'] as const;
+  const maxSignalCount = Math.max(...signalTypes.map(s => (last30 as any)[s] || 0), 1);
+
+  const healthDotColor = health.learningRate === 'growing' ? colors.green : health.learningRate === 'stable' ? colors.yellow : colors.red;
+
+  return (
+    <div style={{ maxWidth: 860 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 600, color: colors.text }}>Workspace Learning</h2>
+        <div style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          fontSize: 11,
+          fontWeight: 500,
+          color: colors.textMuted,
+          background: colors.surfaceRaised,
+          padding: '3px 10px',
+          borderRadius: 12,
+        }}>
+          <div style={{
+            width: 7,
+            height: 7,
+            borderRadius: '50%',
+            background: healthDotColor,
+          }} />
+          {health.learningRate}
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+        {[
+          { value: annotations.active, label: 'Active Annotations' },
+          { value: last30.total, label: 'Feedback Signals (30d)' },
+          { value: last30.correct, label: 'Corrections' },
+          { value: configSuggestions.pending, label: 'Pending Suggestions' },
+        ].map((card, i) => (
+          <div key={i} style={{
+            flex: 1,
+            background: colors.surface,
+            border: `1px solid ${colors.border}`,
+            borderRadius: 10,
+            padding: 16,
+            textAlign: 'center',
+          }}>
+            <div style={{ fontSize: 28, fontWeight: 700, color: colors.text }}>{card.value}</div>
+            <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 4 }}>{card.label}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{
+        background: colors.surface,
+        border: `1px solid ${colors.border}`,
+        borderRadius: 10,
+        padding: 20,
+        marginBottom: 16,
+      }}>
+        <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text, marginBottom: 16 }}>Learning Rate</h3>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 100 }}>
+          {byWeek.slice(-8).map((w, i) => {
+            const barH = Math.max((w.count / maxWeekCount) * 80, 2);
+            const weekLabel = new Date(w.week_start).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            return (
+              <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <div style={{ fontSize: 10, color: colors.textMuted, marginBottom: 4 }}>{w.count}</div>
+                <div style={{
+                  width: '100%',
+                  maxWidth: 40,
+                  height: barH,
+                  background: colors.accent,
+                  borderRadius: 3,
+                }} />
+                <div style={{ fontSize: 9, color: colors.textMuted, marginTop: 4 }}>{weekLabel}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+        <div style={{
+          flex: 1,
+          background: colors.surface,
+          border: `1px solid ${colors.border}`,
+          borderRadius: 10,
+          padding: 20,
+        }}>
+          <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text, marginBottom: 12 }}>Recent Annotations</h3>
+          {annotations.recentlyAdded.length === 0 ? (
+            <p style={{ fontSize: 12, color: colors.textMuted }}>No annotations yet</p>
+          ) : (
+            annotations.recentlyAdded.slice(0, 5).map((a, i) => (
+              <div key={i} style={{
+                padding: '8px 0',
+                borderBottom: i < Math.min(annotations.recentlyAdded.length, 5) - 1 ? `1px solid ${colors.border}` : 'none',
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 8,
+              }}>
+                <span style={{ fontSize: 13, color: colors.textMuted, flexShrink: 0, marginTop: 1 }}>
+                  {a.annotation_type === 'confirmation' ? '\u2713' : '\u2691'}
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  {a.entity_name && (
+                    <div style={{ fontSize: 12, fontWeight: 600, color: colors.text, marginBottom: 2 }}>
+                      {a.entity_name}
+                    </div>
+                  )}
+                  <div style={{ fontSize: 12, color: colors.textSecondary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {a.content.length > 80 ? a.content.slice(0, 80) + '...' : a.content}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                    <span style={{
+                      fontSize: 10,
+                      fontWeight: 500,
+                      color: colors.accent,
+                      background: colors.accentSoft,
+                      padding: '1px 6px',
+                      borderRadius: 4,
+                    }}>
+                      {a.source}
+                    </span>
+                    <span style={{ fontSize: 10, color: colors.textMuted }}>{timeAgo(a.created_at)}</span>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        <div style={{
+          flex: 1,
+          background: colors.surface,
+          border: `1px solid ${colors.border}`,
+          borderRadius: 10,
+          padding: 20,
+        }}>
+          <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text, marginBottom: 12 }}>Config Suggestions from Feedback</h3>
+          {configSuggestions.items.length === 0 ? (
+            <p style={{ fontSize: 12, color: colors.textMuted }}>No pending suggestions</p>
+          ) : (
+            configSuggestions.items.map((s) => (
+              <div key={s.id} style={{
+                padding: '10px 0',
+                borderBottom: `1px solid ${colors.border}`,
+              }}>
+                <div style={{ fontSize: 12, color: colors.text, marginBottom: 4 }}>{s.message}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <span style={{ fontSize: 10, color: colors.textMuted }}>
+                    {Math.round(s.confidence * 100)}% confidence
+                  </span>
+                  <span style={{
+                    fontSize: 10,
+                    fontWeight: 500,
+                    color: colors.accent,
+                    background: colors.accentSoft,
+                    padding: '1px 6px',
+                    borderRadius: 4,
+                  }}>
+                    {s.source_skill}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    onClick={() => resolveSuggestion(s.id, 'accepted')}
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 600,
+                      fontFamily: fonts.sans,
+                      color: '#fff',
+                      background: colors.accent,
+                      border: 'none',
+                      borderRadius: 6,
+                      padding: '4px 12px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Accept
+                  </button>
+                  <button
+                    onClick={() => resolveSuggestion(s.id, 'dismissed')}
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 500,
+                      fontFamily: fonts.sans,
+                      color: colors.textMuted,
+                      background: 'transparent',
+                      border: `1px solid ${colors.border}`,
+                      borderRadius: 6,
+                      padding: '4px 12px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      <div style={{
+        background: colors.surface,
+        border: `1px solid ${colors.border}`,
+        borderRadius: 10,
+        padding: 20,
+      }}>
+        <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text, marginBottom: 12 }}>Feedback Breakdown</h3>
+        {signalTypes.map((type) => {
+          const count = (last30 as any)[type] || 0;
+          const barWidth = maxSignalCount > 0 ? (count / maxSignalCount) * 100 : 0;
+          return (
+            <div key={type} style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              padding: '6px 0',
+            }}>
+              <span style={{ fontSize: 12, color: colors.textSecondary, width: 100, flexShrink: 0 }}>
+                {SIGNAL_LABELS[type]}
+              </span>
+              <div style={{ flex: 1, height: 8, background: colors.surfaceRaised, borderRadius: 4, overflow: 'hidden' }}>
+                <div style={{
+                  width: `${barWidth}%`,
+                  height: '100%',
+                  background: SIGNAL_COLORS[type],
+                  borderRadius: 4,
+                  transition: 'width 0.3s ease',
+                }} />
+              </div>
+              <span style={{ fontSize: 12, fontWeight: 600, color: colors.text, width: 36, textAlign: 'right', flexShrink: 0 }}>
+                {count}
+              </span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

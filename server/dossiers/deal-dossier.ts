@@ -1,5 +1,6 @@
 import { query } from '../db.js';
 import { getDealRiskScore } from '../tools/deal-risk-score.js';
+import { getActiveAnnotations } from '../feedback/annotations.js';
 
 export interface DealDossier {
   deal: {
@@ -75,6 +76,16 @@ export interface DealDossier {
     grade: string;
     signal_counts: { act: number; watch: number; notable: number; info: number };
   };
+  annotations: Array<{
+    id: string;
+    annotation_type: string;
+    content: string;
+    source: string;
+    created_at: string;
+    created_by: string | null;
+    expires_at: string | null;
+  }>;
+  hasUserContext: boolean;
   data_availability: {
     has_stage_history: boolean;
     has_contacts: boolean;
@@ -196,7 +207,7 @@ function formatStageLabel(rawStage: string, normalizedStage: string): string {
 }
 
 export async function assembleDealDossier(workspaceId: string, dealId: string): Promise<DealDossier> {
-  const [deal, contacts, conversations, activities, stageHistory, findings, riskResult] = await Promise.all([
+  const [deal, contacts, conversations, activities, stageHistory, findings, riskResult, annotations] = await Promise.all([
     getDealById(workspaceId, dealId),
     getContactsForDeal(workspaceId, dealId),
     getConversationsForDeal(workspaceId, dealId),
@@ -204,6 +215,7 @@ export async function assembleDealDossier(workspaceId: string, dealId: string): 
     getStageHistoryForDeal(workspaceId, dealId),
     getFindingsForDeal(workspaceId, dealId),
     getDealRiskScore(workspaceId, dealId).catch(() => null),
+    getActiveAnnotations(workspaceId, 'deal', dealId).catch(() => []),
   ]);
 
   if (!deal) {
@@ -313,6 +325,16 @@ export async function assembleDealDossier(workspaceId: string, dealId: string): 
       grade: riskResult?.grade ?? 'A',
       signal_counts: riskResult?.signal_counts ?? { act: 0, watch: 0, notable: 0, info: 0 },
     },
+    annotations: annotations.map((a: any) => ({
+      id: a.id,
+      annotation_type: a.annotation_type,
+      content: a.content,
+      source: a.source,
+      created_at: a.created_at ? new Date(a.created_at).toISOString() : '',
+      created_by: a.created_by ?? null,
+      expires_at: a.expires_at ? new Date(a.expires_at).toISOString() : null,
+    })),
+    hasUserContext: annotations.length > 0,
     data_availability: {
       has_stage_history: stageHistory.length > 0,
       has_contacts: contacts.length > 0,

@@ -5,6 +5,8 @@ interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   timestamp: string;
+  responseId?: string;
+  feedbackEnabled?: boolean;
 }
 
 interface ChatScope {
@@ -26,6 +28,8 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
   const [loading, setLoading] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [feedbackMap, setFeedbackMap] = useState<Record<string, 'thumbs_up' | 'thumbs_down'>>({});
+  const [hoveredMsgIdx, setHoveredMsgIdx] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -38,6 +42,20 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  const submitFeedback = async (responseId: string, signalType: 'thumbs_up' | 'thumbs_down') => {
+    try {
+      await api.post('/feedback', {
+        targetType: 'chat_response',
+        targetId: responseId,
+        signalType,
+        source: 'command_center',
+      });
+      setFeedbackMap(prev => ({ ...prev, [responseId]: signalType }));
+    } catch (err) {
+      console.error('Failed to submit feedback:', err);
+    }
+  };
 
   const startNewChat = useCallback(() => {
     setMessages([]);
@@ -80,6 +98,8 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
         role: 'assistant',
         content: result.answer,
         timestamp: new Date().toISOString(),
+        responseId: result.response_id,
+        feedbackEnabled: result.feedback_enabled,
       };
       setMessages(prev => [...prev, assistantMsg]);
     } catch (err) {
@@ -150,6 +170,8 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
                 ...styles.messageBubble,
                 ...(msg.role === 'user' ? styles.userBubble : styles.assistantBubble),
               }}
+              onMouseEnter={() => setHoveredMsgIdx(idx)}
+              onMouseLeave={() => setHoveredMsgIdx(null)}
             >
               <div style={styles.messageRole}>
                 {msg.role === 'user' ? 'You' : 'Pandora'}
@@ -157,6 +179,48 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
               <div style={styles.messageContent}>
                 {formatMarkdown(msg.content)}
               </div>
+              {msg.role === 'assistant' && msg.feedbackEnabled && msg.responseId && (
+                <div style={{
+                  display: 'flex',
+                  gap: 4,
+                  marginTop: 8,
+                  opacity: hoveredMsgIdx === idx || feedbackMap[msg.responseId] ? 1 : 0,
+                  transition: 'opacity 0.15s',
+                }}>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); submitFeedback(msg.responseId!, 'thumbs_up'); }}
+                    style={{
+                      padding: '2px 8px',
+                      fontSize: 14,
+                      background: feedbackMap[msg.responseId!] === 'thumbs_up' ? 'rgba(100, 136, 234, 0.15)' : 'transparent',
+                      border: `1px solid ${feedbackMap[msg.responseId!] === 'thumbs_up' ? '#6488ea' : '#2a3150'}`,
+                      borderRadius: 4,
+                      cursor: 'pointer',
+                      opacity: feedbackMap[msg.responseId!] === 'thumbs_down' ? 0.3 : 1,
+                      color: '#94a3b8',
+                    }}
+                    title="Helpful response"
+                  >
+                    👍
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); submitFeedback(msg.responseId!, 'thumbs_down'); }}
+                    style={{
+                      padding: '2px 8px',
+                      fontSize: 14,
+                      background: feedbackMap[msg.responseId!] === 'thumbs_down' ? 'rgba(239, 68, 68, 0.15)' : 'transparent',
+                      border: `1px solid ${feedbackMap[msg.responseId!] === 'thumbs_down' ? '#ef4444' : '#2a3150'}`,
+                      borderRadius: 4,
+                      cursor: 'pointer',
+                      opacity: feedbackMap[msg.responseId!] === 'thumbs_up' ? 0.3 : 1,
+                      color: '#94a3b8',
+                    }}
+                    title="Not helpful"
+                  >
+                    👎
+                  </button>
+                </div>
+              )}
             </div>
           ))}
 

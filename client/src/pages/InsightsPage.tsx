@@ -17,6 +17,8 @@ export default function InsightsPage() {
     status: 'all',
     skill: '',
   });
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
+  const [confirmedIds, setConfirmedIds] = useState<Set<string>>(new Set());
 
   const limit = 30;
 
@@ -58,6 +60,37 @@ export default function InsightsPage() {
   useEffect(() => {
     fetchFindings(true);
   }, [filters.severity, filters.status, filters.skill]);
+
+  const confirmFinding = async (findingId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await api.post('/feedback', {
+        targetType: 'finding',
+        targetId: findingId,
+        signalType: 'confirm',
+        source: 'command_center',
+      });
+      setConfirmedIds(prev => new Set(prev).add(findingId));
+    } catch (err) {
+      console.error('Failed to confirm finding:', err);
+    }
+  };
+
+  const dismissFinding = async (findingId: string, severity: string, category: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await api.post('/feedback', {
+        targetType: 'finding',
+        targetId: findingId,
+        signalType: 'dismiss',
+        metadata: { severity, category },
+        source: 'command_center',
+      });
+      setDismissedIds(prev => new Set(prev).add(findingId));
+    } catch (err) {
+      console.error('Failed to dismiss finding:', err);
+    }
+  };
 
   const grouped = groupByDate(findings);
 
@@ -120,7 +153,7 @@ export default function InsightsPage() {
                     style={{
                       display: 'flex', gap: 10, padding: '10px 16px',
                       borderBottom: `1px solid ${colors.border}`,
-                      opacity: isResolved ? 0.5 : 1,
+                      opacity: isResolved ? 0.5 : dismissedIds.has(f.id) ? 0.4 : 1,
                       cursor: f.deal_id ? 'pointer' : 'default',
                     }}
                     onClick={() => f.deal_id && navigate(`/deals/${f.deal_id}`)}
@@ -144,6 +177,50 @@ export default function InsightsPage() {
                         {isResolved && <span style={{ color: colors.green }}>Resolved</span>}
                       </div>
                     </div>
+                    {!isResolved && (
+                      <div style={{ display: 'flex', gap: 4, flexShrink: 0, alignItems: 'center' }}>
+                        {confirmedIds.has(f.id) ? (
+                          <span style={{ fontSize: 11, color: colors.green, fontWeight: 500 }}>Confirmed</span>
+                        ) : dismissedIds.has(f.id) ? (
+                          <span style={{ fontSize: 11, color: colors.textMuted, fontWeight: 500 }}>Dismissed</span>
+                        ) : (
+                          <>
+                            <button
+                              onClick={(e) => confirmFinding(f.id, e)}
+                              style={{
+                                fontSize: 11,
+                                fontWeight: 500,
+                                padding: '3px 8px',
+                                borderRadius: 4,
+                                background: 'transparent',
+                                border: `1px solid ${colors.border}`,
+                                color: colors.green,
+                                cursor: 'pointer',
+                              }}
+                              title="Confirm this is accurate"
+                            >
+                              Confirm
+                            </button>
+                            <button
+                              onClick={(e) => dismissFinding(f.id, f.severity, f.category, e)}
+                              style={{
+                                fontSize: 11,
+                                fontWeight: 500,
+                                padding: '3px 8px',
+                                borderRadius: 4,
+                                background: 'transparent',
+                                border: `1px solid ${colors.border}`,
+                                color: colors.textMuted,
+                                cursor: 'pointer',
+                              }}
+                              title="Dismiss - not relevant"
+                            >
+                              Dismiss
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}

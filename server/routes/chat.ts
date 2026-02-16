@@ -42,6 +42,9 @@ router.post('/:workspaceId/chat', async (req: Request, res: Response): Promise<v
       router_decision: result.router_decision,
       data_strategy: result.data_strategy,
       tokens_used: result.tokens_used,
+      response_id: result.response_id,
+      feedback_enabled: result.feedback_enabled ?? false,
+      entities_mentioned: result.entities_mentioned ?? { deals: [], accounts: [], reps: [] },
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

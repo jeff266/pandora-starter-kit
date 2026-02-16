@@ -12,6 +12,10 @@ import {
   isFollowUpLimitReached,
   type ConversationState,
 } from './conversation-state.js';
+import { detectFeedback } from './feedback-detector.js';
+import { recordFeedbackSignal } from '../feedback/signals.js';
+import { createAnnotation, getActiveAnnotations } from '../feedback/annotations.js';
+import { randomUUID } from 'crypto';
 
 export interface ConversationTurnInput {
   surface: 'slack_thread' | 'slack_dm' | 'in_app';
@@ -41,6 +45,13 @@ export interface ConversationTurnResult {
   tokens_used: number;
   rate_limited?: boolean;
   turn_limit_reached?: boolean;
+  response_id?: string;
+  feedback_enabled?: boolean;
+  entities_mentioned?: {
+    deals: { id: string; name: string }[];
+    accounts: { id: string; name: string }[];
+    reps: { id: string; name: string }[];
+  };
 }
 
 export async function handleConversationTurn(input: ConversationTurnInput): Promise<ConversationTurnResult> {
@@ -76,6 +87,9 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
     timestamp: new Date().toISOString(),
   });
 
+  const isFollowUpConversation = isFollowUp && (state.messages || []).length > 1;
+  const feedback = detectFeedback(message, isFollowUpConversation);
+
   let scopeType: string = inputScope?.type || state.context.last_scope?.type || 'workspace';
   let entityId = inputScope?.entity_id || state.context.last_scope?.entity_id;
   let repEmail = inputScope?.rep_email || state.context.last_scope?.rep_email;
@@ -83,6 +97,73 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
   let dataStrategy = 'unknown';
   let tokensUsed = 0;
   let answer: string | undefined;
+
+  if (feedback && feedback.type !== 'correct') {
+    try {
+      const lastAssistantMsg = (state.messages || []).filter(m => m.role === 'assistant').pop();
+      const targetId = lastAssistantMsg?.timestamp || threadId;
+
+      await recordFeedbackSignal(workspaceId, {
+        targetType: 'chat_response',
+        targetId,
+        signalType: feedback.type === 'confirm' ? 'confirm' : 'dismiss',
+        source: surface === 'in_app' ? 'command_center' : 'slack',
+        metadata: {},
+      });
+    } catch (err) {
+      console.warn('[orchestrator] Failed to record feedback signal:', err);
+    }
+
+    const ack = feedback.type === 'confirm' ? 'Noted.' : 'Got it, moving on.';
+    const responseId = randomUUID();
+
+    await appendMessage(workspaceId, channelId, threadId, {
+      role: 'assistant',
+      content: ack,
+      timestamp: new Date().toISOString(),
+    });
+
+    await updateTurnMetrics(workspaceId, channelId, threadId, 0);
+
+    return {
+      answer: ack,
+      thread_id: threadId,
+      scope: { type: scopeType, entity_id: entityId, rep_email: repEmail },
+      router_decision: 'feedback_' + feedback.type,
+      data_strategy: 'feedback',
+      tokens_used: 0,
+      response_id: responseId,
+      feedback_enabled: false,
+    };
+  }
+
+  if (feedback && feedback.type === 'correct') {
+    try {
+      const lastAssistantMsg = (state.messages || []).filter(m => m.role === 'assistant').pop();
+      const targetId = lastAssistantMsg?.timestamp || threadId;
+
+      await recordFeedbackSignal(workspaceId, {
+        targetType: 'chat_response',
+        targetId,
+        signalType: 'correct',
+        source: surface === 'in_app' ? 'command_center' : 'slack',
+        metadata: {},
+      });
+
+      if (state.context.last_scope?.entity_id) {
+        await createAnnotation(workspaceId, {
+          entityType: state.context.last_scope.type || 'workspace',
+          entityId: state.context.last_scope.entity_id,
+          annotationType: 'correction',
+          content: message,
+          source: surface === 'in_app' ? 'chat' : 'slack_thread',
+          sourceThreadId: threadId,
+        });
+      }
+    } catch (err) {
+      console.warn('[orchestrator] Failed to record correction:', err);
+    }
+  }
 
   try {
     const heuristic = await tryHeuristic(workspaceId, message);
@@ -132,6 +213,20 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
       const recentMessages = (state.messages || []).slice(-4);
       const structuredState = buildStructuredState(state, recentMessages);
 
+      let annotationContext = '';
+      if (entityId) {
+        try {
+          const annotations = await getActiveAnnotations(workspaceId, scopeType, entityId);
+          if (annotations.length > 0) {
+            annotationContext = '\n\nUSER-PROVIDED CONTEXT (from team members, treat as authoritative):\n' +
+              annotations.map(a => `- ${a.content} (${a.created_by || 'team'}, ${new Date(a.created_at).toLocaleDateString()})`).join('\n') +
+              '\nIncorporate this context into your analysis. If it contradicts CRM data, note the discrepancy but trust the user context.';
+          }
+        } catch (err) {
+          console.warn('[orchestrator] Failed to fetch annotations:', err);
+        }
+      }
+
       const analysis = await runScopedAnalysis({
         workspace_id: workspaceId,
         question: message,
@@ -139,7 +234,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
           type: scopeType as any,
           entity_id: entityId,
           rep_email: repEmail,
-          skill_run_context: structuredState,
+          skill_run_context: structuredState + annotationContext,
         },
         format: 'text',
         max_tokens: 2000,
@@ -208,6 +303,8 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
                 router_decision: routerDecision,
                 data_strategy: dataStrategy,
                 tokens_used: tokensUsed,
+                response_id: randomUUID(),
+                feedback_enabled: false,
               };
             }
           }
@@ -218,6 +315,21 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
         dataStrategy = anchor ? 'anchor_context' : 'scoped_analysis';
       }
 
+      let initialAnnotationContext = '';
+      if (entityId) {
+        try {
+          const annotations = await getActiveAnnotations(workspaceId, scopeType, entityId);
+          if (annotations.length > 0) {
+            initialAnnotationContext = '\n\nUSER-PROVIDED CONTEXT (from team members, treat as authoritative):\n' +
+              annotations.map(a => `- ${a.content} (${a.created_by || 'team'}, ${new Date(a.created_at).toLocaleDateString()})`).join('\n') +
+              '\nIncorporate this context into your analysis. If it contradicts CRM data, note the discrepancy but trust the user context.';
+          }
+        } catch (err) {
+          console.warn('[orchestrator] Failed to fetch annotations:', err);
+        }
+      }
+
+      const baseContext = anchor?.result?.evidence || anchor?.result?.summary || '';
       const analysis = await runScopedAnalysis({
         workspace_id: workspaceId,
         question: message,
@@ -226,7 +338,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
           entity_id: entityId,
           rep_email: repEmail,
           skill_run_id: anchor?.skill_run_id,
-          skill_run_context: anchor?.result?.evidence || anchor?.result?.summary,
+          skill_run_context: baseContext ? baseContext + initialAnnotationContext : initialAnnotationContext || undefined,
         },
         format: 'text',
         max_tokens: 2000,
@@ -261,6 +373,26 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
 
   await updateTurnMetrics(workspaceId, channelId, threadId, tokensUsed);
 
+  const responseId = randomUUID();
+  const feedbackEnabled = routerDecision !== 'heuristic' && routerDecision !== 'rate_limited_fallback';
+
+  const entitiesMentioned: ConversationTurnResult['entities_mentioned'] = {
+    deals: [], accounts: [], reps: [],
+  };
+  if (scopeType === 'deal' && entityId) {
+    try {
+      const d = await query<any>(`SELECT name FROM deals WHERE id = $1 AND workspace_id = $2`, [entityId, workspaceId]);
+      if (d.rows[0]) entitiesMentioned.deals.push({ id: entityId, name: d.rows[0].name });
+    } catch {}
+  } else if (scopeType === 'account' && entityId) {
+    try {
+      const a = await query<any>(`SELECT name FROM accounts WHERE id = $1 AND workspace_id = $2`, [entityId, workspaceId]);
+      if (a.rows[0]) entitiesMentioned.accounts.push({ id: entityId, name: a.rows[0].name });
+    } catch {}
+  } else if (scopeType === 'rep' && repEmail) {
+    entitiesMentioned.reps.push({ id: repEmail, name: repEmail });
+  }
+
   return {
     answer,
     thread_id: threadId,
@@ -268,6 +400,9 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
     router_decision: routerDecision,
     data_strategy: dataStrategy,
     tokens_used: tokensUsed,
+    response_id: responseId,
+    feedback_enabled: feedbackEnabled,
+    entities_mentioned: entitiesMentioned,
   };
 }
 

@@ -1,5 +1,6 @@
 import { query } from '../db.js';
 import { getBatchDealRiskScores } from '../tools/deal-risk-score.js';
+import { getActiveAnnotations } from '../feedback/annotations.js';
 
 export interface AccountDossier {
   account: {
@@ -78,6 +79,16 @@ export interface AccountDossier {
     coverage_gaps: string[];
     overall: 'strong' | 'moderate' | 'weak' | 'unknown';
   };
+  annotations: Array<{
+    id: string;
+    annotation_type: string;
+    content: string;
+    source: string;
+    created_at: string;
+    created_by: string | null;
+    expires_at: string | null;
+  }>;
+  hasUserContext: boolean;
   data_availability: {
     has_deals: boolean;
     has_contacts: boolean;
@@ -218,11 +229,12 @@ function computeEngagementTrend(conversations: any[]): 'increasing' | 'stable' |
 }
 
 export async function assembleAccountDossier(workspaceId: string, accountId: string): Promise<AccountDossier> {
-  const [account, deals, contacts, conversations] = await Promise.all([
+  const [account, deals, contacts, conversations, annotations] = await Promise.all([
     getAccountById(workspaceId, accountId),
     getDealsForAccount(workspaceId, accountId),
     getContactsForAccount(workspaceId, accountId),
     getConversationsForAccount(workspaceId, accountId),
+    getActiveAnnotations(workspaceId, 'account', accountId).catch(() => []),
   ]);
 
   if (!account) {
@@ -369,6 +381,16 @@ export async function assembleAccountDossier(workspaceId: string, accountId: str
       coverage_gaps,
       overall,
     },
+    annotations: annotations.map((a: any) => ({
+      id: a.id,
+      annotation_type: a.annotation_type,
+      content: a.content,
+      source: a.source,
+      created_at: a.created_at ? new Date(a.created_at).toISOString() : '',
+      created_by: a.created_by ?? null,
+      expires_at: a.expires_at ? new Date(a.expires_at).toISOString() : null,
+    })),
+    hasUserContext: annotations.length > 0,
     data_availability: {
       has_deals: deals.length > 0,
       has_contacts: contacts.length > 0,

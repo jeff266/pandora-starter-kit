@@ -21,7 +21,8 @@ Pandora is built on Node.js 20 with TypeScript 5+, using Express.js and PostgreS
 -   **Computed Fields Engine:** Orchestrates batch computations for various scores (e.g., `velocity_score`, `deal_risk`, `engagement_score`).
 -   **Sync Infrastructure:** Supports scheduled and manual asynchronous data synchronizations.
 -   **Agent Runner Framework:** Composes multiple skills into unified briefings, synthesizing outputs into narratives for Slack delivery, with built-in agents and a scheduler.
--   **Conversational Agent:** Multi-turn AI chat for Slack and Command Center with three-tier routing (heuristic→DeepSeek→Claude), unified orchestrator, thread anchoring, and structured state management.
+-   **Conversational Agent:** Multi-turn AI chat for Slack and Command Center with three-tier routing (heuristic→DeepSeek→Claude), unified orchestrator, thread anchoring, and structured state management. Includes implicit feedback detection (confirm/correct/dismiss patterns at zero tokens).
+-   **Feedback & Learning System:** `workspace_annotations` and `feedback_signals` tables capture entity-level knowledge from user interactions. Annotations are injected into dossiers ("Team Notes"), skill synthesis prompts, and chat context. Feedback signals (thumbs up/down, confirm, dismiss) drive dismiss velocity analysis that generates ConfigSuggestions. Daily cron expires old annotations. Learning dashboard in Settings shows accumulated knowledge.
 
 **Key Design Decisions:**
 -   **No ORM:** Direct `pg` client and raw SQL for optimal performance and control.

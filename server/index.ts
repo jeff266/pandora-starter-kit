@@ -69,7 +69,9 @@ import userAuthRouter from './routes/user-auth.js';
 import membersRouter from './routes/members.js';
 import dealIntelligenceRouter from './routes/deal-intelligence.js';
 import chatRouter from './routes/chat.js';
+import feedbackRouter from './routes/feedback.js';
 import { initRenderers } from './renderers/index.js';
+import { cleanupExpiredAnnotations } from './feedback/cleanup.js';
 
 dotenv.config();
 
@@ -223,6 +225,7 @@ workspaceApiRouter.use('/workspace-downloads', workspaceDownloadsRouter);
 workspaceApiRouter.use('/members', membersRouter);
 workspaceApiRouter.use(dealIntelligenceRouter);
 workspaceApiRouter.use(chatRouter);
+workspaceApiRouter.use(feedbackRouter);
 app.use("/api/workspaces", workspaceApiRouter);
 
 app.use("/api", skillsRouter);
@@ -353,6 +356,18 @@ async function start(): Promise<void> {
 
   cleanupTempFiles();
   setInterval(cleanupTempFiles, 60 * 60 * 1000);
+
+  // Annotation cleanup - daily at 3 AM UTC
+  const runAnnotationCleanup = () => {
+    const now = new Date();
+    if (now.getUTCHours() === 3 && now.getUTCMinutes() === 0) {
+      cleanupExpiredAnnotations().catch(err => {
+        console.error('[Annotation Cleanup] Failed:', err);
+      });
+    }
+  };
+  // Check every minute (piggyback on existing minute-interval checks if any)
+  setInterval(runAnnotationCleanup, 60000);
 
   setServerReady();
 
