@@ -1,0 +1,42 @@
+First) The Connectors page is showing "Enrichment_config" as a connector card. This is an internal configuration record for the Apollo/Serper enrichment pipeline — it shouldn't be visible to users as a connector.
+Two options:
+
+Filter it out — add a type or is_visible flag to distinguish user-facing connectors (HubSpot, Salesforce, Gong, Fireflies) from internal config records. The Connectors page query should only show user-facing ones.
+Rename and present properly — if you want enrichment to be visible, show it as "Data Enrichment" with a proper icon and status that reflects whether API keys are configured, not sync status.
+Option 1 is simpler and correct. Enrichment config is an admin-level setting, not a connector the user manages alongside their CRM.
+
+Also: Fireflies is connected (21 calls synced) but doesn't appear on this page. Should it?
+
+
+
+Second) HubSpot shows "Last sync: 2 days ago" and Stale status. Gong shows "2 hours ago." Are these connectors on an automatic sync schedule via the cron scheduler?
+
+Expected behavior:
+
+HubSpot/Salesforce: Auto-sync every 4-6 hours (deal data changes throughout the day)
+Gong/Fireflies: Auto-sync every 12-24 hours (call data is less time-sensitive)
+Questions:
+
+Are sync jobs registered in the cron scheduler? If not, they need to be.
+If they are registered, why hasn't HubSpot synced in 2 days? Check if the cron job errored silently.
+The "Sync Now" button is good for manual override, but it shouldn't be the primary mechanism.
+Also on this page:
+
+Enrichment_config still showing here too — same filter fix needed
+Fireflies is missing (21 calls synced, should appear)
+Record Inventory Source column shows "—" for everything — should show "HubSpot" for deals/contacts/accounts and "Gong" for conversations
+The staleness banner at the top is good UX — that's exactly the right pattern
+
+
+third) Chat bubble (bottom right) — is this the conversational agent? Does it persist across page navigation? And does it have access to the current page context (e.g., if I'm on the Deals page and ask "which deals are stale," does it scope to what I'm looking at)?
+
+fourth) for preview in Settings > Voice & Tone - show the same finding rendered in all three detail levels so the user can compare. But for now this is functional and ships the intent.
+
+fifth) i was using the chat agent. very mpressive so far. That's the conversational agent. The starter prompts are well-chosen — "What's our pipeline looking like?", "Which deals are at risk?", "How are reps tracking against quota?", "What changed this week?" — these are the exact questions a RevOps manager asks on Monday morning.
+This is the 7-layer conversational agent from the earlier build. It's landing well as a slide-out panel rather than a full page, which means users can ask questions without leaving their current context.
+
+Want to test it? Try "Which deals are at risk?" and see if it pulls from the findings data and responds with the flat token cost pattern we validated (heuristic match first, LLM only when needed). That would confirm the full stack is working end-to-end from UI to conversational agent to data layer.
+
+
+
+sixth) in chat (ask pandora) - One issue carries over: the stage names in chat are still the normalized versions (awareness, decision, evaluation) instead of Frontera's actual HubSpot stage names. Same root cause as the Command Center bug.
