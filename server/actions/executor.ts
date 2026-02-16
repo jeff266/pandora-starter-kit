@@ -11,6 +11,8 @@ import { HubSpotClient } from '../connectors/hubspot/client.js';
 import { SalesforceClient } from '../connectors/salesforce/client.js';
 import { mapFieldsToHubSpot } from '../connectors/hubspot/field-map.js';
 import { mapFieldsToSalesforce } from '../connectors/salesforce/field-map.js';
+import { getSlackAppClient } from '../connectors/slack/slack-app-client.js';
+import { query as dbQuery } from '../db.js';
 
 export interface ExecutionRequest {
   actionId: string;
@@ -213,17 +215,37 @@ function buildOperations(
       break;
   }
 
-  // Always add an audit note to the CRM record
-  ops.push({
-    type: 'crm_note',
-    target: `${crmSource}:${externalId}`,
-    payload: {
-      crmSource,
-      externalId,
-      title: `Pandora Action: ${action.title}`,
-      body: buildAuditNoteBody(action),
-    },
-  });
+  if (action.action_type === 'notify_rep' || action.action_type === 'notify_manager') {
+    ops.push({
+      type: 'slack_notify',
+      target: action.target_deal_id || action.target_account_id || 'unknown',
+      payload: {
+        workspaceId: action.workspace_id,
+        ownerEmail: deal?.owner || action.execution_payload?.owner_email,
+        targetUserId: action.execution_payload?.slack_user_id,
+        title: action.title,
+        summary: action.summary,
+        severity: action.severity,
+        dealName: deal?.name,
+        dealAmount: deal?.amount,
+        skillId: action.source_skill,
+      },
+    });
+    return ops;
+  }
+
+  if (externalId && crmSource) {
+    ops.push({
+      type: 'crm_note',
+      target: `${crmSource}:${externalId}`,
+      payload: {
+        crmSource,
+        externalId,
+        title: `Pandora Action: ${action.title}`,
+        body: buildAuditNoteBody(action),
+      },
+    });
+  }
 
   return ops;
 }
@@ -263,6 +285,61 @@ async function executeOperation(
         return client.addOpportunityNote(externalId, title, body);
       }
       throw new Error(`Unsupported CRM source: ${crmSource}`);
+    }
+
+    case 'slack_notify': {
+      const { workspaceId: wsId, ownerEmail, targetUserId, title, summary, severity, dealName, dealAmount, skillId } = op.payload;
+      const slackClient = getSlackAppClient();
+
+      let slackUserId = targetUserId;
+      if (!slackUserId && ownerEmail) {
+        const lookup = await slackClient.lookupUserByEmail(wsId, ownerEmail);
+        if (lookup.ok && lookup.userId) {
+          slackUserId = lookup.userId;
+        } else {
+          console.warn(`[executor] Could not find Slack user for email ${ownerEmail}: ${lookup.error}`);
+        }
+      }
+
+      if (!slackUserId) {
+        console.warn(`[executor] Skipping DM: no Slack user found for email ${ownerEmail || 'none'}`);
+        return { skipped: true, reason: `No Slack user found for ${ownerEmail || 'unknown email'}` };
+      }
+
+      const severityIcon = severity === 'critical' ? '🔴' : severity === 'warning' ? '🟡' : '🔵';
+      const amountStr = dealAmount ? ` • $${Number(dealAmount).toLocaleString()}` : '';
+
+      const blocks: any[] = [
+        {
+          type: 'header',
+          text: { type: 'plain_text', text: `${severityIcon} Action Required`, emoji: true },
+        },
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: `*${title}*${dealName ? `\n📋 Deal: *${dealName}*${amountStr}` : ''}`,
+          },
+        },
+        { type: 'divider' },
+        {
+          type: 'section',
+          text: { type: 'mrkdwn', text: summary.slice(0, 2900) },
+        },
+        {
+          type: 'context',
+          elements: [{
+            type: 'mrkdwn',
+            text: `_From Pandora ${skillId || 'analysis'} • ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}_`,
+          }],
+        },
+      ];
+
+      const dmResult = await slackClient.sendDirectMessage(wsId, slackUserId, blocks, `${severityIcon} ${title}`);
+      if (!dmResult.ok) {
+        throw new Error(`DM failed: ${dmResult.error}`);
+      }
+      return { sent_to: slackUserId, channel: dmResult.channel, ts: dmResult.ts };
     }
 
     default:

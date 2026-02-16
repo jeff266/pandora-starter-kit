@@ -165,6 +165,90 @@ export class SlackAppClient {
     }
   }
 
+  async lookupUserByEmail(
+    workspaceId: string,
+    email: string
+  ): Promise<{ ok: boolean; userId?: string; error?: string }> {
+    const botToken = await this.getBotToken(workspaceId);
+    if (!botToken) {
+      return { ok: false, error: 'Bot token required for user lookup' };
+    }
+
+    try {
+      const response = await fetch(`https://slack.com/api/users.lookupByEmail?email=${encodeURIComponent(email)}`, {
+        headers: { 'Authorization': `Bearer ${botToken}` },
+      });
+      const data = await response.json() as any;
+      if (!data.ok) {
+        return { ok: false, error: data.error };
+      }
+      return { ok: true, userId: data.user?.id };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  }
+
+  async sendDirectMessage(
+    workspaceId: string,
+    userId: string,
+    blocks: SlackBlock[],
+    text?: string
+  ): Promise<SlackMessageRef> {
+    const botToken = await this.getBotToken(workspaceId);
+    if (!botToken) {
+      return { ts: '', channel: '', ok: false, error: 'Bot token required for DMs' };
+    }
+
+    try {
+      const openRes = await fetch('https://slack.com/api/conversations.open', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${botToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ users: userId }),
+      });
+      const openData = await openRes.json() as any;
+      if (!openData.ok) {
+        console.error('[slack-app] conversations.open error:', openData.error);
+        return { ts: '', channel: '', ok: false, error: `DM open failed: ${openData.error}` };
+      }
+
+      const dmChannel = openData.channel?.id;
+      const sanitizedBlocks = blocks.map(block => {
+        if (block.type === 'section' && block.text?.text && block.text.text.length > 3000) {
+          return { ...block, text: { ...block.text, text: block.text.text.slice(0, 2990) + '…' } };
+        }
+        return block;
+      });
+
+      const msgRes = await fetch('https://slack.com/api/chat.postMessage', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${botToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          channel: dmChannel,
+          blocks: sanitizedBlocks,
+          text: text || 'Pandora notification',
+        }),
+      });
+      const msgData = await msgRes.json() as any;
+      if (!msgData.ok) {
+        console.error('[slack-app] DM postMessage error:', msgData.error);
+        return { ts: '', channel: dmChannel, ok: false, error: msgData.error };
+      }
+
+      console.log(`[slack-app] DM sent to ${userId} in ${dmChannel} (ts: ${msgData.ts})`);
+      return { ts: msgData.ts, channel: dmChannel, ok: true };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[slack-app] sendDirectMessage exception:', msg);
+      return { ts: '', channel: '', ok: false, error: msg };
+    }
+  }
+
   async openModal(
     workspaceId: string,
     triggerId: string,

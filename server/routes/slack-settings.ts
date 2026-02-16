@@ -59,4 +59,40 @@ router.post('/:id/settings/slack/test', async (req, res) => {
   }
 });
 
+router.post('/:id/settings/slack/test-dm', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { user_id } = req.body;
+    if (!user_id) {
+      return res.status(400).json({ error: 'user_id required' });
+    }
+    const { getSlackAppClient } = await import('../connectors/slack/slack-app-client.js');
+    const client = getSlackAppClient();
+
+    const blocks = [
+      {
+        type: 'header',
+        text: { type: 'plain_text', text: '🧪 Pandora Test Notification', emoji: true },
+      },
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: '*This is a test DM from Pandora.*\nIf you see this, DM delivery is working correctly.',
+        },
+      },
+      {
+        type: 'context',
+        elements: [{ type: 'mrkdwn', text: `_Sent at ${new Date().toISOString()}_` }],
+      },
+    ];
+
+    const result = await client.sendDirectMessage(id, user_id, blocks, 'Pandora test notification');
+    return res.json(result);
+  } catch (err) {
+    console.error('[slack-settings] Error testing DM:', err);
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 export default router;
