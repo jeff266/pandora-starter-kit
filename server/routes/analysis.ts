@@ -9,7 +9,7 @@ import {
 
 const router = Router();
 
-const VALID_SCOPE_TYPES = ['deal', 'account', 'pipeline', 'rep', 'workspace', 'conversations'];
+const VALID_SCOPE_TYPES = ['deal', 'account', 'pipeline', 'rep', 'workspace', 'conversations', 'stage'];
 const RATE_LIMIT_MAX = 10;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 
@@ -84,6 +84,7 @@ router.post('/:workspaceId/analyze', async (req: Request, res: Response): Promis
         type: scope.type,
         entityId: scope.entity_id,
         ownerEmail: scope.rep_email,
+        stage: scope.stage,
         date_range: scope.date_range,
         filters: scope.filters,
       }

@@ -79,6 +79,11 @@ const DEFAULT_STAGE_NORMALIZED_MAP: Record<string, string> = {
 
 export function normalizeStage(rawStage: string | null, customMapping?: StageMapping): string | null {
   if (!rawStage) return null;
+
+  // Pre-pass: explicit closed-won/lost markers in raw name override everything
+  if (/\bclosed[\s\-_]*won\b|\(closed[\s\-_]*won\)/i.test(rawStage)) return 'closed_won';
+  if (/\bclosed[\s\-_]*lost\b|\(closed[\s\-_]*lost\)/i.test(rawStage)) return 'closed_lost';
+
   const cleaned = rawStage.replace(/[^\p{L}\p{N}]/gu, '').toLowerCase();
 
   // Priority 1: Check custom workspace mapping (exact match on cleaned stage name)
@@ -299,7 +304,8 @@ function resolveForecastCategory(
   // Check for custom property first (native)
   const customForecastCategory = props.forecast_category || props.hs_forecast_category;
   if (customForecastCategory) {
-    const normalized = normalizeForecastCategory(sanitizeText(customForecastCategory));
+    const sanitizedForecast = sanitizeText(customForecastCategory);
+    const normalized = sanitizedForecast ? normalizeForecastCategory(sanitizedForecast) : null;
     if (normalized) {
       return { category: normalized, source: 'native' };
     }

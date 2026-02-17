@@ -10,9 +10,10 @@ export interface AnalysisRequest {
   workspace_id: string;
   question: string;
   scope: {
-    type: 'deal' | 'account' | 'pipeline' | 'rep' | 'workspace' | 'conversations';
+    type: 'deal' | 'account' | 'pipeline' | 'rep' | 'workspace' | 'conversations' | 'stage';
     entity_id?: string;
     rep_email?: string;
+    stage?: string;
     date_range?: { from: string; to: string };
     filters?: Record<string, any>;
     skill_run_id?: string;
@@ -736,6 +737,69 @@ async function gatherContext(request: AnalysisRequest): Promise<{
       };
     }
 
+    case 'stage': {
+      const stageName = scope.stage || scope.entity_id;
+      if (!stageName) {
+        return {
+          contextText: 'NO_CONTEXT',
+          dataSources: ['deals'],
+          dataConsulted: { deals: 0, contacts: 0, conversations: 0, findings: 0, date_range: null },
+        };
+      }
+
+      const dealsResult = await query<any>(
+        `SELECT d.id, d.name, d.amount, d.probability, d.close_date,
+           d.owner, d.owner_name, d.stage, d.stage_normalized,
+           COALESCE(d.forecast_category, 'pipeline') as forecast_category,
+           EXTRACT(EPOCH FROM (now() - COALESCE(d.stage_entered_at, d.created_at))) / 86400 as days_in_stage
+         FROM deals d
+         WHERE d.workspace_id = $1
+           AND (d.stage = $2 OR d.stage_normalized = $2)
+           AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+         ORDER BY d.amount DESC NULLS LAST
+         LIMIT 30`,
+        [workspace_id, stageName]
+      );
+
+      const dealIds = dealsResult.rows.map((d: any) => d.id);
+      let findingsText = '';
+      if (dealIds.length > 0) {
+        const findingsResult = await query<any>(
+          `SELECT f.deal_id, f.category, f.message, f.severity
+           FROM findings f
+           WHERE f.workspace_id = $1 AND f.deal_id = ANY($2) AND f.resolved_at IS NULL
+           ORDER BY CASE f.severity WHEN 'act' THEN 1 WHEN 'watch' THEN 2 ELSE 3 END`,
+          [workspace_id, dealIds]
+        );
+        const byDeal: Record<string, string[]> = {};
+        for (const row of findingsResult.rows) {
+          if (!byDeal[row.deal_id]) byDeal[row.deal_id] = [];
+          byDeal[row.deal_id].push(`[${row.severity}] ${row.category}: ${row.message}`);
+        }
+        findingsText = Object.entries(byDeal).map(([id, msgs]) => `Deal ${id}: ${msgs.join('; ')}`).join('\n');
+      }
+
+      const stageContext = `STAGE: ${stageName}
+DEALS (${dealsResult.rows.length} total):
+${dealsResult.rows.map((d: any) =>
+  `- ${d.name}: $${d.amount || 0} | ${Math.round(d.days_in_stage || 0)} days in stage | ${Math.round((d.probability || 0) * 100)}% prob | close: ${d.close_date || 'unknown'} | forecast: ${d.forecast_category} | owner: ${d.owner_name || d.owner}`
+).join('\n')}
+
+${findingsText ? `FINDINGS:\n${findingsText}` : 'No active findings for this stage.'}`;
+
+      return {
+        contextText: stageContext,
+        dataSources: ['deals', 'findings'],
+        dataConsulted: {
+          deals: dealsResult.rows.length,
+          contacts: 0,
+          conversations: 0,
+          findings: findingsText.split('\n').filter(Boolean).length,
+          date_range: null,
+        },
+      };
+    }
+
     default:
       throw new Error(`Unknown scope type: ${scope.type}`);
   }
@@ -745,9 +809,10 @@ export async function analyzeQuestion(
   workspaceId: string,
   question: string,
   scope: {
-    type: 'deal' | 'account' | 'pipeline' | 'rep' | 'workspace' | 'conversations';
+    type: 'deal' | 'account' | 'pipeline' | 'rep' | 'workspace' | 'conversations' | 'stage';
     entityId?: string;
     ownerEmail?: string;
+    stage?: string;
     date_range?: { from: string; to: string };
     filters?: Record<string, any>;
   }
@@ -761,6 +826,7 @@ export async function analyzeQuestion(
       type: scope.type,
       entity_id: scope.entityId,
       rep_email: scope.ownerEmail,
+      stage: scope.stage,
       date_range: scope.date_range,
       filters: scope.filters,
     },
