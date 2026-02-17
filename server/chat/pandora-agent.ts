@@ -460,12 +460,16 @@ export function buildConversationHistory(
     if (msg.role === 'user') {
       history.push({ role: 'user', content: msg.content });
     } else if (msg.role === 'assistant') {
+      // Pass the answer text and which tools were called, but NOT the result data.
+      // Injecting full prior tool results causes the model to anchor on
+      // "data I retrieved before" and refuse to call tools for a new question
+      // (e.g. seeing 50 calls from an objections question, then saying
+      // "I don't have pipeline data" when asked about Q1 forecast).
       if (msg.tool_trace && msg.tool_trace.length > 0) {
-        const toolSummary = msg.tool_trace
-          .map((t: any) => `[Tool: ${t.tool}] ${t.description}\nResult: ${summarizeToolResult(t.tool, t.result)}`)
-          .join('\n\n');
-        const content = (msg.content ? msg.content + '\n\n' : '') +
-          `[Data retrieved in this turn]\n${toolSummary}`;
+        const toolsNote = `[Tools used for this answer: ${
+          msg.tool_trace.map((t: any) => t.tool).join(', ')
+        }]`;
+        const content = (msg.content ? msg.content + '\n\n' : '') + toolsNote;
         history.push({ role: 'assistant', content });
       } else {
         history.push({ role: 'assistant', content: msg.content });
@@ -476,42 +480,3 @@ export function buildConversationHistory(
   return history;
 }
 
-function summarizeToolResult(toolName: string, result: any): string {
-  if (!result) return '(no result)';
-
-  switch (toolName) {
-    case 'query_deals': {
-      const deals = result.deals || [];
-      const top5 = deals.slice(0, 5)
-        .map((d: any) => `  ${d.name}: $${(d.amount || 0).toLocaleString()} (${d.stage || '?'}, closes ${d.close_date?.slice(0, 10) || 'N/A'})`)
-        .join('\n');
-      return `${result.total_count || deals.length} deals, $${(result.total_amount || 0).toLocaleString()} total\n${top5}${deals.length > 5 ? `\n  ... and ${deals.length - 5} more` : ''}`;
-    }
-    case 'query_conversations': {
-      const convs = result.conversations || [];
-      const top5 = convs.slice(0, 5)
-        .map((c: any) => `  ${c.title || 'Untitled'} (${c.date?.slice(0, 10) || '?'}, ${c.account_name || 'no account'}, ${c.duration_minutes || '?'}min)`)
-        .join('\n');
-      return `${result.total_count || convs.length} conversations\n${top5}`;
-    }
-    case 'compute_metric':
-      return `${result.metric}: ${result.formatted} (${result.formula})`;
-    case 'get_skill_evidence':
-      if (!result) return 'No recent skill evidence found';
-      return `${result.claim_count || 0} findings from ${result.skill_id} (ran ${result.last_run_at?.slice(0, 10) || '?'})`;
-    case 'query_contacts': {
-      const contacts = result.contacts || [];
-      return `${result.total_count || contacts.length} contacts`;
-    }
-    case 'query_activity_timeline': {
-      const events = result.events || [];
-      return `${result.total_count || events.length} events over ${result.span_days || '?'} days`;
-    }
-    case 'query_accounts': {
-      const accounts = result.accounts || [];
-      return `${result.total_count || accounts.length} accounts`;
-    }
-    default:
-      return JSON.stringify(result).slice(0, 300);
-  }
-}
