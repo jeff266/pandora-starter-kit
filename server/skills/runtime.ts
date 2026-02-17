@@ -41,6 +41,7 @@ import { getEvidenceBuilder } from './evidence-builder.js';
 import { configLoader } from '../config/workspace-config-loader.js';
 import { extractFindings, insertFindings } from '../findings/extractor.js';
 import { parseActionsFromOutput, insertExtractedActions } from '../actions/index.js';
+import { getConsultantContext } from './consultant-context.js';
 import pool from '../db.js';
 
 // ============================================================================
@@ -104,6 +105,15 @@ export class SkillRuntime {
       console.warn(`[Skill Runtime] Failed to load voice config for ${workspaceId}, using defaults`);
     }
 
+    // Fetch consultant call context (non-blocking, non-fatal)
+    let consultantContextBlock = '';
+    try {
+      const cc = await getConsultantContext(workspaceId);
+      if (cc) consultantContextBlock = cc;
+    } catch (err) {
+      console.warn(`[Skill Runtime] Failed to load consultant context for ${workspaceId}`);
+    }
+
     const businessContext = {
       business_model: contextData?.business_model || {},
       team_structure: contextData?.team_structure || {},
@@ -113,6 +123,7 @@ export class SkillRuntime {
       timeConfig: mergedTimeConfig,
       dataFreshness,
       voiceBlock,
+      consultantContext: consultantContextBlock,
     };
 
     const context: SkillExecutionContext = {
@@ -573,7 +584,9 @@ export class SkillRuntime {
   // ============================================================================
 
   private buildSystemPrompt(step: SkillStep, context: SkillExecutionContext): string {
-    const { business_model, goals_and_targets } = context.businessContext;
+    const { business_model, goals_and_targets, consultantContext } = context.businessContext as any;
+
+    const consultantBlock = consultantContext ? `\n\n${consultantContext}` : '';
 
     return `You are analyzing GTM data for a workspace.
 
@@ -582,7 +595,7 @@ Business Context:
 - Avg Deal Size: $${(business_model as any).acv_range?.avg || 'unknown'}
 - Sales Cycle: ${(business_model as any).sales_cycle_days || 'unknown'} days
 - Revenue Target: $${(goals_and_targets as any).revenue_target || 'unknown'}
-- Pipeline Coverage Target: ${(goals_and_targets as any).pipeline_coverage_target || 'unknown'}x
+- Pipeline Coverage Target: ${(goals_and_targets as any).pipeline_coverage_target || 'unknown'}x${consultantBlock}
 
 Your task: ${step.name}
 

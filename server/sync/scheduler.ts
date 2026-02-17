@@ -3,6 +3,8 @@ import { query } from '../db.js';
 import { syncWorkspace } from './orchestrator.js';
 import { backfillHubSpotAssociations } from './backfill.js';
 import { getJobQueue } from '../jobs/queue.js';
+import { getActiveConsultantConnectors, updateConsultantConnector } from '../connectors/consultant-connector.js';
+import { syncConsultantFireflies } from '../connectors/consultant-fireflies-sync.js';
 
 const INTERNAL_CONNECTORS = ['enrichment_config', 'csv_import'];
 
@@ -43,8 +45,16 @@ export class SyncScheduler {
       this.tasks.push(task);
     }
 
+    // Consultant connector sync (every 6 hours)
+    const consultantTask = cron.schedule('0 */6 * * *', () => {
+      this.runConsultantSync().catch((err) => {
+        console.error('[Scheduler] Unhandled error in consultant sync:', err);
+      });
+    }, { timezone: 'UTC' });
+    this.tasks.push(consultantTask);
+
     const scheduleDescriptions = SYNC_SCHEDULES.map(s => s.label).join(', ');
-    console.log(`[Scheduler] Sync schedules registered: ${scheduleDescriptions}`);
+    console.log(`[Scheduler] Sync schedules registered: ${scheduleDescriptions}, Consultant (every 6 hours)`);
   }
 
   stop(): void {
@@ -128,6 +138,44 @@ export class SyncScheduler {
     }
 
     console.log(`[Scheduler] ${label}: ${queued} sync job(s) queued`);
+  }
+
+  async runConsultantSync(): Promise<void> {
+    let consultantConnectors;
+    try {
+      consultantConnectors = await getActiveConsultantConnectors();
+    } catch (err) {
+      // Table may not exist yet if migration hasn't run
+      console.log('[Scheduler] Consultant connectors table not available, skipping');
+      return;
+    }
+
+    if (consultantConnectors.length === 0) {
+      console.log('[Scheduler] Consultant sync: no active connectors — skipping');
+      return;
+    }
+
+    console.log(`[Scheduler] Consultant sync: processing ${consultantConnectors.length} connector(s)`);
+
+    for (const cc of consultantConnectors) {
+      try {
+        if (cc.source === 'fireflies') {
+          const result = await syncConsultantFireflies(cc.id);
+          console.log(
+            `[Scheduler] Consultant ${cc.source} (${cc.id}): ${result.synced} synced, ` +
+            `T1=${result.distributed.tier1_email} T2=${result.distributed.tier2_calendar} T3=${result.distributed.tier3_transcript} ` +
+            `unmatched=${result.distributed.unmatched}`
+          );
+        }
+      } catch (err: any) {
+        console.error(`[Scheduler] Consultant ${cc.id} failed: ${err.message}`);
+        try {
+          await updateConsultantConnector(cc.id, { status: 'error' });
+        } catch {
+          // ignore update error
+        }
+      }
+    }
   }
 
   async runDailySync(): Promise<void> {

@@ -30,6 +30,7 @@ import {
 import { getSlackAppClient } from '../connectors/slack/slack-app-client.js';
 import { formatAgentWithEvidence } from '../skills/formatters/slack-formatter.js';
 import { deliverToChannels, type DeliveryChannel } from './channels.js';
+import { getConsultantContext } from '../skills/consultant-context.js';
 
 export class AgentRuntime {
   private static instance: AgentRuntime;
@@ -307,6 +308,17 @@ export class AgentRuntime {
       .join('\n\n---\n\n');
     userPrompt = userPrompt.replace('{{skill_outputs}}', allOutputs);
 
+    // Inject consultant call context into synthesis system prompt (if available)
+    let systemPrompt = agent.synthesis.systemPrompt;
+    try {
+      const consultantContext = await getConsultantContext(workspaceId);
+      if (consultantContext) {
+        systemPrompt = systemPrompt + '\n\n' + consultantContext;
+      }
+    } catch (err) {
+      // Non-fatal — consultant context is optional enrichment
+    }
+
     const capability: LLMCapability = agent.synthesis.provider === 'claude' ? 'reason' : 'extract';
 
     const tracking: TrackingContext = {
@@ -318,7 +330,7 @@ export class AgentRuntime {
     };
 
     const response = await callLLM(workspaceId, capability, {
-      systemPrompt: agent.synthesis.systemPrompt,
+      systemPrompt,
       messages: [{ role: 'user', content: userPrompt }],
       maxTokens: agent.synthesis.maxTokens || 4000,
       temperature: 0.7,
