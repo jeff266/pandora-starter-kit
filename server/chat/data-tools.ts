@@ -6,6 +6,7 @@
  */
 
 import { query } from '../db.js';
+import { getToolFilters } from '../config/tool-filter-injector.js';
 
 // ─── Tool result types ───────────────────────────────────────────────────────
 
@@ -729,6 +730,12 @@ async function computeMetric(workspaceId: string, params: Record<string, any>): 
   }
 }
 
+function metricToContext(metric: string): 'win_rate' | 'pipeline_value' | 'general' {
+  if (metric === 'win_rate') return 'win_rate';
+  if (metric === 'total_pipeline' || metric === 'pipeline_created') return 'pipeline_value';
+  return 'general';
+}
+
 async function computeTotalPipeline(workspaceId: string, params: Record<string, any>): Promise<ComputeMetricResult> {
   const conditions: string[] = [
     `workspace_id = $1`,
@@ -747,6 +754,14 @@ async function computeTotalPipeline(workspaceId: string, params: Record<string, 
   if (params.stage) {
     values.push(`%${params.stage}%`);
     conditions.push(`stage ILIKE $${values.length}`);
+  }
+
+  // Inject tool filters for pipeline_value context
+  const toolFilters = await getToolFilters(workspaceId, 'pipeline_value', values.length + 1, 'deals').catch(() => ({ whereClause: '', params: [], paramOffset: values.length + 1, appliedRules: [] }));
+  if (toolFilters.whereClause) {
+    // whereClause starts with ' AND ', strip it and add as a condition
+    conditions.push(toolFilters.whereClause.replace(/^\s*AND\s+/, ''));
+    values.push(...toolFilters.params);
   }
 
   const result = await query<any>(
@@ -830,6 +845,13 @@ async function computeWinRate(workspaceId: string, params: Record<string, any>):
   if (params.owner_email) {
     values.push(params.owner_email);
     conditions.push(`LOWER(owner) = $${values.length}`);
+  }
+
+  // Inject tool filters for win_rate context
+  const toolFilters = await getToolFilters(workspaceId, 'win_rate', values.length + 1, 'deals').catch(() => ({ whereClause: '', params: [], paramOffset: values.length + 1, appliedRules: [] }));
+  if (toolFilters.whereClause) {
+    conditions.push(toolFilters.whereClause.replace(/^\s*AND\s+/, ''));
+    values.push(...toolFilters.params);
   }
 
   const result = await query<any>(

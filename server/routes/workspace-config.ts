@@ -155,6 +155,7 @@ router.patch(
         'thresholds',
         'scoring',
         'voice',
+        'tool_filters',
       ];
 
       if (!validSections.includes(section)) {
@@ -587,5 +588,263 @@ router.get(
     }
   }
 );
+
+// GET /:workspaceId/workspace-config/field-options
+router.get('/:workspaceId/workspace-config/field-options', async (req, res) => {
+  try {
+    const { workspaceId } = req.params;
+    const wsCheck = await query('SELECT id FROM workspaces WHERE id = $1', [workspaceId]);
+    if (wsCheck.rows.length === 0) { res.status(404).json({ error: 'Workspace not found' }); return; }
+
+    // Standard fields
+    const standardFields = [
+      { field: 'stage', label: 'Stage', type: 'text' },
+      { field: 'stage_normalized', label: 'Stage (Normalized)', type: 'text' },
+      { field: 'pipeline', label: 'Pipeline', type: 'text' },
+      { field: 'owner', label: 'Deal Owner', type: 'text' },
+      { field: 'forecast_category', label: 'Forecast Category', type: 'text' },
+      { field: 'source', label: 'Lead Source', type: 'text' },
+      { field: 'amount', label: 'Amount', type: 'number' },
+    ];
+
+    // Custom fields from deals.custom_fields
+    const customFieldRows = await query<{ field: string; label: string }>(
+      `SELECT DISTINCT 'custom_fields.' || key as field, initcap(replace(key, '_', ' ')) as label
+       FROM deals, jsonb_object_keys(custom_fields) as key
+       WHERE workspace_id = $1 AND custom_fields IS NOT NULL AND custom_fields != '{}'::jsonb
+       LIMIT 50`,
+      [workspaceId]
+    ).catch(() => ({ rows: [] as any[] }));
+
+    const allFields = [
+      ...standardFields,
+      ...customFieldRows.rows.map((r: { field: string; label: string }) => ({ field: r.field, label: `Custom: ${r.label}`, type: 'text' })),
+    ];
+
+    // For fields with < 50 unique values, fetch them
+    const fieldsWithValues = await Promise.all(
+      allFields.map(async (f) => {
+        if (f.type === 'number') return { ...f, values: [] };
+        try {
+          let colRef: string;
+          if (f.field.startsWith('custom_fields.')) {
+            const key = f.field.replace('custom_fields.', '');
+            colRef = `custom_fields->>'${key}'`;
+          } else {
+            colRef = f.field;
+          }
+          const vals = await query<{ val: string; cnt: string }>(
+            `SELECT DISTINCT ${colRef} as val, COUNT(*) as cnt FROM deals
+             WHERE workspace_id = $1 AND ${colRef} IS NOT NULL AND ${colRef} != ''
+             GROUP BY val ORDER BY cnt::int DESC LIMIT 50`,
+            [workspaceId]
+          ).catch(() => ({ rows: [] as any[] }));
+          const values = vals.rows.map((r: { val: string; cnt: string }) => r.val).filter(Boolean);
+          return { ...f, values: values.length < 50 ? values : [] };
+        } catch { return { ...f, values: [] }; }
+      })
+    );
+
+    res.json({ success: true, fields: fieldsWithValues });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    res.status(500).json({ error: message });
+  }
+});
+
+// GET /:workspaceId/workspace-config/stages
+router.get('/:workspaceId/workspace-config/stages', async (req, res) => {
+  try {
+    const { workspaceId } = req.params;
+    const wsCheck = await query('SELECT id FROM workspaces WHERE id = $1', [workspaceId]);
+    if (wsCheck.rows.length === 0) { res.status(404).json({ error: 'Workspace not found' }); return; }
+
+    // Query distinct stages directly from deals (no stage_mappings table)
+    const stageRows = await query<any>(
+      `SELECT
+         d.stage as raw_stage,
+         d.stage_normalized,
+         CASE WHEN d.stage_normalized IN ('closed_won', 'closed_lost') THEN false ELSE true END as is_open,
+         COUNT(d.id)::int as deal_count,
+         COALESCE(SUM(d.amount), 0)::numeric as total_amount,
+         COUNT(d.id) FILTER (WHERE d.stage_normalized = 'closed_won')::int as won_count,
+         COUNT(d.id) FILTER (WHERE d.stage_normalized = 'closed_lost')::int as lost_count
+       FROM deals d
+       WHERE d.workspace_id = $1 AND d.stage IS NOT NULL
+       GROUP BY d.stage, d.stage_normalized
+       ORDER BY is_open DESC, d.stage`,
+      [workspaceId]
+    );
+
+    const config = await configLoader.getConfig(workspaceId);
+    const filters = config.tool_filters;
+    const globalExcluded = filters?.global?.exclude_stages || [];
+    const pipelineExcluded = filters?.metric_overrides?.pipeline_value?.exclude_stages || [];
+    const winRateExcluded = filters?.metric_overrides?.win_rate?.exclude_stages || [];
+    const forecastExcluded = filters?.metric_overrides?.forecast?.exclude_stages || [];
+
+    const stages = stageRows.rows.map((s: any) => ({
+      ...s,
+      total_amount: parseFloat(s.total_amount),
+      is_excluded_from_pipeline: globalExcluded.includes(s.raw_stage) || pipelineExcluded.includes(s.raw_stage),
+      is_excluded_from_win_rate: winRateExcluded.includes(s.raw_stage),
+      is_excluded_from_forecast: globalExcluded.includes(s.raw_stage) || forecastExcluded.includes(s.raw_stage),
+    }));
+
+    res.json({ success: true, stages });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    res.status(500).json({ error: message });
+  }
+});
+
+// GET /:workspaceId/workspace-config/owners
+router.get('/:workspaceId/workspace-config/owners', async (req, res) => {
+  try {
+    const { workspaceId } = req.params;
+    const wsCheck = await query('SELECT id FROM workspaces WHERE id = $1', [workspaceId]);
+    if (wsCheck.rows.length === 0) { res.status(404).json({ error: 'Workspace not found' }); return; }
+
+    // deals.owner is name-only (no owner_email column)
+    const ownerRows = await query<any>(
+      `SELECT
+         owner as owner_name,
+         COUNT(*)::int as total_deals,
+         COUNT(*) FILTER (WHERE is_open = true)::int as open_deals,
+         COALESCE(SUM(amount) FILTER (WHERE is_open = true), 0)::numeric as open_pipeline
+       FROM deals
+       WHERE workspace_id = $1 AND owner IS NOT NULL
+       GROUP BY owner
+       ORDER BY open_deals DESC`,
+      [workspaceId]
+    );
+
+    const config = await configLoader.getConfig(workspaceId);
+    const excludedOwners: string[] = (config.teams?.excluded_owners as string[]) || [];
+    const roles: Record<string, string> = {};
+
+    const owners = ownerRows.rows.map((o: any) => ({
+      owner_name: o.owner_name,
+      total_deals: o.total_deals,
+      open_deals: o.open_deals,
+      open_pipeline: parseFloat(o.open_pipeline),
+      is_excluded: excludedOwners.includes(o.owner_name),
+      role: roles[o.owner_name] || 'AE',
+    }));
+
+    res.json({ success: true, owners });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    res.status(500).json({ error: message });
+  }
+});
+
+// POST /:workspaceId/workspace-config/preview-filter
+router.post('/:workspaceId/workspace-config/preview-filter', async (req, res) => {
+  try {
+    const { workspaceId } = req.params;
+    const wsCheck = await query('SELECT id FROM workspaces WHERE id = $1', [workspaceId]);
+    if (wsCheck.rows.length === 0) { res.status(404).json({ error: 'Workspace not found' }); return; }
+
+    const { rule, metric_context } = req.body as {
+      rule: { field: string; operator: string; value: any };
+      metric_context: string;
+    };
+
+    if (!rule || !rule.field || !rule.operator) {
+      res.status(400).json({ error: 'rule.field and rule.operator are required' });
+      return;
+    }
+
+    // Build filter clause for the proposed rule
+    let fieldRef: string;
+    if (rule.field.startsWith('custom_fields.')) {
+      const key = rule.field.replace('custom_fields.', '');
+      fieldRef = `custom_fields->>'${key}'`;
+    } else {
+      fieldRef = rule.field;
+    }
+
+    let filterClause = '';
+    let filterParams: any[] = [];
+    if (rule.operator === 'eq' && rule.value != null) { filterClause = `${fieldRef} = $3`; filterParams = [rule.value]; }
+    else if (rule.operator === 'neq' && rule.value != null) { filterClause = `${fieldRef} != $3`; filterParams = [rule.value]; }
+    else if (rule.operator === 'contains' && rule.value != null) { filterClause = `${fieldRef} ILIKE $3`; filterParams = [`%${rule.value}%`]; }
+    else if (rule.operator === 'is_null') { filterClause = `${fieldRef} IS NULL`; }
+    else if (rule.operator === 'is_not_null') { filterClause = `${fieldRef} IS NOT NULL`; }
+    else { res.status(400).json({ error: `Unsupported operator: ${rule.operator}` }); return; }
+
+    // For win_rate context: calculate before/after
+    if (metric_context === 'win_rate') {
+      const baseWhere = `workspace_id = $1 AND stage_normalized IN ('closed_won', 'closed_lost') AND amount > 0`;
+      const before = await query<{ wins: string; total: string }>(
+        `SELECT COUNT(*) FILTER (WHERE stage_normalized = 'closed_won')::text as wins, COUNT(*)::text as total FROM deals WHERE ${baseWhere}`,
+        [workspaceId]
+      );
+      const bWins = parseInt(before.rows[0]?.wins || '0');
+      const bTotal = parseInt(before.rows[0]?.total || '0');
+      const beforeRate = bTotal > 0 ? bWins / bTotal : 0;
+
+      const afterWhere = filterClause ? `${baseWhere} AND NOT (${filterClause})` : baseWhere;
+      const after = await query<{ wins: string; total: string; affected: string }>(
+        `SELECT COUNT(*) FILTER (WHERE stage_normalized = 'closed_won')::text as wins,
+                COUNT(*)::text as total,
+                (SELECT COUNT(*) FROM deals WHERE workspace_id = $1 AND stage_normalized IN ('closed_won', 'closed_lost') AND ${filterClause || 'false'})::text as affected
+         FROM deals WHERE ${afterWhere}`,
+        filterParams.length > 0 ? [workspaceId, ...filterParams, ...filterParams] : [workspaceId]
+      ).catch(() => before);
+      const aWins = parseInt((after as any).rows[0]?.wins || '0');
+      const aTotal = parseInt((after as any).rows[0]?.total || '0');
+      const afterRate = aTotal > 0 ? aWins / aTotal : 0;
+      const affectedCount = parseInt((after as any).rows[0]?.affected || '0');
+
+      const affectedAmount = await query<{ amt: string }>(
+        filterClause
+          ? `SELECT COALESCE(SUM(amount), 0)::text as amt FROM deals WHERE workspace_id = $1 AND stage_normalized IN ('closed_won', 'closed_lost') AND (${filterClause})`
+          : `SELECT '0' as amt`,
+        filterParams.length > 0 ? [workspaceId, ...filterParams] : [workspaceId]
+      ).catch(() => ({ rows: [{ amt: '0' }] }));
+
+      res.json({
+        success: true,
+        affected_deals: affectedCount,
+        affected_amount: parseFloat(affectedAmount.rows[0]?.amt || '0'),
+        metric_before: { win_rate: Math.round(beforeRate * 1000) / 1000, sample_size: bTotal },
+        metric_after: { win_rate: Math.round(afterRate * 1000) / 1000, sample_size: aTotal },
+        impact_description: `Removes ${affectedCount} deal(s) from win rate calculation. Win rate changes from ${(beforeRate * 100).toFixed(1)}% to ${(afterRate * 100).toFixed(1)}%.`,
+      });
+    } else {
+      // For pipeline_value: before/after pipeline total
+      const before = await query<{ amt: string; cnt: string }>(
+        `SELECT COALESCE(SUM(amount), 0)::text as amt, COUNT(*)::text as cnt FROM deals WHERE workspace_id = $1 AND is_open = true`,
+        [workspaceId]
+      );
+      const bAmt = parseFloat(before.rows[0]?.amt || '0');
+      const bCnt = parseInt(before.rows[0]?.cnt || '0');
+
+      const affected = await query<{ cnt: string; amt: string }>(
+        filterClause
+          ? `SELECT COUNT(*)::text as cnt, COALESCE(SUM(amount), 0)::text as amt FROM deals WHERE workspace_id = $1 AND is_open = true AND (${filterClause})`
+          : `SELECT '0' as cnt, '0' as amt`,
+        filterParams.length > 0 ? [workspaceId, ...filterParams] : [workspaceId]
+      ).catch(() => ({ rows: [{ cnt: '0', amt: '0' }] }));
+
+      const affectedCnt = parseInt(affected.rows[0]?.cnt || '0');
+      const affectedAmt = parseFloat(affected.rows[0]?.amt || '0');
+
+      res.json({
+        success: true,
+        affected_deals: affectedCnt,
+        affected_amount: affectedAmt,
+        metric_before: { pipeline: bAmt, deal_count: bCnt },
+        metric_after: { pipeline: bAmt - affectedAmt, deal_count: bCnt - affectedCnt },
+        impact_description: `Removes ${affectedCnt} deal(s) ($${Math.round(affectedAmt / 1000)}K) from pipeline metrics.`,
+      });
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    res.status(500).json({ error: message });
+  }
+});
 
 export default router;

@@ -3,14 +3,20 @@ import { colors, fonts } from '../styles/theme';
 import { api } from '../lib/api';
 import Skeleton from '../components/Skeleton';
 
-type Tab = 'voice' | 'skills' | 'tokens' | 'learning' | 'quotas';
+type Tab = 'voice' | 'skills' | 'tokens' | 'learning' | 'quotas' | 'ws-general' | 'ws-stages' | 'ws-filters' | 'ws-team' | 'ws-thresholds' | 'ws-suggestions';
 
-const TABS: { key: Tab; label: string }[] = [
+const TABS: { key: Tab; label: string; section?: string }[] = [
   { key: 'voice', label: 'Voice & Tone' },
   { key: 'skills', label: 'Skills' },
   { key: 'tokens', label: 'Token Budget' },
   { key: 'learning', label: 'Learning' },
   { key: 'quotas', label: 'Quotas' },
+  { key: 'ws-general', label: 'General', section: 'workspace' },
+  { key: 'ws-stages', label: 'Pipeline & Stages', section: 'workspace' },
+  { key: 'ws-filters', label: 'Metric Filters', section: 'workspace' },
+  { key: 'ws-team', label: 'Team', section: 'workspace' },
+  { key: 'ws-thresholds', label: 'Thresholds', section: 'workspace' },
+  { key: 'ws-suggestions', label: 'Suggestions', section: 'workspace' },
 ];
 
 const CRON_PRESETS = [
@@ -49,8 +55,54 @@ export default function SettingsPage() {
         display: 'flex',
         flexDirection: 'column',
         padding: '8px 0',
+        overflowY: 'auto',
       }}>
-        {TABS.map(tab => {
+        {TABS.filter(t => !t.section).map(tab => {
+          const isActive = activeTab === tab.key;
+          return (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              style={{
+                display: 'block',
+                width: '100%',
+                textAlign: 'left',
+                padding: '10px 16px',
+                fontSize: 13,
+                fontWeight: isActive ? 600 : 400,
+                fontFamily: fonts.sans,
+                color: isActive ? colors.accent : colors.textSecondary,
+                background: isActive ? colors.accentSoft : 'transparent',
+                border: 'none',
+                borderLeft: isActive ? `3px solid ${colors.accent}` : '3px solid transparent',
+                cursor: 'pointer',
+                transition: 'background 0.12s, color 0.12s',
+              }}
+              onMouseEnter={e => {
+                if (!isActive) e.currentTarget.style.background = colors.surfaceHover;
+              }}
+              onMouseLeave={e => {
+                if (!isActive) e.currentTarget.style.background = 'transparent';
+              }}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+        <div style={{
+          padding: '12px 16px 4px',
+          fontSize: 10,
+          fontWeight: 700,
+          letterSpacing: '0.08em',
+          textTransform: 'uppercase',
+          color: colors.textMuted,
+          fontFamily: fonts.sans,
+          marginTop: 8,
+          borderTop: `1px solid ${colors.border}`,
+        }}>
+          Workspace
+        </div>
+        {TABS.filter(t => t.section === 'workspace').map(tab => {
           const isActive = activeTab === tab.key;
           return (
             <button
@@ -89,6 +141,12 @@ export default function SettingsPage() {
         {activeTab === 'tokens' && <TokensSection />}
         {activeTab === 'learning' && <LearningSection />}
         {activeTab === 'quotas' && <QuotasSection />}
+        {activeTab === 'ws-general' && <WsGeneralSection />}
+        {activeTab === 'ws-stages' && <WsPipelineStagesSection />}
+        {activeTab === 'ws-filters' && <WsMetricFiltersSection />}
+        {activeTab === 'ws-team' && <WsTeamSection />}
+        {activeTab === 'ws-thresholds' && <WsThresholdsSection />}
+        {activeTab === 'ws-suggestions' && <WsSuggestionsSection />}
       </div>
     </div>
   );
@@ -1940,6 +1998,882 @@ function QuotasSection() {
             </button>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Workspace Section Shared Styles ─────────────────────────────────────────
+
+const wsCard: React.CSSProperties = {
+  background: colors.surfaceRaised,
+  border: `1px solid ${colors.border}`,
+  borderRadius: 10,
+  padding: 20,
+  marginBottom: 16,
+};
+
+const wsInput: React.CSSProperties = {
+  padding: '8px 12px',
+  fontSize: 13,
+  fontFamily: fonts.sans,
+  background: colors.surface,
+  border: `1px solid ${colors.border}`,
+  borderRadius: 6,
+  color: colors.text,
+  outline: 'none',
+  width: '100%',
+  boxSizing: 'border-box' as const,
+};
+
+const wsSelect: React.CSSProperties = {
+  ...wsInput,
+  appearance: 'none' as const,
+  backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='%235a6578'%3E%3Cpath d='M6 8L0 0h12z'/%3E%3C/svg%3E")`,
+  backgroundRepeat: 'no-repeat',
+  backgroundPosition: 'right 10px center',
+  paddingRight: 30,
+};
+
+const wsBtn = (variant: 'default' | 'primary' | 'danger' | 'sm' = 'default'): React.CSSProperties => ({
+  padding: variant === 'sm' ? '5px 12px' : '8px 16px',
+  fontSize: variant === 'sm' ? 12 : 13,
+  fontWeight: 500,
+  fontFamily: fonts.sans,
+  border: variant === 'primary' ? 'none' : `1px solid ${colors.border}`,
+  borderRadius: 6,
+  background: variant === 'primary' ? colors.accent : variant === 'danger' ? colors.redSoft : 'transparent',
+  color: variant === 'primary' ? '#fff' : variant === 'danger' ? colors.red : colors.textSecondary,
+  cursor: 'pointer',
+  transition: 'all 0.15s',
+});
+
+const wsBadge = (color: string, bg: string): React.CSSProperties => ({
+  display: 'inline-block',
+  padding: '2px 8px',
+  borderRadius: 4,
+  fontSize: 11,
+  fontWeight: 600,
+  fontFamily: fonts.mono,
+  color,
+  background: bg,
+  letterSpacing: '0.02em',
+});
+
+const wsToggleStyle = (on: boolean): React.CSSProperties => ({
+  width: 40,
+  height: 22,
+  borderRadius: 11,
+  background: on ? colors.accent : colors.borderLight,
+  border: 'none',
+  cursor: 'pointer',
+  position: 'relative',
+  transition: 'background 0.2s',
+  flexShrink: 0,
+});
+
+const wsToggleDot = (on: boolean): React.CSSProperties => ({
+  width: 16,
+  height: 16,
+  borderRadius: 8,
+  background: '#fff',
+  position: 'absolute',
+  top: 3,
+  left: on ? 21 : 3,
+  transition: 'left 0.2s',
+  boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+});
+
+function WsToggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button style={wsToggleStyle(on)} onClick={() => onChange(!on)} aria-label="Toggle">
+      <div style={wsToggleDot(on)} />
+    </button>
+  );
+}
+
+function WsSectionHeader({ title, description, count }: { title: string; description?: string; count?: number }) {
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: colors.text, fontFamily: fonts.sans }}>{title}</h3>
+        {count !== undefined && (
+          <span style={wsBadge(colors.accent, colors.accentSoft)}>{count}</span>
+        )}
+      </div>
+      {description && (
+        <p style={{ margin: '4px 0 0', fontSize: 12.5, color: colors.textSecondary, fontFamily: fonts.sans, lineHeight: 1.5 }}>{description}</p>
+      )}
+    </div>
+  );
+}
+
+// ─── Workspace Tab: General ───────────────────────────────────────────────────
+
+function WsGeneralSection() {
+  const [config, setConfig] = useState({
+    timezone: 'America/New_York',
+    fiscal_start: 1,
+    quota_period: 'quarterly',
+    week_start: 1,
+  });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    api.get('/workspace-config').then((data: any) => {
+      const c = data.config?.cadence;
+      if (c) {
+        setConfig({
+          timezone: c.timezone || 'America/New_York',
+          fiscal_start: c.fiscal_year_start_month || 1,
+          quota_period: c.quota_period || 'quarterly',
+          week_start: c.week_start_day ?? 1,
+        });
+      }
+    }).catch(() => {}).finally(() => setLoading(false));
+  }, []);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await api.patch('/workspace-config/cadence', {
+        timezone: config.timezone,
+        fiscal_year_start_month: Number(config.fiscal_start),
+        quota_period: config.quota_period,
+        week_start_day: Number(config.week_start),
+        planning_cadence: 'weekly',
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e) {
+      // ignore
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const timezones = ['America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'America/Phoenix', 'Europe/London', 'Europe/Berlin', 'Asia/Tokyo', 'UTC'];
+  const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+  if (loading) return <Skeleton />;
+
+  return (
+    <div>
+      <WsSectionHeader title="Workspace Settings" description="General configuration for time handling, fiscal year, and quota periods." />
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        {[
+          {
+            label: 'Timezone', key: 'timezone' as const,
+            options: timezones.map(t => ({ label: t, value: t })),
+          },
+          {
+            label: 'Fiscal Year Start', key: 'fiscal_start' as const,
+            options: months.map((m, i) => ({ label: m, value: String(i + 1) })),
+          },
+          {
+            label: 'Quota Period', key: 'quota_period' as const,
+            options: [{ label: 'Monthly', value: 'monthly' }, { label: 'Quarterly', value: 'quarterly' }, { label: 'Annual', value: 'annual' }],
+          },
+          {
+            label: 'Week Starts On', key: 'week_start' as const,
+            options: days.map((d, i) => ({ label: d, value: String(i) })),
+          },
+        ].map(item => (
+          <div key={item.key} style={wsCard}>
+            <div style={{ fontSize: 13, fontWeight: 500, color: colors.text, fontFamily: fonts.sans, marginBottom: 8 }}>{item.label}</div>
+            <select
+              style={wsSelect}
+              value={String(config[item.key])}
+              onChange={e => setConfig({ ...config, [item.key]: isNaN(Number(e.target.value)) ? e.target.value : Number(e.target.value) } as any)}
+            >
+              {item.options.map(opt => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
+        {saved && <span style={{ fontSize: 13, color: colors.green, fontFamily: fonts.sans, alignSelf: 'center' }}>Saved</span>}
+        <button style={wsBtn('primary')} onClick={save} disabled={saving}>{saving ? 'Saving...' : 'Save Changes'}</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Workspace Tab: Pipeline & Stages ────────────────────────────────────────
+
+interface WsStage {
+  raw_stage: string;
+  stage_normalized: string;
+  is_open: boolean;
+  deal_count: number;
+  total_amount: number;
+  won_count: number;
+  lost_count: number;
+  is_excluded_from_pipeline: boolean;
+  is_excluded_from_win_rate: boolean;
+  is_excluded_from_forecast: boolean;
+}
+
+function WsPipelineStagesSection() {
+  const [stages, setStages] = useState<WsStage[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    api.get('/workspace-config/stages').then((data: any) => {
+      setStages(data.stages || []);
+    }).catch(() => {}).finally(() => setLoading(false));
+  }, []);
+
+  const toggleExclusion = (idx: number, field: 'is_excluded_from_pipeline' | 'is_excluded_from_win_rate' | 'is_excluded_from_forecast') => {
+    const next = [...stages];
+    next[idx] = { ...next[idx], [field]: !next[idx][field] };
+    setStages(next);
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const exclude_stages = stages.filter(s => s.is_excluded_from_pipeline).map(s => s.raw_stage);
+      const wr_exclude = stages.filter(s => s.is_excluded_from_win_rate).map(s => s.raw_stage);
+      const fc_exclude = stages.filter(s => s.is_excluded_from_forecast).map(s => s.raw_stage);
+      await api.patch('/workspace-config/tool_filters', {
+        global: { exclude_stages, exclude_pipelines: [], exclude_deal_types: [], custom_exclusions: [] },
+        metric_overrides: {
+          win_rate: { enabled: wr_exclude.length > 0, exclude_stages: wr_exclude },
+          pipeline_value: { enabled: false },
+          forecast: { enabled: fc_exclude.length > 0, exclude_stages: fc_exclude },
+          velocity: { enabled: false },
+          activity: { enabled: false },
+        },
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e) {
+      // ignore
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) return <Skeleton />;
+
+  return (
+    <div>
+      <WsSectionHeader title="Stage Configuration" description="Control which stages count for each metric type. Stages with $0 pipeline and pre-qualification stages are commonly excluded." />
+      <div style={{ ...wsCard, overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: fonts.sans, minWidth: 700 }}>
+          <thead>
+            <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
+              {['Stage', 'Normalized', 'Deals', 'Amount', 'Pipeline', 'Win Rate', 'Forecast'].map(h => (
+                <th key={h} style={{ padding: '8px 10px', fontSize: 11, fontWeight: 600, color: colors.textMuted, textAlign: 'left', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {stages.map((s, i) => {
+              const isClosed = !s.is_open;
+              const isWon = s.stage_normalized === 'closed_won';
+              const isLost = s.stage_normalized === 'closed_lost';
+              return (
+                <tr key={s.raw_stage} style={{ borderBottom: i < stages.length - 1 ? `1px solid ${colors.border}` : 'none', opacity: s.deal_count === 0 ? 0.5 : 1 }}>
+                  <td style={{ padding: '10px 10px', fontSize: 13, color: colors.text, fontWeight: 500 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ width: 8, height: 8, borderRadius: 4, background: isWon ? colors.green : isLost ? colors.red : colors.accent, flexShrink: 0 }} />
+                      {s.raw_stage}
+                    </div>
+                  </td>
+                  <td style={{ padding: '10px 10px' }}>
+                    <span style={{ fontSize: 11, fontFamily: fonts.mono, color: colors.textMuted, background: colors.surface, padding: '2px 6px', borderRadius: 3 }}>{s.stage_normalized}</span>
+                  </td>
+                  <td style={{ padding: '10px 10px', fontSize: 13, fontFamily: fonts.mono, color: colors.textSecondary }}>{s.deal_count}</td>
+                  <td style={{ padding: '10px 10px', fontSize: 13, fontFamily: fonts.mono, color: s.total_amount === 0 ? colors.textMuted : colors.textSecondary }}>
+                    {s.total_amount === 0 ? '$0' : `$${(s.total_amount / 1000).toFixed(0)}K`}
+                  </td>
+                  <td style={{ padding: '10px 10px' }}>
+                    {isClosed ? <span style={{ fontSize: 11, color: colors.textMuted }}>N/A</span> : (
+                      <WsToggle on={!s.is_excluded_from_pipeline} onChange={() => toggleExclusion(i, 'is_excluded_from_pipeline')} />
+                    )}
+                  </td>
+                  <td style={{ padding: '10px 10px' }}>
+                    {isWon ? <span style={wsBadge(colors.green, colors.greenSoft)}>Won</span>
+                      : isLost ? (
+                        <WsToggle on={!s.is_excluded_from_win_rate} onChange={() => toggleExclusion(i, 'is_excluded_from_win_rate')} />
+                      ) : s.is_open ? (
+                        <span style={{ fontSize: 11, color: colors.textMuted }}>—</span>
+                      ) : null}
+                  </td>
+                  <td style={{ padding: '10px 10px' }}>
+                    {isClosed ? <span style={{ fontSize: 11, color: colors.textMuted }}>N/A</span> : (
+                      <WsToggle on={!s.is_excluded_from_forecast} onChange={() => toggleExclusion(i, 'is_excluded_from_forecast')} />
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 12 }}>
+        {saved && <span style={{ fontSize: 13, color: colors.green, fontFamily: fonts.sans, alignSelf: 'center' }}>Filters saved</span>}
+        <button style={wsBtn('primary')} onClick={save} disabled={saving}>{saving ? 'Saving...' : 'Save Changes'}</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Workspace Tab: Metric Filters ───────────────────────────────────────────
+
+interface WsFilterRule {
+  id: string;
+  field: string;
+  operator: string;
+  value: string;
+  label: string;
+  created_by: string;
+  created_at: string;
+}
+
+interface WsFieldOption {
+  field: string;
+  label: string;
+  type: string;
+  values: string[];
+}
+
+interface WsPreviewData {
+  before: number;
+  after: number;
+  metric: string;
+  affected_deals: number;
+}
+
+function WsMetricFiltersSection() {
+  const [rules, setRules] = useState<WsFilterRule[]>([]);
+  const [fields, setFields] = useState<WsFieldOption[]>([]);
+  const [showBuilder, setShowBuilder] = useState(false);
+  const [newRule, setNewRule] = useState({ field: '', operator: 'eq', value: '', label: '' });
+  const [previewData, setPreviewData] = useState<WsPreviewData | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [expandedMetric, setExpandedMetric] = useState<string | null>(null);
+  const [metricOverrides, setMetricOverrides] = useState<Record<string, any>>({
+    win_rate: { enabled: false },
+    pipeline_value: { enabled: false },
+    forecast: { enabled: false },
+    velocity: { enabled: false },
+    activity: { enabled: false },
+  });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    Promise.all([
+      api.get('/workspace-config').catch(() => ({ config: {} })),
+      api.get('/workspace-config/field-options').catch(() => ({ fields: [] })),
+    ]).then(([cfgData, fieldData]: any[]) => {
+      const tf = cfgData.config?.tool_filters;
+      if (tf) {
+        setRules(tf.global?.custom_exclusions || []);
+        setMetricOverrides(tf.metric_overrides || metricOverrides);
+      }
+      setFields(fieldData.fields || []);
+    }).catch(() => {}).finally(() => setLoading(false));
+  }, []);
+
+  const selectedField = fields.find(f => f.field === newRule.field);
+
+  const previewImpact = async () => {
+    if (!newRule.field || !newRule.operator) return;
+    setPreviewLoading(true);
+    try {
+      const data: any = await api.post('/workspace-config/preview-filter', {
+        rule: { field: newRule.field, operator: newRule.operator, value: newRule.value },
+        metric_context: 'win_rate',
+      });
+      setPreviewData({
+        before: data.metric_before?.win_rate || 0,
+        after: data.metric_after?.win_rate || 0,
+        metric: 'Win Rate',
+        affected_deals: data.affected_deals || 0,
+      });
+    } catch (e) {
+      // ignore
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const addRule = () => {
+    if (!newRule.field || !newRule.label) return;
+    const rule: WsFilterRule = {
+      ...newRule,
+      id: `r${Date.now()}`,
+      created_by: 'admin',
+      created_at: new Date().toISOString().split('T')[0],
+    };
+    setRules([...rules, rule]);
+    setNewRule({ field: '', operator: 'eq', value: '', label: '' });
+    setShowBuilder(false);
+    setPreviewData(null);
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await api.patch('/workspace-config/tool_filters', {
+        global: {
+          exclude_stages: [],
+          exclude_pipelines: [],
+          exclude_deal_types: [],
+          custom_exclusions: rules,
+        },
+        metric_overrides: metricOverrides,
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e) {
+      // ignore
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const wsMetrics = [
+    { key: 'win_rate', label: 'Win Rate', desc: 'Controls which deals count in win/loss rate calculation' },
+    { key: 'pipeline_value', label: 'Pipeline Value', desc: 'Controls which deals count as active pipeline' },
+    { key: 'forecast', label: 'Forecast', desc: 'Controls which deals appear in forecast models' },
+    { key: 'velocity', label: 'Velocity', desc: 'Controls which stage transitions count in velocity benchmarks' },
+    { key: 'activity', label: 'Activity', desc: 'Controls which activities count in engagement scoring' },
+  ];
+
+  if (loading) return <Skeleton />;
+
+  return (
+    <div>
+      <WsSectionHeader
+        title="Global Exclusions"
+        description="These rules apply to ALL pipeline and forecasting tools. Deals matching any rule are excluded from every metric."
+        count={rules.length}
+      />
+
+      <div style={wsCard}>
+        {rules.map((r, i) => (
+          <div key={r.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', borderBottom: i < rules.length - 1 ? `1px solid ${colors.border}` : 'none' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 6, height: 6, borderRadius: 3, background: colors.red }} />
+              <div>
+                <div style={{ fontSize: 13, color: colors.text, fontFamily: fonts.sans }}>
+                  <span style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.accent, background: colors.accentSoft, padding: '1px 5px', borderRadius: 3, marginRight: 6 }}>
+                    {fields.find(f => f.field === r.field)?.label || r.field}
+                  </span>
+                  <span style={{ color: colors.textSecondary }}>{r.operator === 'eq' ? '=' : r.operator}</span>
+                  <span style={{ color: colors.yellow, fontFamily: fonts.mono, fontSize: 12, marginLeft: 4 }}>"{r.value}"</span>
+                </div>
+                <div style={{ fontSize: 11.5, color: colors.textMuted, marginTop: 3, fontFamily: fonts.sans }}>{r.label} · {r.created_by} · {r.created_at}</div>
+              </div>
+            </div>
+            <button style={wsBtn('sm')} onClick={() => setRules(rules.filter(x => x.id !== r.id))}>Remove</button>
+          </div>
+        ))}
+
+        {rules.length === 0 && (
+          <div style={{ padding: 20, textAlign: 'center', color: colors.textMuted, fontSize: 13, fontFamily: fonts.sans }}>
+            No global exclusion rules configured
+          </div>
+        )}
+
+        {!showBuilder ? (
+          <button
+            style={{ ...wsBtn(), marginTop: 12, width: '100%', textAlign: 'center', borderStyle: 'dashed' }}
+            onClick={() => setShowBuilder(true)}
+          >
+            + Add Exclusion Rule
+          </button>
+        ) : (
+          <div style={{ marginTop: 12, padding: 16, background: colors.surface, borderRadius: 8, border: `1px solid ${colors.borderLight}` }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: colors.textSecondary, marginBottom: 12, fontFamily: fonts.sans, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              New Exclusion Rule
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px 1fr', gap: 10, marginBottom: 10 }}>
+              <select style={wsSelect} value={newRule.field} onChange={e => { setNewRule({ ...newRule, field: e.target.value, value: '' }); setPreviewData(null); }}>
+                <option value="">Select field...</option>
+                <optgroup label="Standard Fields">
+                  {fields.filter(f => !f.field.startsWith('custom')).map(f => <option key={f.field} value={f.field}>{f.label}</option>)}
+                </optgroup>
+                {fields.some(f => f.field.startsWith('custom')) && (
+                  <optgroup label="Custom Fields">
+                    {fields.filter(f => f.field.startsWith('custom')).map(f => <option key={f.field} value={f.field}>{f.label}</option>)}
+                  </optgroup>
+                )}
+              </select>
+              <select style={wsSelect} value={newRule.operator} onChange={e => setNewRule({ ...newRule, operator: e.target.value })}>
+                <option value="eq">equals</option>
+                <option value="neq">not equals</option>
+                <option value="contains">contains</option>
+                <option value="in">in list</option>
+                <option value="is_null">is empty</option>
+                <option value="is_not_null">is not empty</option>
+                {selectedField?.type === 'number' && <option value="gt">greater than</option>}
+                {selectedField?.type === 'number' && <option value="lt">less than</option>}
+              </select>
+              {newRule.operator !== 'is_null' && newRule.operator !== 'is_not_null' && (
+                selectedField && selectedField.values && selectedField.values.length > 0 ? (
+                  <select style={wsSelect} value={newRule.value} onChange={e => setNewRule({ ...newRule, value: e.target.value })}>
+                    <option value="">Select value...</option>
+                    {selectedField.values.map(v => <option key={v} value={v}>{v}</option>)}
+                  </select>
+                ) : (
+                  <input style={wsInput} placeholder="Value..." value={newRule.value} onChange={e => setNewRule({ ...newRule, value: e.target.value })} />
+                )
+              )}
+            </div>
+            <input
+              style={{ ...wsInput, marginBottom: 10 }}
+              placeholder='Label (e.g. "Exclude duplicate opportunities")'
+              value={newRule.label}
+              onChange={e => setNewRule({ ...newRule, label: e.target.value })}
+            />
+
+            {previewData && (
+              <div style={{ ...wsCard, background: colors.accentSoft, borderColor: colors.accent, padding: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+                  <span style={{ fontSize: 12, color: colors.textSecondary, fontFamily: fonts.sans }}>Impact Preview</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 14, fontFamily: fonts.mono, color: colors.textMuted, textDecoration: 'line-through' }}>{(previewData.before * 100).toFixed(1)}%</span>
+                    <span style={{ fontSize: 12, color: colors.textMuted }}>→</span>
+                    <span style={{ fontSize: 14, fontFamily: fonts.mono, fontWeight: 600, color: previewData.after > previewData.before ? colors.green : colors.red }}>{(previewData.after * 100).toFixed(1)}%</span>
+                  </div>
+                  <span style={{ fontSize: 12, color: colors.textSecondary, fontFamily: fonts.sans }}>{previewData.affected_deals} deals affected</span>
+                </div>
+                <span style={{ fontSize: 12, color: colors.textSecondary, fontFamily: fonts.sans }}>{previewData.metric}</span>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 10 }}>
+              <button style={wsBtn()} onClick={previewImpact} disabled={previewLoading}>{previewLoading ? 'Loading...' : 'Preview Impact'}</button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button style={wsBtn()} onClick={() => { setShowBuilder(false); setPreviewData(null); }}>Cancel</button>
+                <button style={wsBtn('primary')} onClick={addRule}>Add Rule</button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div style={{ marginTop: 28 }}>
+        <WsSectionHeader title="Metric-Specific Overrides" description="Fine-tune which deals count for each individual metric. These extend the global exclusions above." />
+      </div>
+
+      {wsMetrics.map(m => {
+        const override = metricOverrides[m.key] || { enabled: false };
+        const isExpanded = expandedMetric === m.key;
+        return (
+          <div key={m.key} style={{ ...wsCard, padding: 0, marginBottom: 8, cursor: 'pointer', transition: 'border-color 0.15s', borderColor: isExpanded ? colors.borderLight : colors.border }}>
+            <div
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px' }}
+              onClick={() => setExpandedMetric(isExpanded ? null : m.key)}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div>
+                  <div style={{ fontSize: 13.5, fontWeight: 500, color: colors.text, fontFamily: fonts.sans }}>{m.label}</div>
+                  <div style={{ fontSize: 11.5, color: colors.textMuted, fontFamily: fonts.sans }}>{m.desc}</div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                {override.enabled && (
+                  <span style={wsBadge(colors.yellow, colors.yellowSoft)}>
+                    {(override.exclude_stages?.length || 0) + (override.additional_exclusions?.length || 0)} rules
+                  </span>
+                )}
+                <WsToggle on={override.enabled} onChange={v => {
+                  setMetricOverrides({ ...metricOverrides, [m.key]: { ...override, enabled: v } });
+                }} />
+                <span style={{ fontSize: 14, color: colors.textMuted, transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s', display: 'inline-block' }}>▼</span>
+              </div>
+            </div>
+            {isExpanded && override.enabled && (
+              <div style={{ padding: '0 18px 16px', borderTop: `1px solid ${colors.border}` }}>
+                <div style={{ marginTop: 14, fontSize: 12.5, color: colors.textSecondary, fontFamily: fonts.sans }}>
+                  Override enabled. Use the Global Exclusions above to add rules that apply to this metric.
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 12 }}>
+        {saved && <span style={{ fontSize: 13, color: colors.green, fontFamily: fonts.sans, alignSelf: 'center' }}>Saved</span>}
+        <button style={wsBtn('primary')} onClick={save} disabled={saving}>{saving ? 'Saving...' : 'Save Filters'}</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Workspace Tab: Team ──────────────────────────────────────────────────────
+
+interface WsOwner {
+  owner_name: string;
+  total_deals: number;
+  open_deals: number;
+  open_pipeline: number;
+  is_excluded: boolean;
+  role: string;
+}
+
+function WsTeamSection() {
+  const [owners, setOwners] = useState<WsOwner[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const roles = ['AE', 'SDR', 'Manager', 'VP Sales', 'System', 'Other'];
+
+  useEffect(() => {
+    api.get('/workspace-config/owners').then((data: any) => {
+      setOwners(data.owners || []);
+    }).catch(() => {}).finally(() => setLoading(false));
+  }, []);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const excluded_owners = owners.filter(o => o.is_excluded).map(o => o.owner_name);
+      const rolesMap: Record<string, string> = {};
+      owners.forEach(o => { rolesMap[o.owner_name] = o.role; });
+      await api.patch('/workspace-config/teams', {
+        rep_field: 'owner',
+        roles: [],
+        groups: [],
+        excluded_owners,
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e) {
+      // ignore
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) return <Skeleton />;
+
+  return (
+    <div>
+      <WsSectionHeader title="Team Members" description="Configure which deal owners are included in rep-level metrics. Exclude system accounts, managers, and VPs who shouldn't appear in leaderboards." />
+      <div style={wsCard}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: fonts.sans }}>
+          <thead>
+            <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
+              {['Name', 'Role', 'Open Deals', 'Pipeline', 'In Metrics'].map(h => (
+                <th key={h} style={{ padding: '8px 10px', fontSize: 11, fontWeight: 600, color: colors.textMuted, textAlign: 'left', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {owners.map((o, i) => (
+              <tr key={o.owner_name} style={{ borderBottom: i < owners.length - 1 ? `1px solid ${colors.border}` : 'none', opacity: o.is_excluded ? 0.6 : 1 }}>
+                <td style={{ padding: '10px 10px', fontSize: 13, color: colors.text, fontWeight: 500 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div style={{ width: 28, height: 28, borderRadius: 14, background: !o.is_excluded ? colors.accentSoft : colors.surface, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, color: !o.is_excluded ? colors.accent : colors.textMuted, fontFamily: fonts.sans }}>
+                      {o.owner_name.split(' ').map((w: string) => w[0]).join('')}
+                    </div>
+                    {o.owner_name}
+                  </div>
+                </td>
+                <td style={{ padding: '10px 10px' }}>
+                  <select
+                    style={{ ...wsSelect, width: 100, padding: '4px 8px', fontSize: 12 }}
+                    value={o.role}
+                    onChange={e => { const next = [...owners]; next[i] = { ...next[i], role: e.target.value }; setOwners(next); }}
+                  >
+                    {roles.map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                </td>
+                <td style={{ padding: '10px 10px', fontSize: 13, fontFamily: fonts.mono, color: colors.textSecondary }}>{o.open_deals}</td>
+                <td style={{ padding: '10px 10px', fontSize: 13, fontFamily: fonts.mono, color: colors.textSecondary }}>${(o.open_pipeline / 1000).toFixed(0)}K</td>
+                <td style={{ padding: '10px 10px' }}>
+                  <WsToggle on={!o.is_excluded} onChange={v => { const next = [...owners]; next[i] = { ...next[i], is_excluded: !v }; setOwners(next); }} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 12 }}>
+        {saved && <span style={{ fontSize: 13, color: colors.green, fontFamily: fonts.sans, alignSelf: 'center' }}>Saved</span>}
+        <button style={wsBtn('primary')} onClick={save} disabled={saving}>{saving ? 'Saving...' : 'Save Changes'}</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Workspace Tab: Thresholds ────────────────────────────────────────────────
+
+function WsThresholdsSection() {
+  const [thresholds, setThresholds] = useState({
+    stale_deal_days: 14,
+    critical_stale_days: 30,
+    coverage_target: 3.0,
+    min_contacts: 2,
+  });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    api.get('/workspace-config').then((data: any) => {
+      const t = data.config?.thresholds;
+      if (t) {
+        setThresholds({
+          stale_deal_days: typeof t.stale_deal_days === 'number' ? t.stale_deal_days : 14,
+          critical_stale_days: typeof t.critical_stale_days === 'number' ? t.critical_stale_days : 30,
+          coverage_target: typeof t.coverage_target === 'number' ? t.coverage_target : 3.0,
+          min_contacts: t.minimum_contacts_per_deal ?? 2,
+        });
+      }
+    }).catch(() => {}).finally(() => setLoading(false));
+  }, []);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await api.patch('/workspace-config/thresholds', {
+        stale_deal_days: thresholds.stale_deal_days,
+        critical_stale_days: thresholds.critical_stale_days,
+        coverage_target: thresholds.coverage_target,
+        minimum_contacts_per_deal: thresholds.min_contacts,
+        required_fields: [
+          { field: 'amount', object: 'deals' },
+          { field: 'close_date', object: 'deals' },
+        ],
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e) {
+      // ignore
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const items = [
+    { key: 'stale_deal_days' as const, label: 'Stale Deal Threshold', unit: 'days', desc: 'Deals with no activity for longer than this are flagged as stale', min: 1, max: 120, step: 1 },
+    { key: 'critical_stale_days' as const, label: 'Critical Stale Threshold', unit: 'days', desc: 'Deals exceeding this threshold are escalated as critical', min: 1, max: 180, step: 1 },
+    { key: 'coverage_target' as const, label: 'Pipeline Coverage Target', unit: '×', desc: 'Required pipeline-to-quota ratio for healthy coverage', min: 1, max: 10, step: 0.5 },
+    { key: 'min_contacts' as const, label: 'Minimum Contacts per Deal', unit: 'contacts', desc: 'Deals with fewer contacts than this are flagged as single-threaded', min: 1, max: 10, step: 1 },
+  ];
+
+  if (loading) return <Skeleton />;
+
+  return (
+    <div>
+      <WsSectionHeader title="Thresholds & Benchmarks" description="Adjust the numeric thresholds used by pipeline hygiene, coverage, and engagement skills." />
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        {items.map(item => (
+          <div key={item.key} style={wsCard}>
+            <div style={{ fontSize: 13, fontWeight: 500, color: colors.text, fontFamily: fonts.sans, marginBottom: 4 }}>{item.label}</div>
+            <div style={{ fontSize: 11.5, color: colors.textMuted, fontFamily: fonts.sans, marginBottom: 14, lineHeight: 1.4 }}>{item.desc}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <input
+                type="range"
+                min={item.min}
+                max={item.max}
+                step={item.step}
+                value={thresholds[item.key]}
+                onChange={e => setThresholds({ ...thresholds, [item.key]: Number(e.target.value) })}
+                style={{ flex: 1, accentColor: colors.accent }}
+              />
+              <div style={{ minWidth: 60, textAlign: 'right' }}>
+                <span style={{ fontSize: 20, fontWeight: 700, fontFamily: fonts.mono, color: colors.text }}>{thresholds[item.key]}</span>
+                <span style={{ fontSize: 11, color: colors.textMuted, fontFamily: fonts.sans, marginLeft: 3 }}>{item.unit}</span>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 12 }}>
+        {saved && <span style={{ fontSize: 13, color: colors.green, fontFamily: fonts.sans, alignSelf: 'center' }}>Saved</span>}
+        <button style={wsBtn('primary')} onClick={save} disabled={saving}>{saving ? 'Saving...' : 'Save Changes'}</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Workspace Tab: Suggestions ───────────────────────────────────────────────
+
+interface WsSuggestion {
+  id: string;
+  skill: string;
+  confidence: number;
+  message: string;
+  impact: string;
+  suggested_rule?: any;
+}
+
+function WsSuggestionsSection() {
+  const [suggestions, setSuggestions] = useState<WsSuggestion[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.get('/workspace-config/suggestions').then((data: any) => {
+      setSuggestions(data.suggestions || []);
+    }).catch(() => { setSuggestions([]); }).finally(() => setLoading(false));
+  }, []);
+
+  const dismiss = (id: string) => setSuggestions(suggestions.filter(s => s.id !== id));
+
+  const accept = async (s: WsSuggestion) => {
+    if (!s.suggested_rule) { dismiss(s.id); return; }
+    try {
+      await api.post(`/workspace-config/suggestions/${s.id}/resolve`, { action: 'accept' });
+    } catch (e) {
+      // ignore
+    }
+    dismiss(s.id);
+  };
+
+  if (loading) return <Skeleton />;
+
+  return (
+    <div>
+      <WsSectionHeader
+        title="AI Suggestions"
+        description="Pandora's skills analyze your data and suggest configuration improvements. Review and apply with one click."
+        count={suggestions.length}
+      />
+
+      {suggestions.length === 0 ? (
+        <div style={{ ...wsCard, padding: 40, textAlign: 'center' }}>
+          <div style={{ fontSize: 14, color: colors.text, fontFamily: fonts.sans, fontWeight: 500, marginBottom: 4 }}>All caught up</div>
+          <div style={{ fontSize: 12.5, color: colors.textMuted, fontFamily: fonts.sans }}>New suggestions appear as skills identify configuration improvements</div>
+        </div>
+      ) : (
+        suggestions.map(s => (
+          <div key={s.id} style={{ ...wsCard, borderLeft: `3px solid ${s.confidence > 0.85 ? colors.accent : colors.yellow}` }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: colors.accent, fontFamily: fonts.sans }}>{s.skill}</span>
+              <span style={wsBadge(s.confidence > 0.85 ? colors.green : colors.yellow, s.confidence > 0.85 ? colors.greenSoft : colors.yellowSoft)}>
+                {(s.confidence * 100).toFixed(0)}% confidence
+              </span>
+            </div>
+            <p style={{ margin: '0 0 10px', fontSize: 13.5, color: colors.text, fontFamily: fonts.sans, lineHeight: 1.6 }}>{s.message}</p>
+            <div style={{ padding: '8px 12px', background: colors.surface, borderRadius: 6, marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 12, color: colors.textMuted, fontFamily: fonts.sans }}>Impact:</span>
+              <span style={{ fontSize: 12.5, color: colors.green, fontFamily: fonts.sans, fontWeight: 500 }}>{s.impact}</span>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button style={wsBtn('primary')} onClick={() => accept(s)}>Accept & Apply</button>
+              <button style={wsBtn()} onClick={() => dismiss(s.id)}>Dismiss</button>
+            </div>
+          </div>
+        ))
       )}
     </div>
   );

@@ -65,6 +65,21 @@ export function getDefaultConfig(workspaceId: string): WorkspaceConfig & { _meta
       framing: 'balanced',
       alert_threshold: 'watch_and_act',
     },
+    tool_filters: {
+      global: {
+        exclude_stages: [],
+        exclude_pipelines: [],
+        exclude_deal_types: [],
+        custom_exclusions: [],
+      },
+      metric_overrides: {
+        win_rate: { enabled: false },
+        pipeline_value: { enabled: false },
+        forecast: { enabled: false },
+        velocity: { enabled: false },
+        activity: { enabled: false },
+      },
+    },
     updated_at: new Date(),
     confirmed: false,
     _meta: {},
