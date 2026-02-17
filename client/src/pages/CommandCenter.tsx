@@ -232,7 +232,12 @@ export default function CommandCenter() {
     setStageFilterLoading(true);
 
     // New: open drilldown panel
-    const stageRow = stageData.find(s => s.stage === stageName || s.stage_normalized === stageName);
+    const stageRow = stageData.find(s =>
+      s.stage === stageName ||
+      s.stage_normalized === stageName ||
+      s.stage === d?.stage ||
+      s.stage_normalized === d?.stage_normalized
+    );
     setSelectedStageData(null);
     setStageDealsLoading(true);
     setAskingAbout(null);
@@ -409,6 +414,9 @@ export default function CommandCenter() {
             {findingSummary}
           </div>
         )}
+        <div style={{ marginTop: 6, fontSize: 10, color: colors.textMuted, fontFamily: fonts.sans }}>
+          Click to drill down → Ask Pandora
+        </div>
       </div>
     );
   };
@@ -549,8 +557,11 @@ export default function CommandCenter() {
                     cursor="pointer"
                     onClick={(data: any) => handleBarClick(data)}
                   >
-                    {stageData.map((_, idx) => (
-                      <Cell key={idx} fill={colors.accent} />
+                    {stageData.map((entry, idx) => (
+                      <Cell
+                        key={idx}
+                        fill={selectedStageData?.stage === entry.stage ? '#60a5fa' : colors.accent}
+                      />
                     ))}
                   </Bar>
                 </BarChart>
@@ -570,6 +581,7 @@ export default function CommandCenter() {
                         padding: '4px 4px',
                         borderRadius: 4,
                         transition: 'background 0.12s',
+                        justifyContent: 'space-between',
                       }}
                       onClick={() => handleExpandStage(stage.stage_normalized || stage.stage)}
                       onMouseEnter={e => (e.currentTarget.style.background = colors.surfaceHover)}
@@ -591,6 +603,29 @@ export default function CommandCenter() {
                             <span style={{ fontSize: 10, fontFamily: fonts.mono, color: severityColor('watch') }}>{stage.findings!.watch}</span>
                           </span>
                         )}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleBarClick({ stage: stage.stage, stage_normalized: stage.stage_normalized });
+                            setTimeout(() => {
+                              handleAskPandora(`What's the risk profile for deals in ${stage.stage}?`, { type: 'stage', stage: stage.stage });
+                            }, 100);
+                          }}
+                          style={{
+                            marginLeft: 4,
+                            padding: '2px 8px',
+                            fontSize: 10,
+                            background: 'none',
+                            border: `1px solid ${colors.border}`,
+                            borderRadius: 4,
+                            color: colors.accent,
+                            cursor: 'pointer',
+                            flexShrink: 0,
+                          }}
+                          title={`Ask Pandora about ${stage.stage}`}
+                        >
+                          Ask
+                        </button>
                       </div>
                     </div>
                   ))}
