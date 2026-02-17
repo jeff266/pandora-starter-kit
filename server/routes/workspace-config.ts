@@ -639,8 +639,18 @@ router.get('/:workspaceId/workspace-config/field-options', async (req, res) => {
              GROUP BY val ORDER BY cnt::int DESC LIMIT 50`,
             [workspaceId]
           ).catch(() => ({ rows: [] as any[] }));
-          const values = vals.rows.map((r: { val: string; cnt: string }) => r.val).filter(Boolean);
-          return { ...f, values: values.length < 50 ? values : [] };
+          const withCounts = vals.rows
+            .map((r: { val: string; cnt: string }) => ({ val: r.val || '(empty)', count: parseInt(r.cnt) }))
+            .filter(v => v.val !== '');
+          // Also check for null values
+          const nullRow = await query<{ cnt: string }>(
+            `SELECT COUNT(*)::text as cnt FROM deals
+             WHERE workspace_id = $1 AND (${colRef} IS NULL OR ${colRef} = '')`,
+            [workspaceId]
+          ).catch(() => ({ rows: [{ cnt: '0' }] }));
+          const nullCount = parseInt(nullRow.rows[0]?.cnt || '0');
+          if (nullCount > 0) withCounts.push({ val: '(empty)', count: nullCount });
+          return { ...f, values: withCounts.length < 50 ? withCounts : [] };
         } catch { return { ...f, values: [] }; }
       })
     );

@@ -2224,10 +2224,16 @@ function WsPipelineStagesSection() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [pipelines, setPipelines] = useState<{ val: string; count: number }[]>([]);
 
   useEffect(() => {
-    api.get('/workspace-config/stages').then((data: any) => {
-      setStages(data.stages || []);
+    Promise.all([
+      api.get('/workspace-config/stages').catch(() => ({ stages: [] })),
+      api.get('/workspace-config/field-options').catch(() => ({ fields: [] })),
+    ]).then(([stageData, fieldData]: any[]) => {
+      setStages(stageData.stages || []);
+      const pipelineField = (fieldData.fields || []).find((f: any) => f.field === 'pipeline');
+      setPipelines(pipelineField?.values || []);
     }).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
@@ -2266,6 +2272,19 @@ function WsPipelineStagesSection() {
 
   return (
     <div>
+      {pipelines.length > 0 && (
+        <div style={{ marginBottom: 28 }}>
+          <WsSectionHeader title="Pipelines" description="Active pipelines detected in your CRM." />
+          <div style={wsCard}>
+            {pipelines.map((p, i) => (
+              <div key={p.val} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 0', borderBottom: i < pipelines.length - 1 ? `1px solid ${colors.border}` : 'none' }}>
+                <span style={{ fontSize: 13, color: colors.text, fontFamily: fonts.sans }}>{p.val}</span>
+                <span style={{ fontSize: 12, fontFamily: fonts.mono, color: colors.textMuted }}>{p.count} deals</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       <WsSectionHeader title="Stage Configuration" description="Control which stages count for each metric type. Stages with $0 pipeline and pre-qualification stages are commonly excluded." />
       <div style={{ ...wsCard, overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: fonts.sans, minWidth: 700 }}>
@@ -2334,7 +2353,7 @@ interface WsFilterRule {
   id: string;
   field: string;
   operator: string;
-  value: string;
+  value: string | string[];
   label: string;
   created_by: string;
   created_at: string;
@@ -2344,7 +2363,7 @@ interface WsFieldOption {
   field: string;
   label: string;
   type: string;
-  values: string[];
+  values: { val: string; count: number }[];
 }
 
 interface WsPreviewData {
@@ -2358,7 +2377,7 @@ function WsMetricFiltersSection() {
   const [rules, setRules] = useState<WsFilterRule[]>([]);
   const [fields, setFields] = useState<WsFieldOption[]>([]);
   const [showBuilder, setShowBuilder] = useState(false);
-  const [newRule, setNewRule] = useState({ field: '', operator: 'eq', value: '', label: '' });
+  const [newRule, setNewRule] = useState<{ field: string; operator: string; value: string | string[]; label: string }>({ field: '', operator: 'eq', value: '', label: '' });
   const [previewData, setPreviewData] = useState<WsPreviewData | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [expandedMetric, setExpandedMetric] = useState<string | null>(null);
@@ -2414,6 +2433,7 @@ function WsMetricFiltersSection() {
     if (!newRule.field || !newRule.label) return;
     const rule: WsFilterRule = {
       ...newRule,
+      value: Array.isArray(newRule.value) ? (newRule.value as string[]).join(',') : newRule.value as string,
       id: `r${Date.now()}`,
       created_by: 'admin',
       created_at: new Date().toISOString().split('T')[0],
@@ -2474,7 +2494,9 @@ function WsMetricFiltersSection() {
                     {fields.find(f => f.field === r.field)?.label || r.field}
                   </span>
                   <span style={{ color: colors.textSecondary }}>{r.operator === 'eq' ? '=' : r.operator}</span>
-                  <span style={{ color: colors.yellow, fontFamily: fonts.mono, fontSize: 12, marginLeft: 4 }}>"{r.value}"</span>
+                  <span style={{ color: colors.yellow, fontFamily: fonts.mono, fontSize: 12, marginLeft: 4 }}>
+                    {r.operator === 'is_null' || r.operator === 'is_not_null' ? '' : `"${r.value}"`}
+                  </span>
                 </div>
                 <div style={{ fontSize: 11.5, color: colors.textMuted, marginTop: 3, fontFamily: fonts.sans }}>{r.label} · {r.created_by} · {r.created_at}</div>
               </div>
@@ -2523,16 +2545,41 @@ function WsMetricFiltersSection() {
                 {selectedField?.type === 'number' && <option value="gt">greater than</option>}
                 {selectedField?.type === 'number' && <option value="lt">less than</option>}
               </select>
-              {newRule.operator !== 'is_null' && newRule.operator !== 'is_not_null' && (
-                selectedField && selectedField.values && selectedField.values.length > 0 ? (
-                  <select style={wsSelect} value={newRule.value} onChange={e => setNewRule({ ...newRule, value: e.target.value })}>
-                    <option value="">Select value...</option>
-                    {selectedField.values.map(v => <option key={v} value={v}>{v}</option>)}
-                  </select>
+              { newRule.operator === 'is_null' || newRule.operator === 'is_not_null' ? null : (
+                newRule.operator === 'in' || newRule.operator === 'not_in' ? (
+                  selectedField && selectedField.values.length > 0 ? (
+                    <div style={{ border: `1px solid ${colors.border}`, borderRadius: 6, padding: '6px 10px', maxHeight: 140, overflowY: 'auto', background: colors.bg }}>
+                      {selectedField.values.map(v => {
+                        const checked = Array.isArray(newRule.value) && (newRule.value as string[]).includes(v.val);
+                        return (
+                          <label key={v.val} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0', cursor: 'pointer', fontSize: 13, fontFamily: fonts.sans, color: colors.text }}>
+                            <input type="checkbox" checked={checked} onChange={() => {
+                              const cur = Array.isArray(newRule.value) ? (newRule.value as string[]) : [];
+                              const next = checked ? cur.filter(x => x !== v.val) : [...cur, v.val];
+                              setNewRule({ ...newRule, value: next });
+                            }} />
+                            <span>{v.val}</span>
+                            <span style={{ fontSize: 11, color: colors.textMuted, marginLeft: 'auto' }}>{v.count}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <input style={wsInput} placeholder="Comma-separated values..." value={Array.isArray(newRule.value) ? (newRule.value as string[]).join(', ') : newRule.value as string} onChange={e => setNewRule({ ...newRule, value: e.target.value.split(',').map((s: string) => s.trim()) })} />
+                  )
                 ) : (
-                  <input style={wsInput} placeholder="Value..." value={newRule.value} onChange={e => setNewRule({ ...newRule, value: e.target.value })} />
+                  selectedField && selectedField.values.length > 0 ? (
+                    <select style={wsSelect} value={newRule.value as string} onChange={e => setNewRule({ ...newRule, value: e.target.value })}>
+                      <option value="">Select value...</option>
+                      {selectedField.values.map(v => (
+                        <option key={v.val} value={v.val}>{v.val} ({v.count})</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input style={wsInput} placeholder="Value..." value={newRule.value as string} onChange={e => setNewRule({ ...newRule, value: e.target.value })} />
+                  )
                 )
-              )}
+              ) }
             </div>
             <input
               style={{ ...wsInput, marginBottom: 10 }}
