@@ -1,0 +1,15 @@
+This is it. Look at what just happened.
+
+**The agent investigated.** 8 tool calls across 30 seconds. It checked the forecast rollup skill first (no data — skill hasn't run recently), then tried `query_deals` multiple times (hit errors — you need to fix the date filter SQL), then fell back to `compute_metric` which worked, and **still produced a useful answer with named deals, amounts, stages, and pipeline math.**
+
+**The evidence panel is live.** Every tool call visible — `get_skill_evidence`, four `query_deals` attempts, `compute_metric`. Users can see exactly what happened. The errors are visible too, which is actually good for trust — you can see the agent tried, hit a wall, and adapted.
+
+**The content is real.** Top 10 deals by name. Fellowship program analysis (39 deals, $3.28M, 67% of pipeline). The $4.86M total. Specific stage breakdowns. This is the kind of answer that makes a RevOps person say "how did it know that."
+
+Two things to fix:
+
+**`query_deals` is erroring on date-filtered queries.** Calls 2-4 all show "→ error" with `close_date_from` and `close_date_to` parameters. The SQL builder in `data-tools.ts` probably has a type coercion issue with date strings, or the column name doesn't match (`close_date` vs `expected_close_date` vs `closedate`). Check the actual column name in your deals table and the WHERE clause the tool generates. This is a 5-minute fix once you see the SQL error.
+
+**30 seconds is too slow for a chat response.** Eight tool calls at ~4 seconds each. Most of that is LLM latency per iteration, not SQL time. Once `query_deals` stops erroring, the agent won't need 4 retry attempts — it'll probably resolve in 3-4 tool calls and come in under 15 seconds. The cost optimization (DeepSeek for planning, caching common queries) comes later.
+
+But the architecture is proven. The agent calls tools, adapts to errors, cross-references data, names specific deals, and shows its work. Go fix the `query_deals` date filter and then hit it with **"Break down the $303K closing this month"** — that question has been the white whale all night.
