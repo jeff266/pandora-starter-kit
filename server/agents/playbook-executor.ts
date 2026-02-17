@@ -22,6 +22,8 @@ import {
   createTask as sfCreateTask,
   updateContactField as sfUpdateContactField,
 } from '../connectors/salesforce/salesforce-writer.js';
+import { findSlackUserForCRMOwner } from '../identity/reverse-lookup.js';
+import { getSlackAppClient } from '../connectors/slack/slack-app-client.js';
 
 const logger = createLogger('PlaybookExecutor');
 
@@ -179,6 +181,66 @@ async function handleUpdateContactField(
   return { action_type: 'update_contact_field', success: false, source_id: null, error: `Unsupported CRM source: ${crm.source}` };
 }
 
+async function handleNotifyRep(
+  workspaceId: string,
+  params: Record<string, any>
+): Promise<PlaybookStepResult> {
+  const { owner_email, message, entity_name, severity } = params;
+  if (!owner_email) {
+    return { action_type: 'notify_rep', success: false, source_id: null, error: 'Missing owner_email' };
+  }
+
+  const slackUserId = await findSlackUserForCRMOwner(workspaceId, owner_email);
+  if (!slackUserId) {
+    logger.warn('No Slack user found for rep', { owner_email });
+    return { action_type: 'notify_rep', success: false, source_id: null, error: `No Slack user linked for ${owner_email}` };
+  }
+
+  const slackClient = getSlackAppClient();
+  const botToken = await slackClient.getBotToken(workspaceId);
+  if (!botToken) {
+    return { action_type: 'notify_rep', success: false, source_id: null, error: 'No Slack bot token configured' };
+  }
+
+  // Open DM channel
+  const openResponse = await fetch('https://slack.com/api/conversations.open', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${botToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ users: slackUserId }),
+  });
+  const openData = await openResponse.json() as any;
+  if (!openData.ok) {
+    return { action_type: 'notify_rep', success: false, source_id: null, error: `Failed to open DM: ${openData.error}` };
+  }
+
+  const dmChannel = openData.channel.id;
+  const severityEmoji = severity === 'critical' ? '🔴' : severity === 'high' ? '🟠' : '🟡';
+
+  const blocks = [
+    {
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: entity_name
+          ? `${severityEmoji} *${entity_name}* needs attention:\n\n${message || 'No details provided.'}`
+          : `${severityEmoji} ${message || 'No details provided.'}`,
+      },
+    },
+    {
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: '_Sent by Pandora_' }],
+    },
+  ];
+
+  const postResult = await slackClient.postMessage(workspaceId, dmChannel, blocks);
+  if (!postResult.ok) {
+    return { action_type: 'notify_rep', success: false, source_id: null, error: `Failed to send DM: ${postResult.error}` };
+  }
+
+  logger.info('Sent notify_rep DM', { owner_email, slackUserId, channel: dmChannel });
+  return { action_type: 'notify_rep', success: true, source_id: dmChannel };
+}
+
 // ============================================================================
 // Main Dispatcher
 // ============================================================================
@@ -203,6 +265,9 @@ export async function executePlaybookStep(
 
     case 'update_contact_field':
       return handleUpdateContactField(workspaceId, step.params, triggeredBy);
+
+    case 'notify_rep':
+      return handleNotifyRep(workspaceId, step.params);
 
     default:
       logger.warn('Unknown playbook action type', { actionType: step.action_type });
