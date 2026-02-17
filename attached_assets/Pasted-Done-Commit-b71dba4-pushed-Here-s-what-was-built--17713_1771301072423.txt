@@ -1,0 +1,63 @@
+Done. Commit b71dba4 pushed. Here's what was built:    
+                                                         
+  ---                                                    
+  Task 1 — Migration                                     
+  (migrations/042_conversation_signals.sql)              
+  - 13 new signal columns on conversations:              
+  call_disposition, engagement_quality,                  
+  pricing_discussed, pricing_signals, products_mentioned,
+   next_steps, budget_signals, decision_makers_mentioned,
+   timeline_signals, competitive_context, risk_signals,  
+  signals_extracted_at, signals_extraction_version       
+  - 2 partial indexes for un-extracted and               
+  pricing-discussed conversations                        
+                                                         
+  Task 2 — Signal Extractor                              
+  (server/conversations/signal-extractor.ts)             
+  - Processes up to 50 conversations per run in batches  
+  of 10 (1s delay between batches)                       
+  - Builds analysis text from summary (preferred) or     
+  first 2,000 chars of transcript                        
+  - Calls callLLM(workspaceId, 'extract', ...) → DeepSeek
+   at temperature 0.1                                    
+  - JSON-parses the structured response, writes 13       
+  columns in a single UPDATE                             
+  - Also backfills the existing objections column from   
+  pricing objection signals                              
+                                                         
+  Task 3 — Sync wiring (2 files modified)                
+  - post-sync-events.ts: fires extraction 5s after       
+  Gong/Fireflies sync                                    
+  - consultant-distributor.ts: fires extraction 10s after
+   a consultant call is assigned                         
+                                                         
+  Task 4 — Chat context (scoped-analysis.ts)             
+  - buildConversationContext(): 30 recent calls →        
+  aggregate stats + per-call details for top 15, covering
+   pricing signals, objections, products mentioned,      
+  competitors, risk signals, decision makers             
+  - pipeline/workspace scope now includes conversation   
+  context (zero token impact if no calls)                
+                                                         
+  Task 5 — Transcript search tool (scoped-analysis.ts +  
+  transcript-search.ts)                                  
+  - searchTranscripts(): ILIKE search across             
+  transcript/summary/title with account/deal filters and 
+  excerpt extraction with context window                 
+  - search_call_transcripts tool wired into              
+  runScopedAnalysis() with a proper multi-turn loop —    
+  Claude calls it when questions need quote-level detail 
+                                                         
+  Tasks 6 & 7 — API (server/routes/conversations.ts)     
+  - POST .../conversations/extract-signals — manual      
+  backfill (force: true, limit: 100 for Frontera's 66    
+  Gong calls)                                            
+  - GET .../conversations/signal-status — extraction     
+  coverage: total/extracted/pending, pricing count,      
+  competitor count, risk count, disposition and          
+  engagement breakdowns                                  
+                                                         
+  To backfill Frontera today:                            
+  POST /api/workspaces/<frontera-workspace-id>/conversati
+  ons/extract-signals                                    
+  { "force": true, "limit": 100 }     
