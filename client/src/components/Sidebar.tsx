@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useWorkspace, WorkspaceInfo } from '../context/WorkspaceContext';
 import { useDemoMode } from '../contexts/DemoModeContext';
@@ -72,10 +72,21 @@ interface SidebarProps {
 export default function Sidebar({ badges, showAllClients }: SidebarProps) {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, currentWorkspace, workspaces, selectWorkspace, logout } = useWorkspace();
+  const { user, currentWorkspace, workspaces, selectWorkspace, logout, token } = useWorkspace();
   const { isDemoMode, toggleDemoMode, anon } = useDemoMode();
   const [showWsDropdown, setShowWsDropdown] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [unassignedCount, setUnassignedCount] = useState(0);
+
+  useEffect(() => {
+    if (!showAllClients || workspaces.length <= 1 || !token) return;
+    fetch('/api/consultant/calls/unassigned', {
+      headers: { 'Authorization': `Bearer ${token}` },
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data) setUnassignedCount(data.total ?? data.calls?.length ?? 0); })
+      .catch(() => {});
+  }, [showAllClients, workspaces.length, token]);
 
   const isActive = (path: string) => {
     if (path === '/') return location.pathname === '/';
@@ -190,6 +201,16 @@ export default function Sidebar({ badges, showAllClients }: SidebarProps) {
             >
               <span style={{ fontSize: 14, width: 18, textAlign: 'center', opacity: 0.8 }}>{'\u25A3'}</span>
               <span style={{ flex: 1, fontWeight: isActive('/portfolio') ? 600 : 400 }}>All Clients</span>
+              {unassignedCount > 0 && (
+                <span style={{
+                  fontSize: 10, fontWeight: 600,
+                  background: colors.redSoft, color: colors.red,
+                  padding: '1px 6px', borderRadius: 8,
+                  fontFamily: fonts.mono,
+                }}>
+                  {unassignedCount}
+                </span>
+              )}
             </div>
             <div style={{ height: 1, background: colors.border, margin: '4px 14px' }} />
           </div>
