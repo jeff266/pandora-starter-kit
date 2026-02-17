@@ -710,8 +710,8 @@ router.get('/:workspaceId/workspace-config/owners', async (req, res) => {
       `SELECT
          owner as owner_name,
          COUNT(*)::int as total_deals,
-         COUNT(*) FILTER (WHERE is_open = true)::int as open_deals,
-         COALESCE(SUM(amount) FILTER (WHERE is_open = true), 0)::numeric as open_pipeline
+         COUNT(*) FILTER (WHERE stage_normalized NOT IN ('closed_won', 'closed_lost'))::int as open_deals,
+         COALESCE(SUM(amount) FILTER (WHERE stage_normalized NOT IN ('closed_won', 'closed_lost')), 0)::numeric as open_pipeline
        FROM deals
        WHERE workspace_id = $1 AND owner IS NOT NULL
        GROUP BY owner
@@ -816,7 +816,7 @@ router.post('/:workspaceId/workspace-config/preview-filter', async (req, res) =>
     } else {
       // For pipeline_value: before/after pipeline total
       const before = await query<{ amt: string; cnt: string }>(
-        `SELECT COALESCE(SUM(amount), 0)::text as amt, COUNT(*)::text as cnt FROM deals WHERE workspace_id = $1 AND is_open = true`,
+        `SELECT COALESCE(SUM(amount), 0)::text as amt, COUNT(*)::text as cnt FROM deals WHERE workspace_id = $1 AND stage_normalized NOT IN ('closed_won', 'closed_lost')`,
         [workspaceId]
       );
       const bAmt = parseFloat(before.rows[0]?.amt || '0');
@@ -824,7 +824,7 @@ router.post('/:workspaceId/workspace-config/preview-filter', async (req, res) =>
 
       const affected = await query<{ cnt: string; amt: string }>(
         filterClause
-          ? `SELECT COUNT(*)::text as cnt, COALESCE(SUM(amount), 0)::text as amt FROM deals WHERE workspace_id = $1 AND is_open = true AND (${filterClause})`
+          ? `SELECT COUNT(*)::text as cnt, COALESCE(SUM(amount), 0)::text as amt FROM deals WHERE workspace_id = $1 AND stage_normalized NOT IN ('closed_won', 'closed_lost') AND (${filterClause})`
           : `SELECT '0' as cnt, '0' as amt`,
         filterParams.length > 0 ? [workspaceId, ...filterParams] : [workspaceId]
       ).catch(() => ({ rows: [{ cnt: '0', amt: '0' }] }));
