@@ -87,6 +87,9 @@ export interface WorkspaceConfig {
 
   /** Has user reviewed and confirmed this config? */
   confirmed: boolean;
+  experimental_skills?: {
+    enabled_skill_ids: string[];
+  };
 }
 
 // ===== VOICE CONFIG =====

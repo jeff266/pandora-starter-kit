@@ -20,12 +20,15 @@ const TABS: { key: Tab; label: string; section?: string }[] = [
 ];
 
 const CRON_PRESETS = [
-  { label: 'Daily 8 AM', value: '0 8 * * *' },
-  { label: 'Weekdays 8 AM', value: '0 8 * * 1-5' },
-  { label: 'Mondays 8 AM', value: '0 8 * * 1' },
-  { label: 'Mondays and Thursdays 8 AM', value: '0 8 * * 1,4' },
-  { label: 'Fridays 4 PM', value: '0 16 * * 5' },
-  { label: 'Custom', value: '__custom__' },
+  { label: 'Daily at 8 AM', value: '0 8 * * *', frequency: 'daily' },
+  { label: 'Daily at 6 AM', value: '0 6 * * *', frequency: 'daily' },
+  { label: 'Weekdays at 8 AM', value: '0 8 * * 1-5', frequency: 'daily' },
+  { label: 'Every Monday at 8 AM', value: '0 8 * * 1', frequency: 'weekly' },
+  { label: 'Every Monday at 7 AM', value: '0 7 * * 1', frequency: 'weekly' },
+  { label: 'Mon & Thu at 8 AM', value: '0 8 * * 1,4', frequency: 'biweekly' },
+  { label: 'Every Friday at 4 PM', value: '0 16 * * 5', frequency: 'weekly' },
+  { label: 'Monthly on the 1st at 9 AM', value: '0 9 1 * *', frequency: 'monthly' },
+  { label: 'Advanced (custom cron)', value: '__custom__', frequency: 'custom' },
 ];
 
 function getPreviewText(detailLevel: string, framing: string): string {
@@ -256,6 +259,20 @@ function VoiceSection() {
     }
   };
 
+  const toggleExperimentalSkill = async (skillId: string) => {
+    const next = enabledExperimentalIds.includes(skillId)
+      ? enabledExperimentalIds.filter(id => id !== skillId)
+      : [...enabledExperimentalIds, skillId];
+    setEnabledExperimentalIds(next);
+    try {
+      await api.patch('/workspace-config/experimental_skills', {
+        enabled_skill_ids: next,
+      });
+    } catch {
+      setEnabledExperimentalIds(enabledExperimentalIds);
+    }
+  };
+
   if (loading) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -465,31 +482,38 @@ function Toggle({ enabled, onChange }: { enabled: boolean; onChange: (v: boolean
 function SkillsSection() {
   const [loading, setLoading] = useState(true);
   const [skills, setSkills] = useState<any[]>([]);
+  const [experimentalSkills, setExperimentalSkills] = useState<any[]>([]);
+  const [enabledExperimentalIds, setEnabledExperimentalIds] = useState<string[]>([]);
   const [schedules, setSchedules] = useState<Record<string, { cron: string; enabled: boolean; preset: string; customCron: string }>>({});
   const [savedMap, setSavedMap] = useState<Record<string, boolean>>({});
   const [errorMsg, setErrorMsg] = useState('');
 
   useEffect(() => {
-    api.get('/skills')
-      .then((data: any) => {
-        const arr = Array.isArray(data) ? data : data.skills || [];
-        setSkills(arr);
-        const sched: Record<string, any> = {};
-        arr.forEach((s: any) => {
-          const cronVal = s.schedule?.cron || '';
-          const enabled = s.schedule?.enabled ?? false;
-          const matchedPreset = CRON_PRESETS.find(p => p.value === cronVal);
-          sched[s.id] = {
-            cron: cronVal,
-            enabled,
-            preset: matchedPreset ? matchedPreset.value : (cronVal ? '__custom__' : ''),
-            customCron: matchedPreset ? '' : cronVal,
-          };
-        });
-        setSchedules(sched);
-      })
-      .catch(() => setSkills([]))
-      .finally(() => setLoading(false));
+    Promise.all([
+      api.get('/skills'),
+      api.get('/workspace-config').catch(() => ({ config: {} })),
+    ]).then(([skillData, cfgData]: any[]) => {
+      const arr = Array.isArray(skillData) ? skillData : skillData.skills || [];
+      const regularSkills = arr.filter((s: any) => !s.experimental);
+      const expSkills = arr.filter((s: any) => s.experimental);
+      setExperimentalSkills(expSkills);
+      setSkills(regularSkills);
+      const enabledIds = cfgData.config?.experimental_skills?.enabled_skill_ids || [];
+      setEnabledExperimentalIds(enabledIds);
+      const sched: Record<string, any> = {};
+      regularSkills.forEach((s: any) => {
+        const cronVal = s.schedule?.cron || '';
+        const enabled = s.schedule?.enabled ?? false;
+        const matchedPreset = CRON_PRESETS.find(p => p.value === cronVal);
+        sched[s.id] = {
+          cron: cronVal,
+          enabled,
+          preset: matchedPreset ? matchedPreset.value : (cronVal ? '__custom__' : ''),
+          customCron: matchedPreset ? '' : cronVal,
+        };
+      });
+      setSchedules(sched);
+    }).catch(() => setSkills([])).finally(() => setLoading(false));
   }, []);
 
   const handlePresetChange = (skillId: string, presetValue: string) => {
@@ -620,23 +644,18 @@ function SkillsSection() {
                     <option key={p.value} value={p.value}>{p.label}</option>
                   ))}
                 </select>
-                {isCustom && (
-                  <input
-                    type="text"
-                    value={sched.customCron}
-                    onChange={e => handleCustomCron(skill.id, e.target.value)}
-                    placeholder="* * * * *"
-                    style={{
-                      fontSize: 12,
-                      fontFamily: fonts.mono,
-                      color: colors.text,
-                      background: colors.surfaceRaised,
-                      border: `1px solid ${colors.border}`,
-                      borderRadius: 6,
-                      padding: '5px 10px',
-                      width: 120,
-                    }}
-                  />
+                {s.preset === "__custom__" && (
+                  <details style={{ marginTop: 6 }}>
+                    <summary style={{ fontSize: 11, color: colors.textMuted, cursor: "pointer", fontFamily: fonts.sans, userSelect: "none" }}>
+                      Advanced: Custom cron expression
+                    </summary>
+                    <input
+                      style={{ fontFamily: fonts.mono, fontSize: 12, marginTop: 6, width: "100%", background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 6, padding: "6px 10px", color: colors.text, boxSizing: "border-box" as const }}
+                      placeholder="* * * * *"
+                      value={sched.customCron}
+                      onChange={e => handleCustomCron(skill.id, e.target.value)}
+                    />
+                  </details>
                 )}
                 <Toggle enabled={sched.enabled} onChange={v => handleToggle(skill.id, v)} />
                 <button
@@ -663,6 +682,33 @@ function SkillsSection() {
           })}
         </div>
       )}
+      {experimentalSkills.length > 0 && (
+        <div style={{ marginTop: 32 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: colors.text, fontFamily: fonts.sans, marginBottom: 4 }}>Experimental Skills</div>
+          <div style={{ fontSize: 12, color: colors.textMuted, fontFamily: fonts.sans, marginBottom: 16 }}>
+            Beta features — findings may be less accurate than production skills.
+          </div>
+          {experimentalSkills.map((skill: any) => {
+            const isEnabled = enabledExperimentalIds.includes(skill.id);
+            return (
+              <div key={skill.id} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', padding: '12px 0', borderBottom: `1px solid ${colors.border}` }}>
+                <div style={{ flex: 1, marginRight: 16 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                    <span style={{ fontSize: 14 }}>🧪</span>
+                    <span style={{ fontSize: 13, fontWeight: 500, color: colors.text, fontFamily: fonts.sans }}>{skill.name}</span>
+                    <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 10, background: '#78350f', color: '#fef3c7', fontWeight: 600, fontFamily: fonts.sans }}>BETA</span>
+                  </div>
+                  <div style={{ fontSize: 12, color: colors.textSecondary, fontFamily: fonts.sans, lineHeight: 1.5 }}>{skill.description}</div>
+                </div>
+                <div style={{ flexShrink: 0 }}>
+                  <WsToggle on={isEnabled} onChange={() => toggleExperimentalSkill(skill.id)} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
     </div>
   );
 }

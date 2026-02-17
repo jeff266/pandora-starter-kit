@@ -82,6 +82,9 @@ export function getDefaultConfig(workspaceId: string): WorkspaceConfig & { _meta
     },
     updated_at: new Date(),
     confirmed: false,
+    experimental_skills: {
+      enabled_skill_ids: [],
+    },
     _meta: {},
   };
 }

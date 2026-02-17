@@ -156,6 +156,7 @@ router.patch(
         'scoring',
         'voice',
         'tool_filters',
+        'experimental_skills',
       ];
 
       if (!validSections.includes(section)) {

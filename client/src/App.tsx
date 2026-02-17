@@ -25,6 +25,7 @@ import Actions from './pages/Actions';
 import Playbooks from './pages/Playbooks';
 import SettingsPage from './pages/SettingsPage';
 import ConnectorHealth from './pages/ConnectorHealth';
+import ToolsPage from './pages/ToolsPage';
 import ConsultantDashboard from './pages/ConsultantDashboard';
 import { colors, fonts } from './styles/theme';
 
@@ -182,7 +183,7 @@ export default function App() {
             <Route path="/join" element={<JoinWorkspace />} />
             <Route path="/agents" element={<Placeholder title="Agents" />} />
             <Route path="/agent-builder" element={<Placeholder title="Agent Builder" />} />
-            <Route path="/tools" element={<Placeholder title="Tools" />} />
+            <Route path="/tools" element={<ToolsPage />} />
             <Route path="/playbooks" element={<Playbooks />} />
             <Route path="/actions" element={<Actions />} />
             <Route path="/connectors/health" element={<ConnectorHealth />} />
