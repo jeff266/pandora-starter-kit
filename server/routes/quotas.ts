@@ -465,6 +465,39 @@ router.delete(
 );
 
 router.get(
+  '/workspaces/:workspaceId/quotas/reps',
+  async (req: Request<WorkspaceParams>, res: Response) => {
+    try {
+      const { workspaceId } = req.params;
+      // Pull distinct reps from existing quotas (best name+email source)
+      // supplemented by deal owners that have no quota record yet
+      const result = await query<{ rep_name: string; rep_email: string | null }>(
+        `SELECT rep_name, rep_email
+         FROM rep_quotas
+         WHERE period_id IN (SELECT id FROM quota_periods WHERE workspace_id = $1)
+           AND rep_name IS NOT NULL
+         GROUP BY rep_name, rep_email
+         UNION
+         SELECT DISTINCT owner as rep_name, NULL as rep_email
+         FROM deals
+         WHERE workspace_id = $1 AND owner IS NOT NULL
+           AND owner NOT IN (
+             SELECT rep_name FROM rep_quotas
+             WHERE period_id IN (SELECT id FROM quota_periods WHERE workspace_id = $1)
+               AND rep_name IS NOT NULL
+           )
+         ORDER BY rep_name`,
+        [workspaceId]
+      );
+      res.json({ reps: result.rows });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      res.status(500).json({ error: message });
+    }
+  }
+);
+
+router.get(
   '/workspaces/:workspaceId/quotas/periods',
   async (req: Request<WorkspaceParams>, res: Response) => {
     try {

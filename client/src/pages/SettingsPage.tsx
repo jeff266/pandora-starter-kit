@@ -1353,6 +1353,7 @@ function QuotasSection() {
   const [addName, setAddName] = useState('');
   const [addEmail, setAddEmail] = useState('');
   const [addAmount, setAddAmount] = useState('');
+  const [repSuggestions, setRepSuggestions] = useState<Array<{ rep_name: string; rep_email: string | null }>>([]);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const loadQuotas = (periodsArr?: any[], idx?: number) => {
@@ -1378,7 +1379,9 @@ function QuotasSection() {
       api.get('/quotas').catch(() => ({ quotas: [], teamTotal: 0, period: '', repCount: 0 })),
       api.get('/quotas/pending-goals').catch(() => null),
       api.get('/connectors/health').catch(() => []),
-    ]).then(([periodsData, quotasData, goalsData, healthData]) => {
+      api.get('/quotas/reps').catch(() => ({ reps: [] })),
+    ]).then(([periodsData, quotasData, goalsData, healthData, repsData]) => {
+      setRepSuggestions(repsData?.reps || []);
       const pArr = Array.isArray(periodsData) ? periodsData : periodsData?.periods || [];
       setPeriods(pArr);
       const now = new Date();
@@ -1982,12 +1985,24 @@ function QuotasSection() {
           padding: 20,
         }}>
           <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text, marginBottom: 12 }}>Add Quota</h3>
+          <datalist id="quota-rep-suggestions">
+            {repSuggestions.map((r, i) => (
+              <option key={i} value={r.rep_name} />
+            ))}
+          </datalist>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
             <input
               type="text"
               placeholder="Rep Name"
+              list="quota-rep-suggestions"
               value={addName}
-              onChange={e => setAddName(e.target.value)}
+              onChange={e => {
+                const name = e.target.value;
+                setAddName(name);
+                // Auto-fill email when an existing rep is selected
+                const match = repSuggestions.find(r => r.rep_name === name);
+                if (match?.rep_email) setAddEmail(match.rep_email);
+              }}
               style={{ ...inputStyle, flex: 1, minWidth: 120 }}
             />
             <input
