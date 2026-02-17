@@ -185,6 +185,12 @@ export async function executeDataTool(
       return computeForecastAccuracy(workspaceId, params);
     case 'compute_close_probability':
       return computeCloseProbability(workspaceId, params);
+    case 'compute_pipeline_creation':
+      return computePipelineCreation(workspaceId, params);
+    case 'compute_inqtr_close_rate':
+      return computeInqtrCloseRate(workspaceId, params);
+    case 'compute_competitive_rates':
+      return computeCompetitiveRates(workspaceId, params);
     default:
       throw new Error(`Unknown tool: ${toolName}`);
   }
@@ -2423,5 +2429,429 @@ async function computeCloseProbability(workspaceId: string, params: Record<strin
       query_description: `compute_close_probability failed: ${err?.message}`,
       error: err?.message,
     };
+  }
+}
+
+// ─── Tool 15: compute_pipeline_creation ──────────────────────────────────────
+
+async function computePipelineCreation(workspaceId: string, params: Record<string, any>): Promise<any> {
+  try {
+    const groupBy = params.group_by || 'month';
+    const lookbackMonths = params.lookback_months || 12;
+    const segmentBy: string | null = params.segment_by || null;
+    // Map group_by to date_trunc argument
+    const truncUnit = groupBy === 'quarter' ? 'quarter' : groupBy === 'week' ? 'week' : 'month';
+
+    // Base query for pipeline creation by period
+    let baseQuery: string;
+    const vals: any[] = [workspaceId];
+    vals.push(`${lookbackMonths} months`);
+
+    if (segmentBy && ['source', 'owner', 'pipeline'].includes(segmentBy)) {
+      const segCol = segmentBy === 'owner' ? 'd.owner' : segmentBy === 'pipeline' ? 'd.pipeline' : 'd.source';
+      baseQuery = `
+        SELECT DATE_TRUNC('${truncUnit}', d.created_date)::text as period,
+               ${segCol} as segment_value,
+               COUNT(*)::int as deals_created,
+               COALESCE(SUM(d.amount), 0)::numeric as amount_created,
+               COALESCE(AVG(d.amount), 0)::numeric as avg_deal_size
+        FROM deals d
+        WHERE d.workspace_id = $1
+          AND d.created_date >= NOW() - ($2::interval)
+          AND d.created_date IS NOT NULL
+          AND d.amount > 0
+        GROUP BY period, segment_value
+        ORDER BY period, segment_value`;
+    } else if (segmentBy === 'deal_size_band') {
+      baseQuery = `
+        SELECT DATE_TRUNC('${truncUnit}', d.created_date)::text as period,
+               CASE WHEN d.amount < 10000 THEN 'small'
+                    WHEN d.amount < 50000 THEN 'mid'
+                    WHEN d.amount < 150000 THEN 'large'
+                    ELSE 'enterprise' END as segment_value,
+               COUNT(*)::int as deals_created,
+               COALESCE(SUM(d.amount), 0)::numeric as amount_created,
+               COALESCE(AVG(d.amount), 0)::numeric as avg_deal_size
+        FROM deals d
+        WHERE d.workspace_id = $1
+          AND d.created_date >= NOW() - ($2::interval)
+          AND d.created_date IS NOT NULL
+          AND d.amount > 0
+        GROUP BY period, segment_value
+        ORDER BY period, segment_value`;
+    } else {
+      baseQuery = `
+        SELECT DATE_TRUNC('${truncUnit}', d.created_date)::text as period,
+               COUNT(*)::int as deals_created,
+               COALESCE(SUM(d.amount), 0)::numeric as amount_created,
+               COALESCE(AVG(d.amount), 0)::numeric as avg_deal_size
+        FROM deals d
+        WHERE d.workspace_id = $1
+          AND d.created_date >= NOW() - ($2::interval)
+          AND d.created_date IS NOT NULL
+          AND d.amount > 0
+        GROUP BY period
+        ORDER BY period`;
+    }
+
+    const rows = await query<any>(baseQuery, vals);
+
+    // Aggregate by period (merge segments into periods array)
+    const periodMap = new Map<string, any>();
+    for (const r of rows.rows) {
+      const p = r.period;
+      if (!periodMap.has(p)) {
+        periodMap.set(p, {
+          period: p,
+          deals_created: 0,
+          amount_created: 0,
+          avg_deal_size: 0,
+          ...(segmentBy ? { segments: [] } : {}),
+        });
+      }
+      const entry = periodMap.get(p)!;
+      if (segmentBy) {
+        entry.segments.push({
+          segment_value: r.segment_value,
+          deals_created: r.deals_created,
+          amount_created: parseFloat(r.amount_created),
+        });
+        entry.deals_created += r.deals_created;
+        entry.amount_created += parseFloat(r.amount_created);
+      } else {
+        entry.deals_created = r.deals_created;
+        entry.amount_created = parseFloat(r.amount_created);
+        entry.avg_deal_size = parseFloat(r.avg_deal_size);
+      }
+    }
+    if (segmentBy) {
+      for (const entry of periodMap.values()) {
+        entry.avg_deal_size = entry.deals_created > 0 ? entry.amount_created / entry.deals_created : 0;
+      }
+    }
+
+    const periods = Array.from(periodMap.values());
+
+    // Trend: last 3 complete periods vs prior 3
+    const completePeriods = periods.filter(p => {
+      if (params.include_current_period === false) {
+        // exclude the last period (likely current, incomplete)
+        return p !== periods[periods.length - 1];
+      }
+      return true;
+    });
+
+    const last3 = completePeriods.slice(-3);
+    const prior3 = completePeriods.slice(-6, -3);
+    const last3Avg = last3.length > 0 ? last3.reduce((s, p) => s + p.amount_created, 0) / last3.length : 0;
+    const prior3Avg = prior3.length > 0 ? prior3.reduce((s, p) => s + p.amount_created, 0) / prior3.length : last3Avg;
+    const changePct = prior3Avg > 0 ? Math.round((last3Avg - prior3Avg) / prior3Avg * 100) : 0;
+    const direction = changePct > 10 ? 'increasing' : changePct < -10 ? 'declining' : 'stable';
+
+    const allAmounts = periods.map(p => p.amount_created);
+    const avgMonthlyAmount = allAmounts.length > 0 ? allAmounts.reduce((s, a) => s + a, 0) / allAmounts.length : 0;
+    const allDeals = periods.map(p => p.deals_created);
+    const avgMonthlyDeals = allDeals.length > 0 ? allDeals.reduce((s, d) => s + d, 0) / allDeals.length : 0;
+
+    return {
+      periods,
+      trend: {
+        direction,
+        avg_monthly_creation: Math.round(avgMonthlyDeals),
+        avg_monthly_amount: Math.round(avgMonthlyAmount),
+        last_3m_avg_amount: Math.round(last3Avg),
+        prior_3m_avg_amount: Math.round(prior3Avg),
+        change_pct: changePct,
+      },
+      total_periods_analyzed: periods.length,
+      query_description: `Pipeline creation ${groupBy}ly over ${lookbackMonths} months: ${periods.length} periods, avg $${Math.round(avgMonthlyAmount).toLocaleString()}/${groupBy}${segmentBy ? `, segmented by ${segmentBy}` : ''}. Trend: ${direction} (${changePct > 0 ? '+' : ''}${changePct}%)`,
+    };
+  } catch (err: any) {
+    console.error('[compute_pipeline_creation] error:', err?.message);
+    return { periods: [], trend: { direction: 'stable', avg_monthly_creation: 0, avg_monthly_amount: 0, last_3m_avg_amount: 0, prior_3m_avg_amount: 0, change_pct: 0 }, total_periods_analyzed: 0, query_description: `compute_pipeline_creation failed: ${err?.message}`, error: err?.message };
+  }
+}
+
+// ─── Tool 16: compute_inqtr_close_rate ───────────────────────────────────────
+
+async function computeInqtrCloseRate(workspaceId: string, params: Record<string, any>): Promise<any> {
+  try {
+    const lookbackQuarters = params.lookback_quarters || 4;
+
+    // Build quarter date ranges for historical analysis
+    const now = new Date();
+    const currentQStart = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
+
+    const quarterData: any[] = [];
+    for (let q = lookbackQuarters; q >= 0; q--) {
+      const qStart = new Date(currentQStart);
+      qStart.setMonth(qStart.getMonth() - q * 3);
+      const qEnd = new Date(qStart);
+      qEnd.setMonth(qEnd.getMonth() + 3);
+
+      const label = `${qStart.getFullYear()}-Q${Math.floor(qStart.getMonth() / 3) + 1}`;
+      const isCurrent = q === 0;
+
+      const r = await query<any>(
+        `SELECT
+           COUNT(*)::int as deals_created,
+           COUNT(*) FILTER (WHERE d.stage_normalized = 'closed_won'
+             AND d.close_date >= $2 AND d.close_date < $3)::int as deals_closed_in_qtr,
+           COALESCE(SUM(d.amount), 0)::numeric as amount_created,
+           COALESCE(SUM(d.amount) FILTER (WHERE d.stage_normalized = 'closed_won'
+             AND d.close_date >= $2 AND d.close_date < $3), 0)::numeric as amount_closed_in_qtr,
+           COALESCE(AVG(EXTRACT(DAY FROM (d.close_date - d.created_date::date))) FILTER (WHERE d.stage_normalized = 'closed_won'
+             AND d.close_date >= $2 AND d.close_date < $3), 0)::numeric as avg_cycle_days
+         FROM deals d
+         WHERE d.workspace_id = $1
+           AND d.created_date >= $2 AND d.created_date < $3
+           AND d.amount > 0`,
+        [workspaceId, qStart.toISOString(), qEnd.toISOString()]
+      );
+
+      const row = r.rows[0];
+      const dealsCreated = row?.deals_created || 0;
+      const dealsClosed = row?.deals_closed_in_qtr || 0;
+      const amtCreated = parseFloat(row?.amount_created || '0');
+      const amtClosed = parseFloat(row?.amount_closed_in_qtr || '0');
+      const closeRate = dealsCreated > 0 ? dealsClosed / dealsCreated : 0;
+      const amtCloseRate = amtCreated > 0 ? amtClosed / amtCreated : 0;
+
+      quarterData.push({
+        quarter: label,
+        is_current: isCurrent,
+        deals_created_in_quarter: dealsCreated,
+        deals_closed_won_in_quarter: dealsClosed,
+        close_rate: Math.round(closeRate * 1000) / 1000,
+        amount_created: Math.round(amtCreated),
+        amount_closed_in_quarter: Math.round(amtClosed),
+        amount_close_rate: Math.round(amtCloseRate * 1000) / 1000,
+        avg_cycle_days: Math.round(parseFloat(row?.avg_cycle_days || '0')),
+      });
+    }
+
+    // Separate current quarter from historical
+    const historical = quarterData.filter(q => !q.is_current);
+    const current = quarterData.find(q => q.is_current)!;
+
+    const avgCloseRate = historical.length > 0
+      ? historical.reduce((s, q) => s + q.close_rate, 0) / historical.length : 0;
+    const avgAmtCloseRate = historical.length > 0
+      ? historical.reduce((s, q) => s + q.amount_close_rate, 0) / historical.length : 0;
+    const avgCycleDays = historical.filter(q => q.avg_cycle_days > 0).length > 0
+      ? historical.filter(q => q.avg_cycle_days > 0).reduce((s, q) => s + q.avg_cycle_days, 0) / historical.filter(q => q.avg_cycle_days > 0).length : 0;
+
+    // Projection for current quarter
+    const projectedInQtrCloses = Math.round((current?.deals_created_in_quarter || 0) * avgCloseRate);
+    const projectedInQtrAmount = Math.round((current?.amount_created || 0) * avgAmtCloseRate);
+
+    // Estimate remaining creation (use 1/3 of quarter monthly avg if early in quarter)
+    const daysInQtr = 91;
+    const now2 = new Date();
+    const currentQStartMs = new Date(currentQStart).getTime();
+    const daysElapsed = Math.round((now2.getTime() - currentQStartMs) / 86400000);
+    const fractionRemaining = Math.max(0, (daysInQtr - daysElapsed) / daysInQtr);
+    const estimatedRemainingCreation = Math.round((current?.amount_created || 0) * fractionRemaining);
+    const estimatedAdditionalCloses = Math.round(estimatedRemainingCreation * avgAmtCloseRate);
+
+    const currentQLabel = `${currentQStart.getFullYear()}-Q${Math.floor(currentQStart.getMonth() / 3) + 1}`;
+
+    return {
+      quarters: historical,
+      overall: {
+        avg_close_rate: Math.round(avgCloseRate * 1000) / 1000,
+        avg_amount_close_rate: Math.round(avgAmtCloseRate * 1000) / 1000,
+        avg_cycle_days: Math.round(avgCycleDays),
+      },
+      projection: {
+        current_quarter: currentQLabel,
+        deals_created_so_far: current?.deals_created_in_quarter || 0,
+        amount_created_so_far: current?.amount_created || 0,
+        projected_in_qtr_closes: projectedInQtrCloses,
+        projected_in_qtr_amount: projectedInQtrAmount,
+        estimated_remaining_creation: estimatedRemainingCreation,
+        estimated_additional_closes: estimatedAdditionalCloses,
+      },
+      query_description: `In-quarter close rates (${lookbackQuarters} quarters): avg ${Math.round(avgCloseRate * 100)}% of pipeline created in a quarter closes that quarter. Current quarter: $${(current?.amount_created || 0).toLocaleString()} created so far, projecting $${projectedInQtrAmount.toLocaleString()} in-quarter bookings`,
+    };
+  } catch (err: any) {
+    console.error('[compute_inqtr_close_rate] error:', err?.message);
+    return { quarters: [], overall: { avg_close_rate: 0, avg_amount_close_rate: 0, avg_cycle_days: 0 }, projection: null, query_description: `compute_inqtr_close_rate failed: ${err?.message}`, error: err?.message };
+  }
+}
+
+// ─── Tool 17: compute_competitive_rates ──────────────────────────────────────
+
+async function computeCompetitiveRates(workspaceId: string, params: Record<string, any>): Promise<any> {
+  try {
+    const lookbackMonths = params.lookback_months || 12;
+    const filterCompetitor: string | null = params.competitor || null;
+
+    // Get deals with competitor mentions from conversations
+    // conversations.competitor_mentions is JSONB array of competitor name strings
+    const compRows = await query<any>(
+      `SELECT DISTINCT ON (cv.deal_id, comp_name)
+              cv.deal_id,
+              cv.call_date,
+              d.name as deal_name, d.amount, d.stage, d.stage_normalized,
+              d.owner,
+              comp_name
+       FROM conversations cv
+       CROSS JOIN LATERAL jsonb_array_elements_text(cv.competitor_mentions) AS comp_name
+       LEFT JOIN deals d ON d.id = cv.deal_id AND d.workspace_id = $1
+       WHERE cv.workspace_id = $1
+         AND cv.call_date >= NOW() - ($2 || ' months')::interval
+         AND cv.competitor_mentions IS NOT NULL
+         AND jsonb_array_length(cv.competitor_mentions) > 0
+         ${filterCompetitor ? `AND comp_name ILIKE $3` : ''}
+       ORDER BY cv.deal_id, comp_name, cv.call_date DESC`,
+      filterCompetitor
+        ? [workspaceId, String(lookbackMonths), `%${filterCompetitor}%`]
+        : [workspaceId, String(lookbackMonths)]
+    ).catch(() => ({ rows: [] as any[] }));
+
+    // Also check deal_insights for competition type
+    const insightRows = await query<any>(
+      `SELECT di.deal_id, di.insight_value,
+              d.name as deal_name, d.amount, d.stage, d.stage_normalized, d.owner
+       FROM deal_insights di
+       JOIN deals d ON d.id = di.deal_id AND d.workspace_id = $1
+       WHERE di.workspace_id = $1
+         AND di.insight_type = 'competition'
+         AND di.is_current = true
+         AND d.created_date >= NOW() - ($2 || ' months')::interval`,
+      [workspaceId, String(lookbackMonths)]
+    ).catch(() => ({ rows: [] as any[] }));
+
+    // Also check deals.custom_fields for competitor data
+    const customRows = await query<any>(
+      `SELECT d.id as deal_id, d.name as deal_name, d.amount, d.stage, d.stage_normalized, d.owner,
+              d.custom_fields->>'competitor' as competitor_custom,
+              d.custom_fields->>'loss_reason' as loss_reason
+       FROM deals d
+       WHERE d.workspace_id = $1
+         AND d.created_date >= NOW() - ($2 || ' months')::interval
+         AND (d.custom_fields->>'competitor' IS NOT NULL OR d.custom_fields->>'loss_reason' IS NOT NULL)`,
+      [workspaceId, String(lookbackMonths)]
+    ).catch(() => ({ rows: [] as any[] }));
+
+    // Aggregate competitor data
+    const competitorMap = new Map<string, {
+      deal_ids: Set<string>;
+      wins: number; losses: number; open: number;
+      amounts: number[]; cycle_days: number[];
+      recent_deals: any[];
+    }>();
+
+    const addCompetitorDeal = (compName: string, deal: any) => {
+      const key = compName.toLowerCase().trim();
+      if (!competitorMap.has(key)) {
+        competitorMap.set(key, { deal_ids: new Set(), wins: 0, losses: 0, open: 0, amounts: [], cycle_days: [], recent_deals: [] });
+      }
+      const entry = competitorMap.get(key)!;
+      if (entry.deal_ids.has(deal.deal_id || deal.id)) return;
+      entry.deal_ids.add(deal.deal_id || deal.id);
+      const outcome = deal.stage_normalized === 'closed_won' ? 'won' : deal.stage_normalized === 'closed_lost' ? 'lost' : 'open';
+      if (outcome === 'won') entry.wins++;
+      else if (outcome === 'lost') entry.losses++;
+      else entry.open++;
+      if (deal.amount) entry.amounts.push(parseFloat(deal.amount));
+      if (entry.recent_deals.length < 5) {
+        entry.recent_deals.push({ deal_name: deal.deal_name || deal.name, amount: parseFloat(deal.amount || '0'), outcome, stage: deal.stage });
+      }
+    };
+
+    for (const r of compRows.rows) {
+      if (r.comp_name) addCompetitorDeal(r.comp_name, r);
+    }
+    for (const r of insightRows.rows) {
+      const val = typeof r.insight_value === 'string' ? r.insight_value : JSON.stringify(r.insight_value);
+      if (val) addCompetitorDeal(val, r);
+    }
+    for (const r of customRows.rows) {
+      if (r.competitor_custom) addCompetitorDeal(r.competitor_custom, r);
+    }
+
+    // Overall win rate without any competitor
+    const noCompResult = await query<any>(
+      `SELECT
+         COUNT(*) FILTER (WHERE d.stage_normalized = 'closed_won')::int as wins,
+         COUNT(*) FILTER (WHERE d.stage_normalized IN ('closed_won','closed_lost'))::int as total_closed
+       FROM deals d
+       WHERE d.workspace_id = $1
+         AND d.created_date >= NOW() - ($2 || ' months')::interval
+         AND NOT EXISTS (
+           SELECT 1 FROM conversations cv
+           WHERE cv.deal_id = d.id AND cv.workspace_id = $1
+             AND jsonb_array_length(COALESCE(cv.competitor_mentions,'[]'::jsonb)) > 0
+         )`,
+      [workspaceId, String(lookbackMonths)]
+    ).catch(() => ({ rows: [{ wins: 0, total_closed: 0 }] as any[] }));
+
+    const noCompWins = noCompResult.rows[0]?.wins || 0;
+    const noCompTotal = noCompResult.rows[0]?.total_closed || 0;
+    const winRateWithout = noCompTotal > 0 ? noCompWins / noCompTotal : 0;
+
+    const competitors = Array.from(competitorMap.entries())
+      .filter(([, v]) => v.wins + v.losses + v.open > 0)
+      .map(([name, v]) => {
+        const totalClosed = v.wins + v.losses;
+        const winRate = totalClosed > 0 ? v.wins / totalClosed : 0;
+        return {
+          competitor_name: name,
+          deals_mentioned: v.deal_ids.size,
+          wins: v.wins,
+          losses: v.losses,
+          win_rate: Math.round(winRate * 1000) / 1000,
+          win_rate_without: Math.round(winRateWithout * 1000) / 1000,
+          win_rate_delta: Math.round((winRate - winRateWithout) * 1000) / 1000,
+          avg_cycle_days: v.cycle_days.length > 0 ? Math.round(v.cycle_days.reduce((s, d) => s + d, 0) / v.cycle_days.length) : null,
+          recent_deals: v.recent_deals,
+        };
+      })
+      .sort((a, b) => b.deals_mentioned - a.deals_mentioned);
+
+    const allDealsWithComp = await query<{ cnt: string }>(
+      `SELECT COUNT(DISTINCT cv.deal_id)::text as cnt
+       FROM conversations cv
+       WHERE cv.workspace_id = $1
+         AND cv.call_date >= NOW() - ($2 || ' months')::interval
+         AND jsonb_array_length(COALESCE(cv.competitor_mentions,'[]'::jsonb)) > 0`,
+      [workspaceId, String(lookbackMonths)]
+    ).catch(() => ({ rows: [{ cnt: '0' }] as any[] }));
+
+    const allDeals = await query<{ cnt: string; wins: string }>(
+      `SELECT COUNT(*)::text as cnt,
+              COUNT(*) FILTER (WHERE stage_normalized = 'closed_won')::text as wins
+       FROM deals WHERE workspace_id = $1
+         AND created_date >= NOW() - ($2 || ' months')::interval`,
+      [workspaceId, String(lookbackMonths)]
+    ).catch(() => ({ rows: [{ cnt: '0', wins: '0' }] as any[] }));
+
+    const totalDeals = parseInt(allDeals.rows[0]?.cnt || '0');
+    const totalDealsWithComp = parseInt(allDealsWithComp.rows[0]?.cnt || '0');
+    const compWins = competitors.reduce((s, c) => s + c.wins, 0);
+    const compLosses = competitors.reduce((s, c) => s + c.losses, 0);
+    const winRateComp = (compWins + compLosses) > 0 ? compWins / (compWins + compLosses) : 0;
+
+    const dataSource = compRows.rows.length > 0 ? 'conversation_mentions'
+      : insightRows.rows.length > 0 ? 'deal_insights'
+      : customRows.rows.length > 0 ? 'custom_fields' : 'none';
+
+    return {
+      competitors,
+      overall: {
+        deals_with_any_competitor: totalDealsWithComp,
+        deals_without_competitor: totalDeals - totalDealsWithComp,
+        win_rate_competitive: Math.round(winRateComp * 1000) / 1000,
+        win_rate_non_competitive: Math.round(winRateWithout * 1000) / 1000,
+      },
+      data_source: dataSource,
+      query_description: `Competitive win rates (${lookbackMonths} months): ${competitors.length} competitors detected across ${totalDealsWithComp} deals. Win rate with competitor: ${Math.round(winRateComp * 100)}% vs ${Math.round(winRateWithout * 100)}% without. Data from: ${dataSource}`,
+      ...(dataSource === 'none' ? { note: 'No competitor data found. Connect Gong/Fireflies to enable conversation-based competitor detection, or add a "competitor" field to deals in your CRM.' } : {}),
+    };
+  } catch (err: any) {
+    console.error('[compute_competitive_rates] error:', err?.message);
+    return { competitors: [], overall: { deals_with_any_competitor: 0, deals_without_competitor: 0, win_rate_competitive: 0, win_rate_non_competitive: 0 }, query_description: `compute_competitive_rates failed: ${err?.message}`, error: err?.message };
   }
 }
