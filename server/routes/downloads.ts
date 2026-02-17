@@ -7,9 +7,15 @@
 import { Router } from 'express';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import { renderDeliverable, renderMultiple } from '../renderers/registry.js';
 import { query } from '../db.js';
-import type { RendererInput, RenderOptions } from '../renderers/types.js';
+import type { RendererInput, RenderOptions, BrandingConfig } from '../renderers/types.js';
+import { assemblePipelineReview, assembleForecast } from '../renderers/data-assembler.js';
+import { renderPipelineReviewXLSX } from '../renderers/pipeline-review-xlsx.js';
+import { renderForecastXLSX } from '../renderers/forecast-xlsx.js';
+import { renderPipelineReviewPDF } from '../renderers/pipeline-review-pdf.js';
+import { renderForecastPDF } from '../renderers/forecast-pdf.js';
 
 const router = Router({ mergeParams: true });
 
@@ -30,13 +36,59 @@ const downloadStore = new Map<string, {
 router.post('/render', async (req, res) => {
   try {
     const { workspaceId } = req.params;
-    const { format, source, options } = req.body;
+    const { format, source, options, document_type } = req.body;
 
     if (!format) {
       return res.status(400).json({ error: 'format is required' });
     }
 
-    // Load the source data
+    // ── Direct-DB render path for pipeline_review / forecast ──
+    if (document_type === 'pipeline_review' || document_type === 'forecast') {
+      // Load branding from workspace
+      const wsResult = await query(
+        'SELECT branding FROM workspaces WHERE id = $1',
+        [workspaceId]
+      );
+      const branding: BrandingConfig | undefined = wsResult.rows[0]?.branding ?? undefined;
+
+      let result: { buffer: Buffer; filename: string };
+
+      if (document_type === 'pipeline_review') {
+        const data = await assemblePipelineReview(workspaceId, {
+          period_days: options?.period_days ?? 7,
+        });
+        if (format === 'pdf') {
+          result = await renderPipelineReviewPDF(data, branding);
+        } else {
+          result = await renderPipelineReviewXLSX(data, branding);
+        }
+      } else {
+        const data = await assembleForecast(workspaceId, {
+          quarter: options?.quarter,
+        });
+        if (format === 'pdf') {
+          result = await renderForecastPDF(data, branding);
+        } else {
+          result = await renderForecastXLSX(data, branding);
+        }
+      }
+
+      // Write buffer to temp file
+      const filepath = path.join(os.tmpdir(), result.filename);
+      fs.writeFileSync(filepath, result.buffer);
+
+      const downloadId = generateDownloadId();
+      await storeDownloadReference(downloadId, filepath, result.filename, format);
+
+      return res.json({
+        download_url: `/api/downloads/${downloadId}`,
+        filename: result.filename,
+        format,
+        metadata: {},
+      });
+    }
+
+    // ── Template-driven render path (existing) ────────────────
     const input = await assembleRendererInput(workspaceId, source, options);
 
     // Render
