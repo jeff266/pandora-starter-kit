@@ -1,0 +1,47 @@
+Step 1 — Get your workspace ID                         
+                                                         
+  In Replit, open the Shell tab and run:                 
+  curl -s http://localhost:3000/api/workspaces \         
+    -H "Authorization: Bearer <your-token>" | jq         
+  '.[0].id'                                              
+  Or grab it from the URL in the browser — it's the UUID 
+  in /workspaces/<uuid>/...                              
+                                                         
+  ---                                                    
+  Step 2 — Run the backfill (start with 20)              
+                                                         
+  curl -s -X POST \                                      
+    http://localhost:3000/api/workspaces/<workspace-id>/c
+  onnectors/gong/backfill-transcripts \                  
+    -H "Content-Type: application/json" \                
+    -H "Authorization: Bearer <your-token>" \            
+    -d '{"limit": 20}' | jq                              
+                                                         
+  You'll get back:                                       
+  {                                                      
+    "processed": 20,                                     
+    "updated": 17,                                       
+    "no_transcript_available": 3,                        
+    "errors": []                                         
+  }                                                      
+                                                         
+  no_transcript_available means those calls exist in Gong
+   but Gong hasn't generated a transcript (short calls,  
+  no recording, etc.) — that's normal.                   
+                                                         
+  ---                                                    
+  Step 3 — Run again to get more                         
+                                                         
+  Each call updates the most recent calls first. Run it  
+  again with a higher limit or repeat until updated: 0:  
+  # Get all remaining (up to 100)                        
+  curl -s -X POST \                                      
+    http://localhost:3000/api/workspaces/<workspace-id>/c
+  onnectors/gong/backfill-transcripts \                  
+    -H "Content-Type: application/json" \                
+    -H "Authorization: Bearer <your-token>" \            
+    -d '{"limit": 100}' | jq                             
+                                                         
+  Signal extraction fires automatically ~2 seconds after 
+  each backfill run, so by the time you ask "What are the
+   most common objections?" the calls will be analyzed. 
