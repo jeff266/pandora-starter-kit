@@ -16,7 +16,7 @@ import { detectFeedback } from './feedback-detector.js';
 import { recordFeedbackSignal } from '../feedback/signals.js';
 import { createAnnotation, getActiveAnnotations } from '../feedback/annotations.js';
 import { randomUUID } from 'crypto';
-import { runAskPandora, buildPriorContext } from './ask-pandora.js';
+import { runPandoraAgent, buildConversationHistory } from './pandora-agent.js';
 
 export interface ConversationTurnInput {
   surface: 'slack_thread' | 'slack_dm' | 'in_app';
@@ -227,26 +227,20 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
     }
   }
 
-  // ── Ask Pandora agentic path — primary for all in_app questions ──────────────
-  // Every Command Center question goes through here first.
-  // The old scope-handler path below is the fallback if this throws.
+  // ── Pandora Agent — primary path for all in_app questions ───────────────────
+  // Single native tool-calling loop. No mode classifier, no scope handler.
+  // Falls back to scoped analysis only if this throws.
   if (!answer && surface === 'in_app') {
     try {
-      // Build prior context from messages that have tool_trace attached
-      const messagesWithTrace = (state.messages || []).filter(
-        m => m.role === 'assistant'
-      ) as any[];
-      const priorCtx = isFollowUp
-        ? buildPriorContext(messagesWithTrace, 3, 3000)
-        : undefined;
+      const history = buildConversationHistory(state.messages || [] as any);
+      const pandoraResult = await runPandoraAgent(workspaceId, message, history);
 
-      const pandoraResult = await runAskPandora(workspaceId, message, priorCtx);
       answer = pandoraResult.answer;
       tokensUsed = pandoraResult.tokens_used;
-      routerDecision = pandoraResult.mode === 'fast' ? 'ask_pandora_fast' : 'ask_pandora_loop';
-      dataStrategy = 'ask_pandora';
+      routerDecision = 'pandora_agent';
+      dataStrategy = 'pandora_agent';
 
-      // Append assistant message with tool_trace for follow-up context carryover
+      // Persist assistant message with tool_trace for follow-up context
       await appendMessage(workspaceId, channelId, threadId, {
         role: 'assistant',
         content: answer,
@@ -254,7 +248,6 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
         ...(pandoraResult.evidence.tool_calls.length > 0 ? {
           tool_trace: pandoraResult.evidence.tool_calls,
           cited_records: pandoraResult.evidence.cited_records,
-          evidence_mode: pandoraResult.mode,
         } : {}),
       } as any);
 
@@ -263,8 +256,6 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
       });
       await updateTurnMetrics(workspaceId, channelId, threadId, tokensUsed);
 
-      const responseId = randomUUID();
-
       return {
         answer,
         thread_id: threadId,
@@ -272,12 +263,16 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
         router_decision: routerDecision,
         data_strategy: dataStrategy,
         tokens_used: tokensUsed,
-        response_id: responseId,
+        response_id: randomUUID(),
         feedback_enabled: true,
-        ...(pandoraResult.evidence.tool_calls.length > 0 ? { evidence: pandoraResult.evidence } : {}),
+        ...(pandoraResult.evidence.tool_calls.length > 0 ? {
+          evidence: pandoraResult.evidence,
+          tool_call_count: pandoraResult.tool_call_count,
+          latency_ms: pandoraResult.latency_ms,
+        } : {}),
       } as any;
     } catch (err) {
-      console.warn('[orchestrator] Ask Pandora failed, falling back to scoped analysis:', err);
+      console.warn('[orchestrator] Pandora Agent failed, falling back to scoped analysis:', err);
       // Fall through to existing scoped analysis path
     }
   }

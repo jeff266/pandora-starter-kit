@@ -18,9 +18,10 @@ interface CitedRecord {
 
 interface Evidence {
   tool_calls: ToolCall[];
-  skill_evidence_used: { skill_id: string; last_run_at: string; claims_referenced: number }[];
-  loop_iterations: number;
   cited_records: CitedRecord[];
+  // Legacy loop fields — optional for backwards compat
+  skill_evidence_used?: { skill_id: string; last_run_at: string; claims_referenced: number }[];
+  loop_iterations?: number;
 }
 
 interface ChatMessage {
@@ -30,7 +31,8 @@ interface ChatMessage {
   responseId?: string;
   feedbackEnabled?: boolean;
   evidence?: Evidence;
-  mode?: 'fast' | 'loop';
+  tool_call_count?: number;
+  latency_ms?: number;
 }
 
 interface ChatScope {
@@ -125,7 +127,8 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
         responseId: result.response_id,
         feedbackEnabled: result.feedback_enabled,
         evidence: result.evidence,
-        mode: result.mode,
+        tool_call_count: result.tool_call_count,
+        latency_ms: result.latency_ms,
       };
       setMessages(prev => [...prev, assistantMsg]);
     } catch (err) {
@@ -206,7 +209,11 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
                 {formatMarkdown(msg.content)}
               </div>
               {msg.role === 'assistant' && msg.evidence && msg.evidence.tool_calls.length > 0 && (
-                <EvidencePanel evidence={msg.evidence} mode={msg.mode} />
+                <EvidencePanel
+                  evidence={msg.evidence}
+                  toolCallCount={msg.tool_call_count}
+                  latencyMs={msg.latency_ms}
+                />
               )}
               {msg.role === 'assistant' && msg.feedbackEnabled && msg.responseId && (
                 <div style={{
@@ -308,18 +315,36 @@ function formatAmount(v: any): string {
   return `$${n.toLocaleString()}`;
 }
 
-function EvidencePanel({ evidence, mode }: { evidence: Evidence; mode?: string }) {
+const TOOL_ICONS: Record<string, string> = {
+  query_deals: '💼',
+  query_accounts: '🏢',
+  query_conversations: '🎙',
+  get_skill_evidence: '🔍',
+  compute_metric: '📊',
+  query_contacts: '👤',
+  query_activity_timeline: '📅',
+};
+
+function EvidencePanel({ evidence, toolCallCount, latencyMs }: {
+  evidence: Evidence;
+  toolCallCount?: number;
+  latencyMs?: number;
+}) {
   const [open, setOpen] = useState(false);
 
   const totalToolCalls = evidence.tool_calls.length;
   const totalRecords = evidence.cited_records.length;
-  const loopIterations = evidence.loop_iterations;
 
-  const summaryLabel = [
+  const latencyLabel = latencyMs != null
+    ? `${(latencyMs / 1000).toFixed(1)}s`
+    : null;
+
+  const summaryParts = [
     `${totalToolCalls} tool call${totalToolCalls !== 1 ? 's' : ''}`,
     totalRecords > 0 ? `${totalRecords} record${totalRecords !== 1 ? 's' : ''}` : null,
-    loopIterations > 0 ? `${loopIterations} step${loopIterations !== 1 ? 's' : ''}` : null,
-  ].filter(Boolean).join(', ');
+    latencyLabel,
+  ].filter(Boolean);
+  const summaryLabel = summaryParts.join(' · ');
 
   return (
     <div style={{ marginTop: 8 }}>
@@ -354,7 +379,7 @@ function EvidencePanel({ evidence, mode }: { evidence: Evidence; mode?: string }
           {evidence.tool_calls.map((tc, i) => (
             <div key={i} style={{ marginBottom: 12 }}>
               <div style={{ color: '#6488ea', fontWeight: 600, marginBottom: 4 }}>
-                Tool {i + 1}: {tc.tool}
+                {TOOL_ICONS[tc.tool] || '🔧'} {tc.tool}
                 {tc.error && <span style={{ color: '#ef4444', marginLeft: 8 }}>FAILED</span>}
               </div>
               <div style={{ color: '#64748b', marginBottom: 4, fontSize: 11 }}>
@@ -459,7 +484,7 @@ function EvidencePanel({ evidence, mode }: { evidence: Evidence; mode?: string }
             </div>
           ))}
 
-          {evidence.skill_evidence_used.length > 0 && (
+          {evidence.skill_evidence_used && evidence.skill_evidence_used.length > 0 && (
             <div style={{ borderTop: '1px solid #1e2230', paddingTop: 8, marginTop: 4 }}>
               <div style={{ color: '#6488ea', fontWeight: 600, marginBottom: 4 }}>Skills referenced:</div>
               {evidence.skill_evidence_used.map((s, i) => (
@@ -471,7 +496,7 @@ function EvidencePanel({ evidence, mode }: { evidence: Evidence; mode?: string }
           )}
 
           <div style={{ borderTop: '1px solid #1e2230', paddingTop: 6, marginTop: 6, color: '#64748b', fontSize: 11 }}>
-            Mode: {mode || 'unknown'} · {loopIterations} reasoning step{loopIterations !== 1 ? 's' : ''}
+            {totalToolCalls} tool call{totalToolCalls !== 1 ? 's' : ''}{latencyMs != null ? ` · ${(latencyMs / 1000).toFixed(1)}s` : ''}
           </div>
         </div>
       )}
