@@ -14,6 +14,42 @@ export interface ConfigMeta {
   last_validated?: string;
 }
 
+// ===== TOOL FILTERS CONFIG =====
+
+export interface FilterRule {
+  id: string;
+  field: string;
+  operator: 'eq' | 'neq' | 'in' | 'not_in' | 'contains' | 'gt' | 'lt' | 'is_null' | 'is_not_null';
+  value: string | string[] | number | boolean | null;
+  label: string;
+  created_by: 'admin' | 'system' | 'suggestion';
+  created_at: string;
+}
+
+export interface MetricFilterOverride {
+  enabled: boolean;
+  include_stages?: string[];
+  exclude_stages?: string[];
+  additional_exclusions?: FilterRule[];
+  notes?: string;
+}
+
+export interface ToolFiltersConfig {
+  global: {
+    exclude_stages: string[];
+    exclude_pipelines: string[];
+    exclude_deal_types: string[];
+    custom_exclusions: FilterRule[];
+  };
+  metric_overrides: {
+    win_rate: MetricFilterOverride;
+    pipeline_value: MetricFilterOverride;
+    forecast: MetricFilterOverride;
+    velocity: MetricFilterOverride;
+    activity: MetricFilterOverride;
+  };
+}
+
 // ===== MAIN CONFIG =====
 
 export interface WorkspaceConfig {
@@ -45,6 +81,9 @@ export interface WorkspaceConfig {
 
   /** Voice and tone settings for skill output */
   voice: VoiceConfig;
+
+  /** Tool filter configuration for excluding deals from metrics */
+  tool_filters?: ToolFiltersConfig;
 
   /** Has user reviewed and confirmed this config? */
   confirmed: boolean;

@@ -4411,6 +4411,838 @@ const ciAggregateThemes: ToolDefinition = {
 };
 
 // ============================================================================
+// Forecast Model compute tools
+// ============================================================================
+
+const fmScoreOpenDeals: ToolDefinition = {
+  name: 'fmScoreOpenDeals',
+  description: 'Score all open deals for the current quarter using compute_close_probability logic',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (params, context) => {
+    return safeExecute('fmScoreOpenDeals', async () => {
+      const result = await query<any>(
+        `SELECT d.id, d.name, d.amount, d.stage, d.stage_normalized, d.close_date,
+                d.owner as owner_name, d.account_id, d.forecast_category,
+                d.probability as crm_probability, d.days_in_stage,
+                CASE WHEN d.close_date IS NOT NULL
+                     THEN EXTRACT(DAY FROM (d.close_date::date - CURRENT_DATE))
+                     ELSE NULL END as days_to_close
+         FROM deals d
+         WHERE d.workspace_id = $1
+           AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+           AND d.amount IS NOT NULL AND d.amount > 0
+         ORDER BY d.amount DESC NULLS LAST
+         LIMIT 100`,
+        [context.workspaceId]
+      );
+
+      // Get call counts per deal
+      const dealIds = result.rows.map((r: any) => r.id);
+      if (!dealIds.length) return { scored_deals: [], total_pipeline: 0, probability_weighted_pipeline: 0 };
+
+      const convResult = await query<any>(
+        `SELECT cv.deal_id, COUNT(*)::int as call_count, MAX(cv.call_date)::text as last_call_date
+         FROM conversations cv
+         WHERE cv.workspace_id = $1 AND cv.deal_id = ANY($2) AND cv.is_internal = false
+         GROUP BY cv.deal_id`,
+        [context.workspaceId, dealIds]
+      ).catch(() => ({ rows: [] as any[] }));
+      const convMap = new Map(convResult.rows.map((r: any) => [r.deal_id, { call_count: r.call_count, last_call_date: r.last_call_date }]));
+
+      const contactResult = await query<any>(
+        `SELECT dc.deal_id, COUNT(*)::int as total,
+                COUNT(CASE WHEN dc.role IN ('champion','economic_buyer') THEN 1 END)::int as key_contacts
+         FROM deal_contacts dc
+         WHERE dc.workspace_id = $1 AND dc.deal_id = ANY($2)
+         GROUP BY dc.deal_id`,
+        [context.workspaceId, dealIds]
+      ).catch(() => ({ rows: [] as any[] }));
+      const contactMap = new Map(contactResult.rows.map((r: any) => [r.deal_id, { total: r.total, key_contacts: r.key_contacts }]));
+
+      // Simple probability scoring
+      const scored = result.rows.map((deal: any) => {
+        const conv = (convMap.get(deal.id) as any) || { call_count: 0, last_call_date: null };
+        const cont = (contactMap.get(deal.id) as any) || { total: 0, key_contacts: 0 };
+        const fcScores: Record<string, number> = { commit: 0.85, best_case: 0.55, pipeline: 0.25 };
+        const baseProb = fcScores[deal.forecast_category] ?? 0.30;
+        const callBonus = conv.call_count >= 3 ? 0.05 : conv.call_count >= 1 ? 0.02 : 0;
+        const contactBonus = cont.key_contacts > 0 ? 0.05 : cont.total > 0 ? 0.02 : 0;
+        const daysToClose = deal.days_to_close !== null ? parseFloat(deal.days_to_close) : null;
+        const closePenalty = daysToClose !== null && daysToClose < 0 ? -0.10 : 0;
+        const probability = Math.min(Math.round((baseProb + callBonus + contactBonus + closePenalty) * 100), 95);
+        return {
+          deal_id: deal.id,
+          deal_name: deal.name,
+          amount: parseFloat(deal.amount),
+          stage: deal.stage,
+          stage_normalized: deal.stage_normalized,
+          close_date: deal.close_date,
+          owner: deal.owner_name,
+          forecast_category: deal.forecast_category,
+          probability,
+          crm_probability: deal.crm_probability,
+          weighted_amount: Math.round(parseFloat(deal.amount) * probability / 100),
+          call_count: conv.call_count,
+          contacts: cont.total,
+          key_contacts: cont.key_contacts,
+          days_to_close: daysToClose !== null ? Math.round(daysToClose) : null,
+          days_in_stage: Math.round(parseFloat(deal.days_in_stage) || 0),
+        };
+      }).sort((a: any, b: any) => b.weighted_amount - a.weighted_amount);
+
+      const totalPipeline = scored.reduce((s: number, d: any) => s + d.amount, 0);
+      const totalWeighted = scored.reduce((s: number, d: any) => s + d.weighted_amount, 0);
+
+      return { scored_deals: scored, total_pipeline: Math.round(totalPipeline), probability_weighted_pipeline: Math.round(totalWeighted) };
+    }, params);
+  },
+};
+
+const fmApplyRepHaircuts: ToolDefinition = {
+  name: 'fmApplyRepHaircuts',
+  description: 'Apply historical forecast accuracy haircuts to rep-level deal scores',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (params, context) => {
+    return safeExecute('fmApplyRepHaircuts', async () => {
+      const scoredDeals = ((context.stepResults as any).scored_deals as any[]) || [];
+      if (!scoredDeals.length) return { adjusted_deals: [], rep_haircuts: {} };
+
+      // Get historical accuracy per rep (last 4 quarters)
+      const accuracyResult = await query<any>(
+        `SELECT d.owner as owner_name,
+                COUNT(*) FILTER (WHERE d.stage_normalized = 'closed_won')::float /
+                  NULLIF(COUNT(*) FILTER (WHERE d.stage_normalized IN ('closed_won','closed_lost')), 0) as win_rate,
+                COUNT(*) FILTER (WHERE d.stage_normalized IN ('closed_won','closed_lost'))::int as sample_size
+         FROM deals d
+         WHERE d.workspace_id = $1
+           AND d.close_date >= CURRENT_DATE - INTERVAL '365 days'
+           AND d.owner IS NOT NULL
+         GROUP BY d.owner
+         HAVING COUNT(*) FILTER (WHERE d.stage_normalized IN ('closed_won','closed_lost')) >= 3`,
+        [context.workspaceId]
+      ).catch(() => ({ rows: [] as any[] }));
+
+      const repAccuracy = new Map<string, number>();
+      let teamAvg = 0.5;
+      if (accuracyResult.rows.length > 0) {
+        const rates = accuracyResult.rows.map((r: any) => parseFloat(r.win_rate) || 0).filter((r: number) => r > 0);
+        teamAvg = rates.length > 0 ? rates.reduce((s: number, r: number) => s + r, 0) / rates.length : 0.5;
+        for (const r of accuracyResult.rows) {
+          repAccuracy.set(r.owner_name, parseFloat(r.win_rate) || teamAvg);
+        }
+      }
+
+      const repHaircuts: Record<string, number> = {};
+      const adjustedDeals = scoredDeals.map((deal: any) => {
+        const repRate = repAccuracy.get(deal.owner) ?? teamAvg;
+        const haircutFactor = teamAvg > 0 ? Math.min(repRate / teamAvg, 1.2) : 1.0;
+        repHaircuts[deal.owner] = haircutFactor;
+        const adjustedProbability = Math.min(Math.round(deal.probability * haircutFactor), 95);
+        return {
+          ...deal,
+          haircut_factor: Math.round(haircutFactor * 100) / 100,
+          adjusted_probability: adjustedProbability,
+          adjusted_amount: Math.round(deal.amount * adjustedProbability / 100),
+        };
+      });
+
+      return { adjusted_deals: adjustedDeals, rep_haircuts: repHaircuts, team_avg_win_rate: Math.round(teamAvg * 100) };
+    }, params);
+  },
+};
+
+const fmComputePipelineProjection: ToolDefinition = {
+  name: 'fmComputePipelineProjection',
+  description: 'Compute how much pipeline will be created in the current quarter and how much will close in-quarter',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (params, context) => {
+    return safeExecute('fmComputePipelineProjection', async () => {
+      const now = new Date();
+      const currentQStart = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
+      const currentQEnd = new Date(currentQStart);
+      currentQEnd.setMonth(currentQEnd.getMonth() + 3);
+
+      // Pipeline created so far this quarter
+      const createdResult = await query<any>(
+        `SELECT COUNT(*)::int as deals_created,
+                COALESCE(SUM(d.amount), 0)::numeric as amount_created
+         FROM deals d
+         WHERE d.workspace_id = $1
+           AND d.created_date >= $2 AND d.created_date < $3
+           AND d.amount > 0`,
+        [context.workspaceId, currentQStart.toISOString(), currentQEnd.toISOString()]
+      );
+
+      // Historical in-quarter close rate (last 4 quarters)
+      const inQtrResult = await query<any>(
+        `SELECT
+           COUNT(*) FILTER (WHERE d.stage_normalized = 'closed_won'
+             AND d.close_date >= d.created_date::date
+             AND d.close_date < $2)::float /
+           NULLIF(COUNT(*), 0) as inqtr_close_rate,
+           COALESCE(SUM(d.amount) FILTER (WHERE d.stage_normalized = 'closed_won'
+             AND d.close_date >= d.created_date::date
+             AND d.close_date < $2), 0)::numeric / NULLIF(SUM(d.amount), 0) as inqtr_amount_rate
+         FROM deals d
+         WHERE d.workspace_id = $1
+           AND d.created_date >= $3 AND d.created_date < $2
+           AND d.amount > 0`,
+        [context.workspaceId, currentQStart.toISOString(), new Date(currentQStart.getTime() - 365 * 86400000).toISOString()]
+      ).catch(() => ({ rows: [{ inqtr_close_rate: null, inqtr_amount_rate: null }] as any[] }));
+
+      const daysInQtr = 91;
+      const daysElapsed = Math.round((now.getTime() - currentQStart.getTime()) / 86400000);
+      const fractionElapsed = Math.min(daysElapsed / daysInQtr, 1);
+      const fractionRemaining = Math.max(0, 1 - fractionElapsed);
+
+      const amtCreatedSoFar = parseFloat(createdResult.rows[0]?.amount_created || '0');
+      const inqtrAmtRate = parseFloat(inQtrResult.rows[0]?.inqtr_amount_rate || '0') || 0.15;
+
+      // Project remaining creation based on current pace
+      const pacePerDay = daysElapsed > 0 ? amtCreatedSoFar / daysElapsed : 0;
+      const projectedRemainingCreation = Math.round(pacePerDay * daysInQtr * fractionRemaining);
+      const projectedTotalCreation = Math.round(amtCreatedSoFar + projectedRemainingCreation);
+      const projectedInQtrBookings = Math.round(projectedTotalCreation * inqtrAmtRate);
+
+      return {
+        current_quarter: `${currentQStart.getFullYear()}-Q${Math.floor(currentQStart.getMonth() / 3) + 1}`,
+        days_elapsed: daysElapsed,
+        days_remaining: Math.round(daysInQtr * fractionRemaining),
+        amount_created_so_far: Math.round(amtCreatedSoFar),
+        deals_created_so_far: createdResult.rows[0]?.deals_created || 0,
+        pace_per_day: Math.round(pacePerDay),
+        projected_remaining_creation: projectedRemainingCreation,
+        projected_total_creation: projectedTotalCreation,
+        historical_inqtr_close_rate: Math.round(inqtrAmtRate * 1000) / 1000,
+        projected_inqtr_bookings: projectedInQtrBookings,
+      };
+    }, params);
+  },
+};
+
+const fmBuildForecastModel: ToolDefinition = {
+  name: 'fmBuildForecastModel',
+  description: 'Build bear/base/bull forecast tiers from adjusted deals and pipeline projection',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (params, context) => {
+    return safeExecute('fmBuildForecastModel', async () => {
+      const adjustedDeals = ((context.stepResults as any).adjusted_deals as any[]) || [];
+      const pipelineProjection = (context.stepResults as any).pipeline_projection || {};
+
+      // Closed-won this quarter
+      const now = new Date();
+      const currentQStart = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
+      const currentQEnd = new Date(currentQStart);
+      currentQEnd.setMonth(currentQEnd.getMonth() + 3);
+
+      const closedResult = await query<any>(
+        `SELECT COALESCE(SUM(d.amount), 0)::numeric as closed_won_amount,
+                COUNT(*)::int as closed_won_count
+         FROM deals d
+         WHERE d.workspace_id = $1
+           AND d.stage_normalized = 'closed_won'
+           AND d.close_date >= $2 AND d.close_date < $3`,
+        [context.workspaceId, currentQStart.toISOString(), currentQEnd.toISOString()]
+      ).catch(() => ({ rows: [{ closed_won_amount: '0', closed_won_count: 0 }] as any[] }));
+
+      const closedWonAmount = parseFloat(closedResult.rows[0]?.closed_won_amount || '0');
+      const closedWonCount = closedResult.rows[0]?.closed_won_count || 0;
+
+      // Tier deals by adjusted probability
+      const commitDeals = adjustedDeals.filter((d: any) => d.adjusted_probability >= 70);
+      const bestCaseDeals = adjustedDeals.filter((d: any) => d.adjusted_probability >= 40 && d.adjusted_probability < 70);
+      const pipelineDeals = adjustedDeals.filter((d: any) => d.adjusted_probability < 40);
+
+      const commitAmount = commitDeals.reduce((s: number, d: any) => s + d.adjusted_amount, 0);
+      const bestCaseAmount = bestCaseDeals.reduce((s: number, d: any) => s + d.adjusted_amount, 0);
+      const pipelineAmount = pipelineDeals.reduce((s: number, d: any) => s + d.adjusted_amount, 0);
+      const inQtrProjection = pipelineProjection.projected_inqtr_bookings || 0;
+
+      const baseCase = Math.round(closedWonAmount + commitAmount + inQtrProjection);
+      const bullCase = Math.round(closedWonAmount + commitAmount + bestCaseAmount * 0.5 + inQtrProjection * 1.2);
+      const bearCase = Math.round(closedWonAmount + commitAmount * 0.7 + inQtrProjection * 0.5);
+
+      // Rep rollup
+      const repMap = new Map<string, { commit: number; best_case: number; pipeline: number; deals: number }>();
+      for (const deal of adjustedDeals) {
+        const rep = deal.owner || 'Unknown';
+        if (!repMap.has(rep)) repMap.set(rep, { commit: 0, best_case: 0, pipeline: 0, deals: 0 });
+        const entry = repMap.get(rep)!;
+        entry.deals++;
+        if (deal.adjusted_probability >= 70) entry.commit += deal.adjusted_amount;
+        else if (deal.adjusted_probability >= 40) entry.best_case += deal.adjusted_amount;
+        else entry.pipeline += deal.adjusted_amount;
+      }
+
+      const repRollup = Array.from(repMap.entries()).map(([rep, data]) => ({
+        rep,
+        commit: Math.round(data.commit),
+        best_case: Math.round(data.best_case),
+        pipeline: Math.round(data.pipeline),
+        total_weighted: Math.round(data.commit + data.best_case * 0.5 + data.pipeline * 0.15),
+        deal_count: data.deals,
+      })).sort((a, b) => b.total_weighted - a.total_weighted);
+
+      return {
+        closed_won: { amount: Math.round(closedWonAmount), count: closedWonCount },
+        commit_tier: { amount: Math.round(commitAmount), count: commitDeals.length, deals: commitDeals.slice(0, 10) },
+        best_case_tier: { amount: Math.round(bestCaseAmount), count: bestCaseDeals.length, deals: bestCaseDeals.slice(0, 10) },
+        pipeline_tier: { amount: Math.round(pipelineAmount), count: pipelineDeals.length },
+        in_quarter_projection: { amount: inQtrProjection },
+        scenarios: { bear: bearCase, base: baseCase, bull: bullCase },
+        rep_rollup: repRollup,
+      };
+    }, params);
+  },
+};
+
+// ============================================================================
+// Pipeline Gen Forecast compute tools
+// ============================================================================
+
+const pgfGatherCreationHistory: ToolDefinition = {
+  name: 'pgfGatherCreationHistory',
+  description: 'Gather monthly pipeline creation history overall, by source, and by owner',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: { lookback_months: { type: 'number', description: 'Months of history (default 12)' } },
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('pgfGatherCreationHistory', async () => {
+      const lookbackMonths = params.lookback_months || 12;
+
+      const overallResult = await query<any>(
+        `SELECT DATE_TRUNC('month', d.created_date)::text as period,
+                COUNT(*)::int as deals_created,
+                COALESCE(SUM(d.amount), 0)::numeric as amount_created,
+                COALESCE(AVG(d.amount), 0)::numeric as avg_deal_size
+         FROM deals d
+         WHERE d.workspace_id = $1
+           AND d.created_date >= NOW() - ($2 || ' months')::interval
+           AND d.created_date IS NOT NULL AND d.amount > 0
+         GROUP BY period ORDER BY period`,
+        [context.workspaceId, String(lookbackMonths)]
+      );
+
+      const ownerResult = await query<any>(
+        `SELECT DATE_TRUNC('month', d.created_date)::text as period,
+                d.owner as segment_value,
+                COUNT(*)::int as deals_created,
+                COALESCE(SUM(d.amount), 0)::numeric as amount_created
+         FROM deals d
+         WHERE d.workspace_id = $1
+           AND d.created_date >= NOW() - ($2 || ' months')::interval
+           AND d.created_date IS NOT NULL AND d.amount > 0 AND d.owner IS NOT NULL
+         GROUP BY period, segment_value ORDER BY period, segment_value`,
+        [context.workspaceId, String(lookbackMonths)]
+      ).catch(() => ({ rows: [] as any[] }));
+
+      const periods = overallResult.rows.map((r: any) => ({
+        period: r.period,
+        deals_created: r.deals_created,
+        amount_created: parseFloat(r.amount_created),
+        avg_deal_size: parseFloat(r.avg_deal_size),
+      }));
+
+      const allAmounts = periods.map(p => p.amount_created);
+      const avgMonthly = allAmounts.length > 0 ? allAmounts.reduce((s, a) => s + a, 0) / allAmounts.length : 0;
+      const last3 = periods.slice(-3);
+      const prior3 = periods.slice(-6, -3);
+      const last3Avg = last3.length > 0 ? last3.reduce((s, p) => s + p.amount_created, 0) / last3.length : 0;
+      const prior3Avg = prior3.length > 0 ? prior3.reduce((s, p) => s + p.amount_created, 0) / prior3.length : last3Avg;
+      const changePct = prior3Avg > 0 ? Math.round((last3Avg - prior3Avg) / prior3Avg * 100) : 0;
+
+      // Aggregate by owner
+      const ownerMap = new Map<string, { total: number; periods: number }>();
+      for (const r of ownerResult.rows) {
+        const key = r.segment_value;
+        if (!ownerMap.has(key)) ownerMap.set(key, { total: 0, periods: 0 });
+        const entry = ownerMap.get(key)!;
+        entry.total += parseFloat(r.amount_created);
+        entry.periods++;
+      }
+      const byOwner = Array.from(ownerMap.entries())
+        .map(([owner, data]) => ({ owner, total_created: Math.round(data.total), avg_per_period: Math.round(data.total / Math.max(data.periods, 1)) }))
+        .sort((a, b) => b.total_created - a.total_created)
+        .slice(0, 10);
+
+      return {
+        periods,
+        trend: { direction: changePct > 10 ? 'increasing' : changePct < -10 ? 'declining' : 'stable', change_pct: changePct, avg_monthly_amount: Math.round(avgMonthly), last_3m_avg: Math.round(last3Avg), prior_3m_avg: Math.round(prior3Avg) },
+        by_owner: byOwner,
+      };
+    }, params);
+  },
+};
+
+const pgfGatherInqtrCloseRates: ToolDefinition = {
+  name: 'pgfGatherInqtrCloseRates',
+  description: 'Gather historical in-quarter close rates for pipeline created in the same quarter',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: { lookback_quarters: { type: 'number', description: 'Quarters to analyze (default 4)' } },
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('pgfGatherInqtrCloseRates', async () => {
+      const lookbackQuarters = params.lookback_quarters || 4;
+      const now = new Date();
+      const currentQStart = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
+      const quarters = [];
+
+      for (let q = lookbackQuarters; q >= 1; q--) {
+        const qStart = new Date(currentQStart);
+        qStart.setMonth(qStart.getMonth() - q * 3);
+        const qEnd = new Date(qStart);
+        qEnd.setMonth(qEnd.getMonth() + 3);
+
+        const r = await query<any>(
+          `SELECT
+             COUNT(*)::int as deals_created,
+             COUNT(*) FILTER (WHERE d.stage_normalized = 'closed_won'
+               AND d.close_date >= $2 AND d.close_date < $3)::int as deals_closed,
+             COALESCE(SUM(d.amount), 0)::numeric as amount_created,
+             COALESCE(SUM(d.amount) FILTER (WHERE d.stage_normalized = 'closed_won'
+               AND d.close_date >= $2 AND d.close_date < $3), 0)::numeric as amount_closed
+           FROM deals d
+           WHERE d.workspace_id = $1
+             AND d.created_date >= $2 AND d.created_date < $3
+             AND d.amount > 0`,
+          [context.workspaceId, qStart.toISOString(), qEnd.toISOString()]
+        ).catch(() => ({ rows: [{}] as any[] }));
+
+        const row = r.rows[0] || {};
+        const amtCreated = parseFloat(row.amount_created || '0');
+        const amtClosed = parseFloat(row.amount_closed || '0');
+        quarters.push({
+          quarter: `${qStart.getFullYear()}-Q${Math.floor(qStart.getMonth() / 3) + 1}`,
+          deals_created: row.deals_created || 0,
+          amount_created: Math.round(amtCreated),
+          amount_closed_inqtr: Math.round(amtClosed),
+          amount_close_rate: amtCreated > 0 ? Math.round((amtClosed / amtCreated) * 1000) / 1000 : 0,
+        });
+      }
+
+      const avgCloseRate = quarters.length > 0
+        ? quarters.reduce((s, q) => s + q.amount_close_rate, 0) / quarters.length : 0;
+
+      return { quarters, avg_inqtr_close_rate: Math.round(avgCloseRate * 1000) / 1000 };
+    }, params);
+  },
+};
+
+const pgfComputeProjections: ToolDefinition = {
+  name: 'pgfComputeProjections',
+  description: 'Build next quarter pipeline and booking projections from creation history and in-quarter close rates',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (params, context) => {
+    return safeExecute('pgfComputeProjections', async () => {
+      const creationHistory = (context.stepResults as any).creation_history;
+      const inqtrCloseRates = (context.stepResults as any).inqtr_close_rates;
+
+      const avgMonthly = creationHistory?.trend?.avg_monthly_amount || 0;
+      const avgInqtrRate = inqtrCloseRates?.avg_inqtr_close_rate || 0.15;
+
+      // Next quarter projection
+      const projectedNextQtrCreation = Math.round(avgMonthly * 3);
+      const projectedNextQtrBookings = Math.round(projectedNextQtrCreation * avgInqtrRate);
+
+      // Coverage ratio (assuming 3x is target)
+      const now = new Date();
+      const currentQStart = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
+
+      const quotaResult = await query<any>(
+        `SELECT COALESCE(SUM(d.amount) FILTER (WHERE d.stage_normalized = 'closed_won'), 0)::numeric as last_qtr_won
+         FROM deals d
+         WHERE d.workspace_id = $1
+           AND d.close_date >= $2 AND d.close_date < $3`,
+        [context.workspaceId,
+          new Date(currentQStart.getTime() - 91 * 86400000).toISOString(),
+          currentQStart.toISOString()]
+      ).catch(() => ({ rows: [{ last_qtr_won: '0' }] as any[] }));
+
+      const lastQtrWon = parseFloat(quotaResult.rows[0]?.last_qtr_won || '0');
+      const impliedQuota = lastQtrWon * 1.1; // 10% growth target
+      const coverageRatio = impliedQuota > 0 ? projectedNextQtrCreation / impliedQuota : 0;
+      const targetCoverage = 3.0;
+      const gapToTarget = Math.max(0, Math.round(impliedQuota * targetCoverage - projectedNextQtrCreation));
+
+      return {
+        next_quarter_projected_creation: projectedNextQtrCreation,
+        next_quarter_projected_bookings: projectedNextQtrBookings,
+        implied_quota: Math.round(impliedQuota),
+        coverage_ratio: Math.round(coverageRatio * 10) / 10,
+        target_coverage: targetCoverage,
+        gap_to_3x_coverage: gapToTarget,
+        avg_monthly_creation_pace: avgMonthly,
+        avg_inqtr_close_rate: avgInqtrRate,
+      };
+    }, params);
+  },
+};
+
+// ============================================================================
+// Competitive Intelligence compute tools
+// ============================================================================
+
+const ciCompGatherMentions: ToolDefinition = {
+  name: 'ciCompGatherMentions',
+  description: 'Gather competitor mentions from conversations, deal_insights, and custom_fields',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: { lookback_months: { type: 'number', description: 'Months to analyze (default 6)' } },
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('ciCompGatherMentions', async () => {
+      const lookbackMonths = params.lookback_months || 6;
+
+      const convResult = await query<any>(
+        `SELECT DISTINCT ON (cv.deal_id, comp_name)
+                cv.deal_id, cv.call_date,
+                d.name as deal_name, d.amount, d.stage, d.stage_normalized, d.owner,
+                comp_name
+         FROM conversations cv
+         CROSS JOIN LATERAL jsonb_array_elements_text(cv.competitor_mentions) AS comp_name
+         LEFT JOIN deals d ON d.id = cv.deal_id AND d.workspace_id = $1
+         WHERE cv.workspace_id = $1
+           AND cv.call_date >= NOW() - ($2 || ' months')::interval
+           AND cv.competitor_mentions IS NOT NULL
+           AND jsonb_array_length(cv.competitor_mentions) > 0
+         ORDER BY cv.deal_id, comp_name, cv.call_date DESC
+         LIMIT 500`,
+        [context.workspaceId, String(lookbackMonths)]
+      ).catch(() => ({ rows: [] as any[] }));
+
+      const insightResult = await query<any>(
+        `SELECT di.deal_id, di.insight_value,
+                d.name as deal_name, d.amount, d.stage, d.stage_normalized, d.owner
+         FROM deal_insights di
+         JOIN deals d ON d.id = di.deal_id AND d.workspace_id = $1
+         WHERE di.workspace_id = $1
+           AND di.insight_type = 'competition'
+           AND di.is_current = true
+           AND d.created_date >= NOW() - ($2 || ' months')::interval`,
+        [context.workspaceId, String(lookbackMonths)]
+      ).catch(() => ({ rows: [] as any[] }));
+
+      // Aggregate by competitor
+      const compMap = new Map<string, { deal_ids: Set<string>; deals: any[] }>();
+      const addMention = (name: string, deal: any) => {
+        const key = name.toLowerCase().trim();
+        if (!compMap.has(key)) compMap.set(key, { deal_ids: new Set(), deals: [] });
+        const entry = compMap.get(key)!;
+        const dealId = deal.deal_id || deal.id || String(Math.random());
+        if (!entry.deal_ids.has(dealId)) {
+          entry.deal_ids.add(dealId);
+          if (entry.deals.length < 10) {
+            entry.deals.push({ deal_name: deal.deal_name, amount: parseFloat(deal.amount || '0'), stage: deal.stage, stage_normalized: deal.stage_normalized, owner: deal.owner });
+          }
+        }
+      };
+
+      for (const r of convResult.rows) { if (r.comp_name) addMention(r.comp_name, r); }
+      for (const r of insightResult.rows) {
+        const val = typeof r.insight_value === 'string' ? r.insight_value : JSON.stringify(r.insight_value);
+        if (val) addMention(val, r);
+      }
+
+      const competitors = Array.from(compMap.entries())
+        .map(([name, data]) => ({
+          competitor_name: name,
+          total_mentions: data.deal_ids.size,
+          open_deals: data.deals.filter(d => d.stage_normalized !== 'closed_won' && d.stage_normalized !== 'closed_lost').length,
+          deals: data.deals,
+        }))
+        .sort((a, b) => b.total_mentions - a.total_mentions);
+
+      return {
+        competitors,
+        total_deals_with_competition: new Set([...convResult.rows, ...insightResult.rows].map(r => r.deal_id)).size,
+        data_sources: { conversations: convResult.rows.length, deal_insights: insightResult.rows.length },
+      };
+    }, params);
+  },
+};
+
+const ciCompComputeWinRates: ToolDefinition = {
+  name: 'ciCompComputeWinRates',
+  description: 'Compute win/loss rates by competitor vs baseline',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: { lookback_months: { type: 'number', description: 'Months to analyze (default 6)' } },
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('ciCompComputeWinRates', async () => {
+      const lookbackMonths = params.lookback_months || 6;
+      const competitorMentions = (context.stepResults as any).competitor_mentions;
+      const competitors = competitorMentions?.competitors || [];
+
+      // Baseline win rate (no competition)
+      const baselineResult = await query<any>(
+        `SELECT
+           COUNT(*) FILTER (WHERE d.stage_normalized = 'closed_won')::int as wins,
+           COUNT(*) FILTER (WHERE d.stage_normalized IN ('closed_won','closed_lost'))::int as total_closed
+         FROM deals d
+         WHERE d.workspace_id = $1
+           AND d.created_date >= NOW() - ($2 || ' months')::interval
+           AND NOT EXISTS (
+             SELECT 1 FROM conversations cv
+             WHERE cv.deal_id = d.id AND cv.workspace_id = $1
+               AND jsonb_array_length(COALESCE(cv.competitor_mentions,'[]'::jsonb)) > 0
+           )`,
+        [context.workspaceId, String(lookbackMonths)]
+      ).catch(() => ({ rows: [{ wins: 0, total_closed: 0 }] as any[] }));
+
+      const baselineWins = baselineResult.rows[0]?.wins || 0;
+      const baselineTotal = baselineResult.rows[0]?.total_closed || 0;
+      const baselineWinRate = baselineTotal > 0 ? baselineWins / baselineTotal : 0;
+
+      // Win rates per competitor from the deal data we already have
+      const withRates = competitors.map((comp: any) => {
+        const closed = comp.deals.filter((d: any) => d.stage_normalized === 'closed_won' || d.stage_normalized === 'closed_lost');
+        const wins = comp.deals.filter((d: any) => d.stage_normalized === 'closed_won').length;
+        const winRate = closed.length > 0 ? wins / closed.length : 0;
+        return {
+          competitor_name: comp.competitor_name,
+          deals_mentioned: comp.total_mentions,
+          wins,
+          losses: closed.length - wins,
+          open: comp.open_deals,
+          win_rate: Math.round(winRate * 1000) / 1000,
+          win_rate_baseline: Math.round(baselineWinRate * 1000) / 1000,
+          win_rate_delta: Math.round((winRate - baselineWinRate) * 1000) / 1000,
+        };
+      });
+
+      return {
+        competitors: withRates,
+        baseline: { win_rate: Math.round(baselineWinRate * 1000) / 1000, total_closed: baselineTotal, wins: baselineWins },
+      };
+    }, params);
+  },
+};
+
+// ============================================================================
+// Contact Role Resolution compute tools (for the new skill variant)
+// ============================================================================
+
+const crrGatherContactsNeedingRoles: ToolDefinition = {
+  name: 'crrGatherContactsNeedingRoles',
+  description: 'Gather deal contacts with NULL or unknown roles that need role assignment',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: { limit: { type: 'number', description: 'Max contacts to process (default 100)' } },
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('crrGatherContactsNeedingRoles', async () => {
+      const limit = Math.min(params.limit || 100, 200);
+
+      const result = await query<any>(
+        `SELECT dc.id as deal_contact_id, dc.deal_id, dc.contact_id, dc.role as current_role,
+                c.first_name, c.last_name, c.title, c.seniority, c.department, c.email,
+                d.name as deal_name, d.stage, d.stage_normalized, d.amount, d.owner
+         FROM deal_contacts dc
+         JOIN contacts c ON c.id = dc.contact_id AND c.workspace_id = dc.workspace_id
+         JOIN deals d ON d.id = dc.deal_id AND d.workspace_id = dc.workspace_id
+         WHERE dc.workspace_id = $1
+           AND (dc.role IS NULL OR dc.role = '' OR dc.role = 'unknown')
+           AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+           AND d.amount > 0
+         ORDER BY d.amount DESC NULLS LAST
+         LIMIT $2`,
+        [context.workspaceId, limit]
+      );
+
+      return {
+        contacts: result.rows.map((r: any) => ({
+          deal_contact_id: r.deal_contact_id,
+          deal_id: r.deal_id,
+          contact_id: r.contact_id,
+          contact_name: [r.first_name, r.last_name].filter(Boolean).join(' '),
+          title: r.title,
+          seniority: r.seniority,
+          department: r.department,
+          email: r.email,
+          deal_name: r.deal_name,
+          deal_stage: r.stage,
+          deal_amount: parseFloat(r.amount || '0'),
+          deal_owner: r.owner,
+        })),
+        total_needing_roles: result.rows.length,
+      };
+    }, params);
+  },
+};
+
+const crrGatherConversationContext: ToolDefinition = {
+  name: 'crrGatherConversationContext',
+  description: 'Gather conversation participation context for contacts needing role assignment',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (params, context) => {
+    return safeExecute('crrGatherConversationContext', async () => {
+      const contactsData = (context.stepResults as any).contacts_needing_roles;
+      const contacts = contactsData?.contacts || [];
+      if (!contacts.length) return { participation: [] };
+
+      const dealIds = [...new Set(contacts.map((c: any) => c.deal_id))];
+
+      const convResult = await query<any>(
+        `SELECT cv.deal_id, cv.title, cv.call_date, cv.participants,
+                cv.summary
+         FROM conversations cv
+         WHERE cv.workspace_id = $1
+           AND cv.deal_id = ANY($2)
+           AND cv.is_internal = false
+         ORDER BY cv.call_date DESC
+         LIMIT 200`,
+        [context.workspaceId, dealIds]
+      ).catch(() => ({ rows: [] as any[] }));
+
+      // Match participants to contacts by email
+      const participationMap = new Map<string, { calls: number; last_call: string | null; summaries: string[] }>();
+      for (const conv of convResult.rows) {
+        const participants = Array.isArray(conv.participants) ? conv.participants : [];
+        for (const p of participants) {
+          const email = (typeof p === 'object' ? p.email : p) || '';
+          if (!email) continue;
+          if (!participationMap.has(email)) participationMap.set(email, { calls: 0, last_call: null, summaries: [] });
+          const entry = participationMap.get(email)!;
+          entry.calls++;
+          if (!entry.last_call || conv.call_date > entry.last_call) entry.last_call = conv.call_date;
+          if (conv.summary && entry.summaries.length < 3) entry.summaries.push(conv.summary);
+        }
+      }
+
+      return {
+        participation: contacts.map((c: any) => ({
+          contact_id: c.contact_id,
+          deal_id: c.deal_id,
+          email: c.email,
+          call_count: participationMap.get(c.email)?.calls || 0,
+          last_call: participationMap.get(c.email)?.last_call || null,
+          recent_summaries: participationMap.get(c.email)?.summaries || [],
+        })),
+      };
+    }, params);
+  },
+};
+
+const crrPersistRoleEnrichments: ToolDefinition = {
+  name: 'crrPersistRoleEnrichments',
+  description: 'Persist inferred roles to deal_contacts where confidence meets threshold',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: { min_confidence: { type: 'number', description: 'Minimum confidence to persist (default 0.6)' } },
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('crrPersistRoleEnrichments', async () => {
+      const minConfidence = params.min_confidence || 0.6;
+      const roleInferences = (context.stepResults as any).role_inferences;
+      if (!roleInferences) return { persisted: 0, skipped: 0 };
+
+      let inferences: any[] = [];
+      try {
+        inferences = typeof roleInferences === 'string'
+          ? JSON.parse(roleInferences.match(/\[[\s\S]*\]/)?.[0] || '[]')
+          : Array.isArray(roleInferences) ? roleInferences : [];
+      } catch { inferences = []; }
+
+      const toUpdate = inferences.filter((r: any) => r.confidence >= minConfidence && r.role !== 'unknown');
+      let persisted = 0;
+
+      for (const r of toUpdate) {
+        try {
+          await query(
+            `UPDATE deal_contacts
+             SET role = $1, updated_at = NOW()
+             WHERE workspace_id = $2 AND deal_id = $3 AND contact_id = $4
+               AND (role IS NULL OR role = '' OR role = 'unknown')`,
+            [r.role, context.workspaceId, r.deal_id, r.contact_id]
+          );
+          persisted++;
+        } catch { /* skip individual failures */ }
+      }
+
+      return { persisted, skipped: toUpdate.length - persisted, total_inferred: inferences.length, below_threshold: inferences.length - toUpdate.length };
+    }, params);
+  },
+};
+
+const crrGenerateCoverageFindings: ToolDefinition = {
+  name: 'crrGenerateCoverageFindings',
+  description: 'Check each open deal for missing champion and economic buyer roles',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (params, context) => {
+    return safeExecute('crrGenerateCoverageFindings', async () => {
+      const result = await query<any>(
+        `SELECT d.id as deal_id, d.name as deal_name, d.amount, d.owner,
+                d.stage, d.stage_normalized,
+                BOOL_OR(dc.role = 'champion') as has_champion,
+                BOOL_OR(dc.role = 'economic_buyer') as has_economic_buyer,
+                COUNT(dc.id)::int as total_contacts,
+                COUNT(dc.id) FILTER (WHERE dc.role IS NOT NULL AND dc.role != '')::int as contacts_with_roles
+         FROM deals d
+         LEFT JOIN deal_contacts dc ON dc.deal_id = d.id AND dc.workspace_id = d.workspace_id
+         WHERE d.workspace_id = $1
+           AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+           AND d.amount > 0
+         GROUP BY d.id, d.name, d.amount, d.owner, d.stage, d.stage_normalized
+         ORDER BY d.amount DESC NULLS LAST
+         LIMIT 50`,
+        [context.workspaceId]
+      );
+
+      const findings = result.rows
+        .filter((r: any) => !r.has_champion || !r.has_economic_buyer || r.total_contacts === 0)
+        .map((r: any) => {
+          const missingRoles = [];
+          if (!r.has_champion) missingRoles.push('champion');
+          if (!r.has_economic_buyer) missingRoles.push('economic_buyer');
+          return {
+            deal_id: r.deal_id,
+            deal_name: r.deal_name,
+            amount: parseFloat(r.amount || '0'),
+            owner: r.owner,
+            stage: r.stage,
+            total_contacts: r.total_contacts,
+            contacts_with_roles: r.contacts_with_roles,
+            missing_roles: missingRoles,
+            severity: (r.total_contacts === 0 ? 'critical' : missingRoles.length > 1 ? 'warning' : 'info') as 'critical' | 'warning' | 'info',
+          };
+        });
+
+      return {
+        findings,
+        summary: {
+          deals_missing_champion: findings.filter(f => f.missing_roles.includes('champion')).length,
+          deals_missing_economic_buyer: findings.filter(f => f.missing_roles.includes('economic_buyer')).length,
+          deals_no_contacts: findings.filter(f => f.total_contacts === 0).length,
+          total_open_deals_analyzed: result.rows.length,
+        },
+      };
+    }, params);
+  },
+};
+
+// ============================================================================
 
 export const toolRegistry = new Map<string, ToolDefinition>([
   ['queryDeals', queryDeals],
@@ -4496,6 +5328,19 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['svbFlagSlowDeals', svbFlagSlowDeals],
   ['ciGatherConversations', ciGatherConversations],
   ['ciAggregateThemes', ciAggregateThemes],
+  ['fmScoreOpenDeals', fmScoreOpenDeals],
+  ['fmApplyRepHaircuts', fmApplyRepHaircuts],
+  ['fmComputePipelineProjection', fmComputePipelineProjection],
+  ['fmBuildForecastModel', fmBuildForecastModel],
+  ['pgfGatherCreationHistory', pgfGatherCreationHistory],
+  ['pgfGatherInqtrCloseRates', pgfGatherInqtrCloseRates],
+  ['pgfComputeProjections', pgfComputeProjections],
+  ['ciCompGatherMentions', ciCompGatherMentions],
+  ['ciCompComputeWinRates', ciCompComputeWinRates],
+  ['crrGatherContactsNeedingRoles', crrGatherContactsNeedingRoles],
+  ['crrGatherConversationContext', crrGatherConversationContext],
+  ['crrPersistRoleEnrichments', crrPersistRoleEnrichments],
+  ['crrGenerateCoverageFindings', crrGenerateCoverageFindings],
 ]);
 
 // ============================================================================

@@ -26,6 +26,9 @@ import { strategyInsightsSkill } from './library/strategy-insights.js';
 import { workspaceConfigAuditSkill } from './library/workspace-config-audit.js';
 import { stageVelocityBenchmarksSkill } from './library/stage-velocity-benchmarks.js';
 import { conversationIntelligenceSkill } from './library/conversation-intelligence.js';
+import { forecastModelSkill } from './library/forecast-model.js';
+import { pipelineGenForecastSkill } from './library/pipeline-gen-forecast.js';
+import { competitiveIntelligenceSkill } from './library/competitive-intelligence.js';
 
 // Types
 export type {
@@ -99,6 +102,9 @@ export { strategyInsightsSkill } from './library/strategy-insights.js';
 export { workspaceConfigAuditSkill } from './library/workspace-config-audit.js';
 export { stageVelocityBenchmarksSkill } from './library/stage-velocity-benchmarks.js';
 export { conversationIntelligenceSkill } from './library/conversation-intelligence.js';
+export { forecastModelSkill } from './library/forecast-model.js';
+export { pipelineGenForecastSkill } from './library/pipeline-gen-forecast.js';
+export { competitiveIntelligenceSkill } from './library/competitive-intelligence.js';
 
 // Formatters
 export {
@@ -149,6 +155,9 @@ export function registerBuiltInSkills(): void {
   registry.register(workspaceConfigAuditSkill);
   registry.register(stageVelocityBenchmarksSkill);
   registry.register(conversationIntelligenceSkill);
+  registry.register(forecastModelSkill);
+  registry.register(pipelineGenForecastSkill);
+  registry.register(competitiveIntelligenceSkill);
 
   // Register evidence builders for "Show the Work" evidence assembly
   registerAllEvidenceBuilders();

@@ -43,7 +43,7 @@ setInterval(() => {
 
 router.post('/:workspaceId/analyze', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
 
     if (!checkRateLimit(workspaceId)) {
       res.status(429).json({ error: 'Rate limit exceeded. Maximum 10 analysis requests per minute.' });
@@ -125,7 +125,7 @@ router.post('/:workspaceId/analyze', async (req: Request, res: Response): Promis
 
 router.post('/:workspaceId/analyze/legacy', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     const { question, scope, format, max_tokens } = req.body;
 
     if (!question || typeof question !== 'string' || question.trim().length === 0) {

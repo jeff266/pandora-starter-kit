@@ -64,7 +64,7 @@ const DEFAULT_STAGE_NORMALIZED_MAP: Record<string, string> = {
   proposalsent: 'decision',
   verbalcommitment: 'negotiation',
   fellowcontractsigned: 'negotiation',
-  fellowcontractsignedclosedwon: 'negotiation',
+  fellowcontractsignedclosedwon: 'closed_won',
   fellowredirecttocoresales: 'qualification',
   fellowredirecttocoresalesclosedlost: 'closed_lost',
   closedlostpartnership: 'closed_lost',

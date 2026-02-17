@@ -99,7 +99,7 @@ const PANDORA_TOOLS: ToolDef[] = [
       properties: {
         skill_id: {
           type: 'string',
-          enum: ['pipeline-hygiene', 'single-thread-alert', 'data-quality-audit', 'pipeline-coverage-by-rep', 'weekly-forecast-rollup', 'pipeline-waterfall', 'rep-scorecard', 'stage-velocity-benchmarks', 'conversation-intelligence'],
+          enum: ['pipeline-hygiene', 'single-thread-alert', 'data-quality-audit', 'pipeline-coverage-by-rep', 'weekly-forecast-rollup', 'pipeline-waterfall', 'rep-scorecard', 'stage-velocity-benchmarks', 'conversation-intelligence', 'forecast-model', 'pipeline-gen-forecast', 'competitive-intelligence', 'contact-role-resolution'],
           description: 'The skill to pull evidence from',
         },
         max_age_hours: { type: 'number', description: 'Only return if run within this many hours (default 24)' },
@@ -274,9 +274,47 @@ const PANDORA_TOOLS: ToolDef[] = [
     parameters: {
       type: 'object',
       properties: {
-        owner_email: { type: 'string', description: 'Score only deals owned by this rep (email)' },
+        owner_name: { type: 'string', description: 'Score only deals owned by this rep (partial name match)' },
         deal_ids: { type: 'array', items: { type: 'string' }, description: 'Score specific deals by ID' },
         limit: { type: 'number', description: 'Max deals to score (default 50, max 100)' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'compute_pipeline_creation',
+    description: 'Calculate historical pipeline creation rate: how many deals and how much pipeline value is created per month/quarter/week. Shows trends over time and can segment by source, owner, pipeline, or deal size. Essential for predicting how much new pipeline will be generated in the current period.',
+    parameters: {
+      type: 'object',
+      properties: {
+        group_by: { type: 'string', enum: ['month', 'quarter', 'week'], description: 'Time grouping (default: month)' },
+        lookback_months: { type: 'number', description: 'How many months of history (default 12)' },
+        segment_by: { type: 'string', enum: ['source', 'owner', 'pipeline', 'deal_size_band'], description: 'Optional segmentation' },
+        include_current_period: { type: 'boolean', description: 'Include the current incomplete period (default true)' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'compute_inqtr_close_rate',
+    description: 'Calculate the rate at which pipeline created within a quarter closes in that same quarter. Answers: "If we create $500K of pipeline this month, how much of it will close before quarter end?" Includes projection for current quarter based on historical patterns.',
+    parameters: {
+      type: 'object',
+      properties: {
+        lookback_quarters: { type: 'number', description: 'How many quarters to analyze (default 4)' },
+        segment_by: { type: 'string', enum: ['source', 'owner', 'pipeline', 'deal_size_band'], description: 'Optional segmentation' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'compute_competitive_rates',
+    description: 'Calculate win/loss rates when specific competitors are present vs absent. Shows which competitors hurt your win rate most, where they appear in the funnel, and recent deal outcomes. Sources competitor data from call recordings, deal insights, and CRM custom fields.',
+    parameters: {
+      type: 'object',
+      properties: {
+        competitor: { type: 'string', description: 'Specific competitor name, or omit for all detected competitors' },
+        lookback_months: { type: 'number', description: 'How many months to analyze (default 12)' },
       },
       required: [],
     },
@@ -300,7 +338,7 @@ You have tools that query the company's live data. When someone asks a question,
 3. SHOW YOUR WORK. When citing totals or metrics, list the underlying records. "19 deals totaling $303K" is better than "$303K." Name the top deals.
 
 4. CHECK SKILL EVIDENCE FIRST. Before querying raw data for pipeline health, risk, forecasting, or rep performance questions, check get_skill_evidence. Skills have already analyzed the data with richer context than a raw query provides.
-   Available skills: pipeline-hygiene, single-thread-alert, data-quality-audit, pipeline-coverage-by-rep, weekly-forecast-rollup, pipeline-waterfall, rep-scorecard, stage-velocity-benchmarks, conversation-intelligence.
+   Available skills: pipeline-hygiene, single-thread-alert, data-quality-audit, pipeline-coverage-by-rep, weekly-forecast-rollup, pipeline-waterfall, rep-scorecard, stage-velocity-benchmarks, conversation-intelligence, forecast-model, pipeline-gen-forecast, competitive-intelligence, contact-role-resolution.
 
 5. CROSS-REFERENCE. When a question spans entities (deals + calls, reps + accounts), query both sides. Don't answer with half the picture.
 
@@ -310,7 +348,7 @@ You have tools that query the company's live data. When someone asks a question,
    WHEN LISTING CONVERSATIONS: always include title, date, account, rep, and duration.
    WHEN CITING METRICS: always include the formula and record count.
 
-8. PRIOR TOOL RESULTS IN CONTEXT ARE FROM PREVIOUS QUESTIONS — NOT YOUR CURRENT DATA. Each new question starts fresh. All 14 tools are always available. Never say "I don't have access to X in the data provided" or "the data shows only Y" — that refers to a past question. Call a tool.
+8. PRIOR TOOL RESULTS IN CONTEXT ARE FROM PREVIOUS QUESTIONS — NOT YOUR CURRENT DATA. Each new question starts fresh. All 17 tools are always available. Never say "I don't have access to X in the data provided" or "the data shows only Y" — that refers to a past question. Call a tool.
 
 9. FORECASTS AND QUARTERLY NUMBERS: For any question about Q1/Q2/Q3/Q4 forecast, quarterly pipeline, quarterly revenue, or forecast categories (commit/best case):
    - ALWAYS call get_skill_evidence with skill_id="weekly-forecast-rollup" first.
@@ -323,7 +361,9 @@ You have tools that query the company's live data. When someone asks a question,
 
 11. DEAL INVESTIGATION: When investigating why a deal is at risk, call MULTIPLE tools: query_field_history (stage regressions), query_stage_history (full stage log), query_conversations (recent call activity), query_contacts (stakeholder coverage). Build the full picture before diagnosing.
 
-12. FORECAST QUESTIONS REQUIRE PROBABILITY WEIGHTING: For any question asking for a forecast, projected revenue, or expected close amount, call compute_close_probability BEFORE presenting totals. A forecast is NOT a pipeline summary — it is probability-weighted amounts per deal. Raw pipeline $X ≠ forecast. Always show both the raw total and the probability-weighted total.
+12. FORECAST QUESTIONS REQUIRE PROBABILITY WEIGHTING: For any forecast question, call compute_close_probability to score deals, then reference get_skill_evidence('forecast-model') for the full probability-weighted forecast with rep haircuts and in-quarter creation projections. Never present unweighted pipeline totals as a "forecast." Raw pipeline ≠ forecast.
+
+13. COMPETITIVE QUESTIONS: Check get_skill_evidence('competitive-intelligence') first. For specific competitor deep-dives, also use search_transcripts and compute_competitive_rates to find recent mentions and win/loss patterns.
 
 Today's date is ${new Date().toISOString().split('T')[0]}.`;
 
@@ -422,7 +462,7 @@ export async function runPandoraAgent(
         } else if (/\brep|account.exec|AE|quota|attainment/i.test(message)) {
           nudge += ' Call get_skill_evidence with skill_id="rep-scorecard" or query_deals filtered by owner.';
         } else {
-          nudge += ' Call the appropriate tool from the 14 available tools.';
+          nudge += ' Call the appropriate tool from the 17 available tools.';
         }
         nudge += ']';
 
