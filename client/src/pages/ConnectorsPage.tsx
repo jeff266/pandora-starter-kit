@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import { formatTimeAgo } from '../lib/format';
@@ -15,6 +15,26 @@ const sourceIcons: Record<string, { color: string; letter: string }> = {
   'google-drive': { color: '#4285f4', letter: 'D' },
   'file-import': { color: '#64748b', letter: 'I' },
 };
+
+const CONNECTORS_WITH_TRACKED_USERS = ['gong'];
+
+interface TrackedUser {
+  source_id: string;
+  name: string;
+  email?: string;
+  title?: string;
+  active?: boolean;
+}
+
+interface SyncResult {
+  success: boolean;
+  recordsFetched?: number;
+  recordsStored?: number;
+  duration?: number;
+  errors?: string[];
+  trackedUsers?: number;
+  byUser?: Array<{ name: string; calls: number }>;
+}
 
 interface Connector {
   type: string;
@@ -382,8 +402,17 @@ export default function ConnectorsPage() {
   const [connectors, setConnectors] = useState<Connector[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncingConnector, setSyncingConnector] = useState<string | null>(null);
+  const [syncElapsed, setSyncElapsed] = useState(0);
+  const [syncResults, setSyncResults] = useState<Record<string, SyncResult | null>>({});
+  const syncTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const toastIdRef = React.useRef(0);
+
+  const [showUsersModal, setShowUsersModal] = useState<string | null>(null);
+  const [allUsers, setAllUsers] = useState<TrackedUser[]>([]);
+  const [trackedUserIds, setTrackedUserIds] = useState<Set<string>>(new Set());
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [savingUsers, setSavingUsers] = useState(false);
 
   const fetchConnectors = async () => {
     try {
@@ -419,6 +448,12 @@ export default function ConnectorsPage() {
     fetchConnectors();
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (syncTimerRef.current) clearInterval(syncTimerRef.current);
+    };
+  }, []);
+
   const addToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
     const id = ++toastIdRef.current;
     setToasts(prev => [...prev, { id, message, type }]);
@@ -430,16 +465,93 @@ export default function ConnectorsPage() {
 
   const handleSyncNow = async (connectorType: string) => {
     setSyncingConnector(connectorType);
+    setSyncElapsed(0);
+    setSyncResults(prev => ({ ...prev, [connectorType]: null }));
+
+    syncTimerRef.current = setInterval(() => {
+      setSyncElapsed(prev => prev + 1);
+    }, 1000);
+
     try {
-      await api.post(`/connectors/${connectorType}/sync`, { mode: 'initial' });
-      addToast(`${connectorType} sync triggered successfully`, 'success');
-      setTimeout(() => fetchConnectors(), 3000);
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : 'Failed to trigger sync';
-      addToast(`Sync failed: ${errorMsg}`, 'error');
+      const result = await api.post(`/connectors/${connectorType}/sync`, { mode: 'initial' });
+      const syncResult: SyncResult = {
+        success: result.success !== false && (!result.errors || result.errors.length === 0),
+        recordsFetched: result.recordsFetched,
+        recordsStored: result.recordsStored,
+        duration: result.duration,
+        errors: result.errors,
+        trackedUsers: result.trackedUsers,
+        byUser: result.byUser,
+      };
+      setSyncResults(prev => ({ ...prev, [connectorType]: syncResult }));
+
+      if (syncResult.success) {
+        addToast(`${connectorType} sync complete: ${syncResult.recordsStored ?? 0} records synced`, 'success');
+      } else {
+        addToast(`Sync completed with issues: ${syncResult.errors?.[0] || 'Unknown error'}`, 'error');
+      }
+      fetchConnectors();
+    } catch (error: any) {
+      const displayError = error?.error || error?.message || 'Failed to trigger sync';
+      setSyncResults(prev => ({ ...prev, [connectorType]: { success: false, errors: [displayError] } }));
+      addToast(`Sync failed: ${displayError}`, 'error');
     } finally {
+      if (syncTimerRef.current) {
+        clearInterval(syncTimerRef.current);
+        syncTimerRef.current = null;
+      }
       setSyncingConnector(null);
     }
+  };
+
+  const handleOpenUsersModal = async (connectorType: string) => {
+    setShowUsersModal(connectorType);
+    setLoadingUsers(true);
+    setAllUsers([]);
+    setTrackedUserIds(new Set());
+    try {
+      const data = await api.get(`/connectors/${connectorType}/users`);
+      setAllUsers(data.users || []);
+      const tracked = (data.tracked_users || []).map((u: TrackedUser) => u.source_id);
+      setTrackedUserIds(new Set(tracked));
+    } catch (error) {
+      addToast('Failed to load users', 'error');
+      setShowUsersModal(null);
+    } finally {
+      setLoadingUsers(false);
+    }
+  };
+
+  const handleSaveTrackedUsers = async () => {
+    if (!showUsersModal) return;
+    setSavingUsers(true);
+    try {
+      const userIds = Array.from(trackedUserIds);
+      if (userIds.length === 0) {
+        addToast('Select at least one user to track', 'error');
+        setSavingUsers(false);
+        return;
+      }
+      await api.post(`/connectors/${showUsersModal}/users/track`, { user_ids: userIds });
+      addToast(`Tracking ${userIds.length} user${userIds.length > 1 ? 's' : ''} updated`, 'success');
+      setShowUsersModal(null);
+    } catch (error) {
+      addToast('Failed to update tracked users', 'error');
+    } finally {
+      setSavingUsers(false);
+    }
+  };
+
+  const toggleUser = (sourceId: string) => {
+    setTrackedUserIds(prev => {
+      const next = new Set(prev);
+      if (next.has(sourceId)) {
+        next.delete(sourceId);
+      } else {
+        next.add(sourceId);
+      }
+      return next;
+    });
   };
 
   const renderWorkspaceConnectors = () => {
@@ -582,25 +694,91 @@ export default function ConnectorsPage() {
                 </div>
               )}
 
-              <button
-                onClick={() => handleSyncNow(connector.type)}
-                disabled={syncingConnector === connector.type}
-                style={{
-                  width: '100%',
+              {syncResults[connector.type] && !syncingConnector && (
+                <div style={{
                   padding: '10px 12px',
-                  border: `1px solid ${colors.accent}`,
-                  background: 'transparent',
-                  color: colors.accent,
+                  background: syncResults[connector.type]!.success ? `${colors.green}10` : `${colors.red}10`,
+                  border: `1px solid ${syncResults[connector.type]!.success ? `${colors.green}30` : `${colors.red}30`}`,
                   borderRadius: 6,
+                  marginBottom: 10,
                   fontSize: 12,
-                  fontWeight: 500,
-                  cursor: syncingConnector === connector.type ? 'not-allowed' : 'pointer',
-                  opacity: syncingConnector === connector.type ? 0.6 : 1,
-                  transition: 'all 0.2s',
-                }}
-              >
-                {syncingConnector === connector.type ? 'Syncing...' : 'Sync Now'}
-              </button>
+                  color: colors.textSecondary,
+                  lineHeight: 1.6,
+                }}>
+                  {syncResults[connector.type]!.success ? (
+                    <>
+                      <div style={{ color: colors.green, fontWeight: 600, marginBottom: 2 }}>Sync Complete</div>
+                      <div>{syncResults[connector.type]!.recordsStored ?? 0} records synced in {((syncResults[connector.type]!.duration ?? 0) / 1000).toFixed(1)}s</div>
+                      {syncResults[connector.type]!.byUser && syncResults[connector.type]!.byUser!.length > 0 && (
+                        <div style={{ marginTop: 4 }}>
+                          {syncResults[connector.type]!.byUser!.map(u => (
+                            <span key={u.name} style={{ marginRight: 10 }}>{u.name}: {u.calls}</span>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <div style={{ color: colors.red, fontWeight: 600, marginBottom: 2 }}>Sync Failed</div>
+                      <div>{syncResults[connector.type]!.errors?.[0] || 'Unknown error'}</div>
+                    </>
+                  )}
+                  <button
+                    onClick={() => setSyncResults(prev => ({ ...prev, [connector.type]: null }))}
+                    style={{
+                      background: 'none', border: 'none', color: colors.textMuted,
+                      fontSize: 11, cursor: 'pointer', padding: 0, marginTop: 4,
+                    }}
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  onClick={() => handleSyncNow(connector.type)}
+                  disabled={syncingConnector === connector.type}
+                  style={{
+                    flex: 1,
+                    padding: '10px 12px',
+                    border: `1px solid ${colors.accent}`,
+                    background: 'transparent',
+                    color: colors.accent,
+                    borderRadius: 6,
+                    fontSize: 12,
+                    fontWeight: 500,
+                    cursor: syncingConnector === connector.type ? 'not-allowed' : 'pointer',
+                    opacity: syncingConnector === connector.type ? 0.6 : 1,
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  {syncingConnector === connector.type
+                    ? `Syncing... ${syncElapsed}s`
+                    : 'Sync Now'}
+                </button>
+
+                {CONNECTORS_WITH_TRACKED_USERS.includes(connector.type) && (
+                  <button
+                    onClick={() => handleOpenUsersModal(connector.type)}
+                    disabled={syncingConnector === connector.type}
+                    style={{
+                      padding: '10px 12px',
+                      border: `1px solid ${colors.border}`,
+                      background: 'transparent',
+                      color: colors.textSecondary,
+                      borderRadius: 6,
+                      fontSize: 12,
+                      fontWeight: 500,
+                      cursor: 'pointer',
+                      transition: 'all 0.2s',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    Manage Users
+                  </button>
+                )}
+              </div>
             </div>
           );
         })}
@@ -613,6 +791,97 @@ export default function ConnectorsPage() {
       {isConsultant && <ConsultantConnectorSection addToast={addToast} />}
 
       {renderWorkspaceConnectors()}
+
+      {showUsersModal && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex',
+          alignItems: 'center', justifyContent: 'center', zIndex: 10000,
+        }} onClick={() => setShowUsersModal(null)}>
+          <div style={{
+            background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 12,
+            padding: 28, width: 500, maxWidth: '90vw', maxHeight: '80vh', display: 'flex', flexDirection: 'column',
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 16, fontWeight: 600, color: colors.text, marginBottom: 4 }}>
+              Manage Tracked Users
+            </div>
+            <div style={{ fontSize: 13, color: colors.textSecondary, marginBottom: 16, lineHeight: 1.5 }}>
+              Select which {showUsersModal.replace('-', ' ')} users to sync calls from. Only calls involving these users will be imported.
+            </div>
+
+            {loadingUsers ? (
+              <div style={{ padding: 40, textAlign: 'center' }}>
+                <div style={{ fontSize: 13, color: colors.textMuted }}>Loading users...</div>
+              </div>
+            ) : allUsers.length === 0 ? (
+              <div style={{ padding: 40, textAlign: 'center' }}>
+                <div style={{ fontSize: 13, color: colors.textMuted }}>No users found in {showUsersModal}.</div>
+              </div>
+            ) : (
+              <>
+                <div style={{ fontSize: 12, color: colors.textMuted, marginBottom: 10 }}>
+                  {trackedUserIds.size} of {allUsers.length} users selected
+                </div>
+                <div style={{
+                  flex: 1, overflowY: 'auto', border: `1px solid ${colors.border}`,
+                  borderRadius: 8, marginBottom: 16,
+                }}>
+                  {allUsers.map(user => (
+                    <label
+                      key={user.source_id}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 12,
+                        padding: '12px 14px', cursor: 'pointer',
+                        borderBottom: `1px solid ${colors.border}`,
+                        background: trackedUserIds.has(user.source_id) ? `${colors.accent}08` : 'transparent',
+                        transition: 'background 0.15s',
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={trackedUserIds.has(user.source_id)}
+                        onChange={() => toggleUser(user.source_id)}
+                        style={{ accentColor: colors.accent, width: 16, height: 16, cursor: 'pointer' }}
+                      />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 500, color: colors.text }}>
+                          {user.name}
+                        </div>
+                        <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 1 }}>
+                          {[user.email, user.title].filter(Boolean).join(' · ')}
+                        </div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button
+                onClick={() => setShowUsersModal(null)}
+                style={{
+                  padding: '9px 16px', border: `1px solid ${colors.border}`, background: 'transparent',
+                  color: colors.textSecondary, borderRadius: 6, fontSize: 13, cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveTrackedUsers}
+                disabled={savingUsers || trackedUserIds.size === 0}
+                style={{
+                  padding: '9px 20px', border: 'none', background: colors.accent,
+                  color: '#fff', borderRadius: 6, fontSize: 13, fontWeight: 500,
+                  cursor: savingUsers || trackedUserIds.size === 0 ? 'not-allowed' : 'pointer',
+                  opacity: savingUsers || trackedUserIds.size === 0 ? 0.6 : 1,
+                }}
+              >
+                {savingUsers ? 'Saving...' : `Save (${trackedUserIds.size} selected)`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {toasts.map(toast => (
         <Toast
