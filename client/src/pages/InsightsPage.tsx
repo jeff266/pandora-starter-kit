@@ -37,6 +37,14 @@ export default function InsightsPage() {
   const [crmInfo, setCrmInfo] = useState<{ crm: string | null; portalId?: number | null; instanceUrl?: string | null }>({ crm: null });
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [snoozedIds, setSnoozedIds] = useState<Set<string>>(new Set());
+  const [dismissingId, setDismissingId] = useState<string | null>(null);
+
+  const DISMISS_REASONS = [
+    { key: 'wrong_data', label: 'Data is wrong' },
+    { key: 'already_handled', label: 'Already handled' },
+    { key: 'too_sensitive', label: 'Threshold too sensitive' },
+    { key: 'not_relevant', label: 'Not relevant to us' },
+  ];
 
   const limit = 30;
 
@@ -98,17 +106,18 @@ export default function InsightsPage() {
     }
   };
 
-  const dismissFinding = async (findingId: string, severity: string, category: string, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const dismissFinding = async (findingId: string, severity: string, category: string, reason: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
     try {
       await api.post('/feedback', {
         targetType: 'finding',
         targetId: findingId,
         signalType: 'dismiss',
-        metadata: { severity, category },
+        metadata: { severity, category, reason },
         source: 'command_center',
       });
       setDismissedIds(prev => new Set(prev).add(findingId));
+      setDismissingId(null);
     } catch (err) {
       console.error('Failed to dismiss finding:', err);
     }
@@ -271,9 +280,27 @@ export default function InsightsPage() {
                       {!isResolved && (
                         <div style={{ display: 'flex', gap: 4, flexShrink: 0, alignItems: 'center' }}>
                           {confirmedIds.has(f.id) ? (
-                            <span style={{ fontSize: 11, color: colors.green, fontWeight: 500 }}>Confirmed</span>
+                            <span style={{ fontSize: 11, color: colors.green, fontWeight: 500 }}>✓ Accurate</span>
                           ) : dismissedIds.has(f.id) ? (
-                            <span style={{ fontSize: 11, color: colors.textMuted, fontWeight: 500 }}>Dismissed</span>
+                            <span style={{ fontSize: 11, color: colors.textMuted, fontWeight: 500 }}>Not Right</span>
+                          ) : dismissingId === f.id ? (
+                            <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }} onClick={e => e.stopPropagation()}>
+                              {DISMISS_REASONS.map(r => (
+                                <button
+                                  key={r.key}
+                                  onClick={(e) => dismissFinding(f.id, f.severity, f.category, r.key, e)}
+                                  style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4, background: 'transparent', border: `1px solid ${colors.border}`, color: colors.textSecondary, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                                >
+                                  {r.label}
+                                </button>
+                              ))}
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setDismissingId(null); }}
+                                style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4, background: 'transparent', border: 'none', color: colors.textMuted, cursor: 'pointer' }}
+                              >
+                                ✕
+                              </button>
+                            </div>
                           ) : (
                             <>
                               <button
@@ -288,12 +315,12 @@ export default function InsightsPage() {
                                   color: colors.green,
                                   cursor: 'pointer',
                                 }}
-                                title="Confirm this is accurate"
+                                title="Mark as accurate"
                               >
-                                Confirm
+                                ✓ Accurate
                               </button>
                               <button
-                                onClick={(e) => dismissFinding(f.id, f.severity, f.category, e)}
+                                onClick={(e) => { e.stopPropagation(); setDismissingId(f.id); }}
                                 style={{
                                   fontSize: 11,
                                   fontWeight: 500,
@@ -304,9 +331,9 @@ export default function InsightsPage() {
                                   color: colors.textMuted,
                                   cursor: 'pointer',
                                 }}
-                                title="Dismiss - not relevant"
+                                title="Mark as not right"
                               >
-                                Dismiss
+                                ✗ Not Right
                               </button>
                             </>
                           )}

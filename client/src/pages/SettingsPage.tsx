@@ -1104,7 +1104,7 @@ function LearningSection() {
       }}>
         <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text, marginBottom: 16 }}>Learning Rate</h3>
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 100 }}>
-          {byWeek.slice(-8).map((w, i) => {
+          {byWeek.slice(-8).filter(w => !isNaN(new Date(w.week_start).getTime())).map((w, i) => {
             const barH = Math.max((w.count / maxWeekCount) * 80, 2);
             const weekLabel = new Date(w.week_start).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
             return (
@@ -2207,6 +2207,7 @@ function WsGeneralSection() {
 // ─── Workspace Tab: Pipeline & Stages ────────────────────────────────────────
 
 interface WsStage {
+  pipeline: string;
   raw_stage: string;
   stage_normalized: string;
   is_open: boolean;
