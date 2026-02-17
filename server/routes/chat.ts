@@ -45,6 +45,9 @@ router.post('/:workspaceId/chat', async (req: Request, res: Response): Promise<v
       response_id: result.response_id,
       feedback_enabled: result.feedback_enabled ?? false,
       entities_mentioned: result.entities_mentioned ?? { deals: [], accounts: [], reps: [] },
+      ...(result.evidence ? { evidence: result.evidence } : {}),
+      ...(result.tool_call_count != null ? { tool_call_count: result.tool_call_count } : {}),
+      ...(result.latency_ms != null ? { latency_ms: result.latency_ms } : {}),
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
