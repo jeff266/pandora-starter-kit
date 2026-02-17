@@ -214,6 +214,13 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
               <div style={styles.messageContent}>
                 {formatMarkdown(msg.content)}
               </div>
+              {msg.role === 'assistant' && (
+                <ChainOfThoughtPanel
+                  evidence={msg.evidence}
+                  latencyMs={msg.latency_ms}
+                  visible={hoveredMsgIdx === idx}
+                />
+              )}
               {msg.role === 'assistant' && msg.evidence && msg.evidence.tool_calls.length > 0 && (
                 <EvidencePanel
                   evidence={msg.evidence}
@@ -307,6 +314,90 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── Chain of Thought hover panel ────────────────────────────────────────────
+
+function formatCompactParams(params: Record<string, any>): string {
+  return Object.entries(params)
+    .filter(([, v]) => v !== undefined && v !== null && v !== false)
+    .slice(0, 3)
+    .map(([k, v]) => {
+      const val = typeof v === 'string'
+        ? (v.length > 24 ? v.slice(0, 24) + '…' : v)
+        : Array.isArray(v) ? v.join(',') : String(v);
+      return `${k}: ${val}`;
+    })
+    .join('  ');
+}
+
+function summarizeResult(toolName: string, result: any): string {
+  if (!result) return 'no data';
+  if (result.error) return `error`;
+  switch (toolName) {
+    case 'query_deals':
+      return `${result.total_count ?? result.deals?.length ?? 0} deals · ${formatAmount(result.total_amount)}`;
+    case 'query_conversations':
+      return `${result.total_count ?? result.conversations?.length ?? 0} calls`;
+    case 'compute_metric':
+      return result.formatted || 'computed';
+    case 'get_skill_evidence':
+      return result ? `${result.claim_count || 0} findings` : 'no data';
+    case 'query_contacts':
+      return `${result.total_count ?? result.contacts?.length ?? 0} contacts`;
+    case 'query_activity_timeline':
+      return `${result.total_count ?? result.events?.length ?? 0} events`;
+    case 'query_accounts':
+      return `${result.total_count ?? result.accounts?.length ?? 0} accounts`;
+    default:
+      return 'done';
+  }
+}
+
+function ChainOfThoughtPanel({ evidence, latencyMs, visible }: {
+  evidence?: Evidence;
+  latencyMs?: number;
+  visible: boolean;
+}) {
+  const toolCalls = evidence?.tool_calls || [];
+  const hasTools = toolCalls.length > 0;
+
+  return (
+    <div style={{
+      marginTop: 8,
+      opacity: visible ? 1 : 0,
+      transition: 'opacity 0.15s',
+      pointerEvents: visible ? 'auto' : 'none',
+      borderTop: '1px solid #1e2230',
+      paddingTop: 8,
+    }}>
+      <div style={{ fontSize: 11, color: '#475569', marginBottom: hasTools ? 6 : 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ color: '#334155' }}>⚙</span>
+        {hasTools
+          ? `${toolCalls.length} tool call${toolCalls.length !== 1 ? 's' : ''}${latencyMs != null ? ` · ${(latencyMs / 1000).toFixed(1)}s` : ''}`
+          : `no tools called${latencyMs != null ? ` · ${(latencyMs / 1000).toFixed(1)}s` : ''}`
+        }
+      </div>
+      {toolCalls.map((tc, i) => (
+        <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 4, alignItems: 'flex-start' }}>
+          <span style={{ color: '#334155', fontSize: 11, flexShrink: 0, marginTop: 1 }}>
+            {i + 1}. {TOOL_ICONS[tc.tool] || '🔧'}
+          </span>
+          <div style={{ minWidth: 0 }}>
+            <span style={{ color: '#6488ea', fontSize: 11, fontWeight: 600 }}>{tc.tool}</span>
+            {Object.keys(tc.params || {}).length > 0 && (
+              <span style={{ color: '#475569', fontSize: 11, marginLeft: 6 }}>
+                {formatCompactParams(tc.params)}
+              </span>
+            )}
+            <div style={{ color: tc.error ? '#ef4444' : '#64748b', fontSize: 11, marginTop: 1 }}>
+              → {tc.error ? `failed: ${tc.error}` : summarizeResult(tc.tool, tc.result)}
+            </div>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
