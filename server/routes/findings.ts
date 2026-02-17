@@ -440,6 +440,169 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
     const prev_rate = wr.total_closed_prev > 0 ? wr.won_prev / wr.total_closed_prev : 0;
     const win_trend = trailing_90d > prev_rate + 0.02 ? 'up' : trailing_90d < prev_rate - 0.02 ? 'down' : 'stable';
 
+    // --- D1: include_deals support ---
+    const includeDealsBool = req.query.include_deals === 'true';
+    const stageQueryParam = req.query.stage as string | undefined;
+
+    // If ?stage= is given without ?include_deals=true, return simple deals response
+    if (stageQueryParam && !includeDealsBool) {
+      const stageDealsParams: any[] = [workspaceId, stageQueryParam];
+      let stageDealsFilter = '';
+      if (pipelineFilter && pipelineFilter !== 'all') {
+        stageDealsParams.push(pipelineFilter);
+        stageDealsFilter = ` AND d.pipeline = $${stageDealsParams.length}`;
+      }
+      const stageDealsResult = await query(
+        `SELECT
+           d.id,
+           d.name as deal_name,
+           d.owner as owner_email,
+           d.owner_name,
+           d.amount,
+           COALESCE(d.probability, 0) as probability,
+           d.close_date,
+           COALESCE(d.stage, d.stage_normalized, 'Unknown') as stage,
+           d.stage_normalized,
+           COALESCE(d.forecast_category, 'pipeline') as forecast_category,
+           EXTRACT(EPOCH FROM (now() - COALESCE(d.stage_entered_at, d.created_at))) / 86400 as days_in_stage
+         FROM deals d
+         WHERE d.workspace_id = $1
+           AND (d.stage = $2 OR d.stage_normalized = $2)
+           AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+           ${stageDealsFilter}
+         ORDER BY d.amount DESC NULLS LAST
+         LIMIT 50`,
+        stageDealsParams
+      );
+
+      const dealIds = stageDealsResult.rows.map((d: any) => d.id);
+      const dealFindings: Record<string, string[]> = {};
+      if (dealIds.length > 0) {
+        const findingsForDeals = await query(
+          `SELECT deal_id, array_agg(DISTINCT category) as categories
+           FROM findings
+           WHERE workspace_id = $1 AND deal_id = ANY($2) AND resolved_at IS NULL
+           GROUP BY deal_id`,
+          [workspaceId, dealIds]
+        );
+        for (const row of findingsForDeals.rows) {
+          dealFindings[row.deal_id] = row.categories || [];
+        }
+      }
+
+      const deals = stageDealsResult.rows.map((d: any) => ({
+        id: d.id,
+        name: d.deal_name,
+        owner_name: d.owner_name,
+        owner_email: d.owner_email,
+        amount: d.amount || 0,
+        probability: d.probability || 0,
+        days_in_stage: d.days_in_stage || 0,
+        close_date: d.close_date,
+        forecast_category: d.forecast_category,
+        findings: dealFindings[d.id] || [],
+      }));
+
+      res.json({ deals, stage: stageQueryParam });
+      return;
+    }
+
+    // If ?include_deals=true, fetch deals for all stages (optionally filtered by ?stage=)
+    if (includeDealsBool) {
+      const incDealsParams: any[] = [workspaceId];
+      let incStageFilter = '';
+      let incPipelineFilter = '';
+      if (stageQueryParam) {
+        incDealsParams.push(stageQueryParam);
+        incStageFilter = ` AND (d.stage = $${incDealsParams.length} OR d.stage_normalized = $${incDealsParams.length})`;
+      }
+      if (pipelineFilter && pipelineFilter !== 'all') {
+        incDealsParams.push(pipelineFilter);
+        incPipelineFilter = ` AND d.pipeline = $${incDealsParams.length}`;
+      }
+
+      const allDealsResult = await query(
+        `SELECT
+           d.id,
+           d.name as deal_name,
+           d.owner as owner_email,
+           d.owner_name,
+           d.amount,
+           COALESCE(d.probability, 0) as probability,
+           d.close_date,
+           COALESCE(d.stage, d.stage_normalized, 'Unknown') as stage,
+           d.stage_normalized,
+           COALESCE(d.forecast_category, 'pipeline') as forecast_category,
+           EXTRACT(EPOCH FROM (now() - COALESCE(d.stage_entered_at, d.created_at))) / 86400 as days_in_stage
+         FROM deals d
+         WHERE d.workspace_id = $1
+           AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+           ${incStageFilter}
+           ${incPipelineFilter}
+         ORDER BY d.amount DESC NULLS LAST
+         LIMIT 50`,
+        incDealsParams
+      );
+
+      const allDealIds = allDealsResult.rows.map((d: any) => d.id);
+      const allDealFindings: Record<string, string[]> = {};
+      if (allDealIds.length > 0) {
+        const findingsForAllDeals = await query(
+          `SELECT deal_id, array_agg(DISTINCT category) as categories
+           FROM findings
+           WHERE workspace_id = $1 AND deal_id = ANY($2) AND resolved_at IS NULL
+           GROUP BY deal_id`,
+          [workspaceId, allDealIds]
+        );
+        for (const row of findingsForAllDeals.rows) {
+          allDealFindings[row.deal_id] = row.categories || [];
+        }
+      }
+
+      // Group deals by stage name
+      const dealsByStage: Record<string, any[]> = {};
+      for (const d of allDealsResult.rows) {
+        const stageName = d.stage;
+        if (!dealsByStage[stageName]) dealsByStage[stageName] = [];
+        dealsByStage[stageName].push({
+          id: d.id,
+          name: d.deal_name,
+          owner_name: d.owner_name,
+          owner_email: d.owner_email,
+          amount: d.amount || 0,
+          probability: d.probability || 0,
+          days_in_stage: d.days_in_stage || 0,
+          close_date: d.close_date,
+          forecast_category: d.forecast_category,
+          findings: allDealFindings[d.id] || [],
+        });
+      }
+
+      // Attach deals to each by_stage entry
+      const by_stage_with_deals = by_stage.map(s => ({
+        ...s,
+        deals: dealsByStage[s.stage] || [],
+        deals_total: s.deal_count,
+      }));
+
+      res.json({
+        snapshot,
+        total_pipeline,
+        total_deals,
+        weighted_pipeline,
+        by_stage: by_stage_with_deals,
+        deals_by_stage: dealsByStage,
+        coverage: { ratio: snapshot.coverageRatio, quota, pipeline: total_pipeline },
+        win_rate: {
+          trailing_90d: Math.round(trailing_90d * 1000) / 1000,
+          trend: win_trend,
+        },
+        findings_summary,
+      });
+      return;
+    }
+    // --- end D1 ---
+
     res.json({
       snapshot,
       total_pipeline,

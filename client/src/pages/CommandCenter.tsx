@@ -51,6 +51,36 @@ interface StageDeal {
   stage?: string;
 }
 
+interface DealSummaryFull {
+  id: string;
+  name: string;
+  owner_name: string;
+  owner_email: string;
+  amount: number;
+  probability: number;
+  days_in_stage: number;
+  close_date: string;
+  forecast_category: string;
+  findings: string[];
+}
+
+interface SelectedStage {
+  stage: string;
+  stage_normalized: string;
+  deal_count: number;
+  total_value: number;
+  weighted_value: number;
+  deals: DealSummaryFull[];
+  deals_total: number;
+}
+
+interface ThreadMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  sources?: string[];
+  isThinking?: boolean;
+}
+
 export default function CommandCenter() {
   const navigate = useNavigate();
   const { isAuthenticated, isLoading: authLoading } = useWorkspace();
@@ -77,6 +107,12 @@ export default function CommandCenter() {
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [refreshing, setRefreshing] = useState(false);
   const [, setTick] = useState(0);
+
+  const [selectedStageData, setSelectedStageData] = useState<SelectedStage | null>(null);
+  const [stageDealsLoading, setStageDealsLoading] = useState(false);
+  const [askingAbout, setAskingAbout] = useState<'stage' | DealSummaryFull | null>(null);
+  const [activeThread, setActiveThread] = useState<ThreadMessage[] | null>(null);
+  const [threadLoading, setThreadLoading] = useState(false);
 
   useEffect(() => {
     const tickInterval = setInterval(() => setTick(t => t + 1), 30000);
@@ -188,25 +224,120 @@ export default function CommandCenter() {
 
   const handleBarClick = useCallback(async (data: any) => {
     const d = data?.payload || data;
-    const stageName = d?.stage_normalized || d?.stage;
+    const stageName = d?.stage || d?.stage_normalized;
     if (!stageName) return;
-    setStageFilter(stageName);
+
+    // Keep existing stage filter behavior
+    setStageFilter(d?.stage_normalized || stageName);
     setStageFilterLoading(true);
+
+    // New: open drilldown panel
+    const stageRow = stageData.find(s => s.stage === stageName || s.stage_normalized === stageName);
+    setSelectedStageData(null);
+    setStageDealsLoading(true);
+    setAskingAbout(null);
+    setActiveThread(null);
+
     try {
-      const result = await api.get(`/deals?stage=${encodeURIComponent(stageName)}&limit=50`);
-      const deals = Array.isArray(result) ? result : result.deals || [];
-      setStageFilterDealIds(deals.map((deal: any) => deal.id));
+      const pFilter = selectedPipeline !== 'all' ? `&pipeline=${encodeURIComponent(selectedPipeline)}` : '';
+      const result = await api.get(`/pipeline/snapshot?include_deals=true&stage=${encodeURIComponent(stageName)}${pFilter}`);
+      const dealsForStage = result.deals_by_stage?.[stageName] || result.deals || [];
+      setSelectedStageData({
+        stage: stageName,
+        stage_normalized: d?.stage_normalized || '',
+        deal_count: stageRow?.deal_count || dealsForStage.length,
+        total_value: stageRow?.total_value || 0,
+        weighted_value: stageRow?.weighted_value || 0,
+        deals: dealsForStage,
+        deals_total: stageRow?.deal_count || dealsForStage.length,
+      });
+
+      // existing filter logic
+      const dealIds = dealsForStage.map((deal: any) => deal.id);
+      setStageFilterDealIds(dealIds);
     } catch {
       setStageFilterDealIds([]);
+      if (stageRow) {
+        setSelectedStageData({
+          stage: stageName,
+          stage_normalized: d?.stage_normalized || '',
+          deal_count: stageRow.deal_count,
+          total_value: stageRow.total_value,
+          weighted_value: stageRow.weighted_value,
+          deals: [],
+          deals_total: stageRow.deal_count,
+        });
+      }
     } finally {
+      setStageDealsLoading(false);
       setStageFilterLoading(false);
     }
-  }, []);
+  }, [stageData, selectedPipeline]);
 
   const clearStageFilter = useCallback(() => {
     setStageFilter(null);
     setStageFilterDealIds([]);
   }, []);
+
+  const handleAskPandora = useCallback(async (prompt: string, scopeOverride?: any) => {
+    const scope = scopeOverride || (selectedStageData ? {
+      type: 'stage',
+      stage: selectedStageData.stage,
+    } : { type: 'workspace' });
+
+    const newMsg: ThreadMessage = { role: 'user', content: prompt };
+    const thinkingMsg: ThreadMessage = { role: 'assistant', content: '', isThinking: true };
+
+    setActiveThread(prev => {
+      const history = prev || [];
+      return [...history, newMsg, thinkingMsg];
+    });
+    setThreadLoading(true);
+
+    try {
+      const conversationHistory = (activeThread || [])
+        .filter(m => !m.isThinking)
+        .map(m => ({ role: m.role, content: m.content }));
+
+      const result = await api.post('/analyze', {
+        question: prompt,
+        scope,
+        conversation_history: conversationHistory.length > 0 ? conversationHistory : undefined,
+      });
+
+      setActiveThread(prev => {
+        if (!prev) return null;
+        const withoutThinking = prev.filter(m => !m.isThinking);
+        return [...withoutThinking, {
+          role: 'assistant',
+          content: result.answer || 'No response received.',
+          sources: result.evidence_sources || (result.data_consulted ? ['pipeline data'] : []),
+        }];
+      });
+    } catch (err: any) {
+      setActiveThread(prev => {
+        if (!prev) return null;
+        const withoutThinking = prev.filter(m => !m.isThinking);
+        return [...withoutThinking, {
+          role: 'assistant',
+          content: 'Analysis unavailable — try again.',
+        }];
+      });
+    } finally {
+      setThreadLoading(false);
+    }
+  }, [selectedStageData, activeThread]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (activeThread) { setActiveThread(null); return; }
+        if (selectedStageData) { setSelectedStageData(null); setAskingAbout(null); }
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [activeThread, selectedStageData]);
 
   const handleExpandStage = useCallback(async (stageName: string) => {
     if (expandedStage === stageName) {
@@ -547,6 +678,38 @@ export default function CommandCenter() {
         </div>
       </SectionErrorBoundary>
 
+      {/* Stage Drilldown overlay */}
+      {selectedStageData && (
+        <>
+          <div
+            onClick={() => { setSelectedStageData(null); setAskingAbout(null); }}
+            style={{
+              position: 'fixed', top: 0, left: 0, right: 680, bottom: 0,
+              background: 'rgba(0,0,0,0.3)', zIndex: 99,
+            }}
+          />
+          <StageDrillDownPanel
+            stage={selectedStageData}
+            loading={stageDealsLoading}
+            askingAbout={askingAbout}
+            onClose={() => { setSelectedStageData(null); setAskingAbout(null); }}
+            onAskAboutStage={() => setAskingAbout(askingAbout === 'stage' ? null : 'stage')}
+            onAskAboutDeal={(deal) => setAskingAbout(askingAbout === deal ? null : deal)}
+            onAskPandora={handleAskPandora}
+          />
+        </>
+      )}
+
+      {/* Ask Pandora Drawer */}
+      {activeThread && (
+        <AskPandoraDrawer
+          thread={activeThread}
+          loading={threadLoading}
+          onClose={() => { setActiveThread(null); }}
+          onSend={(msg) => handleAskPandora(msg)}
+        />
+      )}
+
       <SectionErrorBoundary fallbackMessage="Failed to load findings by rep.">
         {ownerRows.length > 0 && (
           <div style={{
@@ -744,6 +907,457 @@ export default function CommandCenter() {
     </div>
   );
 }
+
+const FINDING_LABELS_MAP: Record<string, { label: string; color: string; bg: string; icon: string }> = {
+  stale_deal: { label: 'Stale', color: '#EF4444', bg: 'rgba(239,68,68,0.12)', icon: '\u23F0' },
+  single_thread: { label: 'Single Thread', color: '#F59E0B', bg: 'rgba(245,158,11,0.12)', icon: '\uD83D\uDC64' },
+  close_date_risk: { label: 'Close Date Risk', color: '#F59E0B', bg: 'rgba(245,158,11,0.12)', icon: '\uD83D\uDCC5' },
+  missing_amount: { label: 'No Amount', color: '#5A6A80', bg: '#151D2E', icon: '\uD83D\uDCB0' },
+};
+
+function getPromptSuggestionsForStage(stage: SelectedStage) {
+  const base = [
+    { label: 'Deep dive', prompt: `What's the risk profile for deals in ${stage.stage}?` },
+    { label: 'Velocity', prompt: `How long do deals typically stay in ${stage.stage}? Are any stuck?` },
+    { label: 'Forecast impact', prompt: `What's the probability-weighted forecast from ${stage.stage} deals?` },
+  ];
+  if (stage.deals.some(d => d.findings.includes('stale_deal'))) {
+    base.unshift({ label: 'Stale deals', prompt: `Which ${stage.stage} deals are stale and what should we do about them?` });
+  }
+  if (stage.deals.some(d => d.findings.includes('single_thread'))) {
+    base.push({ label: 'Threading', prompt: `Which ${stage.stage} deals are single-threaded? Who else should we engage?` });
+  }
+  return base;
+}
+
+function getDealPromptsForDeal(deal: DealSummaryFull) {
+  return [
+    { label: 'Full dossier', prompt: `Give me everything you know about the ${deal.name} deal` },
+    { label: 'Risk analysis', prompt: `What are the risks on ${deal.name}? Will it close this quarter?` },
+    { label: 'Next steps', prompt: `What should the rep do next on ${deal.name}?` },
+    { label: 'Call history', prompt: `What did we discuss in recent calls with ${deal.name}?` },
+  ];
+}
+
+function fmtAmt(n: number) {
+  if (n >= 1000000) return `$${(n / 1000000).toFixed(1)}M`;
+  if (n >= 1000) return `$${(n / 1000).toFixed(0)}K`;
+  return `$${n}`;
+}
+
+function StageDrillDownPanel({
+  stage, loading, askingAbout, onClose, onAskAboutStage, onAskAboutDeal, onAskPandora
+}: {
+  stage: SelectedStage;
+  loading: boolean;
+  askingAbout: 'stage' | DealSummaryFull | null;
+  onClose: () => void;
+  onAskAboutStage: () => void;
+  onAskAboutDeal: (deal: DealSummaryFull) => void;
+  onAskPandora: (prompt: string, scope?: any) => void;
+}) {
+  const [sortBy, setSortBy] = useState<'amount' | 'days' | 'probability' | 'risk'>('amount');
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  const sorted = [...stage.deals].sort((a, b) => {
+    if (sortBy === 'amount') return b.amount - a.amount;
+    if (sortBy === 'days') return b.days_in_stage - a.days_in_stage;
+    if (sortBy === 'probability') return b.probability - a.probability;
+    if (sortBy === 'risk') return b.findings.length - a.findings.length;
+    return 0;
+  });
+
+  const riskCount = sorted.filter(d => d.findings.length > 0).length;
+  const prompts = askingAbout === 'stage' ? getPromptSuggestionsForStage(stage)
+    : askingAbout ? getDealPromptsForDeal(askingAbout as DealSummaryFull)
+    : null;
+
+  const avgDays = sorted.length > 0 ? Math.round(sorted.reduce((s, d) => s + (d.days_in_stage || 0), 0) / sorted.length) : 0;
+  const avgProb = sorted.length > 0 ? Math.round(sorted.reduce((s, d) => s + (d.probability || 0), 0) / sorted.length) : 0;
+
+  return (
+    <div
+      ref={panelRef}
+      style={{
+        position: 'fixed', top: 0, right: 0, width: 680, height: '100vh',
+        background: '#111827', borderLeft: '1px solid #1E293B',
+        zIndex: 100, display: 'flex', flexDirection: 'column',
+        boxShadow: '-12px 0 40px rgba(0,0,0,0.5)',
+        fontFamily: "'IBM Plex Sans', -apple-system, sans-serif",
+      }}
+    >
+      {/* Header */}
+      <div style={{ padding: '20px 24px', borderBottom: '1px solid #1E293B', flexShrink: 0 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+          <div>
+            <div style={{ fontSize: 12, color: '#5A6A80', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+              Pipeline Drilldown
+            </div>
+            <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: '#E2E8F0' }}>{stage.stage}</h2>
+            <div style={{ display: 'flex', gap: 16, marginTop: 10 }}>
+              {[
+                { label: 'Deals', value: stage.deal_count, color: '#E2E8F0' },
+                { label: 'Total', value: fmtAmt(stage.total_value), color: '#E2E8F0' },
+                { label: 'Weighted', value: fmtAmt(stage.weighted_value), color: '#3B82F6' },
+                { label: 'At Risk', value: riskCount, color: riskCount > 0 ? '#EF4444' : '#5A6A80' },
+              ].map(m => (
+                <div key={m.label}>
+                  <div style={{ fontSize: 10, color: '#5A6A80', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{m.label}</div>
+                  <div style={{ fontSize: 16, fontWeight: 700, fontFamily: "'IBM Plex Mono', monospace", color: m.color, marginTop: 2 }}>{m.value}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#5A6A80', fontSize: 20, cursor: 'pointer', padding: 4 }}>&#x2715;</button>
+        </div>
+
+        {/* Sort + Ask Pandora */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16 }}>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {(['amount', 'days', 'probability', 'risk'] as const).map(s => (
+              <button key={s} onClick={() => setSortBy(s)} style={{
+                padding: '4px 10px', fontSize: 11, fontWeight: sortBy === s ? 600 : 400,
+                fontFamily: "'IBM Plex Sans', sans-serif",
+                border: `1px solid ${sortBy === s ? '#3B82F6' : '#1E293B'}`,
+                borderRadius: 5,
+                background: sortBy === s ? 'rgba(59,130,246,0.12)' : 'transparent',
+                color: sortBy === s ? '#3B82F6' : '#8896AB',
+                cursor: 'pointer',
+                textTransform: 'capitalize',
+              }}>{s}</button>
+            ))}
+          </div>
+          {stage.deals.length > 0 && (
+            <button
+              onClick={onAskAboutStage}
+              style={{
+                padding: '6px 14px', fontSize: 12, fontWeight: 500,
+                background: askingAbout === 'stage' ? '#3B82F6' : 'rgba(59,130,246,0.12)',
+                color: askingAbout === 'stage' ? '#fff' : '#3B82F6',
+                border: 'none', borderRadius: 6, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 6, transition: 'all 0.15s',
+              }}
+            >
+              &#x1F4AC; Ask Pandora about {stage.stage}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Prompt Suggestions */}
+      {prompts && (
+        <div style={{
+          padding: '12px 24px', borderBottom: '1px solid #1E293B',
+          background: 'rgba(59,130,246,0.04)', flexShrink: 0,
+        }}>
+          <div style={{ fontSize: 11, color: '#5A6A80', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+            {askingAbout === 'stage' ? `Questions about ${stage.stage}` : `Questions about ${(askingAbout as DealSummaryFull).name}`}
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {prompts.map((p, i) => {
+              const dealScope = askingAbout !== 'stage' && askingAbout
+                ? { type: 'deal', entity_id: (askingAbout as DealSummaryFull).id }
+                : { type: 'stage', stage: stage.stage };
+              return (
+                <button
+                  key={i}
+                  onClick={() => { onAskPandora(p.prompt, dealScope); }}
+                  style={{
+                    padding: '8px 14px', fontSize: 12,
+                    background: '#151D2E', border: '1px solid #2a3650',
+                    borderRadius: 8, color: '#E2E8F0', cursor: 'pointer',
+                    transition: 'all 0.15s', textAlign: 'left', lineHeight: 1.4,
+                  }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = '#3B82F6'; (e.currentTarget as HTMLButtonElement).style.background = 'rgba(59,130,246,0.12)'; }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = '#2a3650'; (e.currentTarget as HTMLButtonElement).style.background = '#151D2E'; }}
+                >
+                  <span style={{ color: '#3B82F6', fontWeight: 600, marginRight: 6 }}>{p.label}:</span>
+                  <span style={{ color: '#8896AB' }}>{p.prompt}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Deal List */}
+      <div style={{ flex: 1, overflowY: 'auto' }}>
+        {/* Column headers */}
+        <div style={{
+          display: 'grid', gridTemplateColumns: '1fr 120px 80px 80px 80px 36px',
+          padding: '8px 16px', borderBottom: '1px solid #1E293B',
+          position: 'sticky', top: 0, background: '#111827', zIndex: 2,
+        }}>
+          {['Deal', 'Category', 'Amount', 'Days', 'Prob', ''].map(h => (
+            <div key={h} style={{
+              fontSize: 10, fontWeight: 600, color: '#5A6A80',
+              textTransform: 'uppercase', letterSpacing: '0.05em',
+              textAlign: (h === 'Amount' || h === 'Days' || h === 'Prob') ? 'right' : 'left',
+            }}>{h}</div>
+          ))}
+        </div>
+
+        {loading ? (
+          <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {[1,2,3,4].map(i => (
+              <div key={i} style={{ height: 48, borderRadius: 6, background: 'rgba(255,255,255,0.04)', animation: 'pulse 1.5s ease infinite' }} />
+            ))}
+          </div>
+        ) : sorted.length > 0 ? sorted.map((deal, i) => (
+          <DrilldownDealRow
+            key={deal.id}
+            deal={deal}
+            isLast={i === sorted.length - 1}
+            isAsking={askingAbout === deal}
+            onAsk={() => onAskAboutDeal(deal)}
+          />
+        )) : (
+          <div style={{ padding: 40, textAlign: 'center', color: '#5A6A80' }}>
+            <div style={{ fontSize: 14, marginBottom: 4 }}>No deal details loaded</div>
+            <div style={{ fontSize: 12 }}>Deal-level data for this stage will appear after the next sync</div>
+          </div>
+        )}
+      </div>
+
+      {/* Bottom bar */}
+      <div style={{
+        padding: '12px 24px', borderTop: '1px solid #1E293B',
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        background: '#151D2E', flexShrink: 0,
+      }}>
+        <div style={{ fontSize: 12, color: '#5A6A80' }}>
+          Showing {sorted.length} of {stage.deals_total} deals
+        </div>
+        <div style={{ display: 'flex', gap: 12 }}>
+          <span style={{ fontSize: 12, fontFamily: 'IBM Plex Mono, monospace', color: '#8896AB' }}>
+            Avg days: <span style={{ color: '#E2E8F0', fontWeight: 600 }}>{avgDays}</span>
+          </span>
+          <span style={{ fontSize: 12, fontFamily: 'IBM Plex Mono, monospace', color: '#8896AB' }}>
+            Avg prob: <span style={{ color: '#E2E8F0', fontWeight: 600 }}>{avgProb}%</span>
+          </span>
+        </div>
+      </div>
+
+      <style>{`@keyframes pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }`}</style>
+    </div>
+  );
+}
+
+function DrilldownDealRow({ deal, isLast, isAsking, onAsk }: {
+  deal: DealSummaryFull;
+  isLast: boolean;
+  isAsking: boolean;
+  onAsk: () => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const daysColor = (deal.days_in_stage || 0) > 30 ? '#EF4444' : (deal.days_in_stage || 0) > 14 ? '#F59E0B' : '#8896AB';
+  const prob = deal.probability || 0;
+  const probColor = prob > 50 ? '#10B981' : prob > 30 ? '#3B82F6' : '#8896AB';
+  const fcLabel = (deal.forecast_category || 'pipeline').replace('_', ' ');
+  const fcColor = deal.forecast_category === 'commit' ? '#10B981' : deal.forecast_category === 'best_case' ? '#3B82F6' : '#5A6A80';
+  const fcBg = deal.forecast_category === 'commit' ? 'rgba(16,185,129,0.12)' : deal.forecast_category === 'best_case' ? 'rgba(59,130,246,0.12)' : '#151D2E';
+
+  return (
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        display: 'grid', gridTemplateColumns: '1fr 120px 80px 80px 80px 36px',
+        alignItems: 'center', padding: '12px 16px',
+        borderBottom: isLast ? 'none' : '1px solid #1E293B',
+        background: hovered ? 'rgba(59,130,246,0.04)' : 'transparent',
+        transition: 'background 0.1s',
+        fontFamily: "'IBM Plex Sans', -apple-system, sans-serif",
+      }}
+    >
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 13, fontWeight: 500, color: '#E2E8F0' }}>{deal.name}</span>
+          {deal.findings.map(f => {
+            const fl = FINDING_LABELS_MAP[f];
+            return fl ? (
+              <span key={f} style={{
+                fontSize: 10, fontWeight: 600, fontFamily: 'IBM Plex Mono, monospace',
+                padding: '1px 6px', borderRadius: 3, color: fl.color, background: fl.bg,
+              }}>{fl.icon} {fl.label}</span>
+            ) : null;
+          })}
+        </div>
+        <div style={{ fontSize: 11.5, color: '#5A6A80', marginTop: 2 }}>
+          {deal.owner_name || deal.owner_email} &#xB7; Close {deal.close_date ? deal.close_date.split('T')[0] : '\u2014'}
+        </div>
+      </div>
+      <div>
+        <span style={{
+          fontSize: 10, fontWeight: 600, fontFamily: 'IBM Plex Mono, monospace',
+          padding: '2px 8px', borderRadius: 4, color: fcColor, background: fcBg,
+          textTransform: 'uppercase', letterSpacing: '0.03em',
+        }}>{fcLabel}</span>
+      </div>
+      <div style={{ fontSize: 13, fontWeight: 600, fontFamily: 'IBM Plex Mono, monospace', color: '#E2E8F0', textAlign: 'right' }}>
+        {fmtAmt(deal.amount || 0)}
+      </div>
+      <div style={{ fontSize: 13, fontFamily: 'IBM Plex Mono, monospace', color: daysColor, textAlign: 'right' }}>
+        {Math.round(deal.days_in_stage || 0)}d
+      </div>
+      <div style={{ textAlign: 'right' }}>
+        <div style={{
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          width: 36, height: 36, borderRadius: 18,
+          background: `conic-gradient(${probColor} ${prob * 3.6}deg, #1E293B 0deg)`,
+        }}>
+          <div style={{
+            width: 28, height: 28, borderRadius: 14, background: '#151D2E',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 10, fontWeight: 700, fontFamily: 'IBM Plex Mono, monospace', color: '#E2E8F0',
+          }}>{prob}</div>
+        </div>
+      </div>
+      <div style={{ textAlign: 'center' }}>
+        <button
+          onClick={(e) => { e.stopPropagation(); onAsk(); }}
+          style={{
+            width: 28, height: 28, borderRadius: 14,
+            background: (hovered || isAsking) ? 'rgba(59,130,246,0.12)' : 'transparent',
+            border: `1px solid ${(hovered || isAsking) ? '#3B82F6' : 'transparent'}`,
+            color: (hovered || isAsking) ? '#3B82F6' : 'transparent',
+            fontSize: 14, cursor: 'pointer', transition: 'all 0.15s',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+          title="Ask Pandora about this deal"
+        >&#x1F4AC;</button>
+      </div>
+    </div>
+  );
+}
+
+function renderMarkdownLite(text: string) {
+  const parts = text.split('\n').map((line, i) => {
+    line = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    line = line.replace(/`([^`]+)`/g, '<code style="background:rgba(255,255,255,0.08);padding:1px 5px;border-radius:3px;font-family:monospace;font-size:0.9em">$1</code>');
+    const isBullet = /^[\-\*\u2022]\s/.test(line);
+    const contentLine = isBullet ? line.replace(/^[\-\*\u2022]\s/, '') : line;
+    return (
+      <p key={i} style={{ margin: '0 0 6px', paddingLeft: isBullet ? 16 : 0, position: 'relative' }}>
+        {isBullet && <span style={{ position: 'absolute', left: 0 }}>&bull;</span>}
+        <span dangerouslySetInnerHTML={{ __html: contentLine }} />
+      </p>
+    );
+  });
+  return <>{parts}</>;
+}
+
+function AskPandoraDrawer({ thread, loading, onClose, onSend }: {
+  thread: ThreadMessage[];
+  loading: boolean;
+  onClose: () => void;
+  onSend: (msg: string) => void;
+}) {
+  const [input, setInput] = useState('');
+  const threadRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (threadRef.current) {
+      threadRef.current.scrollTop = threadRef.current.scrollHeight;
+    }
+  }, [thread]);
+
+  const handleSend = () => {
+    const msg = input.trim();
+    if (!msg || loading) return;
+    setInput('');
+    onSend(msg);
+  };
+
+  return (
+    <div style={{
+      position: 'fixed', bottom: 0, left: 0, right: 0, height: 320,
+      background: '#111827', borderTop: '1px solid #3B82F6',
+      zIndex: 200, boxShadow: '0 -8px 30px rgba(0,0,0,0.5)',
+      display: 'flex', flexDirection: 'column',
+      fontFamily: "'IBM Plex Sans', -apple-system, sans-serif",
+    }}>
+      <div style={{ padding: '14px 24px', borderBottom: '1px solid #1E293B', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 16 }}>&#x1F4AC;</span>
+          <span style={{ fontSize: 14, fontWeight: 600, color: '#E2E8F0' }}>Ask Pandora</span>
+        </div>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#5A6A80', fontSize: 18, cursor: 'pointer' }}>&#x2715;</button>
+      </div>
+
+      <div ref={threadRef} style={{ padding: '16px 24px', flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {thread.map((msg, i) => (
+          <div key={i} style={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
+            <div style={{
+              padding: '10px 16px',
+              background: msg.role === 'user' ? 'rgba(59,130,246,0.12)' : '#151D2E',
+              borderRadius: msg.role === 'user' ? '12px 12px 2px 12px' : '12px 12px 12px 2px',
+              maxWidth: '85%', fontSize: 13, color: msg.role === 'user' ? '#E2E8F0' : '#8896AB',
+              lineHeight: 1.6,
+              border: msg.role === 'assistant' ? '1px solid #1E293B' : 'none',
+            }}>
+              {msg.isThinking ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    {[0,1,2].map(j => (
+                      <div key={j} style={{
+                        width: 6, height: 6, borderRadius: 3, background: '#3B82F6',
+                        animation: `pandoraPulse 1.2s ease-in-out ${j * 0.2}s infinite`,
+                        opacity: 0.4,
+                      }} />
+                    ))}
+                  </div>
+                  <span style={{ fontSize: 12, color: '#5A6A80' }}>Analyzing pipeline data...</span>
+                </div>
+              ) : (
+                <>
+                  {msg.role === 'assistant' ? renderMarkdownLite(msg.content) : msg.content}
+                  {msg.sources && msg.sources.length > 0 && (
+                    <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                      {msg.sources.map((s, si) => (
+                        <span key={si} style={{
+                          fontSize: 10, fontFamily: 'IBM Plex Mono, monospace',
+                          padding: '2px 6px', borderRadius: 4,
+                          background: 'rgba(255,255,255,0.06)', color: '#5A6A80',
+                        }}>{s}</span>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ padding: '10px 24px', borderTop: '1px solid #1E293B', display: 'flex', gap: 8 }}>
+        <input
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+          placeholder="Ask a follow-up..."
+          style={{
+            flex: 1, padding: '10px 14px', fontSize: 13,
+            background: '#151D2E', border: '1px solid #1E293B', borderRadius: 8,
+            color: '#E2E8F0', outline: 'none',
+            fontFamily: "'IBM Plex Sans', sans-serif",
+          }}
+        />
+        <button
+          onClick={handleSend}
+          disabled={loading || !input.trim()}
+          style={{
+            padding: '10px 20px', fontSize: 13, fontWeight: 500,
+            background: loading || !input.trim() ? 'rgba(59,130,246,0.3)' : '#3B82F6',
+            color: '#fff', border: 'none', borderRadius: 8, cursor: loading ? 'not-allowed' : 'pointer',
+          }}
+        >Send</button>
+      </div>
+      <style>{`@keyframes pandoraPulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }`}</style>
+    </div>
+  );
+}
+
 
 function InlineSpinner() {
   return (
