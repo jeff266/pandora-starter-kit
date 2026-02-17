@@ -245,8 +245,8 @@ export default function CommandCenter() {
 
     try {
       const pFilter = selectedPipeline !== 'all' ? `&pipeline=${encodeURIComponent(selectedPipeline)}` : '';
-      const result = await api.get(`/pipeline/snapshot?include_deals=true&stage=${encodeURIComponent(stageName)}${pFilter}`);
-      const dealsForStage = result.deals_by_stage?.[stageName] || result.deals || [];
+      const result = await api.get(`/pipeline/snapshot?stage=${encodeURIComponent(stageName)}${pFilter}`);
+      const dealsForStage = Array.isArray(result.deals) ? result.deals : [];
       setSelectedStageData({
         stage: stageName,
         stage_normalized: d?.stage_normalized || '',
