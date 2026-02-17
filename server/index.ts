@@ -79,6 +79,7 @@ import { cleanupExpiredAnnotations } from './feedback/cleanup.js';
 dotenv.config();
 
 const app = express();
+app.set('trust proxy', 1);
 const PORT = parseInt(process.env.PORT || "3000", 10);
 
 const allowedOrigins = new Set(
