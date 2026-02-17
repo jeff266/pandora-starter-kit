@@ -33,7 +33,9 @@ async function upsertConversations(conversations: NormalizedConversation[]): Pro
             action_items, objections,
             sentiment_score, talk_listen_ratio,
             topics, competitor_mentions,
-            custom_fields, created_at, updated_at
+            custom_fields,
+            is_internal, call_disposition, decision_makers_mentioned,
+            created_at, updated_at
           ) VALUES (
             $1, $2, $3, $4,
             $5, $6, $7, $8,
@@ -41,7 +43,9 @@ async function upsertConversations(conversations: NormalizedConversation[]): Pro
             $11, $12,
             $13, $14,
             $15, $16,
-            $17, NOW(), NOW()
+            $17,
+            $18, $19, $20,
+            NOW(), NOW()
           )
           ON CONFLICT (workspace_id, source, source_id) DO UPDATE SET
             source_data = EXCLUDED.source_data,
@@ -58,6 +62,9 @@ async function upsertConversations(conversations: NormalizedConversation[]): Pro
             topics = EXCLUDED.topics,
             competitor_mentions = EXCLUDED.competitor_mentions,
             custom_fields = EXCLUDED.custom_fields,
+            is_internal = EXCLUDED.is_internal,
+            call_disposition = EXCLUDED.call_disposition,
+            decision_makers_mentioned = EXCLUDED.decision_makers_mentioned,
             updated_at = NOW()`,
           [
             conv.workspace_id, conv.source, conv.source_id, JSON.stringify(conv.source_data),
@@ -67,6 +74,7 @@ async function upsertConversations(conversations: NormalizedConversation[]): Pro
             conv.sentiment_score, conv.talk_listen_ratio ? JSON.stringify(conv.talk_listen_ratio) : null,
             JSON.stringify(conv.topics), JSON.stringify(conv.competitor_mentions),
             JSON.stringify(conv.custom_fields),
+            conv.is_internal, conv.call_disposition, JSON.stringify(conv.decision_makers_mentioned),
           ]
         );
         totalStored++;

@@ -273,7 +273,7 @@ async function buildConversationContext(workspaceId: string): Promise<string> {
      LEFT JOIN accounts a ON c.account_id = a.id
      WHERE c.workspace_id = $1
        AND c.is_internal = FALSE
-       AND c.source_type IS DISTINCT FROM 'consultant'
+       AND c.source IS DISTINCT FROM 'consultant'
      ORDER BY c.call_date DESC NULLS LAST
      LIMIT 30`,
     [workspaceId]

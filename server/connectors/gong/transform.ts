@@ -19,6 +19,9 @@ export interface NormalizedConversation {
   topics: any[];
   competitor_mentions: any[];
   custom_fields: Record<string, any>;
+  is_internal: boolean;
+  call_disposition: string | null;
+  decision_makers_mentioned: any[];
 }
 
 export type GongUserMap = Map<string, { name: string; email: string; title?: string }>;
@@ -33,6 +36,40 @@ export function buildUserMap(users: GongUser[]): GongUserMap {
     });
   }
   return map;
+}
+
+function deriveCallDisposition(call: GongCall): string {
+  const dir = call.direction;
+  const scope = call.scope;
+  const media = call.media;
+
+  if (scope === 'Internal') return 'internal';
+  if (dir === 'Inbound') return media === 'Video' ? 'demo_inbound' : 'discovery';
+  if (dir === 'Outbound') return media === 'Video' ? 'demo_outbound' : 'prospecting';
+  return 'meeting';
+}
+
+function extractDecisionMakers(parties: GongCall['parties'], userMap?: GongUserMap): any[] {
+  return parties
+    .filter(p => p.affiliation === 'External' && p.title)
+    .map(p => {
+      const title = p.title || '';
+      const titleLower = title.toLowerCase();
+      const isDecisionMaker =
+        titleLower.includes('vp') || titleLower.includes('vice president') ||
+        titleLower.includes('director') || titleLower.includes('chief') ||
+        titleLower.includes('head of') || titleLower.includes('president') ||
+        titleLower.includes('ceo') || titleLower.includes('cfo') ||
+        titleLower.includes('cto') || titleLower.includes('coo') ||
+        titleLower.includes('owner') || titleLower.includes('founder');
+
+      return {
+        name: p.name || null,
+        title,
+        involvement: isDecisionMaker ? 'decision_maker' : 'stakeholder',
+        context: `Participated in call as ${p.affiliation} party`,
+      };
+    });
 }
 
 export function transformGongCall(call: GongCall, workspaceId: string, userMap?: GongUserMap): NormalizedConversation {
@@ -60,6 +97,10 @@ export function transformGongCall(call: GongCall, workspaceId: string, userMap?:
     };
   });
 
+  const isInternal = call.scope === 'Internal';
+  const callDisposition = deriveCallDisposition(call);
+  const decisionMakers = extractDecisionMakers(call.parties || [], userMap);
+
   return {
     workspace_id: workspaceId,
     source: 'gong',
@@ -79,7 +120,7 @@ export function transformGongCall(call: GongCall, workspaceId: string, userMap?:
     },
     title: call.title || null,
     call_date: call.started ? new Date(call.started) : null,
-    duration_seconds: sanitizeInteger(call.duration), // FIX: empty string would become 0 with Math.round
+    duration_seconds: sanitizeInteger(call.duration),
     participants,
     transcript_text: null,
     summary: null,
@@ -96,5 +137,8 @@ export function transformGongCall(call: GongCall, workspaceId: string, userMap?:
       url: call.url,
       primaryUserId: call.primaryUserId,
     },
+    is_internal: isInternal,
+    call_disposition: callDisposition,
+    decision_makers_mentioned: decisionMakers,
   };
 }
