@@ -5,6 +5,7 @@ import { classifyAndUpdateInternalStatus } from '../analysis/conversation-intern
 import { extractInsightsFromConversations } from '../analysis/deal-insights-extractor.js';
 import { enrichClosedDeal } from '../enrichment/closed-deal-enrichment.js';
 import { getEnrichmentConfig } from '../enrichment/config.js';
+import { extractConversationSignals } from '../conversations/signal-extractor.js';
 import { query } from '../db.js';
 
 interface SyncResult {
@@ -51,6 +52,18 @@ export async function emitSyncCompleted(
       .catch(err => {
         console.error(`[Insights] Post-sync ${workspaceId} failed:`, err instanceof Error ? err.message : err);
       });
+
+    // Signal extraction runs 5s after sync to let the linker finish first
+    // (signals benefit from deal/account links being present)
+    setTimeout(() => {
+      extractConversationSignals(workspaceId)
+        .then(result => {
+          console.log(`[SignalExtractor] Post-sync ${workspaceId}: ${result.extracted} extracted, ${result.skipped} skipped (${result.duration_ms}ms)`);
+        })
+        .catch(err => {
+          console.error(`[SignalExtractor] Post-sync ${workspaceId} failed:`, err instanceof Error ? err.message : err);
+        });
+    }, 5000);
   }
 
   const crmSynced = connectorTypes.some(c => ['hubspot', 'salesforce'].includes(c));

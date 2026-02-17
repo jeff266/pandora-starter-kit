@@ -1,9 +1,10 @@
 import { query } from '../db.js';
-import { callLLM } from '../utils/llm-router.js';
+import { callLLM, assistantMessageFromResponse, toolResultMessage } from '../utils/llm-router.js';
 import { configLoader } from '../config/workspace-config-loader.js';
 import { assembleDealDossier, type DealDossier } from '../dossiers/deal-dossier.js';
 import { assembleAccountDossier, type AccountDossier } from '../dossiers/account-dossier.js';
 import { generatePipelineSnapshot, type PipelineSnapshot } from './pipeline-snapshot.js';
+import { searchTranscripts } from '../conversations/transcript-search.js';
 
 export interface AnalysisRequest {
   workspace_id: string;
@@ -223,6 +224,172 @@ function compressAccountContext(dossier: AccountDossier): { text: string; source
   return { text: lines.join('\n'), sources };
 }
 
+// ── Conversation Context ──────────────────────────────────────────────────────
+
+function countBy(arr: any[], key: string): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const item of arr) {
+    const val = item[key];
+    if (val != null) out[val] = (out[val] || 0) + 1;
+  }
+  return out;
+}
+
+async function buildConversationContext(workspaceId: string): Promise<string> {
+  const recentCalls = await query<{
+    title: string | null;
+    call_date: string | null;
+    duration_seconds: number | null;
+    summary: string | null;
+    call_disposition: string | null;
+    engagement_quality: string | null;
+    pricing_discussed: boolean | null;
+    pricing_signals: any;
+    products_mentioned: any;
+    next_steps: any;
+    budget_signals: any;
+    decision_makers_mentioned: any;
+    timeline_signals: any;
+    competitive_context: any;
+    risk_signals: any;
+    topics: any;
+    objections: any;
+    sentiment_score: number | null;
+    participants: any;
+    deal_name: string | null;
+    account_name: string | null;
+  }>(
+    `SELECT c.title, c.call_date, c.duration_seconds, c.summary,
+            c.call_disposition, c.engagement_quality,
+            c.pricing_discussed, c.pricing_signals,
+            c.products_mentioned, c.next_steps,
+            c.budget_signals, c.decision_makers_mentioned,
+            c.timeline_signals, c.competitive_context,
+            c.risk_signals, c.topics, c.objections,
+            c.sentiment_score, c.participants,
+            d.name as deal_name, a.name as account_name
+     FROM conversations c
+     LEFT JOIN deals d ON c.deal_id = d.id
+     LEFT JOIN accounts a ON c.account_id = a.id
+     WHERE c.workspace_id = $1
+       AND c.is_internal = FALSE
+       AND c.source_type IS DISTINCT FROM 'consultant'
+     ORDER BY c.call_date DESC NULLS LAST
+     LIMIT 30`,
+    [workspaceId]
+  );
+
+  if (recentCalls.rows.length === 0) return '';
+
+  const rows = recentCalls.rows;
+
+  const stats = {
+    total_calls: rows.length,
+    calls_with_pricing: rows.filter(r => r.pricing_discussed).length,
+    calls_with_competitors: rows.filter(r => (r.competitive_context as any)?.evaluating_others).length,
+    calls_with_risk: rows.filter(r => Array.isArray(r.risk_signals) && r.risk_signals.length > 0).length,
+    disposition_breakdown: countBy(rows, 'call_disposition'),
+    engagement_breakdown: countBy(rows, 'engagement_quality'),
+  };
+
+  const allPricingSignals = rows.flatMap(r => Array.isArray(r.pricing_signals) ? r.pricing_signals : []);
+  const allObjections = rows.flatMap(r => Array.isArray(r.objections) ? r.objections : []);
+  const allProducts = rows.flatMap(r => Array.isArray(r.products_mentioned) ? r.products_mentioned : []);
+  const allCompetitors = rows.flatMap(r => (r.competitive_context as any)?.competitors_named || []);
+  const allRisks = rows.flatMap(r => Array.isArray(r.risk_signals) ? r.risk_signals : []);
+  const allDecisionMakers = rows.flatMap(r => Array.isArray(r.decision_makers_mentioned) ? r.decision_makers_mentioned : []);
+
+  let ctx = `\n## Conversation Intelligence (${stats.total_calls} recent calls)\n\n`;
+
+  ctx += `### Call Stats\n`;
+  ctx += `Total external calls: ${stats.total_calls}\n`;
+  if (stats.calls_with_pricing > 0) ctx += `Calls discussing pricing: ${stats.calls_with_pricing}\n`;
+  if (stats.calls_with_competitors > 0) ctx += `Calls mentioning competitors: ${stats.calls_with_competitors}\n`;
+  if (stats.calls_with_risk > 0) ctx += `Calls with risk signals: ${stats.calls_with_risk}\n`;
+  if (Object.keys(stats.disposition_breakdown).length > 0) ctx += `Call types: ${JSON.stringify(stats.disposition_breakdown)}\n`;
+  if (Object.keys(stats.engagement_breakdown).length > 0) ctx += `Engagement quality: ${JSON.stringify(stats.engagement_breakdown)}\n`;
+  ctx += '\n';
+
+  if (allPricingSignals.length > 0) {
+    ctx += `### Pricing Signals\n`;
+    for (const sig of allPricingSignals.slice(0, 10)) {
+      ctx += `- [${sig.type}] ${sig.summary} (${sig.speaker_role})\n`;
+    }
+    ctx += '\n';
+  }
+
+  if (allObjections.length > 0) {
+    ctx += `### Objections Raised\n`;
+    for (const obj of allObjections.slice(0, 10)) {
+      ctx += `- ${typeof obj === 'string' ? obj : (obj as any).summary || JSON.stringify(obj)}\n`;
+    }
+    ctx += '\n';
+  }
+
+  if (allProducts.length > 0) {
+    ctx += `### Products/Features Mentioned\n`;
+    for (const prod of allProducts.slice(0, 10)) {
+      ctx += `- ${prod.product}${prod.feature ? ` (${prod.feature})` : ''}: ${prod.context}\n`;
+    }
+    ctx += '\n';
+  }
+
+  if (allCompetitors.length > 0) {
+    const unique = [...new Set<string>(allCompetitors)];
+    ctx += `### Competitors Mentioned: ${unique.join(', ')}\n\n`;
+  }
+
+  if (allRisks.length > 0) {
+    ctx += `### Risk Signals\n`;
+    for (const risk of allRisks.slice(0, 10)) {
+      ctx += `- [${risk.severity}] ${risk.type}: ${risk.summary}\n`;
+    }
+    ctx += '\n';
+  }
+
+  if (allDecisionMakers.length > 0) {
+    ctx += `### Decision Makers Referenced\n`;
+    for (const dm of allDecisionMakers.slice(0, 10)) {
+      ctx += `- ${dm.title}${dm.name ? ` (${dm.name})` : ''}: ${dm.context} [${dm.involvement}]\n`;
+    }
+    ctx += '\n';
+  }
+
+  ctx += `### Recent Call Details\n`;
+  for (const call of rows.slice(0, 15)) {
+    const date = call.call_date
+      ? new Date(call.call_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+      : 'unknown date';
+    const duration = call.duration_seconds ? `${Math.round(call.duration_seconds / 60)}min` : '';
+    const linked = [
+      call.deal_name ? `Deal: ${call.deal_name}` : null,
+      call.account_name ? `Account: ${call.account_name}` : null,
+    ].filter(Boolean).join(', ');
+
+    ctx += `\n**"${call.title || 'Untitled'}"** (${date}${duration ? `, ${duration}` : ''})`;
+    if (linked) ctx += ` — ${linked}`;
+    ctx += '\n';
+
+    if (call.call_disposition) ctx += `  Type: ${call.call_disposition}\n`;
+    if (call.engagement_quality) ctx += `  Engagement: ${call.engagement_quality}\n`;
+    if (call.summary) ctx += `  Summary: ${call.summary.substring(0, 300)}\n`;
+
+    const ns = Array.isArray(call.next_steps) ? call.next_steps : [];
+    if (ns.length > 0) {
+      ctx += `  Next steps: ${ns.map((n: any) => n.action).join('; ')}\n`;
+    }
+
+    const tl = (call.timeline_signals as any) || {};
+    if (tl.urgency && tl.urgency !== 'none') {
+      ctx += `  Timeline: ${tl.urgency} urgency${tl.context ? ` — ${tl.context}` : ''}\n`;
+    }
+  }
+
+  return ctx;
+}
+
+// ── Pipeline Context ──────────────────────────────────────────────────────────
+
 function compressPipelineContext(
   snapshot: PipelineSnapshot,
   findings: Array<{ severity: string; category: string; message: string; deal_name?: string; owner?: string }>,
@@ -378,7 +545,7 @@ async function gatherContext(request: AnalysisRequest): Promise<{
 
     case 'pipeline':
     case 'workspace': {
-      const [snapshot, findingsResult, topDealsResult] = await Promise.all([
+      const [snapshot, findingsResult, topDealsResult, conversationCtx] = await Promise.all([
         generatePipelineSnapshot(workspace_id),
         query<{ severity: string; category: string; message: string; deal_name: string; owner: string }>(
           `SELECT f.severity, f.category, f.message,
@@ -400,16 +567,20 @@ async function gatherContext(request: AnalysisRequest): Promise<{
            LIMIT 20`,
           [workspace_id]
         ),
+        buildConversationContext(workspace_id).catch(() => ''),
       ]);
 
       const { text, sources } = compressPipelineContext(snapshot, findingsResult.rows, topDealsResult.rows);
+      const fullText = text + conversationCtx;
+      if (conversationCtx) sources.push('conversations');
+
       return {
-        contextText: text,
+        contextText: fullText,
         dataSources: sources,
         dataConsulted: {
           deals: snapshot.dealCount,
           contacts: 0,
-          conversations: 0,
+          conversations: conversationCtx ? 1 : 0,
           findings: findingsResult.rows.length,
           date_range: scope.date_range || null,
         },
@@ -513,6 +684,21 @@ export async function analyzeQuestion(
   };
 }
 
+// Tool definition for transcript search — available to all scopes
+const TRANSCRIPT_SEARCH_TOOL = {
+  name: 'search_call_transcripts',
+  description: 'Search through call transcript text for specific topics, quotes, or discussions. Use when the user asks about what was specifically said in calls, or needs exact quotes or detailed context from conversations.',
+  parameters: {
+    type: 'object' as const,
+    properties: {
+      query: { type: 'string', description: 'Search term or topic to find in transcripts' },
+      account_name: { type: 'string', description: 'Optional: filter to calls with this account' },
+      deal_name: { type: 'string', description: 'Optional: filter to calls about this deal' },
+    },
+    required: ['query'],
+  },
+};
+
 export async function runScopedAnalysis(request: AnalysisRequest): Promise<AnalysisResponse> {
   const startTime = Date.now();
   const { workspace_id, question, scope, max_tokens } = request;
@@ -522,29 +708,80 @@ export async function runScopedAnalysis(request: AnalysisRequest): Promise<Analy
 
   const voiceConfig = await configLoader.getVoiceConfig(workspace_id).catch(() => ({ promptBlock: '' }));
 
-  const response = await callLLM(workspace_id, 'reason', {
-    systemPrompt: SYSTEM_PROMPT + (voiceConfig.promptBlock ? `\n\n${voiceConfig.promptBlock}` : ''),
-    messages: [
-      {
-        role: 'user' as const,
-        content: `CONTEXT:\n${contextText}\n\nQUESTION: ${question}`,
-      },
-    ],
-    maxTokens,
-    temperature: 0.3,
-    _tracking: {
-      feature: 'scoped_analysis',
-      subFeature: scope.type,
-    },
-  });
+  const systemPrompt = SYSTEM_PROMPT + (voiceConfig.promptBlock ? `\n\n${voiceConfig.promptBlock}` : '');
 
-  const tokensUsed = (response.usage?.input || 0) + (response.usage?.output || 0);
-  const parsed = parseAnalysisResponse(response.content);
+  const messages: Array<{ role: 'user' | 'assistant' | 'tool'; content: any; toolCallId?: string }> = [
+    {
+      role: 'user',
+      content: `CONTEXT:\n${contextText}\n\nQUESTION: ${question}`,
+    },
+  ];
+
+  let totalTokens = 0;
+  let finalContent = '';
+
+  // Multi-turn loop to support tool use (max 2 tool calls)
+  for (let turn = 0; turn < 3; turn++) {
+    const response = await callLLM(workspace_id, 'reason', {
+      systemPrompt,
+      messages,
+      maxTokens,
+      temperature: 0.3,
+      tools: [TRANSCRIPT_SEARCH_TOOL],
+    });
+
+    totalTokens += (response.usage?.input || 0) + (response.usage?.output || 0);
+
+    if (!response.toolCalls || response.toolCalls.length === 0) {
+      // No tool calls — final answer
+      finalContent = response.content;
+      break;
+    }
+
+    // Handle tool calls
+    messages.push(assistantMessageFromResponse(response));
+
+    for (const tc of response.toolCalls) {
+      let toolResult: string;
+      try {
+        const input = tc.input as { query: string; account_name?: string; deal_name?: string };
+        const results = await searchTranscripts(workspace_id, input.query, {
+          account_name: input.account_name,
+          deal_name: input.deal_name,
+          limit: 5,
+        });
+
+        if (results.length === 0) {
+          toolResult = 'No transcripts found matching that search.';
+        } else {
+          toolResult = results.map(r => {
+            const date = r.call_date
+              ? new Date(r.call_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+              : 'unknown date';
+            const linked = [
+              r.deal_name ? `Deal: ${r.deal_name}` : null,
+              r.account_name ? `Account: ${r.account_name}` : null,
+            ].filter(Boolean).join(', ');
+            return [
+              `**"${r.title || 'Untitled'}"** (${date})${linked ? ` — ${linked}` : ''}`,
+              r.excerpt,
+            ].join('\n');
+          }).join('\n\n---\n\n');
+        }
+      } catch (err) {
+        toolResult = `Search failed: ${err instanceof Error ? err.message : String(err)}`;
+      }
+
+      messages.push(toolResultMessage(tc.id, toolResult));
+    }
+  }
+
+  const parsed = parseAnalysisResponse(finalContent || '');
 
   return {
     answer: parsed.answer,
     data_consulted: dataConsulted,
-    tokens_used: tokensUsed,
+    tokens_used: totalTokens,
     latency_ms: Date.now() - startTime,
   };
 }

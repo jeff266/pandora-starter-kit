@@ -441,6 +441,14 @@ export async function assignCallToWorkspace(
   } catch (err: any) {
     console.error('[ConsultantDistributor] Could not trigger linker:', err.message);
   }
+
+  // 4. Extract signals for the newly assigned call (10s delay — let linker finish)
+  setTimeout(() => {
+    import('../conversations/signal-extractor.js').then(({ extractConversationSignals }) => {
+      extractConversationSignals(workspaceId, { limit: 5 })
+        .catch((e: any) => console.error(`[ConsultantDistributor] Signal extraction error:`, e.message));
+    }).catch(() => {});
+  }, 10000);
 }
 
 export async function skipCall(
