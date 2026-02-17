@@ -29,6 +29,7 @@ import { conversationIntelligenceSkill } from './library/conversation-intelligen
 import { forecastModelSkill } from './library/forecast-model.js';
 import { pipelineGenForecastSkill } from './library/pipeline-gen-forecast.js';
 import { competitiveIntelligenceSkill } from './library/competitive-intelligence.js';
+import { forecastAccuracyTrackingSkill } from './library/forecast-accuracy-tracking.js';
 
 // Types
 export type {
@@ -105,6 +106,7 @@ export { conversationIntelligenceSkill } from './library/conversation-intelligen
 export { forecastModelSkill } from './library/forecast-model.js';
 export { pipelineGenForecastSkill } from './library/pipeline-gen-forecast.js';
 export { competitiveIntelligenceSkill } from './library/competitive-intelligence.js';
+export { forecastAccuracyTrackingSkill } from './library/forecast-accuracy-tracking.js';
 
 // Formatters
 export {
@@ -158,6 +160,7 @@ export function registerBuiltInSkills(): void {
   registry.register(forecastModelSkill);
   registry.register(pipelineGenForecastSkill);
   registry.register(competitiveIntelligenceSkill);
+  registry.register(forecastAccuracyTrackingSkill);
 
   // Register evidence builders for "Show the Work" evidence assembly
   registerAllEvidenceBuilders();

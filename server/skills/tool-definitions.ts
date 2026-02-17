@@ -5035,6 +5035,165 @@ const ciCompComputeWinRates: ToolDefinition = {
 };
 
 // ============================================================================
+// Forecast Accuracy Tracking compute tools
+// ============================================================================
+
+const fatGatherRepAccuracy: ToolDefinition = {
+  name: 'fatGatherRepAccuracy',
+  description: 'Gather per-rep forecast accuracy metrics over the last 4 quarters: commit hit rate, close date error, amount error, and haircut factor',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (params, context) => {
+    return safeExecute('fatGatherRepAccuracy', async () => {
+      // Rep-level accuracy: compare deal amounts at first stage vs closed amount,
+      // and whether deals that were ever in commit/best_case actually closed.
+      const repResult = await query<any>(
+        `SELECT
+           d.owner as rep_name,
+           COUNT(*) FILTER (WHERE d.stage_normalized IN ('closed_won','closed_lost'))::int as total_closed,
+           COUNT(*) FILTER (WHERE d.stage_normalized = 'closed_won')::int as total_won,
+           AVG(CASE WHEN d.stage_normalized = 'closed_won' AND d.close_date IS NOT NULL
+                    THEN EXTRACT(DAY FROM (d.close_date::date - d.created_date::date))
+                    ELSE NULL END)::numeric as avg_cycle_days,
+           AVG(CASE WHEN d.stage_normalized IN ('closed_won','closed_lost') AND d.amount > 0
+                    THEN d.amount ELSE NULL END)::numeric as avg_deal_size,
+           COUNT(*) FILTER (WHERE d.forecast_category = 'commit'
+             AND d.stage_normalized = 'closed_won')::int as commit_closed_won,
+           COUNT(*) FILTER (WHERE d.forecast_category = 'commit'
+             AND d.stage_normalized IN ('closed_won','closed_lost'))::int as commit_total_closed
+         FROM deals d
+         WHERE d.workspace_id = $1
+           AND d.close_date >= CURRENT_DATE - INTERVAL '365 days'
+           AND d.owner IS NOT NULL
+         GROUP BY d.owner
+         HAVING COUNT(*) FILTER (WHERE d.stage_normalized IN ('closed_won','closed_lost')) >= 1
+         ORDER BY total_closed DESC`,
+        [context.workspaceId]
+      );
+
+      const reps = repResult.rows.map((r: any) => {
+        const totalClosed = r.total_closed || 0;
+        const totalWon = r.total_won || 0;
+        const commitTotal = r.commit_total_closed || 0;
+        const commitWon = r.commit_closed_won || 0;
+        const winRate = totalClosed > 0 ? totalWon / totalClosed : 0;
+        const commitHitRate = commitTotal > 0 ? commitWon / commitTotal : null;
+        const haircutFactor = Math.min(Math.max(winRate, 0.3), 1.0);
+
+        let pattern: string;
+        if (totalClosed < 3) {
+          pattern = 'insufficient_data';
+        } else if (commitHitRate !== null && commitHitRate > 0.85) {
+          pattern = 'accurate';
+        } else if (commitHitRate !== null && commitHitRate < 0.55) {
+          pattern = 'over_committer';
+        } else if (winRate > 0.7 && commitHitRate !== null && commitHitRate < 0.65) {
+          pattern = 'sandbagger';
+        } else if (totalClosed >= 3 && Math.abs((commitHitRate ?? 0.7) - 0.7) > 0.25) {
+          pattern = 'volatile';
+        } else {
+          pattern = 'accurate';
+        }
+
+        return {
+          rep_name: r.rep_name,
+          quarters_analyzed: Math.min(4, Math.ceil(totalClosed / 3)),
+          total_closed: totalClosed,
+          total_won: totalWon,
+          win_rate: Math.round(winRate * 100),
+          commit_hit_rate: commitHitRate !== null ? Math.round(commitHitRate * 100) : null,
+          avg_cycle_days: r.avg_cycle_days ? Math.round(parseFloat(r.avg_cycle_days)) : null,
+          avg_deal_size: r.avg_deal_size ? Math.round(parseFloat(r.avg_deal_size)) : null,
+          haircut_factor: Math.round(haircutFactor * 100) / 100,
+          pattern,
+        };
+      });
+
+      // Team-level summary
+      const allWinRates = reps.filter((r: any) => r.total_closed >= 3).map((r: any) => r.win_rate);
+      const teamAccuracy = allWinRates.length > 0
+        ? Math.round(allWinRates.reduce((s: number, v: number) => s + v, 0) / allWinRates.length)
+        : null;
+
+      const sandbaggers = reps.filter((r: any) => r.pattern === 'sandbagger').map((r: any) => r.rep_name);
+      const overCommitters = reps.filter((r: any) => r.pattern === 'over_committer').map((r: any) => r.rep_name);
+      const mostAccurate = reps.filter((r: any) => r.pattern === 'accurate').sort((a: any, b: any) => b.total_closed - a.total_closed)[0]?.rep_name || null;
+      const leastAccurate = reps.filter((r: any) => r.pattern === 'over_committer' || r.pattern === 'volatile').sort((a: any, b: any) => (a.commit_hit_rate ?? 100) - (b.commit_hit_rate ?? 100))[0]?.rep_name || null;
+      const avgHaircut = reps.length > 0
+        ? Math.round(reps.reduce((s: number, r: any) => s + r.haircut_factor, 0) / reps.length * 100) / 100
+        : 1.0;
+
+      return {
+        reps,
+        team_summary: {
+          team_accuracy_pct: teamAccuracy,
+          most_accurate_rep: mostAccurate,
+          least_accurate_rep: leastAccurate,
+          sandbaggers,
+          over_committers: overCommitters,
+          avg_haircut_factor: avgHaircut,
+          total_reps_analyzed: reps.length,
+          has_sufficient_data: reps.filter((r: any) => r.total_closed >= 3).length >= 2,
+        },
+      };
+    }, params);
+  },
+};
+
+const fatGatherHistoricalRollups: ToolDefinition = {
+  name: 'fatGatherHistoricalRollups',
+  description: 'Pull last 4 weekly-forecast-rollup skill runs to compute team-level forecast drift',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (params, context) => {
+    return safeExecute('fatGatherHistoricalRollups', async () => {
+      // Pull last 4 completed skill runs for weekly-forecast-rollup
+      const runsResult = await query<any>(
+        `SELECT sr.id, sr.completed_at, sr.result_data
+         FROM skill_runs sr
+         WHERE sr.workspace_id = $1
+           AND sr.skill_id = 'weekly-forecast-rollup'
+           AND sr.status = 'completed'
+           AND sr.result_data IS NOT NULL
+         ORDER BY sr.completed_at DESC
+         LIMIT 4`,
+        [context.workspaceId]
+      ).catch(() => ({ rows: [] as any[] }));
+
+      const weeklyRollups = runsResult.rows.map((r: any) => {
+        const data = r.result_data || {};
+        return {
+          run_id: r.id,
+          week: r.completed_at ? new Date(r.completed_at).toISOString().split('T')[0] : null,
+          commit_amount: data.commit?.amount ?? data.forecast?.commit ?? null,
+          best_case_amount: data.best_case?.amount ?? data.forecast?.best_case ?? null,
+          closed_won_amount: data.closed_won?.amount ?? data.closed_won ?? null,
+        };
+      });
+
+      // Also get current quarter closed-won as baseline
+      const now = new Date();
+      const currentQStart = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
+      const closedResult = await query<any>(
+        `SELECT COALESCE(SUM(d.amount), 0)::numeric as closed_won_qtd
+         FROM deals d
+         WHERE d.workspace_id = $1
+           AND d.stage_normalized = 'closed_won'
+           AND d.close_date >= $2`,
+        [context.workspaceId, currentQStart.toISOString()]
+      ).catch(() => ({ rows: [{ closed_won_qtd: 0 }] }));
+
+      return {
+        weekly_rollups: weeklyRollups,
+        has_rollup_history: weeklyRollups.length > 0,
+        rollup_count: weeklyRollups.length,
+        current_qtd_closed: Math.round(parseFloat(closedResult.rows[0]?.closed_won_qtd || '0')),
+      };
+    }, params);
+  },
+};
+
+// ============================================================================
 // Contact Role Resolution compute tools (for the new skill variant)
 // ============================================================================
 
@@ -5337,6 +5496,8 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['pgfComputeProjections', pgfComputeProjections],
   ['ciCompGatherMentions', ciCompGatherMentions],
   ['ciCompComputeWinRates', ciCompComputeWinRates],
+  ['fatGatherRepAccuracy', fatGatherRepAccuracy],
+  ['fatGatherHistoricalRollups', fatGatherHistoricalRollups],
   ['crrGatherContactsNeedingRoles', crrGatherContactsNeedingRoles],
   ['crrGatherConversationContext', crrGatherConversationContext],
   ['crrPersistRoleEnrichments', crrPersistRoleEnrichments],
