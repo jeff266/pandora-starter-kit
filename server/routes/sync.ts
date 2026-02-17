@@ -265,7 +265,7 @@ router.get('/:id/connectors/health', async (req: Request, res: Response): Promis
   const workspaceId = req.params.id;
 
   try {
-    const [connectorsResult, countsResult, syncHistoryResult, entitySourceCounts] = await Promise.all([
+    const [connectorsResult, countsResult, syncHistoryResult, entitySourceCounts, errors24hResult] = await Promise.all([
       query<{
         connector_name: string;
         status: string;
@@ -310,7 +310,7 @@ router.get('/:id/connectors/health', async (req: Request, res: Response): Promis
          FROM sync_log
          WHERE workspace_id = $1
          ORDER BY started_at DESC
-         LIMIT 30`,
+         LIMIT 100`,
         [workspaceId]
       ),
       query<{ entity: string; source: string; cnt: string }>(
@@ -323,6 +323,14 @@ router.get('/:id/connectors/health', async (req: Request, res: Response): Promis
          SELECT 'conversations', source, count(*)::text FROM conversations WHERE workspace_id = $1 GROUP BY source`,
         [workspaceId]
       ),
+      query<{ error_count: string }>(
+        `SELECT count(*)::text as error_count
+         FROM sync_log
+         WHERE workspace_id = $1
+           AND status IN ('failed', 'error')
+           AND started_at > now() - interval '24 hours'`,
+        [workspaceId]
+      ),
     ]);
 
     const actualCounts: Record<string, Record<string, number>> = {};
@@ -332,60 +340,101 @@ router.get('/:id/connectors/health', async (req: Request, res: Response): Promis
       actualCounts[src][row.entity] = parseInt(row.cnt) || 0;
     }
 
-    const entitySources: Record<string, string[]> = {};
     const connectorRecords: Record<string, Record<string, number>> = {};
-
     for (const conn of connectorsResult.rows) {
-      const name = conn.connector_name;
-      connectorRecords[name] = actualCounts[name] || {};
-
-      for (const [entity, count] of Object.entries(connectorRecords[name])) {
-        if (count > 0) {
-          if (!entitySources[entity]) entitySources[entity] = [];
-          if (!entitySources[entity].includes(name)) {
-            entitySources[entity].push(name);
-          }
-        }
-      }
+      connectorRecords[conn.connector_name] = actualCounts[conn.connector_name] || {};
     }
+
+    const syncByConnector: Record<string, typeof syncHistoryResult.rows> = {};
+    for (const row of syncHistoryResult.rows) {
+      if (!syncByConnector[row.connector_type]) syncByConnector[row.connector_type] = [];
+      syncByConnector[row.connector_type].push(row);
+    }
+
+    const expectedIntervals: Record<string, number> = {
+      hubspot: 4, salesforce: 4,
+      gong: 12, fireflies: 12,
+      monday: 24, 'google-drive': 24,
+    };
 
     const now = Date.now();
 
     const connectors = connectorsResult.rows.map(conn => {
       const lastSync = conn.last_sync_at ? new Date(conn.last_sync_at).getTime() : null;
       const hoursSinceSync = lastSync ? (now - lastSync) / 3600000 : null;
+      const interval = expectedIntervals[conn.connector_name] || 12;
 
-      let healthStatus: 'connected' | 'error' | 'stale' | 'disconnected' = 'disconnected';
+      const connSyncs = (syncByConnector[conn.connector_name] || []).slice(0, 3);
+      const recentErrors = connSyncs.filter(s => s.status === 'failed' || s.status === 'error').length;
+
+      let health_status: 'healthy' | 'warning' | 'error' = 'healthy';
       if (conn.status === 'disconnected') {
-        healthStatus = 'disconnected';
+        health_status = 'error';
       } else if (conn.error_message || conn.status === 'error') {
-        healthStatus = 'error';
-      } else if (hoursSinceSync !== null && hoursSinceSync > 72) {
-        healthStatus = 'stale';
-      } else if (hoursSinceSync !== null && hoursSinceSync > 24) {
-        healthStatus = 'stale';
-      } else {
-        healthStatus = 'connected';
+        health_status = 'error';
+      } else if (hoursSinceSync !== null && hoursSinceSync > interval * 2) {
+        health_status = 'error';
+      } else if (hoursSinceSync !== null && hoursSinceSync > interval) {
+        health_status = 'warning';
+      } else if (recentErrors > 0) {
+        health_status = 'warning';
       }
 
+      const entities = Object.entries(connectorRecords[conn.connector_name] || {}).map(([type, count]) => ({
+        type,
+        count,
+        last_synced: conn.last_sync_at,
+      }));
+
+      const sync_history = (syncByConnector[conn.connector_name] || []).slice(0, 20).map(row => ({
+        id: row.id,
+        timestamp: row.started_at,
+        records_affected: row.records_synced,
+        duration_ms: row.duration_ms,
+        status: (row.status === 'completed' || row.status === 'success') ? 'success' as const
+          : (row.status === 'failed' || row.status === 'error') ? 'error' as const
+          : 'partial' as const,
+        error_message: row.errors ? (typeof row.errors === 'string' ? row.errors : JSON.stringify(row.errors)) : undefined,
+        sync_type: row.sync_type,
+      }));
+
       return {
+        id: conn.connector_name,
         type: conn.connector_name,
-        status: healthStatus,
-        raw_status: conn.status,
-        last_sync_at: conn.last_sync_at,
+        status: conn.status === 'disconnected' ? 'disconnected' as const
+          : (conn.error_message || conn.status === 'error') ? 'error' as const
+          : 'connected' as const,
+        last_synced_at: conn.last_sync_at,
+        health_status,
         last_error: conn.error_message || null,
         created_at: conn.created_at,
         metadata: conn.metadata || {},
-        records: connectorRecords[conn.connector_name] || {},
+        entities,
+        sync_history,
         freshness: {
           hours_since_sync: hoursSinceSync !== null ? Math.round(hoursSinceSync * 10) / 10 : null,
-          is_stale: hoursSinceSync !== null && hoursSinceSync > 24,
-          is_critical: hoursSinceSync !== null && hoursSinceSync > 72,
+          is_stale: hoursSinceSync !== null && hoursSinceSync > interval,
+          is_critical: hoursSinceSync !== null && hoursSinceSync > interval * 2,
         },
       };
     });
 
     const counts = countsResult.rows[0];
+    const totalRecords = parseInt(counts?.deal_count || '0') + parseInt(counts?.contact_count || '0')
+      + parseInt(counts?.account_count || '0') + parseInt(counts?.conversation_count || '0');
+
+    const allSyncDates = connectorsResult.rows
+      .filter(c => c.last_sync_at)
+      .map(c => new Date(c.last_sync_at!).getTime());
+    const lastSyncAcrossAll = allSyncDates.length > 0 ? new Date(Math.max(...allSyncDates)).toISOString() : null;
+
+    const summary = {
+      total_sources: connectorsResult.rows.filter(c => c.status !== 'disconnected').length,
+      total_records: totalRecords,
+      last_sync: lastSyncAcrossAll,
+      errors_24h: parseInt(errors24hResult.rows[0]?.error_count || '0'),
+    };
+
     const totals = {
       deals: parseInt(counts?.deal_count || '0'),
       contacts: parseInt(counts?.contact_count || '0'),
@@ -393,23 +442,42 @@ router.get('/:id/connectors/health', async (req: Request, res: Response): Promis
       conversations: parseInt(counts?.conversation_count || '0'),
     };
 
-    const syncHistory = syncHistoryResult.rows.map(row => ({
-      id: row.id,
-      connectorType: row.connector_type,
-      syncType: row.sync_type,
-      status: row.status,
-      recordsSynced: row.records_synced,
-      durationMs: row.duration_ms,
-      startedAt: row.started_at,
-      completedAt: row.completed_at,
-      errors: row.errors,
-    }));
-
-    res.json({ connectors, totals, syncHistory });
+    res.json({ summary, connectors, totals });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     console.error('[Connector Health] Error:', msg);
     res.status(500).json({ error: 'Failed to fetch connector health' });
+  }
+});
+
+router.post('/:id/connectors/disconnect', async (req: Request, res: Response): Promise<void> => {
+  const workspaceId = req.params.id;
+  const { connectorType } = req.body || {};
+
+  if (!connectorType) {
+    res.status(400).json({ error: 'connectorType is required' });
+    return;
+  }
+
+  try {
+    const result = await query(
+      `UPDATE connections
+       SET status = 'disconnected', updated_at = NOW()
+       WHERE workspace_id = $1 AND connector_name = $2 AND status != 'disconnected'`,
+      [workspaceId, connectorType]
+    );
+
+    if (result.rowCount === 0) {
+      res.status(404).json({ error: 'Connector not found or already disconnected' });
+      return;
+    }
+
+    console.log(`[Connector] Disconnected ${connectorType} for workspace ${workspaceId}`);
+    res.json({ success: true, message: `${connectorType} disconnected` });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error('[Connector] Disconnect error:', msg);
+    res.status(500).json({ error: 'Failed to disconnect connector' });
   }
 });
 
