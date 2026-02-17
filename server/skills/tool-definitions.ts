@@ -4122,6 +4122,295 @@ const getPipelineRiskSummaryTool: ToolDefinition = {
 // ============================================================================
 // Tool Registry
 // ============================================================================
+// Stage Velocity Benchmarks compute tools
+// ============================================================================
+
+const svbComputeBenchmarks: ToolDefinition = {
+  name: 'svbComputeBenchmarks',
+  description: 'Compute median/p75/p90 time-in-stage benchmarks from deal_stage_history',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {
+      lookback_months: { type: 'number', description: 'Months of history (default 12)' },
+    },
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('svbComputeBenchmarks', async () => {
+      const lookbackMonths = params.lookback_months || 12;
+      const result = await query<any>(
+        `WITH stage_windows AS (
+           SELECT
+             dsh.deal_id,
+             dsh.stage_normalized,
+             dsh.stage,
+             dsh.entered_at,
+             LEAD(dsh.entered_at) OVER (PARTITION BY dsh.deal_id ORDER BY dsh.entered_at) AS next_entered_at
+           FROM deal_stage_history dsh
+           WHERE dsh.workspace_id = $1
+             AND dsh.entered_at >= NOW() - ($2 || ' months')::interval
+             AND dsh.stage_normalized NOT IN ('closed_won', 'closed_lost')
+         ),
+         durations AS (
+           SELECT stage_normalized, stage,
+                  EXTRACT(EPOCH FROM (next_entered_at - entered_at)) / 86400.0 AS days
+           FROM stage_windows
+           WHERE next_entered_at IS NOT NULL AND next_entered_at > entered_at
+         )
+         SELECT
+           stage_normalized, stage,
+           PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY days)::numeric(10,1) AS median_days,
+           PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY days)::numeric(10,1) AS p75_days,
+           PERCENTILE_CONT(0.9)  WITHIN GROUP (ORDER BY days)::numeric(10,1) AS p90_days,
+           AVG(days)::numeric(10,1) AS mean_days,
+           COUNT(*)::int AS sample_size
+         FROM durations WHERE days > 0
+         GROUP BY stage_normalized, stage
+         HAVING COUNT(*) >= 2
+         ORDER BY median_days`,
+        [context.workspaceId, lookbackMonths]
+      );
+
+      // Conversion rates per stage
+      const convResult = await query<any>(
+        `SELECT from_norm, to_norm, COUNT(*)::int AS cnt
+         FROM (
+           SELECT dsh.stage_normalized AS from_norm,
+                  LEAD(dsh.stage_normalized) OVER (PARTITION BY dsh.deal_id ORDER BY dsh.entered_at) AS to_norm
+           FROM deal_stage_history dsh
+           WHERE dsh.workspace_id = $1
+             AND dsh.entered_at >= NOW() - ($2 || ' months')::interval
+         ) sub WHERE to_norm IS NOT NULL
+         GROUP BY from_norm, to_norm`,
+        [context.workspaceId, lookbackMonths]
+      );
+      const convMap: Record<string, { advance: number; drop: number; total: number }> = {};
+      for (const r of convResult.rows) {
+        if (!convMap[r.from_norm]) convMap[r.from_norm] = { advance: 0, drop: 0, total: 0 };
+        convMap[r.from_norm].total += r.cnt;
+        if (r.to_norm === 'closed_lost') convMap[r.from_norm].drop += r.cnt;
+        else if (r.to_norm !== r.from_norm) convMap[r.from_norm].advance += r.cnt;
+      }
+
+      return result.rows.map((r: any) => {
+        const conv = convMap[r.stage_normalized] || { advance: 0, drop: 0, total: 0 };
+        return {
+          stage: r.stage,
+          stage_normalized: r.stage_normalized,
+          median_days: parseFloat(r.median_days) || 0,
+          p75_days: parseFloat(r.p75_days) || 0,
+          p90_days: parseFloat(r.p90_days) || 0,
+          mean_days: parseFloat(r.mean_days) || 0,
+          sample_size: r.sample_size,
+          conversion_rate: conv.total > 0 ? Math.round((conv.advance / conv.total) * 100) : 0,
+          drop_rate: conv.total > 0 ? Math.round((conv.drop / conv.total) * 100) : 0,
+        };
+      });
+    }, params);
+  },
+};
+
+const svbFlagSlowDeals: ToolDefinition = {
+  name: 'svbFlagSlowDeals',
+  description: 'Flag open deals where days_in_stage exceeds p75 or p90 benchmark',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (params, context) => {
+    return safeExecute('svbFlagSlowDeals', async () => {
+      const benchmarks = (context.stepResults as any).benchmarks as any[];
+      if (!benchmarks?.length) return [];
+
+      const benchmarkMap: Record<string, { median_days: number; p75_days: number; p90_days: number }> = {};
+      for (const b of benchmarks) benchmarkMap[b.stage_normalized] = b;
+
+      // Get all open deals with their current stage and time in stage
+      const dealsResult = await query<any>(
+        `SELECT d.id, d.name, d.amount, d.stage, d.stage_normalized, d.owner,
+                COALESCE(dsh.entered_at, d.created_at) AS stage_entered_at,
+                EXTRACT(DAY FROM NOW() - COALESCE(dsh.entered_at, d.created_at))::int AS days_in_stage
+         FROM deals d
+         LEFT JOIN LATERAL (
+           SELECT entered_at FROM deal_stage_history dsh2
+           WHERE dsh2.deal_id = d.id AND dsh2.workspace_id = d.workspace_id
+             AND dsh2.stage_normalized = d.stage_normalized
+           ORDER BY entered_at DESC LIMIT 1
+         ) dsh ON true
+         WHERE d.workspace_id = $1
+           AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+           AND d.amount > 0`,
+        [context.workspaceId]
+      );
+
+      const flagged = [];
+      for (const deal of dealsResult.rows) {
+        const bench = benchmarkMap[deal.stage_normalized];
+        if (!bench) continue;
+        const daysInStage = deal.days_in_stage || 0;
+        if (daysInStage <= bench.p75_days) continue;
+
+        const severity = daysInStage >= bench.p90_days ? 'critical' : 'warning';
+        const daysOver = Math.round(daysInStage - bench.p75_days);
+        flagged.push({
+          deal_id: deal.id,
+          deal_name: deal.name,
+          amount: parseFloat(deal.amount) || 0,
+          stage: deal.stage,
+          stage_normalized: deal.stage_normalized,
+          owner: deal.owner,
+          days_in_stage: daysInStage,
+          benchmark_median: bench.median_days,
+          benchmark_p75: bench.p75_days,
+          benchmark_p90: bench.p90_days,
+          days_over_benchmark: daysOver,
+          severity,
+        });
+      }
+
+      return flagged.sort((a, b) => b.days_over_benchmark - a.days_over_benchmark);
+    }, params);
+  },
+};
+
+// ============================================================================
+// Conversation Intelligence compute tools
+// ============================================================================
+
+const ciGatherConversations: ToolDefinition = {
+  name: 'ciGatherConversations',
+  description: 'Gather recent conversations with summaries for theme extraction',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (params, context) => {
+    return safeExecute('ciGatherConversations', async () => {
+      const timeWindows = (context.stepResults as any).time_windows;
+      const since = timeWindows?.changeRange?.start ||
+        new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
+
+      const result = await query<any>(
+        `SELECT cv.id, cv.title, cv.call_date, cv.duration_seconds, cv.source,
+                cv.summary, cv.objections, cv.competitor_mentions, cv.topics,
+                cv.talk_listen_ratio,
+                a.name AS account_name, d.name AS deal_name, d.id AS deal_id,
+                cv.participants
+         FROM conversations cv
+         LEFT JOIN accounts a ON a.id = cv.account_id AND a.workspace_id = cv.workspace_id
+         LEFT JOIN deals d ON d.id = cv.deal_id AND d.workspace_id = cv.workspace_id
+         WHERE cv.workspace_id = $1
+           AND cv.is_internal = false
+           AND cv.call_date >= $2
+         ORDER BY cv.call_date DESC
+         LIMIT 100`,
+        [context.workspaceId, since]
+      );
+
+      const rows = result.rows;
+      const withSummary = rows.filter((r: any) => r.summary);
+      const totalDuration = rows.reduce((s: number, r: any) => s + (r.duration_seconds || 0), 0);
+
+      return {
+        conversations: rows.map((r: any) => ({
+          id: r.id,
+          title: r.title,
+          call_date: r.call_date,
+          duration_minutes: r.duration_seconds ? Math.round(r.duration_seconds / 60) : null,
+          account_name: r.account_name || null,
+          deal_name: r.deal_name || null,
+          deal_id: r.deal_id || null,
+          summary: r.summary || null,
+          source: r.source,
+          talk_listen_ratio: r.talk_listen_ratio || null,
+          // Include pre-extracted signals if they exist
+          existing_objections: Array.isArray(r.objections) && r.objections.length ? r.objections : null,
+          existing_competitors: Array.isArray(r.competitor_mentions) && r.competitor_mentions.length ? r.competitor_mentions : null,
+          existing_topics: Array.isArray(r.topics) && r.topics.length ? r.topics : null,
+        })),
+        summary: {
+          total_calls: rows.length,
+          calls_with_summaries: withSummary.length,
+          summary_coverage_pct: rows.length > 0 ? Math.round((withSummary.length / rows.length) * 100) : 0,
+          total_hours: Math.round(totalDuration / 3600 * 10) / 10,
+          unique_accounts: new Set(rows.map((r: any) => r.account_name).filter(Boolean)).size,
+          since,
+        },
+      };
+    }, params);
+  },
+};
+
+const ciAggregateThemes: ToolDefinition = {
+  name: 'ciAggregateThemes',
+  description: 'Aggregate per-call theme extractions into workspace-level patterns',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (params, context) => {
+    return safeExecute('ciAggregateThemes', async () => {
+      const extractions = (context.stepResults as any).theme_extractions;
+      if (!extractions) return { objection_themes: [], competitor_mentions: [], risk_signals: [], buying_signals: [] };
+
+      let parsed: any[] = [];
+      try {
+        parsed = typeof extractions === 'string'
+          ? JSON.parse(extractions.match(/\[[\s\S]*\]/)?.[0] || '[]')
+          : Array.isArray(extractions) ? extractions : [];
+      } catch { parsed = []; }
+
+      // Count objections
+      const objectionCounts: Record<string, { count: number; deals: string[] }> = {};
+      for (const e of parsed) {
+        for (const obj of (e.objections_mentioned || [])) {
+          const key = String(obj).toLowerCase().trim();
+          if (!objectionCounts[key]) objectionCounts[key] = { count: 0, deals: [] };
+          objectionCounts[key].count++;
+          if (e.account_name && !objectionCounts[key].deals.includes(e.account_name)) {
+            objectionCounts[key].deals.push(e.account_name);
+          }
+        }
+      }
+
+      // Count competitors
+      const compCounts: Record<string, { count: number; deals: string[] }> = {};
+      for (const e of parsed) {
+        for (const comp of (e.competitors_mentioned || [])) {
+          const key = String(comp).trim();
+          if (!compCounts[key]) compCounts[key] = { count: 0, deals: [] };
+          compCounts[key].count++;
+          if (e.deal_name && !compCounts[key].deals.includes(e.deal_name)) {
+            compCounts[key].deals.push(e.deal_name);
+          }
+        }
+      }
+
+      // Risk and buying signals per deal
+      const riskSignals = parsed
+        .filter(e => e.risk_signals?.length > 0)
+        .map(e => ({ deal_name: e.deal_name, account_name: e.account_name, signals: e.risk_signals, call_date: e.conversation_title }));
+
+      const buyingSignals = parsed
+        .filter(e => e.buying_signals?.length > 0)
+        .map(e => ({ deal_name: e.deal_name, account_name: e.account_name, signals: e.buying_signals, momentum: e.momentum }));
+
+      return {
+        objection_themes: Object.entries(objectionCounts)
+          .sort((a, b) => b[1].count - a[1].count)
+          .slice(0, 10)
+          .map(([theme, data]) => ({ theme, count: data.count, accounts: data.deals })),
+        competitor_mentions: Object.entries(compCounts)
+          .sort((a, b) => b[1].count - a[1].count)
+          .map(([competitor, data]) => ({ competitor, count: data.count, deals: data.deals })),
+        risk_signals: riskSignals.slice(0, 15),
+        buying_signals: buyingSignals.slice(0, 10),
+        deals_with_momentum: {
+          accelerating: parsed.filter(e => e.momentum === 'accelerating').map(e => e.deal_name || e.account_name),
+          decelerating: parsed.filter(e => e.momentum === 'decelerating').map(e => e.deal_name || e.account_name),
+        },
+        calls_analyzed: parsed.length,
+      };
+    }, params);
+  },
+};
+
+// ============================================================================
 
 export const toolRegistry = new Map<string, ToolDefinition>([
   ['queryDeals', queryDeals],
@@ -4203,6 +4492,10 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['runConfigAudit', runConfigAuditTool],
   ['getDealRiskScore', getDealRiskScoreTool],
   ['getPipelineRiskSummary', getPipelineRiskSummaryTool],
+  ['svbComputeBenchmarks', svbComputeBenchmarks],
+  ['svbFlagSlowDeals', svbFlagSlowDeals],
+  ['ciGatherConversations', ciGatherConversations],
+  ['ciAggregateThemes', ciAggregateThemes],
 ]);
 
 // ============================================================================

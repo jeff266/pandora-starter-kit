@@ -93,13 +93,13 @@ const PANDORA_TOOLS: ToolDef[] = [
   {
     name: 'get_skill_evidence',
     description:
-      'Retrieve the most recent output from a Pandora AI skill. Skills run on schedules and produce findings (claims with severity) plus evaluated records (the data they analyzed). ALWAYS check skill evidence before querying raw data for pipeline health, risk, forecasting, or rep performance — skills have richer analysis with risk flags and cross-record patterns. Available skills: pipeline-hygiene (stale deals, missing data, close date issues), single-thread-alert (deals with only 1 contact engaged), data-quality-audit (CRM data completeness), pipeline-coverage-by-rep (rep-level pipeline vs quota), weekly-forecast-rollup (forecast by category with changes), pipeline-waterfall (pipeline movement: created, advanced, slipped, lost), rep-scorecard (rep performance metrics).',
+      'Retrieve the most recent output from a Pandora AI skill. Skills run on schedules and produce findings (claims with severity) plus evaluated records (the data they analyzed). ALWAYS check skill evidence before querying raw data for pipeline health, risk, forecasting, or rep performance — skills have richer analysis with risk flags and cross-record patterns. Available skills: pipeline-hygiene (stale deals, missing data, close date issues), single-thread-alert (deals with only 1 contact engaged), data-quality-audit (CRM data completeness), pipeline-coverage-by-rep (rep-level pipeline vs quota), weekly-forecast-rollup (forecast by category with changes), pipeline-waterfall (pipeline movement: created, advanced, slipped, lost), rep-scorecard (rep performance metrics), stage-velocity-benchmarks (deals exceeding time-in-stage thresholds, stalled/grinding/stuck patterns), conversation-intelligence (weekly call themes: top objections, competitive mentions, buying signals, coaching opportunities).',
     parameters: {
       type: 'object',
       properties: {
         skill_id: {
           type: 'string',
-          enum: ['pipeline-hygiene', 'single-thread-alert', 'data-quality-audit', 'pipeline-coverage-by-rep', 'weekly-forecast-rollup', 'pipeline-waterfall', 'rep-scorecard'],
+          enum: ['pipeline-hygiene', 'single-thread-alert', 'data-quality-audit', 'pipeline-coverage-by-rep', 'weekly-forecast-rollup', 'pipeline-waterfall', 'rep-scorecard', 'stage-velocity-benchmarks', 'conversation-intelligence'],
           description: 'The skill to pull evidence from',
         },
         max_age_hours: { type: 'number', description: 'Only return if run within this many hours (default 24)' },
@@ -267,6 +267,20 @@ const PANDORA_TOOLS: ToolDef[] = [
       required: [],
     },
   },
+  {
+    name: 'compute_close_probability',
+    description:
+      'Score each open deal on close probability (0-95) using 4 dimensions: Engagement (30% — contacts, champion/EB presence, call recency), Velocity (30% — days in stage vs benchmarks, close date proximity, regressions), Qualification (20% — stage advancement, amount vs median, forecast category), Execution (20% — rep win rate vs team avg). Returns scored_deals[] sorted by probability, probability_weighted_pipeline, and factor lists (positive signals, risk signals, data gaps) per deal. Use before presenting any forecast or pipeline summary to get probability-adjusted totals.',
+    parameters: {
+      type: 'object',
+      properties: {
+        owner_email: { type: 'string', description: 'Score only deals owned by this rep (email)' },
+        deal_ids: { type: 'array', items: { type: 'string' }, description: 'Score specific deals by ID' },
+        limit: { type: 'number', description: 'Max deals to score (default 50, max 100)' },
+      },
+      required: [],
+    },
+  },
 ];
 
 // ─── System prompt ────────────────────────────────────────────────────────────
@@ -296,7 +310,7 @@ You have tools that query the company's live data. When someone asks a question,
    WHEN LISTING CONVERSATIONS: always include title, date, account, rep, and duration.
    WHEN CITING METRICS: always include the formula and record count.
 
-8. PRIOR TOOL RESULTS IN CONTEXT ARE FROM PREVIOUS QUESTIONS — NOT YOUR CURRENT DATA. Each new question starts fresh. All 13 tools are always available. Never say "I don't have access to X in the data provided" or "the data shows only Y" — that refers to a past question. Call a tool.
+8. PRIOR TOOL RESULTS IN CONTEXT ARE FROM PREVIOUS QUESTIONS — NOT YOUR CURRENT DATA. Each new question starts fresh. All 14 tools are always available. Never say "I don't have access to X in the data provided" or "the data shows only Y" — that refers to a past question. Call a tool.
 
 9. FORECASTS AND QUARTERLY NUMBERS: For any question about Q1/Q2/Q3/Q4 forecast, quarterly pipeline, quarterly revenue, or forecast categories (commit/best case):
    - ALWAYS call get_skill_evidence with skill_id="weekly-forecast-rollup" first.
@@ -308,6 +322,8 @@ You have tools that query the company's live data. When someone asks a question,
 10. VELOCITY QUESTIONS: Check get_skill_evidence('stage-velocity-benchmarks') first. If stale or unavailable, call compute_stage_benchmarks directly. Always compare a specific deal's time-in-stage to the benchmark — never say a deal is "slow" without the data to prove it.
 
 11. DEAL INVESTIGATION: When investigating why a deal is at risk, call MULTIPLE tools: query_field_history (stage regressions), query_stage_history (full stage log), query_conversations (recent call activity), query_contacts (stakeholder coverage). Build the full picture before diagnosing.
+
+12. FORECAST QUESTIONS REQUIRE PROBABILITY WEIGHTING: For any question asking for a forecast, projected revenue, or expected close amount, call compute_close_probability BEFORE presenting totals. A forecast is NOT a pipeline summary — it is probability-weighted amounts per deal. Raw pipeline $X ≠ forecast. Always show both the raw total and the probability-weighted total.
 
 Today's date is ${new Date().toISOString().split('T')[0]}.`;
 
@@ -406,7 +422,7 @@ export async function runPandoraAgent(
         } else if (/\brep|account.exec|AE|quota|attainment/i.test(message)) {
           nudge += ' Call get_skill_evidence with skill_id="rep-scorecard" or query_deals filtered by owner.';
         } else {
-          nudge += ' Call the appropriate tool from the 7 available tools.';
+          nudge += ' Call the appropriate tool from the 14 available tools.';
         }
         nudge += ']';
 

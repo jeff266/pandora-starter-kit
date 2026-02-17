@@ -183,6 +183,8 @@ export async function executeDataTool(
       return searchTranscripts(workspaceId, params);
     case 'compute_forecast_accuracy':
       return computeForecastAccuracy(workspaceId, params);
+    case 'compute_close_probability':
+      return computeCloseProbability(workspaceId, params);
     default:
       throw new Error(`Unknown tool: ${toolName}`);
   }
@@ -2063,5 +2065,322 @@ async function computeForecastAccuracy(workspaceId: string, params: Record<strin
     team_average_accuracy: Math.round(teamAvg * 100) / 100,
     data_source: hasSnapshots ? 'forecast_snapshots' : 'pipeline_vs_actuals_approximation',
     query_description: `Forecast accuracy (${lookbackQuarters - 1} completed quarters): ${reps.length} reps analyzed, team avg ${Math.round(teamAvg * 100)}%${hasSnapshots ? '' : ' (approximated — no forecast snapshots available)'}`,
+  };
+}
+
+// ─── Tool 14: compute_close_probability ──────────────────────────────────────
+
+async function computeCloseProbability(workspaceId: string, params: Record<string, any>): Promise<any> {
+  const ownerEmail: string | null = params.owner_email || null;
+  const dealIds: string[] | null = params.deal_ids || null;
+  const limit = Math.min(params.limit || 50, 100);
+
+  // 1. Open deals with stage order
+  const dealConds = [
+    'd.workspace_id = $1',
+    "d.stage_normalized NOT IN ('closed_won', 'closed_lost')",
+    'd.amount IS NOT NULL',
+    'd.amount > 0',
+  ];
+  const dealVals: any[] = [workspaceId];
+
+  if (ownerEmail) {
+    dealVals.push(ownerEmail.toLowerCase());
+    dealConds.push(`LOWER(COALESCE(d.owner_email, '')) = $${dealVals.length}`);
+  }
+  if (dealIds?.length) {
+    dealVals.push(dealIds);
+    dealConds.push(`d.id = ANY($${dealVals.length})`);
+  }
+
+  const dealRows = await query<any>(
+    `SELECT d.id, d.name, d.amount, d.stage, d.stage_normalized, d.close_date,
+            d.owner as owner_name, d.owner_email, d.account_id, d.forecast_category,
+            d.probability as crm_probability,
+            d.days_in_stage,
+            CASE WHEN d.close_date IS NOT NULL
+                 THEN EXTRACT(DAY FROM (d.close_date::date - CURRENT_DATE))
+                 ELSE NULL END as days_to_close,
+            COALESCE(sm.display_order, 50) as stage_order,
+            (SELECT MAX(sm2.display_order) FROM stage_mappings sm2 WHERE sm2.workspace_id = d.workspace_id) as max_stage_order
+     FROM deals d
+     LEFT JOIN stage_mappings sm ON sm.workspace_id = d.workspace_id AND sm.normalized_stage = d.stage_normalized
+     WHERE ${dealConds.join(' AND ')}
+     ORDER BY d.amount DESC NULLS LAST
+     LIMIT $${dealVals.length + 1}`,
+    [...dealVals, limit]
+  );
+
+  if (dealRows.rows.length === 0) {
+    return {
+      scored_deals: [],
+      total_scored: 0,
+      total_pipeline: 0,
+      probability_weighted_pipeline: 0,
+      average_probability: 0,
+      scoring_model: 'engagement(30%) + velocity(30%) + qualification(20%) + execution(20%)',
+      query_description: 'No open deals with amounts found',
+    };
+  }
+
+  const dealIdList = dealRows.rows.map((r: any) => r.id);
+
+  // 2. Conversation counts per deal (direct deal_id on conversations)
+  const convRows = await query<{ deal_id: string; call_count: string; last_call_date: string }>(
+    `SELECT cv.deal_id, COUNT(*)::text as call_count, MAX(cv.call_date)::text as last_call_date
+     FROM conversations cv
+     WHERE cv.workspace_id = $1 AND cv.deal_id = ANY($2) AND cv.is_internal = false
+     GROUP BY cv.deal_id`,
+    [workspaceId, dealIdList]
+  ).catch(() => ({ rows: [] as any[] }));
+  const convMap = new Map<string, { call_count: number; last_call_date: string | null }>();
+  for (const r of convRows.rows) {
+    convMap.set(r.deal_id, { call_count: parseInt(r.call_count), last_call_date: r.last_call_date });
+  }
+
+  // 3. Contact counts per deal
+  const contactRows = await query<{ deal_id: string; total: string; key_contacts: string }>(
+    `SELECT dc.deal_id,
+            COUNT(*)::text as total,
+            COUNT(CASE WHEN dc.role IN ('champion', 'economic_buyer') THEN 1 END)::text as key_contacts
+     FROM deal_contacts dc
+     WHERE dc.workspace_id = $1 AND dc.deal_id = ANY($2)
+     GROUP BY dc.deal_id`,
+    [workspaceId, dealIdList]
+  ).catch(() => ({ rows: [] as any[] }));
+  const contactMap = new Map<string, { total: number; key_contacts: number }>();
+  for (const r of contactRows.rows) {
+    contactMap.set(r.deal_id, { total: parseInt(r.total), key_contacts: parseInt(r.key_contacts) });
+  }
+
+  // 4. Regression counts from deal_stage_history
+  const regressionRows = await query<{ deal_id: string; regressions: string }>(
+    `SELECT dsh.deal_id, COUNT(*)::text as regressions
+     FROM deal_stage_history dsh
+     JOIN stage_mappings sm_curr ON sm_curr.workspace_id = $1 AND sm_curr.normalized_stage = dsh.stage_normalized
+     WHERE dsh.workspace_id = $1 AND dsh.deal_id = ANY($2)
+       AND EXISTS (
+         SELECT 1 FROM deal_stage_history dsh2
+         JOIN stage_mappings sm_prev ON sm_prev.workspace_id = $1 AND sm_prev.normalized_stage = dsh2.stage_normalized
+         WHERE dsh2.deal_id = dsh.deal_id
+           AND dsh2.entered_at < dsh.entered_at
+           AND sm_prev.display_order > sm_curr.display_order
+       )
+     GROUP BY dsh.deal_id`,
+    [workspaceId, dealIdList]
+  ).catch(() => ({ rows: [] as any[] }));
+  const regressionMap = new Map<string, number>();
+  for (const r of regressionRows.rows) {
+    regressionMap.set(r.deal_id, parseInt(r.regressions));
+  }
+
+  // 5. Rep win rates (last 12 months)
+  const winRateRows = await query<{ owner_email: string; win_rate: string }>(
+    `SELECT LOWER(d.owner_email) as owner_email,
+            (COUNT(CASE WHEN d.stage_normalized = 'closed_won' THEN 1 END)::float /
+             NULLIF(COUNT(CASE WHEN d.stage_normalized IN ('closed_won', 'closed_lost') THEN 1 END), 0))::text as win_rate
+     FROM deals d
+     WHERE d.workspace_id = $1
+       AND d.close_date >= CURRENT_DATE - INTERVAL '365 days'
+       AND d.owner_email IS NOT NULL
+     GROUP BY LOWER(d.owner_email)`,
+    [workspaceId]
+  ).catch(() => ({ rows: [] as any[] }));
+  const repWinRates = new Map<string, number>();
+  let teamWinRateSum = 0;
+  let teamWinRateCount = 0;
+  for (const r of winRateRows.rows) {
+    const wr = parseFloat(r.win_rate || '0');
+    if (!isNaN(wr) && wr > 0) {
+      repWinRates.set(r.owner_email, wr);
+      teamWinRateSum += wr;
+      teamWinRateCount++;
+    }
+  }
+  const teamAvgWinRate = teamWinRateCount > 0 ? teamWinRateSum / teamWinRateCount : 0.25;
+
+  // 6. Median open deal size
+  const medianRow = await query<{ median_amount: string }>(
+    `SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY amount)::text as median_amount
+     FROM deals WHERE workspace_id = $1 AND amount > 0
+       AND stage_normalized NOT IN ('closed_won', 'closed_lost')`,
+    [workspaceId]
+  ).catch(() => ({ rows: [{ median_amount: '0' }] as any[] }));
+  const medianAmount = parseFloat(medianRow.rows[0]?.median_amount || '0');
+
+  // 7. Stage velocity benchmarks
+  const benchmarkRows = await query<{
+    stage_normalized: string;
+    median_days: string;
+    p75_days: string;
+    p90_days: string;
+  }>(
+    `WITH durations AS (
+       SELECT dsh.stage_normalized,
+              EXTRACT(DAY FROM (LEAD(dsh.entered_at) OVER (PARTITION BY dsh.deal_id ORDER BY dsh.entered_at) - dsh.entered_at)) as duration_days
+       FROM deal_stage_history dsh
+       WHERE dsh.workspace_id = $1
+     )
+     SELECT stage_normalized,
+            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY duration_days)::text as median_days,
+            PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY duration_days)::text as p75_days,
+            PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY duration_days)::text as p90_days
+     FROM durations
+     WHERE duration_days IS NOT NULL AND duration_days > 0
+     GROUP BY stage_normalized`,
+    [workspaceId]
+  ).catch(() => ({ rows: [] as any[] }));
+  const benchmarkMap = new Map<string, { median: number; p75: number; p90: number }>();
+  for (const r of benchmarkRows.rows) {
+    benchmarkMap.set(r.stage_normalized, {
+      median: parseFloat(r.median_days),
+      p75: parseFloat(r.p75_days),
+      p90: parseFloat(r.p90_days),
+    });
+  }
+
+  // Score each deal
+  const scoredDeals = dealRows.rows.map((deal: any) => {
+    const convData = convMap.get(deal.id) || { call_count: 0, last_call_date: null };
+    const contactData = contactMap.get(deal.id) || { total: 0, key_contacts: 0 };
+    const regressions = regressionMap.get(deal.id) || 0;
+    const repWinRate = repWinRates.get((deal.owner_email || '').toLowerCase());
+    const benchmark = benchmarkMap.get(deal.stage_normalized);
+    const daysInStage = parseFloat(deal.days_in_stage) || 0;
+    const daysToClose = deal.days_to_close !== null ? parseFloat(deal.days_to_close) : null;
+    const amount = parseFloat(deal.amount) || 0;
+
+    // === Qualification (weight: 0.20) ===
+    const maxStageOrder = parseFloat(deal.max_stage_order) || 10;
+    const stageOrder = parseFloat(deal.stage_order) || 1;
+    const stageAdvancement = Math.min(stageOrder / Math.max(maxStageOrder * 0.7, 1), 1);
+    const amountScore = medianAmount > 0 ? Math.min(amount / medianAmount / 1.5, 1) : 0.5;
+    const fcScores: Record<string, number> = { commit: 1.0, best_case: 0.7, pipeline: 0.4 };
+    const forecastScore = fcScores[deal.forecast_category] ?? 0.3;
+    const qualificationScore = stageAdvancement * 0.4 + amountScore * 0.2 + forecastScore * 0.4;
+
+    // === Engagement (weight: 0.30) ===
+    const contactScore = contactData.total >= 3 ? 1.0 : contactData.total === 2 ? 0.7 : contactData.total === 1 ? 0.4 : 0;
+    const keyContactScore = contactData.key_contacts > 0 ? 1.0 : 0;
+    let callRecencyScore = 0;
+    if (convData.last_call_date) {
+      const daysSinceCall = Math.round((Date.now() - new Date(convData.last_call_date).getTime()) / 86400000);
+      callRecencyScore = daysSinceCall <= 14 ? 1.0 : daysSinceCall <= 30 ? 0.6 : daysSinceCall <= 60 ? 0.3 : 0;
+    }
+    const engagementScore = contactScore * 0.3 + keyContactScore * 0.3 + callRecencyScore * 0.4;
+
+    // === Velocity (weight: 0.30) ===
+    let velocityStageScore = 0.7; // default if no benchmark
+    if (benchmark) {
+      if (daysInStage <= benchmark.median) velocityStageScore = 1.0;
+      else if (daysInStage <= benchmark.p75) velocityStageScore = 0.7;
+      else if (daysInStage <= benchmark.p90) velocityStageScore = 0.4;
+      else velocityStageScore = 0.1;
+    }
+    let closeDateScore = 0.5;
+    if (daysToClose !== null) {
+      if (daysToClose >= 30) closeDateScore = 1.0;
+      else if (daysToClose >= 14) closeDateScore = 0.8;
+      else if (daysToClose >= 7) closeDateScore = 0.5;
+      else if (daysToClose >= 0) closeDateScore = 0.2;
+      else closeDateScore = 0; // past due
+    }
+    const regressionScore = regressions === 0 ? 1.0 : regressions === 1 ? 0.5 : 0.2;
+    const velocityScore = velocityStageScore * 0.4 + closeDateScore * 0.3 + regressionScore * 0.3;
+
+    // === Execution (weight: 0.20) ===
+    let executionScore = 0.5;
+    if (repWinRate !== undefined && teamAvgWinRate > 0) {
+      executionScore = Math.min((repWinRate / teamAvgWinRate) / 2, 1);
+    }
+
+    // === Final probability ===
+    const rawScore = qualificationScore * 0.20
+      + engagementScore * 0.30
+      + velocityScore * 0.30
+      + executionScore * 0.20;
+    const probability = Math.min(Math.round(rawScore * 100), 95);
+
+    // Build factor lists
+    const positiveFactors: string[] = [];
+    const riskFactors: string[] = [];
+    const dataGaps: string[] = [];
+
+    if (stageAdvancement >= 0.7) positiveFactors.push('Advanced stage');
+    if (deal.forecast_category === 'commit') positiveFactors.push('Commit category');
+    if (contactData.key_contacts > 0) positiveFactors.push('Champion or economic buyer identified');
+    if (convData.call_count >= 3) positiveFactors.push(`Active deal — ${convData.call_count} calls recorded`);
+    if (callRecencyScore >= 0.6) positiveFactors.push('Recent call activity (last 30 days)');
+    if (benchmark && daysInStage <= benchmark.median) positiveFactors.push('Progressing faster than median');
+    if (repWinRate !== undefined && repWinRate > teamAvgWinRate * 1.1)
+      positiveFactors.push(`Rep win rate ${Math.round(repWinRate * 100)}% (above ${Math.round(teamAvgWinRate * 100)}% team avg)`);
+
+    if (regressions > 0) riskFactors.push(`${regressions} stage regression${regressions > 1 ? 's' : ''}`);
+    if (daysToClose !== null && daysToClose < 7)
+      riskFactors.push(daysToClose < 0 ? 'Close date is past due' : `Close date in ${Math.round(daysToClose)} days`);
+    if (benchmark && daysInStage > benchmark.p90)
+      riskFactors.push(`${Math.round(daysInStage)} days in stage — exceeds p90 (${Math.round(benchmark.p90)} days)`);
+    if (contactData.total === 0) riskFactors.push('No contacts linked (single-threaded risk)');
+    if (convData.call_count === 0) riskFactors.push('No call recordings');
+    if (repWinRate !== undefined && repWinRate < teamAvgWinRate * 0.8)
+      riskFactors.push(`Rep win rate ${Math.round(repWinRate * 100)}% below team avg ${Math.round(teamAvgWinRate * 100)}%`);
+
+    if (contactData.total === 0) dataGaps.push('No contacts in CRM');
+    if (convData.call_count === 0) dataGaps.push('No call recordings');
+    if (!benchmark) dataGaps.push('No stage benchmark (insufficient history)');
+    if (daysToClose === null) dataGaps.push('No close date set');
+
+    return {
+      deal_id: deal.id,
+      deal_name: deal.name,
+      amount,
+      stage: deal.stage,
+      close_date: deal.close_date,
+      owner: deal.owner_name,
+      owner_email: deal.owner_email,
+      probability,
+      crm_probability: deal.crm_probability,
+      weighted_amount: Math.round(amount * probability / 100),
+      dimension_scores: {
+        qualification: Math.round(qualificationScore * 100),
+        engagement: Math.round(engagementScore * 100),
+        velocity: Math.round(velocityScore * 100),
+        execution: Math.round(executionScore * 100),
+      },
+      signals: {
+        days_in_stage: Math.round(daysInStage),
+        benchmark_p75: benchmark ? Math.round(benchmark.p75) : null,
+        days_to_close: daysToClose !== null ? Math.round(daysToClose) : null,
+        contacts: contactData.total,
+        key_contacts: contactData.key_contacts,
+        call_count: convData.call_count,
+        last_call_date: convData.last_call_date,
+        regressions,
+        rep_win_rate: repWinRate !== undefined ? Math.round(repWinRate * 100) : null,
+        forecast_category: deal.forecast_category,
+      },
+      top_positive_factors: positiveFactors.slice(0, 3),
+      top_risk_factors: riskFactors.slice(0, 3),
+      data_gaps: dataGaps,
+    };
+  });
+
+  scoredDeals.sort((a: any, b: any) => b.probability - a.probability);
+
+  const totalRaw = scoredDeals.reduce((s: number, d: any) => s + d.amount, 0);
+  const totalWeighted = scoredDeals.reduce((s: number, d: any) => s + d.weighted_amount, 0);
+  const avgProbability = scoredDeals.length > 0
+    ? Math.round(scoredDeals.reduce((s: number, d: any) => s + d.probability, 0) / scoredDeals.length)
+    : 0;
+
+  return {
+    scored_deals: scoredDeals,
+    total_scored: scoredDeals.length,
+    total_pipeline: Math.round(totalRaw),
+    probability_weighted_pipeline: Math.round(totalWeighted),
+    average_probability: avgProbability,
+    team_avg_win_rate: Math.round(teamAvgWinRate * 100),
+    scoring_model: 'engagement(30%) + velocity(30%) + qualification(20%) + execution(20%)',
+    query_description: `Probability-scored ${scoredDeals.length} open deals. Weighted pipeline: $${Math.round(totalWeighted).toLocaleString()} (raw: $${Math.round(totalRaw).toLocaleString()})`,
   };
 }

@@ -24,6 +24,8 @@ import { pipelineGoalsSkill } from './library/pipeline-goals.js';
 import { projectRecapSkill } from './library/project-recap.js';
 import { strategyInsightsSkill } from './library/strategy-insights.js';
 import { workspaceConfigAuditSkill } from './library/workspace-config-audit.js';
+import { stageVelocityBenchmarksSkill } from './library/stage-velocity-benchmarks.js';
+import { conversationIntelligenceSkill } from './library/conversation-intelligence.js';
 
 // Types
 export type {
@@ -95,6 +97,8 @@ export { pipelineGoalsSkill } from './library/pipeline-goals.js';
 export { projectRecapSkill } from './library/project-recap.js';
 export { strategyInsightsSkill } from './library/strategy-insights.js';
 export { workspaceConfigAuditSkill } from './library/workspace-config-audit.js';
+export { stageVelocityBenchmarksSkill } from './library/stage-velocity-benchmarks.js';
+export { conversationIntelligenceSkill } from './library/conversation-intelligence.js';
 
 // Formatters
 export {
@@ -143,6 +147,8 @@ export function registerBuiltInSkills(): void {
   registry.register(projectRecapSkill);
   registry.register(strategyInsightsSkill);
   registry.register(workspaceConfigAuditSkill);
+  registry.register(stageVelocityBenchmarksSkill);
+  registry.register(conversationIntelligenceSkill);
 
   // Register evidence builders for "Show the Work" evidence assembly
   registerAllEvidenceBuilders();
