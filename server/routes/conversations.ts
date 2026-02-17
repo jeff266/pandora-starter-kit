@@ -3,7 +3,7 @@
  *
  * Signal extraction endpoints — backfill, status, and manual re-extraction.
  *
- * Mounted under /api/workspaces/:workspaceId (via workspaceApiRouter)
+ * Mounted under /api/workspaces (via workspaceApiRouter)
  */
 
 import { Router, type Request, type Response } from 'express';
@@ -12,17 +12,9 @@ import { query } from '../db.js';
 
 const router = Router({ mergeParams: true });
 
-/**
- * POST /api/workspaces/:workspaceId/conversations/extract-signals
- *
- * Trigger signal extraction for unprocessed conversations.
- * Pass `force: true` to re-extract already-extracted conversations (backfill).
- *
- * Body: { force?: boolean, limit?: number }
- */
-router.post('/conversations/extract-signals', async (req: Request, res: Response) => {
+router.post('/:id/conversations/extract-signals', async (req: Request, res: Response) => {
   try {
-    const { workspaceId } = req.params as { workspaceId: string };
+    const workspaceId = req.params.id;
     const force = req.body.force === true;
     const limit = typeof req.body.limit === 'number' ? req.body.limit : 100;
 
@@ -38,17 +30,11 @@ router.post('/conversations/extract-signals', async (req: Request, res: Response
   }
 });
 
-/**
- * GET /api/workspaces/:workspaceId/conversations/signal-status
- *
- * Returns extraction coverage stats.
- */
-router.get('/conversations/signal-status', async (req: Request, res: Response) => {
+router.get('/:id/conversations/signal-status', async (req: Request, res: Response) => {
   try {
-    const { workspaceId } = req.params as { workspaceId: string };
+    const workspaceId = req.params.id;
 
     const [countRow, statsRow, lastExtractionRow] = await Promise.all([
-      // Total counts and extracted
       query<{
         total: string;
         extracted: string;
@@ -76,7 +62,6 @@ router.get('/conversations/signal-status', async (req: Request, res: Response) =
         [workspaceId]
       ),
 
-      // Disposition and engagement breakdown
       query<{ call_disposition: string | null; engagement_quality: string | null; cnt: string }>(
         `SELECT call_disposition, engagement_quality, COUNT(*) as cnt
          FROM conversations
@@ -87,7 +72,6 @@ router.get('/conversations/signal-status', async (req: Request, res: Response) =
         [workspaceId]
       ),
 
-      // Last extraction timestamp and version
       query<{ signals_extracted_at: string; signals_extraction_version: string }>(
         `SELECT signals_extracted_at, signals_extraction_version
          FROM conversations
@@ -99,7 +83,6 @@ router.get('/conversations/signal-status', async (req: Request, res: Response) =
 
     const r = countRow.rows[0] || { total: '0', extracted: '0', pending: '0', pricing_count: '0', competitor_count: '0', risk_count: '0' };
 
-    // Build disposition and engagement breakdowns
     const by_disposition: Record<string, number> = {};
     const by_engagement: Record<string, number> = {};
     for (const row of statsRow.rows) {

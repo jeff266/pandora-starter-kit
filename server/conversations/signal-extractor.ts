@@ -14,7 +14,7 @@
 import { query } from '../db.js';
 import { callLLM } from '../utils/llm-router.js';
 
-const EXTRACTION_VERSION = 'v1.0';
+const EXTRACTION_VERSION = 1;
 const BATCH_SIZE = 10;
 const BATCH_DELAY_MS = 1000;
 
@@ -112,6 +112,9 @@ export async function extractConversationSignals(
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         result.errors.push(`${convo.id}: ${msg}`);
+        if (result.errors.length <= 3) {
+          console.error(`[SignalExtractor] Error extracting ${convo.id}:`, msg);
+        }
       }
     }));
 

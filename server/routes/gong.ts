@@ -5,6 +5,8 @@ import { GongClient } from '../connectors/gong/client.js';
 import type { Connection, ConnectorCredentials } from '../connectors/_interface.js';
 import { linkConversations } from '../linker/entity-linker.js';
 import { getConnectorCredentials } from '../lib/credential-store.js';
+import { classifyAndUpdateInternalStatus } from '../analysis/conversation-internal-filter.js';
+import { extractConversationSignals } from '../conversations/signal-extractor.js';
 import {
   fetchAndStoreDirectory,
   getDirectory,
@@ -135,9 +137,19 @@ router.post('/:workspaceId/connectors/gong/sync', async (req: Request<WorkspaceP
     });
 
     linkConversations(workspaceId)
-      .then(lr => {
+      .then(async (lr) => {
         const total = lr.linked.tier1_email + lr.linked.tier2_native + lr.linked.tier3_inferred;
         console.log(`[Linker] Gong post-sync: ${total} linked, ${lr.stillUnlinked} unlinked (${lr.durationMs}ms)`);
+
+        classifyAndUpdateInternalStatus(workspaceId)
+          .then(stats => console.log(`[InternalFilter] Gong post-sync: ${stats.classified} classified, ${stats.markedInternal} internal (${stats.durationMs}ms)`))
+          .catch(err => console.error(`[InternalFilter] Gong post-sync failed:`, err.message));
+
+        setTimeout(() => {
+          extractConversationSignals(workspaceId)
+            .then(sr => console.log(`[SignalExtractor] Gong post-sync: ${sr.extracted} extracted, ${sr.skipped} skipped (${sr.duration_ms}ms)`))
+            .catch(err => console.error(`[SignalExtractor] Gong post-sync failed:`, err.message));
+        }, 3000);
       })
       .catch(err => console.error(`[Linker] Gong post-sync failed:`, err.message));
   } catch (error) {

@@ -115,7 +115,7 @@ export class GongClient {
     return this.request<GongListCallsResponse>(endpoint);
   }
 
-  async getAllCalls(fromDate?: string, toDate?: string): Promise<GongCall[]> {
+  async getAllCalls(fromDate?: string, toDate?: string, maxCalls = 5000): Promise<GongCall[]> {
     const allCalls: GongCall[] = [];
     let cursor: string | undefined;
 
@@ -126,12 +126,21 @@ export class GongClient {
       }
       cursor = response.records.cursor;
       console.log(`[Gong Client] Fetched ${allCalls.length} calls so far`);
+
+      if (allCalls.length >= maxCalls) {
+        console.warn(`[Gong Client] Safety cap reached: ${allCalls.length} calls (max: ${maxCalls}). Stopping pagination.`);
+        break;
+      }
     } while (cursor);
 
     return allCalls;
   }
 
-  async getCallsExtensive(fromDate?: string, toDate?: string, primaryUserId?: string): Promise<GongCall[]> {
+  async getCallsExtensive(fromDate?: string, toDate?: string, primaryUserId?: string, maxCalls = 5000): Promise<GongCall[]> {
+    if (!primaryUserId) {
+      console.warn(`[Gong Client] getCallsExtensive called WITHOUT primaryUserId filter — this may fetch entire org's calls`);
+    }
+
     const allCalls: GongCall[] = [];
     let cursor: string | undefined;
 
@@ -177,6 +186,11 @@ export class GongClient {
       }
       cursor = response.records?.cursor;
       console.log(`[Gong Client] Fetched ${allCalls.length} calls (extensive) so far`);
+
+      if (allCalls.length >= maxCalls) {
+        console.warn(`[Gong Client] Safety cap reached: ${allCalls.length} calls (max: ${maxCalls}). Stopping pagination.`);
+        break;
+      }
     } while (cursor);
 
     return allCalls;

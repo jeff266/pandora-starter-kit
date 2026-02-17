@@ -2,6 +2,8 @@
  * Gong Conversation Adapter
  *
  * Implements ConversationAdapter interface wrapping the legacy GongConnector.
+ * Note: sync.ts handles DB upserts directly; the orchestrator doesn't need
+ * to re-process conversation records from the return value.
  */
 
 import type { ConversationAdapter, SyncResult, NormalizedConversation } from '../adapters/types.js';
@@ -16,9 +18,6 @@ export class GongConversationAdapter implements ConversationAdapter {
 
   private connector = new GongConnector();
 
-  /**
-   * Test connection to Gong
-   */
   async testConnection(credentials: Record<string, any>): Promise<{ success: boolean; error?: string }> {
     const result = await this.connector.testConnection(credentials);
     return {
@@ -27,9 +26,6 @@ export class GongConversationAdapter implements ConversationAdapter {
     };
   }
 
-  /**
-   * Get health status
-   */
   async health(credentials: Record<string, any>): Promise<{ healthy: boolean; details?: Record<string, any> }> {
     try {
       const result = await this.connector.testConnection(credentials);
@@ -47,9 +43,6 @@ export class GongConversationAdapter implements ConversationAdapter {
     }
   }
 
-  /**
-   * Initial sync: fetch all conversations
-   */
   async initialSync(
     credentials: Record<string, any>,
     workspaceId: string,
@@ -64,17 +57,17 @@ export class GongConversationAdapter implements ConversationAdapter {
 
     const result = await initialSync(client, workspaceId, { lookbackDays });
 
+    console.log(`[Gong Adapter] initialSync complete: ${result.recordsFetched} fetched, ${result.recordsStored} stored, ${result.trackedUsers || 0} tracked users`);
+
     return {
       conversations: {
-        records: result.calls as NormalizedConversation[],
-        errors: [],
+        succeeded: [],
+        failed: result.errors.map(e => ({ record: null as any, error: e })),
+        totalAttempted: result.recordsFetched,
       },
     };
   }
 
-  /**
-   * Incremental sync: fetch conversations since lastSyncTime
-   */
   async incrementalSync(
     credentials: Record<string, any>,
     workspaceId: string,
@@ -88,10 +81,13 @@ export class GongConversationAdapter implements ConversationAdapter {
     const client = new GongClient(credentials.apiKey);
     const result = await incrementalSync(client, workspaceId, lastSyncTime);
 
+    console.log(`[Gong Adapter] incrementalSync complete: ${result.recordsFetched} fetched, ${result.recordsStored} stored, ${result.trackedUsers || 0} tracked users`);
+
     return {
       conversations: {
-        records: result.calls as NormalizedConversation[],
-        errors: [],
+        succeeded: [],
+        failed: result.errors.map(e => ({ record: null as any, error: e })),
+        totalAttempted: result.recordsFetched,
       },
     };
   }
