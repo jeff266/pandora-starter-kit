@@ -271,6 +271,21 @@ export async function runPandoraAgent(
 
     // Done — model produced its answer
     if (response.stopReason === 'end_turn' || !response.toolCalls?.length) {
+      // Guard: if this is the very first iteration and no tools have been called,
+      // the agent answered from conversation history instead of live data.
+      // Push a nudge and let the loop continue — one free pass to force a tool call.
+      if (i === 0 && toolTrace.length === 0) {
+        messages.push({
+          role: 'assistant',
+          content: response.content || '',
+        });
+        messages.push({
+          role: 'user',
+          content: '[You answered without calling any tools. For any question about deals, pipeline, forecast, conversations, or reps you must query live data first. Call the appropriate tool now.]',
+        });
+        continue;
+      }
+
       return {
         answer: response.content,
         evidence: {
