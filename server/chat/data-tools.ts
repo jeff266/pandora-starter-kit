@@ -69,6 +69,10 @@ export interface ConversationRecord {
   talk_ratio: number | null;
   longest_monologue_seconds: number | null;
   interactivity: number | null;
+  // Structured signal fields populated by Gong/Fireflies parsers
+  objections: any[] | null;
+  competitor_mentions: any[] | null;
+  topics: any[] | null;
 }
 
 export interface QueryConversationsResult {
@@ -481,7 +485,10 @@ async function queryConversations(workspaceId: string, params: Record<string, an
             d.name as deal_name,
             cv.participants,
             cv.summary,
-            cv.source_data
+            cv.source_data,
+            cv.objections,
+            cv.competitor_mentions,
+            cv.topics
      FROM conversations cv
      LEFT JOIN accounts a ON a.id = cv.account_id AND a.workspace_id = cv.workspace_id
      LEFT JOIN deals d ON d.id = cv.deal_id AND d.workspace_id = cv.workspace_id
@@ -582,6 +589,9 @@ function mapConversationRow(r: any, excerpt: string | null): ConversationRecord 
     talk_ratio: talkRatio,
     longest_monologue_seconds: longestMonologue,
     interactivity,
+    objections: Array.isArray(r.objections) && r.objections.length > 0 ? r.objections : null,
+    competitor_mentions: Array.isArray(r.competitor_mentions) && r.competitor_mentions.length > 0 ? r.competitor_mentions : null,
+    topics: Array.isArray(r.topics) && r.topics.length > 0 ? r.topics : null,
   };
 }
 

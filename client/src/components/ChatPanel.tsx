@@ -132,7 +132,13 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
       };
       setMessages(prev => [...prev, assistantMsg]);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Something went wrong';
+      let msg = err instanceof Error ? err.message : 'Something went wrong';
+      // api.post throws with the raw response body as the message;
+      // try to extract a human-readable string from JSON error responses.
+      try {
+        const parsed = JSON.parse(msg);
+        msg = parsed.error || parsed.message || msg;
+      } catch {}
       setError(msg);
     } finally {
       setLoading(false);
