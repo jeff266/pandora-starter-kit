@@ -20,35 +20,28 @@ export default function QuotaBanner() {
     let cancelled = false;
     (async () => {
       try {
-        const [periodsRes, pendingRes] = await Promise.all([
-          api.get('/quotas/periods').catch(() => ({ periods: [] })),
+        // Use /quotas directly — backend applies CURRENT_DATE comparison server-side,
+        // avoiding JS Date serialization issues when passing dates as URL params.
+        const [quotaRes, pendingRes] = await Promise.all([
+          api.get('/quotas').catch(() => ({ quotas: [], period: null })),
           api.get('/quotas/pending-goals').catch(() => ({ pending: false })),
         ]);
 
         if (cancelled) return;
 
-        const periods = periodsRes.periods || [];
-        const now = new Date();
-        const currentPeriod = periods.find((p: any) => {
-          const start = new Date(p.start_date);
-          const end = new Date(p.end_date);
-          return now >= start && now <= end;
-        });
-
-        let hasQuotas = false;
-        if (currentPeriod) {
-          const quotaRes = await api.get(`/quotas?period_start=${currentPeriod.start_date}&period_end=${currentPeriod.end_date}`).catch(() => ({ quotas: [] }));
-          hasQuotas = (quotaRes.quotas || []).length > 0;
-        }
-
-        const isStale = !currentPeriod && periods.length > 0;
+        const quotas = quotaRes.quotas || [];
+        const hasQuotas = quotas.length > 0;
+        const period = quotaRes.period || null;
+        const periodName = typeof period === 'object' && period !== null
+          ? period.name || null
+          : typeof period === 'string' ? period : null;
 
         setStatus({
           hasQuotas,
-          isStale,
+          isStale: false,
           pendingGoals: pendingRes.pending || false,
           pendingCount: pendingRes.preview?.goals?.length || 0,
-          currentPeriod: currentPeriod?.name || null,
+          currentPeriod: periodName,
         });
       } catch {
         // silently ignore
