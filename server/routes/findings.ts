@@ -506,7 +506,7 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
            COALESCE(d.stage, d.stage_normalized, 'Unknown') as stage,
            d.stage_normalized,
            COALESCE(d.forecast_category, 'pipeline') as forecast_category,
-           EXTRACT(EPOCH FROM (now() - COALESCE(d.stage_entered_at, d.created_at))) / 86400 as days_in_stage
+           COALESCE(d.days_in_stage, 0) as days_in_stage
          FROM deals d
          WHERE d.workspace_id = $1
            AND (d.stage = $2 OR d.stage_normalized = $2)
@@ -575,7 +575,7 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
            COALESCE(d.stage, d.stage_normalized, 'Unknown') as stage,
            d.stage_normalized,
            COALESCE(d.forecast_category, 'pipeline') as forecast_category,
-           EXTRACT(EPOCH FROM (now() - COALESCE(d.stage_entered_at, d.created_at))) / 86400 as days_in_stage
+           COALESCE(d.days_in_stage, 0) as days_in_stage
          FROM deals d
          WHERE d.workspace_id = $1
            AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
