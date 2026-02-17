@@ -1,12 +1,36 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
 
+interface ToolCall {
+  tool: string;
+  params: Record<string, any>;
+  result: any;
+  description: string;
+  error?: string;
+}
+
+interface CitedRecord {
+  type: string;
+  id: string;
+  name: string;
+  key_fields: Record<string, any>;
+}
+
+interface Evidence {
+  tool_calls: ToolCall[];
+  skill_evidence_used: { skill_id: string; last_run_at: string; claims_referenced: number }[];
+  loop_iterations: number;
+  cited_records: CitedRecord[];
+}
+
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   timestamp: string;
   responseId?: string;
   feedbackEnabled?: boolean;
+  evidence?: Evidence;
+  mode?: 'fast' | 'loop';
 }
 
 interface ChatScope {
@@ -100,6 +124,8 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
         timestamp: new Date().toISOString(),
         responseId: result.response_id,
         feedbackEnabled: result.feedback_enabled,
+        evidence: result.evidence,
+        mode: result.mode,
       };
       setMessages(prev => [...prev, assistantMsg]);
     } catch (err) {
@@ -179,6 +205,9 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
               <div style={styles.messageContent}>
                 {formatMarkdown(msg.content)}
               </div>
+              {msg.role === 'assistant' && msg.evidence && msg.evidence.tool_calls.length > 0 && (
+                <EvidencePanel evidence={msg.evidence} mode={msg.mode} />
+              )}
               {msg.role === 'assistant' && msg.feedbackEnabled && msg.responseId && (
                 <div style={{
                   display: 'flex',
@@ -265,6 +294,187 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── Evidence Panel ───────────────────────────────────────────────────────────
+
+function formatAmount(v: any): string {
+  const n = Number(v);
+  if (isNaN(n) || !v) return '';
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `$${(n / 1_000).toFixed(0)}K`;
+  return `$${n.toLocaleString()}`;
+}
+
+function EvidencePanel({ evidence, mode }: { evidence: Evidence; mode?: string }) {
+  const [open, setOpen] = useState(false);
+
+  const totalToolCalls = evidence.tool_calls.length;
+  const totalRecords = evidence.cited_records.length;
+  const loopIterations = evidence.loop_iterations;
+
+  const summaryLabel = [
+    `${totalToolCalls} tool call${totalToolCalls !== 1 ? 's' : ''}`,
+    totalRecords > 0 ? `${totalRecords} record${totalRecords !== 1 ? 's' : ''}` : null,
+    loopIterations > 0 ? `${loopIterations} step${loopIterations !== 1 ? 's' : ''}` : null,
+  ].filter(Boolean).join(', ');
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{
+          background: 'transparent',
+          border: 'none',
+          color: '#6488ea',
+          fontSize: 12,
+          cursor: 'pointer',
+          padding: '2px 0',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4,
+        }}
+      >
+        <span style={{ fontSize: 10 }}>{open ? '▼' : '▶'}</span>
+        Show work ({summaryLabel})
+      </button>
+
+      {open && (
+        <div style={{
+          marginTop: 8,
+          padding: '10px 12px',
+          backgroundColor: '#0d101a',
+          borderRadius: 6,
+          border: '1px solid #1e2230',
+          fontSize: 12,
+          color: '#94a3b8',
+        }}>
+          {evidence.tool_calls.map((tc, i) => (
+            <div key={i} style={{ marginBottom: 12 }}>
+              <div style={{ color: '#6488ea', fontWeight: 600, marginBottom: 4 }}>
+                Tool {i + 1}: {tc.tool}
+                {tc.error && <span style={{ color: '#ef4444', marginLeft: 8 }}>FAILED</span>}
+              </div>
+              <div style={{ color: '#64748b', marginBottom: 4, fontSize: 11 }}>
+                → {tc.description}
+              </div>
+
+              {/* Render deal table if result has deals */}
+              {tc.result?.deals && tc.result.deals.length > 0 && (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, marginTop: 4 }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid #1e2230' }}>
+                        {['Deal', 'Amount', 'Stage', 'Close', 'Owner'].map(h => (
+                          <th key={h} style={{ textAlign: 'left', padding: '3px 6px', color: '#64748b', fontWeight: 500 }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tc.result.deals.slice(0, 15).map((d: any, di: number) => (
+                        <tr key={di} style={{ borderBottom: '1px solid #1a1f30' }}>
+                          <td style={{ padding: '3px 6px', color: '#e2e8f0', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</td>
+                          <td style={{ padding: '3px 6px', color: '#94a3b8' }}>{formatAmount(d.amount)}</td>
+                          <td style={{ padding: '3px 6px', color: '#94a3b8' }}>{d.stage || '—'}</td>
+                          <td style={{ padding: '3px 6px', color: '#94a3b8' }}>{d.close_date?.slice(0, 10) || '—'}</td>
+                          <td style={{ padding: '3px 6px', color: '#94a3b8', maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.owner_name || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {tc.result.deals.length > 15 && (
+                    <div style={{ color: '#64748b', fontSize: 11, marginTop: 4, paddingLeft: 6 }}>
+                      +{tc.result.deals.length - 15} more deals not shown
+                    </div>
+                  )}
+                  <div style={{ color: '#64748b', fontSize: 11, marginTop: 4, paddingLeft: 6 }}>
+                    Total: {tc.result.total_count} deals · {formatAmount(tc.result.total_amount)}
+                  </div>
+                </div>
+              )}
+
+              {/* Render compute_metric result */}
+              {tc.result?.formula && (
+                <div style={{ marginTop: 4, padding: '6px 8px', backgroundColor: '#161926', borderRadius: 4 }}>
+                  <div style={{ color: '#e2e8f0', fontWeight: 600, marginBottom: 2 }}>{tc.result.formatted}</div>
+                  <div style={{ color: '#64748b', fontFamily: 'monospace', fontSize: 11 }}>{tc.result.formula}</div>
+                </div>
+              )}
+
+              {/* Render skill evidence findings */}
+              {tc.result?.claims && tc.result.claims.length > 0 && (
+                <div style={{ marginTop: 4 }}>
+                  {tc.result.claims.slice(0, 8).map((c: any, ci: number) => (
+                    <div key={ci} style={{
+                      display: 'flex',
+                      gap: 6,
+                      marginBottom: 3,
+                      padding: '3px 6px',
+                      backgroundColor: '#161926',
+                      borderRadius: 3,
+                    }}>
+                      <span style={{
+                        color: c.severity === 'act' ? '#ef4444' : c.severity === 'watch' ? '#f59e0b' : '#6488ea',
+                        fontSize: 10,
+                        flexShrink: 0,
+                        marginTop: 1,
+                      }}>
+                        {c.severity === 'act' ? '⚠' : c.severity === 'watch' ? '●' : 'ℹ'}
+                      </span>
+                      <span style={{ color: '#94a3b8' }}>
+                        {c.entity_name && <strong style={{ color: '#cbd5e1' }}>{c.entity_name}: </strong>}
+                        {c.message}
+                      </span>
+                    </div>
+                  ))}
+                  {tc.result.claims.length > 8 && (
+                    <div style={{ color: '#64748b', fontSize: 11, paddingLeft: 6 }}>+{tc.result.claims.length - 8} more findings</div>
+                  )}
+                </div>
+              )}
+
+              {/* Render conversations */}
+              {tc.result?.conversations && tc.result.conversations.length > 0 && (
+                <div style={{ marginTop: 4 }}>
+                  {tc.result.conversations.slice(0, 8).map((c: any, ci: number) => (
+                    <div key={ci} style={{ marginBottom: 3, padding: '3px 6px', backgroundColor: '#161926', borderRadius: 3 }}>
+                      <span style={{ color: '#cbd5e1' }}>{c.title || 'Untitled'}</span>
+                      <span style={{ color: '#64748b', marginLeft: 6 }}>
+                        {c.date?.slice(0, 10)} {c.account_name ? `· ${c.account_name}` : ''} {c.duration_minutes ? `· ${c.duration_minutes}m` : ''}
+                      </span>
+                    </div>
+                  ))}
+                  <div style={{ color: '#64748b', fontSize: 11, paddingLeft: 6, marginTop: 2 }}>
+                    {tc.result.total_count} total · {tc.result.summary_coverage}% have summaries
+                  </div>
+                </div>
+              )}
+
+              {/* Error message */}
+              {tc.error && (
+                <div style={{ color: '#ef4444', fontSize: 11, marginTop: 4 }}>Error: {tc.error}</div>
+              )}
+            </div>
+          ))}
+
+          {evidence.skill_evidence_used.length > 0 && (
+            <div style={{ borderTop: '1px solid #1e2230', paddingTop: 8, marginTop: 4 }}>
+              <div style={{ color: '#6488ea', fontWeight: 600, marginBottom: 4 }}>Skills referenced:</div>
+              {evidence.skill_evidence_used.map((s, i) => (
+                <div key={i} style={{ color: '#64748b', fontSize: 11 }}>
+                  {s.skill_id} · {s.claims_referenced} findings · ran {s.last_run_at?.slice(0, 16) || 'unknown'}
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div style={{ borderTop: '1px solid #1e2230', paddingTop: 6, marginTop: 6, color: '#64748b', fontSize: 11 }}>
+            Mode: {mode || 'unknown'} · {loopIterations} reasoning step{loopIterations !== 1 ? 's' : ''}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

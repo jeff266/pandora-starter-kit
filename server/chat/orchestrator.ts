@@ -16,6 +16,7 @@ import { detectFeedback } from './feedback-detector.js';
 import { recordFeedbackSignal } from '../feedback/signals.js';
 import { createAnnotation, getActiveAnnotations } from '../feedback/annotations.js';
 import { randomUUID } from 'crypto';
+import { runAskPandora, buildPriorContext } from './ask-pandora.js';
 
 export interface ConversationTurnInput {
   surface: 'slack_thread' | 'slack_dm' | 'in_app';
@@ -223,6 +224,62 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
           rate_limited: true,
         };
       }
+    }
+  }
+
+  // ── Ask Pandora agentic path (in_app surface, non-entity scope) ─────────────
+  // Runs before the scoped-analysis fallback for Command Center chat.
+  // Falls back gracefully if it throws.
+  const isAgenticScope = !['deal', 'account'].includes(scopeType);
+  if (!answer && surface === 'in_app' && isAgenticScope) {
+    try {
+      // Build prior context from messages that have tool_trace attached
+      const messagesWithTrace = (state.messages || []).filter(
+        m => m.role === 'assistant'
+      ) as any[];
+      const priorCtx = isFollowUp
+        ? buildPriorContext(messagesWithTrace, 3, 3000)
+        : undefined;
+
+      const pandoraResult = await runAskPandora(workspaceId, message, priorCtx);
+      answer = pandoraResult.answer;
+      tokensUsed = pandoraResult.tokens_used;
+      routerDecision = pandoraResult.mode === 'fast' ? 'ask_pandora_fast' : 'ask_pandora_loop';
+      dataStrategy = 'ask_pandora';
+
+      // Append assistant message with tool_trace for follow-up context carryover
+      await appendMessage(workspaceId, channelId, threadId, {
+        role: 'assistant',
+        content: answer,
+        timestamp: new Date().toISOString(),
+        ...(pandoraResult.evidence.tool_calls.length > 0 ? {
+          tool_trace: pandoraResult.evidence.tool_calls,
+          cited_records: pandoraResult.evidence.cited_records,
+          evidence_mode: pandoraResult.mode,
+        } : {}),
+      } as any);
+
+      await updateContext(workspaceId, channelId, threadId, {
+        last_scope: { type: scopeType, entity_id: entityId, rep_email: repEmail },
+      });
+      await updateTurnMetrics(workspaceId, channelId, threadId, tokensUsed);
+
+      const responseId = randomUUID();
+
+      return {
+        answer,
+        thread_id: threadId,
+        scope: { type: scopeType, entity_id: entityId, rep_email: repEmail },
+        router_decision: routerDecision,
+        data_strategy: dataStrategy,
+        tokens_used: tokensUsed,
+        response_id: responseId,
+        feedback_enabled: true,
+        ...(pandoraResult.evidence.tool_calls.length > 0 ? { evidence: pandoraResult.evidence } : {}),
+      } as any;
+    } catch (err) {
+      console.warn('[orchestrator] Ask Pandora failed, falling back to scoped analysis:', err);
+      // Fall through to existing scoped analysis path
     }
   }
 
