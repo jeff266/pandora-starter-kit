@@ -274,7 +274,7 @@ const PANDORA_TOOLS: ToolDef[] = [
     parameters: {
       type: 'object',
       properties: {
-        owner_email: { type: 'string', description: 'Score only deals owned by this rep (email)' },
+        owner_name: { type: 'string', description: 'Score only deals owned by this rep (partial name match)' },
         deal_ids: { type: 'array', items: { type: 'string' }, description: 'Score specific deals by ID' },
         limit: { type: 'number', description: 'Max deals to score (default 50, max 100)' },
       },

@@ -2070,12 +2070,18 @@ async function computeForecastAccuracy(workspaceId: string, params: Record<strin
 
 // ─── Tool 14: compute_close_probability ──────────────────────────────────────
 
+// Hardcoded normalized stage order for advancement scoring (no stage_mappings table in DB)
+const STAGE_ORDER: Record<string, number> = {
+  awareness: 1, qualification: 2, evaluation: 3, decision: 4, negotiation: 5,
+};
+const STAGE_ORDER_MAX = 5; // negotiation = highest open stage
+
 async function computeCloseProbability(workspaceId: string, params: Record<string, any>): Promise<any> {
-  const ownerEmail: string | null = params.owner_email || null;
+  const ownerName: string | null = params.owner_name || params.owner_email || null;
   const dealIds: string[] | null = params.deal_ids || null;
   const limit = Math.min(params.limit || 50, 100);
 
-  // 1. Open deals with stage order
+  // 1. Open deals (no stage_mappings JOIN — use inline CASE for stage order)
   const dealConds = [
     'd.workspace_id = $1',
     "d.stage_normalized NOT IN ('closed_won', 'closed_lost')",
@@ -2084,9 +2090,9 @@ async function computeCloseProbability(workspaceId: string, params: Record<strin
   ];
   const dealVals: any[] = [workspaceId];
 
-  if (ownerEmail) {
-    dealVals.push(ownerEmail.toLowerCase());
-    dealConds.push(`LOWER(COALESCE(d.owner_email, '')) = $${dealVals.length}`);
+  if (ownerName) {
+    dealVals.push(`%${ownerName}%`);
+    dealConds.push(`d.owner ILIKE $${dealVals.length}`);
   }
   if (dealIds?.length) {
     dealVals.push(dealIds);
@@ -2095,16 +2101,13 @@ async function computeCloseProbability(workspaceId: string, params: Record<strin
 
   const dealRows = await query<any>(
     `SELECT d.id, d.name, d.amount, d.stage, d.stage_normalized, d.close_date,
-            d.owner as owner_name, d.owner_email, d.account_id, d.forecast_category,
+            d.owner as owner_name, d.account_id, d.forecast_category,
             d.probability as crm_probability,
             d.days_in_stage,
             CASE WHEN d.close_date IS NOT NULL
                  THEN EXTRACT(DAY FROM (d.close_date::date - CURRENT_DATE))
-                 ELSE NULL END as days_to_close,
-            COALESCE(sm.display_order, 50) as stage_order,
-            (SELECT MAX(sm2.display_order) FROM stage_mappings sm2 WHERE sm2.workspace_id = d.workspace_id) as max_stage_order
+                 ELSE NULL END as days_to_close
      FROM deals d
-     LEFT JOIN stage_mappings sm ON sm.workspace_id = d.workspace_id AND sm.normalized_stage = d.stage_normalized
      WHERE ${dealConds.join(' AND ')}
      ORDER BY d.amount DESC NULLS LAST
      LIMIT $${dealVals.length + 1}`,
@@ -2154,18 +2157,17 @@ async function computeCloseProbability(workspaceId: string, params: Record<strin
   }
 
   // 4. Regression counts from deal_stage_history
+  // A regression is any transition where to_stage_normalized is earlier in STAGE_ORDER than from_stage_normalized
   const regressionRows = await query<{ deal_id: string; regressions: string }>(
-    `SELECT dsh.deal_id, COUNT(*)::text as regressions
+    `WITH stage_ord(stage_name, ord) AS (
+       VALUES ('awareness',1),('qualification',2),('evaluation',3),('decision',4),('negotiation',5)
+     )
+     SELECT dsh.deal_id, COUNT(*)::text as regressions
      FROM deal_stage_history dsh
-     JOIN stage_mappings sm_curr ON sm_curr.workspace_id = $1 AND sm_curr.normalized_stage = dsh.stage_normalized
+     JOIN stage_ord so_to ON so_to.stage_name = dsh.to_stage_normalized
+     JOIN stage_ord so_from ON so_from.stage_name = dsh.from_stage_normalized
      WHERE dsh.workspace_id = $1 AND dsh.deal_id = ANY($2)
-       AND EXISTS (
-         SELECT 1 FROM deal_stage_history dsh2
-         JOIN stage_mappings sm_prev ON sm_prev.workspace_id = $1 AND sm_prev.normalized_stage = dsh2.stage_normalized
-         WHERE dsh2.deal_id = dsh.deal_id
-           AND dsh2.entered_at < dsh.entered_at
-           AND sm_prev.display_order > sm_curr.display_order
-       )
+       AND so_from.ord > so_to.ord
      GROUP BY dsh.deal_id`,
     [workspaceId, dealIdList]
   ).catch(() => ({ rows: [] as any[] }));
@@ -2174,16 +2176,16 @@ async function computeCloseProbability(workspaceId: string, params: Record<strin
     regressionMap.set(r.deal_id, parseInt(r.regressions));
   }
 
-  // 5. Rep win rates (last 12 months)
-  const winRateRows = await query<{ owner_email: string; win_rate: string }>(
-    `SELECT LOWER(d.owner_email) as owner_email,
+  // 5. Rep win rates (last 12 months) — keyed by owner name (no owner_email on deals)
+  const winRateRows = await query<{ owner_name: string; win_rate: string }>(
+    `SELECT d.owner as owner_name,
             (COUNT(CASE WHEN d.stage_normalized = 'closed_won' THEN 1 END)::float /
              NULLIF(COUNT(CASE WHEN d.stage_normalized IN ('closed_won', 'closed_lost') THEN 1 END), 0))::text as win_rate
      FROM deals d
      WHERE d.workspace_id = $1
        AND d.close_date >= CURRENT_DATE - INTERVAL '365 days'
-       AND d.owner_email IS NOT NULL
-     GROUP BY LOWER(d.owner_email)`,
+       AND d.owner IS NOT NULL
+     GROUP BY d.owner`,
     [workspaceId]
   ).catch(() => ({ rows: [] as any[] }));
   const repWinRates = new Map<string, number>();
@@ -2192,7 +2194,7 @@ async function computeCloseProbability(workspaceId: string, params: Record<strin
   for (const r of winRateRows.rows) {
     const wr = parseFloat(r.win_rate || '0');
     if (!isNaN(wr) && wr > 0) {
-      repWinRates.set(r.owner_email, wr);
+      repWinRates.set(r.owner_name, wr);
       teamWinRateSum += wr;
       teamWinRateCount++;
     }
@@ -2208,26 +2210,23 @@ async function computeCloseProbability(workspaceId: string, params: Record<strin
   ).catch(() => ({ rows: [{ median_amount: '0' }] as any[] }));
   const medianAmount = parseFloat(medianRow.rows[0]?.median_amount || '0');
 
-  // 7. Stage velocity benchmarks
+  // 7. Stage velocity benchmarks — use from_stage_normalized + duration_in_previous_stage_ms
   const benchmarkRows = await query<{
     stage_normalized: string;
     median_days: string;
     p75_days: string;
     p90_days: string;
   }>(
-    `WITH durations AS (
-       SELECT dsh.stage_normalized,
-              EXTRACT(DAY FROM (LEAD(dsh.entered_at) OVER (PARTITION BY dsh.deal_id ORDER BY dsh.entered_at) - dsh.entered_at)) as duration_days
-       FROM deal_stage_history dsh
-       WHERE dsh.workspace_id = $1
-     )
-     SELECT stage_normalized,
-            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY duration_days)::text as median_days,
-            PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY duration_days)::text as p75_days,
-            PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY duration_days)::text as p90_days
-     FROM durations
-     WHERE duration_days IS NOT NULL AND duration_days > 0
-     GROUP BY stage_normalized`,
+    `SELECT dsh.from_stage_normalized as stage_normalized,
+            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY dsh.duration_in_previous_stage_ms / 86400000.0)::text as median_days,
+            PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY dsh.duration_in_previous_stage_ms / 86400000.0)::text as p75_days,
+            PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY dsh.duration_in_previous_stage_ms / 86400000.0)::text as p90_days
+     FROM deal_stage_history dsh
+     WHERE dsh.workspace_id = $1
+       AND dsh.duration_in_previous_stage_ms IS NOT NULL
+       AND dsh.duration_in_previous_stage_ms > 0
+       AND dsh.from_stage_normalized IS NOT NULL
+     GROUP BY dsh.from_stage_normalized`,
     [workspaceId]
   ).catch(() => ({ rows: [] as any[] }));
   const benchmarkMap = new Map<string, { median: number; p75: number; p90: number }>();
@@ -2244,16 +2243,15 @@ async function computeCloseProbability(workspaceId: string, params: Record<strin
     const convData = convMap.get(deal.id) || { call_count: 0, last_call_date: null };
     const contactData = contactMap.get(deal.id) || { total: 0, key_contacts: 0 };
     const regressions = regressionMap.get(deal.id) || 0;
-    const repWinRate = repWinRates.get((deal.owner_email || '').toLowerCase());
+    const repWinRate = repWinRates.get(deal.owner_name || '');
     const benchmark = benchmarkMap.get(deal.stage_normalized);
     const daysInStage = parseFloat(deal.days_in_stage) || 0;
     const daysToClose = deal.days_to_close !== null ? parseFloat(deal.days_to_close) : null;
     const amount = parseFloat(deal.amount) || 0;
 
     // === Qualification (weight: 0.20) ===
-    const maxStageOrder = parseFloat(deal.max_stage_order) || 10;
-    const stageOrder = parseFloat(deal.stage_order) || 1;
-    const stageAdvancement = Math.min(stageOrder / Math.max(maxStageOrder * 0.7, 1), 1);
+    const stageOrder = STAGE_ORDER[deal.stage_normalized] ?? 1;
+    const stageAdvancement = Math.min(stageOrder / (STAGE_ORDER_MAX * 0.7), 1);
     const amountScore = medianAmount > 0 ? Math.min(amount / medianAmount / 1.5, 1) : 0.5;
     const fcScores: Record<string, number> = { commit: 1.0, best_case: 0.7, pipeline: 0.4 };
     const forecastScore = fcScores[deal.forecast_category] ?? 0.3;
@@ -2337,7 +2335,6 @@ async function computeCloseProbability(workspaceId: string, params: Record<strin
       stage: deal.stage,
       close_date: deal.close_date,
       owner: deal.owner_name,
-      owner_email: deal.owner_email,
       probability,
       crm_probability: deal.crm_probability,
       weighted_amount: Math.round(amount * probability / 100),
