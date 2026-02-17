@@ -749,9 +749,9 @@ async function gatherContext(request: AnalysisRequest): Promise<{
 
       const dealsResult = await query<any>(
         `SELECT d.id, d.name, d.amount, d.probability, d.close_date,
-           d.owner, d.owner_name, d.stage, d.stage_normalized,
+           d.owner, d.owner as owner_name, d.stage, d.stage_normalized,
            COALESCE(d.forecast_category, 'pipeline') as forecast_category,
-           EXTRACT(EPOCH FROM (now() - COALESCE(d.stage_entered_at, d.created_at))) / 86400 as days_in_stage
+           COALESCE(d.days_in_stage, 0) as days_in_stage
          FROM deals d
          WHERE d.workspace_id = $1
            AND (d.stage = $2 OR d.stage_normalized = $2)
