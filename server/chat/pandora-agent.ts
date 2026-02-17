@@ -200,6 +200,8 @@ You have tools that query the company's live data. When someone asks a question,
    WHEN LISTING CONVERSATIONS: always include title, date, account, rep, and duration.
    WHEN CITING METRICS: always include the formula and record count.
 
+8. PRIOR TOOL RESULTS IN CONTEXT ARE FROM PREVIOUS QUESTIONS — NOT YOUR CURRENT DATA. Each new question starts fresh. All 7 tools are always available. Never say "I don't have access to X in the data provided" or "the data shows only Y" — that refers to a past question. Call a tool.
+
 Today's date is ${new Date().toISOString().split('T')[0]}.`;
 
 // ─── Response types ───────────────────────────────────────────────────────────
