@@ -154,7 +154,7 @@ router.get(
       }
 
       const result = await query<{
-        quota_id: string;
+        id: string;
         rep_name: string;
         rep_email: string | null;
         quota_amount: number;
@@ -167,7 +167,7 @@ router.get(
         team_quota: number;
       }>(
         `SELECT
-          rq.id as quota_id,
+          rq.id,
           rq.rep_name,
           rq.rep_email,
           rq.quota_amount,
