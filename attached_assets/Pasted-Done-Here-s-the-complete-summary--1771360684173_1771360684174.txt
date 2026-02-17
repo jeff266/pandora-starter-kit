@@ -1,0 +1,67 @@
+Done. Here's the complete summary:                     
+                                                         
+  ---                                                    
+  All 6 UI fixes + Command Center Drilldown are built and
+   committed.                                            
+                                                         
+  Session commits (newest first)                         
+  Hash: 7226049                                          
+  What: Command Center drilldown — stage panel, Ask      
+    Pandora drawer, deals API                            
+  ────────────────────────────────────────               
+  Hash: 6d90823                                          
+  What: UI fixes: Tools page, experimental skills opt-in,
+                                                         
+    cron dropdowns                                       
+  ────────────────────────────────────────               
+  Hash: d69013b                                          
+  What: Stage configuration grouped by pipeline          
+  ────────────────────────────────────────               
+  Hash: d6807e7                                          
+  What: Learning Rate invalid date + Insights feedback   
+    rename + reason picker                               
+  ────────────────────────────────────────               
+  Hash: f86bf97                                          
+  What: Real CRM values in Settings rule builder         
+  ────────────────────────────────────────               
+  Hash: a153122                                          
+  What: getToolFilters wired into all 14 deal tools      
+  Drilldown (D1–D4) — what was built                     
+                                                         
+  Backend (D1):                                          
+  - GET /pipeline/snapshot?include_deals=true — returns  
+  DealSummaryFull[] per stage with findings: string[]    
+  (category IDs), days_in_stage, forecast_category, and a
+   deals_by_stage map                                    
+  - GET /pipeline/snapshot?stage=STAGENAME — fast        
+  single-stage deal fetch for on-demand bar clicks       
+  - 'stage' added to VALID_SCOPE_TYPES in analysis.ts    
+  - case 'stage': context builder in scoped-analysis.ts —
+   queries deals + findings, formats rich context for    
+  Claude                                                 
+                                                         
+  Frontend (D2–D4):                                      
+  - StageDrillDownPanel — fixed 680px right drawer,      
+  sortable deal table (Amount/Days/Probability/Risk),    
+  mini metrics header, prompt suggestion chips, bottom   
+  bar with avg days/prob                                 
+  - DrilldownDealRow — grid layout matching the mockup:  
+  finding badges, forecast category badge, conic-gradient
+   probability donut, hover-reveal 💬 ask button         
+  - AskPandoraDrawer — fixed 320px bottom drawer, chat   
+  thread, thinking animation (3 pulsing dots),           
+  lightweight markdown renderer, follow-up input with    
+  Enter key support                                      
+  - Overlay dim behind panel (click to close), Escape key
+   dismissal                                             
+  - handleAskPandora — posts to /analyze with scope: {   
+  type: 'stage', stage: '...' } or scope: { type: 'deal',
+   entity_id: '...' } for per-deal prompts               
+                                                         
+✻ Brewed for 16m 14s                                     
+                                                         
+⏺ Agent "Fix 1 Tools page + Fix 2 experimental skills +  
+ Fix 3 cron dropdowns" completed                         
+                                                         
+⏺ Already captured — that's the 6d90823 commit confirmed 
+  above. No action needed. 
