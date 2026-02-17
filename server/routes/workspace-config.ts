@@ -672,6 +672,7 @@ router.get('/:workspaceId/workspace-config/stages', async (req, res) => {
     // Query distinct stages directly from deals (no stage_mappings table)
     const stageRows = await query<any>(
       `SELECT
+         COALESCE(d.pipeline, 'Default') as pipeline,
          d.stage as raw_stage,
          d.stage_normalized,
          CASE WHEN d.stage_normalized IN ('closed_won', 'closed_lost') THEN false ELSE true END as is_open,
@@ -681,8 +682,8 @@ router.get('/:workspaceId/workspace-config/stages', async (req, res) => {
          COUNT(d.id) FILTER (WHERE d.stage_normalized = 'closed_lost')::int as lost_count
        FROM deals d
        WHERE d.workspace_id = $1 AND d.stage IS NOT NULL
-       GROUP BY d.stage, d.stage_normalized
-       ORDER BY is_open DESC, d.stage`,
+       GROUP BY d.pipeline, d.stage, d.stage_normalized
+       ORDER BY d.pipeline NULLS LAST, is_open DESC, d.stage`,
       [workspaceId]
     );
 
@@ -695,6 +696,7 @@ router.get('/:workspaceId/workspace-config/stages', async (req, res) => {
 
     const stages = stageRows.rows.map((s: any) => ({
       ...s,
+      pipeline: s.pipeline || 'Default',
       total_amount: parseFloat(s.total_amount),
       is_excluded_from_pipeline: globalExcluded.includes(s.raw_stage) || pipelineExcluded.includes(s.raw_stage),
       is_excluded_from_win_rate: winRateExcluded.includes(s.raw_stage),

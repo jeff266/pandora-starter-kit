@@ -2225,16 +2225,9 @@ function WsPipelineStagesSection() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [pipelines, setPipelines] = useState<{ val: string; count: number }[]>([]);
-
   useEffect(() => {
-    Promise.all([
-      api.get('/workspace-config/stages').catch(() => ({ stages: [] })),
-      api.get('/workspace-config/field-options').catch(() => ({ fields: [] })),
-    ]).then(([stageData, fieldData]: any[]) => {
-      setStages(stageData.stages || []);
-      const pipelineField = (fieldData.fields || []).find((f: any) => f.field === 'pipeline');
-      setPipelines(pipelineField?.values || []);
+    api.get('/workspace-config/stages').then((data: any) => {
+      setStages(data.stages || []);
     }).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
@@ -2269,77 +2262,95 @@ function WsPipelineStagesSection() {
     }
   };
 
+  const PIPELINE_COLORS = ['#3b82f6', '#a78bfa', '#22c55e', '#f97316', '#ec4899'];
+  const pipelineGroups = stages.reduce((acc, s, idx) => {
+    const key = s.pipeline || 'Default';
+    if (!acc[key]) acc[key] = [];
+    acc[key].push({ ...s, _idx: idx });
+    return acc;
+  }, {} as Record<string, (WsStage & { _idx: number })[]>);
+  const pipelineNames = Object.keys(pipelineGroups).sort();
+
   if (loading) return <Skeleton />;
 
   return (
     <div>
-      {pipelines.length > 0 && (
-        <div style={{ marginBottom: 28 }}>
-          <WsSectionHeader title="Pipelines" description="Active pipelines detected in your CRM." />
-          <div style={wsCard}>
-            {pipelines.map((p, i) => (
-              <div key={p.val} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 0', borderBottom: i < pipelines.length - 1 ? `1px solid ${colors.border}` : 'none' }}>
-                <span style={{ fontSize: 13, color: colors.text, fontFamily: fonts.sans }}>{p.val}</span>
-                <span style={{ fontSize: 12, fontFamily: fonts.mono, color: colors.textMuted }}>{p.count} deals</span>
+      <WsSectionHeader title="Stage Configuration" description="Control which stages count for each metric type. Grouped by pipeline." />
+
+      {pipelineNames.map((pipelineName, pIdx) => {
+        const pipelineStages = pipelineGroups[pipelineName];
+        const totalDeals = pipelineStages.reduce((s, st) => s + st.deal_count, 0);
+        const totalAmount = pipelineStages.reduce((s, st) => s + st.total_amount, 0);
+        const borderColor = PIPELINE_COLORS[pIdx % PIPELINE_COLORS.length];
+        return (
+          <div key={pipelineName} style={{ ...wsCard, padding: 0, marginBottom: 16, borderLeft: `3px solid ${borderColor}` }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', background: colors.surface, borderRadius: '6px 6px 0 0', borderBottom: `1px solid ${colors.border}` }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 10, height: 10, borderRadius: 2, background: borderColor }} />
+                <span style={{ fontSize: 14, fontWeight: 600, color: colors.text, fontFamily: fonts.sans }}>{pipelineName}</span>
               </div>
-            ))}
+              <span style={{ fontSize: 12, color: colors.textMuted, fontFamily: fonts.mono }}>
+                {totalDeals} deals · ${(totalAmount / 1000).toFixed(0)}K
+              </span>
+            </div>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: fonts.sans, minWidth: 700 }}>
+                <thead>
+                  <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
+                    {["Stage", "Normalized", "Deals", "Amount", "Pipeline", "Win Rate", "Forecast"].map(h => (
+                      <th key={h} style={{ padding: '8px 10px', fontSize: 11, fontWeight: 600, color: colors.textMuted, textAlign: 'left', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {pipelineStages.map((s, i) => {
+                    const isClosed = !s.is_open;
+                    const isWon = s.stage_normalized === 'closed_won';
+                    const isLost = s.stage_normalized === 'closed_lost';
+                    const hasNormMismatch = (s.raw_stage.toLowerCase().includes('closed') || s.raw_stage.toLowerCase().includes('won')) && s.stage_normalized !== 'closed_won';
+                    return (
+                      <tr key={`${s.pipeline}-${s.raw_stage}`} style={{ borderBottom: i < pipelineStages.length - 1 ? `1px solid ${colors.border}` : 'none', opacity: s.deal_count === 0 ? 0.5 : 1 }}>
+                        <td style={{ padding: '10px 10px', fontSize: 13, color: colors.text, fontWeight: 500 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <div style={{ width: 8, height: 8, borderRadius: 4, background: isWon ? colors.green : isLost ? colors.red : borderColor, flexShrink: 0 }} />
+                            {s.raw_stage}
+                            {hasNormMismatch && <span title="Stage name suggests different normalization" style={{ fontSize: 10, color: colors.yellow, marginLeft: 4 }}>⚠</span>}
+                          </div>
+                        </td>
+                        <td style={{ padding: '10px 10px' }}>
+                          <span style={{ fontSize: 11, fontFamily: fonts.mono, color: colors.textMuted, background: colors.surface, padding: '2px 6px', borderRadius: 3 }}>{s.stage_normalized}</span>
+                        </td>
+                        <td style={{ padding: '10px 10px', fontSize: 13, fontFamily: fonts.mono, color: colors.textSecondary }}>{s.deal_count}</td>
+                        <td style={{ padding: '10px 10px', fontSize: 13, fontFamily: fonts.mono, color: s.total_amount === 0 ? colors.textMuted : colors.textSecondary }}>
+                          {s.total_amount === 0 ? '$0' : `${(s.total_amount / 1000).toFixed(0)}K`} 
+                        </td>
+                        <td style={{ padding: '10px 10px' }}>
+                          {isClosed ? <span style={{ fontSize: 11, color: colors.textMuted }}>N/A</span> : (
+                            <WsToggle on={!s.is_excluded_from_pipeline} onChange={() => toggleExclusion(s._idx, 'is_excluded_from_pipeline')} />
+                          )}
+                        </td>
+                        <td style={{ padding: '10px 10px' }}>
+                          {isWon ? <span style={wsBadge(colors.green, colors.greenSoft)}>Won</span>
+                            : isLost ? (
+                              <WsToggle on={!s.is_excluded_from_win_rate} onChange={() => toggleExclusion(s._idx, 'is_excluded_from_win_rate')} />
+                            ) : s.is_open ? (
+                              <span style={{ fontSize: 11, color: colors.textMuted }}>—</span>
+                            ) : null}
+                        </td>
+                        <td style={{ padding: '10px 10px' }}>
+                          {isClosed ? <span style={{ fontSize: 11, color: colors.textMuted }}>N/A</span> : (
+                            <WsToggle on={!s.is_excluded_from_forecast} onChange={() => toggleExclusion(s._idx, 'is_excluded_from_forecast')} />
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
-      )}
-      <WsSectionHeader title="Stage Configuration" description="Control which stages count for each metric type. Stages with $0 pipeline and pre-qualification stages are commonly excluded." />
-      <div style={{ ...wsCard, overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: fonts.sans, minWidth: 700 }}>
-          <thead>
-            <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
-              {['Stage', 'Normalized', 'Deals', 'Amount', 'Pipeline', 'Win Rate', 'Forecast'].map(h => (
-                <th key={h} style={{ padding: '8px 10px', fontSize: 11, fontWeight: 600, color: colors.textMuted, textAlign: 'left', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {stages.map((s, i) => {
-              const isClosed = !s.is_open;
-              const isWon = s.stage_normalized === 'closed_won';
-              const isLost = s.stage_normalized === 'closed_lost';
-              return (
-                <tr key={s.raw_stage} style={{ borderBottom: i < stages.length - 1 ? `1px solid ${colors.border}` : 'none', opacity: s.deal_count === 0 ? 0.5 : 1 }}>
-                  <td style={{ padding: '10px 10px', fontSize: 13, color: colors.text, fontWeight: 500 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <div style={{ width: 8, height: 8, borderRadius: 4, background: isWon ? colors.green : isLost ? colors.red : colors.accent, flexShrink: 0 }} />
-                      {s.raw_stage}
-                    </div>
-                  </td>
-                  <td style={{ padding: '10px 10px' }}>
-                    <span style={{ fontSize: 11, fontFamily: fonts.mono, color: colors.textMuted, background: colors.surface, padding: '2px 6px', borderRadius: 3 }}>{s.stage_normalized}</span>
-                  </td>
-                  <td style={{ padding: '10px 10px', fontSize: 13, fontFamily: fonts.mono, color: colors.textSecondary }}>{s.deal_count}</td>
-                  <td style={{ padding: '10px 10px', fontSize: 13, fontFamily: fonts.mono, color: s.total_amount === 0 ? colors.textMuted : colors.textSecondary }}>
-                    {s.total_amount === 0 ? '$0' : `$${(s.total_amount / 1000).toFixed(0)}K`}
-                  </td>
-                  <td style={{ padding: '10px 10px' }}>
-                    {isClosed ? <span style={{ fontSize: 11, color: colors.textMuted }}>N/A</span> : (
-                      <WsToggle on={!s.is_excluded_from_pipeline} onChange={() => toggleExclusion(i, 'is_excluded_from_pipeline')} />
-                    )}
-                  </td>
-                  <td style={{ padding: '10px 10px' }}>
-                    {isWon ? <span style={wsBadge(colors.green, colors.greenSoft)}>Won</span>
-                      : isLost ? (
-                        <WsToggle on={!s.is_excluded_from_win_rate} onChange={() => toggleExclusion(i, 'is_excluded_from_win_rate')} />
-                      ) : s.is_open ? (
-                        <span style={{ fontSize: 11, color: colors.textMuted }}>—</span>
-                      ) : null}
-                  </td>
-                  <td style={{ padding: '10px 10px' }}>
-                    {isClosed ? <span style={{ fontSize: 11, color: colors.textMuted }}>N/A</span> : (
-                      <WsToggle on={!s.is_excluded_from_forecast} onChange={() => toggleExclusion(i, 'is_excluded_from_forecast')} />
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+        );
+      })}
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 12 }}>
         {saved && <span style={{ fontSize: 13, color: colors.green, fontFamily: fonts.sans, alignSelf: 'center' }}>Filters saved</span>}
         <button style={wsBtn('primary')} onClick={save} disabled={saving}>{saving ? 'Saving...' : 'Save Changes'}</button>
