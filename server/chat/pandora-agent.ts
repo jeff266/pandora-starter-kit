@@ -261,6 +261,9 @@ export async function runPandoraAgent(
   ];
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
+    console.log(`[PandoraAgent] iter=${i} calling LLM with ${PANDORA_TOOLS.length} tools, history=${messages.length} msgs`);
+    console.log(`[PandoraAgent] tools:`, PANDORA_TOOLS.map(t => t.name).join(', '));
+
     const response = await callLLM(workspaceId, 'reason', {
       systemPrompt: PANDORA_SYSTEM_PROMPT,
       messages,
@@ -276,11 +279,17 @@ export async function runPandoraAgent(
 
     totalTokens += (response.usage?.input || 0) + (response.usage?.output || 0);
 
+    console.log(`[PandoraAgent] iter=${i} stopReason=${response.stopReason} toolCalls=${response.toolCalls?.length ?? 0}`);
+    if (response.toolCalls?.length) {
+      console.log(`[PandoraAgent] tools called:`, response.toolCalls.map((tc: any) => tc.name).join(', '));
+    }
+
     // Done — model produced its answer
     if (response.stopReason === 'end_turn' || !response.toolCalls?.length) {
       // Guard: if no tools have been called yet, the agent is answering from context
       // instead of live data. Give it up to 2 nudges before accepting the answer.
       if (toolTrace.length === 0 && i < 2) {
+        console.log(`[PandoraAgent] GUARD FIRED at iter=${i} — no tools called, injecting nudge`);
         messages.push({
           role: 'assistant',
           content: response.content || '',
