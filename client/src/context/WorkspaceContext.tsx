@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { setApiCredentials } from '../lib/api';
 
 interface UserInfo {
   id: string;
@@ -84,6 +85,12 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
         selected = data.workspaces.find((w: WorkspaceInfo) => w.id === lastWsId) || null;
       }
 
+      // Set API credentials BEFORE setState so components that respond to
+      // isAuthenticated:true already have a valid token in the api module.
+      if (selected) {
+        setApiCredentials(selected.id, sessionToken);
+      }
+
       setState({
         user: data.user,
         token: sessionToken,
@@ -156,8 +163,9 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
 
   const selectWorkspace = useCallback((workspace: WorkspaceInfo) => {
     localStorage.setItem('pandora_last_workspace', workspace.id);
+    if (state.token) setApiCredentials(workspace.id, state.token);
     setState(prev => ({ ...prev, currentWorkspace: workspace }));
-  }, []);
+  }, [state.token]);
 
   const joinWorkspace = useCallback(async (apiKey: string): Promise<WorkspaceInfo> => {
     const res = await fetch('/api/auth/workspaces/join', {
