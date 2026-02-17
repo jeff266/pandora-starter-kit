@@ -354,7 +354,27 @@ export class SkillRuntime {
     }
 
     const args = step.computeArgs || {};
-    return tool.execute(args, context);
+    const start = Date.now();
+    let result: any;
+    let errorMsg: string | undefined;
+    try {
+      result = await tool.execute(args, context);
+      return result;
+    } catch (err: any) {
+      errorMsg = err.message || String(err);
+      throw err;
+    } finally {
+      const { logToolCall } = await import('../chat/tool-logger.js');
+      logToolCall({
+        workspace_id: context.workspaceId,
+        tool_name: step.computeFn,
+        called_by: 'skill_run',
+        skill_id: (context as any).skillId ?? (context as any).skill?.id,
+        duration_ms: Date.now() - start,
+        result_empty: result == null,
+        error: errorMsg,
+      });
+    }
   }
 
   /**

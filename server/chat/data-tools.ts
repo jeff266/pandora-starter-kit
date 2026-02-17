@@ -155,45 +155,70 @@ export interface QueryActivityTimelineResult {
 export async function executeDataTool(
   workspaceId: string,
   toolName: string,
-  params: Record<string, any>
+  params: Record<string, any>,
+  calledBy: 'ask_pandora' | 'skill_run' | 'playground' = 'ask_pandora',
+  skillId?: string
 ): Promise<any> {
-  switch (toolName) {
-    case 'query_deals':
-      return queryDeals(workspaceId, params);
-    case 'query_accounts':
-      return queryAccounts(workspaceId, params);
-    case 'query_conversations':
-      return queryConversations(workspaceId, params);
-    case 'get_skill_evidence':
-      return getSkillEvidence(workspaceId, params);
-    case 'compute_metric':
-      return computeMetric(workspaceId, params);
-    case 'query_contacts':
-      return queryContacts(workspaceId, params);
-    case 'query_activity_timeline':
-      return queryActivityTimeline(workspaceId, params);
-    case 'query_stage_history':
-      return queryStageHistory(workspaceId, params);
-    case 'compute_stage_benchmarks':
-      return computeStageBenchmarks(workspaceId, params);
-    case 'query_field_history':
-      return queryFieldHistory(workspaceId, params);
-    case 'compute_metric_segmented':
-      return computeMetricSegmented(workspaceId, params);
-    case 'search_transcripts':
-      return searchTranscripts(workspaceId, params);
-    case 'compute_forecast_accuracy':
-      return computeForecastAccuracy(workspaceId, params);
-    case 'compute_close_probability':
-      return computeCloseProbability(workspaceId, params);
-    case 'compute_pipeline_creation':
-      return computePipelineCreation(workspaceId, params);
-    case 'compute_inqtr_close_rate':
-      return computeInqtrCloseRate(workspaceId, params);
-    case 'compute_competitive_rates':
-      return computeCompetitiveRates(workspaceId, params);
-    default:
-      throw new Error(`Unknown tool: ${toolName}`);
+  const { logToolCall, extractResultRowCount } = await import('./tool-logger.js');
+  const start = Date.now();
+  let result: any;
+  let errorMsg: string | undefined;
+
+  try {
+    switch (toolName) {
+      case 'query_deals':
+        result = await queryDeals(workspaceId, params); break;
+      case 'query_accounts':
+        result = await queryAccounts(workspaceId, params); break;
+      case 'query_conversations':
+        result = await queryConversations(workspaceId, params); break;
+      case 'get_skill_evidence':
+        result = await getSkillEvidence(workspaceId, params); break;
+      case 'compute_metric':
+        result = await computeMetric(workspaceId, params); break;
+      case 'query_contacts':
+        result = await queryContacts(workspaceId, params); break;
+      case 'query_activity_timeline':
+        result = await queryActivityTimeline(workspaceId, params); break;
+      case 'query_stage_history':
+        result = await queryStageHistory(workspaceId, params); break;
+      case 'compute_stage_benchmarks':
+        result = await computeStageBenchmarks(workspaceId, params); break;
+      case 'query_field_history':
+        result = await queryFieldHistory(workspaceId, params); break;
+      case 'compute_metric_segmented':
+        result = await computeMetricSegmented(workspaceId, params); break;
+      case 'search_transcripts':
+        result = await searchTranscripts(workspaceId, params); break;
+      case 'compute_forecast_accuracy':
+        result = await computeForecastAccuracy(workspaceId, params); break;
+      case 'compute_close_probability':
+        result = await computeCloseProbability(workspaceId, params); break;
+      case 'compute_pipeline_creation':
+        result = await computePipelineCreation(workspaceId, params); break;
+      case 'compute_inqtr_close_rate':
+        result = await computeInqtrCloseRate(workspaceId, params); break;
+      case 'compute_competitive_rates':
+        result = await computeCompetitiveRates(workspaceId, params); break;
+      default:
+        throw new Error(`Unknown tool: ${toolName}`);
+    }
+    return result;
+  } catch (err: any) {
+    errorMsg = err.message || String(err);
+    throw err;
+  } finally {
+    const rowCount = extractResultRowCount(result);
+    logToolCall({
+      workspace_id: workspaceId,
+      tool_name: toolName,
+      called_by: calledBy,
+      skill_id: skillId,
+      duration_ms: Date.now() - start,
+      result_row_count: rowCount ?? undefined,
+      result_empty: result == null || rowCount === 0,
+      error: errorMsg,
+    });
   }
 }
 
