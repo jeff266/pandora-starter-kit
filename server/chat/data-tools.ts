@@ -284,6 +284,13 @@ async function queryDeals(workspaceId: string, params: Record<string, any>): Pro
   const orderDir = params.order_dir === 'asc' ? 'ASC' : 'DESC';
   const limit = Math.min(params.limit || 50, 200);
 
+  // Inject tool filters for general context
+  const toolFilters = await getToolFilters(workspaceId, 'general', values.length + 1, 'd').catch(() => ({ whereClause: '', params: [], paramOffset: values.length + 1, appliedRules: [] }));
+  if (toolFilters.whereClause) {
+    conditions.push(toolFilters.whereClause.replace(/^\s*AND\s+/, ''));
+    values.push(...toolFilters.params);
+  }
+
   const where = conditions.join(' AND ');
 
   const countResult = await query<{ cnt: string; total_amt: string }>(
@@ -888,15 +895,20 @@ async function computeWinRate(workspaceId: string, params: Record<string, any>):
 }
 
 async function computeAvgDealSize(workspaceId: string, params: Record<string, any>): Promise<ComputeMetricResult> {
+  const conditions = ['workspace_id = $1', "stage_normalized = 'closed_won'", 'amount > 0'];
+  const values: any[] = [workspaceId];
+  const toolFilters = await getToolFilters(workspaceId, 'win_rate', values.length + 1, 'deals').catch(()=>({whereClause: '', params: [], paramOffset: values.length + 1, appliedRules: []}));
+  if (toolFilters.whereClause) {
+    conditions.push(toolFilters.whereClause.replace(/^\s*AND\s+/, ''));
+    values.push(...toolFilters.params);
+  }
   const result = await query<any>(
     `SELECT id, name, amount, stage, owner
      FROM deals
-     WHERE workspace_id = $1
-       AND stage_normalized = 'closed_won'
-       AND amount > 0
+     WHERE ${conditions.join(' AND ')}
      ORDER BY close_date DESC NULLS LAST
      LIMIT 100`,
-    [workspaceId]
+    values
   );
 
   const rows = result.rows;
@@ -923,17 +935,21 @@ async function computeAvgDealSize(workspaceId: string, params: Record<string, an
 }
 
 async function computeAvgSalesCycle(workspaceId: string, params: Record<string, any>): Promise<ComputeMetricResult> {
+  const conditions = ['workspace_id = $1', "stage_normalized = 'closed_won'", 'close_date IS NOT NULL', 'created_at IS NOT NULL'];
+  const values: any[] = [workspaceId];
+  const toolFilters = await getToolFilters(workspaceId, 'win_rate', values.length + 1, 'deals').catch(()=>({whereClause: '', params: [], paramOffset: values.length + 1, appliedRules: []}));
+  if (toolFilters.whereClause) {
+    conditions.push(toolFilters.whereClause.replace(/^\s*AND\s+/, ''));
+    values.push(...toolFilters.params);
+  }
   const result = await query<any>(
     `SELECT id, name, amount,
             EXTRACT(DAY FROM (close_date::date - created_at::date))::int as cycle_days
      FROM deals
-     WHERE workspace_id = $1
-       AND stage_normalized = 'closed_won'
-       AND close_date IS NOT NULL
-       AND created_at IS NOT NULL
+     WHERE ${conditions.join(' AND ')}
      ORDER BY close_date DESC NULLS LAST
      LIMIT 100`,
-    [workspaceId]
+    values
   );
 
   const rows = result.rows.filter((r: any) => r.cycle_days != null && r.cycle_days > 0);
@@ -975,12 +991,18 @@ async function computeCoverageRatio(workspaceId: string, params: Record<string, 
     } catch {}
   }
 
-  const pipelineResult = await query<{ total: string; cnt: string }>(
+  const covConditions = ['workspace_id = $1', "stage_normalized NOT IN ('closed_won', 'closed_lost')"];
+  const covValues: any[] = [workspaceId];
+  const toolFilters = await getToolFilters(workspaceId, 'pipeline_value', covValues.length + 1, 'deals').catch(()=>({whereClause: '', params: [], paramOffset: covValues.length + 1, appliedRules: []}));
+  if (toolFilters.whereClause) {
+    covConditions.push(toolFilters.whereClause.replace(/^\s*AND\s+/, ''));
+    covValues.push(...toolFilters.params);
+  }
+const pipelineResult = await query<{ total: string; cnt: string }>(
     `SELECT COALESCE(SUM(amount), 0)::text as total, COUNT(*)::text as cnt
      FROM deals
-     WHERE workspace_id = $1
-       AND stage_normalized NOT IN ('closed_won', 'closed_lost')`,
-    [workspaceId]
+     WHERE ${covConditions.join(' AND ')}`,
+    covValues
   );
 
   const pipeline = parseFloat(pipelineResult.rows[0]?.total || '0');
@@ -1006,14 +1028,19 @@ async function computePipelineCreated(workspaceId: string, params: Record<string
   const from = params.date_from || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
   const to = params.date_to || new Date().toISOString().split('T')[0];
 
+  const conditions = ['workspace_id = $1', 'created_at >= $2', 'created_at <= $3'];
+  const values: any[] = [workspaceId, from, to];
+  const toolFilters = await getToolFilters(workspaceId, 'pipeline_value', values.length + 1, 'deals').catch(()=>({whereClause: '', params: [], paramOffset: values.length + 1, appliedRules: []}));
+  if (toolFilters.whereClause) {
+    conditions.push(toolFilters.whereClause.replace(/^\s*AND\s+/, ''));
+    values.push(...toolFilters.params);
+  }
   const result = await query<any>(
     `SELECT id, name, amount, stage, owner, created_at
      FROM deals
-     WHERE workspace_id = $1
-       AND created_at >= $2
-       AND created_at <= $3
+     WHERE ${conditions.join(' AND ')}
      ORDER BY created_at DESC`,
-    [workspaceId, from, to]
+    values
   );
 
   const rows = result.rows;
@@ -1043,15 +1070,19 @@ async function computePipelineClosed(workspaceId: string, params: Record<string,
   const from = params.date_from || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
   const to = params.date_to || new Date().toISOString().split('T')[0];
 
+  const closedConditions = ['workspace_id = $1', "stage_normalized IN ('closed_won', 'closed_lost')", 'close_date >= $2', 'close_date <= $3'];
+  const closedValues: any[] = [workspaceId, from, to];
+  const toolFilters = await getToolFilters(workspaceId, 'general', closedValues.length + 1, 'deals').catch(()=>({whereClause: '', params: [], paramOffset: closedValues.length + 1, appliedRules: []}));
+  if (toolFilters.whereClause) {
+    closedConditions.push(toolFilters.whereClause.replace(/^\s*AND\s+/, ''));
+    closedValues.push(...toolFilters.params);
+  }
   const result = await query<any>(
     `SELECT id, name, amount, stage_normalized, owner, close_date
      FROM deals
-     WHERE workspace_id = $1
-       AND stage_normalized IN ('closed_won', 'closed_lost')
-       AND close_date >= $2
-       AND close_date <= $3
+     WHERE ${closedConditions.join(' AND ')}
      ORDER BY close_date DESC`,
-    [workspaceId, from, to]
+    closedValues
   );
 
   const rows = result.rows;
@@ -1295,6 +1326,13 @@ async function queryStageHistory(workspaceId: string, params: Record<string, any
   const sinceFilter = params.since ? `AND dsh.entered_at >= $${values.push(params.since)}` : '';
   const untilFilter = params.until ? `AND dsh.entered_at <= $${values.push(params.until)}` : '';
 
+  // Inject tool filters for general context
+  let dealFilterWithToolFilters = dealFilter;
+  const stageHistToolFilters = await getToolFilters(workspaceId, 'general', values.length + 1, 'd').catch(()=>({whereClause: '', params: [], paramOffset: values.length + 1, appliedRules: []}));
+  if (stageHistToolFilters.whereClause) {
+    dealFilterWithToolFilters += " " + stageHistToolFilters.whereClause;
+    values.push(...stageHistToolFilters.params);
+  }
   // Use LEAD to compute from→to transitions from the single-row-per-stage-entry schema.
   // direction is determined by comparing display_order from stage_mappings.
   const sql = `
@@ -1316,7 +1354,7 @@ async function queryStageHistory(workspaceId: string, params: Record<string, any
       LEFT JOIN stage_mappings sm_to
         ON sm_to.workspace_id = dsh.workspace_id AND sm_to.normalized_stage = dsh.stage_normalized
       WHERE dsh.workspace_id = $1
-        ${dealFilter}
+        ${dealFilterWithToolFilters}
         ${sinceFilter}
         ${untilFilter}
     )
@@ -1408,6 +1446,13 @@ async function computeStageBenchmarks(workspaceId: string, params: Record<string
     };
     const bc = bandConditions[params.deal_size_band];
     if (bc) dealFilter += ` AND (${bc})`;
+  }
+
+  // Inject tool filters for general context
+  const stageBenchToolFilters = await getToolFilters(workspaceId, 'general', values.length + 1, 'd').catch(()=>({whereClause: '', params: [], paramOffset: values.length + 1, appliedRules: []}));
+  if (stageBenchToolFilters.whereClause) {
+    dealFilter += " " + stageBenchToolFilters.whereClause;
+    values.push(...stageBenchToolFilters.params);
   }
 
   // Compute duration per stage using LEAD(entered_at) to find when deal left that stage
@@ -1730,6 +1775,13 @@ async function computeMetricSegmented(workspaceId: string, params: Record<string
     throw new Error(`Unknown metric for segmented compute: ${metric}. Use: win_rate, avg_deal_size, avg_sales_cycle, total_pipeline, pipeline_created`);
   }
 
+  // Inject metric-contextual tool filters
+  const segToolFilters = await getToolFilters(workspaceId, metricToContext(metric), values.length + 1, 'd').catch(()=>({whereClause: '', params: [], paramOffset: values.length + 1, appliedRules: []}));
+  if (segToolFilters.whereClause) {
+    sql = sql.replace(/\n      GROUP BY/, segToolFilters.whereClause + '\n      GROUP BY');
+    values.push(...segToolFilters.params);
+  }
+
   const result = await query<any>(sql, values);
   const rows = result.rows;
 
@@ -1957,13 +2009,18 @@ async function computeForecastAccuracy(workspaceId: string, params: Record<strin
   const hasSnapshots = snapshotResult.rows.length >= 3;
 
   // Gather all reps from closed deals
-  const repResult = await query<any>(
+  const repConds = ['workspace_id = $1', "stage_normalized IN ('closed_won','closed_lost')", 'owner IS NOT NULL'];
+  const repVals: any[] = [workspaceId];
+  const toolFilters = await getToolFilters(workspaceId, 'general', repVals.length + 1, 'deals').catch(()=>({whereClause: '', params: [], paramOffset: repVals.length + 1, appliedRules: []}));
+  if (toolFilters.whereClause) {
+    repConds.push(toolFilters.whereClause.replace(/^\s*AND\s+/, ''));
+    repVals.push(...toolFilters.params);
+  }
+const repResult = await query<any>(
     `SELECT DISTINCT owner as name, owner as email
      FROM deals
-     WHERE workspace_id = $1
-       AND stage_normalized IN ('closed_won','closed_lost')
-       AND owner IS NOT NULL`,
-    [workspaceId]
+     WHERE ${repConds.join(' AND ')}`,
+    repVals
   );
 
   const ownerFilter = params.owner_email
@@ -2127,6 +2184,13 @@ async function computeCloseProbability(workspaceId: string, params: Record<strin
   if (dealIds?.length) {
     dealVals.push(dealIds);
     dealConds.push(`d.id = ANY($${dealVals.length})`);
+  }
+
+    // Inject tool filters for general context
+  const dealToolFilters = await getToolFilters(workspaceId, 'general', dealVals.length + 1, 'd').catch(()=>({whereClause: '', params: [], paramOffset: dealVals.length + 1, appliedRules: []}));
+  if (dealToolFilters.whereClause) {
+    dealConds.push(dealToolFilters.whereClause.replace(/^\s*AND\s+/, ''));
+    dealVals.push(...dealToolFilters.params);
   }
 
   const dealRows = await query<any>(
@@ -2516,9 +2580,14 @@ async function computePipelineCreation(workspaceId: string, params: Record<strin
         ORDER BY period`;
     }
 
-    const rows = await query<any>(baseQuery, vals);
+        // Inject pipeline_value tool filters
+    const pipeCreationTF = await getToolFilters(workspaceId, 'pipeline_value', vals.length + 1, 'd').catch(()=>({whereClause: '', params: [], paramOffset: vals.length + 1, appliedRules: []}));
+    if (pipeCreationTF.whereClause) {
+      baseQuery = baseQuery.replace(/GROUP/, pipeCreationTF.whereClause + ' GROUP');
+      vals.push(...pipeCreationTF.params);
+    }
 
-    // Aggregate by period (merge segments into periods array)
+    const rows = await query<any>(baseQuery, vals);  // Aggregate by period (merge segments into periods array)
     const periodMap = new Map<string, any>();
     for (const r of rows.rows) {
       const p = r.period;
@@ -2614,7 +2683,10 @@ async function computeInqtrCloseRate(workspaceId: string, params: Record<string,
       const label = `${qStart.getFullYear()}-Q${Math.floor(qStart.getMonth() / 3) + 1}`;
       const isCurrent = q === 0;
 
-      const r = await query<any>(
+            const inqtrTF = await getToolFilters(workspaceId, 'general', 4, 'd').catch(()=>({whereClause: '', params: [], paramOffset: 4, appliedRules: []}));
+      const inqtrExtraWhere = inqtrTF.whereClause || '';
+      const inqtrParams = [...inqtrTF.params];
+const r = await query<any>(
         `SELECT
            COUNT(*)::int as deals_created,
            COUNT(*) FILTER (WHERE d.stage_normalized = 'closed_won'
@@ -2627,8 +2699,8 @@ async function computeInqtrCloseRate(workspaceId: string, params: Record<string,
          FROM deals d
          WHERE d.workspace_id = $1
            AND d.created_date >= $2 AND d.created_date < $3
-           AND d.amount > 0`,
-        [workspaceId, qStart.toISOString(), qEnd.toISOString()]
+           AND d.amount > 0${inqtrExtraWhere}`,
+        [workspaceId, qStart.toISOString(), qEnd.toISOString(), ...inqtrParams]
       );
 
       const row = r.rows[0];
