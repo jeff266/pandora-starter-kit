@@ -5,6 +5,7 @@ import { HubSpotClient } from '../connectors/hubspot/client.js';
 import { extractFindings, insertFindings } from '../findings/extractor.js';
 import { generatePipelineSnapshot } from '../analysis/pipeline-snapshot.js';
 import { getGoals } from '../context/index.js';
+import { configLoader } from '../config/workspace-config-loader.js';
 
 const router = Router();
 
@@ -285,6 +286,19 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
     const { workspaceId } = req.params;
     const pipelineFilter = req.query.pipeline as string | undefined;
 
+    let excludedFromPipeline: string[] = [];
+    let excludedFromForecast: string[] = [];
+    let excludedFromWinRate: string[] = [];
+    try {
+      const config = await configLoader.getConfig(workspaceId);
+      const globalExclude = config.tool_filters?.global?.exclude_stages || [];
+      excludedFromPipeline = [...globalExclude, ...(config.tool_filters?.metric_overrides?.pipeline_value?.exclude_stages || [])];
+      excludedFromForecast = [...globalExclude, ...(config.tool_filters?.metric_overrides?.forecast?.exclude_stages || [])];
+      excludedFromWinRate = [...globalExclude, ...(config.tool_filters?.metric_overrides?.win_rate?.exclude_stages || [])];
+    } catch {
+      // no config = no exclusions, continue normally
+    }
+
     let quota: number | null = null;
     let staleDaysThreshold = 21;
 
@@ -319,6 +333,14 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
       pipelineClause = ` AND d.pipeline = $${params.length}`;
     }
 
+    let excludeStagesClause = '';
+    const excludeParams: any[] = [];
+    if (excludedFromPipeline.length > 0) {
+      const placeholders = excludedFromPipeline.map((_, i) => `$${params.length + i + 1}`).join(', ');
+      excludeStagesClause = ` AND COALESCE(d.stage, d.stage_normalized, 'Unknown') NOT IN (${placeholders})`;
+      excludeParams.push(...excludedFromPipeline);
+    }
+
     const stageResult = await query(
       `SELECT
          COALESCE(d.stage, d.stage_normalized, 'Unknown') as stage,
@@ -330,9 +352,10 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
        WHERE d.workspace_id = $1
          AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
          ${pipelineClause}
+         ${excludeStagesClause}
        GROUP BY d.stage, d.stage_normalized
        ORDER BY sum(d.amount) DESC`,
-      params
+      [...params, ...excludeParams]
     );
 
     const total_pipeline = stageResult.rows.reduce((s, r) => s + r.total_value, 0);
@@ -346,6 +369,14 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
       findingsPipelineClause = ` AND d.pipeline = $${findingsParams.length}`;
     }
 
+    let findingsExcludeClause = '';
+    const findingsExcludeParams: any[] = [];
+    if (excludedFromPipeline.length > 0) {
+      const fp = excludedFromPipeline.map((_, i) => `$${findingsParams.length + i + 1}`).join(', ');
+      findingsExcludeClause = ` AND COALESCE(d.stage, d.stage_normalized, 'Unknown') NOT IN (${fp})`;
+      findingsExcludeParams.push(...excludedFromPipeline);
+    }
+
     const findingsByStage = await query(
       `SELECT
          COALESCE(d.stage, d.stage_normalized, 'Unknown') as stage,
@@ -357,8 +388,9 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
          AND f.resolved_at IS NULL
          AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
          ${findingsPipelineClause}
+         ${findingsExcludeClause}
        GROUP BY d.stage, d.stage_normalized, f.severity`,
-      findingsParams
+      [...findingsParams, ...findingsExcludeParams]
     );
 
     const stageFindingsMap: Record<string, Record<string, number>> = {};
@@ -380,10 +412,11 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
          AND f.resolved_at IS NULL
          AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
          ${findingsPipelineClause}
+         ${findingsExcludeClause}
          AND f.severity IN ('act', 'watch')
        ORDER BY CASE f.severity WHEN 'act' THEN 1 WHEN 'watch' THEN 2 ELSE 3 END, f.found_at DESC
        LIMIT 50`,
-      findingsParams
+      [...findingsParams, ...findingsExcludeParams]
     );
 
     const topFindingsByStage: Record<string, Array<{ severity: string; category: string; message: string; deal_id: string }>> = {};
@@ -423,6 +456,14 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
       winRatePipelineClause = ` AND pipeline = $${winRateParams.length}`;
     }
 
+    let winRateExcludeClause = '';
+    const winRateExcludeParams: any[] = [];
+    if (excludedFromWinRate.length > 0) {
+      const wp = excludedFromWinRate.map((_, i) => `$${winRateParams.length + i + 1}`).join(', ');
+      winRateExcludeClause = ` AND COALESCE(stage, stage_normalized) NOT IN (${wp})`;
+      winRateExcludeParams.push(...excludedFromWinRate);
+    }
+
     const winRateResult = await query(
       `SELECT
          count(*) FILTER (WHERE stage_normalized = 'closed_won' AND close_date >= now() - interval '90 days')::int as won_90,
@@ -431,8 +472,9 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
          count(*) FILTER (WHERE stage_normalized IN ('closed_won', 'closed_lost') AND close_date >= now() - interval '120 days' AND close_date < now() - interval '30 days')::int as total_closed_prev
        FROM deals
        WHERE workspace_id = $1
-         ${winRatePipelineClause}`,
-      winRateParams
+         ${winRatePipelineClause}
+         ${winRateExcludeClause}`,
+      [...winRateParams, ...winRateExcludeParams]
     );
 
     const wr = winRateResult.rows[0];
