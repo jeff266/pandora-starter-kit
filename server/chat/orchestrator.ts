@@ -227,11 +227,10 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
     }
   }
 
-  // ── Ask Pandora agentic path (in_app surface, non-entity scope) ─────────────
-  // Runs before the scoped-analysis fallback for Command Center chat.
-  // Falls back gracefully if it throws.
-  const isAgenticScope = !['deal', 'account'].includes(scopeType);
-  if (!answer && surface === 'in_app' && isAgenticScope) {
+  // ── Ask Pandora agentic path — primary for all in_app questions ──────────────
+  // Every Command Center question goes through here first.
+  // The old scope-handler path below is the fallback if this throws.
+  if (!answer && surface === 'in_app') {
     try {
       // Build prior context from messages that have tool_trace attached
       const messagesWithTrace = (state.messages || []).filter(
