@@ -347,6 +347,104 @@ router.post('/:workspaceId/connectors/gong/transcript/:sourceId', async (req: Re
   }
 });
 
+router.post('/:workspaceId/connectors/gong/backfill-transcripts', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    const workspaceId = req.params.workspaceId;
+    const limit = Math.min(typeof req.body.limit === 'number' ? req.body.limit : 20, 100);
+
+    const connResult = await query<{ status: string }>(
+      `SELECT status FROM connections WHERE workspace_id = $1 AND connector_name = 'gong'`,
+      [workspaceId]
+    );
+    if (connResult.rows.length === 0) {
+      res.status(404).json({ error: 'Gong connection not found.' });
+      return;
+    }
+    if (connResult.rows[0].status === 'disconnected') {
+      res.status(400).json({ error: 'Gong connection is disconnected.' });
+      return;
+    }
+
+    const credentials = await getConnectorCredentials(workspaceId, 'gong');
+    if (!credentials) {
+      res.status(404).json({ error: 'Gong credentials not found.' });
+      return;
+    }
+
+    // Pull stored calls that need transcripts — parties already in source_data
+    const pending = await query<{ source_id: string; source_data: any }>(
+      `SELECT source_id, source_data
+       FROM conversations
+       WHERE workspace_id = $1
+         AND source = 'gong'
+         AND transcript_text IS NULL
+       ORDER BY call_date DESC NULLS LAST
+       LIMIT $2`,
+      [workspaceId, limit]
+    );
+
+    if (pending.rows.length === 0) {
+      res.json({ processed: 0, updated: 0, errors: [], message: 'No calls pending transcript backfill.' });
+      return;
+    }
+
+    const client = new GongClient(credentials.apiKey);
+    const callIds = pending.rows.map(r => r.source_id);
+    const partyMap = new Map<string, any[]>(
+      pending.rows.map(r => [r.source_id, r.source_data?.parties || []])
+    );
+
+    // Fetch transcripts in one batch (Gong accepts up to 100)
+    const transcripts = await client.getTranscripts(callIds);
+
+    let updated = 0;
+    const errors: string[] = [];
+
+    for (const transcript of transcripts) {
+      try {
+        const parties = partyMap.get(transcript.callId) || [];
+        const text = client.formatTranscriptAsText(transcript, parties);
+        if (!text) continue;
+
+        await query(
+          `UPDATE conversations SET transcript_text = $1, updated_at = NOW()
+           WHERE workspace_id = $2 AND source = 'gong' AND source_id = $3
+             AND transcript_text IS NULL`,
+          [text, workspaceId, transcript.callId]
+        );
+        updated++;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        errors.push(`${transcript.callId}: ${msg}`);
+      }
+    }
+
+    const noTranscript = callIds.length - transcripts.length;
+
+    console.log(`[Gong Backfill] ${workspaceId}: ${updated} transcripts stored, ${noTranscript} calls had no transcript, ${errors.length} errors`);
+
+    res.json({
+      processed: pending.rows.length,
+      updated,
+      no_transcript_available: noTranscript,
+      errors,
+    });
+
+    // Fire signal extraction for calls that now have transcripts
+    if (updated > 0) {
+      setTimeout(() => {
+        extractConversationSignals(workspaceId, { limit: updated + 5 })
+          .then(sr => console.log(`[SignalExtractor] Post-backfill: ${sr.extracted} extracted`))
+          .catch(() => {});
+      }, 2000);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[Gong Route] Backfill error:', message);
+    res.status(500).json({ error: message });
+  }
+});
+
 router.get('/:workspaceId/connectors/gong/health', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId;
