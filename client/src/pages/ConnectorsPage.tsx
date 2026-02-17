@@ -431,9 +431,9 @@ export default function ConnectorsPage() {
   const handleSyncNow = async (connectorType: string) => {
     setSyncingConnector(connectorType);
     try {
-      await api.post('/sync/trigger', { source_type: connectorType });
+      await api.post(`/connectors/${connectorType}/sync`, { mode: 'initial' });
       addToast(`${connectorType} sync triggered successfully`, 'success');
-      setTimeout(() => fetchConnectors(), 1000);
+      setTimeout(() => fetchConnectors(), 3000);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Failed to trigger sync';
       addToast(`Sync failed: ${errorMsg}`, 'error');
