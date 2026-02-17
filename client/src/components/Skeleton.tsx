@@ -15,7 +15,7 @@ export default function Skeleton({ width = '100%', height = 16, borderRadius = 4
         width,
         height,
         borderRadius,
-        background: colors.surfaceHover,
+        background: colors.surfaceRaised,
         animation: 'skeleton-pulse 1.5s ease-in-out infinite',
         ...style,
       }}

@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import { formatDateTime, formatTimeAgo, severityColor, severityBg } from '../lib/format';
 import Skeleton from '../components/Skeleton';
+import SectionErrorBoundary from '../components/SectionErrorBoundary';
 
 function buildCrmUrl(crm: string | null, portalId: number | null, instanceUrl: string | null, sourceId: string | null, dealSource: string | null): string | null {
   if (!crm || !sourceId) return null;
@@ -146,6 +147,7 @@ export default function InsightsPage() {
       </div>
 
       {/* Feed */}
+      <SectionErrorBoundary fallbackMessage="Something went wrong loading findings.">
       {loading ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} height={52} />)}
@@ -474,6 +476,7 @@ export default function InsightsPage() {
           )}
         </div>
       )}
+      </SectionErrorBoundary>
     </div>
   );
 }

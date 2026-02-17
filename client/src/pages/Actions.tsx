@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import { formatCurrency, formatTimeAgo } from '../lib/format';
 import Skeleton from '../components/Skeleton';
+import SectionErrorBoundary from '../components/SectionErrorBoundary';
 
 interface ActionsSummary {
   open_total: number;
@@ -92,6 +93,8 @@ export default function Actions() {
   const [summary, setSummary] = useState<ActionsSummary | null>(null);
   const [actions, setActions] = useState<Action[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [selectedAction, setSelectedAction] = useState<Action | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
@@ -107,23 +110,40 @@ export default function Actions() {
     setTimeout(() => setToast(null), 4000);
   }, []);
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (isRefresh?: boolean) => {
     try {
-      setLoading(true);
+      if (isRefresh) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
       const [summaryData, actionsData] = await Promise.all([
         api.get('/action-items/summary'),
         api.get('/action-items?status=all&limit=200'),
       ]);
       setSummary(summaryData);
       setActions(actionsData.actions || []);
+      setLastUpdated(new Date());
     } catch (err) {
       console.error('Failed to fetch actions:', err);
     } finally {
-      setLoading(false);
+      if (isRefresh) {
+        setRefreshing(false);
+      } else {
+        setLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      fetchData(true);
+    }, 120000);
+    return () => clearInterval(interval);
+  }, [fetchData]);
 
   const tabMatch = statusTabs.find(t => t.key === activeTab);
   const filtered = actions
@@ -242,36 +262,51 @@ export default function Actions() {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
-        <SummaryCard
-          label="Open Actions"
-          value={summary?.open_total || 0}
-          sub={
-            <div style={{ display: 'flex', gap: 10, fontSize: 11, marginTop: 4 }}>
-              <span style={{ color: sevColors.critical }}>{summary?.open_critical || 0} critical</span>
-              <span style={{ color: sevColors.warning }}>{summary?.open_warning || 0} warning</span>
-            </div>
-          }
-        />
-        <SummaryCard
-          label="Total Impact at Risk"
-          value={formatCurrency(Number(summary?.total_impact_at_risk) || 0)}
-          sub={<span style={{ fontSize: 11, color: colors.textMuted }}>{filtered.filter(a => a.target_deal_id).length} deals affected</span>}
-        />
-        <SummaryCard
-          label="Reps with Actions"
-          value={summary?.reps_with_actions || 0}
-          sub={
-            <span style={{ fontSize: 11, color: colors.textMuted }}>
-              {summary?.by_rep?.filter(r => r.critical_count > 0).length || 0} with critical
-            </span>
-          }
-        />
-        <SummaryCard
-          label="Executed This Week"
-          value={summary?.executed_7d || 0}
-          sub={<span style={{ fontSize: 11, color: colors.textMuted }}>resolved actions</span>}
-        />
+      <SectionErrorBoundary fallbackMessage="Failed to load summary cards.">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
+          <SummaryCard
+            label="Open Actions"
+            value={summary?.open_total || 0}
+            sub={
+              <div style={{ display: 'flex', gap: 10, fontSize: 11, marginTop: 4 }}>
+                <span style={{ color: sevColors.critical }}>{summary?.open_critical || 0} critical</span>
+                <span style={{ color: sevColors.warning }}>{summary?.open_warning || 0} warning</span>
+              </div>
+            }
+          />
+          <SummaryCard
+            label="Total Impact at Risk"
+            value={formatCurrency(Number(summary?.total_impact_at_risk) || 0)}
+            sub={<span style={{ fontSize: 11, color: colors.textMuted }}>{filtered.filter(a => a.target_deal_id).length} deals affected</span>}
+          />
+          <SummaryCard
+            label="Reps with Actions"
+            value={summary?.reps_with_actions || 0}
+            sub={
+              <span style={{ fontSize: 11, color: colors.textMuted }}>
+                {summary?.by_rep?.filter(r => r.critical_count > 0).length || 0} with critical
+              </span>
+            }
+          />
+          <SummaryCard
+            label="Executed This Week"
+            value={summary?.executed_7d || 0}
+            sub={<span style={{ fontSize: 11, color: colors.textMuted }}>resolved actions</span>}
+          />
+        </div>
+      </SectionErrorBoundary>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: colors.textDim }}>
+        {refreshing && (
+          <span style={{
+            display: 'inline-block', width: 10, height: 10,
+            border: `1.5px solid ${colors.textDim}`, borderTopColor: colors.accent,
+            borderRadius: '50%', animation: 'spin 0.8s linear infinite',
+          }} />
+        )}
+        {lastUpdated && (
+          <span>Updated {Math.max(0, Math.round((Date.now() - lastUpdated.getTime()) / 60000))}m ago</span>
+        )}
       </div>
 
       <div style={{
@@ -367,109 +402,111 @@ export default function Actions() {
         </div>
       </div>
 
-      {filtered.length === 0 ? (
-        <div style={{
-          textAlign: 'center', padding: 60,
-          background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10,
-        }}>
-          <p style={{ fontSize: 32, marginBottom: 12 }}>&#x26A1;</p>
-          <p style={{ fontSize: 15, color: colors.textSecondary }}>
-            {actions.length === 0 ? 'No actions yet' : 'No actions match your filters'}
-          </p>
-          <p style={{ fontSize: 12, color: colors.textMuted, marginTop: 6 }}>
-            {actions.length === 0
-              ? 'Actions will be created when skills run and produce recommendations.'
-              : 'Try adjusting your filter criteria.'}
-          </p>
-        </div>
-      ) : (
-        <div style={{
-          background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, overflow: 'hidden',
-        }}>
+      <SectionErrorBoundary fallbackMessage="Failed to load action list.">
+        {filtered.length === 0 ? (
           <div style={{
-            display: 'grid',
-            gridTemplateColumns: '8px 2fr 1.2fr 1fr 0.8fr 0.7fr 0.5fr 0.8fr',
-            padding: '10px 16px',
-            borderBottom: `1px solid ${colors.border}`,
-            fontSize: 11, fontWeight: 600, color: colors.textDim,
-            textTransform: 'uppercase', letterSpacing: '0.05em',
+            textAlign: 'center', padding: 60,
+            background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10,
           }}>
-            <span></span>
-            <span>Title</span>
-            <span>Deal</span>
-            <span>Owner</span>
-            <span style={{ textAlign: 'right' }}>Impact</span>
-            <span>Urgency</span>
-            <span>Age</span>
-            <span>Status</span>
+            <p style={{ fontSize: 32, marginBottom: 12 }}>&#x26A1;</p>
+            <p style={{ fontSize: 15, color: colors.textSecondary }}>
+              {actions.length === 0 ? 'No actions yet' : 'No actions match your filters'}
+            </p>
+            <p style={{ fontSize: 12, color: colors.textMuted, marginTop: 6 }}>
+              {actions.length === 0
+                ? 'Actions will be created when skills run and produce recommendations.'
+                : 'Try adjusting your filter criteria.'}
+            </p>
           </div>
+        ) : (
+          <div style={{
+            background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, overflow: 'hidden',
+          }}>
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: '8px 2fr 1.2fr 1fr 0.8fr 0.7fr 0.5fr 0.8fr',
+              padding: '10px 16px',
+              borderBottom: `1px solid ${colors.border}`,
+              fontSize: 11, fontWeight: 600, color: colors.textDim,
+              textTransform: 'uppercase', letterSpacing: '0.05em',
+            }}>
+              <span></span>
+              <span>Title</span>
+              <span>Deal</span>
+              <span>Owner</span>
+              <span style={{ textAlign: 'right' }}>Impact</span>
+              <span>Urgency</span>
+              <span>Age</span>
+              <span>Status</span>
+            </div>
 
-          {filtered.map(action => {
-            const sc = sevColors[action.severity] || colors.textMuted;
-            const hasFailed = action.execution_result?.some(op => op.error);
-            const effectiveStatus = hasFailed && action.execution_status !== 'executed' ? 'failed' : action.execution_status;
-            const st = statusConfig[effectiveStatus] || statusConfig.open;
-            const dealName = action.deal_name || action.target_entity_name || action.target_deal_name;
+            {filtered.map(action => {
+              const sc = sevColors[action.severity] || colors.textMuted;
+              const hasFailed = action.execution_result?.some(op => op.error);
+              const effectiveStatus = hasFailed && action.execution_status !== 'executed' ? 'failed' : action.execution_status;
+              const st = statusConfig[effectiveStatus] || statusConfig.open;
+              const dealName = action.deal_name || action.target_entity_name || action.target_deal_name;
 
-            return (
-              <div
-                key={action.id}
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '8px 2fr 1.2fr 1fr 0.8fr 0.7fr 0.5fr 0.8fr',
-                  padding: '10px 16px',
-                  borderBottom: `1px solid ${colors.border}`,
-                  borderLeft: `3px solid ${sc}`,
-                  alignItems: 'center',
-                  cursor: 'pointer',
-                }}
-                onClick={() => setSelectedAction(action)}
-                onMouseEnter={e => (e.currentTarget.style.background = colors.surfaceHover)}
-                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-              >
-                <span style={{
-                  width: 7, height: 7, borderRadius: '50%', background: sc,
-                  boxShadow: `0 0 6px ${sc}40`,
-                }} />
-                <div style={{ minWidth: 0, overflow: 'hidden' }}>
-                  <span style={{ fontSize: 13, fontWeight: 500, color: colors.text, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {action.title}
-                  </span>
-                  <p style={{ fontSize: 11, color: colors.textMuted, marginTop: 1 }}>
-                    {action.action_type.replace(/_/g, ' ')} &middot; {action.source_skill}
-                  </p>
-                </div>
-                <span
-                  style={{ fontSize: 12, color: dealName ? colors.accent : colors.textDim, cursor: dealName ? 'pointer' : 'default', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                  onClick={e => {
-                    if (action.target_deal_id) {
-                      e.stopPropagation();
-                      navigate(`/deals/${action.target_deal_id}`);
-                    }
+              return (
+                <div
+                  key={action.id}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '8px 2fr 1.2fr 1fr 0.8fr 0.7fr 0.5fr 0.8fr',
+                    padding: '10px 16px',
+                    borderBottom: `1px solid ${colors.border}`,
+                    borderLeft: `3px solid ${sc}`,
+                    alignItems: 'center',
+                    cursor: 'pointer',
                   }}
+                  onClick={() => setSelectedAction(action)}
+                  onMouseEnter={e => (e.currentTarget.style.background = colors.surfaceHover)}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                 >
-                  {dealName || '--'}
-                </span>
-                <span style={{ fontSize: 12, color: colors.textMuted }}>
-                  {action.owner_email?.split('@')[0] || '--'}
-                </span>
-                <span style={{ fontSize: 12, fontFamily: fonts.mono, color: colors.text, textAlign: 'right' }}>
-                  {action.impact_amount ? formatCurrency(Number(action.impact_amount)) : '--'}
-                </span>
-                <span style={{ fontSize: 11, color: colors.textMuted }}>{action.urgency_label || '--'}</span>
-                <span style={{ fontSize: 11, color: colors.textMuted }}>{formatTimeAgo(action.created_at)}</span>
-                <span style={{
-                  fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 4,
-                  background: st.bg, color: st.color,
-                  justifySelf: 'start',
-                }}>
-                  {st.label}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      )}
+                  <span style={{
+                    width: 7, height: 7, borderRadius: '50%', background: sc,
+                    boxShadow: `0 0 6px ${sc}40`,
+                  }} />
+                  <div style={{ minWidth: 0, overflow: 'hidden' }}>
+                    <span style={{ fontSize: 13, fontWeight: 500, color: colors.text, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {action.title}
+                    </span>
+                    <p style={{ fontSize: 11, color: colors.textMuted, marginTop: 1 }}>
+                      {action.action_type.replace(/_/g, ' ')} &middot; {action.source_skill}
+                    </p>
+                  </div>
+                  <span
+                    style={{ fontSize: 12, color: dealName ? colors.accent : colors.textDim, cursor: dealName ? 'pointer' : 'default', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    onClick={e => {
+                      if (action.target_deal_id) {
+                        e.stopPropagation();
+                        navigate(`/deals/${action.target_deal_id}`);
+                      }
+                    }}
+                  >
+                    {dealName || '--'}
+                  </span>
+                  <span style={{ fontSize: 12, color: colors.textMuted }}>
+                    {action.owner_email?.split('@')[0] || '--'}
+                  </span>
+                  <span style={{ fontSize: 12, fontFamily: fonts.mono, color: colors.text, textAlign: 'right' }}>
+                    {action.impact_amount ? formatCurrency(Number(action.impact_amount)) : '--'}
+                  </span>
+                  <span style={{ fontSize: 11, color: colors.textMuted }}>{action.urgency_label || '--'}</span>
+                  <span style={{ fontSize: 11, color: colors.textMuted }}>{formatTimeAgo(action.created_at)}</span>
+                  <span style={{
+                    fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 4,
+                    background: st.bg, color: st.color,
+                    justifySelf: 'start',
+                  }}>
+                    {st.label}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </SectionErrorBoundary>
 
       {selectedAction && (
         <ActionPanel

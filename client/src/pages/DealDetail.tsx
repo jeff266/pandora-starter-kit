@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import { formatCurrency, formatDate, formatTimeAgo, severityColor } from '../lib/format';
 import Skeleton from '../components/Skeleton';
+import SectionErrorBoundary from '../components/SectionErrorBoundary';
 import { DossierNarrative, AnalysisModal } from '../components/shared';
 
 const SEVERITY_LABELS: Record<string, string> = {
@@ -278,6 +279,7 @@ export default function DealDetail() {
       )}
 
       {/* Deal Header */}
+      <SectionErrorBoundary fallbackMessage="Unable to load deal header.">
       <div style={{
         background: colors.surface,
         border: `1px solid ${colors.border}`,
@@ -415,16 +417,20 @@ export default function DealDetail() {
           ))}
         </div>
       </div>
+      </SectionErrorBoundary>
 
       {/* AI Narrative */}
+      <SectionErrorBoundary fallbackMessage="Unable to load AI narrative.">
       {dealId && (
         <DossierNarrative
           narrative={narrative}
           onGenerate={() => fetchDossier(true)}
         />
       )}
+      </SectionErrorBoundary>
 
       {/* Coverage Gaps */}
+      <SectionErrorBoundary fallbackMessage="Unable to load coverage gaps.">
       {hasCoverageGaps && (
         <div style={{
           background: colors.surface,
@@ -487,12 +493,14 @@ export default function DealDetail() {
           </div>
         </div>
       )}
+      </SectionErrorBoundary>
 
       {/* Two Column Layout */}
       <div style={{ display: 'grid', gridTemplateColumns: '1.8fr 1fr', gap: 16, alignItems: 'start' }}>
         {/* Left Column */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {/* Active Findings */}
+          <SectionErrorBoundary fallbackMessage="Something went wrong loading findings.">
           <Card title="Active Findings" count={findingsList.length}>
             {findingsList.length === 0 ? (
               <EmptyText>No active findings for this deal</EmptyText>
@@ -591,8 +599,10 @@ export default function DealDetail() {
               })
             )}
           </Card>
+          </SectionErrorBoundary>
 
           {/* Stage History */}
+          <SectionErrorBoundary fallbackMessage="Unable to load stage history.">
           <Card title="Stage History">
             {stageHistory.length === 0 ? (
               <EmptyText>Stage history not available</EmptyText>
@@ -622,8 +632,10 @@ export default function DealDetail() {
               </div>
             )}
           </Card>
+          </SectionErrorBoundary>
 
           {/* Activity Timeline */}
+          <SectionErrorBoundary fallbackMessage="Unable to load recent activity.">
           <Card title="Recent Activity" count={activities.length}>
             {activities.length === 0 ? (
               <EmptyText>No activity records</EmptyText>
@@ -645,8 +657,10 @@ export default function DealDetail() {
               ))
             )}
           </Card>
+          </SectionErrorBoundary>
 
           {/* Conversations */}
+          <SectionErrorBoundary fallbackMessage="Unable to load conversations.">
           <Card title="Conversations" count={conversations.length}>
             {conversations.length === 0 ? (
               <EmptyText>No linked conversations</EmptyText>
@@ -683,11 +697,13 @@ export default function DealDetail() {
               })
             )}
           </Card>
+          </SectionErrorBoundary>
         </div>
 
         {/* Right Column */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {/* Contacts */}
+          <SectionErrorBoundary fallbackMessage="Unable to load deal contacts.">
           <Card title="Contacts" count={contactsList.length}>
             {contactsList.length === 0 ? (
               <EmptyText>No contacts linked — this deal is single-threaded</EmptyText>
@@ -751,6 +767,7 @@ export default function DealDetail() {
               })
             )}
           </Card>
+          </SectionErrorBoundary>
 
           {/* Deal Details */}
           <Card title="Deal Details">

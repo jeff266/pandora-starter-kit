@@ -3,6 +3,7 @@ import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import { formatTimeAgo, formatSchedule, severityColor } from '../lib/format';
 import Skeleton from '../components/Skeleton';
+import SectionErrorBoundary from '../components/SectionErrorBoundary';
 
 interface SkillRun {
   runId: string;
@@ -135,6 +136,7 @@ export default function SkillsPage() {
         </p>
       </div>
 
+      <SectionErrorBoundary fallbackMessage="Unable to load skills.">
       {grouped.map(group => {
         const catColor = categoryColors[group.category] || colors.textMuted;
 
@@ -317,6 +319,7 @@ export default function SkillsPage() {
           </div>
         );
       })}
+      </SectionErrorBoundary>
 
       {skills.length === 0 && (
         <div style={{ textAlign: 'center', padding: 60 }}>

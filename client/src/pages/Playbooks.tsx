@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import Skeleton from '../components/Skeleton';
+import SectionErrorBoundary from '../components/SectionErrorBoundary';
 
 interface PlaybookStats {
   totalRuns: number;
@@ -185,6 +186,7 @@ export default function Playbooks() {
 
   if (selectedId && detail) {
     return (
+      <SectionErrorBoundary fallbackMessage="Unable to load playbook details.">
       <PlaybookDetailView
         detail={detail}
         detailLoading={detailLoading}
@@ -193,6 +195,7 @@ export default function Playbooks() {
         onRunNow={handleRunNow}
         toast={toast}
       />
+      </SectionErrorBoundary>
     );
   }
 
@@ -220,6 +223,7 @@ export default function Playbooks() {
         </div>
       </div>
 
+      <SectionErrorBoundary fallbackMessage="Unable to load playbook list.">
       {playbooks.length === 0 ? (
         <div style={{
           textAlign: 'center', padding: 60,
@@ -244,6 +248,7 @@ export default function Playbooks() {
           ))}
         </div>
       )}
+      </SectionErrorBoundary>
     </div>
   );
 }

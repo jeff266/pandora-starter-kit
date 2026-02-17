@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import { formatCurrency, formatDate, formatTimeAgo, severityColor } from '../lib/format';
 import Skeleton from '../components/Skeleton';
+import SectionErrorBoundary from '../components/SectionErrorBoundary';
 import { DossierNarrative, AnalysisModal } from '../components/shared';
 
 const SEVERITY_LABELS: Record<string, string> = {
@@ -274,6 +275,7 @@ export default function AccountDetail() {
         </div>
       )}
 
+      <SectionErrorBoundary fallbackMessage="Unable to load account header.">
       <div style={{
         background: colors.surface,
         border: `1px solid ${colors.border}`,
@@ -357,14 +359,18 @@ export default function AccountDetail() {
           </div>
         </div>
       </div>
+      </SectionErrorBoundary>
 
+      <SectionErrorBoundary fallbackMessage="Unable to load AI narrative.">
       {accountId && (
         <DossierNarrative
           narrative={narrative}
           onGenerate={() => fetchDossier(true)}
         />
       )}
+      </SectionErrorBoundary>
 
+      <SectionErrorBoundary fallbackMessage="Unable to load relationship health.">
       {relHealth && Object.keys(relHealth).length > 0 && (
         <div style={{
           background: colors.surface,
@@ -451,9 +457,11 @@ export default function AccountDetail() {
           )}
         </div>
       )}
+      </SectionErrorBoundary>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1.8fr 1fr', gap: 16, alignItems: 'start' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <SectionErrorBoundary fallbackMessage="Unable to load deals.">
           <Card title="Deals" count={deals.length}>
             {deals.length === 0 ? (
               <EmptyText>No open deals for this account</EmptyText>
@@ -474,7 +482,9 @@ export default function AccountDetail() {
               </>
             )}
           </Card>
+          </SectionErrorBoundary>
 
+          <SectionErrorBoundary fallbackMessage="Something went wrong loading findings.">
           <Card title="Findings" count={findings.length}>
             {findings.length === 0 ? (
               <EmptyText>No findings for this account</EmptyText>
@@ -583,7 +593,9 @@ export default function AccountDetail() {
               ))
             )}
           </Card>
+          </SectionErrorBoundary>
 
+          <SectionErrorBoundary fallbackMessage="Unable to load conversations.">
           <Card title="Conversations" count={conversations.length}>
             {conversations.length === 0 ? (
               <EmptyText>No linked conversations</EmptyText>
@@ -626,7 +638,9 @@ export default function AccountDetail() {
               })
             )}
           </Card>
+          </SectionErrorBoundary>
 
+          <SectionErrorBoundary fallbackMessage="Unable to load recent activity.">
           <Card title="Recent Activity" count={activities.length}>
             {activities.length === 0 ? (
               <EmptyText>No activity records</EmptyText>
@@ -643,9 +657,11 @@ export default function AccountDetail() {
               ))
             )}
           </Card>
+          </SectionErrorBoundary>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <SectionErrorBoundary fallbackMessage="Unable to load account contacts.">
           <Card title="Contacts" count={contacts.length}>
             {contacts.length === 0 ? (
               <EmptyText>No contacts at this account</EmptyText>
@@ -684,6 +700,7 @@ export default function AccountDetail() {
               })
             )}
           </Card>
+          </SectionErrorBoundary>
 
           <Card title="Account Details">
             <DetailRow label="Domain" value={account.domain} />

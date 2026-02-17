@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import Skeleton from '../components/Skeleton';
+import SectionErrorBoundary from '../components/SectionErrorBoundary';
 
 interface EntityInfo {
   type: string;
@@ -280,6 +281,7 @@ export default function ConnectorHealth() {
         </span>
       </div>
 
+      <SectionErrorBoundary fallbackMessage="Unable to load connector summary.">
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
         <SummaryCard
           label="Connected Sources"
@@ -305,6 +307,7 @@ export default function ConnectorHealth() {
           color={data.summary.errors_24h === 0 ? colors.green : colors.red}
         />
       </div>
+      </SectionErrorBoundary>
 
       {data.summary.errors_24h > 0 && recentErrors.length > 0 && (
         <div style={{
@@ -341,7 +344,8 @@ export default function ConnectorHealth() {
         const totalRecords = connector.entities.reduce((sum, e) => sum + e.count, 0);
 
         return (
-          <div key={connector.type} style={{
+          <SectionErrorBoundary key={connector.type} fallbackMessage={`Unable to load ${capitalize(connector.type)} connector.`}>
+          <div style={{
             background: colors.surface, border: `1px solid ${colors.border}`,
             borderRadius: 10, overflow: 'hidden',
           }}>
@@ -552,6 +556,7 @@ export default function ConnectorHealth() {
               </div>
             )}
           </div>
+          </SectionErrorBoundary>
         );
       })}
     </div>
