@@ -282,7 +282,7 @@ async function queryDeals(workspaceId: string, params: Record<string, any>): Pro
             d.probability, d.forecast_category,
             EXTRACT(DAY FROM NOW() - d.created_at)::int as days_in_stage,
             d.created_at as created_date,
-            d.pipeline_name,
+            d.pipeline as pipeline_name,
             (d.stage_normalized NOT IN ('closed_won', 'closed_lost')) as is_open
      FROM deals d
      LEFT JOIN accounts a ON a.id = d.account_id AND a.workspace_id = d.workspace_id
@@ -722,7 +722,7 @@ async function computeTotalPipeline(workspaceId: string, params: Record<string, 
   }
   if (params.pipeline_name) {
     values.push(`%${params.pipeline_name}%`);
-    conditions.push(`pipeline_name ILIKE $${values.length}`);
+    conditions.push(`pipeline ILIKE $${values.length}`);
   }
   if (params.stage) {
     values.push(`%${params.stage}%`);
