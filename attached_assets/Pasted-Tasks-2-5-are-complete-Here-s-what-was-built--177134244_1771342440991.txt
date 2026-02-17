@@ -1,0 +1,37 @@
+Tasks 2-5 are complete. Here's what was built:         
+                                                         
+  Task 2 — Stage Velocity Benchmarks skill               
+  (server/skills/library/stage-velocity-benchmarks.ts):  
+  6-step pipeline — resolves time windows, computes      
+  median/p75/p90 benchmarks per stage, flags slow deals, 
+  uses DeepSeek to classify patterns                     
+  (stalled/grinding/stuck_at_gate/regression_risk),      
+  synthesizes a velocity report via Claude with per-deal 
+  action items. Registered in index.ts.                  
+                                                         
+  Task 3 — Conversation Intelligence skill               
+  (server/skills/library/conversation-intelligence.ts):  
+  6-step pipeline — gathers last 7 days of calls, uses   
+  DeepSeek to extract objections/competitors/buying      
+  signals/risk signals/momentum per call, aggregates     
+  themes across calls, synthesizes a weekly conversation 
+  brief via Claude. Category fixed to 'calls',           
+  analysisWindow fixed to 'trailing_7d'. Registered in   
+  index.ts.                                              
+                                                         
+  Task 4 — compute_close_probability tool (appended to   
+  data-tools.ts, wired in executeDataTool): Scores all   
+  open deals across 4 dimensions using 7 parallel queries
+   (stage order, conversations, contacts, regressions,   
+  rep win rates, median deal size, stage benchmarks).    
+  Returns scored_deals[] sorted by probability with      
+  dimension_scores, weighted_amount,                     
+  top_positive_factors, top_risk_factors, and data_gaps  
+  per deal.                                              
+                                                         
+  Task 5 — System prompt update (pandora-agent.ts): Added
+   Rule 12 ("forecasts require probability weighting —   
+  call compute_close_probability before presenting       
+  totals"), updated get_skill_evidence enum and          
+  description to include the two new skills, tool count  
+  updated to 14.     
