@@ -227,13 +227,27 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
     }
   }
 
-  // ── Pandora Agent — primary path for all in_app questions ───────────────────
-  // Single native tool-calling loop. No mode classifier, no scope handler.
-  // Falls back to scoped analysis only if this throws.
+  // ── Pandora Agent — exclusive path for all in_app questions ─────────────────
+  // Free-text questions on the Command Center surface go here and nowhere else.
+  // runScopedAnalysis is NOT a fallback for in_app — it's Slack-only (below).
   if (!answer && surface === 'in_app') {
     try {
       const history = buildConversationHistory(state.messages || [] as any);
-      const pandoraResult = await runPandoraAgent(workspaceId, message, history);
+
+      // Inject entity scope so deal/account page questions have context.
+      // e.g. "What are the risks?" on a deal page needs to know which deal.
+      let agentMessage = message;
+      if (entityId && scopeType && !['workspace', 'pipeline', 'conversations'].includes(scopeType)) {
+        agentMessage = `[Context: viewing ${scopeType} id=${entityId}] ${message}`;
+      } else if (anchor?.result) {
+        // Anchor context: user clicked a skill result and is asking a follow-up
+        const skillContext = anchor.result.narrative || anchor.result.summary || '';
+        if (skillContext) {
+          agentMessage = `[Skill run context: ${String(skillContext).slice(0, 600)}]\n\n${message}`;
+        }
+      }
+
+      const pandoraResult = await runPandoraAgent(workspaceId, agentMessage, history);
 
       answer = pandoraResult.answer;
       tokensUsed = pandoraResult.tokens_used;
@@ -272,12 +286,17 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
         } : {}),
       } as any;
     } catch (err) {
-      console.warn('[orchestrator] Pandora Agent failed, falling back to scoped analysis:', err);
-      // Fall through to existing scoped analysis path
+      console.error('[orchestrator] Pandora Agent failed:', err);
+      answer = "I wasn't able to analyze that right now. Please try again in a moment.";
+      routerDecision = 'error_fallback';
+      dataStrategy = 'none';
+      tokensUsed = 0;
     }
   }
 
-  if (!answer) {
+  // ── Slack path — runScopedAnalysis for slack_thread / slack_dm ───────────────
+  // in_app questions never reach here; Pandora Agent handles them exclusively.
+  if (!answer && surface !== 'in_app') {
     try {
     if (isFollowUp) {
       const recentMessages = (state.messages || []).slice(-4);
