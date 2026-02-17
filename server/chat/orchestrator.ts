@@ -54,6 +54,19 @@ export interface ConversationTurnResult {
   };
 }
 
+const CONVERSATION_SIGNALS = [
+  /\b(calls?|meetings?|conversations?|recordings?|transcripts?)\b/i,
+  /\b(objections?|competitors?|pricing\s+discuss(?:ed|ion)?|sentiment|themes?)\b/i,
+  /\b(discovery\s+questions?|talk[\-\s]ratio|monologue|coaching|call\s+quality)\b/i,
+  /\bwhat\s+(are|were)\s+(we|they|prospects?|customers?)\s+(hearing|saying|asking|mentioning)\b/i,
+  /\b(summarize|summary\s+of)\s+(last|recent|this)\s+(week|month)/i,
+  /\bwhat.{0,30}(heard|said|came\s+up|mentioned)\s+on\s+(calls?|meetings?)\b/i,
+];
+
+function isConversationQuestion(message: string): boolean {
+  return CONVERSATION_SIGNALS.some(p => p.test(message));
+}
+
 export async function handleConversationTurn(input: ConversationTurnInput): Promise<ConversationTurnResult> {
   const { workspaceId, channelId, threadId, message, surface, anchor, scope: inputScope } = input;
 
@@ -93,6 +106,12 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
   let scopeType: string = inputScope?.type || state.context.last_scope?.type || 'workspace';
   let entityId = inputScope?.entity_id || state.context.last_scope?.entity_id;
   let repEmail = inputScope?.rep_email || state.context.last_scope?.rep_email;
+
+  // Auto-detect conversation questions when no explicit scope provided
+  if (!inputScope?.type && scopeType === 'workspace' && isConversationQuestion(message)) {
+    scopeType = 'conversations';
+  }
+
   let routerDecision = 'unknown';
   let dataStrategy = 'unknown';
   let tokensUsed = 0;

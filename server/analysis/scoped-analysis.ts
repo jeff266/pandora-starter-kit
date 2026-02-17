@@ -10,7 +10,7 @@ export interface AnalysisRequest {
   workspace_id: string;
   question: string;
   scope: {
-    type: 'deal' | 'account' | 'pipeline' | 'rep' | 'workspace';
+    type: 'deal' | 'account' | 'pipeline' | 'rep' | 'workspace' | 'conversations';
     entity_id?: string;
     rep_email?: string;
     date_range?: { from: string; to: string };
@@ -235,7 +235,51 @@ function countBy(arr: any[], key: string): Record<string, number> {
   return out;
 }
 
-async function buildConversationContext(workspaceId: string): Promise<string> {
+interface ConversationContextFilters {
+  since?: string;
+  until?: string;
+  account_id?: string;
+  deal_id?: string;
+  rep_name?: string;
+  limit?: number;
+}
+
+async function buildConversationContext(
+  workspaceId: string,
+  filters?: ConversationContextFilters
+): Promise<{ text: string; count: number; hasData: boolean }> {
+  const limit = Math.min(filters?.limit ?? 50, 100);
+  const params: any[] = [workspaceId];
+  const clauses: string[] = [
+    `c.workspace_id = $1`,
+    `c.is_internal = FALSE`,
+    `c.source IS DISTINCT FROM 'consultant'`,
+  ];
+
+  if (filters?.since) {
+    params.push(filters.since);
+    clauses.push(`c.call_date >= $${params.length}`);
+  }
+  if (filters?.until) {
+    params.push(filters.until);
+    clauses.push(`c.call_date <= $${params.length}`);
+  }
+  if (filters?.account_id) {
+    params.push(filters.account_id);
+    clauses.push(`c.account_id = $${params.length}`);
+  }
+  if (filters?.deal_id) {
+    params.push(filters.deal_id);
+    clauses.push(`c.deal_id = $${params.length}`);
+  }
+  if (filters?.rep_name) {
+    params.push(`%${filters.rep_name}%`);
+    clauses.push(`(d.owner ILIKE $${params.length} OR c.participants::text ILIKE $${params.length})`);
+  }
+
+  params.push(limit);
+  const limitParam = `$${params.length}`;
+
   const recentCalls = await query<{
     title: string | null;
     call_date: string | null;
@@ -271,15 +315,13 @@ async function buildConversationContext(workspaceId: string): Promise<string> {
      FROM conversations c
      LEFT JOIN deals d ON c.deal_id = d.id
      LEFT JOIN accounts a ON c.account_id = a.id
-     WHERE c.workspace_id = $1
-       AND c.is_internal = FALSE
-       AND c.source IS DISTINCT FROM 'consultant'
+     WHERE ${clauses.join(' AND ')}
      ORDER BY c.call_date DESC NULLS LAST
-     LIMIT 30`,
-    [workspaceId]
+     LIMIT ${limitParam}`,
+    params
   );
 
-  if (recentCalls.rows.length === 0) return '';
+  if (recentCalls.rows.length === 0) return { text: '', count: 0, hasData: false };
 
   const rows = recentCalls.rows;
 
@@ -385,7 +427,7 @@ async function buildConversationContext(workspaceId: string): Promise<string> {
     }
   }
 
-  return ctx;
+  return { text: ctx, count: rows.length, hasData: true };
 }
 
 // ── Pipeline Context ──────────────────────────────────────────────────────────
@@ -479,6 +521,14 @@ After your answer, on a new line starting with "CONFIDENCE:", rate your confiden
 
 On another new line starting with "FOLLOWUPS:", suggest 2-3 natural follow-up questions the user might ask next, separated by pipes (|).`;
 
+const CONVERSATIONS_SYSTEM_PROMPT = `You are analyzing sales call data for a revenue team. Answer using ONLY the conversation data provided below. Be specific — cite call titles, account names, rep names, and dates when relevant. Quantify patterns whenever possible (e.g., "mentioned in 7 of 23 calls", "3 of the last 5 discovery calls").
+
+Keep answers to 3-5 sentences unless listing specific items. Cite evidence from the calls. Do not invent patterns that aren't clearly supported by the data.
+
+After your answer, on a new line starting with "CONFIDENCE:", rate your confidence as HIGH (patterns clearly visible in data), MEDIUM (limited data, patterns are suggestive), or LOW (insufficient call data to answer reliably).
+
+On another new line starting with "FOLLOWUPS:", suggest 2-3 natural follow-up questions, separated by pipes (|).`;
+
 function parseAnalysisResponse(raw: string): { answer: string; confidence: 'high' | 'medium' | 'low'; followups: string[] } {
   let answer = raw;
   let confidence: 'high' | 'medium' | 'low' = 'medium';
@@ -499,6 +549,17 @@ function parseAnalysisResponse(raw: string): { answer: string; confidence: 'high
   }
 
   return { answer, confidence, followups };
+}
+
+function classifyConversationSubIntent(question: string): string {
+  const q = question.toLowerCase();
+  if (/compet|rival|vs\.|versus|alternative/.test(q)) return 'competitive';
+  if (/objection|pushback|concern|resistance|obstacle/.test(q)) return 'themes';
+  if (/coaching|call\s+quality|talk[\s-]ratio|monologue|discovery\s+question/.test(q)) return 'quality';
+  if (/summarize|summary\s+of|recap|last\s+week|this\s+week|this\s+month/.test(q)) return 'time_summary';
+  if (/pricing|budget|cost|discount|roi/.test(q)) return 'topic_search';
+  if (/\bwith\s+\S+\s+(calls?|meetings?)\b/.test(q)) return 'account_scoped';
+  return 'general';
 }
 
 async function gatherContext(request: AnalysisRequest): Promise<{
@@ -567,12 +628,12 @@ async function gatherContext(request: AnalysisRequest): Promise<{
            LIMIT 20`,
           [workspace_id]
         ),
-        buildConversationContext(workspace_id).catch(() => ''),
+        buildConversationContext(workspace_id).catch(() => ({ text: '', count: 0, hasData: false })),
       ]);
 
       const { text, sources } = compressPipelineContext(snapshot, findingsResult.rows, topDealsResult.rows);
-      const fullText = text + conversationCtx;
-      if (conversationCtx) sources.push('conversations');
+      const fullText = text + conversationCtx.text;
+      if (conversationCtx.hasData) sources.push('conversations');
 
       return {
         contextText: fullText,
@@ -580,7 +641,7 @@ async function gatherContext(request: AnalysisRequest): Promise<{
         dataConsulted: {
           deals: snapshot.dealCount,
           contacts: 0,
-          conversations: conversationCtx ? 1 : 0,
+          conversations: conversationCtx.count,
           findings: findingsResult.rows.length,
           date_range: scope.date_range || null,
         },
@@ -625,6 +686,56 @@ async function gatherContext(request: AnalysisRequest): Promise<{
       };
     }
 
+    case 'conversations': {
+      const subIntent = scope.filters?.sub_intent || classifyConversationSubIntent(request.question);
+
+      // Graceful degradation: check connector status
+      const connCheck = await query<{ cnt: string }>(
+        `SELECT COUNT(*)::text as cnt FROM conversations
+         WHERE workspace_id = $1 AND is_internal = false
+           AND source_type IS DISTINCT FROM 'consultant'`,
+        [workspace_id]
+      );
+      const totalConvos = parseInt(connCheck.rows[0]?.cnt || '0');
+
+      if (totalConvos === 0) {
+        return {
+          contextText: 'NO_CONVERSATIONS',
+          dataSources: [],
+          dataConsulted: { deals: 0, contacts: 0, conversations: 0, findings: 0, date_range: null },
+        };
+      }
+
+      const { text, count } = await buildConversationContext(workspace_id, {
+        since: scope.date_range?.from,
+        until: scope.date_range?.to,
+        account_id: scope.entity_id,
+        rep_name: scope.rep_email,
+        limit: 50,
+      });
+
+      if (!text) {
+        return {
+          contextText: 'NO_CONVERSATIONS',
+          dataSources: [],
+          dataConsulted: { deals: 0, contacts: 0, conversations: 0, findings: 0, date_range: null },
+        };
+      }
+
+      const headerNote = `Sub-intent: ${subIntent}\n`;
+      return {
+        contextText: headerNote + text,
+        dataSources: ['conversations'],
+        dataConsulted: {
+          deals: 0,
+          contacts: 0,
+          conversations: count,
+          findings: 0,
+          date_range: scope.date_range || null,
+        },
+      };
+    }
+
     default:
       throw new Error(`Unknown scope type: ${scope.type}`);
   }
@@ -634,9 +745,11 @@ export async function analyzeQuestion(
   workspaceId: string,
   question: string,
   scope: {
-    type: 'deal' | 'account' | 'pipeline' | 'rep' | 'workspace';
+    type: 'deal' | 'account' | 'pipeline' | 'rep' | 'workspace' | 'conversations';
     entityId?: string;
     ownerEmail?: string;
+    date_range?: { from: string; to: string };
+    filters?: Record<string, any>;
   }
 ): Promise<AnalysisResult> {
   const startTime = Date.now();
@@ -648,27 +761,39 @@ export async function analyzeQuestion(
       type: scope.type,
       entity_id: scope.entityId,
       rep_email: scope.ownerEmail,
+      date_range: scope.date_range,
+      filters: scope.filters,
     },
   };
 
   const { contextText, dataSources } = await gatherContext(request);
 
+  // Graceful degradation for conversations scope
+  if (contextText === 'NO_CONVERSATIONS') {
+    return {
+      answer: "No conversation data found. Connect Gong or Fireflies in Settings → Connectors to enable call analysis.",
+      data_consulted: dataSources,
+      confidence: 'low',
+      suggested_followups: [],
+      tokens_used: 0,
+      latency_ms: Date.now() - startTime,
+    };
+  }
+
   const voiceConfig = await configLoader.getVoiceConfig(workspaceId).catch(() => ({ promptBlock: '' }));
 
+  const basePrompt = scope.type === 'conversations' ? CONVERSATIONS_SYSTEM_PROMPT : SYSTEM_PROMPT;
+
   const response = await callLLM(workspaceId, 'reason', {
-    systemPrompt: SYSTEM_PROMPT + (voiceConfig.promptBlock ? `\n\n${voiceConfig.promptBlock}` : ''),
+    systemPrompt: basePrompt + (voiceConfig.promptBlock ? `\n\n${voiceConfig.promptBlock}` : ''),
     messages: [
       {
         role: 'user' as const,
         content: `CONTEXT:\n${contextText}\n\nQUESTION: ${question}`,
       },
     ],
-    maxTokens: 800,
+    maxTokens: scope.type === 'conversations' ? 1500 : 800,
     temperature: 0.3,
-    _tracking: {
-      feature: 'scoped_analysis',
-      subFeature: scope.type,
-    },
   });
 
   const tokensUsed = (response.usage?.input || 0) + (response.usage?.output || 0);
@@ -706,9 +831,20 @@ export async function runScopedAnalysis(request: AnalysisRequest): Promise<Analy
 
   const { contextText, dataConsulted } = await gatherContext(request);
 
+  // Graceful degradation for conversations scope
+  if (contextText === 'NO_CONVERSATIONS') {
+    return {
+      answer: "No conversation data found. Connect Gong or Fireflies in Settings → Connectors to enable call analysis.",
+      data_consulted: dataConsulted,
+      tokens_used: 0,
+      latency_ms: Date.now() - startTime,
+    };
+  }
+
   const voiceConfig = await configLoader.getVoiceConfig(workspace_id).catch(() => ({ promptBlock: '' }));
 
-  const systemPrompt = SYSTEM_PROMPT + (voiceConfig.promptBlock ? `\n\n${voiceConfig.promptBlock}` : '');
+  const basePrompt = scope.type === 'conversations' ? CONVERSATIONS_SYSTEM_PROMPT : SYSTEM_PROMPT;
+  const systemPrompt = basePrompt + (voiceConfig.promptBlock ? `\n\n${voiceConfig.promptBlock}` : '');
 
   const messages: Array<{ role: 'user' | 'assistant' | 'tool'; content: any; toolCallId?: string }> = [
     {
@@ -822,6 +958,13 @@ export function getAnalysisSuggestions(scope: string): string[] {
         "Which reps have the most at-risk deals?",
         "Where are the biggest gaps in our coverage?",
         "What are the top findings across all deals?",
+      ];
+    case 'conversations':
+      return [
+        "What are the most common objections we're hearing?",
+        "Which competitors keep coming up on calls?",
+        "How are our discovery calls going?",
+        "What did prospects say about pricing this month?",
       ];
     default:
       return [

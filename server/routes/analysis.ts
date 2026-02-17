@@ -9,7 +9,7 @@ import {
 
 const router = Router();
 
-const VALID_SCOPE_TYPES = ['deal', 'account', 'pipeline', 'rep', 'workspace'];
+const VALID_SCOPE_TYPES = ['deal', 'account', 'pipeline', 'rep', 'workspace', 'conversations'];
 const RATE_LIMIT_MAX = 10;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 
@@ -84,6 +84,8 @@ router.post('/:workspaceId/analyze', async (req: Request, res: Response): Promis
         type: scope.type,
         entityId: scope.entity_id,
         ownerEmail: scope.rep_email,
+        date_range: scope.date_range,
+        filters: scope.filters,
       }
     );
 
@@ -169,6 +171,7 @@ router.get('/:workspaceId/analyze/suggestions', async (req: Request, res: Respon
       account: getAnalysisSuggestions('account'),
       pipeline: getAnalysisSuggestions('pipeline'),
       rep: getAnalysisSuggestions('rep'),
+      conversations: getAnalysisSuggestions('conversations'),
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
