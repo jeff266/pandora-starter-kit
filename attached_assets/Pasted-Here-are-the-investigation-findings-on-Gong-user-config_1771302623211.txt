@@ -1,0 +1,41 @@
+Here are the investigation findings on Gong user       
+  configuration:                                         
+                                                         
+  How it works:                                          
+  - Tracked users are stored in                          
+  connections.metadata.tracked_users (JSONB array) for   
+  each workspace                                         
+  - The sync requires at least one tracked user — if none
+   are configured, it skips and logs a warning           
+  - Each sync call passes the user's source_id as        
+  primaryUserId to Gong's /calls/extensive endpoint,     
+  filtering calls at the API level                       
+                                                         
+  How to update tracked users:                           
+  The API endpoint exists: POST /api/workspaces/:workspac
+  eId/connectors/gong/users/track                        
+  Body: { user_ids: ["gong_user_id_1", "gong_user_id_2"] 
+  }                                                      
+                                                         
+  The UI gap:                                            
+  The Connectors page currently shows the Gong card as   
+  "Healthy / 44 conversations / Sync Now" — but there's  
+  no visible button to edit the tracked users list from  
+  that view. User selection was likely done during the   
+  initial connection flow and isn't re-surfaced once the 
+  connector is in a healthy state.                       
+                                                         
+  To check which users are currently tracked, you'd query
+   the DB directly:                                      
+  SELECT metadata->'tracked_users' FROM connections      
+  WHERE workspace_id = '<your_workspace_id>' AND         
+  connector_name = 'gong';                               
+                                                         
+  Or hit the Gong users list endpoint to see available   
+  users vs. tracked users.                               
+                                                         
+  Do you want me to add an "Edit Users" button to the    
+  Gong connector card on the Connectors page so the      
+  tracked user list can be updated without going through 
+  the initial setup flow again?                          
+                                     
