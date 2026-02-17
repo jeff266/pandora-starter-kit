@@ -38,6 +38,7 @@ import funnelRouter from './routes/funnel.js';
 import workspaceConfigRouter from './routes/workspace-config.js';
 import findingsRouter from './routes/findings.js';
 import actionItemsRouter from './routes/action-items.js';
+import playbooksRouter from './routes/playbooks.js';
 import dossiersRouter from './routes/dossiers.js';
 import routerApiRouter from './routes/router.js';
 import deliverablesRouter from './routes/deliverables.js';
@@ -216,6 +217,7 @@ workspaceApiRouter.use(workspaceConfigRouter);
 workspaceApiRouter.use(agentsWorkspaceRouter);
 workspaceApiRouter.use(findingsRouter);
 workspaceApiRouter.use(actionItemsRouter);
+workspaceApiRouter.use(playbooksRouter);
 workspaceApiRouter.use(dossiersRouter);
 workspaceApiRouter.use(analysisRouter);
 workspaceApiRouter.use(routerApiRouter);
@@ -356,6 +358,10 @@ async function start(): Promise<void> {
 
   cleanupTempFiles();
   setInterval(cleanupTempFiles, 60 * 60 * 1000);
+
+  const { startActionExpiryScheduler } = await import('./actions/scheduler.js');
+  const dbPool = (await import('./db.js')).default;
+  startActionExpiryScheduler(dbPool);
 
   // Annotation cleanup - daily at 3 AM UTC
   const runAnnotationCleanup = () => {

@@ -21,6 +21,7 @@ import SkillRunsPage from './pages/SkillRunsPage';
 import ConnectorsPage from './pages/ConnectorsPage';
 import InsightsPage from './pages/InsightsPage';
 import Actions from './pages/Actions';
+import Playbooks from './pages/Playbooks';
 import SettingsPage from './pages/SettingsPage';
 import ConnectorHealth from './pages/ConnectorHealth';
 import { colors, fonts } from './styles/theme';
@@ -157,7 +158,7 @@ export default function App() {
             <Route path="/agents" element={<Placeholder title="Agents" />} />
             <Route path="/agent-builder" element={<Placeholder title="Agent Builder" />} />
             <Route path="/tools" element={<Placeholder title="Tools" />} />
-            <Route path="/playbooks" element={<Placeholder title="Playbooks" />} />
+            <Route path="/playbooks" element={<Playbooks />} />
             <Route path="/actions" element={<Actions />} />
             <Route path="/connectors/health" element={<ConnectorHealth />} />
             <Route path="/data-dictionary" element={<Placeholder title="Data Dictionary" />} />
