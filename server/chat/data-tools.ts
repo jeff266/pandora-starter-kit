@@ -2077,9 +2077,11 @@ const STAGE_ORDER: Record<string, number> = {
 const STAGE_ORDER_MAX = 5; // negotiation = highest open stage
 
 async function computeCloseProbability(workspaceId: string, params: Record<string, any>): Promise<any> {
+  try {
   const ownerName: string | null = params.owner_name || params.owner_email || null;
   const dealIds: string[] | null = params.deal_ids || null;
   const limit = Math.min(params.limit || 50, 100);
+  const queryErrors: string[] = [];
 
   // 1. Open deals (no stage_mappings JOIN — use inline CASE for stage order)
   const dealConds = [
@@ -2112,7 +2114,11 @@ async function computeCloseProbability(workspaceId: string, params: Record<strin
      ORDER BY d.amount DESC NULLS LAST
      LIMIT $${dealVals.length + 1}`,
     [...dealVals, limit]
-  );
+  ).catch((err: any) => {
+    console.error('[compute_close_probability] deals query failed:', err?.message);
+    queryErrors.push(`deals: ${err?.message}`);
+    return { rows: [] as any[] };
+  });
 
   if (dealRows.rows.length === 0) {
     return {
@@ -2135,7 +2141,11 @@ async function computeCloseProbability(workspaceId: string, params: Record<strin
      WHERE cv.workspace_id = $1 AND cv.deal_id = ANY($2) AND cv.is_internal = false
      GROUP BY cv.deal_id`,
     [workspaceId, dealIdList]
-  ).catch(() => ({ rows: [] as any[] }));
+  ).catch((err: any) => {
+    console.error('[compute_close_probability] conversations query failed:', err?.message);
+    queryErrors.push(`conversations: ${err?.message}`);
+    return { rows: [] as any[] };
+  });
   const convMap = new Map<string, { call_count: number; last_call_date: string | null }>();
   for (const r of convRows.rows) {
     convMap.set(r.deal_id, { call_count: parseInt(r.call_count), last_call_date: r.last_call_date });
@@ -2150,7 +2160,11 @@ async function computeCloseProbability(workspaceId: string, params: Record<strin
      WHERE dc.workspace_id = $1 AND dc.deal_id = ANY($2)
      GROUP BY dc.deal_id`,
     [workspaceId, dealIdList]
-  ).catch(() => ({ rows: [] as any[] }));
+  ).catch((err: any) => {
+    console.error('[compute_close_probability] contacts query failed:', err?.message);
+    queryErrors.push(`contacts: ${err?.message}`);
+    return { rows: [] as any[] };
+  });
   const contactMap = new Map<string, { total: number; key_contacts: number }>();
   for (const r of contactRows.rows) {
     contactMap.set(r.deal_id, { total: parseInt(r.total), key_contacts: parseInt(r.key_contacts) });
@@ -2170,7 +2184,11 @@ async function computeCloseProbability(workspaceId: string, params: Record<strin
        AND so_from.ord > so_to.ord
      GROUP BY dsh.deal_id`,
     [workspaceId, dealIdList]
-  ).catch(() => ({ rows: [] as any[] }));
+  ).catch((err: any) => {
+    console.error('[compute_close_probability] regressions query failed:', err?.message);
+    queryErrors.push(`regressions: ${err?.message}`);
+    return { rows: [] as any[] };
+  });
   const regressionMap = new Map<string, number>();
   for (const r of regressionRows.rows) {
     regressionMap.set(r.deal_id, parseInt(r.regressions));
@@ -2187,7 +2205,11 @@ async function computeCloseProbability(workspaceId: string, params: Record<strin
        AND d.owner IS NOT NULL
      GROUP BY d.owner`,
     [workspaceId]
-  ).catch(() => ({ rows: [] as any[] }));
+  ).catch((err: any) => {
+    console.error('[compute_close_probability] win_rates query failed:', err?.message);
+    queryErrors.push(`win_rates: ${err?.message}`);
+    return { rows: [] as any[] };
+  });
   const repWinRates = new Map<string, number>();
   let teamWinRateSum = 0;
   let teamWinRateCount = 0;
@@ -2207,7 +2229,11 @@ async function computeCloseProbability(workspaceId: string, params: Record<strin
      FROM deals WHERE workspace_id = $1 AND amount > 0
        AND stage_normalized NOT IN ('closed_won', 'closed_lost')`,
     [workspaceId]
-  ).catch(() => ({ rows: [{ median_amount: '0' }] as any[] }));
+  ).catch((err: any) => {
+    console.error('[compute_close_probability] median query failed:', err?.message);
+    queryErrors.push(`median: ${err?.message}`);
+    return { rows: [{ median_amount: '0' }] as any[] };
+  });
   const medianAmount = parseFloat(medianRow.rows[0]?.median_amount || '0');
 
   // 7. Stage velocity benchmarks — use from_stage_normalized + duration_in_previous_stage_ms
@@ -2228,7 +2254,11 @@ async function computeCloseProbability(workspaceId: string, params: Record<strin
        AND dsh.from_stage_normalized IS NOT NULL
      GROUP BY dsh.from_stage_normalized`,
     [workspaceId]
-  ).catch(() => ({ rows: [] as any[] }));
+  ).catch((err: any) => {
+    console.error('[compute_close_probability] benchmarks query failed:', err?.message);
+    queryErrors.push(`benchmarks: ${err?.message}`);
+    return { rows: [] as any[] };
+  });
   const benchmarkMap = new Map<string, { median: number; p75: number; p90: number }>();
   for (const r of benchmarkRows.rows) {
     benchmarkMap.set(r.stage_normalized, {
@@ -2379,5 +2409,19 @@ async function computeCloseProbability(workspaceId: string, params: Record<strin
     team_avg_win_rate: Math.round(teamAvgWinRate * 100),
     scoring_model: 'engagement(30%) + velocity(30%) + qualification(20%) + execution(20%)',
     query_description: `Probability-scored ${scoredDeals.length} open deals. Weighted pipeline: $${Math.round(totalWeighted).toLocaleString()} (raw: $${Math.round(totalRaw).toLocaleString()})`,
+    ...(queryErrors.length > 0 ? { partial_data_warnings: queryErrors } : {}),
   };
+  } catch (err: any) {
+    console.error('[compute_close_probability] unexpected error:', err?.message, err?.stack);
+    return {
+      scored_deals: [],
+      total_scored: 0,
+      total_pipeline: 0,
+      probability_weighted_pipeline: 0,
+      average_probability: 0,
+      scoring_model: 'engagement(30%) + velocity(30%) + qualification(20%) + execution(20%)',
+      query_description: `compute_close_probability failed: ${err?.message}`,
+      error: err?.message,
+    };
+  }
 }
