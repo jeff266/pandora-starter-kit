@@ -1008,7 +1008,7 @@ function StageDrillDownPanel({
     : null;
 
   const avgDays = sorted.length > 0 ? Math.round(sorted.reduce((s, d) => s + (d.days_in_stage || 0), 0) / sorted.length) : 0;
-  const avgProb = sorted.length > 0 ? Math.round(sorted.reduce((s, d) => s + (d.probability || 0), 0) / sorted.length) : 0;
+  const avgProb = sorted.length > 0 ? Math.round(sorted.reduce((s, d) => s + Number(d.probability || 0), 0) / sorted.length * 100) : 0;
 
   return (
     <div
@@ -1186,7 +1186,7 @@ function DrilldownDealRow({ deal, isLast, isAsking, onAsk }: {
 }) {
   const [hovered, setHovered] = useState(false);
   const daysColor = (deal.days_in_stage || 0) > 30 ? '#EF4444' : (deal.days_in_stage || 0) > 14 ? '#F59E0B' : '#8896AB';
-  const prob = deal.probability || 0;
+  const prob = Math.round(Number(deal.probability || 0) * 100);
   const probColor = prob > 50 ? '#10B981' : prob > 30 ? '#3B82F6' : '#8896AB';
   const fcLabel = (deal.forecast_category || 'pipeline').replace('_', ' ');
   const fcColor = deal.forecast_category === 'commit' ? '#10B981' : deal.forecast_category === 'best_case' ? '#3B82F6' : '#5A6A80';
