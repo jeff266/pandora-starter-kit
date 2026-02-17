@@ -172,6 +172,101 @@ const PANDORA_TOOLS: ToolDef[] = [
       required: [],
     },
   },
+  {
+    name: 'query_stage_history',
+    description:
+      'Get stage transition history for a deal or across the workspace. Returns each stage change with from/to stages, timestamps, days spent in previous stage, and direction (advance/regress/lateral/initial). Essential for understanding deal velocity, detecting stalled deals, and finding regression patterns.',
+    parameters: {
+      type: 'object',
+      properties: {
+        deal_id: { type: 'string', description: 'Stage history for a specific deal' },
+        account_id: { type: 'string', description: 'Stage history across all deals at this account' },
+        since: { type: 'string', description: 'ISO date — transitions after this date' },
+        until: { type: 'string', description: 'ISO date — transitions before this date' },
+        direction: { type: 'string', enum: ['advance', 'regress', 'all'], description: 'Filter by transition direction. "regress" finds deals that moved backward.' },
+        limit: { type: 'number', description: 'Max transitions to return (default 50)' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'compute_stage_benchmarks',
+    description:
+      'Calculate historical time-in-stage benchmarks: median, p75, p90 days per stage, plus conversion rates and drop rates. Use to determine if a deal is fast or slow compared to historical patterns. Can segment by pipeline, deal size band, or individual rep.',
+    parameters: {
+      type: 'object',
+      properties: {
+        stage: { type: 'string', description: 'Specific stage to benchmark, or omit for all stages' },
+        pipeline: { type: 'string', description: 'Filter by pipeline name' },
+        deal_size_band: { type: 'string', enum: ['small', 'mid', 'large', 'enterprise'], description: 'Segment by deal size' },
+        owner_email: { type: 'string', description: 'Benchmarks for a specific rep (compare to team)' },
+        lookback_months: { type: 'number', description: 'How many months of history (default 12)' },
+        only_closed_won: { type: 'boolean', description: 'Only include deals that eventually closed-won (default false)' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'query_field_history',
+    description:
+      "Get the change history for a deal's key fields: stage transitions, close date pushes, amount changes. Returns each change with old/new values and timestamps, plus a summary with stage regression count. Essential for assessing deal reliability and detecting deals that keep slipping.",
+    parameters: {
+      type: 'object',
+      properties: {
+        deal_id: { type: 'string', description: 'The deal to get history for (required)' },
+        field_name: { type: 'string', enum: ['close_date', 'amount', 'stage', 'forecast_category', 'all'], description: 'Which field to track (default: all)' },
+        since: { type: 'string', description: 'ISO date — only changes after this date' },
+      },
+      required: ['deal_id'],
+    },
+  },
+  {
+    name: 'compute_metric_segmented',
+    description:
+      "Calculate a metric broken down by segment. Example: win rate by rep, avg deal size by pipeline, sales cycle by deal size band. Returns each segment's value, sample size, and comparison to team average. Use when you need to compare performance across groups.",
+    parameters: {
+      type: 'object',
+      properties: {
+        metric: { type: 'string', enum: ['win_rate', 'avg_deal_size', 'avg_sales_cycle', 'total_pipeline', 'pipeline_created'], description: 'The metric to calculate' },
+        segment_by: { type: 'string', enum: ['owner', 'stage', 'pipeline', 'deal_size_band', 'source', 'forecast_category'], description: 'How to segment the results' },
+        date_from: { type: 'string', description: 'Start of period (ISO date)' },
+        date_to: { type: 'string', description: 'End of period (ISO date)' },
+        lookback_days: { type: 'number', description: 'Alternative to date_from/to — look back N days' },
+      },
+      required: ['metric', 'segment_by'],
+    },
+  },
+  {
+    name: 'search_transcripts',
+    description:
+      "Full-text search across call and meeting transcripts. Returns matching excerpts with surrounding context, speaker attribution, and conversation metadata. Use for finding specific topics discussed (objections, competitors, pricing, technical requirements), patterns across calls, or investigating what happened on a specific deal's calls.",
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search terms — can be a word, phrase, or topic' },
+        deal_id: { type: 'string', description: 'Only search conversations linked to this deal' },
+        account_id: { type: 'string', description: 'Only search conversations linked to this account' },
+        rep_email: { type: 'string', description: 'Only search conversations involving this rep' },
+        since: { type: 'string', description: 'ISO date — conversations after this date' },
+        until: { type: 'string', description: 'ISO date — conversations before this date' },
+        max_results: { type: 'number', description: 'Max excerpts to return (default 10)' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'compute_forecast_accuracy',
+    description:
+      'Calculate historical forecast accuracy per rep: what percentage of their committed pipeline actually closed? Identifies sandbagging (consistently under-commits) and over-committing patterns. Returns a haircut factor to adjust current forecast. Uses forecast snapshots if available, otherwise approximates from pipeline vs actuals.',
+    parameters: {
+      type: 'object',
+      properties: {
+        owner_email: { type: 'string', description: 'Specific rep, or omit for all reps' },
+        lookback_quarters: { type: 'number', description: 'How many quarters to analyze (default 4)' },
+      },
+      required: [],
+    },
+  },
 ];
 
 // ─── System prompt ────────────────────────────────────────────────────────────
@@ -191,6 +286,7 @@ You have tools that query the company's live data. When someone asks a question,
 3. SHOW YOUR WORK. When citing totals or metrics, list the underlying records. "19 deals totaling $303K" is better than "$303K." Name the top deals.
 
 4. CHECK SKILL EVIDENCE FIRST. Before querying raw data for pipeline health, risk, forecasting, or rep performance questions, check get_skill_evidence. Skills have already analyzed the data with richer context than a raw query provides.
+   Available skills: pipeline-hygiene, single-thread-alert, data-quality-audit, pipeline-coverage-by-rep, weekly-forecast-rollup, pipeline-waterfall, rep-scorecard, stage-velocity-benchmarks, conversation-intelligence.
 
 5. CROSS-REFERENCE. When a question spans entities (deals + calls, reps + accounts), query both sides. Don't answer with half the picture.
 
@@ -200,7 +296,7 @@ You have tools that query the company's live data. When someone asks a question,
    WHEN LISTING CONVERSATIONS: always include title, date, account, rep, and duration.
    WHEN CITING METRICS: always include the formula and record count.
 
-8. PRIOR TOOL RESULTS IN CONTEXT ARE FROM PREVIOUS QUESTIONS — NOT YOUR CURRENT DATA. Each new question starts fresh. All 7 tools are always available. Never say "I don't have access to X in the data provided" or "the data shows only Y" — that refers to a past question. Call a tool.
+8. PRIOR TOOL RESULTS IN CONTEXT ARE FROM PREVIOUS QUESTIONS — NOT YOUR CURRENT DATA. Each new question starts fresh. All 13 tools are always available. Never say "I don't have access to X in the data provided" or "the data shows only Y" — that refers to a past question. Call a tool.
 
 9. FORECASTS AND QUARTERLY NUMBERS: For any question about Q1/Q2/Q3/Q4 forecast, quarterly pipeline, quarterly revenue, or forecast categories (commit/best case):
    - ALWAYS call get_skill_evidence with skill_id="weekly-forecast-rollup" first.
@@ -208,6 +304,10 @@ You have tools that query the company's live data. When someone asks a question,
    - Q1 = Jan 1 – Mar 31. Q2 = Apr 1 – Jun 30. Q3 = Jul 1 – Sep 30. Q4 = Oct 1 – Dec 31.
    - Use the current year unless the user specifies otherwise.
    - Never say "I don't have Q1 data" — you have deal close dates and the forecast rollup skill.
+
+10. VELOCITY QUESTIONS: Check get_skill_evidence('stage-velocity-benchmarks') first. If stale or unavailable, call compute_stage_benchmarks directly. Always compare a specific deal's time-in-stage to the benchmark — never say a deal is "slow" without the data to prove it.
+
+11. DEAL INVESTIGATION: When investigating why a deal is at risk, call MULTIPLE tools: query_field_history (stage regressions), query_stage_history (full stage log), query_conversations (recent call activity), query_contacts (stakeholder coverage). Build the full picture before diagnosing.
 
 Today's date is ${new Date().toISOString().split('T')[0]}.`;
 

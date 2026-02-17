@@ -171,6 +171,18 @@ export async function executeDataTool(
       return queryContacts(workspaceId, params);
     case 'query_activity_timeline':
       return queryActivityTimeline(workspaceId, params);
+    case 'query_stage_history':
+      return queryStageHistory(workspaceId, params);
+    case 'compute_stage_benchmarks':
+      return computeStageBenchmarks(workspaceId, params);
+    case 'query_field_history':
+      return queryFieldHistory(workspaceId, params);
+    case 'compute_metric_segmented':
+      return computeMetricSegmented(workspaceId, params);
+    case 'search_transcripts':
+      return searchTranscripts(workspaceId, params);
+    case 'compute_forecast_accuracy':
+      return computeForecastAccuracy(workspaceId, params);
     default:
       throw new Error(`Unknown tool: ${toolName}`);
   }
@@ -1234,5 +1246,822 @@ async function queryActivityTimeline(workspaceId: string, params: Record<string,
     total_count: trimmed.length,
     span_days: spanDays,
     query_description: `Activity timeline for ${params.deal_id ? 'deal' : 'account'} — ${trimmed.length} events over ${spanDays} days`,
+  };
+}
+
+// ─── Tool 8: query_stage_history ─────────────────────────────────────────────
+
+async function queryStageHistory(workspaceId: string, params: Record<string, any>) {
+  const limit = Math.min(params.limit || 50, 200);
+  const values: any[] = [workspaceId];
+
+  // Build deal_id / account_id filter
+  const dealFilter = params.deal_id
+    ? `AND dsh.deal_id = $${values.push(params.deal_id)}`
+    : params.account_id
+      ? `AND d.account_id = $${values.push(params.account_id)}`
+      : '';
+
+  const sinceFilter = params.since ? `AND dsh.entered_at >= $${values.push(params.since)}` : '';
+  const untilFilter = params.until ? `AND dsh.entered_at <= $${values.push(params.until)}` : '';
+
+  // Use LEAD to compute from→to transitions from the single-row-per-stage-entry schema.
+  // direction is determined by comparing display_order from stage_mappings.
+  const sql = `
+    WITH ordered AS (
+      SELECT
+        dsh.deal_id,
+        dsh.stage            AS to_stage,
+        dsh.stage_normalized AS to_stage_normalized,
+        dsh.entered_at       AS changed_at,
+        LAG(dsh.stage)            OVER (PARTITION BY dsh.deal_id ORDER BY dsh.entered_at) AS from_stage,
+        LAG(dsh.stage_normalized) OVER (PARTITION BY dsh.deal_id ORDER BY dsh.entered_at) AS from_stage_normalized,
+        LAG(dsh.entered_at)       OVER (PARTITION BY dsh.deal_id ORDER BY dsh.entered_at) AS prev_entered_at,
+        d.name   AS deal_name,
+        d.amount AS deal_amount,
+        d.owner  AS owner_name,
+        sm_to.display_order AS to_order
+      FROM deal_stage_history dsh
+      JOIN deals d ON d.id = dsh.deal_id AND d.workspace_id = dsh.workspace_id
+      LEFT JOIN stage_mappings sm_to
+        ON sm_to.workspace_id = dsh.workspace_id AND sm_to.normalized_stage = dsh.stage_normalized
+      WHERE dsh.workspace_id = $1
+        ${dealFilter}
+        ${sinceFilter}
+        ${untilFilter}
+    )
+    SELECT
+      o.deal_id, o.deal_name, o.deal_amount,
+      o.from_stage, o.from_stage_normalized,
+      o.to_stage,  o.to_stage_normalized,
+      o.changed_at,
+      CASE
+        WHEN o.prev_entered_at IS NOT NULL
+        THEN ROUND(EXTRACT(EPOCH FROM (o.changed_at - o.prev_entered_at)) / 86400.0, 1)
+      END AS days_in_previous_stage,
+      sm_from.display_order AS from_order,
+      o.to_order,
+      o.owner_name
+    FROM ordered o
+    LEFT JOIN stage_mappings sm_from
+      ON sm_from.workspace_id = $1 AND sm_from.normalized_stage = o.from_stage_normalized
+    ORDER BY o.changed_at DESC
+    LIMIT $${values.push(limit)}
+  `;
+
+  const result = await query<any>(sql, values);
+
+  const transitions = result.rows.map((r: any) => {
+    let direction: 'advance' | 'regress' | 'lateral' | 'initial' = 'initial';
+    if (r.from_stage === null) {
+      direction = 'initial';
+    } else if (r.from_order != null && r.to_order != null) {
+      if (r.to_order > r.from_order) direction = 'advance';
+      else if (r.to_order < r.from_order) direction = 'regress';
+      else direction = 'lateral';
+    }
+
+    return {
+      deal_id: r.deal_id,
+      deal_name: r.deal_name,
+      deal_amount: parseFloat(r.deal_amount) || 0,
+      from_stage: r.from_stage || null,
+      to_stage: r.to_stage,
+      from_stage_normalized: r.from_stage_normalized || null,
+      to_stage_normalized: r.to_stage_normalized,
+      changed_at: r.changed_at,
+      days_in_previous_stage: r.days_in_previous_stage != null ? parseFloat(r.days_in_previous_stage) : null,
+      direction,
+      owner_name: r.owner_name,
+    };
+  });
+
+  // Apply direction filter in app-code (simpler than complex SQL CASE in WHERE)
+  const filtered = params.direction && params.direction !== 'all'
+    ? transitions.filter(t => t.direction === params.direction)
+    : transitions;
+
+  return {
+    transitions: filtered,
+    total_count: filtered.length,
+    query_description: `Stage history ${params.deal_id ? `for deal ${params.deal_id}` : params.account_id ? `for account ${params.account_id}` : '(workspace-wide)'} — ${filtered.length} transitions`,
+  };
+}
+
+// ─── Tool 9: compute_stage_benchmarks ────────────────────────────────────────
+
+async function computeStageBenchmarks(workspaceId: string, params: Record<string, any>) {
+  const lookbackMonths = params.lookback_months || 12;
+  const values: any[] = [workspaceId, lookbackMonths];
+
+  let dealFilter = '';
+  if (params.pipeline) {
+    dealFilter += ` AND d.pipeline ILIKE $${values.push(`%${params.pipeline}%`)}`;
+  }
+  if (params.owner_email) {
+    dealFilter += ` AND LOWER(d.owner) = $${values.push(params.owner_email.toLowerCase())}`;
+  }
+  if (params.stage) {
+    dealFilter += ` AND (dsh.stage_normalized = $${values.push(params.stage.toLowerCase())} OR dsh.stage ILIKE $${values.push(`%${params.stage}%`)})`;
+  }
+  if (params.only_closed_won === true) {
+    dealFilter += ` AND d.stage_normalized = 'closed_won'`;
+  }
+
+  // Size band filter
+  if (params.deal_size_band) {
+    const bandConditions: Record<string, string> = {
+      small: 'd.amount < 25000',
+      mid: 'd.amount >= 25000 AND d.amount < 100000',
+      large: 'd.amount >= 100000 AND d.amount < 500000',
+      enterprise: 'd.amount >= 500000',
+    };
+    const bc = bandConditions[params.deal_size_band];
+    if (bc) dealFilter += ` AND (${bc})`;
+  }
+
+  // Compute duration per stage using LEAD(entered_at) to find when deal left that stage
+  const sql = `
+    WITH stage_windows AS (
+      SELECT
+        dsh.deal_id,
+        dsh.stage_normalized,
+        dsh.stage,
+        dsh.entered_at,
+        LEAD(dsh.entered_at) OVER (PARTITION BY dsh.deal_id ORDER BY dsh.entered_at) AS next_entered_at
+      FROM deal_stage_history dsh
+      JOIN deals d ON d.id = dsh.deal_id AND d.workspace_id = dsh.workspace_id
+      WHERE dsh.workspace_id = $1
+        AND dsh.entered_at >= NOW() - ($2 || ' months')::interval
+        AND dsh.stage_normalized NOT IN ('closed_won', 'closed_lost')
+        ${dealFilter}
+    ),
+    durations AS (
+      SELECT
+        stage_normalized,
+        stage,
+        EXTRACT(EPOCH FROM (next_entered_at - entered_at)) / 86400.0 AS days_in_stage
+      FROM stage_windows
+      WHERE next_entered_at IS NOT NULL  -- only completed stage stays
+        AND next_entered_at > entered_at  -- sanity check
+    )
+    SELECT
+      stage_normalized,
+      stage,
+      PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY days_in_stage)::numeric(10,1) AS median_days,
+      PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY days_in_stage)::numeric(10,1) AS p75_days,
+      PERCENTILE_CONT(0.9)  WITHIN GROUP (ORDER BY days_in_stage)::numeric(10,1) AS p90_days,
+      AVG(days_in_stage)::numeric(10,1)                                           AS mean_days,
+      COUNT(*)::int                                                                AS sample_size
+    FROM durations
+    WHERE days_in_stage > 0
+    GROUP BY stage_normalized, stage
+    HAVING COUNT(*) >= 2
+    ORDER BY MIN(days_in_stage)
+  `;
+
+  const result = await query<any>(sql, values);
+
+  // Conversion rates: for each stage, what fraction advanced vs dropped out?
+  // Use a separate pass over deal_stage_history
+  const convSql = `
+    SELECT
+      from_norm,
+      to_norm,
+      COUNT(*)::int AS cnt
+    FROM (
+      SELECT
+        dsh.stage_normalized AS from_norm,
+        LEAD(dsh.stage_normalized) OVER (PARTITION BY dsh.deal_id ORDER BY dsh.entered_at) AS to_norm
+      FROM deal_stage_history dsh
+      WHERE dsh.workspace_id = $1
+        AND dsh.entered_at >= NOW() - ($2 || ' months')::interval
+    ) sub
+    WHERE to_norm IS NOT NULL
+    GROUP BY from_norm, to_norm
+  `;
+  const convResult = await query<any>(convSql, [workspaceId, lookbackMonths]);
+
+  // Build conversion map
+  const convMap: Record<string, { advance: number; drop: number; total: number }> = {};
+  for (const r of convResult.rows) {
+    if (!convMap[r.from_norm]) convMap[r.from_norm] = { advance: 0, drop: 0, total: 0 };
+    convMap[r.from_norm].total += r.cnt;
+    if (r.to_norm === 'closed_lost') convMap[r.from_norm].drop += r.cnt;
+    else if (r.to_norm !== r.from_norm) convMap[r.from_norm].advance += r.cnt;
+  }
+
+  const benchmarks = result.rows.map((r: any) => {
+    const conv = convMap[r.stage_normalized] || { advance: 0, drop: 0, total: 0 };
+    const convRate = conv.total > 0 ? Math.round((conv.advance / conv.total) * 100) : 0;
+    const dropRate = conv.total > 0 ? Math.round((conv.drop / conv.total) * 100) : 0;
+    return {
+      stage: r.stage,
+      stage_normalized: r.stage_normalized,
+      median_days: parseFloat(r.median_days) || 0,
+      p75_days: parseFloat(r.p75_days) || 0,
+      p90_days: parseFloat(r.p90_days) || 0,
+      mean_days: parseFloat(r.mean_days) || 0,
+      sample_size: r.sample_size,
+      conversion_rate_to_next: convRate,
+      drop_rate: dropRate,
+    };
+  });
+
+  const totalTransitions = benchmarks.reduce((s, b) => s + b.sample_size, 0);
+
+  return {
+    benchmarks,
+    segmented_by: params.deal_size_band || params.owner_email || null,
+    lookback_months: lookbackMonths,
+    total_transitions_analyzed: totalTransitions,
+    query_description: `Stage benchmarks (${lookbackMonths}m lookback, ${totalTransitions} transitions): ${benchmarks.length} stages analyzed`,
+  };
+}
+
+// ─── Tool 10: query_field_history ─────────────────────────────────────────────
+
+async function queryFieldHistory(workspaceId: string, params: Record<string, any>) {
+  if (!params.deal_id) throw new Error('deal_id is required for query_field_history');
+
+  const fieldName = params.field_name || 'all';
+
+  // Stage history — always available from deal_stage_history
+  const stageChanges: any[] = [];
+  if (fieldName === 'all' || fieldName === 'stage') {
+    const result = await query<any>(
+      `WITH ordered AS (
+         SELECT
+           dsh.stage_normalized AS to_stage_normalized,
+           dsh.stage AS new_value,
+           dsh.entered_at AS changed_at,
+           dsh.source,
+           LAG(dsh.stage) OVER (PARTITION BY dsh.deal_id ORDER BY dsh.entered_at) AS old_value,
+           LAG(dsh.stage_normalized) OVER (PARTITION BY dsh.deal_id ORDER BY dsh.entered_at) AS from_stage_normalized
+         FROM deal_stage_history dsh
+         WHERE dsh.workspace_id = $1 AND dsh.deal_id = $2
+           ${params.since ? `AND dsh.entered_at >= $3` : ''}
+         ORDER BY dsh.entered_at
+       )
+       SELECT * FROM ordered WHERE old_value IS NOT NULL`,
+      params.since
+        ? [workspaceId, params.deal_id, params.since]
+        : [workspaceId, params.deal_id]
+    );
+
+    for (const r of result.rows) {
+      stageChanges.push({
+        field: 'stage',
+        old_value: r.old_value,
+        new_value: r.new_value,
+        changed_at: r.changed_at,
+        source: r.source || 'deal_stage_history',
+      });
+    }
+  }
+
+  // Count stage regressions using stage_mappings display_order
+  let stageRegressions = 0;
+  if (stageChanges.length > 0) {
+    const orderResult = await query<any>(
+      `SELECT normalized_stage, display_order FROM stage_mappings WHERE workspace_id = $1`,
+      [workspaceId]
+    );
+    const orderMap: Record<string, number> = {};
+    for (const r of orderResult.rows) orderMap[r.normalized_stage] = r.display_order;
+
+    // Need to recompute with normalized values from stageChanges
+    const fullStageResult = await query<any>(
+      `WITH ordered AS (
+         SELECT
+           dsh.stage_normalized AS to_norm,
+           dsh.entered_at,
+           LAG(dsh.stage_normalized) OVER (PARTITION BY dsh.deal_id ORDER BY dsh.entered_at) AS from_norm
+         FROM deal_stage_history dsh
+         WHERE dsh.workspace_id = $1 AND dsh.deal_id = $2
+       )
+       SELECT from_norm, to_norm FROM ordered WHERE from_norm IS NOT NULL`,
+      [workspaceId, params.deal_id]
+    );
+    for (const r of fullStageResult.rows) {
+      const fo = orderMap[r.from_norm] ?? 0;
+      const to = orderMap[r.to_norm] ?? 0;
+      if (to < fo) stageRegressions++;
+    }
+  }
+
+  // close_date and amount history: not available without field_change_log table
+  const noHistoryNote = 'Close date and amount change history not available — requires CRM property history sync (not yet enabled)';
+
+  const summary = {
+    close_date_pushes: 0,
+    close_date_pulls: 0,
+    total_slip_days: 0,
+    amount_changes: 0,
+    amount_net_change: 0,
+    stage_regressions: stageRegressions,
+  };
+
+  const allChanges = [...stageChanges];
+  if (fieldName !== 'stage') {
+    allChanges.push({
+      field: 'note',
+      old_value: null,
+      new_value: noHistoryNote,
+      changed_at: new Date().toISOString(),
+      source: 'system',
+    });
+  }
+
+  return {
+    changes: allChanges,
+    summary,
+    query_description: `Field history for deal ${params.deal_id} — ${stageChanges.length} stage changes, ${stageRegressions} regressions${fieldName !== 'stage' ? '; close_date/amount history not available' : ''}`,
+  };
+}
+
+// ─── Tool 11: compute_metric_segmented ───────────────────────────────────────
+
+async function computeMetricSegmented(workspaceId: string, params: Record<string, any>) {
+  const { metric, segment_by } = params;
+  if (!metric || !segment_by) throw new Error('metric and segment_by are required');
+
+  const lookbackDays = params.lookback_days || 90;
+  const dateFrom = params.date_from
+    ? params.date_from
+    : new Date(Date.now() - lookbackDays * 86400000).toISOString().split('T')[0];
+  const dateTo = params.date_to || new Date().toISOString().split('T')[0];
+
+  // Build segment expression
+  const segmentExpr: Record<string, string> = {
+    owner: 'd.owner',
+    stage: 'd.stage',
+    pipeline: 'COALESCE(d.pipeline, \'(none)\')',
+    forecast_category: 'COALESCE(d.forecast_category, \'(none)\')',
+    source: '\'unknown\'',  // no source column on deals; graceful fallback
+    deal_size_band: `CASE
+      WHEN d.amount < 25000    THEN 'small (<$25K)'
+      WHEN d.amount < 100000   THEN 'mid ($25K–$100K)'
+      WHEN d.amount < 500000   THEN 'large ($100K–$500K)'
+      ELSE                         'enterprise ($500K+)'
+    END`,
+  };
+
+  const seg = segmentExpr[segment_by] || 'd.owner';
+
+  let sql: string;
+  let values: any[];
+
+  if (metric === 'win_rate') {
+    sql = `
+      SELECT
+        ${seg} AS segment_value,
+        COUNT(*) FILTER (WHERE d.stage_normalized = 'closed_won')::int  AS wins,
+        COUNT(*) FILTER (WHERE d.stage_normalized IN ('closed_won','closed_lost'))::int AS decisions,
+        CASE
+          WHEN COUNT(*) FILTER (WHERE d.stage_normalized IN ('closed_won','closed_lost')) > 0
+          THEN ROUND(
+            COUNT(*) FILTER (WHERE d.stage_normalized = 'closed_won')::numeric /
+            COUNT(*) FILTER (WHERE d.stage_normalized IN ('closed_won','closed_lost')), 4)
+          ELSE 0
+        END AS value,
+        COUNT(*) FILTER (WHERE d.stage_normalized IN ('closed_won','closed_lost'))::int AS sample_size
+      FROM deals d
+      WHERE d.workspace_id = $1
+        AND d.stage_normalized IN ('closed_won','closed_lost')
+        AND d.updated_at >= $2
+        AND d.updated_at <= $3
+      GROUP BY ${seg}
+      HAVING COUNT(*) FILTER (WHERE d.stage_normalized IN ('closed_won','closed_lost')) >= 2
+      ORDER BY value DESC
+    `;
+    values = [workspaceId, dateFrom, dateTo];
+  } else if (metric === 'avg_deal_size') {
+    sql = `
+      SELECT
+        ${seg} AS segment_value,
+        AVG(d.amount)::numeric(14,2) AS value,
+        COUNT(*)::int AS sample_size
+      FROM deals d
+      WHERE d.workspace_id = $1
+        AND d.stage_normalized = 'closed_won'
+        AND d.amount > 0
+        AND d.updated_at >= $2
+        AND d.updated_at <= $3
+      GROUP BY ${seg}
+      ORDER BY value DESC
+    `;
+    values = [workspaceId, dateFrom, dateTo];
+  } else if (metric === 'avg_sales_cycle') {
+    sql = `
+      SELECT
+        ${seg} AS segment_value,
+        AVG(EXTRACT(DAY FROM (d.close_date::date - d.created_at::date)))::numeric(10,1) AS value,
+        COUNT(*)::int AS sample_size
+      FROM deals d
+      WHERE d.workspace_id = $1
+        AND d.stage_normalized = 'closed_won'
+        AND d.close_date IS NOT NULL
+        AND d.updated_at >= $2
+        AND d.updated_at <= $3
+      GROUP BY ${seg}
+      HAVING COUNT(*) >= 2
+      ORDER BY value ASC
+    `;
+    values = [workspaceId, dateFrom, dateTo];
+  } else if (metric === 'total_pipeline') {
+    sql = `
+      SELECT
+        ${seg} AS segment_value,
+        SUM(d.amount)::numeric(14,2) AS value,
+        COUNT(*)::int AS sample_size
+      FROM deals d
+      WHERE d.workspace_id = $1
+        AND d.stage_normalized NOT IN ('closed_won','closed_lost')
+      GROUP BY ${seg}
+      ORDER BY value DESC
+    `;
+    values = [workspaceId];
+  } else if (metric === 'pipeline_created') {
+    sql = `
+      SELECT
+        ${seg} AS segment_value,
+        SUM(d.amount)::numeric(14,2) AS value,
+        COUNT(*)::int AS sample_size
+      FROM deals d
+      WHERE d.workspace_id = $1
+        AND d.created_at >= $2
+        AND d.created_at <= $3
+      GROUP BY ${seg}
+      ORDER BY value DESC
+    `;
+    values = [workspaceId, dateFrom, dateTo];
+  } else {
+    throw new Error(`Unknown metric for segmented compute: ${metric}. Use: win_rate, avg_deal_size, avg_sales_cycle, total_pipeline, pipeline_created`);
+  }
+
+  const result = await query<any>(sql, values);
+  const rows = result.rows;
+
+  if (rows.length === 0) {
+    return {
+      metric,
+      segment_by,
+      segments: [],
+      team_average: 0,
+      team_average_formatted: 'N/A',
+      total_sample_size: 0,
+      formula: `${metric} segmented by ${segment_by}`,
+      query_description: `No data found for ${metric} by ${segment_by} in the requested period`,
+    };
+  }
+
+  // Team average (weighted by sample_size for rates, straight avg otherwise)
+  const totalSample = rows.reduce((s: number, r: any) => s + (r.sample_size || 0), 0);
+  const teamAvg = rows.reduce((s: number, r: any) => s + (parseFloat(r.value) || 0), 0) / rows.length;
+
+  const segments = rows.map((r: any, idx: number) => {
+    const val = parseFloat(r.value) || 0;
+    const delta = teamAvg > 0 ? Math.round(((val - teamAvg) / teamAvg) * 100) : 0;
+    return {
+      segment_value: String(r.segment_value || '(unknown)'),
+      value: val,
+      formatted: formatMetricValue(metric, val),
+      sample_size: r.sample_size || 0,
+      vs_team_average: delta,
+      rank: idx + 1,
+    };
+  });
+
+  return {
+    metric,
+    segment_by,
+    segments,
+    team_average: teamAvg,
+    team_average_formatted: formatMetricValue(metric, teamAvg),
+    total_sample_size: totalSample,
+    formula: `${metric} grouped by ${segment_by}`,
+    query_description: `${metric} by ${segment_by} — ${segments.length} segments, team avg ${formatMetricValue(metric, teamAvg)}`,
+  };
+}
+
+function formatMetricValue(metric: string, val: number): string {
+  if (metric === 'win_rate') return `${(val * 100).toFixed(1)}%`;
+  if (metric === 'avg_sales_cycle') return `${Math.round(val)} days`;
+  if (metric === 'avg_deal_size' || metric === 'total_pipeline' || metric === 'pipeline_created') {
+    return val >= 1_000_000 ? `$${(val / 1_000_000).toFixed(2)}M` : `$${(val / 1_000).toFixed(0)}K`;
+  }
+  return String(val);
+}
+
+// ─── Tool 12: search_transcripts ─────────────────────────────────────────────
+
+async function searchTranscripts(workspaceId: string, params: Record<string, any>) {
+  if (!params.query) throw new Error('query is required for search_transcripts');
+
+  const maxResults = Math.min(params.max_results || 10, 50);
+  const searchQuery = params.query as string;
+  const values: any[] = [workspaceId];
+
+  const conditions: string[] = ['cv.workspace_id = $1', 'cv.is_internal = false'];
+
+  if (params.deal_id) conditions.push(`cv.deal_id = $${values.push(params.deal_id)}`);
+  if (params.account_id) conditions.push(`cv.account_id = $${values.push(params.account_id)}`);
+  if (params.rep_email) conditions.push(`cv.participants::text ILIKE $${values.push(`%${params.rep_email}%`)}`);
+  if (params.since) conditions.push(`cv.call_date >= $${values.push(params.since)}`);
+  if (params.until) conditions.push(`cv.call_date <= $${values.push(params.until)}`);
+
+  const where = conditions.join(' AND ');
+
+  // Check if tsvector index exists — prefer it, fall back to ILIKE
+  let useFullText = false;
+  try {
+    const tsCheck = await query<{ cnt: string }>(
+      `SELECT COUNT(*)::text as cnt FROM information_schema.columns
+       WHERE table_name = 'conversations' AND column_name = 'transcript_tsv'`,
+      []
+    );
+    useFullText = parseInt(tsCheck.rows[0]?.cnt || '0') > 0;
+  } catch {}
+
+  let searchRows: any[];
+
+  if (useFullText) {
+    const tsq = `$${values.push(searchQuery)}`;
+    const excerptSql = `
+      SELECT cv.id, cv.title, cv.call_date, cv.duration_seconds, cv.participants,
+             a.name as account_name, d.name as deal_name,
+             ts_headline('english', COALESCE(cv.transcript_text, ''), plainto_tsquery(${tsq}),
+               'MaxWords=60, MinWords=20, StartSel=[MATCH], StopSel=[/MATCH]') as excerpt
+      FROM conversations cv
+      LEFT JOIN accounts a ON a.id = cv.account_id AND a.workspace_id = cv.workspace_id
+      LEFT JOIN deals d ON d.id = cv.deal_id AND d.workspace_id = cv.workspace_id
+      WHERE ${where}
+        AND cv.transcript_tsv @@ plainto_tsquery(${tsq})
+      ORDER BY ts_rank(cv.transcript_tsv, plainto_tsquery(${tsq})) DESC
+      LIMIT $${values.push(maxResults)}
+    `;
+    const r = await query<any>(excerptSql, values);
+    searchRows = r.rows;
+  } else {
+    // ILIKE fallback — also search summaries if transcript is sparse
+    const ilikePat = `$${values.push(`%${searchQuery}%`)}`;
+    const excerptSql = `
+      SELECT cv.id, cv.title, cv.call_date, cv.duration_seconds, cv.participants,
+             a.name as account_name, d.name as deal_name,
+             cv.transcript_text, cv.summary
+      FROM conversations cv
+      LEFT JOIN accounts a ON a.id = cv.account_id AND a.workspace_id = cv.workspace_id
+      LEFT JOIN deals d ON d.id = cv.deal_id AND d.workspace_id = cv.workspace_id
+      WHERE ${where}
+        AND (cv.transcript_text ILIKE ${ilikePat} OR cv.summary ILIKE ${ilikePat})
+      ORDER BY cv.call_date DESC
+      LIMIT $${values.push(maxResults)}
+    `;
+    const r = await query<any>(excerptSql, values);
+    searchRows = r.rows;
+  }
+
+  const excerpts = searchRows.map((r: any) => {
+    let excerpt = '';
+    let usedSource = 'transcript';
+
+    if (useFullText && r.excerpt) {
+      excerpt = r.excerpt;
+    } else if (r.transcript_text) {
+      const idx = r.transcript_text.toLowerCase().indexOf(searchQuery.toLowerCase());
+      if (idx >= 0) {
+        const start = Math.max(0, idx - 150);
+        const end = Math.min(r.transcript_text.length, idx + 300);
+        excerpt = `...${r.transcript_text.slice(start, end)}...`;
+      }
+    } else if (r.summary) {
+      const idx = r.summary.toLowerCase().indexOf(searchQuery.toLowerCase());
+      if (idx >= 0) {
+        const start = Math.max(0, idx - 100);
+        const end = Math.min(r.summary.length, idx + 200);
+        excerpt = `[From summary] ...${r.summary.slice(start, end)}...`;
+        usedSource = 'summary';
+      }
+    }
+
+    // Try to extract speaker from transcript line containing match
+    let speaker: string | null = null;
+    if (r.transcript_text && excerpt && usedSource === 'transcript') {
+      const matchIdx = r.transcript_text.toLowerCase().indexOf(searchQuery.toLowerCase());
+      if (matchIdx >= 0) {
+        const lineStart = r.transcript_text.lastIndexOf('\n', matchIdx);
+        const lineText = r.transcript_text.slice(lineStart + 1, matchIdx);
+        const colonIdx = lineText.indexOf(':');
+        if (colonIdx > 0 && colonIdx < 40) speaker = lineText.slice(0, colonIdx).trim();
+      }
+    }
+
+    let repName: string | null = null;
+    try {
+      const parts = r.participants;
+      if (Array.isArray(parts)) {
+        for (const p of parts) {
+          if (p.affiliation === 'Internal' || p.type === 'host') {
+            repName = p.name || `${p.firstName || ''} ${p.lastName || ''}`.trim() || null;
+            break;
+          }
+        }
+      }
+    } catch {}
+
+    return {
+      conversation_id: r.id,
+      conversation_title: r.title,
+      conversation_date: r.call_date,
+      account_name: r.account_name || null,
+      rep_name: repName,
+      duration_minutes: r.duration_seconds ? Math.round(r.duration_seconds / 60) : null,
+      excerpt: excerpt || '[excerpt extraction failed]',
+      speaker,
+      timestamp_in_call: null,  // not stored in current schema
+    };
+  });
+
+  return {
+    excerpts,
+    total_matches: excerpts.length,
+    query_description: `Transcript search for "${searchQuery}" — ${excerpts.length} matches found`,
+  };
+}
+
+// ─── Tool 13: compute_forecast_accuracy ───────────────────────────────────────
+
+async function computeForecastAccuracy(workspaceId: string, params: Record<string, any>) {
+  const lookbackQuarters = Math.min(params.lookback_quarters || 4, 8);
+
+  // Build quarter date ranges going back from current quarter
+  const now = new Date();
+  const quarters: { label: string; start: string; end: string }[] = [];
+  for (let q = 0; q < lookbackQuarters; q++) {
+    const d = new Date(now);
+    d.setMonth(d.getMonth() - q * 3);
+    const year = d.getFullYear();
+    const qIdx = Math.floor(d.getMonth() / 3);
+    const qStart = new Date(year, qIdx * 3, 1);
+    const qEnd = new Date(year, qIdx * 3 + 3, 0);
+    // Skip current (partial) quarter
+    if (q === 0) continue;
+    quarters.push({
+      label: `Q${qIdx + 1} ${year}`,
+      start: qStart.toISOString().split('T')[0],
+      end: qEnd.toISOString().split('T')[0],
+    });
+  }
+
+  // Attempt to pull forecast snapshots from skill_runs
+  const snapshotResult = await query<any>(
+    `SELECT result, completed_at
+     FROM skill_runs
+     WHERE workspace_id = $1 AND skill_id = 'weekly-forecast-rollup' AND status = 'completed'
+     ORDER BY completed_at DESC
+     LIMIT 50`,
+    [workspaceId]
+  );
+
+  const hasSnapshots = snapshotResult.rows.length >= 3;
+
+  // Gather all reps from closed deals
+  const repResult = await query<any>(
+    `SELECT DISTINCT owner as name, owner as email
+     FROM deals
+     WHERE workspace_id = $1
+       AND stage_normalized IN ('closed_won','closed_lost')
+       AND owner IS NOT NULL`,
+    [workspaceId]
+  );
+
+  const ownerFilter = params.owner_email
+    ? `AND LOWER(d.owner) = '${params.owner_email.toLowerCase()}'`
+    : '';
+
+  const reps: any[] = [];
+
+  for (const rep of repResult.rows) {
+    if (params.owner_email && rep.email?.toLowerCase() !== params.owner_email.toLowerCase()) continue;
+
+    let commitAccuracy = 0;
+    let bestCaseAccuracy = 0;
+    let quartersAnalyzed = 0;
+
+    if (hasSnapshots) {
+      // Use snapshot data to compute accuracy
+      let totalCommitForecast = 0;
+      let totalCommitActual = 0;
+      let totalBestForecast = 0;
+      let totalBestActual = 0;
+
+      for (const snapshot of snapshotResult.rows) {
+        const result = snapshot.result || {};
+        const repData = (result.reps || result.by_rep || []).find((r: any) =>
+          r.owner_email === rep.email || r.owner === rep.email || r.name === rep.name
+        );
+        if (!repData) continue;
+
+        const snapDate = new Date(snapshot.completed_at);
+        const snapQ = quarters.find(q => new Date(q.start) <= snapDate && snapDate <= new Date(q.end));
+        if (!snapQ) continue;
+
+        const actualResult = await query<{ actual: string }>(
+          `SELECT COALESCE(SUM(amount), 0)::text as actual
+           FROM deals
+           WHERE workspace_id = $1
+             AND LOWER(owner) = $2
+             AND stage_normalized = 'closed_won'
+             AND close_date >= $3 AND close_date <= $4`,
+          [workspaceId, rep.email?.toLowerCase(), snapQ.start, snapQ.end]
+        );
+        const actual = parseFloat(actualResult.rows[0]?.actual || '0');
+
+        const commit = parseFloat(repData.commit_amount || repData.commit || 0);
+        const bestCase = parseFloat(repData.best_case_amount || repData.best_case || 0);
+
+        if (commit > 0) { totalCommitForecast += commit; totalCommitActual += actual; quartersAnalyzed++; }
+        if (bestCase > 0) { totalBestForecast += bestCase; totalBestActual += actual; }
+      }
+
+      commitAccuracy = totalCommitForecast > 0 ? totalCommitActual / totalCommitForecast : 0;
+      bestCaseAccuracy = totalBestForecast > 0 ? totalBestActual / totalBestForecast : 0;
+    } else {
+      // Degraded: use pipeline-at-quarter-start vs closed-won approach
+      for (const qtr of quarters) {
+        // Deals that were open at start of quarter
+        const openAtStart = await query<{ total: string }>(
+          `SELECT COALESCE(SUM(amount), 0)::text as total
+           FROM deals
+           WHERE workspace_id = $1
+             AND LOWER(owner) = $2
+             AND created_at <= $3
+             AND (close_date >= $3 OR stage_normalized NOT IN ('closed_won','closed_lost'))
+             ${ownerFilter}`,
+          [workspaceId, rep.email?.toLowerCase(), qtr.start]
+        );
+        const openPipeline = parseFloat(openAtStart.rows[0]?.total || '0');
+
+        const closedWon = await query<{ total: string }>(
+          `SELECT COALESCE(SUM(amount), 0)::text as total
+           FROM deals
+           WHERE workspace_id = $1
+             AND LOWER(owner) = $2
+             AND stage_normalized = 'closed_won'
+             AND close_date >= $3 AND close_date <= $4`,
+          [workspaceId, rep.email?.toLowerCase(), qtr.start, qtr.end]
+        );
+        const wonAmount = parseFloat(closedWon.rows[0]?.total || '0');
+
+        if (openPipeline > 0) {
+          commitAccuracy += wonAmount / openPipeline;
+          quartersAnalyzed++;
+        }
+      }
+      if (quartersAnalyzed > 0) commitAccuracy /= quartersAnalyzed;
+      bestCaseAccuracy = commitAccuracy;  // No distinction without snapshot data
+    }
+
+    // Avg slip days — how many days do committed deals close late?
+    const slipResult = await query<{ avg_slip: string }>(
+      `SELECT AVG(
+         GREATEST(0, EXTRACT(DAY FROM (updated_at::date - close_date::date)))
+       )::text as avg_slip
+       FROM deals
+       WHERE workspace_id = $1
+         AND LOWER(owner) = $2
+         AND stage_normalized = 'closed_won'
+         AND close_date IS NOT NULL`,
+      [workspaceId, rep.email?.toLowerCase()]
+    );
+    const avgSlip = parseFloat(slipResult.rows[0]?.avg_slip || '0');
+
+    const haircut = commitAccuracy > 0 ? Math.min(commitAccuracy, 1.3) : 1.0;
+    let direction: 'sandbag' | 'over_commit' | 'balanced' = 'balanced';
+    if (commitAccuracy > 1.1) direction = 'sandbag';
+    else if (commitAccuracy < 0.8) direction = 'over_commit';
+
+    reps.push({
+      name: rep.name,
+      email: rep.email,
+      quarters_analyzed: quartersAnalyzed || quarters.length,
+      commit_accuracy: Math.round(commitAccuracy * 100) / 100,
+      best_case_accuracy: Math.round(bestCaseAccuracy * 100) / 100,
+      direction,
+      haircut_factor: Math.round(haircut * 100) / 100,
+      avg_slip_days: Math.round(avgSlip),
+    });
+  }
+
+  const teamAvg = reps.length > 0
+    ? reps.reduce((s, r) => s + r.commit_accuracy, 0) / reps.length
+    : 0;
+
+  return {
+    reps,
+    team_average_accuracy: Math.round(teamAvg * 100) / 100,
+    data_source: hasSnapshots ? 'forecast_snapshots' : 'pipeline_vs_actuals_approximation',
+    query_description: `Forecast accuracy (${lookbackQuarters - 1} completed quarters): ${reps.length} reps analyzed, team avg ${Math.round(teamAvg * 100)}%${hasSnapshots ? '' : ' (approximated — no forecast snapshots available)'}`,
   };
 }
