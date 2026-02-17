@@ -202,6 +202,13 @@ You have tools that query the company's live data. When someone asks a question,
 
 8. PRIOR TOOL RESULTS IN CONTEXT ARE FROM PREVIOUS QUESTIONS — NOT YOUR CURRENT DATA. Each new question starts fresh. All 7 tools are always available. Never say "I don't have access to X in the data provided" or "the data shows only Y" — that refers to a past question. Call a tool.
 
+9. FORECASTS AND QUARTERLY NUMBERS: For any question about Q1/Q2/Q3/Q4 forecast, quarterly pipeline, quarterly revenue, or forecast categories (commit/best case):
+   - ALWAYS call get_skill_evidence with skill_id="weekly-forecast-rollup" first.
+   - THEN call query_deals with close_date_from and close_date_to set to the quarter's date range.
+   - Q1 = Jan 1 – Mar 31. Q2 = Apr 1 – Jun 30. Q3 = Jul 1 – Sep 30. Q4 = Oct 1 – Dec 31.
+   - Use the current year unless the user specifies otherwise.
+   - Never say "I don't have Q1 data" — you have deal close dates and the forecast rollup skill.
+
 Today's date is ${new Date().toISOString().split('T')[0]}.`;
 
 // ─── Response types ───────────────────────────────────────────────────────────
@@ -271,18 +278,30 @@ export async function runPandoraAgent(
 
     // Done — model produced its answer
     if (response.stopReason === 'end_turn' || !response.toolCalls?.length) {
-      // Guard: if this is the very first iteration and no tools have been called,
-      // the agent answered from conversation history instead of live data.
-      // Push a nudge and let the loop continue — one free pass to force a tool call.
-      if (i === 0 && toolTrace.length === 0) {
+      // Guard: if no tools have been called yet, the agent is answering from context
+      // instead of live data. Give it up to 2 nudges before accepting the answer.
+      if (toolTrace.length === 0 && i < 2) {
         messages.push({
           role: 'assistant',
           content: response.content || '',
         });
-        messages.push({
-          role: 'user',
-          content: '[You answered without calling any tools. For any question about deals, pipeline, forecast, conversations, or reps you must query live data first. Call the appropriate tool now.]',
-        });
+
+        // Build a targeted nudge based on question content
+        let nudge = '[You answered without calling any tools. You must query live data before responding.';
+        if (/\bQ[1-4]\b|quarter|forecast|commit|best.?case/i.test(message)) {
+          nudge += ' For forecast questions: call get_skill_evidence with skill_id="weekly-forecast-rollup", then call query_deals with close_date_from and close_date_to for the relevant quarter.';
+        } else if (/\bdeal|pipeline|stage|close|won|lost/i.test(message)) {
+          nudge += ' Call query_deals to retrieve live pipeline data.';
+        } else if (/\bcall|meeting|conversation|objection|competi/i.test(message)) {
+          nudge += ' Call query_conversations to get live call data.';
+        } else if (/\brep|account.exec|AE|quota|attainment/i.test(message)) {
+          nudge += ' Call get_skill_evidence with skill_id="rep-scorecard" or query_deals filtered by owner.';
+        } else {
+          nudge += ' Call the appropriate tool from the 7 available tools.';
+        }
+        nudge += ']';
+
+        messages.push({ role: 'user', content: nudge });
         continue;
       }
 
