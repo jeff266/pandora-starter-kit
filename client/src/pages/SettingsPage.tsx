@@ -2360,11 +2360,35 @@ function WsPipelineStagesSection() {
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                             <div style={{ width: 8, height: 8, borderRadius: 4, background: isWon ? colors.green : isLost ? colors.red : borderColor, flexShrink: 0 }} />
                             {s.raw_stage}
-                            {hasNormMismatch && <span title="Stage name suggests different normalization" style={{ fontSize: 10, color: colors.yellow, marginLeft: 4 }}>⚠</span>}
+                            {hasNormMismatch && <span title="Stage name suggests 'closed_won' but normalization differs. Fix in the dropdown →" style={{ fontSize: 12, color: colors.yellow, marginLeft: 4, cursor: 'help' }}>⚠</span>}
                           </div>
                         </td>
                         <td style={{ padding: '10px 10px' }}>
-                          <span style={{ fontSize: 11, fontFamily: fonts.mono, color: colors.textMuted, background: colors.surface, padding: '2px 6px', borderRadius: 3 }}>{s.stage_normalized}</span>
+                          <select
+                            value={s.stage_normalized || ''}
+                            onChange={(e) => {
+                              const newNorm = e.target.value;
+                              const newStages = [...stages];
+                              newStages[s._idx] = { ...newStages[s._idx], stage_normalized: newNorm };
+                              setStages(newStages);
+                              const overrides: Record<string, string> = {};
+                              newStages.forEach(st => { if (st.stage_normalized) overrides[st.raw_stage] = st.stage_normalized; });
+                              api.patch('/workspace-config', {
+                                section: 'pipelines',
+                                data: { stage_normalizations: overrides },
+                              }).catch(() => {});
+                            }}
+                            style={{
+                              fontSize: 11, fontFamily: fonts.mono,
+                              color: colors.text, background: colors.surface,
+                              border: `1px solid ${colors.border}`, borderRadius: 3,
+                              padding: '2px 6px', cursor: 'pointer', outline: 'none',
+                            }}
+                          >
+                            {['awareness', 'qualification', 'evaluation', 'decision', 'proposal', 'negotiation', 'closed_won', 'closed_lost'].map(v => (
+                              <option key={v} value={v}>{v}</option>
+                            ))}
+                          </select>
                         </td>
                         <td style={{ padding: '10px 10px', fontSize: 13, fontFamily: fonts.mono, color: colors.textSecondary }}>{s.deal_count}</td>
                         <td style={{ padding: '10px 10px', fontSize: 13, fontFamily: fonts.mono, color: s.total_amount === 0 ? colors.textMuted : colors.textSecondary }}>
@@ -2378,7 +2402,9 @@ function WsPipelineStagesSection() {
                         <td style={{ padding: '10px 10px' }}>
                           {isWon ? <span style={wsBadge(colors.green, colors.greenSoft)}>Won</span>
                             : isLost ? (
-                              <WsToggle on={!s.is_excluded_from_win_rate} onChange={() => toggleExclusion(s._idx, 'is_excluded_from_win_rate')} />
+                              <div style={s.stage_normalized !== 'closed_won' ? { pointerEvents: 'none', opacity: 0.4 } : {}}>
+                                <WsToggle on={!s.is_excluded_from_win_rate} onChange={() => toggleExclusion(s._idx, 'is_excluded_from_win_rate')} />
+                              </div>
                             ) : s.is_open ? (
                               <span style={{ fontSize: 11, color: colors.textMuted }}>—</span>
                             ) : null}
