@@ -67,6 +67,7 @@ import slackEventsRouter from './routes/slack-events.js';
 import slackInteractionsRouter from './routes/slack-interactions.js';
 import analysisRouter from './routes/analysis.js';
 import userAuthRouter from './routes/user-auth.js';
+import consultantRouter from './routes/consultant.js';
 import membersRouter from './routes/members.js';
 import dealIntelligenceRouter from './routes/deal-intelligence.js';
 import chatRouter from './routes/chat.js';
@@ -170,6 +171,8 @@ app.use("/api/slack/events", slackEventsRouter);
 app.use("/api/slack/interactions", slackInteractionsRouter);
 
 app.use("/api/auth", userAuthRouter);
+
+app.use("/api/consultant", consultantRouter);
 
 app.use("/api/workspaces", workspacesRouter);
 

@@ -5,6 +5,7 @@ import { colors, fonts } from '../styles/theme';
 import { formatCurrency, formatTimeAgo } from '../lib/format';
 import Skeleton from '../components/Skeleton';
 import SectionErrorBoundary from '../components/SectionErrorBoundary';
+import { useDemoMode } from '../contexts/DemoModeContext';
 
 interface ActionsSummary {
   open_total: number;
@@ -90,6 +91,7 @@ const snoozeDurations = [
 
 export default function Actions() {
   const navigate = useNavigate();
+  const { anon } = useDemoMode();
   const [summary, setSummary] = useState<ActionsSummary | null>(null);
   const [actions, setActions] = useState<Action[]>([]);
   const [loading, setLoading] = useState(true);
@@ -276,7 +278,7 @@ export default function Actions() {
           />
           <SummaryCard
             label="Total Impact at Risk"
-            value={formatCurrency(Number(summary?.total_impact_at_risk) || 0)}
+            value={formatCurrency(anon.amount(Number(summary?.total_impact_at_risk) || 0))}
             sub={<span style={{ fontSize: 11, color: colors.textMuted }}>{filtered.filter(a => a.target_deal_id).length} deals affected</span>}
           />
           <SummaryCard
@@ -378,7 +380,7 @@ export default function Actions() {
           options={[['all', 'All Types'], ...types.map(t => [t, t.replace(/_/g, ' ')])]} />
 
         <SelectFilter value={repFilter} onChange={setRepFilter}
-          options={[['all', 'All Reps'], ...reps.map(r => [r, r.split('@')[0]])]} />
+          options={[['all', 'All Reps'], ...reps.map(r => [r, anon.email(r).split('@')[0]])]} />
 
         <SelectFilter value={skillFilter} onChange={setSkillFilter}
           options={[['all', 'All Skills'], ...skills.map(s => [s, s.replace(/-/g, ' ')])]} />
@@ -469,7 +471,7 @@ export default function Actions() {
                   }} />
                   <div style={{ minWidth: 0, overflow: 'hidden' }}>
                     <span style={{ fontSize: 13, fontWeight: 500, color: colors.text, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {action.title}
+                      {anon.text(action.title)}
                     </span>
                     <p style={{ fontSize: 11, color: colors.textMuted, marginTop: 1 }}>
                       {action.action_type.replace(/_/g, ' ')} &middot; {action.source_skill}
@@ -484,13 +486,13 @@ export default function Actions() {
                       }
                     }}
                   >
-                    {dealName || '--'}
+                    {dealName ? anon.deal(dealName) : '--'}
                   </span>
                   <span style={{ fontSize: 12, color: colors.textMuted }}>
-                    {action.owner_email?.split('@')[0] || '--'}
+                    {action.owner_email ? anon.email(action.owner_email).split('@')[0] : '--'}
                   </span>
                   <span style={{ fontSize: 12, fontFamily: fonts.mono, color: colors.text, textAlign: 'right' }}>
-                    {action.impact_amount ? formatCurrency(Number(action.impact_amount)) : '--'}
+                    {action.impact_amount ? formatCurrency(anon.amount(Number(action.impact_amount))) : '--'}
                   </span>
                   <span style={{ fontSize: 11, color: colors.textMuted }}>{action.urgency_label || '--'}</span>
                   <span style={{ fontSize: 11, color: colors.textMuted }}>{formatTimeAgo(action.created_at)}</span>
@@ -570,6 +572,7 @@ function ActionPanel({ action, onClose, onExecute, onReject, onSnooze, onReopen,
   onRetry: (id: string) => void;
   navigate: (path: string) => void;
 }) {
+  const { anon } = useDemoMode();
   const [rejectReason, setRejectReason] = useState('');
   const [showReject, setShowReject] = useState(false);
   const [showSnooze, setShowSnooze] = useState(false);
@@ -614,7 +617,7 @@ function ActionPanel({ action, onClose, onExecute, onReject, onSnooze, onReopen,
               boxShadow: `0 0 8px ${sc}40`, flexShrink: 0,
             }} />
             <div style={{ minWidth: 0 }}>
-              <h3 style={{ fontSize: 16, fontWeight: 700, color: colors.text }}>{action.title}</h3>
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: colors.text }}>{anon.text(action.title)}</h3>
               <p style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
                 {action.action_type.replace(/_/g, ' ')} &middot; {action.source_skill}
               </p>
@@ -652,12 +655,12 @@ function ActionPanel({ action, onClose, onExecute, onReject, onSnooze, onReopen,
         {action.summary && (
           <div style={{ marginBottom: 16 }}>
             <SectionLabel>Summary</SectionLabel>
-            <p style={{ fontSize: 13, color: colors.textSecondary, lineHeight: 1.5 }}>{action.summary}</p>
+            <p style={{ fontSize: 13, color: colors.textSecondary, lineHeight: 1.5 }}>{anon.text(action.summary)}</p>
           </div>
         )}
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
-          <InfoCard label="Impact" value={action.impact_amount ? formatCurrency(Number(action.impact_amount)) : '--'} mono />
+          <InfoCard label="Impact" value={action.impact_amount ? formatCurrency(anon.amount(Number(action.impact_amount))) : '--'} mono />
           <InfoCard label="Urgency" value={action.urgency_label || '--'} />
         </div>
 
@@ -668,7 +671,7 @@ function ActionPanel({ action, onClose, onExecute, onReject, onSnooze, onReopen,
               style={{ fontSize: 13, color: colors.accent, cursor: action.target_deal_id ? 'pointer' : 'default' }}
               onClick={() => action.target_deal_id && navigate(`/deals/${action.target_deal_id}`)}
             >
-              {dealName}
+              {anon.deal(dealName)}
             </span>
           </div>
         )}
@@ -688,7 +691,7 @@ function ActionPanel({ action, onClose, onExecute, onReject, onSnooze, onReopen,
         {action.owner_email && (
           <div style={{ marginBottom: 16 }}>
             <SectionLabel>Owner</SectionLabel>
-            <span style={{ fontSize: 13, color: colors.textSecondary }}>{action.owner_email}</span>
+            <span style={{ fontSize: 13, color: colors.textSecondary }}>{anon.email(action.owner_email)}</span>
           </div>
         )}
 

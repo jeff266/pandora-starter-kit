@@ -5,6 +5,7 @@ import { colors, fonts } from '../styles/theme';
 import { formatDateTime, formatTimeAgo, severityColor, severityBg } from '../lib/format';
 import Skeleton from '../components/Skeleton';
 import SectionErrorBoundary from '../components/SectionErrorBoundary';
+import { useDemoMode } from '../contexts/DemoModeContext';
 
 function buildCrmUrl(crm: string | null, portalId: number | null, instanceUrl: string | null, sourceId: string | null, dealSource: string | null): string | null {
   if (!crm || !sourceId) return null;
@@ -20,6 +21,7 @@ function buildCrmUrl(crm: string | null, portalId: number | null, instanceUrl: s
 
 export default function InsightsPage() {
   const navigate = useNavigate();
+  const { anon } = useDemoMode();
   const [findings, setFindings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -221,7 +223,7 @@ export default function InsightsPage() {
                       }} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <p style={{ fontSize: 13, color: colors.text, lineHeight: 1.4 }}>
-                          {f.message}
+                          {anon.text(f.message)}
                         </p>
                         <div style={{ display: 'flex', gap: 12, marginTop: 3, fontSize: 11, color: colors.textMuted, alignItems: 'center' }}>
                           <span>{f.skill_id}</span>
@@ -235,7 +237,7 @@ export default function InsightsPage() {
                                 }}
                                 style={{ color: colors.accent, textDecoration: 'none', cursor: 'pointer' }}
                               >
-                                {f.deal_name}
+                                {anon.deal(f.deal_name)}
                               </a>
                               {(() => {
                                 const crmUrl = buildCrmUrl(crmInfo.crm, crmInfo.portalId ?? null, crmInfo.instanceUrl ?? null, f.deal_source_id, f.deal_source);
@@ -261,7 +263,7 @@ export default function InsightsPage() {
                               })()}
                             </span>
                           )}
-                          {f.owner_email && <span>{f.owner_email}</span>}
+                          {f.owner_email && <span>{anon.email(f.owner_email)}</span>}
                           <span>{f.found_at ? formatTimeAgo(f.found_at) : ''}</span>
                           {isResolved && <span style={{ color: colors.green }}>Resolved</span>}
                         </div>
@@ -331,7 +333,7 @@ export default function InsightsPage() {
                               Details
                             </p>
                             <p style={{ fontSize: 12, color: colors.text, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                              {f.message}
+                              {anon.text(f.message)}
                             </p>
                           </div>
 
@@ -347,7 +349,7 @@ export default function InsightsPage() {
                               {f.metric_context && (
                                 <div>
                                   <p style={{ fontSize: 10, fontWeight: 600, color: colors.textDim, marginBottom: 2, textTransform: 'uppercase' }}>Context</p>
-                                  <p style={{ fontSize: 12, color: colors.text, fontWeight: 500 }}>{f.metric_context}</p>
+                                  <p style={{ fontSize: 12, color: colors.text, fontWeight: 500 }}>{anon.text(f.metric_context)}</p>
                                 </div>
                               )}
                             </div>
@@ -365,7 +367,7 @@ export default function InsightsPage() {
                               {f.entity_name && (
                                 <div>
                                   <p style={{ fontSize: 10, fontWeight: 600, color: colors.textDim, marginBottom: 2, textTransform: 'uppercase' }}>Entity Name</p>
-                                  <p style={{ fontSize: 12, color: colors.text, fontWeight: 500 }}>{f.entity_name}</p>
+                                  <p style={{ fontSize: 12, color: colors.text, fontWeight: 500 }}>{anon.text(f.entity_name)}</p>
                                 </div>
                               )}
                             </div>

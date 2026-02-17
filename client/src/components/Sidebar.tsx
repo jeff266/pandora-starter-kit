@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useWorkspace, WorkspaceInfo } from '../context/WorkspaceContext';
+import { useDemoMode } from '../contexts/DemoModeContext';
 import { colors, fonts } from '../styles/theme';
 
 interface NavItem {
@@ -65,17 +66,20 @@ const sections: NavSection[] = [
 
 interface SidebarProps {
   badges: Record<string, number>;
+  showAllClients?: boolean;
 }
 
-export default function Sidebar({ badges }: SidebarProps) {
+export default function Sidebar({ badges, showAllClients }: SidebarProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, currentWorkspace, workspaces, selectWorkspace, logout } = useWorkspace();
+  const { isDemoMode, toggleDemoMode, anon } = useDemoMode();
   const [showWsDropdown, setShowWsDropdown] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
 
   const isActive = (path: string) => {
     if (path === '/') return location.pathname === '/';
+    if (path === '/portfolio') return location.pathname === '/portfolio';
     return location.pathname.startsWith(path);
   };
 
@@ -84,6 +88,8 @@ export default function Sidebar({ badges }: SidebarProps) {
     setShowWsDropdown(false);
     navigate('/');
   };
+
+  const displayWsName = (name: string) => anon.workspace(name);
 
   return (
     <aside style={{
@@ -110,7 +116,7 @@ export default function Sidebar({ badges }: SidebarProps) {
             fontSize: 13, fontWeight: 600, color: colors.text,
             whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
           }}>
-            {currentWorkspace?.name || 'Pandora'}
+            {displayWsName(currentWorkspace?.name || 'Pandora')}
           </div>
           <div style={{ fontSize: 11, color: colors.textMuted, textTransform: 'capitalize' }}>
             {currentWorkspace?.role || 'Workspace'}
@@ -147,7 +153,7 @@ export default function Sidebar({ badges }: SidebarProps) {
                 }}>
                   {ws.name.charAt(0).toUpperCase()}
                 </div>
-                <span style={{ flex: 1 }}>{ws.name}</span>
+                <span style={{ flex: 1 }}>{displayWsName(ws.name)}</span>
                 {ws.id === currentWorkspace?.id && <span style={{ fontSize: 12, color: colors.accent }}>{'\u2713'}</span>}
               </div>
             ))}
@@ -167,6 +173,27 @@ export default function Sidebar({ badges }: SidebarProps) {
       </div>
 
       <nav style={{ flex: 1, overflow: 'auto', padding: '8px 0' }}>
+        {showAllClients && workspaces.length > 1 && (
+          <div style={{ marginBottom: 4 }}>
+            <div
+              onClick={() => navigate('/portfolio')}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8, padding: '7px 14px', marginLeft: 2,
+                cursor: 'pointer', fontSize: 13,
+                color: isActive('/portfolio') ? colors.accent : colors.textSecondary,
+                background: isActive('/portfolio') ? colors.accentSoft : 'transparent',
+                borderLeft: isActive('/portfolio') ? `2px solid ${colors.accent}` : '2px solid transparent',
+                transition: 'background 0.1s',
+              }}
+              onMouseEnter={e => { if (!isActive('/portfolio')) e.currentTarget.style.background = colors.surfaceHover; }}
+              onMouseLeave={e => { if (!isActive('/portfolio')) e.currentTarget.style.background = 'transparent'; }}
+            >
+              <span style={{ fontSize: 14, width: 18, textAlign: 'center', opacity: 0.8 }}>{'\u25A3'}</span>
+              <span style={{ flex: 1, fontWeight: isActive('/portfolio') ? 600 : 400 }}>All Clients</span>
+            </div>
+            <div style={{ height: 1, background: colors.border, margin: '4px 14px' }} />
+          </div>
+        )}
         {sections.map((section, si) => (
           <div key={si} style={{ marginBottom: 4 }}>
             {section.title && (
@@ -206,6 +233,30 @@ export default function Sidebar({ badges }: SidebarProps) {
           </div>
         ))}
       </nav>
+
+      <div style={{ borderTop: `1px solid ${colors.border}`, padding: '10px 14px' }}>
+        <div
+          onClick={toggleDemoMode}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer',
+            padding: '6px 0',
+          }}
+        >
+          <span style={{ fontSize: 14 }}>{'\uD83C\uDFAD'}</span>
+          <span style={{ fontSize: 12, color: colors.textSecondary, flex: 1 }}>Demo Mode</span>
+          <div style={{
+            width: 32, height: 18, borderRadius: 9,
+            background: isDemoMode ? colors.purple : colors.surfaceHover,
+            position: 'relative', transition: 'background 0.2s',
+          }}>
+            <div style={{
+              width: 14, height: 14, borderRadius: '50%',
+              background: '#fff', position: 'absolute', top: 2,
+              left: isDemoMode ? 16 : 2, transition: 'left 0.2s',
+            }} />
+          </div>
+        </div>
+      </div>
 
       <div style={{
         padding: '12px 14px', borderTop: `1px solid ${colors.border}`,

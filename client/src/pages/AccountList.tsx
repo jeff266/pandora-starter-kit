@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import { formatCurrency, formatTimeAgo } from '../lib/format';
 import Skeleton from '../components/Skeleton';
+import { useDemoMode } from '../contexts/DemoModeContext';
 
 const PAGE_SIZE = 50;
 
@@ -25,6 +26,7 @@ type SortDir = 'asc' | 'desc';
 
 export default function AccountList() {
   const navigate = useNavigate();
+  const { anon } = useDemoMode();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -220,7 +222,7 @@ export default function AccountList() {
         )}
         {uniqueOwners.length > 0 && (
           <FilterSelect label="Owner" value={ownerFilter} onChange={setOwnerFilter}
-            options={[{ value: 'all', label: 'All' }, ...uniqueOwners.map(o => ({ value: o, label: o }))]} />
+            options={[{ value: 'all', label: 'All' }, ...uniqueOwners.map(o => ({ value: o, label: anon.person(o) }))]} />
         )}
         {hasFilters && (
           <button onClick={clearFilters} style={{
@@ -287,7 +289,7 @@ export default function AccountList() {
               onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
             >
               <div style={{ fontSize: 13, fontWeight: 500, color: colors.accent, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingRight: 8 }}>
-                {account.name || 'Unnamed'}
+                {anon.company(account.name || 'Unnamed')}
               </div>
               <div style={{ fontSize: 12, color: colors.textSecondary, fontFamily: fonts.mono, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {account.domain || '—'}
@@ -304,7 +306,7 @@ export default function AccountList() {
               )}
               {hasPipelineData && (
                 <div style={{ fontSize: 12, fontFamily: fonts.mono, color: colors.text }}>
-                  {account.total_pipeline ? formatCurrency(account.total_pipeline) : '—'}
+                  {account.total_pipeline ? formatCurrency(anon.amount(account.total_pipeline)) : '—'}
                 </div>
               )}
               {hasContactData && (

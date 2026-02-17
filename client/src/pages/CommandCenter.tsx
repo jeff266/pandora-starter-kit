@@ -9,6 +9,7 @@ import { SeverityDot } from '../components/shared';
 import QuotaBanner from '../components/QuotaBanner';
 import { useWorkspace } from '../context/WorkspaceContext';
 import SectionErrorBoundary from '../components/SectionErrorBoundary';
+import { useDemoMode } from '../contexts/DemoModeContext';
 
 interface Finding {
   id: string;
@@ -53,6 +54,7 @@ interface StageDeal {
 export default function CommandCenter() {
   const navigate = useNavigate();
   const { isAuthenticated, isLoading: authLoading } = useWorkspace();
+  const { anon } = useDemoMode();
   const [pipeline, setPipeline] = useState<any>(null);
   const [summary, setSummary] = useState<any>(null);
   const [findings, setFindings] = useState<Finding[]>([]);
@@ -269,8 +271,8 @@ export default function CommandCenter() {
       }}>
         <div style={{ fontWeight: 600, marginBottom: 6 }}>{d.stage}</div>
         <div style={{ color: colors.textSecondary }}>Deals: <span style={{ fontFamily: fonts.mono, color: colors.text }}>{d.deal_count}</span></div>
-        <div style={{ color: colors.textSecondary }}>Total: <span style={{ fontFamily: fonts.mono, color: colors.text }}>{formatCurrency(d.total_value)}</span></div>
-        <div style={{ color: colors.textSecondary }}>Weighted: <span style={{ fontFamily: fonts.mono, color: colors.text }}>{formatCurrency(d.weighted_value)}</span></div>
+        <div style={{ color: colors.textSecondary }}>Total: <span style={{ fontFamily: fonts.mono, color: colors.text }}>{formatCurrency(anon.amount(d.total_value))}</span></div>
+        <div style={{ color: colors.textSecondary }}>Weighted: <span style={{ fontFamily: fonts.mono, color: colors.text }}>{formatCurrency(anon.amount(d.weighted_value))}</span></div>
         {findingSummary && (
           <div style={{ marginTop: 4, fontSize: 11, color: colors.yellow }}>
             {findingSummary}
@@ -297,8 +299,8 @@ export default function CommandCenter() {
             Array.from({ length: 5 }).map((_, i) => <SkeletonCard key={i} height={100} />)
           ) : (
             <>
-              <MetricCard label="Total Pipeline" value={formatCurrency(totalPipeline)} />
-              <MetricCard label="Weighted Pipeline" value={formatCurrency(weightedPipeline)} />
+              <MetricCard label="Total Pipeline" value={formatCurrency(anon.amount(totalPipeline))} />
+              <MetricCard label="Weighted Pipeline" value={formatCurrency(anon.amount(weightedPipeline))} />
               <MetricCard
                 label="Coverage Ratio"
                 value={coverage != null ? `${Number(coverage).toFixed(1)}x` : '--'}
@@ -346,7 +348,7 @@ export default function CommandCenter() {
             <div>
               <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>Pipeline by Stage</h3>
               <p style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
-                {formatCurrency(totalPipeline)} total {'·'} {stageData.reduce((sum, s) => sum + s.deal_count, 0)} deals across {stageData.length} stages
+                {formatCurrency(anon.amount(totalPipeline))} total {'·'} {stageData.reduce((sum, s) => sum + s.deal_count, 0)} deals across {stageData.length} stages
               </p>
             </div>
             {availablePipelines.length > 1 && (
@@ -474,7 +476,7 @@ export default function CommandCenter() {
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
                     <div style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>
-                      {expandedStage} — {expandedStageDeals.length} deal{expandedStageDeals.length !== 1 ? 's' : ''} ({formatCurrency(expandedStageTotalValue)})
+                      {expandedStage} — {expandedStageDeals.length} deal{expandedStageDeals.length !== 1 ? 's' : ''} ({formatCurrency(anon.amount(expandedStageTotalValue))})
                     </div>
                   </div>
                   {expandedStageLoading ? (
@@ -503,16 +505,16 @@ export default function CommandCenter() {
                           onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                         >
                           <span style={{ fontSize: 12, fontWeight: 500, color: colors.accent, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {deal.name}
+                            {anon.deal(deal.name)}
                           </span>
                           {deal.amount != null && (
                             <span style={{ fontSize: 11, fontFamily: fonts.mono, color: colors.text, flexShrink: 0 }}>
-                              {formatCurrency(deal.amount)}
+                              {formatCurrency(anon.amount(deal.amount))}
                             </span>
                           )}
                           {deal.owner_name && (
                             <span style={{ fontSize: 11, color: colors.textSecondary, flexShrink: 0 }}>
-                              {deal.owner_name}
+                              {anon.person(deal.owner_name)}
                             </span>
                           )}
                           {deal.days_in_stage != null && (
@@ -571,7 +573,7 @@ export default function CommandCenter() {
                   onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                 >
                   <span style={{ fontSize: 12, fontWeight: 500, color: colors.text, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {row.owner}
+                    {anon.person(row.owner)}
                   </span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     {row.act > 0 && (
@@ -765,6 +767,7 @@ function FindingRow({ finding, onSnooze, onResolve, onNavigate }: {
   onResolve: (id: string) => void;
   onNavigate: (path: string) => void;
 }) {
+  const { anon } = useDemoMode();
   const [showSnooze, setShowSnooze] = useState(false);
   const snoozeRef = useRef<HTMLDivElement>(null);
   const f = finding;
@@ -806,13 +809,13 @@ function FindingRow({ finding, onSnooze, onResolve, onNavigate }: {
         <SeverityDot severity={f.severity as any} size={7} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <p style={{ fontSize: 13, color: colors.text, lineHeight: 1.4, marginBottom: 4 }}>
-            {f.message}
+            {anon.text(f.message)}
           </p>
           <div style={{ display: 'flex', gap: 12, fontSize: 11, color: colors.textMuted, flexWrap: 'wrap' }}>
             <span style={{ fontWeight: 500 }}>{f.skill_name || f.skill_id}</span>
-            {f.deal_name && <span style={{ color: colors.accent }}>{f.deal_name}</span>}
-            {f.account_name && <span>{f.account_name}</span>}
-            {(f.owner_name || f.owner_email) && <span>{f.owner_name || f.owner_email}</span>}
+            {f.deal_name && <span style={{ color: colors.accent }}>{anon.deal(f.deal_name)}</span>}
+            {f.account_name && <span>{anon.company(f.account_name)}</span>}
+            {(f.owner_name || f.owner_email) && <span>{f.owner_name ? anon.person(f.owner_name) : anon.email(f.owner_email!)}</span>}
             <span>{formatTimeAgo(f.found_at)}</span>
           </div>
         </div>

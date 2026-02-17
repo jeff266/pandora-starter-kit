@@ -1,6 +1,7 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, lazy, Suspense } from 'react';
 import { Routes, Route, useLocation } from 'react-router-dom';
 import { useWorkspace } from './context/WorkspaceContext';
+import { useDemoMode } from './contexts/DemoModeContext';
 import { setApiCredentials, api } from './lib/api';
 import Sidebar from './components/Sidebar';
 import TopBar from './components/TopBar';
@@ -24,10 +25,12 @@ import Actions from './pages/Actions';
 import Playbooks from './pages/Playbooks';
 import SettingsPage from './pages/SettingsPage';
 import ConnectorHealth from './pages/ConnectorHealth';
+import ConsultantDashboard from './pages/ConsultantDashboard';
 import { colors, fonts } from './styles/theme';
 
 const pageTitles: Record<string, string> = {
   '/': 'Command Center',
+  '/portfolio': 'All Clients',
   '/deals': 'Open Deals',
   '/accounts': 'Accounts',
   '/agents': 'Agents',
@@ -50,6 +53,25 @@ function getPageTitle(pathname: string): string {
   if (pathname.startsWith('/accounts/')) return 'Account Detail';
   if (pathname.match(/^\/skills\/[^/]+\/runs/)) return 'Skill Run History';
   return pageTitles[pathname] || 'Pandora';
+}
+
+function DemoModeBanner() {
+  const { isDemoMode } = useDemoMode();
+  if (!isDemoMode) return null;
+  return (
+    <div style={{
+      background: colors.purpleSoft,
+      color: colors.purple,
+      textAlign: 'center',
+      padding: '6px 16px',
+      fontSize: 12,
+      fontWeight: 500,
+      fontFamily: fonts.sans,
+      flexShrink: 0,
+    }}>
+      {'\uD83C\uDFAD'} Demo Mode — All names and values are anonymized
+    </div>
+  );
 }
 
 export default function App() {
@@ -136,15 +158,18 @@ export default function App() {
   }
 
   const title = getPageTitle(location.pathname);
+  const hasMultipleWorkspaces = workspaces.length > 1;
 
   return (
     <div style={{ display: 'flex', height: '100vh', background: colors.bg }}>
-      <Sidebar badges={badges} />
+      <Sidebar badges={badges} showAllClients={hasMultipleWorkspaces} />
       <main style={{ marginLeft: 220, flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <DemoModeBanner />
         <TopBar title={title} lastRefreshed={lastRefreshed} onRefresh={fetchBadges} />
         <div style={{ flex: 1, overflow: 'auto', padding: '24px 28px' }}>
           <Routes>
             <Route path="/" element={<CommandCenter />} />
+            <Route path="/portfolio" element={<ConsultantDashboard />} />
             <Route path="/deals" element={<DealList />} />
             <Route path="/deals/:dealId" element={<DealDetail />} />
             <Route path="/accounts" element={<AccountList />} />
@@ -193,7 +218,7 @@ export default function App() {
           onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.08)')}
           onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}
         >
-          💬
+          {'\uD83D\uDCAC'}
         </button>
       )}
       <ChatPanel

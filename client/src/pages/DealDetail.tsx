@@ -6,6 +6,7 @@ import { formatCurrency, formatDate, formatTimeAgo, severityColor } from '../lib
 import Skeleton from '../components/Skeleton';
 import SectionErrorBoundary from '../components/SectionErrorBoundary';
 import { DossierNarrative, AnalysisModal } from '../components/shared';
+import { useDemoMode } from '../contexts/DemoModeContext';
 
 const SEVERITY_LABELS: Record<string, string> = {
   act: 'Critical', watch: 'Warning', notable: 'Notable', info: 'Info',
@@ -87,6 +88,7 @@ function ExternalLinkIcon({ size = 12, color = 'currentColor' }: { size?: number
 export default function DealDetail() {
   const { dealId } = useParams<{ dealId: string }>();
   const navigate = useNavigate();
+  const { anon } = useDemoMode();
   const [dossier, setDossier] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -262,7 +264,7 @@ export default function DealDetail() {
         <span style={{ color: colors.textMuted }}>&gt;</span>
         <Link to="/deals" style={{ color: colors.accent, textDecoration: 'none' }}>Deals</Link>
         <span style={{ color: colors.textMuted }}>&gt;</span>
-        <span style={{ color: colors.textSecondary }}>{deal.name || 'Deal'}</span>
+        <span style={{ color: colors.textSecondary }}>{anon.deal(deal.name || 'Deal')}</span>
       </nav>
 
       {toast && (
@@ -289,11 +291,11 @@ export default function DealDetail() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div style={{ flex: 1 }}>
             <h2 style={{ fontSize: 17, fontWeight: 700, color: colors.text }}>
-              {deal.name || 'Unnamed Deal'}
+              {anon.deal(deal.name || 'Unnamed Deal')}
             </h2>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 6 }}>
               <span style={{ fontSize: 24, fontWeight: 700, fontFamily: fonts.mono, color: colors.text }}>
-                {formatCurrency(Number(deal.amount) || 0)}
+                {formatCurrency(anon.amount(Number(deal.amount) || 0))}
               </span>
               <span style={{
                 fontSize: 11,
@@ -316,14 +318,14 @@ export default function DealDetail() {
               )}
             </div>
             <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 12, color: colors.textMuted }}>
-              <span>Owner: {deal.owner_name || deal.owner_email || deal.owner || '--'}</span>
+              <span>Owner: {deal.owner_name ? anon.person(deal.owner_name) : deal.owner_email ? anon.email(deal.owner_email) : deal.owner ? anon.person(deal.owner) : '--'}</span>
               <span>Close: {deal.close_date ? formatDate(deal.close_date) : '--'}</span>
               {deal.account_name && (
                 <span
                   style={{ color: colors.accent, cursor: 'pointer' }}
                   onClick={() => deal.account_id && navigate(`/accounts/${deal.account_id}`)}
                 >
-                  {deal.account_name}
+                  {anon.company(deal.account_name)}
                 </span>
               )}
             </div>
@@ -474,7 +476,7 @@ export default function DealDetail() {
                 <div style={{ paddingLeft: 22, display: 'flex', flexDirection: 'column', gap: 4 }}>
                   {coverageGapsData.contacts_never_called.map((c: any, i: number) => (
                     <div key={i} style={{ fontSize: 12, color: colors.textSecondary }}>
-                      {c.name || c.email || 'Unknown'}
+                      {c.name ? anon.person(c.name) : c.email ? anon.email(c.email) : 'Unknown'}
                       {c.title && <span style={{ color: colors.textMuted }}> — {c.title}</span>}
                     </div>
                   ))}
@@ -520,7 +522,7 @@ export default function DealDetail() {
                       boxShadow: `0 0 6px ${severityColor(f.severity)}40`,
                     }} />
                     <div style={{ flex: 1 }}>
-                      <p style={{ fontSize: 13, color: colors.text }}>{f.message}</p>
+                      <p style={{ fontSize: 13, color: colors.text }}>{anon.text(f.message)}</p>
                       <div style={{ display: 'flex', gap: 8, marginTop: 4, alignItems: 'center' }}>
                         <span style={{
                           fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 3,
@@ -647,10 +649,10 @@ export default function DealDetail() {
                   </span>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <p style={{ fontSize: 12, color: colors.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {a.subject || a.type || 'Activity'}
+                      {anon.text(a.subject || a.type || 'Activity')}
                     </p>
                     <span style={{ fontSize: 11, color: colors.textMuted }}>
-                      {a.actor || ''} · {a.timestamp ? formatTimeAgo(a.timestamp) : ''}
+                      {a.actor ? anon.person(a.actor) : ''} · {a.timestamp ? formatTimeAgo(a.timestamp) : ''}
                     </span>
                   </div>
                 </div>
@@ -671,7 +673,7 @@ export default function DealDetail() {
                   <div key={i} style={{ padding: '8px 0', borderBottom: `1px solid ${colors.border}` }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <p style={{ fontSize: 13, fontWeight: 500, color: colors.text, flex: 1 }}>
-                        {c.title || 'Untitled conversation'}
+                        {anon.text(c.title || 'Untitled conversation')}
                       </p>
                       {lm && (
                         <span style={{
@@ -689,7 +691,7 @@ export default function DealDetail() {
                     </div>
                     {c.summary && (
                       <p style={{ fontSize: 12, color: colors.textSecondary, marginTop: 4, lineHeight: 1.4 }}>
-                        {c.summary.slice(0, 200)}{c.summary.length > 200 ? '...' : ''}
+                        {anon.text(c.summary.slice(0, 200))}{c.summary.length > 200 ? '...' : ''}
                       </p>
                     )}
                   </div>
@@ -718,11 +720,11 @@ export default function DealDetail() {
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       fontSize: 10, fontWeight: 600, color: colors.textSecondary, flexShrink: 0,
                     }}>
-                      {(c.name || c.email || '?').charAt(0).toUpperCase()}
+                      {(c.name ? anon.person(c.name) : c.email ? anon.email(c.email) : '?').charAt(0).toUpperCase()}
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <span style={{ fontSize: 12, fontWeight: 500, color: colors.text }}>
-                        {c.name || c.email || 'Unknown'}
+                        {c.name ? anon.person(c.name) : c.email ? anon.email(c.email) : 'Unknown'}
                       </span>
                       {c.title && <span style={{ fontSize: 11, color: colors.textMuted, display: 'block' }}>{c.title}</span>}
                       {c.last_activity_date && (
@@ -838,7 +840,7 @@ export default function DealDetail() {
                   borderRadius: 6,
                 }}>
                   <p style={{ fontSize: 13, lineHeight: 1.6, color: colors.text, margin: 0, marginBottom: 12, whiteSpace: 'pre-wrap' }}>
-                    {askAnswer.answer}
+                    {anon.text(askAnswer.answer)}
                   </p>
                   <div style={{ display: 'flex', gap: 16, fontSize: 11, color: colors.textMuted, fontFamily: fonts.mono }}>
                     {askAnswer.data_consulted && (

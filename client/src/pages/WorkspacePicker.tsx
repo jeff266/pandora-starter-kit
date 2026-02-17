@@ -2,10 +2,12 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { colors, fonts } from '../styles/theme';
+import { useDemoMode } from '../contexts/DemoModeContext';
 
 export default function WorkspacePicker() {
   const { workspaces, selectWorkspace } = useWorkspace();
   const navigate = useNavigate();
+  const { anon } = useDemoMode();
 
   const roleBadgeColor = (role: string) => {
     switch (role) {
@@ -30,10 +32,10 @@ export default function WorkspacePicker() {
               onMouseLeave={e => { e.currentTarget.style.borderColor = colors.border; }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
                 <div style={{ width: 32, height: 32, borderRadius: 6, background: colors.accent, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, color: '#fff', flexShrink: 0 }}>
-                  {ws.name.charAt(0).toUpperCase()}
+                  {anon.workspace(ws.name).charAt(0).toUpperCase()}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: colors.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ws.name}</div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: colors.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{anon.workspace(ws.name)}</div>
                   <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 4, background: `${roleBadgeColor(ws.role)}15`, color: roleBadgeColor(ws.role), textTransform: 'capitalize' }}>{ws.role}</span>
                 </div>
               </div>

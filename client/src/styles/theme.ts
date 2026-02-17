@@ -21,6 +21,7 @@ export const colors = {
   red: '#ef4444',
   redSoft: 'rgba(239,68,68,0.1)',
   purple: '#a78bfa',
+  purpleSoft: 'rgba(167,139,250,0.12)',
   orange: '#f97316',
 } as const;
 

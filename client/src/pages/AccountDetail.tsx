@@ -6,6 +6,7 @@ import { formatCurrency, formatDate, formatTimeAgo, severityColor } from '../lib
 import Skeleton from '../components/Skeleton';
 import SectionErrorBoundary from '../components/SectionErrorBoundary';
 import { DossierNarrative, AnalysisModal } from '../components/shared';
+import { useDemoMode } from '../contexts/DemoModeContext';
 
 const SEVERITY_LABELS: Record<string, string> = {
   act: 'Critical', watch: 'Warning', notable: 'Notable', info: 'Info',
@@ -92,6 +93,7 @@ function ExternalLinkIcon({ size = 12, color = 'currentColor' }: { size?: number
 export default function AccountDetail() {
   const { accountId } = useParams<{ accountId: string }>();
   const navigate = useNavigate();
+  const { anon } = useDemoMode();
   const [dossier, setDossier] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -259,7 +261,7 @@ export default function AccountDetail() {
         <span style={{ color: colors.textMuted }}>&gt;</span>
         <Link to="/accounts" style={{ color: colors.accent, textDecoration: 'none' }}>Accounts</Link>
         <span style={{ color: colors.textMuted }}>&gt;</span>
-        <span style={{ color: colors.textSecondary }}>{account.name || 'Account'}</span>
+        <span style={{ color: colors.textSecondary }}>{anon.company(account.name || 'Account')}</span>
       </nav>
 
       {toast && (
@@ -286,7 +288,7 @@ export default function AccountDetail() {
           <div style={{ flex: 1 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <h2 style={{ fontSize: 17, fontWeight: 700, color: colors.text }}>
-                {account.name || 'Unnamed Account'}
+                {anon.company(account.name || 'Unnamed Account')}
               </h2>
               {account.industry && (
                 <span style={{
@@ -310,13 +312,13 @@ export default function AccountDetail() {
             <div style={{ display: 'flex', gap: 16, marginTop: 6, fontSize: 12, color: colors.textMuted }}>
               {account.domain && <span>{account.domain}</span>}
               {account.employee_count && <span>{account.employee_count} employees</span>}
-              {account.annual_revenue && <span>Rev: {formatCurrency(Number(account.annual_revenue))}</span>}
-              {(account.owner_email || account.owner) && <span>Owner: {account.owner_email || account.owner}</span>}
+              {account.annual_revenue && <span>Rev: {formatCurrency(anon.amount(Number(account.annual_revenue)))}</span>}
+              {(account.owner_email || account.owner) && <span>Owner: {account.owner_email ? anon.email(account.owner_email) : anon.person(account.owner)}</span>}
             </div>
             <div style={{ display: 'flex', gap: 20, marginTop: 12 }}>
               <MiniStat label="Total Deals" value={String(rel.total_deals || deals.length)} />
-              <MiniStat label="Open Value" value={formatCurrency(Number(rel.open_value) || 0)} />
-              <MiniStat label="Won Value" value={formatCurrency(Number(rel.won_value) || 0)} />
+              <MiniStat label="Open Value" value={formatCurrency(anon.amount(Number(rel.open_value) || 0))} />
+              <MiniStat label="Won Value" value={formatCurrency(anon.amount(Number(rel.won_value) || 0))} />
             </div>
           </div>
 
@@ -513,7 +515,7 @@ export default function AccountDetail() {
                           boxShadow: `0 0 6px ${severityColor(f.severity)}40`,
                         }} />
                         <div style={{ flex: 1 }}>
-                          <p style={{ fontSize: 13, color: colors.text }}>{f.message}</p>
+                          <p style={{ fontSize: 13, color: colors.text }}>{anon.text(f.message)}</p>
                           <div style={{ display: 'flex', gap: 8, marginTop: 4, alignItems: 'center' }}>
                             <span style={{
                               fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 3,
@@ -605,13 +607,13 @@ export default function AccountDetail() {
                 return (
                   <div key={i} style={{ padding: '10px 0', borderBottom: `1px solid ${colors.border}` }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <p style={{ fontSize: 13, fontWeight: 500, color: colors.text, flex: 1 }}>{c.title || 'Untitled'}</p>
+                      <p style={{ fontSize: 13, fontWeight: 500, color: colors.text, flex: 1 }}>{anon.text(c.title || 'Untitled')}</p>
                       {c.deal_name && (
                         <span style={{
                           fontSize: 10, fontWeight: 500, padding: '1px 6px', borderRadius: 3,
                           background: colors.accentSoft, color: colors.accent,
                         }}>
-                          {c.deal_name}
+                          {anon.deal(c.deal_name)}
                         </span>
                       )}
                       {lm && (
@@ -630,7 +632,7 @@ export default function AccountDetail() {
                     </div>
                     {c.summary && (
                       <p style={{ fontSize: 12, color: colors.textSecondary, marginTop: 4, lineHeight: 1.4 }}>
-                        {c.summary.length > 100 ? c.summary.slice(0, 100) + '…' : c.summary}
+                        {anon.text(c.summary.length > 100 ? c.summary.slice(0, 100) + '…' : c.summary)}
                       </p>
                     )}
                   </div>
@@ -651,7 +653,7 @@ export default function AccountDetail() {
                     {a.timestamp ? formatTimeAgo(a.timestamp) : ''}
                   </span>
                   <p style={{ fontSize: 12, color: colors.text, flex: 1 }}>
-                    {a.subject || a.type || 'Activity'}
+                    {anon.text(a.subject || a.type || 'Activity')}
                   </p>
                 </div>
               ))
@@ -675,10 +677,10 @@ export default function AccountDetail() {
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       fontSize: 10, fontWeight: 600, color: colors.textSecondary, flexShrink: 0,
                     }}>
-                      {(c.name || c.email || '?').charAt(0).toUpperCase()}
+                      {(c.name ? anon.person(c.name) : c.email ? anon.email(c.email) : '?').charAt(0).toUpperCase()}
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <span style={{ fontSize: 12, color: colors.text }}>{c.name || c.email || 'Unknown'}</span>
+                      <span style={{ fontSize: 12, color: colors.text }}>{c.name ? anon.person(c.name) : c.email ? anon.email(c.email) : 'Unknown'}</span>
                       {c.title && <span style={{ fontSize: 11, color: colors.textMuted, display: 'block' }}>{c.title}</span>}
                       {c.role && <span style={{ fontSize: 10, color: colors.textDim }}>{c.role}</span>}
                     </div>
@@ -706,8 +708,8 @@ export default function AccountDetail() {
             <DetailRow label="Domain" value={account.domain} />
             <DetailRow label="Industry" value={account.industry} />
             <DetailRow label="Employees" value={account.employee_count ? String(account.employee_count) : undefined} />
-            <DetailRow label="Revenue" value={account.annual_revenue ? formatCurrency(Number(account.annual_revenue)) : undefined} />
-            <DetailRow label="Owner" value={account.owner_email || account.owner} />
+            <DetailRow label="Revenue" value={account.annual_revenue ? formatCurrency(anon.amount(Number(account.annual_revenue))) : undefined} />
+            <DetailRow label="Owner" value={account.owner_email ? anon.email(account.owner_email) : account.owner ? anon.person(account.owner) : undefined} />
             <DetailRow label="Created" value={account.created_at ? formatDate(account.created_at) : undefined} />
           </Card>
 
@@ -768,7 +770,7 @@ export default function AccountDetail() {
                   borderRadius: 6,
                 }}>
                   <p style={{ fontSize: 13, lineHeight: 1.6, color: colors.text, margin: 0, marginBottom: 12, whiteSpace: 'pre-wrap' }}>
-                    {askAnswer.answer}
+                    {anon.text(askAnswer.answer)}
                   </p>
                   <div style={{ display: 'flex', gap: 16, fontSize: 11, color: colors.textMuted, fontFamily: fonts.mono }}>
                     {askAnswer.data_consulted && (
@@ -806,6 +808,7 @@ function Card({ title, count, children }: { title: string; count?: number; child
 }
 
 function DealRow({ deal, muted }: { deal: any; muted?: boolean }) {
+  const { anon } = useDemoMode();
   const findingsCount = deal.findings_count || 0;
   const criticalCount = deal.critical_findings_count || 0;
   return (
@@ -818,7 +821,7 @@ function DealRow({ deal, muted }: { deal: any; muted?: boolean }) {
     >
       <div style={{ flex: 1, minWidth: 0 }}>
         <Link to={`/deals/${deal.id}`} style={{ fontSize: 13, fontWeight: 500, color: colors.accent, textDecoration: 'none' }}>
-          {deal.name || 'Unnamed'}
+          {anon.deal(deal.name || 'Unnamed')}
         </Link>
         <div style={{ display: 'flex', gap: 8, marginTop: 2, fontSize: 11, color: colors.textMuted, alignItems: 'center' }}>
           <span style={{ textTransform: 'capitalize' }}>{(deal.stage_normalized || deal.stage || '').replace(/_/g, ' ')}</span>
@@ -846,7 +849,7 @@ function DealRow({ deal, muted }: { deal: any; muted?: boolean }) {
           </span>
         )}
         <span style={{ fontSize: 13, fontFamily: fonts.mono, color: colors.text }}>
-          {formatCurrency(Number(deal.amount) || 0)}
+          {formatCurrency(anon.amount(Number(deal.amount) || 0))}
         </span>
       </div>
     </div>

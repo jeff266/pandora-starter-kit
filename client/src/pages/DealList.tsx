@@ -5,6 +5,7 @@ import { colors, fonts } from '../styles/theme';
 import { formatCurrency, formatDate, formatTimeAgo, severityColor } from '../lib/format';
 import Skeleton from '../components/Skeleton';
 import QuotaBanner from '../components/QuotaBanner';
+import { useDemoMode } from '../contexts/DemoModeContext';
 
 const PAGE_SIZE = 50;
 
@@ -62,6 +63,7 @@ const DEFAULT_SORT: Record<SortField, SortDir> = {
 
 export default function DealList() {
   const navigate = useNavigate();
+  const { anon } = useDemoMode();
   const [searchParams] = useSearchParams();
   const [allDeals, setAllDeals] = useState<DealRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -298,7 +300,7 @@ export default function DealList() {
           <h2 style={{ fontSize: 16, fontWeight: 600, color: colors.text, margin: 0 }}>Deals</h2>
           <p style={{ fontSize: 12, color: colors.textMuted, margin: '4px 0 0' }}>
             Showing {filtered.length} of {allDeals.length} deals
-            {filtered.length > 0 && ` · ${formatCurrency(totalPipeline)} pipeline`}
+            {filtered.length > 0 && ` · ${formatCurrency(anon.amount(totalPipeline))} pipeline`}
           </p>
         </div>
       </div>
@@ -324,7 +326,7 @@ export default function DealList() {
         <FilterSelect label="Stage" value={stageFilter} onChange={setStageFilter}
           options={[{ value: 'all', label: 'All' }, ...uniqueStages.map(s => ({ value: s, label: s.replace(/_/g, ' ') }))]} />
         <FilterSelect label="Owner" value={ownerFilter} onChange={setOwnerFilter}
-          options={[{ value: 'all', label: 'All' }, ...uniqueOwners.map(o => ({ value: o, label: shortName(o) }))]} />
+          options={[{ value: 'all', label: 'All' }, ...uniqueOwners.map(o => ({ value: o, label: anon.person(shortName(o)) }))]} />
         <FilterSelect label="Health" value={healthFilter} onChange={setHealthFilter}
           options={[{ value: 'all', label: 'All' }, ...['A','B','C','D','F'].map(g => ({ value: g, label: g }))]} />
         <FilterSelect label="Status" value={statusFilter} onChange={setStatusFilter}
@@ -412,7 +414,7 @@ export default function DealList() {
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, overflow: 'hidden', paddingRight: 8 }}>
                   <span style={{ fontSize: 13, fontWeight: 500, color: colors.accent, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {deal.name || 'Unnamed'}
+                    {anon.deal(deal.name || 'Unnamed')}
                   </span>
                   {(() => {
                     const crmUrl = buildCrmUrl(crmInfo.crm, crmInfo.portalId ?? null, crmInfo.instanceUrl ?? null, deal.source_id, deal.source);
@@ -438,7 +440,7 @@ export default function DealList() {
                   })()}
                 </div>
                 <div style={{ fontSize: 13, fontFamily: fonts.mono, color: colors.text }}>
-                  {deal.amount ? formatCurrency(deal.amount) : '—'}
+                  {deal.amount ? formatCurrency(anon.amount(deal.amount)) : '—'}
                 </div>
                 <div>
                   <span style={{
@@ -449,7 +451,7 @@ export default function DealList() {
                   </span>
                 </div>
                 <div style={{ fontSize: 12, color: colors.textSecondary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {shortName(deal.owner) || '—'}
+                  {anon.person(shortName(deal.owner)) || '—'}
                 </div>
                 <div style={{ fontSize: 12, color: pastDue ? colors.red : colors.textMuted, fontWeight: pastDue ? 600 : 400 }}>
                   {deal.close_date ? formatDate(deal.close_date) : '—'}

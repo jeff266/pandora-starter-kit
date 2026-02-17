@@ -3,6 +3,7 @@ import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import Skeleton from '../components/Skeleton';
 import SectionErrorBoundary from '../components/SectionErrorBoundary';
+import { useDemoMode } from '../contexts/DemoModeContext';
 
 interface PlaybookStats {
   totalRuns: number;
@@ -384,6 +385,7 @@ function PlaybookDetailView({ detail, detailLoading, runningId, onBack, onRunNow
   onRunNow: (id: string) => void;
   toast: { message: string; type: 'success' | 'error' } | null;
 }) {
+  const { anon } = useDemoMode();
   const pb = detail.playbook;
   const lastStatus = pb.lastRun?.status || 'completed';
   const dot = statusDot[lastStatus] || statusDot.completed;
@@ -563,7 +565,7 @@ function PlaybookDetailView({ detail, detailLoading, runningId, onBack, onRunNow
                     width: 6, height: 6, borderRadius: '50%', background: sc, flexShrink: 0,
                   }} />
                   <span style={{ fontSize: 12, color: colors.text, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {f.title}
+                    {anon.text(f.title)}
                   </span>
                   <span style={{ fontSize: 10, color: colors.textDim, flexShrink: 0 }}>
                     {f.source_skill.replace(/-/g, ' ')}
