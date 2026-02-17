@@ -7,6 +7,7 @@
 
 import { query } from '../db.js';
 import { getToolFilters } from '../config/tool-filter-injector.js';
+import { callLLM } from '../utils/llm-router.js';
 
 // ─── Tool result types ───────────────────────────────────────────────────────
 
@@ -200,6 +201,12 @@ export async function executeDataTool(
         result = await computeInqtrCloseRate(workspaceId, params); break;
       case 'compute_competitive_rates':
         result = await computeCompetitiveRates(workspaceId, params); break;
+      case 'compute_activity_trend':
+        result = await computeActivityTrend(workspaceId, params); break;
+      case 'compute_shrink_rate':
+        result = await computeShrinkRate(workspaceId, params); break;
+      case 'infer_contact_role':
+        result = await inferContactRole(workspaceId, params); break;
       default:
         throw new Error(`Unknown tool: ${toolName}`);
     }
@@ -2972,5 +2979,335 @@ async function computeCompetitiveRates(workspaceId: string, params: Record<strin
   } catch (err: any) {
     console.error('[compute_competitive_rates] error:', err?.message);
     return { competitors: [], overall: { deals_with_any_competitor: 0, deals_without_competitor: 0, win_rate_competitive: 0, win_rate_non_competitive: 0 }, query_description: `compute_competitive_rates failed: ${err?.message}`, error: err?.message };
+  }
+}
+
+// ─── Tool 18: compute_activity_trend ─────────────────────────────────────────
+
+export async function computeActivityTrend(workspaceId: string, params: Record<string, any>): Promise<any> {
+  try {
+    const dealId: string = params.deal_id;
+    if (!dealId) return { error: 'deal_id is required' };
+    const lookbackDays: number = params.lookback_days ?? 30;
+
+    // Build 4 complete ISO week buckets going backwards from today
+    const now = new Date();
+    // Monday of current week
+    const dayOfWeek = now.getDay(); // 0=Sun
+    const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    const thisMonday = new Date(now);
+    thisMonday.setDate(now.getDate() + mondayOffset);
+    thisMonday.setHours(0, 0, 0, 0);
+
+    const weeks: { label: string; from: Date; to: Date }[] = [];
+    for (let i = 3; i >= 0; i--) {
+      const weekStart = new Date(thisMonday);
+      weekStart.setDate(thisMonday.getDate() - i * 7);
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekStart.getDate() + 7);
+      const isoWeek = weekStart.toISOString().split('T')[0];
+      weeks.push({ label: isoWeek, from: weekStart, to: weekEnd });
+    }
+
+    const windowStart = new Date(now);
+    windowStart.setDate(now.getDate() - lookbackDays);
+
+    const actResult = await query<any>(
+      `SELECT timestamp, activity_type
+       FROM activities
+       WHERE workspace_id = $1
+         AND deal_id = $2
+         AND timestamp >= $3
+       ORDER BY timestamp DESC`,
+      [workspaceId, dealId, windowStart.toISOString()]
+    ).catch(() => ({ rows: [] as any[] }));
+
+    const rows = actResult.rows;
+
+    // Count per week
+    const weekly_counts = weeks.map(w => ({
+      week: w.label,
+      count: rows.filter(r => {
+        const t = new Date(r.timestamp);
+        return t >= w.from && t < w.to;
+      }).length,
+    }));
+
+    // Linear regression: x = week index 0..3, y = count
+    const n = weekly_counts.length;
+    const xs = weekly_counts.map((_, i) => i);
+    const ys = weekly_counts.map(w => w.count);
+    const sumX = xs.reduce((a, b) => a + b, 0);
+    const sumY = ys.reduce((a, b) => a + b, 0);
+    const sumXY = xs.reduce((a, x, i) => a + x * ys[i], 0);
+    const sumX2 = xs.reduce((a, x) => a + x * x, 0);
+    const denom = n * sumX2 - sumX * sumX;
+    const slope = denom !== 0 ? (n * sumXY - sumX * sumY) / denom : 0;
+
+    let trend: 'increasing' | 'flat' | 'declining';
+    const nonZeroWeeks = weekly_counts.filter(w => w.count > 0).length;
+    if (nonZeroWeeks <= 1) {
+      trend = rows.length === 0 ? 'declining' : 'flat';
+    } else if (slope > 0.3) {
+      trend = 'increasing';
+    } else if (slope < -0.3) {
+      trend = 'declining';
+    } else {
+      trend = 'flat';
+    }
+
+    const totalActivities = rows.length;
+    const lastActivityDate = rows.length > 0 ? new Date(rows[0].timestamp).toISOString().split('T')[0] : null;
+    const daysSinceLast = lastActivityDate
+      ? Math.floor((now.getTime() - new Date(lastActivityDate).getTime()) / 86400000)
+      : null;
+
+    return {
+      deal_id: dealId,
+      lookback_days: lookbackDays,
+      trend,
+      slope: Math.round(slope * 100) / 100,
+      weekly_counts,
+      total_activities: totalActivities,
+      last_activity_date: lastActivityDate,
+      days_since_last_activity: daysSinceLast,
+      query_description: `Activity trend for deal ${dealId} over ${lookbackDays} days: ${totalActivities} activities, trend=${trend} (slope=${Math.round(slope * 100) / 100})`,
+    };
+  } catch (err: any) {
+    console.error('[compute_activity_trend] error:', err?.message);
+    return { error: err?.message, deal_id: params.deal_id, trend: 'flat', slope: 0, weekly_counts: [], total_activities: 0, last_activity_date: null, days_since_last_activity: null };
+  }
+}
+
+// ─── Tool 19: compute_shrink_rate ────────────────────────────────────────────
+
+export async function computeShrinkRate(workspaceId: string, params: Record<string, any>): Promise<any> {
+  try {
+    const lookbackQuarters: number = params.lookback_quarters ?? 4;
+    const segmentBy: string | null = params.segment_by ?? null;
+    const since = new Date();
+    since.setMonth(since.getMonth() - lookbackQuarters * 3);
+
+    // Check if field_change_log exists
+    const tableExists = await query<any>(
+      `SELECT EXISTS (
+         SELECT 1 FROM information_schema.tables
+         WHERE table_schema = 'public' AND table_name = 'field_change_log'
+       ) AS exists`,
+      []
+    ).catch(() => ({ rows: [{ exists: false }] }));
+
+    if (!tableExists.rows[0]?.exists) {
+      return {
+        avg_shrink_pct: 10,
+        median_shrink_pct: 10,
+        pct_deals_shrunk: null,
+        pct_deals_grew: null,
+        n_deals: 0,
+        confidence: 'low',
+        by_segment: null,
+        note: 'Insufficient history — using 10% estimate (field_change_log not yet populated)',
+      };
+    }
+
+    // Find closed-won deals with amount history
+    const dealHistory = await query<any>(
+      `SELECT d.id as deal_id,
+              d.amount::numeric as final_amount,
+              d.owner,
+              d.amount::numeric as amount,
+              fcl.first_amount
+       FROM deals d
+       JOIN (
+         SELECT deal_id,
+                first_value(new_value::numeric) OVER (PARTITION BY deal_id ORDER BY changed_at ASC) AS first_amount
+         FROM field_change_log
+         WHERE workspace_id = $1
+           AND field_name = 'amount'
+           AND new_value IS NOT NULL
+           AND new_value ~ '^[0-9]+(\.[0-9]+)?$'
+       ) fcl ON fcl.deal_id = d.id
+       WHERE d.workspace_id = $1
+         AND d.stage_normalized = 'closed_won'
+         AND d.close_date >= $2
+         AND d.amount IS NOT NULL AND d.amount > 0
+       GROUP BY d.id, d.amount, d.owner, fcl.first_amount`,
+      [workspaceId, since.toISOString()]
+    ).catch(() => ({ rows: [] as any[] }));
+
+    const rows = dealHistory.rows;
+
+    if (rows.length === 0) {
+      return {
+        avg_shrink_pct: 10,
+        median_shrink_pct: 10,
+        pct_deals_shrunk: null,
+        pct_deals_grew: null,
+        n_deals: 0,
+        confidence: 'low',
+        by_segment: null,
+        note: 'Insufficient history — using 10% estimate (no closed-won deals with amount change history found)',
+      };
+    }
+
+    const shrinkPcts = rows.map((r: any) => {
+      const first = parseFloat(r.first_amount);
+      const final = parseFloat(r.final_amount);
+      return first > 0 ? ((first - final) / first) * 100 : 0;
+    });
+
+    shrinkPcts.sort((a, b) => a - b);
+    const avg = shrinkPcts.reduce((s, v) => s + v, 0) / shrinkPcts.length;
+    const mid = Math.floor(shrinkPcts.length / 2);
+    const median = shrinkPcts.length % 2 === 0
+      ? (shrinkPcts[mid - 1] + shrinkPcts[mid]) / 2
+      : shrinkPcts[mid];
+    const shrunk = shrinkPcts.filter(v => v > 0).length;
+    const grew = shrinkPcts.filter(v => v < 0).length;
+    const n = shrinkPcts.length;
+    const confidence: 'high' | 'medium' | 'low' = n >= 20 ? 'high' : n >= 5 ? 'medium' : 'low';
+
+    let by_segment: any[] | null = null;
+    if (segmentBy === 'rep') {
+      const repMap = new Map<string, number[]>();
+      rows.forEach((r: any, i: number) => {
+        const rep = r.owner || 'unknown';
+        if (!repMap.has(rep)) repMap.set(rep, []);
+        repMap.get(rep)!.push(shrinkPcts[i]);
+      });
+      by_segment = Array.from(repMap.entries()).map(([rep, vals]) => ({
+        segment: rep,
+        shrink_pct: Math.round(vals.reduce((s, v) => s + v, 0) / vals.length * 10) / 10,
+        n: vals.length,
+      }));
+    } else if (segmentBy === 'deal_size') {
+      const bands = [
+        { label: 'small', min: 0, max: 25000 },
+        { label: 'mid', min: 25000, max: 100000 },
+        { label: 'large', min: 100000, max: 500000 },
+        { label: 'enterprise', min: 500000, max: Infinity },
+      ];
+      by_segment = bands.map(band => {
+        const bandRows = rows.filter((r: any) => {
+          const amt = parseFloat(r.final_amount);
+          return amt >= band.min && amt < band.max;
+        });
+        if (!bandRows.length) return null;
+        const vals = bandRows.map((r: any, idx: number) => shrinkPcts[rows.indexOf(r)]);
+        return {
+          segment: band.label,
+          shrink_pct: Math.round(vals.reduce((s, v) => s + v, 0) / vals.length * 10) / 10,
+          n: vals.length,
+        };
+      }).filter(Boolean);
+    }
+
+    return {
+      avg_shrink_pct: Math.round(avg * 10) / 10,
+      median_shrink_pct: Math.round(median * 10) / 10,
+      pct_deals_shrunk: Math.round((shrunk / n) * 100),
+      pct_deals_grew: Math.round((grew / n) * 100),
+      n_deals: n,
+      confidence,
+      by_segment,
+      note: `Based on ${n} closed-won deals with amount change history (last ${lookbackQuarters} quarters)`,
+      query_description: `Shrink rate: avg=${Math.round(avg * 10) / 10}%, median=${Math.round(median * 10) / 10}%, n=${n}, confidence=${confidence}`,
+    };
+  } catch (err: any) {
+    console.error('[compute_shrink_rate] error:', err?.message);
+    return { avg_shrink_pct: 10, median_shrink_pct: 10, pct_deals_shrunk: null, pct_deals_grew: null, n_deals: 0, confidence: 'low', by_segment: null, note: 'Insufficient history — using 10% estimate', error: err?.message };
+  }
+}
+
+// ─── Tool 20: infer_contact_role ─────────────────────────────────────────────
+
+export async function inferContactRole(workspaceId: string, params: Record<string, any>): Promise<any> {
+  const contactId: string = params.contact_id;
+  if (!contactId) return { error: 'contact_id is required', inferred_role: 'unknown', confidence: 0 };
+
+  try {
+    // 1. Fetch contact
+    const contactRes = await query<any>(
+      `SELECT id, first_name, last_name, title, seniority, email
+       FROM contacts
+       WHERE workspace_id = $1 AND id = $2
+       LIMIT 1`,
+      [workspaceId, contactId]
+    ).catch(() => ({ rows: [] as any[] }));
+
+    const contact = contactRes.rows[0];
+    if (!contact) return { contact_id: contactId, inferred_role: 'unknown', confidence: 0, title_signal: 'Contact not found', participation_signal: 'No data', calls_analyzed: 0 };
+
+    // 2. Fetch conversation participation (last 180 days)
+    const convRes = await query<any>(
+      `SELECT cv.title, cv.summary, cv.call_date,
+              d.stage as deal_stage
+       FROM conversations cv
+       LEFT JOIN deals d ON d.id = cv.deal_id AND d.workspace_id = $1
+       WHERE cv.workspace_id = $1
+         AND cv.call_date >= NOW() - INTERVAL '180 days'
+         AND (
+           cv.participants::text ILIKE $2
+           OR cv.external_participants::text ILIKE $2
+         )
+       ORDER BY cv.call_date DESC
+       LIMIT 5`,
+      [workspaceId, `%${contact.email || contact.first_name || ''}%`]
+    ).catch(() => ({ rows: [] as any[] }));
+
+    const convs = convRes.rows;
+    const callsAnalyzed = convs.length;
+    const topics = convs.map(c => (c.title || c.summary || '').substring(0, 100)).filter(Boolean).join('; ');
+    const stages = [...new Set(convs.map(c => c.deal_stage).filter(Boolean))].join(', ');
+
+    const hasTitle = !!(contact.title && contact.title.trim());
+
+    // 3. Build DeepSeek prompt
+    const promptText = `Infer the buying role of this B2B contact.
+
+Contact: title="${contact.title || 'unknown'}", seniority="${contact.seniority || 'unknown'}"
+Appeared in ${callsAnalyzed} calls in the last 180 days.${topics ? ` Recent call topics: ${topics}.` : ''}${stages ? ` Calls during deal stages: ${stages}.` : ''}
+
+Classify their most likely role as exactly one of:
+economic_buyer | champion | technical_evaluator | coach | blocker | unknown
+
+Respond ONLY with JSON:
+{"role":"...","confidence":0.0,"title_signal":"one sentence","participation_signal":"one sentence"}`;
+
+    // 4. Call DeepSeek via classify capability
+    const llmRes = await callLLM(workspaceId, 'classify', {
+      messages: [{ role: 'user', content: promptText }],
+      maxTokens: 200,
+      temperature: 0,
+    });
+
+    let parsed: any = null;
+    try {
+      const jsonMatch = llmRes.content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) parsed = JSON.parse(jsonMatch[0]);
+    } catch {
+      // fall through to default
+    }
+
+    const validRoles = ['economic_buyer', 'champion', 'technical_evaluator', 'coach', 'blocker', 'unknown'];
+    const rawRole = parsed?.role || 'unknown';
+    const inferredRole = validRoles.includes(rawRole) ? rawRole : 'unknown';
+    let confidence = typeof parsed?.confidence === 'number' ? parsed.confidence : 0.5;
+
+    // Cap confidence if no title available
+    if (!hasTitle) confidence = Math.min(confidence, 0.4);
+    if (callsAnalyzed === 0) confidence = Math.min(confidence, 0.5);
+
+    return {
+      contact_id: contactId,
+      inferred_role: inferredRole,
+      confidence: Math.round(confidence * 100) / 100,
+      title_signal: parsed?.title_signal || `Title: ${contact.title || 'not provided'}`,
+      participation_signal: parsed?.participation_signal || `Participated in ${callsAnalyzed} calls`,
+      calls_analyzed: callsAnalyzed,
+    };
+  } catch (err: any) {
+    console.error('[infer_contact_role] error:', err?.message);
+    return { contact_id: contactId, inferred_role: 'unknown', confidence: 0, title_signal: 'Inference failed', participation_signal: err?.message, calls_analyzed: 0, error: true };
   }
 }
