@@ -1,0 +1,178 @@
+Test Plan — Replit                                     
+                                                         
+  Assumes server is running (npm run dev or equivalent)  
+  and you have a WORKSPACE_ID env var or know your       
+  workspace ID.                                          
+                                                         
+  ---                                                    
+  0. Setup                                               
+                                                         
+  WID=<your-workspace-id>                                
+  BASE=http://localhost:3000/api/workspaces/$WID         
+  TOKEN=<your-token>                                     
+  H="Authorization: Bearer $TOKEN"                       
+                                                         
+  ---                                                    
+  1. Config API endpoints (new in 91e3e80)               
+                                                         
+  # Stages — should return distinct stages from deals    
+  table                                                  
+  curl -s -H "$H" "$BASE/workspace-config/stages" | jq   
+  '.[] | {stage, excluded}'                              
+                                                         
+  # Owners — distinct deal owners with exclusion status  
+  curl -s -H "$H" "$BASE/workspace-config/owners" | jq   
+  '.[0:5]'                                               
+                                                         
+  # Field options — standard + custom deal fields        
+  curl -s -H "$H" "$BASE/workspace-config/field-options" 
+  | jq '.fields | keys'                                  
+                                                         
+  # Preview filter — should show before/after win rate   
+  impact                                                 
+  curl -s -X POST -H "$H" -H "Content-Type:              
+  application/json" \                                    
+    -d '{"metric":"win_rate","rule":{"field":"stage","ope
+  rator":"neq","value":"New Lead"}}' \                   
+    "$BASE/workspace-config/preview-filter" | jq         
+  '{before, after, delta}'                               
+                                                         
+  Pass: All 4 return 200 with non-empty data. Preview    
+  shows two different numbers.                           
+                                                         
+  ---                                                    
+  2. Tool filter injection — baseline                    
+                                                         
+  # Win rate before any filters                          
+  curl -s -X POST -H "$H" -H "Content-Type:              
+  application/json" \                                    
+    -d '{"message":"What is our win                      
+  rate?","channel_id":"test","thread_id":"t1"}' \        
+    "$BASE/chat/message" | jq '.answer'                  
+                                                         
+  Note the win rate number. Then add a stage exclusion:  
+                                                         
+  # Add a global stage exclusion                         
+  curl -s -X PATCH -H "$H" -H "Content-Type:             
+  application/json" \                                    
+    -d '{"global":{"exclude_stages":["New                
+  Lead"],"exclude_pipelines":[],"exclude_deal_types":[],"
+  custom_exclusions":[]}}' \                             
+    "$BASE/workspace-config/tool_filters" | jq '.ok'     
+                                                         
+  # Ask win rate again — number should change if any     
+  deals are in "New Lead"                                
+  curl -s -X POST -H "$H" -H "Content-Type:              
+  application/json" \                                    
+    -d '{"message":"What is our win                      
+  rate?","channel_id":"test","thread_id":"t2"}' \        
+    "$BASE/chat/message" | jq '.answer'                  
+                                                         
+  Pass: Win rate shifts (or stays same with note "0 deals
+   excluded" if no New Lead stage exists). No 500 errors.
+                                                         
+  # Reset filters                                        
+  curl -s -X PATCH -H "$H" -H "Content-Type:             
+  application/json" \                                    
+    -d '{"global":{"exclude_stages":[],"exclude_pipelines
+  ":[],"exclude_deal_types":[],"custom_exclusions":[]}}' 
+  \                                                      
+    "$BASE/workspace-config/tool_filters"                
+                                                         
+  ---                                                    
+  3. Conversation scope routing (1a2cee0)                
+                                                         
+  # Direct scope — should not 400 anymore                
+  curl -s -X POST -H "$H" -H "Content-Type:              
+  application/json" \                                    
+    -d '{"question":"What are the most common            
+  objections?","scope":{"type":"conversations"}}' \      
+    "$BASE/analyze" | jq '{answer: .answer[0:200],       
+  conversations: .data_consulted.conversations}'         
+                                                         
+  # Auto-detection via chat                              
+  curl -s -X POST -H "$H" -H "Content-Type:              
+  application/json" \                                    
+    -d '{"message":"What objections keep coming up on    
+  calls?","channel_id":"test","thread_id":"t3"}' \       
+    "$BASE/chat/message" | jq '.answer[0:300]'           
+                                                         
+  Pass for direct scope: Returns 200, not 400. If no     
+  conversations: returns the connector message, not a    
+  stack trace.                                           
+  Pass for chat auto-detect: Answer references call data,
+   not pipeline data.                                    
+                                                         
+  ---                                                    
+  4. Phase 2 skills (dadecd8)                            
+                                                         
+  # List registered skills — should show 13 total        
+  curl -s -H "$H" "$BASE/skills" | jq '[.[] | .id] |     
+  sort'                                                  
+                                                         
+  Expected in the list: forecast-model,                  
+  pipeline-gen-forecast, competitive-intelligence,       
+  contact-role-resolution.                               
+                                                         
+  # Run competitive-intelligence on demand               
+  curl -s -X POST -H "$H" -H "Content-Type:              
+  application/json" \                                    
+    -d '{"trigger":"on_demand"}' \                       
+    "$BASE/skills/competitive-intelligence/run" | jq     
+  '{status, skill_id}'                                   
+                                                         
+  ---                                                    
+  5. Graceful degradation checks                         
+                                                         
+  # Filter injector should not crash tools when config is
+   missing                                               
+  # Query deals directly via analyze                     
+  curl -s -X POST -H "$H" -H "Content-Type:              
+  application/json" \                                    
+    -d '{"question":"Show me open deals over             
+  $50K","scope":{"type":"pipeline"}}' \                  
+    "$BASE/analyze" | jq '{answer: .answer[0:200], deals:
+   .data_consulted.deals}'                               
+                                                         
+  Pass: Returns deals data, no 500, no mention of filter 
+  errors.                                                
+                                                         
+  ---                                                    
+  6. Settings UI (visual check)                          
+                                                         
+  Open http://localhost:5173/settings (or wherever the   
+  client runs) and verify:                               
+  - Left sidebar shows a Workspace section with 6 tabs   
+  below existing tabs                                    
+  - Pipeline & Stages tab loads stage list from API (not 
+  mock data)                                             
+  - Metric Filters tab shows empty rule list + Add Rule  
+  button                                                 
+  - Thresholds tab shows sliders                         
+  - Suggestions tab loads without crashing (may be empty)
+                                                         
+  ---                                                    
+  Quick pass/fail summary                                
+  Test: /workspace-config/stages                         
+  Pass condition: 200, array of stages                   
+  ────────────────────────────────────────               
+  Test: /workspace-config/preview-filter                 
+  Pass condition: before ≠ after or both 0               
+  ────────────────────────────────────────               
+  Test: Win rate shifts after stage exclusion            
+  Pass condition: Number changes or 0-deal note          
+  ────────────────────────────────────────               
+  Test: analyze with scope.type: conversations           
+  Pass condition: Not 400                                
+  ────────────────────────────────────────               
+  Test: Chat conversation question                       
+  Pass condition: Auto-routed, answer cites calls        
+  ────────────────────────────────────────               
+  Test: Skills list                                      
+  Pass condition: 13 skills, includes 4 new ones         
+  ────────────────────────────────────────               
+  Test: analyze pipeline question                        
+  Pass condition: No 500, returns deals                  
+  ────────────────────────────────────────               
+  Test: Settings UI Workspace tabs                       
+  Pass condition: All 6 tabs render 
