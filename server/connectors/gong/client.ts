@@ -150,13 +150,13 @@ export class GongClient {
           ...(fromDate && { fromDateTime: fromDate }),
           ...(toDate && { toDateTime: toDate }),
           ...(primaryUserId && { primaryUserId }),
-          ...(cursor && { cursor }),
         },
         contentSelector: {
           exposedFields: {
             parties: true,
           },
         },
+        ...(cursor && { cursor }),
       };
 
       const response = await this.request<{ calls: any[]; records?: { cursor?: string } }>("/calls/extensive", {

@@ -1,5 +1,6 @@
 import { query, getClient } from '../../db.js';
 import { GongClient } from './client.js';
+import type { GongCall } from './types.js';
 import { transformGongCall, buildUserMap, type NormalizedConversation, type GongUserMap } from './transform.js';
 import type { SyncResult } from '../_interface.js';
 import { transformWithErrorCapture } from '../../utils/sync-helpers.js';
@@ -114,6 +115,15 @@ async function updateConnectionSyncStatus(
   );
 }
 
+function getTrackedUserIdsInCall(call: GongCall, trackedUserIds: Set<string>): string[] {
+  const matched = new Set<string>();
+  if (trackedUserIds.has(call.primaryUserId)) matched.add(call.primaryUserId);
+  for (const party of call.parties) {
+    if (party.userId && trackedUserIds.has(party.userId)) matched.add(party.userId);
+  }
+  return Array.from(matched);
+}
+
 async function syncForTrackedUsers(
   client: GongClient,
   workspaceId: string,
@@ -122,42 +132,79 @@ async function syncForTrackedUsers(
   userMap: GongUserMap,
   errors: string[]
 ): Promise<{ totalFetched: number; totalStored: number; byUser: Array<{ name: string; calls: number }> }> {
-  let totalFetched = 0;
-  let totalStored = 0;
-  const byUser: Array<{ name: string; calls: number }> = [];
+  const trackedUserIds = new Set(trackedUsers.map(u => u.source_id));
+  const userCallCounts = new Map<string, number>(trackedUsers.map(u => [u.source_id, 0]));
 
-  for (let i = 0; i < trackedUsers.length; i++) {
-    const user = trackedUsers[i];
-    console.log(`[Gong Sync] Syncing user ${i + 1}/${trackedUsers.length}: ${user.name} (${user.source_id})`);
+  console.log(`[Gong Sync] Fetching all calls from ${fromDate} then filtering by ${trackedUsers.length} tracked users (hosted + attended + invited)`);
 
-    try {
-      const rawCalls = await client.getCallsExtensive(fromDate, undefined, user.source_id);
-      totalFetched += rawCalls.length;
+  let allCalls: GongCall[];
+  try {
+    allCalls = await client.getCallsExtensive(fromDate);
+  } catch (err: any) {
+    console.error(`[Gong Sync] Failed to fetch calls: ${err.message}`);
+    errors.push(`Fetch error: ${err.message}`);
+    return {
+      totalFetched: 0,
+      totalStored: 0,
+      byUser: trackedUsers.map(u => ({ name: u.name, calls: 0 })),
+    };
+  }
 
-      const transformResult = transformWithErrorCapture(
-        rawCalls,
-        (call) => transformGongCall(call, workspaceId, userMap),
-        `Gong Calls (${user.name})`,
-        (call) => call.id
-      );
+  const uniqueCallMap = new Map<string, GongCall>();
+  for (const call of allCalls) {
+    uniqueCallMap.set(call.id, call);
+  }
+  const dedupedCalls = Array.from(uniqueCallMap.values());
+  if (dedupedCalls.length !== allCalls.length) {
+    console.warn(`[Gong Sync] Deduplicated: ${allCalls.length} → ${dedupedCalls.length} unique calls`);
+  }
 
-      if (transformResult.failed.length > 0) {
-        errors.push(`${user.name}: ${transformResult.failed.length} transform failures`);
+  console.log(`[Gong Sync] Fetched ${dedupedCalls.length} unique calls from Gong, filtering by tracked users...`);
+
+  const matchedCalls: GongCall[] = [];
+  for (const call of dedupedCalls) {
+    const matchedUserIdsInCall = getTrackedUserIdsInCall(call, trackedUserIds);
+    if (matchedUserIdsInCall.length > 0) {
+      matchedCalls.push(call);
+      for (const uid of matchedUserIdsInCall) {
+        userCallCounts.set(uid, (userCallCounts.get(uid) || 0) + 1);
       }
-
-      const stored = await upsertConversations(transformResult.succeeded);
-      totalStored += stored;
-      byUser.push({ name: user.name, calls: stored });
-
-      console.log(`[Gong Sync] ${user.name}: ${rawCalls.length} fetched, ${stored} stored`);
-    } catch (err: any) {
-      console.error(`[Gong Sync] Error syncing user ${user.name}: ${err.message}`);
-      errors.push(`${user.name}: ${err.message}`);
-      byUser.push({ name: user.name, calls: 0 });
     }
   }
 
-  return { totalFetched, totalStored, byUser };
+  console.log(`[Gong Sync] ${matchedCalls.length} calls match tracked users (out of ${dedupedCalls.length} total)`);
+
+  const transformResult = transformWithErrorCapture(
+    matchedCalls,
+    (call) => transformGongCall(call, workspaceId, userMap),
+    `Gong Calls`,
+    (call) => call.id
+  );
+
+  const uniqueSourceIds = new Set(transformResult.succeeded.map(c => c.source_id));
+  console.log(`[Gong Sync] Transform: ${transformResult.succeeded.length} succeeded (${uniqueSourceIds.size} unique source_ids), ${transformResult.failed.length} failed`);
+
+  if (transformResult.failed.length > 0) {
+    errors.push(`${transformResult.failed.length} transform failures`);
+    if (transformResult.failed.length <= 5) {
+      for (const f of transformResult.failed) {
+        console.error(`[Gong Sync] Transform failure: ${f.id} — ${f.error}`);
+      }
+    }
+  }
+
+  const totalStored = await upsertConversations(transformResult.succeeded);
+
+  const byUser = trackedUsers.map(u => ({
+    name: u.name,
+    calls: userCallCounts.get(u.source_id) || 0,
+  }));
+
+  for (const entry of byUser) {
+    console.log(`[Gong Sync] ${entry.name}: ${entry.calls} calls matched`);
+  }
+
+  return { totalFetched: dedupedCalls.length, totalStored, byUser };
 }
 
 export async function initialSync(
