@@ -256,7 +256,7 @@ export default function CommandCenter() {
       }
     }, 300000);
     return () => clearInterval(interval);
-  }, [isAuthenticated, authLoading, fetchPipelines, fetchData]);
+  }, [isAuthenticated, authLoading, fetchPipelines, fetchData, wsId]);
 
   const stageData: PipelineStage[] = pipeline?.by_stage || [];
   const totalPipeline = Number(pipeline?.total_pipeline) || 0;
