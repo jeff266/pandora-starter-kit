@@ -41,6 +41,16 @@ CREATE TABLE IF NOT EXISTS training_pairs (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Backfill any columns that may be missing if table was created with an earlier schema
+ALTER TABLE training_pairs ADD COLUMN IF NOT EXISTS quality_source TEXT;
+ALTER TABLE training_pairs ADD COLUMN IF NOT EXISTS was_overridden BOOLEAN DEFAULT FALSE;
+ALTER TABLE training_pairs ADD COLUMN IF NOT EXISTS override_value JSONB;
+ALTER TABLE training_pairs ADD COLUMN IF NOT EXISTS input_tokens INTEGER;
+ALTER TABLE training_pairs ADD COLUMN IF NOT EXISTS output_tokens INTEGER;
+ALTER TABLE training_pairs ADD COLUMN IF NOT EXISTS latency_ms INTEGER;
+ALTER TABLE training_pairs ADD COLUMN IF NOT EXISTS exported_at TIMESTAMPTZ;
+ALTER TABLE training_pairs ADD COLUMN IF NOT EXISTS export_batch TEXT;
+
 CREATE INDEX IF NOT EXISTS idx_training_pairs_export
   ON training_pairs(capability, quality_score)
   WHERE exported_at IS NULL;
