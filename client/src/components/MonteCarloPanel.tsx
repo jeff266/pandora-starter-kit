@@ -87,6 +87,28 @@ function RefreshIcon({ size = 14 }: { size?: number }) {
   );
 }
 
+interface QueryResponse {
+  answer: string;
+  queryType: string;
+  data: any;
+  confidence: number;
+  followUps: string[];
+}
+
+interface QueryHistoryItem {
+  id?: string;
+  question: string;
+  intentType?: string;
+  answer: string;
+  createdAt: string;
+}
+
+const SUGGESTED_QUESTIONS = [
+  'Which deals must close to hit target?',
+  'What if our win rate improves 20%?',
+  'What happens if we close the biggest deal?',
+];
+
 export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
   const { anon } = useDemoMode();
   const [state, setState] = useState<PanelState>('loading');
@@ -98,6 +120,14 @@ export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
   const [pipelines, setPipelines] = useState<PipelineOption[]>([]);
   const [selectedPipeline, setSelectedPipeline] = useState<string | null>(null);
   const [selectedPipelineType, setSelectedPipelineType] = useState<string | null>(null);
+
+  // Query section state
+  const [question, setQuestion] = useState('');
+  const [queryAnswer, setQueryAnswer] = useState<QueryResponse | null>(null);
+  const [queryLoading, setQueryLoading] = useState(false);
+  const [queryError, setQueryError] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [history, setHistory] = useState<QueryHistoryItem[]>([]);
 
   const fetchPipelines = async () => {
     try {
@@ -173,6 +203,37 @@ export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
     } catch {
       setTriggeringRun(false);
       setState('empty');
+    }
+  };
+
+  // Fetch query history on mount / workspace change
+  useEffect(() => {
+    if (!wsId) return;
+    api.get('/monte-carlo/queries?limit=5')
+      .then((res: any) => setHistory(res?.queries || []))
+      .catch(() => {});
+  }, [wsId]);
+
+  const submitQuestion = async (q: string) => {
+    if (!q.trim() || queryLoading) return;
+    setQueryLoading(true);
+    setQueryError(null);
+    try {
+      const res = await api.post('/monte-carlo/query', {
+        question: q.trim(),
+        pipelineId: selectedPipeline ?? null,
+      }) as QueryResponse;
+      setQueryAnswer(res);
+      setQuestion('');
+      setHistory(prev => [{
+        question: q.trim(),
+        answer: res.answer,
+        createdAt: new Date().toISOString(),
+      }, ...prev].slice(0, 5));
+    } catch {
+      setQueryError('Something went wrong. Try again.');
+    } finally {
+      setQueryLoading(false);
     }
   };
 
@@ -320,6 +381,11 @@ export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
         >
           {triggeringRun ? 'Starting...' : 'Run forecast'}
         </button>
+        <div style={{ borderTop: `1px solid #1A1F2B`, marginTop: 16, paddingTop: 16 }}>
+          <div style={{ fontSize: 12, color: colors.textMuted, fontStyle: 'italic' }}>
+            Ask questions once a forecast has been run.
+          </div>
+        </div>
       </div>
     );
   }
@@ -474,6 +540,149 @@ export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
           maxImpact={maxDriverImpact}
           anon={anon}
         />
+      </div>
+
+      {/* Query Section */}
+      <div style={{ borderTop: `1px solid #1A1F2B`, marginTop: 16, paddingTop: 16 }}>
+        <div style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 12 }}>
+          Ask a Question
+        </div>
+
+        {/* Suggested chips — shown until first question submitted */}
+        {!queryAnswer && (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+            {SUGGESTED_QUESTIONS.map((q) => (
+              <button
+                key={q}
+                onClick={() => submitQuestion(q)}
+                style={{
+                  fontSize: 11, padding: '4px 12px', borderRadius: 20,
+                  background: '#1A1F2A', color: '#5A6578',
+                  border: '1px solid #2A3040', cursor: 'pointer',
+                  fontFamily: fonts.sans, transition: 'border-color 0.15s',
+                }}
+                onMouseEnter={e => (e.currentTarget.style.borderColor = '#3B82F6')}
+                onMouseLeave={e => (e.currentTarget.style.borderColor = '#2A3040')}
+              >
+                {q}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Input row */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input
+            type="text"
+            value={question}
+            onChange={e => setQuestion(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') submitQuestion(question); }}
+            placeholder="Ask a question about this forecast..."
+            disabled={queryLoading}
+            style={{
+              flex: 1, height: 36, padding: '0 12px', fontSize: 12,
+              background: colors.surfaceRaised,
+              border: `1px solid ${queryError ? colors.red : colors.border}`,
+              borderRadius: 6, color: colors.text, fontFamily: fonts.sans,
+              outline: 'none',
+            }}
+          />
+          <button
+            onClick={() => submitQuestion(question)}
+            disabled={queryLoading || !question.trim()}
+            style={{
+              width: 32, height: 32, borderRadius: 6, flexShrink: 0,
+              background: queryLoading || !question.trim() ? colors.surfaceRaised : colors.accent,
+              border: 'none', cursor: queryLoading || !question.trim() ? 'default' : 'pointer',
+              color: '#fff', fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              transition: 'background 0.15s',
+            }}
+          >
+            {queryLoading ? <SpinnerIcon size={14} /> : '→'}
+          </button>
+        </div>
+
+        {queryError && (
+          <div style={{ fontSize: 11, color: colors.red, marginTop: 6 }}>{queryError}</div>
+        )}
+
+        {/* Answer */}
+        {queryAnswer && (
+          <div style={{ marginTop: 14, opacity: 1, transition: 'opacity 0.2s' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+              <span style={{
+                width: 7, height: 7, borderRadius: '50%', flexShrink: 0, marginTop: 5,
+                background: queryAnswer.queryType?.includes('risk') ? colors.orange
+                  : queryAnswer.queryType?.includes('opportunity') ? colors.green
+                  : '#3B82F6',
+              }} />
+              <p style={{ fontSize: 13, color: '#94A3B8', lineHeight: 1.6, margin: 0 }}>
+                {queryAnswer.answer}
+              </p>
+            </div>
+
+            {/* Follow-up chips */}
+            {queryAnswer.followUps?.length > 0 && (
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
+                {queryAnswer.followUps.map((fq, i) => (
+                  <button
+                    key={i}
+                    onClick={() => submitQuestion(fq)}
+                    style={{
+                      fontSize: 11, padding: '4px 12px', borderRadius: 20,
+                      background: '#1A1F2A', color: '#5A6578',
+                      border: '1px solid #2A3040', cursor: 'pointer',
+                      fontFamily: fonts.sans, transition: 'border-color 0.15s',
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.borderColor = '#3B82F6')}
+                    onMouseLeave={e => (e.currentTarget.style.borderColor = '#2A3040')}
+                  >
+                    {fq}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Recent questions */}
+        {history.length > 0 && (
+          <div style={{ marginTop: 14 }}>
+            <button
+              onClick={() => setHistoryOpen(o => !o)}
+              style={{
+                fontSize: 10, color: colors.textMuted, background: 'none',
+                border: 'none', cursor: 'pointer', padding: 0, fontFamily: fonts.sans,
+              }}
+            >
+              {historyOpen ? '▾' : '▸'} Recent
+            </button>
+            {historyOpen && (
+              <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 0 }}>
+                {history.map((item, i) => (
+                  <div key={i}>
+                    {i > 0 && <div style={{ height: 1, background: '#1A1F2B', margin: '8px 0' }} />}
+                    <button
+                      onClick={() => submitQuestion(item.question)}
+                      style={{
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        padding: 0, textAlign: 'left', width: '100%',
+                      }}
+                    >
+                      <div style={{ fontSize: 11, color: colors.textMuted, fontFamily: fonts.sans }}>{item.question}</div>
+                      <div style={{ fontSize: 12, color: '#94A3B8', marginTop: 2, fontFamily: fonts.sans }}>
+                        {item.answer.length > 80 ? item.answer.slice(0, 80) + '…' : item.answer}
+                      </div>
+                      <div style={{ fontSize: 10, color: colors.textDim, marginTop: 2, fontFamily: fonts.sans }}>
+                        {formatTimeAgo(item.createdAt)}
+                      </div>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
