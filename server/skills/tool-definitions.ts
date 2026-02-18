@@ -3973,10 +3973,11 @@ const preparePipelineGoalsSummaryTool: ToolDefinition = {
       // FEEDBACK SIGNAL: Quota period validation
       // Check if there are quota records to validate period alignment
       const quotaResult = await query<{ period_type: string; count: number }>(
-        `SELECT DISTINCT period_type, COUNT(*) as count
-         FROM quotas
-         WHERE workspace_id = $1
-         GROUP BY period_type`,
+        `SELECT DISTINCT qp.period_type, COUNT(rq.id)::int as count
+         FROM quota_periods qp
+         JOIN rep_quotas rq ON rq.period_id = qp.id
+         WHERE qp.workspace_id = $1
+         GROUP BY qp.period_type`,
         [context.workspaceId]
       );
 
@@ -4718,27 +4719,27 @@ const pgfGatherCreationHistory: ToolDefinition = {
       const lookbackMonths = params.lookback_months || 12;
 
       const overallResult = await query<any>(
-        `SELECT DATE_TRUNC('month', d.created_date)::text as period,
+        `SELECT DATE_TRUNC('month', d.created_at)::text as period,
                 COUNT(*)::int as deals_created,
                 COALESCE(SUM(d.amount), 0)::numeric as amount_created,
                 COALESCE(AVG(d.amount), 0)::numeric as avg_deal_size
          FROM deals d
          WHERE d.workspace_id = $1
-           AND d.created_date >= NOW() - ($2 || ' months')::interval
-           AND d.created_date IS NOT NULL AND d.amount > 0
+           AND d.created_at >= NOW() - ($2 || ' months')::interval
+           AND d.created_at IS NOT NULL AND d.amount > 0
          GROUP BY period ORDER BY period`,
         [context.workspaceId, String(lookbackMonths)]
       );
 
       const ownerResult = await query<any>(
-        `SELECT DATE_TRUNC('month', d.created_date)::text as period,
+        `SELECT DATE_TRUNC('month', d.created_at)::text as period,
                 d.owner as segment_value,
                 COUNT(*)::int as deals_created,
                 COALESCE(SUM(d.amount), 0)::numeric as amount_created
          FROM deals d
          WHERE d.workspace_id = $1
-           AND d.created_date >= NOW() - ($2 || ' months')::interval
-           AND d.created_date IS NOT NULL AND d.amount > 0 AND d.owner IS NOT NULL
+           AND d.created_at >= NOW() - ($2 || ' months')::interval
+           AND d.created_at IS NOT NULL AND d.amount > 0 AND d.owner IS NOT NULL
          GROUP BY period, segment_value ORDER BY period, segment_value`,
         [context.workspaceId, String(lookbackMonths)]
       ).catch(() => ({ rows: [] as any[] }));
@@ -4813,7 +4814,7 @@ const pgfGatherInqtrCloseRates: ToolDefinition = {
                AND d.close_date >= $2 AND d.close_date < $3), 0)::numeric as amount_closed
            FROM deals d
            WHERE d.workspace_id = $1
-             AND d.created_date >= $2 AND d.created_date < $3
+             AND d.created_at >= $2 AND d.created_at < $3
              AND d.amount > 0`,
           [context.workspaceId, qStart.toISOString(), qEnd.toISOString()]
         ).catch(() => ({ rows: [{}] as any[] }));
@@ -4931,7 +4932,7 @@ const ciCompGatherMentions: ToolDefinition = {
          WHERE di.workspace_id = $1
            AND di.insight_type = 'competition'
            AND di.is_current = true
-           AND d.created_date >= NOW() - ($2 || ' months')::interval`,
+           AND d.created_at >= NOW() - ($2 || ' months')::interval`,
         [context.workspaceId, String(lookbackMonths)]
       ).catch(() => ({ rows: [] as any[] }));
 
@@ -4996,7 +4997,7 @@ const ciCompComputeWinRates: ToolDefinition = {
            COUNT(*) FILTER (WHERE d.stage_normalized IN ('closed_won','closed_lost'))::int as total_closed
          FROM deals d
          WHERE d.workspace_id = $1
-           AND d.created_date >= NOW() - ($2 || ' months')::interval
+           AND d.created_at >= NOW() - ($2 || ' months')::interval
            AND NOT EXISTS (
              SELECT 1 FROM conversations cv
              WHERE cv.deal_id = d.id AND cv.workspace_id = $1
@@ -5053,7 +5054,7 @@ const fatGatherRepAccuracy: ToolDefinition = {
            COUNT(*) FILTER (WHERE d.stage_normalized IN ('closed_won','closed_lost'))::int as total_closed,
            COUNT(*) FILTER (WHERE d.stage_normalized = 'closed_won')::int as total_won,
            AVG(CASE WHEN d.stage_normalized = 'closed_won' AND d.close_date IS NOT NULL
-                    THEN EXTRACT(DAY FROM (d.close_date::date - d.created_date::date))
+                    THEN EXTRACT(DAY FROM (d.close_date::date - d.created_at::date))
                     ELSE NULL END)::numeric as avg_cycle_days,
            AVG(CASE WHEN d.stage_normalized IN ('closed_won','closed_lost') AND d.amount > 0
                     THEN d.amount ELSE NULL END)::numeric as avg_deal_size,
@@ -5416,8 +5417,8 @@ const dsmGatherOpenDeals: ToolDefinition = {
         `SELECT
            d.id, d.name, d.amount, d.stage, d.stage_normalized,
            d.close_date, d.owner, d.days_in_stage, d.probability,
-           d.forecast_category, d.next_steps, d.lead_source,
-           d.ai_score as previous_ai_score, d.created_at as deal_created_at,
+           d.forecast_category,
+           d.created_at as deal_created_at,
            -- Contact coverage
            COUNT(DISTINCT dc.id)::int as contact_count,
            BOOL_OR(dc.role = 'economic_buyer')::bool as has_economic_buyer,
@@ -5437,8 +5438,8 @@ const dsmGatherOpenDeals: ToolDefinition = {
            AND d.amount > 0
          GROUP BY d.id, d.name, d.amount, d.stage, d.stage_normalized,
                   d.close_date, d.owner, d.days_in_stage, d.probability,
-                  d.forecast_category, d.next_steps, d.lead_source,
-                  d.ai_score, d.created_at
+                  d.forecast_category,
+                  d.created_at
          ORDER BY d.amount DESC NULLS LAST`,
         [context.workspaceId]
       );
@@ -5454,9 +5455,6 @@ const dsmGatherOpenDeals: ToolDefinition = {
         days_in_stage: r.days_in_stage || 0,
         probability: parseFloat(r.probability || '0'),
         forecast_category: r.forecast_category,
-        next_steps: r.next_steps || '',
-        lead_source: r.lead_source,
-        previous_ai_score: r.previous_ai_score,
         deal_created_at: r.deal_created_at,
         contact_count: r.contact_count || 0,
         has_economic_buyer: r.has_economic_buyer || false,
@@ -5590,8 +5588,6 @@ const dsmComputeAndWriteScores: ToolDefinition = {
         let dim1 = 0;
         // Amount confidence: amount > 0 → 30pts
         if (deal.amount > 0) dim1 += 30;
-        // Data completeness: next_steps filled → 15pts, contact_count > 1 → 15pts
-        if (deal.next_steps && deal.next_steps.length > 10) dim1 += 15;
         if (deal.contact_count > 1) dim1 += 15;
         // Stage appropriateness: close_date realistic?
         if (deal.close_date) {
@@ -5665,8 +5661,6 @@ const dsmComputeAndWriteScores: ToolDefinition = {
         if (repRate > 0.30) dim4 += 40;
         else if (repRate > 0.20) dim4 += 25;
         else dim4 += 10;
-        // Next steps documented
-        if (deal.next_steps && deal.next_steps.length > 10) dim4 += 30;
         // Recent meetings
         if (deal.meetings_14d >= 2) dim4 += 30;
         else if (deal.meetings_14d >= 1) dim4 += 20;
