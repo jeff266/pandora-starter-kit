@@ -319,6 +319,41 @@ const PANDORA_TOOLS: ToolDef[] = [
       required: [],
     },
   },
+  {
+    name: 'compute_activity_trend',
+    description: '30-day engagement trajectory for a deal. Returns weekly activity counts, linear regression slope, and trend classification (increasing/flat/declining). Use to answer: "Is this deal going dark?" or "Is engagement heating up?"',
+    parameters: {
+      type: 'object',
+      properties: {
+        deal_id: { type: 'string', description: 'UUID of the deal to analyze' },
+        lookback_days: { type: 'number', description: 'Days to look back (default 30)' },
+      },
+      required: ['deal_id'],
+    },
+  },
+  {
+    name: 'compute_shrink_rate',
+    description: 'Calculates how much deal amounts shrink from initial value to closed-won amount. Returns avg_shrink_pct, median, confidence level, and optional segmentation by rep or deal size.',
+    parameters: {
+      type: 'object',
+      properties: {
+        lookback_quarters: { type: 'number', description: 'Quarters of history to analyze (default 4)' },
+        segment_by: { type: 'string', enum: ['deal_size', 'rep'], description: 'Optional segmentation axis' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'infer_contact_role',
+    description: "Infers a contact's buying role (economic_buyer, champion, technical_evaluator, coach, blocker, unknown) using their job title and call participation history. Returns confidence score and signals.",
+    parameters: {
+      type: 'object',
+      properties: {
+        contact_id: { type: 'string', description: 'UUID of the contact to classify' },
+      },
+      required: ['contact_id'],
+    },
+  },
 ];
 
 // ─── System prompt ────────────────────────────────────────────────────────────

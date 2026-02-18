@@ -172,6 +172,29 @@ const TOOLS: Tool[] = [
       { name: 'limit', type: 'number', description: 'Max results (default 10)' },
     ],
   },
+  {
+    id: 'compute_activity_trend', name: 'Activity Trend', category: 'Analytics', status: 'live',
+    description: '30-day engagement trajectory for a deal',
+    params: [
+      { name: 'deal_id', type: 'string', description: 'UUID of the deal', required: true },
+      { name: 'lookback_days', type: 'number', description: 'Days to look back (default 30)' },
+    ],
+  },
+  {
+    id: 'compute_shrink_rate', name: 'Shrink Rate', category: 'Analytics', status: 'live',
+    description: 'Deal amount shrinkage from initial to closed-won',
+    params: [
+      { name: 'lookback_quarters', type: 'number', description: 'Quarters of history (default 4)' },
+      { name: 'segment_by', type: 'string', description: 'rep or deal_size' },
+    ],
+  },
+  {
+    id: 'infer_contact_role', name: 'Infer Contact Role', category: 'Intelligence', status: 'live',
+    description: 'Infer buying role from title and call history',
+    params: [
+      { name: 'contact_id', type: 'string', description: 'UUID of the contact', required: true },
+    ],
+  },
 ];
 
 const STATUS_BADGE: Record<Tool['status'], { label: string; bg: string; color: string }> = {
