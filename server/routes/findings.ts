@@ -328,9 +328,25 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
 
     const params: any[] = [workspaceId];
     let pipelineClause = '';
+    let stageConfigPipelineClause = '';
+    let stageFilterClause = '';
+    let pipelineParamIdx = -1;
     if (pipelineFilter && pipelineFilter !== 'all') {
       params.push(pipelineFilter);
-      pipelineClause = ` AND d.pipeline = $${params.length}`;
+      pipelineParamIdx = params.length;
+      pipelineClause = ` AND d.pipeline = $${pipelineParamIdx}`;
+      // Scope the stage_configs JOIN to this pipeline only
+      stageConfigPipelineClause = ` AND sc.pipeline_name = $${pipelineParamIdx}`;
+      // Hide stages that don't belong to this pipeline's stage_configs —
+      // but only once stage_configs has been populated (otherwise show everything).
+      stageFilterClause = `
+        AND (
+          NOT EXISTS (
+            SELECT 1 FROM stage_configs
+            WHERE workspace_id = $1 AND pipeline_name = $${pipelineParamIdx}
+          )
+          OR sc.stage_name IS NOT NULL
+        )`;
     }
 
     let excludeStagesClause = '';
@@ -344,7 +360,6 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
     const stageResult = await query(
       `SELECT
          COALESCE(d.stage, d.stage_normalized, 'Unknown') as stage,
-         d.stage_normalized,
          count(*)::int as deal_count,
          COALESCE(sum(d.amount), 0)::float as total_value,
          COALESCE(sum(d.amount * COALESCE(d.probability, 0.5)), 0)::float as weighted_value,
@@ -353,11 +368,13 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
        LEFT JOIN stage_configs sc
          ON sc.stage_name = COALESCE(d.stage, d.stage_normalized)
          AND sc.workspace_id = d.workspace_id
+         ${stageConfigPipelineClause}
        WHERE d.workspace_id = $1
          AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
          ${pipelineClause}
          ${excludeStagesClause}
-       GROUP BY d.stage, d.stage_normalized
+         ${stageFilterClause}
+       GROUP BY COALESCE(d.stage, d.stage_normalized, 'Unknown')
        ORDER BY MAX(sc.display_order) ASC NULLS LAST, sum(d.amount) DESC`,
       [...params, ...excludeParams]
     );
@@ -393,7 +410,7 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
          AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
          ${findingsPipelineClause}
          ${findingsExcludeClause}
-       GROUP BY d.stage, d.stage_normalized, f.severity`,
+       GROUP BY COALESCE(d.stage, d.stage_normalized, 'Unknown'), f.severity`,
       [...findingsParams, ...findingsExcludeParams]
     );
 
