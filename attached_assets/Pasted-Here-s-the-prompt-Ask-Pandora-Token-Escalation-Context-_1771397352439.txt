@@ -1,0 +1,41 @@
+Here's the prompt:
+
+---
+
+**Ask Pandora: Token Escalation & Context Compression Investigation**
+
+I need you to investigate two related issues with the Ask Pandora agent loop. Do not make any changes yet — diagnosis only first.
+
+**Issue 1: Context compression is not working in Ask Pandora**
+
+We designed a pattern where tool results get summarized into compact structured form before being added to context, and prior turn summaries replace raw tool output as the thread grows. This is supposed to prevent token escalation across iterations.
+
+In a recent session, input tokens escalated like this:
+- iter 1: ~13K input
+- iter 2: ~24K input
+- iter 3: ~54K input
+- iter 4: ~55K input
+- iter 5: ~64K input
+
+This suggests raw tool results are being appended wholesale to context each turn rather than being compressed. Please find:
+1. Where Ask Pandora's agent loop manages context/thread history
+2. Whether it uses the same context compression logic as the skill runner, or has its own separate loop
+3. Whether tool results are being summarized before being added to context, or passed raw
+4. What is actually in the thread by iter 3-4 that's causing the bloat
+
+**Issue 2: No pre-flight question classification or dynamic token budgeting**
+
+Currently the agent attempts to answer before calling any tools, hits the max_tokens ceiling on open-ended questions, and wastes an entire iteration recovering. We want to fix this with a pre-flight router as step zero of every Ask Pandora session.
+
+Please investigate and document:
+1. Where in the code the Ask Pandora agent loop starts and how the first iteration is structured
+2. Where `maxTokens` is currently set and whether it's static or dynamic
+3. Whether there is any existing intent classification or question routing logic, or if the model just fires cold
+
+**Deliverable**
+
+Give me a diagnosis report covering both issues with file names, line numbers, and the specific code responsible. I want to understand the full picture before we decide on the fix approach.
+
+---
+
+That gives Replit clear scope without letting it start coding before you understand what's actually broken.

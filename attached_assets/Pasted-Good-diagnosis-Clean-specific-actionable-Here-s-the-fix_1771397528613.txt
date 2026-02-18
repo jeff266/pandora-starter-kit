@@ -1,0 +1,74 @@
+Good diagnosis. Clean, specific, actionable. Here's the fix prompt:
+
+---
+
+**Ask Pandora: Agent Loop Fix — Context Compression + Pre-flight Router**
+
+Based on the diagnosis report, implement the following fixes in `pandora-agent.ts` and `data-tools.ts`. Do not change anything else.
+
+---
+
+**Fix 1: Separate `max_tokens` from `end_turn` in the guard (lines 479–506)**
+
+When `stopReason === 'max_tokens'` and no tools were called, discard the truncated output entirely — do not push it to message history. Instead inject a system nudge and continue the loop. The current behavior of preserving truncated text in history poisons all subsequent iterations.
+
+---
+
+**Fix 2: Raise maxTokens to 8,192 (lines 462 and 566)**
+
+Replace the hardcoded `4096` with `8192` at both locations. This is a temporary measure while the pre-flight router (Fix 4) is being built — it prevents the truncation from happening in the first place on complex questions.
+
+---
+
+**Fix 3: Compress tool results before appending to thread (lines 550–555)**
+
+After each tool call returns, do not push raw `JSON.stringify(result)` to messages. Instead apply a result compressor per tool type:
+
+- `search_transcripts` → keep only `call_title`, `date`, `speaker`, and first 150 chars of excerpt per result. Drop full metadata.
+- `query_conversations` → keep `id`, `title`, `date`, `participants[]` only. Drop transcript excerpts entirely.
+- `query_deals` → keep `name`, `amount`, `stage`, `close_date`. Drop all other fields.
+- `query_accounts` → keep `name`, `pipeline_value`, `open_deals_count`. Drop all other fields.
+- `get_skill_evidence` → pass through as-is (already compact).
+- All others → truncate to 2,000 chars max if result exceeds that.
+
+The compressed result is what gets pushed to messages. The LLM still sees the signal, just not the noise.
+
+---
+
+**Fix 4: Add a pre-flight question classifier as step zero of `runPandoraAgent()` (lines 434–452)**
+
+Before entering the agent loop, classify the incoming question with a single fast LLM call (use the cheapest available model — Haiku or equivalent). The classifier prompt should return a JSON object:
+
+```
+{
+  question_type: "discrete" | "analytical" | "strategic",
+  tools_likely_needed: string[],
+  estimated_complexity: "low" | "medium" | "high",
+  token_budget: number
+}
+```
+
+Map complexity to token budget:
+- `low` (discrete lookups) → 2,048
+- `medium` (single-domain analysis) → 4,096  
+- `high` (cross-domain, open-ended) → 8,192
+
+Use the returned `token_budget` as `maxTokens` for the agent loop instead of the hardcoded value. Pass `tools_likely_needed` as a hint in the system prompt so the model knows which tools to prioritize — do not restrict the tool list, just hint.
+
+---
+
+**Fix 5: Cap `search_transcripts` result payload at the source (data-tools.ts lines 1876, 1946–1951)**
+
+Reduce max results from 10 to 5 per call. Truncate each transcript excerpt to 200 chars max (down from ~450). Add a `total_results_available` field to the response so the LLM knows more exist if needed. This is a data layer fix that complements Fix 3.
+
+---
+
+**Sequence**
+
+Implement in this order: Fix 1 → Fix 2 → Fix 3 → Fix 5 → Fix 4. Fixes 1-3 stop the bleeding immediately. Fix 4 is the architectural improvement and should be tested separately.
+
+After implementing Fixes 1-3 and 5, run the same ABM/messaging question that triggered the problem session and report back the per-iteration token counts. Target is iter 3 staying under 20K input tokens.
+
+---
+
+That should get you from ~$1.00 to under $0.20 per complex session once all five are in.
