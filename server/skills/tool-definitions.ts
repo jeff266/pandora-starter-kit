@@ -6113,7 +6113,7 @@ const mcFitDistributions: ToolDefinition = {
       // Count closed deals for tier assessment
       const closedResult = await query<{ cnt: string }>(
         `SELECT COUNT(*)::text AS cnt FROM deals
-         WHERE workspace_id = $1 AND (is_closed_won = true OR is_closed_lost = true)`,
+         WHERE workspace_id = $1 AND stage_normalized IN ('closed_won', 'closed_lost')`,
         [context.workspaceId]
       );
       const closedDealCount = parseInt(closedResult.rows[0]?.cnt || '0', 10);
@@ -6139,10 +6139,10 @@ const mcLoadOpenDeals: ToolDefinition = {
         amount: string | null;
         stage_normalized: string | null;
         close_date: string | null;
-        owner_email: string | null;
+        owner: string | null;
         probability: string | null;
       }>(
-        `SELECT id, name, amount::text, stage_normalized, close_date::text, owner_email, probability::text
+        `SELECT id, name, amount::text, stage_normalized, close_date::text, owner, probability::text
          FROM deals
          WHERE workspace_id = $1
            AND stage_normalized NOT IN ('closed_won', 'closed_lost')
@@ -6158,7 +6158,7 @@ const mcLoadOpenDeals: ToolDefinition = {
         amount: r.amount ? Math.max(0, parseFloat(r.amount)) : 50000,
         stageNormalized: r.stage_normalized || 'qualification',
         closeDate: r.close_date ? new Date(r.close_date) : new Date(Date.now() + 90 * 86400000),
-        ownerEmail: r.owner_email,
+        ownerEmail: r.owner,
         probability: r.probability ? parseFloat(r.probability) : null,
       }));
 
@@ -6186,7 +6186,7 @@ const mcComputeRiskAdjustments: ToolDefinition = {
   execute: async (_params, context) => {
     return safeExecute('mcComputeRiskAdjustments', async () => {
       const { computeDealRiskAdjustments } = await import('../analysis/monte-carlo-engine.js');
-      const openDealsKey = (context as any).stepOutputs?.['open_deals'];
+      const openDealsKey = (context as any).stepResults?.['open_deals'];
       const openDeals = openDealsKey?.openDeals || [];
 
       const adjustments = await computeDealRiskAdjustments(context.workspaceId, openDeals);
@@ -6229,12 +6229,12 @@ const mcRunSimulation: ToolDefinition = {
       const { runSimulation, buildHistogram } = await import('../analysis/monte-carlo-engine.js');
       const { computeVarianceDrivers } = await import('../analysis/monte-carlo-variance.js');
 
-      const stepOutputs = (context as any).stepOutputs || {};
-      const distributions = stepOutputs['distributions']?.distributions;
-      const openDeals = stepOutputs['open_deals']?.openDeals || [];
-      const riskAdjustments = stepOutputs['risk_adjustments']?.adjustments || {};
-      const forecastWindow = stepOutputs['forecast_window'] || {};
-      const closedDealCount = stepOutputs['distributions']?.closedDealCount || 0;
+      const stepResults = (context as any).stepResults || {};
+      const distributions = stepResults['distributions']?.distributions;
+      const openDeals = stepResults['open_deals']?.openDeals || [];
+      const riskAdjustments = stepResults['risk_adjustments']?.adjustments || {};
+      const forecastWindow = stepResults['forecast_window'] || {};
+      const closedDealCount = stepResults['distributions']?.closedDealCount || 0;
 
       if (!distributions) {
         return { error: 'Distributions not available — fit-distributions step must complete first.' };

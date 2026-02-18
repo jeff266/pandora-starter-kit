@@ -202,20 +202,20 @@ export async function computeDealRiskAdjustments(
   }
 
   // 6. Large deal vs rep historical average — × 0.90 for deals > 2× rep avg
-  const repAvgResult = await query<{ owner_email: string; avg_amount: string }>(
-    `SELECT owner_email, AVG(amount)::text AS avg_amount
+  const repAvgResult = await query<{ owner: string; avg_amount: string }>(
+    `SELECT owner, AVG(amount)::text AS avg_amount
      FROM deals
      WHERE workspace_id = $1
-       AND is_closed_won = true
-       AND closed_at > NOW() - INTERVAL '24 months'
+       AND stage_normalized = 'closed_won'
+       AND updated_at > NOW() - INTERVAL '24 months'
        AND amount > 0
-     GROUP BY owner_email`,
+     GROUP BY owner`,
     [workspaceId]
   ).catch(() => ({ rows: [] as any[] }));
 
   const repAvg: Record<string, number> = {};
   for (const row of repAvgResult.rows) {
-    repAvg[row.owner_email] = parseFloat(row.avg_amount);
+    repAvg[row.owner] = parseFloat(row.avg_amount);
   }
 
   for (const deal of openDeals) {

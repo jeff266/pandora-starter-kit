@@ -618,7 +618,12 @@ router.get('/:workspaceId/monte-carlo/latest', async (req, res) => {
 
     const commandCenter = stepData?.simulation?.commandCenter ?? null;
     if (!commandCenter) {
-      return res.status(404).json({ error: 'No command_center payload in latest run' });
+      const simError = stepData?.simulation?.error;
+      return res.status(404).json({
+        error: simError
+          ? `Simulation failed: ${simError}`
+          : 'No command_center payload in latest run',
+      });
     }
 
     return res.json({

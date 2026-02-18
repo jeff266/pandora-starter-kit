@@ -58,13 +58,13 @@ export async function fitStageWinRates(
   }>(
     `SELECT
        dsh.stage_normalized,
-       COUNT(*) FILTER (WHERE d.is_closed_won = true)::text AS wins,
-       COUNT(*) FILTER (WHERE d.is_closed_lost = true)::text AS losses
+       COUNT(*) FILTER (WHERE d.stage_normalized = 'closed_won')::text AS wins,
+       COUNT(*) FILTER (WHERE d.stage_normalized = 'closed_lost')::text AS losses
      FROM deal_stage_history dsh
      JOIN deals d ON dsh.deal_id = d.id AND d.workspace_id = dsh.workspace_id
      WHERE d.workspace_id = $1
-       AND (d.is_closed_won = true OR d.is_closed_lost = true)
-       AND d.closed_at > NOW() - ($2 || ' months')::interval
+       AND d.stage_normalized IN ('closed_won', 'closed_lost')
+       AND d.updated_at > NOW() - ($2 || ' months')::interval
      GROUP BY dsh.stage_normalized
      HAVING dsh.stage_normalized IS NOT NULL`,
     [workspaceId, lookbackMonths]
@@ -82,12 +82,12 @@ export async function fitStageWinRates(
     }>(
       `SELECT
          stage_normalized,
-         COUNT(*) FILTER (WHERE is_closed_won = true)::text AS wins,
-         COUNT(*) FILTER (WHERE is_closed_lost = true)::text AS losses
+         COUNT(*) FILTER (WHERE stage_normalized = 'closed_won')::text AS wins,
+         COUNT(*) FILTER (WHERE stage_normalized = 'closed_lost')::text AS losses
        FROM deals
        WHERE workspace_id = $1
-         AND (is_closed_won = true OR is_closed_lost = true)
-         AND closed_at > NOW() - ($2 || ' months')::interval
+         AND stage_normalized IN ('closed_won', 'closed_lost')
+         AND updated_at > NOW() - ($2 || ' months')::interval
          AND stage_normalized IS NOT NULL
        GROUP BY stage_normalized`,
       [workspaceId, lookbackMonths]
@@ -123,8 +123,8 @@ export async function fitDealSizeDistribution(
     `SELECT amount::text
      FROM deals
      WHERE workspace_id = $1
-       AND is_closed_won = true
-       AND closed_at > NOW() - ($2 || ' months')::interval
+       AND stage_normalized = 'closed_won'
+       AND updated_at > NOW() - ($2 || ' months')::interval
        AND amount > 0`,
     [workspaceId, lookbackMonths]
   );
@@ -168,12 +168,12 @@ export async function fitCycleLengthDistribution(
 ): Promise<LogNormalDistribution> {
   const result = await query<{ cycle_days: string }>(
     `SELECT
-       (EXTRACT(EPOCH FROM (closed_at - created_at)) / 86400)::text AS cycle_days
+       (EXTRACT(EPOCH FROM (updated_at - created_at)) / 86400)::text AS cycle_days
      FROM deals
      WHERE workspace_id = $1
-       AND (is_closed_won = true OR is_closed_lost = true)
-       AND closed_at > NOW() - ($2 || ' months')::interval
-       AND closed_at > created_at`,
+       AND stage_normalized IN ('closed_won', 'closed_lost')
+       AND updated_at > NOW() - ($2 || ' months')::interval
+       AND updated_at > created_at`,
     [workspaceId, lookbackMonths]
   );
 
@@ -204,7 +204,7 @@ export async function fitCloseSlippageDistribution(
   workspaceId: string,
   lookbackMonths: number = 24
 ): Promise<Record<string, NormalDistribution>> {
-  // Try close_date_at_stage_entry first; fall back to close_date vs closed_at
+  // Try close_date_at_stage_entry first; fall back to close_date vs updated_at
   const result = await query<{
     stage_normalized: string;
     mean_slippage: string | null;
@@ -219,13 +219,13 @@ export async function fitCloseSlippageDistribution(
      FROM (
        SELECT
          d.stage_normalized,
-         EXTRACT(EPOCH FROM (d.closed_at - COALESCE(d.close_date, d.created_at::date))) / 86400 AS slippage_days
+         EXTRACT(EPOCH FROM (d.updated_at - COALESCE(d.close_date, d.created_at::date))) / 86400 AS slippage_days
        FROM deals d
        WHERE d.workspace_id = $1
-         AND (d.is_closed_won = true OR d.is_closed_lost = true)
-         AND d.closed_at > NOW() - ($2 || ' months')::interval
+         AND d.stage_normalized IN ('closed_won', 'closed_lost')
+         AND d.updated_at > NOW() - ($2 || ' months')::interval
          AND d.close_date IS NOT NULL
-         AND d.closed_at IS NOT NULL
+         AND d.updated_at IS NOT NULL
          AND d.stage_normalized IS NOT NULL
      ) subq
      WHERE slippage_days BETWEEN -365 AND 365
@@ -259,31 +259,31 @@ export async function fitPipelineCreationRates(
   lookbackMonths: number = 12
 ): Promise<Record<string, PipelineRateDistribution>> {
   const result = await query<{
-    owner_email: string;
+    owner: string;
     month: string;
     deals_created: string;
     first_deal_at: string;
   }>(
     `SELECT
-       owner_email,
+       owner,
        DATE_TRUNC('month', created_at)::text AS month,
        COUNT(*)::text AS deals_created,
        MIN(created_at)::text AS first_deal_at
      FROM deals
      WHERE workspace_id = $1
        AND created_at > NOW() - ($2 || ' months')::interval
-       AND owner_email IS NOT NULL
-     GROUP BY owner_email, DATE_TRUNC('month', created_at)`,
+       AND owner IS NOT NULL
+     GROUP BY owner, DATE_TRUNC('month', created_at)`,
     [workspaceId, lookbackMonths]
   );
 
   // Group by rep
   const repData: Record<string, { counts: number[]; firstDealAt: Date }> = {};
   for (const row of result.rows) {
-    if (!repData[row.owner_email]) {
-      repData[row.owner_email] = { counts: [], firstDealAt: new Date(row.first_deal_at) };
+    if (!repData[row.owner]) {
+      repData[row.owner] = { counts: [], firstDealAt: new Date(row.first_deal_at) };
     }
-    repData[row.owner_email].counts.push(parseInt(row.deals_created, 10));
+    repData[row.owner].counts.push(parseInt(row.deals_created, 10));
   }
 
   // Compute team average for new hire fallback
