@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { colors, fonts } from '../styles/theme';
 import { api } from '../lib/api';
 import Skeleton from '../components/Skeleton';
 import { formatCurrency } from '../lib/format';
+import Toast from '../components/Toast';
 
 type Tab = 'voice' | 'skills' | 'tokens' | 'learning' | 'quotas' | 'ws-general' | 'ws-stages' | 'ws-filters' | 'ws-team' | 'ws-thresholds' | 'ws-suggestions';
 
@@ -480,14 +481,23 @@ function Toggle({ enabled, onChange }: { enabled: boolean; onChange: (v: boolean
   );
 }
 
+interface ToastItem { id: number; message: string; type: 'success' | 'error' | 'info'; }
+
 function SkillsSection() {
   const [loading, setLoading] = useState(true);
   const [skills, setSkills] = useState<any[]>([]);
   const [experimentalSkills, setExperimentalSkills] = useState<any[]>([]);
   const [enabledExperimentalIds, setEnabledExperimentalIds] = useState<string[]>([]);
   const [schedules, setSchedules] = useState<Record<string, { cron: string; enabled: boolean; preset: string; customCron: string }>>({});
-  const [savedMap, setSavedMap] = useState<Record<string, boolean>>({});
-  const [errorMsg, setErrorMsg] = useState('');
+  const [savingAll, setSavingAll] = useState(false);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const toastIdRef = useRef(0);
+
+  const addToast = (message: string, type: ToastItem['type'] = 'success') => {
+    const id = ++toastIdRef.current;
+    setToasts(prev => [...prev, { id, message, type }]);
+  };
+  const removeToast = (id: number) => setToasts(prev => prev.filter(t => t.id !== id));
 
   useEffect(() => {
     Promise.all([
@@ -545,16 +555,28 @@ function SkillsSection() {
   const saveSchedule = async (skillId: string, sched?: any) => {
     const s = sched || schedules[skillId];
     if (!s) return;
-    setErrorMsg('');
     try {
-      await api.patch(`/skills/${skillId}/schedule`, { cron: s.cron, enabled: s.enabled });
-      setSavedMap(prev => ({ ...prev, [skillId]: true }));
-      setTimeout(() => setSavedMap(prev => ({ ...prev, [skillId]: false })), 2000);
+      await api.patch(`/skills/${skillId}/schedule`, { cron: s.cron || null, enabled: s.enabled });
+      addToast('Schedule saved', 'success');
     } catch (err: any) {
-      if (err.message?.includes('404') || err.message?.includes('Not Found')) {
-        setErrorMsg('Schedule updates not yet available');
-        setTimeout(() => setErrorMsg(''), 3000);
-      }
+      addToast(err.message || 'Failed to save schedule', 'error');
+    }
+  };
+
+  const saveAll = async () => {
+    const skillIds = Object.keys(schedules);
+    if (skillIds.length === 0) return;
+    setSavingAll(true);
+    try {
+      await Promise.all(skillIds.map(id => api.patch(`/skills/${id}/schedule`, {
+        cron: schedules[id]?.cron || null,
+        enabled: schedules[id]?.enabled ?? false,
+      })));
+      addToast(`Saved ${skillIds.length} skill schedules`, 'success');
+    } catch (err: any) {
+      addToast(err.message || 'Some schedules failed to save', 'error');
+    } finally {
+      setSavingAll(false);
     }
   };
 
@@ -569,22 +591,29 @@ function SkillsSection() {
 
   return (
     <div style={{ maxWidth: 720 }}>
-      <h2 style={{ fontSize: 18, fontWeight: 600, color: colors.text, marginBottom: 24 }}>Skill Scheduling</h2>
-
-      {errorMsg && (
-        <div style={{
-          padding: '8px 14px',
-          marginBottom: 16,
-          borderRadius: 8,
-          background: colors.yellowSoft,
-          border: `1px solid ${colors.yellow}`,
-          color: colors.yellow,
-          fontSize: 12,
-          fontWeight: 500,
-        }}>
-          {errorMsg}
-        </div>
-      )}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 600, color: colors.text, margin: 0 }}>Skill Scheduling</h2>
+        <button
+          onClick={saveAll}
+          disabled={savingAll || skills.length === 0}
+          style={{
+            fontSize: 12,
+            fontWeight: 600,
+            fontFamily: fonts.sans,
+            color: '#fff',
+            background: savingAll ? colors.textMuted : colors.accent,
+            border: 'none',
+            borderRadius: 6,
+            padding: '7px 16px',
+            cursor: savingAll ? 'default' : 'pointer',
+          }}
+        >
+          {savingAll ? 'Saving...' : 'Save All'}
+        </button>
+      </div>
+      {toasts.map(t => (
+        <Toast key={t.id} message={t.message} type={t.type} onClose={() => removeToast(t.id)} />
+      ))}
 
       {skills.length === 0 ? (
         <div style={{
@@ -675,9 +704,6 @@ function SkillsSection() {
                 >
                   Save
                 </button>
-                {savedMap[skill.id] && (
-                  <span style={{ fontSize: 11, color: colors.green, fontWeight: 500 }}>Saved ✓</span>
-                )}
               </div>
             );
           })}

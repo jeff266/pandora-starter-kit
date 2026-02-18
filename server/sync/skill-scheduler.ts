@@ -49,6 +49,16 @@ async function executeSkill(
   const startTime = Date.now();
 
   try {
+    // Check per-workspace schedule override — skip if disabled
+    const overrideResult = await query<{ enabled: boolean }>(
+      `SELECT enabled FROM skill_schedules WHERE workspace_id = $1 AND skill_id = $2`,
+      [workspaceId, skill.id]
+    ).catch(() => ({ rows: [] as { enabled: boolean }[] }));
+    if (overrideResult.rows.length > 0 && overrideResult.rows[0].enabled === false) {
+      console.log(`[Skill Scheduler] Skipping ${skill.id} for workspace ${workspaceId} (disabled by workspace override)`);
+      return { success: false, error: 'Skill disabled for this workspace' };
+    }
+
     // Check for duplicate run
     const isDuplicate = await hasRecentRun(workspaceId, skill.id);
     if (isDuplicate) {

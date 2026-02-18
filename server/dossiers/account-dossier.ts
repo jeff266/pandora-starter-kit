@@ -311,7 +311,7 @@ export async function assembleAccountDossier(
   for (const cv of conversations) {
     if (Array.isArray(cv.participants)) {
       for (const p of cv.participants) {
-        if (p?.includes('@')) {
+        if (typeof p === 'string' && p.includes('@')) {
           const lower = p.toLowerCase();
           participantEmails.add(lower);
           participantCounts.set(lower, (participantCounts.get(lower) || 0) + 1);

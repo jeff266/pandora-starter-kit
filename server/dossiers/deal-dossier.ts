@@ -337,7 +337,7 @@ export async function assembleDealDossier(
   const participantEmails = new Set<string>();
   for (const cv of mappedConversations) {
     for (const p of cv.participants) {
-      if (p && p.includes('@')) participantEmails.add(p.toLowerCase());
+      if (typeof p === 'string' && p.includes('@')) participantEmails.add(p.toLowerCase());
     }
   }
 

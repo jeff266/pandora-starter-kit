@@ -181,15 +181,31 @@ router.get('/:workspaceId/skills', async (req, res) => {
       findingsMap.get(row.skill_id)![alias] = parseInt(row.cnt, 10);
     }
 
+    // Load per-workspace schedule overrides
+    const scheduleOverrides = await query<{ skill_id: string; cron: string | null; enabled: boolean }>(
+      `SELECT skill_id, cron, enabled FROM skill_schedules WHERE workspace_id = $1`,
+      [workspaceId]
+    ).catch(() => ({ rows: [] as { skill_id: string; cron: string | null; enabled: boolean }[] }));
+    const overrideMap = new Map<string, { cron: string | null; enabled: boolean }>();
+    for (const row of scheduleOverrides.rows) {
+      overrideMap.set(row.skill_id, { cron: row.cron, enabled: row.enabled });
+    }
+
     const result = skills.map(s => {
       const last = lastRunMap.get(s.id);
+      const override = overrideMap.get(s.id);
+      const baseSchedule = s.schedule || {};
       return {
         id: s.id,
         name: s.name,
         description: s.description,
         category: s.category,
         tier: s.tier,
-        schedule: s.schedule,
+        schedule: {
+          ...baseSchedule,
+          cron: override?.cron ?? baseSchedule.cron ?? null,
+          enabled: override !== undefined ? override.enabled : false,
+        },
         lastRunAt: last?.at || null,
         lastRunStatus: last?.status || null,
         lastRunDuration: last?.duration || null,
@@ -200,6 +216,33 @@ router.get('/:workspaceId/skills', async (req, res) => {
     return res.json(result);
   } catch (err) {
     console.error('[skills] Error listing skills:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.patch('/:workspaceId/skills/:skillId/schedule', async (req, res) => {
+  try {
+    const { workspaceId, skillId } = req.params;
+    const { cron, enabled } = req.body || {};
+
+    const registry = getSkillRegistry();
+    if (!registry.get(skillId)) {
+      return res.status(404).json({ error: `Skill not found: ${skillId}` });
+    }
+
+    await query(
+      `INSERT INTO skill_schedules (workspace_id, skill_id, cron, enabled, updated_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       ON CONFLICT (workspace_id, skill_id) DO UPDATE SET
+         cron = EXCLUDED.cron,
+         enabled = EXCLUDED.enabled,
+         updated_at = NOW()`,
+      [workspaceId, skillId, cron ?? null, enabled ?? true]
+    );
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[skills] Error saving schedule:', err);
     return res.status(500).json({ error: 'Internal server error' });
   }
 });
