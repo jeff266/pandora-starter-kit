@@ -736,7 +736,7 @@ export async function initialSync(
       const staleStageTimestamps = await query<{ count: string }>(
         `SELECT COUNT(*) as count FROM deals
          WHERE workspace_id = $1 AND source = 'hubspot'
-           AND (stage_changed_at IS NULL OR stage_changed_at = created_date)`,
+           AND (stage_changed_at IS NULL OR stage_changed_at = created_at)`,
         [workspaceId]
       );
       const staleCount = parseInt(staleStageTimestamps.rows[0]?.count || '0', 10);

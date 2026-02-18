@@ -36,6 +36,14 @@ interface SyncResult {
   byUser?: Array<{ name: string; calls: number }>;
 }
 
+const CRM_CONNECTORS = ['hubspot', 'salesforce'];
+const SYNC_INTERVAL_OPTIONS = [
+  { value: 60, label: 'Every hour' },
+  { value: 240, label: 'Every 4 hours' },
+  { value: 720, label: 'Every 12 hours' },
+  { value: 1440, label: 'Daily' },
+];
+
 interface Connector {
   type: string;
   status: string;
@@ -48,6 +56,10 @@ interface Connector {
     accounts: number;
     conversations: number;
   };
+  sync_interval_minutes?: number;
+  sync_interval_label?: string;
+  next_sync_at?: string | null;
+  open_field_findings?: number;
 }
 
 interface ConsultantConnector {
@@ -413,6 +425,30 @@ export default function ConnectorsPage() {
   const [trackedUserIds, setTrackedUserIds] = useState<Set<string>>(new Set());
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [savingUsers, setSavingUsers] = useState(false);
+  const [savingInterval, setSavingInterval] = useState<string | null>(null);
+
+  const handleSyncIntervalChange = async (connectorType: string, minutes: number) => {
+    setSavingInterval(connectorType);
+    try {
+      await api.patch(`/connectors/${connectorType}/sync-interval`, { sync_interval_minutes: minutes });
+      setConnectors(prev => prev.map(c => c.type === connectorType
+        ? {
+            ...c,
+            sync_interval_minutes: minutes,
+            sync_interval_label: SYNC_INTERVAL_OPTIONS.find(o => o.value === minutes)?.label ?? '',
+            next_sync_at: c.last_sync_at
+              ? new Date(new Date(c.last_sync_at).getTime() + minutes * 60 * 1000).toISOString()
+              : null,
+          }
+        : c
+      ));
+      addToast(`Sync interval updated to ${SYNC_INTERVAL_OPTIONS.find(o => o.value === minutes)?.label}`, 'success');
+    } catch {
+      addToast('Failed to update sync interval', 'error');
+    } finally {
+      setSavingInterval(null);
+    }
+  };
 
   const fetchConnectors = async () => {
     try {
@@ -654,9 +690,42 @@ export default function ConnectorsPage() {
                 )}
               </div>
 
-              <div style={{ fontSize: 12, color: colors.textMuted, marginBottom: 16 }}>
+              <div style={{ fontSize: 12, color: colors.textMuted, marginBottom: CRM_CONNECTORS.includes(connector.type) ? 10 : 16 }}>
                 Last sync: {connector.last_sync_at ? formatTimeAgo(connector.last_sync_at) : 'Never'}
               </div>
+
+              {CRM_CONNECTORS.includes(connector.type) && (
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 11, color: colors.textMuted, whiteSpace: 'nowrap' }}>Auto-sync:</span>
+                    <select
+                      value={connector.sync_interval_minutes ?? 60}
+                      onChange={e => handleSyncIntervalChange(connector.type, parseInt(e.target.value, 10))}
+                      disabled={savingInterval === connector.type}
+                      style={{
+                        flex: 1,
+                        padding: '4px 8px',
+                        background: colors.surfaceHover,
+                        border: `1px solid ${colors.border}`,
+                        borderRadius: 5,
+                        color: colors.text,
+                        fontSize: 11,
+                        cursor: savingInterval === connector.type ? 'not-allowed' : 'pointer',
+                        opacity: savingInterval === connector.type ? 0.6 : 1,
+                      }}
+                    >
+                      {SYNC_INTERVAL_OPTIONS.map(opt => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {connector.next_sync_at && (
+                    <div style={{ fontSize: 10, color: colors.textMuted, marginTop: 4, marginLeft: 64 }}>
+                      Next: {formatTimeAgo(connector.next_sync_at)}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {recordEntries.length > 0 && (
                 <div style={{
