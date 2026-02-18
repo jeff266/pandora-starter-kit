@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS agents (
   skill_ids TEXT[] NOT NULL DEFAULT '{}',
   focus_config JSONB NOT NULL DEFAULT '{}',
 
-  delivery_rule_id UUID REFERENCES delivery_rules(id) ON DELETE SET NULL,
+  delivery_rule_id TEXT REFERENCES delivery_rules(id) ON DELETE SET NULL,
 
   estimated_tokens_per_week INT,
   estimated_deliveries_per_week FLOAT,
