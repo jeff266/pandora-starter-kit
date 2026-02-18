@@ -9,6 +9,7 @@ import { SeverityDot } from '../components/shared';
 import QuotaBanner from '../components/QuotaBanner';
 import { useWorkspace } from '../context/WorkspaceContext';
 import SectionErrorBoundary from '../components/SectionErrorBoundary';
+import MonteCarloPanel from '../components/MonteCarloPanel';
 import { useDemoMode } from '../contexts/DemoModeContext';
 
 interface Finding {
@@ -549,6 +550,10 @@ export default function CommandCenter() {
             </>
           )}
         </div>
+      </SectionErrorBoundary>
+
+      <SectionErrorBoundary fallbackMessage="Failed to load forecast panel.">
+        <MonteCarloPanel />
       </SectionErrorBoundary>
 
       <SectionErrorBoundary fallbackMessage="Failed to load pipeline chart.">
