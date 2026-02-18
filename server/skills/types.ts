@@ -19,7 +19,12 @@ export type SkillCategory =
   | 'calls'
   | 'forecasting'
   | 'reporting'
-  | 'operations';
+  | 'operations'
+  | 'enrichment'
+  | 'intelligence'
+  | 'scoring'
+  | 'config'
+  | 'data_enrichment';
 
 export type SkillOutputFormat = 'slack' | 'markdown' | 'json' | 'structured';
 
@@ -64,8 +69,10 @@ export interface SkillDefinition {
   schedule?: {
     /** Cron expression: '0 8 * * 1' (Monday 8 AM) */
     cron?: string;
-    /** Trigger type: 'post_sync', 'on_demand', 'webhook' */
-    trigger?: string;
+    /** Trigger type: 'post_sync', 'on_demand', 'webhook' — accepts single string or array */
+    trigger?: string | string[];
+    /** Optional description of the schedule */
+    description?: string;
   };
 
   /** Time-scoping configuration (overridable at runtime) */
@@ -132,6 +139,14 @@ export interface SkillStep {
   maxToolCalls?: number;
   /** Maximum tokens for LLM response (default: 4096) */
   maxTokens?: number;
+
+  // --- OUTPUT PARSING ---
+  /** How to parse the LLM response: 'json' | 'markdown' | 'text' */
+  parseAs?: 'json' | 'markdown' | 'text';
+
+  // --- MODEL OVERRIDE ---
+  /** Override the default model for this step */
+  model?: string;
 }
 
 // ============================================================================

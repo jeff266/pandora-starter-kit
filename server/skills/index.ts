@@ -30,6 +30,7 @@ import { forecastModelSkill } from './library/forecast-model.js';
 import { pipelineGenForecastSkill } from './library/pipeline-gen-forecast.js';
 import { competitiveIntelligenceSkill } from './library/competitive-intelligence.js';
 import { forecastAccuracyTrackingSkill } from './library/forecast-accuracy-tracking.js';
+import { dealScoringModelSkill } from './library/deal-scoring-model.js';
 
 // Types
 export type {
@@ -107,6 +108,7 @@ export { forecastModelSkill } from './library/forecast-model.js';
 export { pipelineGenForecastSkill } from './library/pipeline-gen-forecast.js';
 export { competitiveIntelligenceSkill } from './library/competitive-intelligence.js';
 export { forecastAccuracyTrackingSkill } from './library/forecast-accuracy-tracking.js';
+export { dealScoringModelSkill } from './library/deal-scoring-model.js';
 
 // Formatters
 export {
@@ -161,6 +163,7 @@ export function registerBuiltInSkills(): void {
   registry.register(pipelineGenForecastSkill);
   registry.register(competitiveIntelligenceSkill);
   registry.register(forecastAccuracyTrackingSkill);
+  registry.register(dealScoringModelSkill);
 
   // Register evidence builders for "Show the Work" evidence assembly
   registerAllEvidenceBuilders();

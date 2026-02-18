@@ -24,7 +24,7 @@ export const icpDiscoverySkill: SkillDefinition = {
   tier: 'claude',
   slackTemplate: 'icp-discovery',
 
-  requiredTools: ['resolveContactRoles', 'discoverICP'],
+  requiredTools: ['resolveContactRoles', 'discoverICP', 'icpScoreOpenDeals', 'icpPersistProfile'],
   requiredContext: [],
 
   steps: [
@@ -45,6 +45,26 @@ export const icpDiscoverySkill: SkillDefinition = {
       computeFn: 'discoverICP',
       computeArgs: {},
       outputKey: 'discovery_result',
+    },
+
+    {
+      id: 'score-open-deals',
+      name: 'Score Open Deals Against ICP Profile',
+      tier: 'compute',
+      dependsOn: ['discover-patterns'],
+      computeFn: 'icpScoreOpenDeals',
+      computeArgs: {},
+      outputKey: 'icp_fit_scores',
+    },
+
+    {
+      id: 'persist-profile',
+      name: 'Write ICP Profile to Database and Emit Findings',
+      tier: 'compute',
+      dependsOn: ['score-open-deals'],
+      computeFn: 'icpPersistProfile',
+      computeArgs: {},
+      outputKey: 'persist_result',
     },
 
     {
@@ -216,6 +236,21 @@ NOTE: Contact data not available (file import workspace). ICP analysis based on 
 Persona and buying committee analysis will be limited or unavailable.
 {{/unless}}
 
+## Portfolio ICP Alignment
+
+Open deals scored: {{icp_fit_scores.total_open_deals}}
+Pipeline matching ICP (score ≥60): {{icp_fit_scores.pipeline_in_icp_pct}}% (\${{icp_fit_scores.pipeline_in_icp_value}})
+Pipeline off-ICP (score <40): {{icp_fit_scores.pipeline_off_icp_pct}}% (\${{icp_fit_scores.pipeline_off_icp_value}})
+Average ICP fit score: {{icp_fit_scores.avg_icp_fit}}/100
+
+Top ICP-fit open deals:
+{{{json icp_fit_scores.top_icp_deals}}}
+
+Lowest ICP-fit open deals (at risk):
+{{{json icp_fit_scores.bottom_icp_deals}}}
+
+---
+
 ## Data Analyzed
 
 **Mode:** {{discovery_result.mode}}
@@ -335,6 +370,8 @@ Write a Slack-ready ICP report covering:
 
 4. **Company Sweet Spot** — Industry, size, and any custom field values that define the ideal target. Include win rates.
 
+4b. **Portfolio Alignment**: "X% of pipeline ($Y) matches ICP. Top ICP-fit deals: [list top 3]. Highest-risk off-ICP deals: [list bottom 3 with amounts]."
+
 5. **Acquisition Channel Insights** — Which lead sources produce the highest quality pipeline (conversion rate × win rate × deal size). If lead data is available.
 
 6. **Custom Field Discoveries** — Any customer-specific fields that strongly segment outcomes. "Deals with [Field = Value] win at X% versus Y% for [Field = Other Value]."
@@ -383,7 +420,7 @@ Keep it concise and actionable. Use real deal sizes and percentages from the dat
   ],
 
   schedule: {
-    cron: '0 6 1 * *', // Monthly on 1st at 6am
+    cron: '0 8 * * 0', // Weekly on Sunday at 8am
     trigger: ['on_demand'],
   },
 
