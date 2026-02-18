@@ -573,4 +573,63 @@ function extractTopDeals(result: SkillResult): Array<{ id: string; name: string 
   return deals;
 }
 
+/**
+ * GET /api/workspaces/:workspaceId/monte-carlo/latest
+ * Returns the command_center payload from the most recent completed monte-carlo-forecast run.
+ * Used by the Command Center UI (Flight Plan tab).
+ */
+router.get('/:workspaceId/monte-carlo/latest', async (req, res) => {
+  try {
+    const { workspaceId } = req.params;
+
+    const ws = await query('SELECT id FROM workspaces WHERE id = $1', [workspaceId]);
+    if (ws.rows.length === 0) {
+      return res.status(404).json({ error: 'Workspace not found' });
+    }
+
+    // result column holds stepData JSONB; command_center lives under simulation key
+    const result = await query<{
+      run_id: string;
+      created_at: string;
+      result: any;
+    }>(
+      `SELECT run_id, created_at, result
+       FROM skill_runs
+       WHERE workspace_id = $1
+         AND skill_id = 'monte-carlo-forecast'
+         AND status = 'completed'
+         AND result IS NOT NULL
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [workspaceId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'No completed monte-carlo-forecast run found' });
+    }
+
+    const row = result.rows[0];
+    let stepData: any;
+    try {
+      stepData = typeof row.result === 'string' ? JSON.parse(row.result) : row.result;
+    } catch {
+      return res.status(422).json({ error: 'Run result data is malformed' });
+    }
+
+    const commandCenter = stepData?.simulation?.commandCenter ?? null;
+    if (!commandCenter) {
+      return res.status(404).json({ error: 'No command_center payload in latest run' });
+    }
+
+    return res.json({
+      runId: row.run_id,
+      generatedAt: row.created_at,
+      commandCenter,
+    });
+  } catch (err) {
+    console.error('[skills] Error fetching monte-carlo latest:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 export default router;

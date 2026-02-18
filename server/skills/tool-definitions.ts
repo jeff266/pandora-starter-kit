@@ -6027,6 +6027,290 @@ const icpPersistProfile: ToolDefinition = {
 };
 
 // ============================================================================
+// Monte Carlo Forecast Tools
+// ============================================================================
+
+const mcResolveForecastWindow: ToolDefinition = {
+  name: 'mcResolveForecastWindow',
+  description: 'Resolve forecast window (today → year-end) and read team quota from quota_periods table.',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (_params, context) => {
+    return safeExecute('mcResolveForecastWindow', async () => {
+      const today = new Date();
+      const forecastWindowEnd = new Date(today.getFullYear(), 11, 31);
+      const daysRemaining = Math.max(0, Math.floor((forecastWindowEnd.getTime() - today.getTime()) / 86400000));
+      const monthsRemaining = daysRemaining / 30;
+
+      // Read most recent active annual quota period
+      const quotaResult = await query<{
+        id: string;
+        team_quota: string | null;
+        start_date: string;
+        end_date: string;
+      }>(
+        `SELECT id, team_quota::text, start_date::text, end_date::text
+         FROM quota_periods
+         WHERE workspace_id = $1
+           AND period_type IN ('annual', 'yearly')
+           AND end_date >= NOW()
+         ORDER BY start_date DESC
+         LIMIT 1`,
+        [context.workspaceId]
+      ).catch(() => ({ rows: [] as any[] }));
+
+      let quota: number | null = null;
+      if (quotaResult.rows.length > 0 && quotaResult.rows[0].team_quota) {
+        quota = parseFloat(quotaResult.rows[0].team_quota);
+        if (isNaN(quota)) quota = null;
+      }
+
+      // Fallback: check workspace config for target_arr
+      if (!quota) {
+        const goalsCtx = context.businessContext?.goals_and_targets as Record<string, any> | undefined;
+        if (goalsCtx?.annual_target) {
+          quota = parseFloat(String(goalsCtx.annual_target));
+          if (isNaN(quota)) quota = null;
+        }
+      }
+
+      return {
+        today: today.toISOString(),
+        forecastWindowEnd: forecastWindowEnd.toISOString(),
+        daysRemaining,
+        monthsRemaining,
+        quota,
+        hasQuota: quota !== null,
+      };
+    }, _params);
+  },
+};
+
+const mcFitDistributions: ToolDefinition = {
+  name: 'mcFitDistributions',
+  description: 'Fit probability distributions (win rates, deal size, cycle length, slippage, pipeline rates) to historical CRM data.',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (_params, context) => {
+    return safeExecute('mcFitDistributions', async () => {
+      const {
+        fitStageWinRates,
+        fitDealSizeDistribution,
+        fitCycleLengthDistribution,
+        fitCloseSlippageDistribution,
+        fitPipelineCreationRates,
+        assessDataQuality,
+      } = await import('../analysis/monte-carlo-distributions.js');
+
+      const [stageWinRates, dealSize, cycleLength, slippage, pipelineRates] = await Promise.all([
+        fitStageWinRates(context.workspaceId),
+        fitDealSizeDistribution(context.workspaceId),
+        fitCycleLengthDistribution(context.workspaceId),
+        fitCloseSlippageDistribution(context.workspaceId),
+        fitPipelineCreationRates(context.workspaceId),
+      ]);
+
+      // Count closed deals for tier assessment
+      const closedResult = await query<{ cnt: string }>(
+        `SELECT COUNT(*)::text AS cnt FROM deals
+         WHERE workspace_id = $1 AND (is_closed_won = true OR is_closed_lost = true)`,
+        [context.workspaceId]
+      );
+      const closedDealCount = parseInt(closedResult.rows[0]?.cnt || '0', 10);
+
+      const distributions = { stageWinRates, dealSize, cycleLength, slippage, pipelineRates };
+      const dataQuality = assessDataQuality(distributions, closedDealCount);
+
+      return { distributions, dataQuality, closedDealCount };
+    }, _params);
+  },
+};
+
+const mcLoadOpenDeals: ToolDefinition = {
+  name: 'mcLoadOpenDeals',
+  description: 'Load all open deals for Monte Carlo simulation (excludes closed stages, includes deals closing within 24 months).',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (_params, context) => {
+    return safeExecute('mcLoadOpenDeals', async () => {
+      const result = await query<{
+        id: string;
+        name: string;
+        amount: string | null;
+        stage_normalized: string | null;
+        close_date: string | null;
+        owner_email: string | null;
+        probability: string | null;
+      }>(
+        `SELECT id, name, amount::text, stage_normalized, close_date::text, owner_email, probability::text
+         FROM deals
+         WHERE workspace_id = $1
+           AND stage_normalized NOT IN ('closed_won', 'closed_lost')
+           AND (close_date IS NULL OR close_date <= NOW() + INTERVAL '24 months')
+         ORDER BY amount DESC NULLS LAST
+         LIMIT 500`,
+        [context.workspaceId]
+      );
+
+      const openDeals = result.rows.map(r => ({
+        id: r.id,
+        name: r.name,
+        amount: r.amount ? Math.max(0, parseFloat(r.amount)) : 50000,
+        stageNormalized: r.stage_normalized || 'qualification',
+        closeDate: r.close_date ? new Date(r.close_date) : new Date(Date.now() + 90 * 86400000),
+        ownerEmail: r.owner_email,
+        probability: r.probability ? parseFloat(r.probability) : null,
+      }));
+
+      const totalCrmValue = openDeals.reduce((s, d) => s + d.amount, 0);
+
+      const stageBreakdown: Record<string, { count: number; value: number }> = {};
+      for (const deal of openDeals) {
+        if (!stageBreakdown[deal.stageNormalized]) {
+          stageBreakdown[deal.stageNormalized] = { count: 0, value: 0 };
+        }
+        stageBreakdown[deal.stageNormalized].count++;
+        stageBreakdown[deal.stageNormalized].value += deal.amount;
+      }
+
+      return { openDeals, dealCount: openDeals.length, totalCrmValue, stageBreakdown };
+    }, _params);
+  },
+};
+
+const mcComputeRiskAdjustments: ToolDefinition = {
+  name: 'mcComputeRiskAdjustments',
+  description: 'Compute per-deal win rate multipliers from recent skill run signals (pipeline-hygiene, single-thread-alert, conversation-intelligence).',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (_params, context) => {
+    return safeExecute('mcComputeRiskAdjustments', async () => {
+      const { computeDealRiskAdjustments } = await import('../analysis/monte-carlo-engine.js');
+      const openDealsKey = (context as any).stepOutputs?.['open_deals'];
+      const openDeals = openDealsKey?.openDeals || [];
+
+      const adjustments = await computeDealRiskAdjustments(context.workspaceId, openDeals);
+
+      // Build summary of top risky deals for DeepSeek prompt
+      const topRiskyDeals = Object.values(adjustments)
+        .filter(a => a.multiplier < 0.85 || a.signals.length > 0)
+        .sort((a, b) => a.multiplier - b.multiplier)
+        .slice(0, 15)
+        .map(a => {
+          const deal = openDeals.find((d: any) => d.id === a.dealId);
+          return {
+            deal_name: deal?.name || a.dealId,
+            amount: deal?.amount || 0,
+            risk_multiplier: a.multiplier,
+            signals: a.signals,
+          };
+        });
+
+      const signalSources: string[] = [];
+      const allSignals = Object.values(adjustments).flatMap(a => a.signals);
+      if (allSignals.some(s => s.includes('single_thread'))) signalSources.push('single-thread-alert');
+      if (allSignals.some(s => s.includes('activity'))) signalSources.push('pipeline-hygiene');
+      if (allSignals.some(s => s.includes('competitor') || s.includes('champion'))) signalSources.push('conversation-intelligence');
+
+      const adjustedDealCount = Object.values(adjustments).filter(a => a.multiplier !== 1.0).length;
+
+      return { adjustments, topRiskyDeals, signalSources, adjustedDealCount };
+    }, _params);
+  },
+};
+
+const mcRunSimulation: ToolDefinition = {
+  name: 'mcRunSimulation',
+  description: 'Run 10,000-iteration Monte Carlo simulation and compute variance drivers.',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (_params, context) => {
+    return safeExecute('mcRunSimulation', async () => {
+      const { runSimulation, buildHistogram } = await import('../analysis/monte-carlo-engine.js');
+      const { computeVarianceDrivers } = await import('../analysis/monte-carlo-variance.js');
+
+      const stepOutputs = (context as any).stepOutputs || {};
+      const distributions = stepOutputs['distributions']?.distributions;
+      const openDeals = stepOutputs['open_deals']?.openDeals || [];
+      const riskAdjustments = stepOutputs['risk_adjustments']?.adjustments || {};
+      const forecastWindow = stepOutputs['forecast_window'] || {};
+      const closedDealCount = stepOutputs['distributions']?.closedDealCount || 0;
+
+      if (!distributions) {
+        return { error: 'Distributions not available — fit-distributions step must complete first.' };
+      }
+
+      const today = new Date();
+      const forecastWindowEnd = forecastWindow.forecastWindowEnd
+        ? new Date(forecastWindow.forecastWindowEnd)
+        : new Date(today.getFullYear(), 11, 31);
+      const quota = forecastWindow.quota ?? null;
+
+      const simInputs = {
+        openDeals,
+        distributions,
+        riskAdjustments,
+        forecastWindowEnd,
+        today,
+        iterations: 10000,
+      };
+
+      const simulation = runSimulation(simInputs, quota);
+      simulation.closedDealsUsedForFitting = closedDealCount;
+
+      const varianceDrivers = computeVarianceDrivers(simInputs, simulation.p50);
+
+      const p50Total = simulation.p50;
+      const existingPct = p50Total > 0
+        ? Math.round((simulation.existingPipelineP50 / p50Total) * 100)
+        : 100;
+
+      const histogram = buildHistogram(simulation.iterationResults, 100);
+
+      // Determine data quality tier
+      const dataQualityTier: 1 | 2 | 3 =
+        closedDealCount < 20 ? 1 : quota !== null ? 3 : 2;
+
+      // Command center payload
+      const commandCenter = {
+        p50: simulation.p50,
+        probOfHittingTarget: simulation.probOfHittingTarget,
+        quota,
+        p10: simulation.p10,
+        p25: simulation.p25,
+        p75: simulation.p75,
+        p90: simulation.p90,
+        existingPipelineP50: simulation.existingPipelineP50,
+        projectedPipelineP50: simulation.projectedPipelineP50,
+        varianceDrivers: varianceDrivers.map(d => ({
+          label: d.label,
+          upsideImpact: d.upsideImpact,
+          downsideImpact: d.downsideImpact,
+        })),
+        iterationsRun: 10000,
+        dealsInSimulation: openDeals.length,
+        closedDealsUsedForFitting: closedDealCount,
+        forecastWindowEnd: forecastWindowEnd.toISOString(),
+        dataQualityTier,
+        warnings: simulation.dataQuality.warnings,
+        histogram,
+      };
+
+      return {
+        simulation,
+        varianceDrivers,
+        componentBreakdown: {
+          existingPipelinePct: existingPct,
+          projectedPipelinePct: 100 - existingPct,
+        },
+        dataQualityTier,
+        commandCenter,
+      };
+    }, _params);
+  },
+};
+
+// ============================================================================
 
 export const toolRegistry = new Map<string, ToolDefinition>([
   ['queryDeals', queryDeals],
@@ -6133,6 +6417,12 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['dsmBuildFindings', dsmBuildFindings],
   ['icpScoreOpenDeals', icpScoreOpenDeals],
   ['icpPersistProfile', icpPersistProfile],
+  // Monte Carlo Forecast tools
+  ['mcResolveForecastWindow', mcResolveForecastWindow],
+  ['mcFitDistributions', mcFitDistributions],
+  ['mcLoadOpenDeals', mcLoadOpenDeals],
+  ['mcComputeRiskAdjustments', mcComputeRiskAdjustments],
+  ['mcRunSimulation', mcRunSimulation],
 ]);
 
 // ============================================================================
