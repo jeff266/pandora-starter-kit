@@ -4426,7 +4426,7 @@ const fmScoreOpenDeals: ToolDefinition = {
                 d.owner as owner_name, d.account_id, d.forecast_category,
                 d.probability as crm_probability, d.days_in_stage,
                 CASE WHEN d.close_date IS NOT NULL
-                     THEN EXTRACT(DAY FROM (d.close_date::date - CURRENT_DATE))
+                     THEN (d.close_date::date - CURRENT_DATE)
                      ELSE NULL END as days_to_close
          FROM deals d
          WHERE d.workspace_id = $1
@@ -4571,7 +4571,7 @@ const fmComputePipelineProjection: ToolDefinition = {
                 COALESCE(SUM(d.amount), 0)::numeric as amount_created
          FROM deals d
          WHERE d.workspace_id = $1
-           AND d.created_date >= $2 AND d.created_date < $3
+           AND d.created_at >= $2 AND d.created_at < $3
            AND d.amount > 0`,
         [context.workspaceId, currentQStart.toISOString(), currentQEnd.toISOString()]
       );
@@ -4580,15 +4580,15 @@ const fmComputePipelineProjection: ToolDefinition = {
       const inQtrResult = await query<any>(
         `SELECT
            COUNT(*) FILTER (WHERE d.stage_normalized = 'closed_won'
-             AND d.close_date >= d.created_date::date
+             AND d.close_date >= d.created_at::date
              AND d.close_date < $2)::float /
            NULLIF(COUNT(*), 0) as inqtr_close_rate,
            COALESCE(SUM(d.amount) FILTER (WHERE d.stage_normalized = 'closed_won'
-             AND d.close_date >= d.created_date::date
+             AND d.close_date >= d.created_at::date
              AND d.close_date < $2), 0)::numeric / NULLIF(SUM(d.amount), 0) as inqtr_amount_rate
          FROM deals d
          WHERE d.workspace_id = $1
-           AND d.created_date >= $3 AND d.created_date < $2
+           AND d.created_at >= $3 AND d.created_at < $2
            AND d.amount > 0`,
         [context.workspaceId, currentQStart.toISOString(), new Date(currentQStart.getTime() - 365 * 86400000).toISOString()]
       ).catch(() => ({ rows: [{ inqtr_close_rate: null, inqtr_amount_rate: null }] as any[] }));
@@ -4630,7 +4630,7 @@ const fmBuildForecastModel: ToolDefinition = {
   parameters: { type: 'object', properties: {}, required: [] },
   execute: async (params, context) => {
     return safeExecute('fmBuildForecastModel', async () => {
-      const adjustedDeals = ((context.stepResults as any).adjusted_deals as any[]) || [];
+      const adjustedDeals = Array.isArray((context.stepResults as any).adjusted_deals) ? (context.stepResults as any).adjusted_deals as any[] : [];
       const pipelineProjection = (context.stepResults as any).pipeline_projection || {};
 
       // Closed-won this quarter
