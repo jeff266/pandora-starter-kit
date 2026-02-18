@@ -1873,7 +1873,7 @@ function formatMetricValue(metric: string, val: number): string {
 async function searchTranscripts(workspaceId: string, params: Record<string, any>) {
   if (!params.query) throw new Error('query is required for search_transcripts');
 
-  const maxResults = Math.min(params.max_results || 10, 50);
+  const maxResults = Math.min(params.max_results || 5, 10);
   const searchQuery = params.query as string;
   const values: any[] = [workspaceId];
 
@@ -1906,7 +1906,7 @@ async function searchTranscripts(workspaceId: string, params: Record<string, any
       SELECT cv.id, cv.title, cv.call_date, cv.duration_seconds, cv.participants,
              a.name as account_name, d.name as deal_name,
              ts_headline('english', COALESCE(cv.transcript_text, ''), plainto_tsquery(${tsq}),
-               'MaxWords=60, MinWords=20, StartSel=[MATCH], StopSel=[/MATCH]') as excerpt
+               'MaxWords=30, MinWords=10, StartSel=[MATCH], StopSel=[/MATCH]') as excerpt
       FROM conversations cv
       LEFT JOIN accounts a ON a.id = cv.account_id AND a.workspace_id = cv.workspace_id
       LEFT JOIN deals d ON d.id = cv.deal_id AND d.workspace_id = cv.workspace_id
@@ -1945,8 +1945,8 @@ async function searchTranscripts(workspaceId: string, params: Record<string, any
     } else if (r.transcript_text) {
       const idx = r.transcript_text.toLowerCase().indexOf(searchQuery.toLowerCase());
       if (idx >= 0) {
-        const start = Math.max(0, idx - 150);
-        const end = Math.min(r.transcript_text.length, idx + 300);
+        const start = Math.max(0, idx - 80);
+        const end = Math.min(r.transcript_text.length, idx + 120);
         excerpt = `...${r.transcript_text.slice(start, end)}...`;
       }
     } else if (r.summary) {
@@ -1997,10 +1997,26 @@ async function searchTranscripts(workspaceId: string, params: Record<string, any
     };
   });
 
+  let totalAvailable = excerpts.length;
+  try {
+    const countValues: any[] = [workspaceId, `%${searchQuery}%`];
+    const countConditions = ['cv.workspace_id = $1', 'cv.is_internal = false', '(cv.transcript_text ILIKE $2 OR cv.summary ILIKE $2)'];
+    if (params.deal_id) countConditions.push(`cv.deal_id = $${countValues.push(params.deal_id)}`);
+    if (params.account_id) countConditions.push(`cv.account_id = $${countValues.push(params.account_id)}`);
+    if (params.since) countConditions.push(`cv.call_date >= $${countValues.push(params.since)}`);
+    if (params.until) countConditions.push(`cv.call_date <= $${countValues.push(params.until)}`);
+    const countResult = await query<any>(
+      `SELECT COUNT(*)::int as cnt FROM conversations cv WHERE ${countConditions.join(' AND ')}`,
+      countValues
+    );
+    totalAvailable = countResult.rows[0]?.cnt || excerpts.length;
+  } catch {}
+
   return {
     excerpts,
     total_matches: excerpts.length,
-    query_description: `Transcript search for "${searchQuery}" — ${excerpts.length} matches found`,
+    total_results_available: totalAvailable,
+    query_description: `Transcript search for "${searchQuery}" — ${excerpts.length} of ${totalAvailable} matches returned`,
   };
 }
 

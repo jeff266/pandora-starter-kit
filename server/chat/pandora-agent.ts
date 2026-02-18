@@ -429,6 +429,58 @@ export interface PandoraResponse {
   latency_ms: number;
 }
 
+// ─── Pre-flight question classifier ───────────────────────────────────────────
+
+interface QuestionClassification {
+  question_type: 'discrete' | 'analytical' | 'strategic';
+  tools_likely_needed: string[];
+  estimated_complexity: 'low' | 'medium' | 'high';
+  token_budget: number;
+}
+
+const CLASSIFIER_PROMPT = `You are a question classifier for a Revenue Operations data platform. Given a user question, classify it and return a JSON object.
+
+Rules:
+- "discrete": simple lookups, single metric, one entity (e.g. "what's the Q1 forecast?", "show me deal X")
+- "analytical": multi-step analysis within one domain (e.g. "which reps have the best win rate?", "why is deal X stuck?")
+- "strategic": cross-domain, open-ended, advisory (e.g. "create a messaging framework", "what should we focus on this quarter?", "build an ABM playbook")
+
+Available tools: query_deals, query_accounts, query_conversations, get_skill_evidence, compute_metric, query_contacts, query_activity_timeline, query_stage_history, compute_stage_benchmarks, query_field_history, compute_metric_segmented, search_transcripts, compute_forecast_accuracy, compute_close_probability, compute_pipeline_creation, compute_inqtr_close_rate, compute_competitive_rates, compute_activity_trend, compute_shrink_rate, infer_contact_role
+
+Return ONLY valid JSON, no markdown:
+{"question_type":"discrete|analytical|strategic","tools_likely_needed":["tool1","tool2"],"estimated_complexity":"low|medium|high"}`;
+
+async function classifyQuestion(workspaceId: string, question: string): Promise<QuestionClassification> {
+  const COMPLEXITY_TO_BUDGET: Record<string, number> = { low: 2048, medium: 4096, high: 8192 };
+
+  try {
+    const response = await callLLM(workspaceId, 'classify', {
+      systemPrompt: CLASSIFIER_PROMPT,
+      messages: [{ role: 'user', content: question }],
+      maxTokens: 256,
+      temperature: 0,
+      _tracking: { workspaceId, phase: 'chat', stepName: 'question-classifier' },
+    });
+
+    const text = (response.content || '').trim();
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      const complexity = parsed.estimated_complexity || 'medium';
+      return {
+        question_type: parsed.question_type || 'analytical',
+        tools_likely_needed: Array.isArray(parsed.tools_likely_needed) ? parsed.tools_likely_needed : [],
+        estimated_complexity: complexity,
+        token_budget: COMPLEXITY_TO_BUDGET[complexity] || 4096,
+      };
+    }
+  } catch (err) {
+    console.log(`[PandoraAgent] Classifier failed, defaulting to medium:`, err);
+  }
+
+  return { question_type: 'analytical', tools_likely_needed: [], estimated_complexity: 'medium', token_budget: 4096 };
+}
+
 // ─── Main agent loop ──────────────────────────────────────────────────────────
 
 export async function runPandoraAgent(
@@ -441,25 +493,31 @@ export async function runPandoraAgent(
   let totalTokens = 0;
   const MAX_ITERATIONS = 8;
 
-  // Build the messages array: prior history + new user message
-  // The history uses the LLM router's message format
+  const classification = await classifyQuestion(workspaceId, message);
+  console.log(`[PandoraAgent] classification:`, JSON.stringify(classification));
+  const dynamicMaxTokens = classification.token_budget;
+
+  const toolHint = classification.tools_likely_needed.length > 0
+    ? `\n\n[Routing hint: This question likely needs these tools first: ${classification.tools_likely_needed.join(', ')}. Start by calling them.]`
+    : '';
+
   const messages: LLMCallOptions['messages'] = [
     ...conversationHistory.map(m => ({
       role: m.role as 'user' | 'assistant',
       content: m.content,
     })),
-    { role: 'user', content: message },
+    { role: 'user', content: message + toolHint },
   ];
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
-    console.log(`[PandoraAgent] iter=${i} calling LLM with ${PANDORA_TOOLS.length} tools, history=${messages.length} msgs`);
+    console.log(`[PandoraAgent] iter=${i} calling LLM with ${PANDORA_TOOLS.length} tools, history=${messages.length} msgs, maxTokens=${dynamicMaxTokens}`);
     console.log(`[PandoraAgent] tools:`, PANDORA_TOOLS.map(t => t.name).join(', '));
 
     const response = await callLLM(workspaceId, 'reason', {
       systemPrompt: PANDORA_SYSTEM_PROMPT,
       messages,
       tools: PANDORA_TOOLS,
-      maxTokens: 4096,
+      maxTokens: dynamicMaxTokens,
       temperature: 0.2,
       _tracking: {
         workspaceId,
@@ -475,10 +533,22 @@ export async function runPandoraAgent(
       console.log(`[PandoraAgent] tools called:`, response.toolCalls.map((tc: any) => tc.name).join(', '));
     }
 
-    // Done — model produced its answer
+    if (response.stopReason === 'max_tokens' && !response.toolCalls?.length) {
+      console.log(`[PandoraAgent] MAX_TOKENS GUARD at iter=${i} — discarding truncated output, injecting nudge`);
+      let nudge = '[Your previous response was truncated because it exceeded the token limit. Do NOT try to write a long answer from memory. Instead, call the appropriate tools to gather data, then give a concise answer based on the results.';
+      if (/\bQ[1-4]\b|quarter|forecast|commit|best.?case/i.test(message)) {
+        nudge += ' For forecast questions: call get_skill_evidence with skill_id="weekly-forecast-rollup", then call query_deals with close_date_from and close_date_to for the relevant quarter.';
+      } else if (/\bcall|meeting|conversation|objection|competi/i.test(message)) {
+        nudge += ' Call search_transcripts or query_conversations to get live call data.';
+      } else {
+        nudge += ' Call the appropriate tools from the available set, gather data, then synthesize a focused answer.';
+      }
+      nudge += ']';
+      messages.push({ role: 'user', content: nudge });
+      continue;
+    }
+
     if (response.stopReason === 'end_turn' || !response.toolCalls?.length) {
-      // Guard: if no tools have been called yet, the agent is answering from context
-      // instead of live data. Give it up to 2 nudges before accepting the answer.
       if (toolTrace.length === 0 && i < 2) {
         console.log(`[PandoraAgent] GUARD FIRED at iter=${i} — no tools called, injecting nudge`);
         messages.push({
@@ -486,7 +556,6 @@ export async function runPandoraAgent(
           content: response.content || '',
         });
 
-        // Build a targeted nudge based on question content
         let nudge = '[You answered without calling any tools. You must query live data before responding.';
         if (/\bQ[1-4]\b|quarter|forecast|commit|best.?case/i.test(message)) {
           nudge += ' For forecast questions: call get_skill_evidence with skill_id="weekly-forecast-rollup", then call query_deals with close_date_from and close_date_to for the relevant quarter.';
@@ -547,10 +616,9 @@ export async function runPandoraAgent(
         });
       }
 
-      // Append tool result as a 'tool' role message (router handles formatting)
       messages.push({
         role: 'tool',
-        content: isError ? JSON.stringify(result) : JSON.stringify(result),
+        content: isError ? JSON.stringify(result) : JSON.stringify(compressToolResult(toolCall.name, result)),
         toolCallId: toolCall.id,
       });
     }
@@ -563,7 +631,7 @@ export async function runPandoraAgent(
       ...messages,
       { role: 'user', content: 'You have reached the maximum number of tool calls. Synthesize your best answer from the data gathered so far.' },
     ],
-    maxTokens: 4096,
+    maxTokens: 8192,
     temperature: 0.2,
     _tracking: {
       workspaceId,
@@ -584,6 +652,96 @@ export async function runPandoraAgent(
     tool_call_count: toolTrace.length,
     latency_ms: Date.now() - startTime,
   };
+}
+
+// ─── Tool result compressor ───────────────────────────────────────────────────
+
+function compressToolResult(toolName: string, result: any): any {
+  if (!result || typeof result !== 'object') return result;
+
+  switch (toolName) {
+    case 'search_transcripts': {
+      const compressed: any = {
+        total_matches: result.total_matches,
+        total_results_available: result.total_results_available,
+        query_description: result.query_description,
+      };
+      if (Array.isArray(result.excerpts)) {
+        compressed.excerpts = result.excerpts.map((e: any) => ({
+          conversation_title: e.conversation_title,
+          conversation_date: e.conversation_date,
+          speaker: e.speaker,
+          excerpt: typeof e.excerpt === 'string' ? e.excerpt.slice(0, 150) : e.excerpt,
+        }));
+      }
+      return compressed;
+    }
+
+    case 'query_conversations': {
+      const compressed: any = {
+        total_count: result.total_count,
+        query_description: result.query_description,
+      };
+      if (Array.isArray(result.conversations)) {
+        compressed.conversations = result.conversations.map((c: any) => ({
+          id: c.id,
+          title: c.title,
+          date: c.date || c.call_date,
+          participants: c.participants,
+        }));
+      }
+      return compressed;
+    }
+
+    case 'query_deals': {
+      const compressed: any = {
+        total_count: result.total_count,
+        total_amount: result.total_amount,
+        query_description: result.query_description,
+      };
+      if (Array.isArray(result.deals)) {
+        compressed.deals = result.deals.map((d: any) => ({
+          id: d.id,
+          name: d.name,
+          amount: d.amount,
+          stage: d.stage,
+          close_date: d.close_date,
+          owner_name: d.owner_name,
+          account_name: d.account_name,
+          forecast_category: d.forecast_category,
+        }));
+      }
+      return compressed;
+    }
+
+    case 'query_accounts': {
+      const compressed: any = {
+        total_count: result.total_count,
+        query_description: result.query_description,
+      };
+      if (Array.isArray(result.accounts)) {
+        compressed.accounts = result.accounts.map((a: any) => ({
+          id: a.id,
+          name: a.name,
+          total_pipeline: a.total_pipeline,
+          open_deal_count: a.open_deal_count,
+          industry: a.industry,
+        }));
+      }
+      return compressed;
+    }
+
+    case 'get_skill_evidence':
+      return result;
+
+    default: {
+      const serialized = JSON.stringify(result);
+      if (serialized.length > 2000) {
+        return { _truncated: true, _original_size: serialized.length, preview: serialized.slice(0, 1500) };
+      }
+      return result;
+    }
+  }
 }
 
 // ─── Build assistant content array with tool_use blocks ───────────────────────
