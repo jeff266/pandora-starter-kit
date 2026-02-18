@@ -292,7 +292,7 @@ export async function scoreAccount(workspaceId: string, accountId: string): Prom
 
   // Load recent activity
   const activityResult = await dbQuery<{ last_activity: string | null }>(
-    `SELECT MAX(activity_date)::text AS last_activity
+    `SELECT MAX(timestamp)::text AS last_activity
      FROM activities
      WHERE workspace_id = $1 AND account_id = $2`,
     [workspaceId, accountId]
