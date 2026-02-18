@@ -302,6 +302,72 @@ export function startSkillScheduler(): void {
     console.log(`[Agent Scheduler] Registered agent ${agentId} on cron ${agentCron}`);
   }
 
+  // Account enrichment cron: Sunday 2am UTC — full enrichment + scoring batch
+  const enrichmentJob = cron.schedule(
+    '0 2 * * 0',
+    async () => {
+      console.log('[Account Enrichment Scheduler] Sunday 2am cron triggered');
+      const { enrichAndScoreAccountsBatch } = await import('../enrichment/account-enrichment-batch.js');
+
+      const workspacesResult = await query<{ id: string; name: string }>(
+        `SELECT DISTINCT w.id, w.name
+         FROM workspaces w
+         INNER JOIN connections c ON c.workspace_id = w.id
+         WHERE c.status IN ('connected', 'synced', 'error')
+         ORDER BY w.name`
+      );
+
+      for (const workspace of workspacesResult.rows) {
+        console.log(`[Account Enrichment Scheduler] Enriching workspace: ${workspace.name}`);
+        try {
+          const result = await enrichAndScoreAccountsBatch(workspace.id, { limit: 100 });
+          console.log(`[Account Enrichment Scheduler] ✓ ${workspace.name}: ${result.enriched} enriched, ${result.scored} scored, grades: ${JSON.stringify(result.grades)}`);
+        } catch (err: any) {
+          console.error(`[Account Enrichment Scheduler] ✗ ${workspace.name}:`, err.message);
+        }
+      }
+    },
+    { timezone: 'UTC' }
+  );
+  scheduledSkills.push({ skillId: 'account-enrichment-batch', cronExpression: '0 2 * * 0', job: enrichmentJob });
+  console.log('[Account Enrichment Scheduler] Registered account enrichment on cron 0 2 * * 0 (Sunday 2am UTC)');
+
+  // Account scoring cron: daily 3am UTC — re-score already-enriched accounts
+  const scoringJob = cron.schedule(
+    '0 3 * * *',
+    async () => {
+      console.log('[Account Scoring Scheduler] Daily 3am cron triggered');
+      const { scoreAccountsBatch } = await import('../scoring/account-scorer.js');
+
+      const workspacesResult = await query<{ id: string; name: string }>(
+        `SELECT DISTINCT w.id, w.name
+         FROM workspaces w
+         INNER JOIN connections c ON c.workspace_id = w.id
+         WHERE c.status IN ('connected', 'synced', 'error')
+         ORDER BY w.name`
+      );
+
+      for (const workspace of workspacesResult.rows) {
+        const accountIds = await query<{ account_id: string }>(
+          `SELECT account_id FROM account_signals WHERE workspace_id = $1 AND enriched_at IS NOT NULL`,
+          [workspace.id]
+        );
+        if (accountIds.rows.length === 0) continue;
+
+        console.log(`[Account Scoring Scheduler] Scoring ${accountIds.rows.length} accounts for ${workspace.name}`);
+        try {
+          const result = await scoreAccountsBatch(workspace.id, accountIds.rows.map(r => r.account_id));
+          console.log(`[Account Scoring Scheduler] ✓ ${workspace.name}: ${result.scored} scored, grades: ${JSON.stringify(result.grades)}`);
+        } catch (err: any) {
+          console.error(`[Account Scoring Scheduler] ✗ ${workspace.name}:`, err.message);
+        }
+      }
+    },
+    { timezone: 'UTC' }
+  );
+  scheduledSkills.push({ skillId: 'account-scoring-daily', cronExpression: '0 3 * * *', job: scoringJob });
+  console.log('[Account Scoring Scheduler] Registered daily scoring on cron 0 3 * * * (daily 3am UTC)');
+
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   console.log(`[Skill Scheduler] Server timezone: ${timezone}`);
   console.log(`[Skill Scheduler] Cron expressions use UTC timezone`);

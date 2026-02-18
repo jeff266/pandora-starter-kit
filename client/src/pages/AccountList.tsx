@@ -19,10 +19,92 @@ interface Account {
   finding_count: number;
   last_activity: string;
   owner: string;
+  total_score?: number | null;
+  grade?: string | null;
+  signal_summary?: string | null;
+  data_quality?: string | null;
+  company_type?: string | null;
 }
 
-type SortField = 'name' | 'domain' | 'industry' | 'open_deals' | 'pipeline' | 'contacts' | 'last_activity';
+interface ScoreDetail {
+  scored: boolean;
+  totalScore?: number;
+  grade?: string;
+  firmographicScore?: number;
+  engagementScore?: number;
+  signalScore?: number;
+  relationshipScore?: number;
+  breakdown?: any;
+  scoredAt?: string;
+}
+
+type SortField = 'name' | 'domain' | 'industry' | 'open_deals' | 'pipeline' | 'contacts' | 'last_activity' | 'score';
 type SortDir = 'asc' | 'desc';
+
+const GRADE_COLORS: Record<string, { bg: string; fg: string }> = {
+  A: { bg: '#dcfce7', fg: '#166534' },
+  B: { bg: '#dbeafe', fg: '#1e40af' },
+  C: { bg: '#fef9c3', fg: '#854d0e' },
+  D: { bg: '#fed7aa', fg: '#9a3412' },
+  F: { bg: '#fecaca', fg: '#991b1b' },
+};
+
+const DATA_QUALITY_LABELS: Record<string, { label: string; color: string }> = {
+  high: { label: 'High confidence', color: colors.green },
+  standard: { label: 'Standard', color: colors.accent },
+  limited: { label: 'Limited data', color: colors.yellow },
+};
+
+function ScoreBadge({ grade, score }: { grade: string | null | undefined; score: number | null | undefined }) {
+  if (!grade) return <span style={{ fontSize: 11, color: colors.textDim }}>--</span>;
+  const c = GRADE_COLORS[grade] || GRADE_COLORS.D;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+      <span style={{
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        width: 22, height: 22, borderRadius: 4, fontSize: 11, fontWeight: 700,
+        background: c.bg, color: c.fg, fontFamily: fonts.mono,
+      }}>
+        {grade}
+      </span>
+      {score != null && (
+        <span style={{ fontSize: 10, color: colors.textMuted, fontFamily: fonts.mono }}>
+          {score}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function SignalBadges({ dataQuality, companyType }: { dataQuality?: string | null; companyType?: string | null }) {
+  const badges: React.ReactNode[] = [];
+
+  if (dataQuality && DATA_QUALITY_LABELS[dataQuality]) {
+    const dq = DATA_QUALITY_LABELS[dataQuality];
+    badges.push(
+      <span key="dq" style={{
+        fontSize: 9, fontWeight: 600, padding: '1px 5px', borderRadius: 3,
+        background: `${dq.color}18`, color: dq.color,
+      }}>
+        {dataQuality === 'limited' ? '\u26A0 ' : ''}{dq.label}
+      </span>
+    );
+  }
+
+  if (companyType && companyType !== 'other') {
+    badges.push(
+      <span key="ct" style={{
+        fontSize: 9, fontWeight: 500, padding: '1px 5px', borderRadius: 3,
+        background: colors.surfaceRaised, color: colors.textMuted,
+      }}>
+        {companyType.replace(/_/g, ' ')}
+      </span>
+    );
+  }
+
+  if (badges.length === 0) return null;
+  return <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginTop: 2 }}>{badges}</div>;
+}
 
 export default function AccountList() {
   const navigate = useNavigate();
@@ -38,6 +120,10 @@ export default function AccountList() {
   const [sortField, setSortField] = useState<SortField>('name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [page, setPage] = useState(0);
+
+  const [drawerAccountId, setDrawerAccountId] = useState<string | null>(null);
+  const [drawerData, setDrawerData] = useState<ScoreDetail | null>(null);
+  const [drawerLoading, setDrawerLoading] = useState(false);
 
   useEffect(() => {
     fetchAccounts();
@@ -59,12 +145,31 @@ export default function AccountList() {
         finding_count: a.finding_count || 0,
         last_activity: a.last_activity || a.updated_at || '',
         owner: a.owner || a.owner_email || '',
+        total_score: a.total_score ?? null,
+        grade: a.grade ?? null,
+        signal_summary: a.signal_summary ?? null,
+        data_quality: a.data_quality ?? null,
+        company_type: a.company_type ?? null,
       })));
       setError('');
     } catch (err: any) {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const openScoreDrawer = async (accountId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setDrawerAccountId(accountId);
+    setDrawerLoading(true);
+    try {
+      const data = await api.get(`/accounts/${accountId}/score`);
+      setDrawerData(data);
+    } catch {
+      setDrawerData({ scored: false });
+    } finally {
+      setDrawerLoading(false);
     }
   };
 
@@ -81,6 +186,7 @@ export default function AccountList() {
   const hasPipelineData = accounts.some(a => a.total_pipeline > 0);
   const hasContactData = accounts.some(a => a.contact_count > 0);
   const hasActivityData = accounts.some(a => a.last_activity);
+  const hasScoreData = accounts.some(a => a.grade != null);
 
   const filtered = useMemo(() => {
     let result = accounts;
@@ -110,6 +216,7 @@ export default function AccountList() {
         case 'open_deals': cmp = a.open_deal_count - b.open_deal_count; break;
         case 'pipeline': cmp = a.total_pipeline - b.total_pipeline; break;
         case 'contacts': cmp = a.contact_count - b.contact_count; break;
+        case 'score': cmp = (a.total_score ?? -1) - (b.total_score ?? -1); break;
         case 'last_activity': {
           const da = a.last_activity ? new Date(a.last_activity).getTime() : 0;
           const db = b.last_activity ? new Date(b.last_activity).getTime() : 0;
@@ -142,13 +249,14 @@ export default function AccountList() {
 
   type ColDef = { field: SortField; label: string; width: string; show: boolean };
   const columns: ColDef[] = [
-    { field: 'name', label: 'Account Name', width: '25%', show: true },
-    { field: 'domain', label: 'Domain', width: '15%', show: true },
-    { field: 'industry', label: 'Industry', width: '15%', show: hasIndustryData },
-    { field: 'open_deals', label: 'Open Deals', width: '10%', show: hasDealData },
+    { field: 'score', label: 'Score', width: '7%', show: hasScoreData },
+    { field: 'name', label: 'Account Name', width: hasScoreData ? '22%' : '25%', show: true },
+    { field: 'domain', label: 'Domain', width: '13%', show: true },
+    { field: 'industry', label: 'Industry', width: '13%', show: hasIndustryData },
+    { field: 'open_deals', label: 'Open Deals', width: '9%', show: hasDealData },
     { field: 'pipeline', label: 'Pipeline Value', width: '12%', show: hasPipelineData },
-    { field: 'contacts', label: 'Contacts', width: '8%', show: hasContactData },
-    { field: 'last_activity', label: 'Last Activity', width: '15%', show: hasActivityData },
+    { field: 'contacts', label: 'Contacts', width: '7%', show: hasContactData },
+    { field: 'last_activity', label: 'Last Activity', width: '12%', show: hasActivityData },
   ];
   const visibleColumns = columns.filter(c => c.show);
   const gridTemplate = visibleColumns.map(c => c.width).join(' ');
@@ -288,35 +396,43 @@ export default function AccountList() {
               onMouseEnter={e => (e.currentTarget.style.background = colors.surfaceHover)}
               onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
             >
-              <div style={{ fontSize: 13, fontWeight: 500, color: colors.accent, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingRight: 8 }}>
-                {anon.company(account.name || 'Unnamed')}
+              {hasScoreData && (
+                <div onClick={e => openScoreDrawer(account.id, e)} style={{ cursor: 'pointer' }}>
+                  <ScoreBadge grade={account.grade} score={account.total_score} />
+                </div>
+              )}
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 500, color: colors.accent, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingRight: 8 }}>
+                  {anon.company(account.name || 'Unnamed')}
+                </div>
+                <SignalBadges dataQuality={account.data_quality} companyType={account.company_type} />
               </div>
               <div style={{ fontSize: 12, color: colors.textSecondary, fontFamily: fonts.mono, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {account.domain || '—'}
+                {account.domain || '\u2014'}
               </div>
               {hasIndustryData && (
                 <div style={{ fontSize: 12, color: colors.textMuted }}>
-                  {account.industry || '—'}
+                  {account.industry || '\u2014'}
                 </div>
               )}
               {hasDealData && (
                 <div style={{ fontSize: 12, fontFamily: fonts.mono, color: colors.text }}>
-                  {account.open_deal_count || '—'}
+                  {account.open_deal_count || '\u2014'}
                 </div>
               )}
               {hasPipelineData && (
                 <div style={{ fontSize: 12, fontFamily: fonts.mono, color: colors.text }}>
-                  {account.total_pipeline ? formatCurrency(anon.amount(account.total_pipeline)) : '—'}
+                  {account.total_pipeline ? formatCurrency(anon.amount(account.total_pipeline)) : '\u2014'}
                 </div>
               )}
               {hasContactData && (
                 <div style={{ fontSize: 12, fontFamily: fonts.mono, color: colors.textMuted }}>
-                  {account.contact_count || '—'}
+                  {account.contact_count || '\u2014'}
                 </div>
               )}
               {hasActivityData && (
                 <div style={{ fontSize: 11, color: colors.textMuted }}>
-                  {account.last_activity ? formatTimeAgo(account.last_activity) : '—'}
+                  {account.last_activity ? formatTimeAgo(account.last_activity) : '\u2014'}
                 </div>
               )}
             </div>
@@ -361,6 +477,138 @@ export default function AccountList() {
           </div>
         </div>
       )}
+
+      {/* Score Drawer */}
+      {drawerAccountId && (
+        <ScoreDrawer
+          accountId={drawerAccountId}
+          accountName={accounts.find(a => a.id === drawerAccountId)?.name || ''}
+          data={drawerData}
+          loading={drawerLoading}
+          onClose={() => { setDrawerAccountId(null); setDrawerData(null); }}
+          anon={anon}
+        />
+      )}
+    </div>
+  );
+}
+
+function ScoreDrawer({ accountId, accountName, data, loading, onClose, anon }: {
+  accountId: string;
+  accountName: string;
+  data: ScoreDetail | null;
+  loading: boolean;
+  onClose: () => void;
+  anon: any;
+}) {
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+        background: 'rgba(0,0,0,0.4)', zIndex: 1000,
+        display: 'flex', justifyContent: 'flex-end',
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          width: 380, background: colors.surface, height: '100%',
+          borderLeft: `1px solid ${colors.border}`,
+          display: 'flex', flexDirection: 'column', overflow: 'auto',
+          padding: 24,
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+          <h3 style={{ fontSize: 15, fontWeight: 600, color: colors.text, margin: 0 }}>
+            {anon.company(accountName)}
+          </h3>
+          <button onClick={onClose} style={{
+            background: 'none', border: 'none', fontSize: 18, color: colors.textMuted,
+            cursor: 'pointer', lineHeight: 1,
+          }}>
+            \u2715
+          </button>
+        </div>
+
+        {loading ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <Skeleton height={60} />
+            <Skeleton height={120} />
+            <Skeleton height={120} />
+          </div>
+        ) : !data?.scored ? (
+          <div style={{ textAlign: 'center', padding: 40 }}>
+            <p style={{ fontSize: 13, color: colors.textMuted }}>No score data yet.</p>
+            <p style={{ fontSize: 11, color: colors.textDim, marginTop: 8 }}>
+              Run account enrichment to generate scores.
+            </p>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {/* Overall Score */}
+            <div style={{
+              background: colors.surfaceRaised, borderRadius: 8, padding: 16,
+              textAlign: 'center',
+            }}>
+              <ScoreBadge grade={data.grade ?? null} score={data.totalScore ?? null} />
+              <p style={{ fontSize: 12, color: colors.textMuted, marginTop: 8 }}>
+                Overall Score: {data.totalScore}/100
+              </p>
+              {data.scoredAt && (
+                <p style={{ fontSize: 10, color: colors.textDim, marginTop: 4 }}>
+                  Last scored {formatTimeAgo(data.scoredAt)}
+                </p>
+              )}
+            </div>
+
+            {/* Category Breakdown */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <ScoreBar label="Firmographic" score={data.firmographicScore ?? 0} max={25} color="#3b82f6" />
+              <ScoreBar label="Engagement" score={data.engagementScore ?? 0} max={35} color="#10b981" />
+              <ScoreBar label="Signals" score={data.signalScore ?? 0} max={20} color="#8b5cf6" />
+              <ScoreBar label="Relationship" score={data.relationshipScore ?? 0} max={20} color="#f59e0b" />
+            </div>
+
+            {/* Detailed Breakdown */}
+            {data.breakdown && (
+              <div style={{ fontSize: 11, color: colors.textMuted }}>
+                <p style={{ fontWeight: 600, color: colors.text, marginBottom: 8 }}>Score Details</p>
+                {Object.entries(data.breakdown).map(([category, items]: [string, any]) => (
+                  <div key={category} style={{ marginBottom: 10 }}>
+                    <p style={{ fontWeight: 600, color: colors.textSecondary, textTransform: 'capitalize', marginBottom: 4 }}>
+                      {category}
+                    </p>
+                    {Object.entries(items).map(([key, value]: [string, any]) => (
+                      <div key={key} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
+                        <span>{key.replace(/_/g, ' ')}</span>
+                        <span style={{ fontFamily: fonts.mono, color: Number(value) > 0 ? colors.green : Number(value) < 0 ? colors.red : colors.textDim }}>
+                          {Number(value) > 0 ? `+${value}` : value}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ScoreBar({ label, score, max, color }: { label: string; score: number; max: number; color: string }) {
+  const pct = max > 0 ? Math.round((score / max) * 100) : 0;
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+        <span style={{ fontSize: 11, color: colors.text }}>{label}</span>
+        <span style={{ fontSize: 10, fontFamily: fonts.mono, color: colors.textMuted }}>{score}/{max}</span>
+      </div>
+      <div style={{ height: 6, background: colors.surfaceRaised, borderRadius: 3, overflow: 'hidden' }}>
+        <div style={{ height: '100%', width: `${pct}%`, background: color, borderRadius: 3, transition: 'width 0.3s' }} />
+      </div>
     </div>
   );
 }

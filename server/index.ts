@@ -76,6 +76,7 @@ import chatRouter from './routes/chat.js';
 import feedbackRouter from './routes/feedback.js';
 import pushRouter from './routes/push.js';
 import agentBuilderRouter from './routes/agent-builder.js';
+import accountScoringRouter from './routes/account-scoring.js';
 import { startPushTriggers, stopPushTriggers } from './push/trigger-manager.js';
 import { initRenderers } from './renderers/index.js';
 import { cleanupExpiredAnnotations } from './feedback/cleanup.js';
@@ -241,6 +242,7 @@ workspaceApiRouter.use(chatRouter);
 workspaceApiRouter.use(feedbackRouter);
 workspaceApiRouter.use(pushRouter);
 workspaceApiRouter.use(agentBuilderRouter);
+workspaceApiRouter.use(accountScoringRouter);
 app.use("/api/workspaces", workspaceApiRouter);
 
 app.use("/api", skillsRouter);
