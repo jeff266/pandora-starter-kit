@@ -113,24 +113,23 @@ async function checkRosterDrift(workspaceId: string, config: any): Promise<Audit
 
   const result = await query<{
     owner: string;
-    owner_email: string;
     deal_count: number;
     total_amount: number;
   }>(
-    `SELECT owner, owner_email, COUNT(*)::int as deal_count,
+    `SELECT owner, COUNT(*)::int as deal_count,
             COALESCE(SUM(amount), 0)::numeric as total_amount
      FROM deals
      WHERE workspace_id = $1
        AND stage_normalized NOT IN ('closed_won', 'closed_lost')
-       AND owner_email IS NOT NULL
-     GROUP BY owner, owner_email
+       AND owner IS NOT NULL
+     GROUP BY owner
      HAVING COUNT(*) >= 2
      ORDER BY COUNT(*) DESC`,
     [workspaceId]
   );
 
   const unknownReps = result.rows.filter(
-    r => r.owner_email && !knownPeople.has(r.owner_email.toLowerCase())
+    r => r.owner && !knownPeople.has(r.owner.toLowerCase())
   );
 
   if (unknownReps.length > 0) {
@@ -138,11 +137,10 @@ async function checkRosterDrift(workspaceId: string, config: any): Promise<Audit
     findings.push({
       check: 'roster_drift',
       severity,
-      message: `${unknownReps.length} deal owner(s) not in any team role or exclusion list: ${unknownReps.slice(0, 5).map(r => r.owner || r.owner_email).join(', ')}`,
+      message: `${unknownReps.length} deal owner(s) not in any team role or exclusion list: ${unknownReps.slice(0, 5).map(r => r.owner).join(', ')}`,
       evidence: {
         unknown_reps: unknownReps.slice(0, 10).map(r => ({
           name: r.owner,
-          email: r.owner_email,
           open_deals: r.deal_count,
           pipeline_value: Number(r.total_amount),
         })),
@@ -152,7 +150,7 @@ async function checkRosterDrift(workspaceId: string, config: any): Promise<Audit
         section: 'teams',
         path: 'teams.roles',
         type: 'add',
-        suggested_value: unknownReps.slice(0, 5).map(r => r.owner_email),
+        suggested_value: unknownReps.slice(0, 5).map(r => r.owner),
         confidence: 0.85,
       },
     });
@@ -162,12 +160,12 @@ async function checkRosterDrift(workspaceId: string, config: any): Promise<Audit
   for (const role of config.teams.roles || []) {
     for (const member of role.members || []) {
       const hasDeals = result.rows.some(
-        r => r.owner_email?.toLowerCase() === member.toLowerCase()
+        r => r.owner?.toLowerCase() === member.toLowerCase()
       );
       if (!hasDeals) {
         const closedRecently = await query<{ cnt: number }>(
           `SELECT COUNT(*)::int as cnt FROM deals
-           WHERE workspace_id = $1 AND owner_email = $2
+           WHERE workspace_id = $1 AND owner = $2
              AND close_date >= NOW() - INTERVAL '90 days'`,
           [workspaceId, member]
         );
@@ -214,7 +212,7 @@ async function checkStageDrift(workspaceId: string, config: any): Promise<AuditF
      FROM deals
      WHERE workspace_id = $1
        AND stage_normalized IS NOT NULL
-       AND created_date >= NOW() - INTERVAL '90 days'
+       AND created_at >= NOW() - INTERVAL '90 days'
      GROUP BY stage_normalized
      ORDER BY COUNT(*) DESC`,
     [workspaceId]
@@ -257,7 +255,7 @@ async function checkVelocityShift(workspaceId: string, _config: any): Promise<Au
     `SELECT
        CASE WHEN close_date >= NOW() - INTERVAL '30 days' THEN 'recent'
             ELSE 'prior' END as period,
-       AVG(EXTRACT(DAY FROM close_date - created_date))::int as avg_days,
+       AVG(close_date::date - created_at::date)::int as avg_days,
        COUNT(*)::int as deal_count
      FROM deals
      WHERE workspace_id = $1
@@ -504,9 +502,9 @@ async function checkStaleThresholdCalibration(workspaceId: string, config: any):
     `SELECT
        COUNT(*)::int as total_open,
        COUNT(*) FILTER (WHERE last_activity_date < NOW() - INTERVAL '${threshold} days')::int as stale_count,
-       PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY EXTRACT(DAY FROM NOW() - COALESCE(last_activity_date, created_date)))::int as p50_days,
-       PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY EXTRACT(DAY FROM NOW() - COALESCE(last_activity_date, created_date)))::int as p75_days,
-       PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY EXTRACT(DAY FROM NOW() - COALESCE(last_activity_date, created_date)))::int as p90_days
+       PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY CURRENT_DATE - COALESCE(last_activity_date, created_at)::date)::int as p50_days,
+       PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY CURRENT_DATE - COALESCE(last_activity_date, created_at)::date)::int as p75_days,
+       PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY CURRENT_DATE - COALESCE(last_activity_date, created_at)::date)::int as p90_days
      FROM deals
      WHERE workspace_id = $1
        AND stage_normalized NOT IN ('closed_won', 'closed_lost')`,
@@ -581,7 +579,7 @@ async function checkFieldFillRates(workspaceId: string, config: any): Promise<Au
        COUNT(*)::int as total,
        COUNT(*) FILTER (WHERE amount IS NOT NULL AND amount > 0)::int as has_amount,
        COUNT(*) FILTER (WHERE close_date IS NOT NULL)::int as has_close_date,
-       COUNT(*) FILTER (WHERE owner IS NOT NULL OR owner_email IS NOT NULL)::int as has_owner,
+       COUNT(*) FILTER (WHERE owner IS NOT NULL)::int as has_owner,
        COUNT(*) FILTER (WHERE stage IS NOT NULL)::int as has_stage,
        (SELECT COUNT(DISTINCT deal_id)::int FROM deal_contacts WHERE workspace_id = $1) as has_contact
      FROM deals

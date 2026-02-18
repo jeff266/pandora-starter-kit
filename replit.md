@@ -47,6 +47,34 @@ Pandora is built on Node.js 20 with TypeScript 5+, using Express.js and PostgreS
 -   **Voice & Tone System:** Per-workspace voice configuration (detail_level, framing, alert_threshold) dynamically injected into skill synthesis prompts via Handlebars.
 -   **WorkbookGenerator:** Provides multi-tab `.xlsx` export services for skill and agent runs.
 
+## E2E Tool Smoke Test (Feb 18, 2026)
+Ran all 104 registered tools against Frontera Health workspace. Results:
+-   **63/104 tools pass** (independent COMPUTE tools with no upstream dependencies)
+-   **40/104 expected failures** (downstream tools that require prior step outputs — e.g. `fmApplyRepHaircuts` needs `scored_deals` from `fmScoreOpenDeals`)
+-   **1 test-data artifact** (`getDocument` called with invalid UUID)
+-   **0 real SQL/runtime bugs remaining**
+
+### Bugs Found & Fixed
+| Tool / File | Bug | Fix |
+|---|---|---|
+| `fmScoreOpenDeals` | `EXTRACT(DAY FROM date - date)` invalid on integer | Use `(d.close_date::date - CURRENT_DATE)` directly |
+| `fmComputePipelineProjection` | `d.created_date` column doesn't exist | Changed to `d.created_at` |
+| `fmBuildForecastModel` | `.filter` crash when upstream fails | Added `Array.isArray()` guard |
+| `fatGatherRepAccuracy` | `EXTRACT(DAY FROM date - date)` invalid on integer | Use `(d.close_date::date - d.created_at::date)` directly |
+| `pgfGatherCreationHistory` | `d.created_date` (6 occurrences) | Changed to `d.created_at` |
+| `pgfGatherInqtrCloseRates` | `d.created_date` (2 occurrences) | Changed to `d.created_at` |
+| `ciCompComputeWinRates` | `d.created_date` | Changed to `d.created_at` |
+| `preparePipelineGoalsSummary` | `FROM quotas` table doesn't exist | Changed to `quota_periods JOIN rep_quotas` |
+| `dsmGatherOpenDeals` | `d.next_steps`, `d.lead_source`, `d.ai_score` columns don't exist | Removed from SQL SELECT and GROUP BY |
+| `dsmComputeAndWriteScores` | Scoring logic references `deal.next_steps` | Removed dead code branches |
+| `workspace-config-audit.ts` | `owner_email` column doesn't exist (5 refs) | Changed to `owner` |
+| `workspace-config-audit.ts` | `created_date` (3 refs) | Changed to `created_at` |
+| `workspace-config-audit.ts` | `EXTRACT(DAY FROM date - date)` | Use date subtraction directly |
+
+### Schema Reference (deals table)
+Correct column names: `id`, `workspace_id`, `source`, `source_id`, `source_data`, `name`, `amount`, `stage`, `close_date`, `owner`, `account_id`, `contact_id`, `probability`, `forecast_category`, `pipeline`, `days_in_stage`, `last_activity_date`, `custom_fields`, `created_at`, `updated_at`, `velocity_score`, `deal_risk`, `deal_risk_factors`, `stage_normalized`, `health_score`, `forecast_category_source`, `previous_stage`, `stage_changed_at`.
+**No**: `created_date`, `owner_email`, `next_steps`, `lead_source`, `ai_score`.
+
 ## External Dependencies
 -   **PostgreSQL (Neon):** Primary database.
 -   **HubSpot API:** CRM data.

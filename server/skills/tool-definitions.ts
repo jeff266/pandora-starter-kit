@@ -5054,7 +5054,7 @@ const fatGatherRepAccuracy: ToolDefinition = {
            COUNT(*) FILTER (WHERE d.stage_normalized IN ('closed_won','closed_lost'))::int as total_closed,
            COUNT(*) FILTER (WHERE d.stage_normalized = 'closed_won')::int as total_won,
            AVG(CASE WHEN d.stage_normalized = 'closed_won' AND d.close_date IS NOT NULL
-                    THEN EXTRACT(DAY FROM (d.close_date::date - d.created_at::date))
+                    THEN (d.close_date::date - d.created_at::date)
                     ELSE NULL END)::numeric as avg_cycle_days,
            AVG(CASE WHEN d.stage_normalized IN ('closed_won','closed_lost') AND d.amount > 0
                     THEN d.amount ELSE NULL END)::numeric as avg_deal_size,
