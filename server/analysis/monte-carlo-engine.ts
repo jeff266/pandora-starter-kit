@@ -36,6 +36,15 @@ export interface UpcomingRenewal {
   owner: string | null;
 }
 
+export interface IterationRecord {
+  total: number;
+  existing: number;
+  projected: number;
+  dealsWon: string[];
+  newDealsCreated: number;
+  byRep: Record<string, number>;
+}
+
 export interface SimulationInputs {
   openDeals: OpenDeal[];
   distributions: FittedDistributions;
@@ -47,6 +56,7 @@ export interface SimulationInputs {
   upcomingRenewals?: UpcomingRenewal[];
   customerBaseARR?: number;
   expansionRate?: { mean: number; sigma: number } | null;
+  storeIterations?: boolean;
 }
 
 export interface SimulationOutputs {
@@ -61,6 +71,7 @@ export interface SimulationOutputs {
   projectedPipelineP50: number;
   iterationResults: number[];
   closedDealsUsedForFitting: number;
+  iterations?: IterationRecord[];
   dataQuality: {
     reliableDistributions: string[];
     unreliableDistributions: string[];
@@ -280,11 +291,15 @@ function extractFlaggedDealIds(data: any, signalType: string): string[] {
 
 // ─── Simulation ───────────────────────────────────────────────────────────────
 
-function runIteration(
+function runIterationWithDetail(
   inputs: SimulationInputs
-): { existing: number; projected: number } {
+): { existing: number; projected: number; record: IterationRecord } {
   let existingRevenue = 0;
   let projectedRevenue = 0;
+  const dealsWon: string[] = [];
+  const byRep: Record<string, number> = {};
+  let newDealsCreated = 0;
+
   const today = toDate(inputs.today);
   const forecastEnd = toDate(inputs.forecastWindowEnd);
   const daysRemaining = daysBetween(today, forecastEnd);
@@ -315,6 +330,7 @@ function runIteration(
     );
 
     existingRevenue += simulatedAmount;
+    dealsWon.push(deal.id);
   }
 
   const monthsRemaining = daysRemaining / 30;
@@ -335,6 +351,10 @@ function runIteration(
       const logMu = Math.log(renewal.contractValue);
       const amount = sampleLogNormal(logMu, inputs.distributions.dealSize.sigma * 0.15);
       projectedRevenue += amount;
+      newDealsCreated++;
+      if (renewal.owner) {
+        byRep[renewal.owner] = (byRep[renewal.owner] ?? 0) + amount;
+      }
     }
   } else if (pipelineType === 'expansion') {
     if ((inputs.customerBaseARR ?? 0) > 0) {
@@ -359,7 +379,8 @@ function runIteration(
       projectedRevenue += expansionRevenue;
     }
   } else {
-    for (const [, rateDist] of Object.entries(inputs.distributions.pipelineRates)) {
+    for (const [repKey, rateDist] of Object.entries(inputs.distributions.pipelineRates)) {
+      let repRevenue = 0;
       for (let month = 0; month < Math.ceil(monthsRemaining); month++) {
         const monthFraction = Math.min(1, monthsRemaining - month);
         const dealsThisMonth = Math.max(0, Math.round(
@@ -382,13 +403,25 @@ function runIteration(
             inputs.distributions.dealSize.mu,
             inputs.distributions.dealSize.sigma
           ));
+          repRevenue += amount;
           projectedRevenue += amount;
+          newDealsCreated++;
         }
       }
+      if (repRevenue > 0) byRep[repKey] = repRevenue;
     }
   }
 
-  return { existing: existingRevenue, projected: projectedRevenue };
+  const record: IterationRecord = {
+    total: existingRevenue + projectedRevenue,
+    existing: existingRevenue,
+    projected: projectedRevenue,
+    dealsWon,
+    newDealsCreated,
+    byRep,
+  };
+
+  return { existing: existingRevenue, projected: projectedRevenue, record };
 }
 
 function buildDataQualityReport(
@@ -417,11 +450,13 @@ export function runSimulation(
 ): SimulationOutputs {
   const results: number[] = [];
   const existingResults: number[] = [];
+  const iterationRecords: IterationRecord[] = [];
 
   for (let i = 0; i < inputs.iterations; i++) {
-    const { existing, projected } = runIteration(inputs);
+    const { existing, projected, record } = runIterationWithDetail(inputs);
     results.push(existing + projected);
     existingResults.push(existing);
+    if (inputs.storeIterations) iterationRecords.push(record);
   }
 
   results.sort((a, b) => a - b);
@@ -442,6 +477,7 @@ export function runSimulation(
     projectedPipelineP50: results[p50idx] - existingResults[p50idx],
     iterationResults: results,
     closedDealsUsedForFitting: 0,  // set by caller
+    iterations: inputs.storeIterations ? iterationRecords : undefined,
     dataQuality: buildDataQualityReport(inputs.distributions),
   };
 }
