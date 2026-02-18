@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
@@ -7,6 +7,193 @@ import Skeleton from '../components/Skeleton';
 import { useDemoMode } from '../contexts/DemoModeContext';
 
 const PAGE_SIZE = 50;
+
+// ============================================================================
+// Scoring State Types + Hook
+// ============================================================================
+
+type ScoringStateValue = 'locked' | 'ready' | 'processing' | 'active';
+
+interface ScoringStatePoll {
+  state: ScoringStateValue;
+  processingStep: string | null;
+  accountsScored: number;
+  accountsTotal: number;
+}
+
+function useScoringState(): {
+  scoringState: ScoringStatePoll | null;
+  activating: boolean;
+  activateScoring: () => Promise<void>;
+  refreshIcp: () => Promise<void>;
+} {
+  const [scoringState, setScoringState] = useState<ScoringStatePoll | null>(null);
+  const [activating, setActivating] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const fetchState = useCallback(async () => {
+    try {
+      const data = await api.get('/scoring/state/poll');
+      setScoringState(data as ScoringStatePoll);
+    } catch {
+      // non-fatal
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchState();
+    // Poll every 5s during processing, every 60s otherwise
+    const schedule = () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      pollRef.current = setInterval(async () => {
+        await fetchState();
+      }, 5000);
+    };
+    schedule();
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [fetchState]);
+
+  // Slow down polling when not processing
+  useEffect(() => {
+    if (!scoringState) return;
+    if (pollRef.current) clearInterval(pollRef.current);
+    const interval = scoringState.state === 'processing' ? 5000 : 60000;
+    pollRef.current = setInterval(fetchState, interval);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [scoringState?.state, fetchState]);
+
+  const activateScoring = useCallback(async () => {
+    setActivating(true);
+    try {
+      await api.post('/scoring/activate', {});
+      await fetchState();
+    } finally {
+      setActivating(false);
+    }
+  }, [fetchState]);
+
+  const refreshIcp = useCallback(async () => {
+    setActivating(true);
+    try {
+      await api.post('/scoring/refresh-icp', {});
+      await fetchState();
+    } finally {
+      setActivating(false);
+    }
+  }, [fetchState]);
+
+  return { scoringState, activating, activateScoring, refreshIcp };
+}
+
+// ============================================================================
+// Scoring State Banners
+// ============================================================================
+
+function ScoringLockedBanner() {
+  return (
+    <div style={{
+      background: '#fefce8', border: '1px solid #fde68a', borderRadius: 10, padding: '14px 20px',
+      display: 'flex', alignItems: 'center', gap: 12,
+    }}>
+      <span style={{ fontSize: 16 }}>🔒</span>
+      <div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: '#92400e' }}>Account Scoring Locked</div>
+        <div style={{ fontSize: 12, color: '#a16207', marginTop: 2 }}>
+          Connect your CRM and close at least 5 deals to unlock ICP-based account scoring.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ScoringReadyBanner({ onActivate, activating }: { onActivate: () => void; activating: boolean }) {
+  return (
+    <div style={{
+      background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '14px 20px',
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <span style={{ fontSize: 16 }}>✨</span>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: '#166534' }}>Account Scoring Ready</div>
+          <div style={{ fontSize: 12, color: '#15803d', marginTop: 2 }}>
+            You have enough closed deals. Activate ICP Discovery to start scoring your accounts.
+          </div>
+        </div>
+      </div>
+      <button
+        onClick={onActivate}
+        disabled={activating}
+        style={{
+          fontSize: 12, padding: '8px 18px', borderRadius: 6, cursor: activating ? 'default' : 'pointer',
+          background: '#16a34a', color: '#fff', border: 'none', fontWeight: 600,
+          opacity: activating ? 0.7 : 1, whiteSpace: 'nowrap', flexShrink: 0,
+        }}
+      >
+        {activating ? 'Starting...' : 'Activate Scoring'}
+      </button>
+    </div>
+  );
+}
+
+function ScoringProcessingBanner({ step, scored, total }: { step: string | null; scored: number; total: number }) {
+  const stepLabel: Record<string, string> = {
+    icp_discovery: 'Analyzing closed deals to build your ICP...',
+    enriching: 'Enriching account data...',
+    scoring: 'Scoring accounts...',
+  };
+  const label = step ? (stepLabel[step] || step) : 'Processing...';
+  const pct = total > 0 ? Math.round((scored / total) * 100) : 0;
+
+  return (
+    <div style={{
+      background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 10, padding: '14px 20px',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{ fontSize: 16 }}>⏳</span>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: '#1e40af' }}>Scoring in Progress</div>
+          <div style={{ fontSize: 12, color: '#2563eb', marginTop: 2 }}>{label}</div>
+        </div>
+        {total > 0 && (
+          <span style={{ fontSize: 12, color: '#2563eb', whiteSpace: 'nowrap' }}>
+            {scored}/{total} accounts
+          </span>
+        )}
+      </div>
+      {total > 0 && (
+        <div style={{ marginTop: 10, height: 4, background: '#dbeafe', borderRadius: 2 }}>
+          <div style={{ width: `${pct}%`, height: '100%', background: '#2563eb', borderRadius: 2, transition: 'width 0.5s ease' }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ScoringActiveBanner({ onRefresh, activating }: { onRefresh: () => void; activating: boolean }) {
+  return (
+    <div style={{
+      background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10,
+      padding: '10px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontSize: 13, color: '#16a34a' }}>●</span>
+        <span style={{ fontSize: 12, color: colors.textSecondary }}>ICP-based scoring active</span>
+      </div>
+      <button
+        onClick={onRefresh}
+        disabled={activating}
+        style={{
+          fontSize: 11, padding: '4px 12px', borderRadius: 4, cursor: activating ? 'default' : 'pointer',
+          background: 'none', color: colors.textSecondary, border: `1px solid ${colors.border}`,
+          opacity: activating ? 0.6 : 1,
+        }}
+      >
+        {activating ? 'Refreshing...' : 'Refresh ICP'}
+      </button>
+    </div>
+  );
+}
 
 interface Signal {
   type: string;
@@ -96,6 +283,7 @@ type SortDir = 'asc' | 'desc';
 export default function AccountList() {
   const navigate = useNavigate();
   const { anon } = useDemoMode();
+  const { scoringState, activating, activateScoring, refreshIcp } = useScoringState();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -222,11 +410,11 @@ export default function AccountList() {
   const clearFilters = () => { setSearch(''); setIndustryFilter('all'); setOwnerFilter('all'); };
 
   type ColDef = { field: SortField; label: string; width: string; show: boolean };
-  const hasScoreData = accounts.some(a => a.grade);
+  const scoringActive = scoringState?.state === 'active';
   const columns: ColDef[] = [
     { field: 'name', label: 'Account Name', width: '22%', show: true },
     { field: 'domain', label: 'Domain', width: '13%', show: true },
-    { field: 'score', label: 'Score', width: '10%', show: true },
+    { field: 'score', label: 'Score', width: '10%', show: scoringActive },
     { field: 'industry', label: 'Industry', width: '12%', show: hasIndustryData },
     { field: 'open_deals', label: 'Open Deals', width: '8%', show: hasDealData },
     { field: 'pipeline', label: 'Pipeline', width: '10%', show: hasPipelineData },
@@ -282,6 +470,22 @@ export default function AccountList() {
           Showing {filtered.length} of {accounts.length} accounts
         </p>
       </div>
+
+      {/* Scoring State Banners */}
+      {scoringState?.state === 'locked' && <ScoringLockedBanner />}
+      {scoringState?.state === 'ready' && (
+        <ScoringReadyBanner onActivate={activateScoring} activating={activating} />
+      )}
+      {scoringState?.state === 'processing' && (
+        <ScoringProcessingBanner
+          step={scoringState.processingStep}
+          scored={scoringState.accountsScored}
+          total={scoringState.accountsTotal}
+        />
+      )}
+      {scoringState?.state === 'active' && (
+        <ScoringActiveBanner onRefresh={refreshIcp} activating={activating} />
+      )}
 
       {/* Filter Bar */}
       <div style={{
@@ -361,6 +565,7 @@ export default function AccountList() {
             <div
               key={account.id}
               onClick={() => {
+                if (!scoringActive) return;
                 setSelectedAccount(account);
                 setDrawerWhy(null);
                 setDrawerWhyLoading(true);
@@ -385,13 +590,15 @@ export default function AccountList() {
               <div style={{ fontSize: 12, color: colors.textSecondary, fontFamily: fonts.mono, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {account.domain || '—'}
               </div>
-              {/* Score column — always shown */}
-              <div>
-                <ScoreBadge grade={account.grade} score={account.total_score} scoreDelta={account.score_delta} dataConfidence={account.data_confidence} />
-                <div style={{ marginTop: 4 }}>
-                  <SignalBadges signals={account.signals} confidence={account.classification_confidence} />
+              {/* Score column — only shown when scoring is active */}
+              {scoringActive && (
+                <div>
+                  <ScoreBadge grade={account.grade} score={account.total_score} scoreDelta={account.score_delta} dataConfidence={account.data_confidence} />
+                  <div style={{ marginTop: 4 }}>
+                    <SignalBadges signals={account.signals} confidence={account.classification_confidence} />
+                  </div>
                 </div>
-              </div>
+              )}
               {hasIndustryData && (
                 <div style={{ fontSize: 12, color: colors.textMuted }}>
                   {account.industry || '—'}

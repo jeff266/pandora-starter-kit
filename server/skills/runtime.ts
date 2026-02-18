@@ -256,6 +256,15 @@ export class SkillRuntime {
         // Non-fatal — push trigger failure never blocks skill completion
       }
 
+      // Scoring state: recompute after icp-discovery completes so state transitions locked→ready→active
+      if (skill.id === 'icp-discovery') {
+        import('../scoring/workspace-scoring-state.js').then(({ recomputeScoringState }) => {
+          recomputeScoringState(workspaceId).catch(err => {
+            console.error(`[ScoringState] Post-icp-discovery recompute failed:`, err instanceof Error ? err.message : err);
+          });
+        }).catch(() => {});
+      }
+
       return {
         runId,
         skillId: skill.id,

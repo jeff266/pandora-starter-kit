@@ -3,7 +3,7 @@ import { query } from '../db.js';
 import { enrichAccount } from '../enrichment/account-enrichment.js';
 import { scoreAccount } from '../scoring/account-scorer.js';
 import { runAccountEnrichmentBatch, runAccountScoringBatch } from '../enrichment/account-enrichment-batch.js';
-import { callLLM } from '../utils/llm-router.js';
+import { getOrGenerateSynthesis } from '../scoring/account-synthesis.js';
 
 const router = Router();
 
@@ -93,59 +93,20 @@ router.get('/:workspaceId/accounts/:accountId/score', async (req, res) => {
 /**
  * GET /:workspaceId/accounts/:accountId/score/why
  * Returns a short LLM synthesis of why this account scores well/poorly.
- * Called when the score drawer opens.
+ * Cached per account per day in account_scores.synthesis_text.
  */
 router.get('/:workspaceId/accounts/:accountId/score/why', async (req, res) => {
   try {
     const { workspaceId, accountId } = req.params;
 
-    const result = await query(
-      `SELECT a.name, a.domain, a.industry,
-         acs.total_score, acs.grade, acs.score_breakdown,
-         asig.signal_summary, asig.signals, asig.growth_stage, asig.business_model
-       FROM accounts a
-       LEFT JOIN account_scores acs ON acs.account_id = a.id AND acs.workspace_id = a.workspace_id
-       LEFT JOIN account_signals asig ON asig.account_id = a.id AND asig.workspace_id = a.workspace_id
-       WHERE a.workspace_id = $1 AND a.id = $2`,
+    const exists = await query(
+      `SELECT id FROM accounts WHERE workspace_id = $1 AND id = $2`,
       [workspaceId, accountId]
     );
+    if (!exists.rows.length) return res.status(404).json({ error: 'Account not found' });
 
-    if (!result.rows.length) {
-      return res.status(404).json({ error: 'Account not found' });
-    }
-
-    const row = result.rows[0];
-    if (!row.total_score) {
-      return res.json({ why: 'This account has not been scored yet. Click "Enrich Now" to analyze.' });
-    }
-
-    const closedWon = await query(
-      `SELECT COUNT(*) AS cnt FROM deals
-       WHERE workspace_id = $1 AND stage_normalized = 'closed_won'
-         AND industry ILIKE $2`,
-      [workspaceId, `%${row.signal_industry || row.industry || ''}%`]
-    );
-    const similarWins = parseInt(closedWon.rows[0]?.cnt || '0');
-
-    const prompt = `Account: ${row.name} (${row.domain || 'no domain'})
-Score: ${row.total_score}/100 — Grade ${row.grade}
-Industry: ${row.signal_industry || row.industry || 'unknown'}
-Business model: ${row.business_model || 'unknown'}
-Growth stage: ${row.growth_stage || 'unknown'}
-Signal summary: ${row.signal_summary || 'none'}
-Score breakdown: ${JSON.stringify(row.score_breakdown || {})}
-Similar closed-won deals in your CRM: ${similarWins}
-
-In 2-3 sentences, explain why this account scores this way and what makes it a priority (or not). Be specific about the signals and fit factors. Do not repeat the score number.`;
-
-    const response = await callLLM(workspaceId, 'generate', {
-      systemPrompt: 'You are a RevOps analyst explaining account prioritization to a sales rep. Be specific and direct.',
-      messages: [{ role: 'user', content: prompt }],
-      maxTokens: 200,
-      temperature: 0.3,
-    });
-
-    return res.json({ why: response.content || '' });
+    const why = await getOrGenerateSynthesis(workspaceId, accountId);
+    return res.json({ why });
   } catch (err) {
     console.error('[account-scoring] score why error:', err);
     return res.status(500).json({ error: 'Internal server error' });
