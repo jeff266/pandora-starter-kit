@@ -81,10 +81,71 @@ interface ThreadMessage {
   isThinking?: boolean;
 }
 
+function PushBanner() {
+  const navigate = useNavigate();
+  const [dismissed, setDismissed] = useState(() => localStorage.getItem('pandora_push_banner_dismissed') === 'true');
+  const [hasRules, setHasRules] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    if (dismissed) return;
+    api.get('/push/rules').then(d => {
+      const rules = d.rules || [];
+      setHasRules(rules.some((r: any) => r.is_active));
+    }).catch(() => {});
+  }, [dismissed]);
+
+  if (dismissed || hasRules === null || hasRules) return null;
+
+  return (
+    <div style={{
+      background: colors.accentSoft,
+      border: `1px solid rgba(59,130,246,0.2)`,
+      borderRadius: 8,
+      padding: '10px 16px',
+      marginBottom: 0,
+      display: 'flex',
+      alignItems: 'center',
+      gap: 10,
+      fontFamily: fonts.sans,
+      fontSize: 13,
+    }}>
+      <span style={{ fontSize: 16 }}>{'\uD83D\uDCA1'}</span>
+      <span style={{ color: colors.textSecondary }}>
+        Push findings to Slack automatically —{' '}
+        <span
+          onClick={() => navigate('/push')}
+          style={{ color: colors.accent, cursor: 'pointer', textDecoration: 'underline' }}
+        >
+          Set up delivery rules
+        </span>
+      </span>
+      <button
+        onClick={() => {
+          setDismissed(true);
+          localStorage.setItem('pandora_push_banner_dismissed', 'true');
+        }}
+        style={{
+          marginLeft: 'auto',
+          background: 'transparent',
+          color: colors.textMuted,
+          border: 'none',
+          fontSize: 16,
+          cursor: 'pointer',
+          padding: '2px 6px',
+          lineHeight: 1,
+        }}
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
 export default function CommandCenter() {
   const navigate = useNavigate();
-  const { isAuthenticated, isLoading: authLoading } = useWorkspace();
+  const { isAuthenticated, isLoading: authLoading, currentWorkspace } = useWorkspace();
   const { anon } = useDemoMode();
+  const wsId = currentWorkspace?.id || '';
   const [pipeline, setPipeline] = useState<any>(null);
   const [summary, setSummary] = useState<any>(null);
   const [findings, setFindings] = useState<Finding[]>([]);
@@ -93,7 +154,7 @@ export default function CommandCenter() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [availablePipelines, setAvailablePipelines] = useState<Array<{ name: string; deal_count: number; total_value: number }>>([]);
   const [selectedPipeline, setSelectedPipeline] = useState<string>(() => {
-    return localStorage.getItem('pandora_selected_pipeline') || 'all';
+    return localStorage.getItem(`pandora_selected_pipeline_${wsId}`) || 'all';
   });
 
   const [stageFilter, setStageFilter] = useState<string | null>(null);
@@ -178,10 +239,10 @@ export default function CommandCenter() {
 
   const handlePipelineChange = useCallback((value: string) => {
     setSelectedPipeline(value);
-    localStorage.setItem('pandora_selected_pipeline', value);
+    localStorage.setItem(`pandora_selected_pipeline_${wsId}`, value);
     setLoading(prev => ({ ...prev, pipeline: true }));
     fetchData(value);
-  }, [fetchData]);
+  }, [fetchData, wsId]);
 
   useEffect(() => {
     if (!isAuthenticated || authLoading) return;
@@ -437,6 +498,7 @@ export default function CommandCenter() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <QuotaBanner />
+      <PushBanner />
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

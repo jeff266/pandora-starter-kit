@@ -303,6 +303,8 @@ router.post('/:workspaceId/push/rules/:id/trigger', async (req: Request, res: Re
 router.get('/:workspaceId/push/log', async (req: Request, res: Response) => {
   const { workspaceId } = req.params;
   const status = req.query.status as string | undefined;
+  const ruleId = req.query.rule_id as string | undefined;
+  const since = req.query.since as string | undefined;
   const limit = parseInt(req.query.limit as string || '50', 10);
   const offset = parseInt(req.query.offset as string || '0', 10);
 
@@ -312,6 +314,14 @@ router.get('/:workspaceId/push/log', async (req: Request, res: Response) => {
   if (status) {
     params.push(status);
     conditions.push(`dl.status = $${params.length}`);
+  }
+  if (ruleId) {
+    params.push(ruleId);
+    conditions.push(`dl.rule_id = $${params.length}`);
+  }
+  if (since) {
+    params.push(since);
+    conditions.push(`dl.delivered_at >= $${params.length}::timestamptz`);
   }
 
   try {

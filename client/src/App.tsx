@@ -26,6 +26,7 @@ import Playbooks from './pages/Playbooks';
 import SettingsPage from './pages/SettingsPage';
 import ConnectorHealth from './pages/ConnectorHealth';
 import ToolsPage from './pages/ToolsPage';
+import PushPage from './pages/PushPage';
 import ConsultantDashboard from './pages/ConsultantDashboard';
 import { colors, fonts } from './styles/theme';
 
@@ -39,6 +40,7 @@ const pageTitles: Record<string, string> = {
   '/skills': 'Skills',
   '/tools': 'Tools',
   '/playbooks': 'Playbooks',
+  '/push': 'Push',
   '/insights': 'Insights Feed',
   '/actions': 'Actions',
   '/connectors': 'Connectors',
@@ -185,6 +187,7 @@ export default function App() {
             <Route path="/agent-builder" element={<Placeholder title="Agent Builder" />} />
             <Route path="/tools" element={<ToolsPage />} />
             <Route path="/playbooks" element={<Playbooks />} />
+            <Route path="/push" element={<PushPage />} />
             <Route path="/actions" element={<Actions />} />
             <Route path="/connectors/health" element={<ConnectorHealth />} />
             <Route path="/data-dictionary" element={<Placeholder title="Data Dictionary" />} />
