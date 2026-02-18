@@ -6367,6 +6367,7 @@ const mcRunSimulation: ToolDefinition = {
         upcomingRenewals: hydratedRenewals,
         customerBaseARR,
         expansionRate,
+        storeIterations: true,
       };
 
       const simulation = runSimulation(simInputs, quota);
@@ -6415,6 +6416,29 @@ const mcRunSimulation: ToolDefinition = {
         componentBMethod,
       };
 
+      // Store compact iteration records for query layer (deduped from simulation)
+      const storedIterations = simulation.iterations ?? [];
+      // Clear from simulation object to avoid double-storage
+      delete (simulation as any).iterations;
+
+      // Compact simulationInputs for what-if re-runs (exclude large iterationResults)
+      const storedSimInputs = {
+        openDeals: openDeals.map((d: any) => ({
+          id: d.id,
+          name: d.name,
+          amount: d.amount,
+          stageNormalized: d.stageNormalized,
+          ownerEmail: d.ownerEmail,
+          probability: d.probability,
+          closeDate: d.closeDate instanceof Date ? d.closeDate.toISOString() : d.closeDate,
+        })),
+        distributions,
+        forecastWindowEnd: forecastWindowEnd.toISOString(),
+        today: today.toISOString(),
+        pipelineType,
+        quota,
+      };
+
       return {
         simulation,
         varianceDrivers,
@@ -6424,6 +6448,8 @@ const mcRunSimulation: ToolDefinition = {
         },
         dataQualityTier,
         commandCenter,
+        iterations: storedIterations,
+        simulationInputs: storedSimInputs,
       };
     }, _params);
   },

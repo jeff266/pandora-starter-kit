@@ -681,4 +681,305 @@ router.get('/:workspaceId/monte-carlo/latest', async (req, res) => {
   }
 });
 
+/**
+ * POST /api/workspaces/:workspaceId/monte-carlo/query
+ * Ask a natural language question about the most recent Monte Carlo run.
+ */
+router.post('/:workspaceId/monte-carlo/query', async (req, res) => {
+  try {
+    const { workspaceId } = req.params;
+    const { question, pipelineId } = req.body || {};
+
+    if (!question || typeof question !== 'string' || !question.trim()) {
+      return res.status(400).json({ error: 'question is required' });
+    }
+
+    const ws = await query('SELECT id FROM workspaces WHERE id = $1', [workspaceId]);
+    if (ws.rows.length === 0) return res.status(404).json({ error: 'Workspace not found' });
+
+    // Load most recent completed MC run
+    const runResult = await query<{ run_id: string; created_at: string; result: any }>(
+      pipelineId
+        ? `SELECT run_id, created_at, result FROM skill_runs
+           WHERE workspace_id = $1 AND skill_id = 'monte-carlo-forecast'
+             AND status = 'completed' AND result IS NOT NULL
+             AND result->'simulation'->'commandCenter'->>'pipelineFilter' = $2
+           ORDER BY created_at DESC LIMIT 1`
+        : `SELECT run_id, created_at, result FROM skill_runs
+           WHERE workspace_id = $1 AND skill_id = 'monte-carlo-forecast'
+             AND status = 'completed' AND result IS NOT NULL
+           ORDER BY created_at DESC LIMIT 1`,
+      pipelineId ? [workspaceId, pipelineId] : [workspaceId]
+    );
+
+    if (runResult.rows.length === 0) {
+      return res.json({
+        answer: 'No forecast run found. Trigger a Monte Carlo run first.',
+        queryType: 'unknown',
+        data: {},
+        confidence: 0,
+        followUps: [],
+      });
+    }
+
+    const row = runResult.rows[0];
+    const stepData = typeof row.result === 'string' ? JSON.parse(row.result) : row.result;
+
+    const iterations: any[] = stepData?.simulation?.iterations ?? [];
+    const simulationInputs = stepData?.simulation?.simulationInputs ?? null;
+    const commandCenter = stepData?.simulation?.commandCenter ?? {};
+
+    if (iterations.length === 0) {
+      return res.json({
+        answer: 'This run was computed before query support was added. Re-run the forecast to enable questions.',
+        queryType: 'unknown',
+        data: {},
+        confidence: 0,
+        followUps: [],
+      });
+    }
+
+    const openDeals: { id: string; name: string; amount: number; ownerEmail: string }[] =
+      simulationInputs?.openDeals ?? [];
+    const repNames = [...new Set(openDeals.map((d: any) => d.ownerEmail).filter(Boolean))] as string[];
+    const openDealNames = openDeals.map((d: any) => d.name);
+
+    // Classify intent
+    const { classifyQueryIntent, fuzzyMatch } = await import('../analysis/monte-carlo-intent.js');
+    const intent = await classifyQueryIntent(question.trim(), {
+      workspaceId,
+      pipelineType: commandCenter.pipelineType ?? 'new_business',
+      p50: commandCenter.p50 ?? 0,
+      quota: commandCenter.quota ?? null,
+      openDealNames,
+      repNames,
+    });
+
+    // Route to query handler
+    let queryData: any = {};
+    const {
+      queryDealProbability,
+      queryMustClose,
+      queryWhatIfWinRate,
+      queryWhatIfDeal,
+      queryScenarioDecompose,
+      queryComponentSensitivity,
+      queryRepImpact,
+    } = await import('../analysis/monte-carlo-queries.js');
+
+    const targetRevenue = intent.params.targetRevenue ?? commandCenter.quota ?? null;
+
+    switch (intent.type) {
+      case 'deal_probability': {
+        const matched = intent.params.dealName
+          ? fuzzyMatch(intent.params.dealName, openDeals)
+          : null;
+        if (!matched && intent.params.dealName) {
+          return res.json({
+            answer: `I couldn't find a deal called "${intent.params.dealName}" in the current simulation. Open deals include: ${openDealNames.slice(0, 8).join(', ')}. Which did you mean?`,
+            queryType: 'deal_probability',
+            data: {},
+            confidence: intent.confidence,
+            followUps: [],
+          });
+        }
+        const dealsToQuery = matched
+          ? [matched].map(d => ({ ...d, amount: openDeals.find(od => od.id === d.id)?.amount ?? 0 }))
+          : openDeals.slice(0, 5).map(d => ({ id: d.id, name: d.name, amount: d.amount }));
+        queryData = queryDealProbability(iterations, dealsToQuery);
+        break;
+      }
+
+      case 'must_close': {
+        const target = targetRevenue ?? commandCenter.p50;
+        queryData = queryMustClose(iterations, target, 5);
+        // Resolve deal names from openDeals
+        queryData.mustCloseDeals = queryData.mustCloseDeals.map((d: any) => {
+          const deal = openDeals.find(od => od.id === d.dealId);
+          return { ...d, dealName: deal?.name ?? d.dealId, amount: deal?.amount ?? 0 };
+        });
+        break;
+      }
+
+      case 'what_if_win_rate': {
+        if (!simulationInputs) {
+          queryData = { error: 'simulationInputs not stored in this run' };
+          break;
+        }
+        const multiplier = intent.params.winRateImprovement
+          ? (intent.params.winRateImprovement > 1 ? intent.params.winRateImprovement : 1 + intent.params.winRateImprovement)
+          : 1.3;
+        queryData = await queryWhatIfWinRate(
+          simulationInputs,
+          commandCenter.p50,
+          commandCenter.probOfHittingTarget,
+          multiplier
+        );
+        break;
+      }
+
+      case 'what_if_deal': {
+        const matched = intent.params.dealName
+          ? fuzzyMatch(intent.params.dealName, openDeals)
+          : null;
+        if (!matched) {
+          return res.json({
+            answer: `I couldn't find a deal called "${intent.params.dealName ?? '(unknown)'}" in the current simulation. Open deals: ${openDealNames.slice(0, 8).join(', ')}.`,
+            queryType: 'what_if_deal',
+            data: {},
+            confidence: intent.confidence,
+            followUps: [],
+          });
+        }
+        const dealAmount = openDeals.find(d => d.id === matched.id)?.amount ?? 0;
+        queryData = queryWhatIfDeal(iterations, matched.id, matched.name, dealAmount, targetRevenue);
+        break;
+      }
+
+      case 'scenario_decompose': {
+        const threshold = intent.params.threshold
+          ?? (targetRevenue ? 'above_target' : 'top_quartile');
+        queryData = queryScenarioDecompose(iterations, threshold, targetRevenue);
+        break;
+      }
+
+      case 'component_sensitivity': {
+        queryData = queryComponentSensitivity(iterations, targetRevenue);
+        break;
+      }
+
+      case 'rep_impact': {
+        const matchedRep = intent.params.repName
+          ? fuzzyMatch(intent.params.repName, repNames.map(r => ({ id: r, name: r })))
+          : null;
+        if (!matchedRep) {
+          return res.json({
+            answer: `I couldn't find a rep called "${intent.params.repName ?? '(unknown)'}". Known reps: ${repNames.slice(0, 6).join(', ')}.`,
+            queryType: 'rep_impact',
+            data: {},
+            confidence: intent.confidence,
+            followUps: [],
+          });
+        }
+        queryData = queryRepImpact(iterations, matchedRep.id, matchedRep.name, targetRevenue);
+        break;
+      }
+
+      default:
+        queryData = {};
+    }
+
+    // Synthesize answer with Claude
+    const { callLLM } = await import('../utils/llm-router.js');
+    const synthesisPrompt = `You are answering a question about a Monte Carlo revenue forecast for a B2B SaaS company.
+
+FORECAST CONTEXT:
+Pipeline: ${commandCenter.pipelineFilter ?? 'all pipelines'} (${commandCenter.pipelineType ?? 'new_business'})
+P10: $${Math.round(commandCenter.p10 ?? 0).toLocaleString()} | P50: $${Math.round(commandCenter.p50 ?? 0).toLocaleString()} | P90: $${Math.round(commandCenter.p90 ?? 0).toLocaleString()}
+Annual quota: ${commandCenter.quota ? `$${Math.round(commandCenter.quota).toLocaleString()}` : 'not set'}
+Probability of hitting target: ${commandCenter.probOfHittingTarget !== null && commandCenter.probOfHittingTarget !== undefined ? `${Math.round(commandCenter.probOfHittingTarget * 100)}%` : 'n/a'}
+Forecast window end: ${commandCenter.forecastWindowEnd ?? 'unknown'}
+Open deals in simulation: ${commandCenter.dealsInSimulation ?? 0}
+
+QUESTION: "${question.trim()}"
+
+QUERY TYPE: ${intent.type}
+
+STRUCTURED RESULT:
+${JSON.stringify(queryData, null, 2)}
+
+Answer the question in 2–4 sentences. Rules:
+- Lead with the direct answer — a number, a deal name, a percentage
+- Quantify everything — never say "significant" when you can say "$180K"
+- Name specific deals and reps when they appear in the data
+- End with one implication sentence: what should the reader do with this information?
+- Do not explain how Monte Carlo works
+- Do not hedge with "based on the simulation" — just state the finding
+${intent.type === 'unknown' ? '- This question is outside the scope of the stored simulation data. Give a helpful answer using only the forecast context above.' : ''}
+
+After the answer, output exactly this JSON on a new line:
+{"followUps": ["question 1", "question 2", "question 3"]}
+
+Pick follow-up questions that logically extend the current answer.`;
+
+    const llmResponse = await callLLM(workspaceId, 'generate', {
+      messages: [{ role: 'user', content: synthesisPrompt }],
+      maxTokens: 500,
+      temperature: 0.3,
+    });
+
+    const rawAnswer = llmResponse.content || '';
+    const followUpMatch = rawAnswer.match(/\{"followUps":\s*\[[\s\S]*?\]\}/);
+    let answer = rawAnswer;
+    let followUps: string[] = [];
+
+    if (followUpMatch) {
+      try {
+        const parsed = JSON.parse(followUpMatch[0]);
+        followUps = Array.isArray(parsed.followUps) ? parsed.followUps.slice(0, 3) : [];
+        answer = rawAnswer.slice(0, followUpMatch.index).trim();
+      } catch {
+        // Keep raw answer if JSON parse fails
+      }
+    }
+
+    // Log to monte_carlo_queries
+    await query(
+      `INSERT INTO monte_carlo_queries (workspace_id, run_id, pipeline_id, question, intent_type, confidence, answer, query_data)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [workspaceId, row.run_id, pipelineId ?? null, question.trim(), intent.type, intent.confidence, answer, JSON.stringify(queryData)]
+    ).catch(err => console.warn('[mc-query] Failed to log query:', err.message));
+
+    return res.json({
+      answer,
+      queryType: intent.type,
+      data: queryData,
+      confidence: intent.confidence,
+      followUps,
+    });
+  } catch (err) {
+    console.error('[mc-query] Error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * GET /api/workspaces/:workspaceId/monte-carlo/queries
+ * Returns recent questions asked against this workspace's MC runs.
+ */
+router.get('/:workspaceId/monte-carlo/queries', async (req, res) => {
+  try {
+    const { workspaceId } = req.params;
+    const limit = Math.min(parseInt(String(req.query.limit || '10')), 50);
+
+    const result = await query<{
+      id: string;
+      question: string;
+      intent_type: string;
+      answer: string;
+      created_at: string;
+    }>(
+      `SELECT id, question, intent_type, answer, created_at
+       FROM monte_carlo_queries
+       WHERE workspace_id = $1
+       ORDER BY created_at DESC
+       LIMIT $2`,
+      [workspaceId, limit]
+    );
+
+    return res.json({
+      queries: result.rows.map(r => ({
+        id: r.id,
+        question: r.question,
+        intentType: r.intent_type,
+        answer: r.answer,
+        createdAt: r.created_at,
+      })),
+    });
+  } catch (err) {
+    console.error('[mc-queries] Error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 export default router;
