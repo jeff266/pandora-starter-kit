@@ -22,12 +22,27 @@ async function buildStageMaps(client: HubSpotClient, workspaceId: string): Promi
 
   try {
     const pipelines = await client.getPipelines();
+    const stageUpserts: Promise<any>[] = [];
     for (const pipeline of pipelines) {
       pipelineMap.set(pipeline.id, pipeline.label);
       for (const stage of pipeline.stages) {
         stageMap.set(stage.id, stage.label);
+        stageUpserts.push(
+          query(
+            `INSERT INTO stage_configs (workspace_id, pipeline_name, stage_name, display_order)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT (workspace_id, stage_name) DO UPDATE SET
+               display_order = EXCLUDED.display_order,
+               pipeline_name = EXCLUDED.pipeline_name,
+               updated_at = NOW()`,
+            [workspaceId, pipeline.label, stage.label, stage.displayOrder]
+          ).catch(err => {
+            console.warn('[HubSpot Sync] Failed to upsert stage_config:', err instanceof Error ? err.message : err);
+          })
+        );
       }
     }
+    await Promise.all(stageUpserts);
     console.log(`[HubSpot Sync] Built stage map: ${stageMap.size} stages across ${pipelineMap.size} pipelines`);
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';

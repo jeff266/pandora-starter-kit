@@ -473,6 +473,19 @@ async function runSync(
     const stages = await client.getOpportunityStages();
     stageMap = new Map(stages.map(s => [s.ApiName, s]));
     logger.info('Built stage map', { stageCount: stageMap.size });
+    // Upsert stage_configs for display_order (uses Salesforce SortOrder)
+    await Promise.all(stages.map(stage =>
+      query(
+        `INSERT INTO stage_configs (workspace_id, stage_name, display_order)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (workspace_id, stage_name) DO UPDATE SET
+           display_order = EXCLUDED.display_order,
+           updated_at = NOW()`,
+        [workspaceId, stage.ApiName, stage.SortOrder ?? 999]
+      ).catch(err => {
+        logger.warn('Failed to upsert stage_config', { error: err instanceof Error ? err.message : err });
+      })
+    ));
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
     errors.push(`Failed to fetch stage metadata: ${msg}`);

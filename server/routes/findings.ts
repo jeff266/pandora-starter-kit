@@ -347,14 +347,18 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
          d.stage_normalized,
          count(*)::int as deal_count,
          COALESCE(sum(d.amount), 0)::float as total_value,
-         COALESCE(sum(d.amount * COALESCE(d.probability, 0.5)), 0)::float as weighted_value
+         COALESCE(sum(d.amount * COALESCE(d.probability, 0.5)), 0)::float as weighted_value,
+         MAX(sc.display_order) as display_order
        FROM deals d
+       LEFT JOIN stage_configs sc
+         ON sc.stage_name = COALESCE(d.stage, d.stage_normalized)
+         AND sc.workspace_id = d.workspace_id
        WHERE d.workspace_id = $1
          AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
          ${pipelineClause}
          ${excludeStagesClause}
        GROUP BY d.stage, d.stage_normalized
-       ORDER BY sum(d.amount) DESC`,
+       ORDER BY MAX(sc.display_order) ASC NULLS LAST, sum(d.amount) DESC`,
       [...params, ...excludeParams]
     );
 
