@@ -74,6 +74,8 @@ import dealIntelligenceRouter from './routes/deal-intelligence.js';
 import toolsRouter from './routes/tools.js';
 import chatRouter from './routes/chat.js';
 import feedbackRouter from './routes/feedback.js';
+import pushRouter from './routes/push.js';
+import { startPushTriggers, stopPushTriggers } from './push/trigger-manager.js';
 import { initRenderers } from './renderers/index.js';
 import { cleanupExpiredAnnotations } from './feedback/cleanup.js';
 
@@ -236,6 +238,7 @@ workspaceApiRouter.use(dealIntelligenceRouter);
 workspaceApiRouter.use(toolsRouter);
 workspaceApiRouter.use(chatRouter);
 workspaceApiRouter.use(feedbackRouter);
+workspaceApiRouter.use(pushRouter);
 app.use("/api/workspaces", workspaceApiRouter);
 
 app.use("/api", skillsRouter);
@@ -361,6 +364,9 @@ async function start(): Promise<void> {
   startJobQueue();
   startScheduler();
   startSkillScheduler();
+  startPushTriggers().catch(err => {
+    console.warn('[server] Push trigger system failed to start (non-fatal):', err instanceof Error ? err.message : err);
+  });
 
   const tSchedulers = performance.now();
 
@@ -400,6 +406,7 @@ async function start(): Promise<void> {
 process.on('SIGTERM', () => {
   console.log('[server] SIGTERM received, shutting down gracefully');
   stopSkillScheduler();
+  stopPushTriggers();
   stopWorkflowMonitor();
   process.exit(0);
 });
@@ -407,6 +414,7 @@ process.on('SIGTERM', () => {
 process.on('SIGINT', () => {
   console.log('[server] SIGINT received, shutting down gracefully');
   stopSkillScheduler();
+  stopPushTriggers();
   stopWorkflowMonitor();
   process.exit(0);
 });

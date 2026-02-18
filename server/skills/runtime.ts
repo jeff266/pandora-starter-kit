@@ -247,6 +247,14 @@ export class SkillRuntime {
         console.error(`[Actions] Extraction failed for ${skill.id}:`, err instanceof Error ? err.message : err);
       }
 
+      // Push API: fire skill_run delivery triggers (fire-and-forget)
+      try {
+        const { onSkillRunCompleted } = await import('../push/trigger-manager.js');
+        onSkillRunCompleted(workspaceId, skill.id, runId);
+      } catch {
+        // Non-fatal — push trigger failure never blocks skill completion
+      }
+
       return {
         runId,
         skillId: skill.id,
