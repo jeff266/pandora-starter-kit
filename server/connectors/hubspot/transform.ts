@@ -22,6 +22,8 @@ export interface NormalizedDeal {
   custom_fields: Record<string, any>;
   account_source_id: string | null;
   contact_source_ids: string[];
+  next_steps: string | null;
+  lead_source: string | null;
 }
 
 // TODO: Allow per-workspace override via context_layer.definitions.stage_mapping
@@ -392,6 +394,8 @@ export function transformDeal(
     custom_fields: extractCustomFields(props, CORE_DEAL_FIELDS),
     account_source_id: accountSourceId,
     contact_source_ids: contactSourceIds,
+    next_steps: sanitizeText(props.hs_next_step) || null,
+    lead_source: sanitizeText(props.hs_lead_status) || null,
   };
 }
 

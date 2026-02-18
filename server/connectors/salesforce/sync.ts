@@ -50,12 +50,12 @@ async function upsertDeals(deals: NormalizedDeal[]): Promise<number> {
             workspace_id, source, source_id, source_data,
             name, amount, stage, stage_normalized, close_date, owner,
             probability, forecast_category, forecast_category_source, pipeline,
-            last_activity_date, custom_fields, created_at, updated_at
+            last_activity_date, custom_fields, next_steps, lead_source, created_at, updated_at
           ) VALUES (
             $1, $2, $3, $4,
             $5, $6, $7, $8, $9, $10,
             $11, $12, $13, $14,
-            $15, $16, NOW(), NOW()
+            $15, $16, $17, $18, NOW(), NOW()
           )
           ON CONFLICT (workspace_id, source, source_id) DO UPDATE SET
             source_data = EXCLUDED.source_data,
@@ -71,12 +71,14 @@ async function upsertDeals(deals: NormalizedDeal[]): Promise<number> {
             pipeline = EXCLUDED.pipeline,
             last_activity_date = EXCLUDED.last_activity_date,
             custom_fields = EXCLUDED.custom_fields,
+            next_steps = EXCLUDED.next_steps,
+            lead_source = EXCLUDED.lead_source,
             updated_at = NOW()`,
           [
             deal.workspace_id, deal.source, deal.source_id, JSON.stringify(deal.source_data),
             deal.name, deal.amount, deal.stage, deal.stage_normalized, deal.close_date, deal.owner,
             deal.probability, deal.forecast_category, deal.forecast_category_source, deal.pipeline,
-            deal.last_activity_date, JSON.stringify(deal.custom_fields),
+            deal.last_activity_date, JSON.stringify(deal.custom_fields), deal.next_steps, deal.lead_source,
           ]
         );
         stored++;

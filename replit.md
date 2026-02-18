@@ -72,8 +72,8 @@ Ran all 104 registered tools against Frontera Health workspace. Results:
 | `workspace-config-audit.ts` | `EXTRACT(DAY FROM date - date)` | Use date subtraction directly |
 
 ### Schema Reference (deals table)
-Correct column names: `id`, `workspace_id`, `source`, `source_id`, `source_data`, `name`, `amount`, `stage`, `close_date`, `owner`, `account_id`, `contact_id`, `probability`, `forecast_category`, `pipeline`, `days_in_stage`, `last_activity_date`, `custom_fields`, `created_at`, `updated_at`, `velocity_score`, `deal_risk`, `deal_risk_factors`, `stage_normalized`, `health_score`, `forecast_category_source`, `previous_stage`, `stage_changed_at`.
-**No**: `created_date`, `owner_email`, `next_steps`, `lead_source`, `ai_score`.
+Correct column names: `id`, `workspace_id`, `source`, `source_id`, `source_data`, `name`, `amount`, `stage`, `close_date`, `owner`, `account_id`, `contact_id`, `probability`, `forecast_category`, `pipeline`, `days_in_stage`, `last_activity_date`, `custom_fields`, `created_at`, `updated_at`, `velocity_score`, `deal_risk`, `deal_risk_factors`, `stage_normalized`, `health_score`, `forecast_category_source`, `previous_stage`, `stage_changed_at`, `ai_score`, `ai_score_updated_at`, `ai_score_breakdown`, `next_steps`, `lead_source`, `icp_fit_score`, `icp_fit_at`.
+**No**: `created_date`, `owner_email`.
 
 ## External Dependencies
 -   **PostgreSQL (Neon):** Primary database.

@@ -74,6 +74,8 @@ export interface NormalizedDeal {
   custom_fields: Record<string, any>;
   account_source_id: string | null;
   contact_source_ids: string[];
+  next_steps: string | null;
+  lead_source: string | null;
 }
 
 export interface NormalizedContact {
@@ -514,6 +516,8 @@ export function transformOpportunity(
     custom_fields: customFields,
     account_source_id: opp.AccountId,
     contact_source_ids: [],  // TODO: Extract from OpportunityContactRole in Phase 2
+    next_steps: sanitizeText((opp as any).NextStep, 2000) || null,
+    lead_source: sanitizeText((opp as any).LeadSource, 255) || null,
   };
 }
 
