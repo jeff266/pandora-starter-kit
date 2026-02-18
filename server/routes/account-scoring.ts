@@ -1,162 +1,221 @@
-import { Router, type Request, type Response } from 'express';
+import { Router } from 'express';
 import { query } from '../db.js';
 import { enrichAccount } from '../enrichment/account-enrichment.js';
-import { enrichAndScoreAccountsBatch, getAccountScoringStatus } from '../enrichment/account-enrichment-batch.js';
 import { scoreAccount } from '../scoring/account-scorer.js';
+import { runAccountEnrichmentBatch, runAccountScoringBatch } from '../enrichment/account-enrichment-batch.js';
+import { getOrGenerateSynthesis } from '../scoring/account-synthesis.js';
 
 const router = Router();
 
-interface WorkspaceParams {
-  workspaceId: string;
-}
-
-interface AccountParams {
-  workspaceId: string;
-  accountId: string;
-}
-
-router.get('/:workspaceId/accounts/scoring/status', async (req: Request<WorkspaceParams>, res: Response) => {
+/**
+ * GET /:workspaceId/accounts/scores
+ * Returns all accounts with their scores, sorted by score desc.
+ * Query params: ?grade=A,B&limit=50&offset=0
+ */
+router.get('/:workspaceId/accounts/scores', async (req, res) => {
   try {
     const { workspaceId } = req.params;
-    const status = await getAccountScoringStatus(workspaceId);
-    res.json(status);
-  } catch (err: any) {
-    console.error('[AccountScoring] Status error:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
+    const gradeFilter = req.query.grade ? String(req.query.grade).split(',') : null;
+    const limit = Math.min(parseInt(String(req.query.limit || '50')), 200);
+    const offset = parseInt(String(req.query.offset || '0'));
 
-router.post('/:workspaceId/accounts/enrich/batch', async (req: Request<WorkspaceParams>, res: Response) => {
-  try {
-    const { workspaceId } = req.params;
-    const { limit, forceRefresh, concurrency } = req.body || {};
+    const gradeCondition = gradeFilter?.length
+      ? `AND acs.grade = ANY($3::text[])`
+      : '';
+    const params: any[] = [workspaceId, workspaceId];
+    if (gradeFilter?.length) params.push(gradeFilter);
 
-    const result = await enrichAndScoreAccountsBatch(workspaceId, {
-      limit: Math.min(parseInt(limit) || 50, 200),
-      forceRefresh: forceRefresh === true,
-      concurrency: Math.min(parseInt(concurrency) || 3, 5),
-    });
-
-    res.json(result);
-  } catch (err: any) {
-    console.error('[AccountScoring] Batch enrichment error:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.post('/:workspaceId/accounts/:accountId/enrich', async (req: Request<AccountParams>, res: Response) => {
-  try {
-    const { workspaceId, accountId } = req.params;
-    const { forceRefresh } = req.body || {};
-
-    const result = await enrichAccount(workspaceId, accountId, { forceRefresh: forceRefresh === true });
-    res.json(result);
-  } catch (err: any) {
-    console.error('[AccountScoring] Single enrichment error:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.post('/:workspaceId/accounts/:accountId/score', async (req: Request<AccountParams>, res: Response) => {
-  try {
-    const { workspaceId, accountId } = req.params;
-    const result = await scoreAccount(workspaceId, accountId);
-    res.json(result);
-  } catch (err: any) {
-    console.error('[AccountScoring] Scoring error:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.get('/:workspaceId/accounts/:accountId/score', async (req: Request<AccountParams>, res: Response) => {
-  try {
-    const { workspaceId, accountId } = req.params;
-
-    const result = await query<{
-      total_score: number; grade: string;
-      firmographic_score: number; engagement_score: number;
-      signal_score: number; relationship_score: number;
-      breakdown: any; scored_at: Date;
-    }>(
-      `SELECT total_score, grade, firmographic_score, engagement_score,
-              signal_score, relationship_score, breakdown, scored_at
-       FROM account_scores
-       WHERE workspace_id = $1 AND account_id = $2`,
-      [workspaceId, accountId]
-    );
-
-    if (result.rows.length === 0) {
-      res.json({ scored: false });
-      return;
-    }
-
-    const row = result.rows[0];
-    res.json({
-      scored: true,
-      totalScore: row.total_score,
-      grade: row.grade,
-      firmographicScore: row.firmographic_score,
-      engagementScore: row.engagement_score,
-      signalScore: row.signal_score,
-      relationshipScore: row.relationship_score,
-      breakdown: row.breakdown,
-      scoredAt: row.scored_at,
-    });
-  } catch (err: any) {
-    console.error('[AccountScoring] Get score error:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.get('/:workspaceId/accounts/scores/list', async (req: Request<WorkspaceParams>, res: Response) => {
-  try {
-    const { workspaceId } = req.params;
-    const { sortBy, sortDir, grade, limit: rawLimit, offset: rawOffset } = req.query;
-
-    const validSorts = new Set(['total_score', 'grade', 'scored_at', 'firmographic_score', 'engagement_score', 'signal_score', 'relationship_score']);
-    const sort = validSorts.has(sortBy as string) ? sortBy as string : 'total_score';
-    const dir = sortDir === 'asc' ? 'ASC' : 'DESC';
-    const lim = Math.min(Math.max(parseInt(rawLimit as string) || 50, 1), 200);
-    const off = Math.max(parseInt(rawOffset as string) || 0, 0);
-
-    let gradeFilter = '';
-    const params: any[] = [workspaceId];
-
-    if (grade && typeof grade === 'string' && ['A', 'B', 'C', 'D', 'F'].includes(grade)) {
-      gradeFilter = ` AND acs.grade = $2`;
-      params.push(grade);
-    }
-
-    const countResult = await query<{ count: string }>(
-      `SELECT COUNT(*) as count FROM account_scores acs WHERE acs.workspace_id = $1${gradeFilter}`,
+    const result = await query(
+      `SELECT a.id, a.name, a.domain, a.industry, a.owner,
+         acs.total_score, acs.grade, acs.score_delta, acs.data_confidence, acs.scored_at,
+         acs.score_breakdown,
+         asig.signals, asig.signal_score, asig.signal_summary,
+         asig.industry AS signal_industry, asig.growth_stage, asig.classification_confidence, asig.scrape_status
+       FROM accounts a
+       LEFT JOIN account_scores acs ON acs.account_id = a.id AND acs.workspace_id = a.workspace_id
+       LEFT JOIN account_signals asig ON asig.account_id = a.id AND asig.workspace_id = a.workspace_id
+       WHERE a.workspace_id = $1 ${gradeCondition}
+       ORDER BY acs.total_score DESC NULLS LAST, a.name ASC
+       LIMIT ${limit} OFFSET ${offset}`,
       params
     );
 
-    const idx = params.length + 1;
-    const dataResult = await query(
-      `SELECT
-        a.id, a.name, a.domain, a.industry, a.employee_count, a.annual_revenue,
-        acs.total_score, acs.grade, acs.firmographic_score, acs.engagement_score,
-        acs.signal_score, acs.relationship_score, acs.scored_at,
-        asi.data_quality, asi.company_type, asi.signal_summary
-       FROM account_scores acs
-       JOIN accounts a ON a.id = acs.account_id AND a.workspace_id = acs.workspace_id
-       LEFT JOIN account_signals asi ON asi.account_id = acs.account_id AND asi.workspace_id = acs.workspace_id
-       WHERE acs.workspace_id = $1${gradeFilter}
-       ORDER BY acs.${sort} ${dir}
-       LIMIT $${idx} OFFSET $${idx + 1}`,
-      [...params, lim, off]
+    const total = await query(
+      `SELECT COUNT(*) AS cnt FROM accounts WHERE workspace_id = $1`,
+      [workspaceId]
     );
 
-    res.json({
-      total: parseInt(countResult.rows[0].count),
-      scores: dataResult.rows,
-      limit: lim,
-      offset: off,
+    return res.json({
+      accounts: result.rows,
+      total: parseInt(total.rows[0]?.cnt || '0'),
+      limit,
+      offset,
     });
-  } catch (err: any) {
-    console.error('[AccountScoring] List scores error:', err);
-    res.status(500).json({ error: err.message });
+  } catch (err) {
+    console.error('[account-scoring] scores list error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * GET /:workspaceId/accounts/:accountId/score
+ * Returns full score breakdown + signals for one account.
+ */
+router.get('/:workspaceId/accounts/:accountId/score', async (req, res) => {
+  try {
+    const { workspaceId, accountId } = req.params;
+
+    const result = await query(
+      `SELECT a.id, a.name, a.domain, a.industry, a.owner,
+         acs.total_score, acs.grade, acs.score_delta, acs.previous_score, acs.data_confidence,
+         acs.score_breakdown, acs.icp_fit_details, acs.scoring_mode, acs.scored_at, acs.stale_after,
+         asig.signals, asig.signal_score, asig.signal_summary, asig.industry AS signal_industry,
+         asig.business_model, asig.employee_range, asig.growth_stage,
+         asig.classification_confidence, asig.scrape_status, asig.enriched_at
+       FROM accounts a
+       LEFT JOIN account_scores acs ON acs.account_id = a.id AND acs.workspace_id = a.workspace_id
+       LEFT JOIN account_signals asig ON asig.account_id = a.id AND asig.workspace_id = a.workspace_id
+       WHERE a.workspace_id = $1 AND a.id = $2`,
+      [workspaceId, accountId]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: 'Account not found' });
+    }
+
+    return res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[account-scoring] score detail error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * GET /:workspaceId/accounts/:accountId/score/why
+ * Returns a short LLM synthesis of why this account scores well/poorly.
+ * Cached per account per day in account_scores.synthesis_text.
+ */
+router.get('/:workspaceId/accounts/:accountId/score/why', async (req, res) => {
+  try {
+    const { workspaceId, accountId } = req.params;
+
+    const exists = await query(
+      `SELECT id FROM accounts WHERE workspace_id = $1 AND id = $2`,
+      [workspaceId, accountId]
+    );
+    if (!exists.rows.length) return res.status(404).json({ error: 'Account not found' });
+
+    const why = await getOrGenerateSynthesis(workspaceId, accountId);
+    return res.json({ why });
+  } catch (err) {
+    console.error('[account-scoring] score why error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * POST /:workspaceId/accounts/:accountId/enrich
+ * Triggers enrichment + scoring for a single account.
+ */
+router.post('/:workspaceId/accounts/:accountId/enrich', async (req, res) => {
+  try {
+    const { workspaceId, accountId } = req.params;
+    const { forceApollo } = req.body || {};
+
+    const enrichResult = await enrichAccount(workspaceId, accountId, { forceApollo: !!forceApollo });
+    const scoreResult = await scoreAccount(workspaceId, accountId);
+
+    return res.json({
+      enrichment: enrichResult,
+      score: scoreResult,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[account-scoring] enrich error:', err);
+    return res.status(500).json({ error: msg });
+  }
+});
+
+/**
+ * POST /:workspaceId/accounts/enrich/batch
+ * Triggers batch enrichment job.
+ */
+router.post('/:workspaceId/accounts/enrich/batch', async (req, res) => {
+  try {
+    const { workspaceId } = req.params;
+    const { limit, forceRefresh, accountIds } = req.body || {};
+
+    // Return immediately — run batch in background
+    res.json({ ok: true, message: 'Batch enrichment started' });
+
+    runAccountEnrichmentBatch(workspaceId, { limit, forceRefresh, accountIds }).catch(err =>
+      console.error('[account-scoring] batch error:', err)
+    );
+  } catch (err) {
+    console.error('[account-scoring] batch start error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * GET /:workspaceId/accounts/enrich/status
+ * Returns enrichment coverage stats.
+ */
+router.get('/:workspaceId/accounts/enrich/status', async (req, res) => {
+  try {
+    const { workspaceId } = req.params;
+
+    const [totals, byMethod, scoreDistrib, avgConf] = await Promise.all([
+      query(
+        `SELECT
+           COUNT(a.id) AS total,
+           COUNT(asig.id) AS enriched,
+           COUNT(CASE WHEN asig.id IS NULL OR asig.scrape_status = 'pending' THEN 1 END) AS pending,
+           COUNT(CASE WHEN asig.stale_after < now() AND asig.id IS NOT NULL THEN 1 END) AS stale
+         FROM accounts a
+         LEFT JOIN account_signals asig ON asig.account_id = a.id AND asig.workspace_id = a.workspace_id
+         WHERE a.workspace_id = $1`,
+        [workspaceId]
+      ),
+      query(
+        `SELECT enrichment_method, COUNT(*) AS cnt
+         FROM account_signals WHERE workspace_id = $1 AND scrape_status NOT IN ('pending', 'serper_failed')
+         GROUP BY enrichment_method`,
+        [workspaceId]
+      ),
+      query(
+        `SELECT grade, COUNT(*) AS cnt FROM account_scores WHERE workspace_id = $1 GROUP BY grade`,
+        [workspaceId]
+      ),
+      query(
+        `SELECT AVG(classification_confidence)::integer AS avg_conf FROM account_signals WHERE workspace_id = $1`,
+        [workspaceId]
+      ),
+    ]);
+
+    const byMethodMap: Record<string, number> = {};
+    for (const row of byMethod.rows) {
+      byMethodMap[row.enrichment_method || 'unknown'] = parseInt(row.cnt);
+    }
+
+    const scoreDistribMap: Record<string, number> = { A: 0, B: 0, C: 0, D: 0, F: 0 };
+    for (const row of scoreDistrib.rows) {
+      scoreDistribMap[row.grade] = parseInt(row.cnt);
+    }
+
+    const t = totals.rows[0];
+    return res.json({
+      total: parseInt(t.total),
+      enriched: parseInt(t.enriched),
+      pending: parseInt(t.pending),
+      stale: parseInt(t.stale),
+      byMethod: byMethodMap,
+      avgConfidence: avgConf.rows[0]?.avg_conf ?? 0,
+      scoreDistribution: scoreDistribMap,
+    });
+  } catch (err) {
+    console.error('[account-scoring] status error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
   }
 });
 

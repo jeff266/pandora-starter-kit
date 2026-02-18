@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
@@ -7,6 +7,201 @@ import Skeleton from '../components/Skeleton';
 import { useDemoMode } from '../contexts/DemoModeContext';
 
 const PAGE_SIZE = 50;
+
+// ============================================================================
+// Scoring State Types + Hook
+// ============================================================================
+
+type ScoringStateValue = 'locked' | 'ready' | 'processing' | 'active';
+
+interface ScoringStatePoll {
+  state: ScoringStateValue;
+  processingStep: string | null;
+  accountsScored: number;
+  accountsTotal: number;
+}
+
+function useScoringState(): {
+  scoringState: ScoringStatePoll | null;
+  activating: boolean;
+  activateScoring: () => Promise<void>;
+  refreshIcp: () => Promise<void>;
+} {
+  const [scoringState, setScoringState] = useState<ScoringStatePoll | null>(null);
+  const [activating, setActivating] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const fetchState = useCallback(async () => {
+    try {
+      const data = await api.get('/scoring/state/poll');
+      setScoringState(data as ScoringStatePoll);
+    } catch {
+      // non-fatal
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchState();
+    // Poll every 5s during processing, every 60s otherwise
+    const schedule = () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      pollRef.current = setInterval(async () => {
+        await fetchState();
+      }, 5000);
+    };
+    schedule();
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [fetchState]);
+
+  // Slow down polling when not processing
+  useEffect(() => {
+    if (!scoringState) return;
+    if (pollRef.current) clearInterval(pollRef.current);
+    const interval = scoringState.state === 'processing' ? 5000 : 60000;
+    pollRef.current = setInterval(fetchState, interval);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [scoringState?.state, fetchState]);
+
+  const activateScoring = useCallback(async () => {
+    setActivating(true);
+    try {
+      await api.post('/scoring/activate', {});
+      await fetchState();
+    } finally {
+      setActivating(false);
+    }
+  }, [fetchState]);
+
+  const refreshIcp = useCallback(async () => {
+    setActivating(true);
+    try {
+      await api.post('/scoring/refresh-icp', {});
+      await fetchState();
+    } finally {
+      setActivating(false);
+    }
+  }, [fetchState]);
+
+  return { scoringState, activating, activateScoring, refreshIcp };
+}
+
+// ============================================================================
+// Scoring State Banners
+// ============================================================================
+
+function ScoringLockedBanner() {
+  return (
+    <div style={{
+      background: '#fefce8', border: '1px solid #fde68a', borderRadius: 10, padding: '14px 20px',
+      display: 'flex', alignItems: 'center', gap: 12,
+    }}>
+      <span style={{ fontSize: 16 }}>🔒</span>
+      <div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: '#92400e' }}>Account Scoring Locked</div>
+        <div style={{ fontSize: 12, color: '#a16207', marginTop: 2 }}>
+          Connect your CRM and close at least 5 deals to unlock ICP-based account scoring.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ScoringReadyBanner({ onActivate, activating }: { onActivate: () => void; activating: boolean }) {
+  return (
+    <div style={{
+      background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '14px 20px',
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <span style={{ fontSize: 16 }}>✨</span>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: '#166534' }}>Account Scoring Ready</div>
+          <div style={{ fontSize: 12, color: '#15803d', marginTop: 2 }}>
+            You have enough closed deals. Activate ICP Discovery to start scoring your accounts.
+          </div>
+        </div>
+      </div>
+      <button
+        onClick={onActivate}
+        disabled={activating}
+        style={{
+          fontSize: 12, padding: '8px 18px', borderRadius: 6, cursor: activating ? 'default' : 'pointer',
+          background: '#16a34a', color: '#fff', border: 'none', fontWeight: 600,
+          opacity: activating ? 0.7 : 1, whiteSpace: 'nowrap', flexShrink: 0,
+        }}
+      >
+        {activating ? 'Starting...' : 'Activate Scoring'}
+      </button>
+    </div>
+  );
+}
+
+function ScoringProcessingBanner({ step, scored, total }: { step: string | null; scored: number; total: number }) {
+  const stepLabel: Record<string, string> = {
+    icp_discovery: 'Analyzing closed deals to build your ICP...',
+    enriching: 'Enriching account data...',
+    scoring: 'Scoring accounts...',
+  };
+  const label = step ? (stepLabel[step] || step) : 'Processing...';
+  const pct = total > 0 ? Math.round((scored / total) * 100) : 0;
+
+  return (
+    <div style={{
+      background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 10, padding: '14px 20px',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{ fontSize: 16 }}>⏳</span>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: '#1e40af' }}>Scoring in Progress</div>
+          <div style={{ fontSize: 12, color: '#2563eb', marginTop: 2 }}>{label}</div>
+        </div>
+        {total > 0 && (
+          <span style={{ fontSize: 12, color: '#2563eb', whiteSpace: 'nowrap' }}>
+            {scored}/{total} accounts
+          </span>
+        )}
+      </div>
+      {total > 0 && (
+        <div style={{ marginTop: 10, height: 4, background: '#dbeafe', borderRadius: 2 }}>
+          <div style={{ width: `${pct}%`, height: '100%', background: '#2563eb', borderRadius: 2, transition: 'width 0.5s ease' }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ScoringActiveBanner({ onRefresh, activating }: { onRefresh: () => void; activating: boolean }) {
+  return (
+    <div style={{
+      background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10,
+      padding: '10px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontSize: 13, color: '#16a34a' }}>●</span>
+        <span style={{ fontSize: 12, color: colors.textSecondary }}>ICP-based scoring active</span>
+      </div>
+      <button
+        onClick={onRefresh}
+        disabled={activating}
+        style={{
+          fontSize: 11, padding: '4px 12px', borderRadius: 4, cursor: activating ? 'default' : 'pointer',
+          background: 'none', color: colors.textSecondary, border: `1px solid ${colors.border}`,
+          opacity: activating ? 0.6 : 1,
+        }}
+      >
+        {activating ? 'Refreshing...' : 'Refresh ICP'}
+      </button>
+    </div>
+  );
+}
+
+interface Signal {
+  type: string;
+  signal: string;
+  source_url: string;
+  relevance: number;
+  date: string | null;
+}
 
 interface Account {
   id: string;
@@ -19,96 +214,76 @@ interface Account {
   finding_count: number;
   last_activity: string;
   owner: string;
-  total_score?: number | null;
-  grade?: string | null;
-  signal_summary?: string | null;
-  data_quality?: string | null;
-  company_type?: string | null;
+  // Score fields
+  total_score?: number;
+  grade?: string;
+  score_delta?: number;
+  data_confidence?: number;
+  signals?: Signal[];
+  signal_score?: number;
+  classification_confidence?: number;
 }
 
-interface ScoreDetail {
-  scored: boolean;
-  totalScore?: number;
-  grade?: string;
-  firmographicScore?: number;
-  engagementScore?: number;
-  signalScore?: number;
-  relationshipScore?: number;
-  breakdown?: any;
-  scoredAt?: string;
+const GRADE_COLORS: Record<string, { bg: string; text: string }> = {
+  A: { bg: '#dcfce7', text: '#16a34a' },
+  B: { bg: '#ccfbf1', text: '#0d9488' },
+  C: { bg: '#fef9c3', text: '#ca8a04' },
+  D: { bg: '#ffedd5', text: '#ea580c' },
+  F: { bg: '#f3f4f6', text: '#9ca3af' },
+};
+
+function ScoreBadge({ grade, score, scoreDelta, dataConfidence }: {
+  grade?: string; score?: number; scoreDelta?: number; dataConfidence?: number;
+}) {
+  if (!grade) return <span style={{ color: '#9ca3af', fontSize: 12 }}>—</span>;
+  const c = GRADE_COLORS[grade] || GRADE_COLORS.F;
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+      <span style={{
+        background: c.bg, color: c.text, fontWeight: 700, fontSize: 13,
+        borderRadius: 4, padding: '1px 7px',
+      }}>{grade}</span>
+      <span style={{ fontSize: 11, color: '#6b7280' }}>{score}</span>
+      {scoreDelta !== undefined && scoreDelta >= 10 && (
+        <span style={{ fontSize: 11, color: '#16a34a' }}>↑+{scoreDelta}</span>
+      )}
+      {(dataConfidence ?? 100) < 40 && (
+        <span title="Limited data available" style={{ color: '#ca8a04', fontSize: 11 }}>⚠</span>
+      )}
+    </span>
+  );
+}
+
+function SignalBadges({ signals, confidence }: { signals?: Signal[]; confidence?: number }) {
+  const badges: { label: string; color: string }[] = [];
+  if (signals) {
+    if (signals.some(s => s.type === 'hiring')) badges.push({ label: 'Hiring', color: '#16a34a' });
+    if (signals.some(s => s.type === 'funding')) badges.push({ label: 'Funded', color: '#2563eb' });
+    if (signals.some(s => s.type === 'expansion')) badges.push({ label: 'Expanding', color: '#ca8a04' });
+    if (signals.some(s => s.type === 'layoff')) badges.push({ label: 'Layoffs', color: '#dc2626' });
+  }
+  if ((confidence ?? 100) < 40 && signals !== undefined) badges.push({ label: 'Limited data', color: '#9ca3af' });
+  if (!signals && confidence === undefined) return <span style={{ fontSize: 11, color: '#9ca3af' }}>Unscored</span>;
+  if (badges.length === 0) return null;
+  return (
+    <span style={{ display: 'inline-flex', gap: 4, flexWrap: 'wrap' }}>
+      {badges.slice(0, 3).map((b, i) => (
+        <span key={i} style={{
+          fontSize: 11, color: b.color, border: `1px solid ${b.color}`,
+          borderRadius: 10, padding: '0px 6px', whiteSpace: 'nowrap',
+        }}>{b.label}</span>
+      ))}
+    </span>
+  );
 }
 
 type SortField = 'name' | 'domain' | 'industry' | 'open_deals' | 'pipeline' | 'contacts' | 'last_activity' | 'score';
 type SortDir = 'asc' | 'desc';
 
-const GRADE_COLORS: Record<string, { bg: string; fg: string }> = {
-  A: { bg: '#dcfce7', fg: '#166534' },
-  B: { bg: '#dbeafe', fg: '#1e40af' },
-  C: { bg: '#fef9c3', fg: '#854d0e' },
-  D: { bg: '#fed7aa', fg: '#9a3412' },
-  F: { bg: '#fecaca', fg: '#991b1b' },
-};
-
-const DATA_QUALITY_LABELS: Record<string, { label: string; color: string }> = {
-  high: { label: 'High confidence', color: colors.green },
-  standard: { label: 'Standard', color: colors.accent },
-  limited: { label: 'Limited data', color: colors.yellow },
-};
-
-function ScoreBadge({ grade, score }: { grade: string | null | undefined; score: number | null | undefined }) {
-  if (!grade) return <span style={{ fontSize: 11, color: colors.textDim }}>--</span>;
-  const c = GRADE_COLORS[grade] || GRADE_COLORS.D;
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-      <span style={{
-        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        width: 22, height: 22, borderRadius: 4, fontSize: 11, fontWeight: 700,
-        background: c.bg, color: c.fg, fontFamily: fonts.mono,
-      }}>
-        {grade}
-      </span>
-      {score != null && (
-        <span style={{ fontSize: 10, color: colors.textMuted, fontFamily: fonts.mono }}>
-          {score}
-        </span>
-      )}
-    </div>
-  );
-}
-
-function SignalBadges({ dataQuality, companyType }: { dataQuality?: string | null; companyType?: string | null }) {
-  const badges: React.ReactNode[] = [];
-
-  if (dataQuality && DATA_QUALITY_LABELS[dataQuality]) {
-    const dq = DATA_QUALITY_LABELS[dataQuality];
-    badges.push(
-      <span key="dq" style={{
-        fontSize: 9, fontWeight: 600, padding: '1px 5px', borderRadius: 3,
-        background: `${dq.color}18`, color: dq.color,
-      }}>
-        {dataQuality === 'limited' ? '\u26A0 ' : ''}{dq.label}
-      </span>
-    );
-  }
-
-  if (companyType && companyType !== 'other') {
-    badges.push(
-      <span key="ct" style={{
-        fontSize: 9, fontWeight: 500, padding: '1px 5px', borderRadius: 3,
-        background: colors.surfaceRaised, color: colors.textMuted,
-      }}>
-        {companyType.replace(/_/g, ' ')}
-      </span>
-    );
-  }
-
-  if (badges.length === 0) return null;
-  return <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginTop: 2 }}>{badges}</div>;
-}
-
 export default function AccountList() {
   const navigate = useNavigate();
   const { anon } = useDemoMode();
+  const { scoringState, activating, activateScoring, refreshIcp } = useScoringState();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -120,10 +295,10 @@ export default function AccountList() {
   const [sortField, setSortField] = useState<SortField>('name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [page, setPage] = useState(0);
-
-  const [drawerAccountId, setDrawerAccountId] = useState<string | null>(null);
-  const [drawerData, setDrawerData] = useState<ScoreDetail | null>(null);
-  const [drawerLoading, setDrawerLoading] = useState(false);
+  const [selectedAccount, setSelectedAccount] = useState<Account | null>(null);
+  const [drawerWhy, setDrawerWhy] = useState<string | null>(null);
+  const [drawerWhyLoading, setDrawerWhyLoading] = useState(false);
+  const [enrichingId, setEnrichingId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchAccounts();
@@ -145,31 +320,19 @@ export default function AccountList() {
         finding_count: a.finding_count || 0,
         last_activity: a.last_activity || a.updated_at || '',
         owner: a.owner || a.owner_email || '',
-        total_score: a.total_score ?? null,
-        grade: a.grade ?? null,
-        signal_summary: a.signal_summary ?? null,
-        data_quality: a.data_quality ?? null,
-        company_type: a.company_type ?? null,
+        total_score: a.total_score ?? undefined,
+        grade: a.grade ?? undefined,
+        score_delta: a.score_delta ?? undefined,
+        data_confidence: a.data_confidence ?? undefined,
+        signals: Array.isArray(a.signals) ? a.signals : undefined,
+        signal_score: a.signal_score ?? undefined,
+        classification_confidence: a.classification_confidence ?? undefined,
       })));
       setError('');
     } catch (err: any) {
       setError(err.message);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const openScoreDrawer = async (accountId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setDrawerAccountId(accountId);
-    setDrawerLoading(true);
-    try {
-      const data = await api.get(`/accounts/${accountId}/score`);
-      setDrawerData(data);
-    } catch {
-      setDrawerData({ scored: false });
-    } finally {
-      setDrawerLoading(false);
     }
   };
 
@@ -186,7 +349,6 @@ export default function AccountList() {
   const hasPipelineData = accounts.some(a => a.total_pipeline > 0);
   const hasContactData = accounts.some(a => a.contact_count > 0);
   const hasActivityData = accounts.some(a => a.last_activity);
-  const hasScoreData = accounts.some(a => a.grade != null);
 
   const filtered = useMemo(() => {
     let result = accounts;
@@ -216,13 +378,13 @@ export default function AccountList() {
         case 'open_deals': cmp = a.open_deal_count - b.open_deal_count; break;
         case 'pipeline': cmp = a.total_pipeline - b.total_pipeline; break;
         case 'contacts': cmp = a.contact_count - b.contact_count; break;
-        case 'score': cmp = (a.total_score ?? -1) - (b.total_score ?? -1); break;
         case 'last_activity': {
           const da = a.last_activity ? new Date(a.last_activity).getTime() : 0;
           const db = b.last_activity ? new Date(b.last_activity).getTime() : 0;
           cmp = da - db;
           break;
         }
+        case 'score': cmp = (a.total_score ?? -1) - (b.total_score ?? -1); break;
       }
       if (cmp === 0) cmp = a.name.localeCompare(b.name);
       return sortDir === 'desc' ? -cmp : cmp;
@@ -248,15 +410,16 @@ export default function AccountList() {
   const clearFilters = () => { setSearch(''); setIndustryFilter('all'); setOwnerFilter('all'); };
 
   type ColDef = { field: SortField; label: string; width: string; show: boolean };
+  const scoringActive = scoringState?.state === 'active';
   const columns: ColDef[] = [
-    { field: 'score', label: 'Score', width: '7%', show: hasScoreData },
-    { field: 'name', label: 'Account Name', width: hasScoreData ? '22%' : '25%', show: true },
+    { field: 'name', label: 'Account Name', width: '22%', show: true },
     { field: 'domain', label: 'Domain', width: '13%', show: true },
-    { field: 'industry', label: 'Industry', width: '13%', show: hasIndustryData },
-    { field: 'open_deals', label: 'Open Deals', width: '9%', show: hasDealData },
-    { field: 'pipeline', label: 'Pipeline Value', width: '12%', show: hasPipelineData },
+    { field: 'score', label: 'Score', width: '10%', show: scoringActive },
+    { field: 'industry', label: 'Industry', width: '12%', show: hasIndustryData },
+    { field: 'open_deals', label: 'Open Deals', width: '8%', show: hasDealData },
+    { field: 'pipeline', label: 'Pipeline', width: '10%', show: hasPipelineData },
     { field: 'contacts', label: 'Contacts', width: '7%', show: hasContactData },
-    { field: 'last_activity', label: 'Last Activity', width: '12%', show: hasActivityData },
+    { field: 'last_activity', label: 'Last Activity', width: '13%', show: hasActivityData },
   ];
   const visibleColumns = columns.filter(c => c.show);
   const gridTemplate = visibleColumns.map(c => c.width).join(' ');
@@ -307,6 +470,22 @@ export default function AccountList() {
           Showing {filtered.length} of {accounts.length} accounts
         </p>
       </div>
+
+      {/* Scoring State Banners */}
+      {scoringState?.state === 'locked' && <ScoringLockedBanner />}
+      {scoringState?.state === 'ready' && (
+        <ScoringReadyBanner onActivate={activateScoring} activating={activating} />
+      )}
+      {scoringState?.state === 'processing' && (
+        <ScoringProcessingBanner
+          step={scoringState.processingStep}
+          scored={scoringState.accountsScored}
+          total={scoringState.accountsTotal}
+        />
+      )}
+      {scoringState?.state === 'active' && (
+        <ScoringActiveBanner onRefresh={refreshIcp} activating={activating} />
+      )}
 
       {/* Filter Bar */}
       <div style={{
@@ -385,7 +564,16 @@ export default function AccountList() {
           pageAccounts.map(account => (
             <div
               key={account.id}
-              onClick={() => navigate(`/accounts/${account.id}`)}
+              onClick={() => {
+                if (!scoringActive) return;
+                setSelectedAccount(account);
+                setDrawerWhy(null);
+                setDrawerWhyLoading(true);
+                api.get(`/accounts/${account.id}/score/why`)
+                  .then((r: any) => setDrawerWhy(r.why || ''))
+                  .catch(() => setDrawerWhy('Unable to load analysis.'))
+                  .finally(() => setDrawerWhyLoading(false));
+              }}
               style={{
                 display: 'grid', gridTemplateColumns: gridTemplate,
                 padding: '12px 20px',
@@ -396,43 +584,44 @@ export default function AccountList() {
               onMouseEnter={e => (e.currentTarget.style.background = colors.surfaceHover)}
               onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
             >
-              {hasScoreData && (
-                <div onClick={e => openScoreDrawer(account.id, e)} style={{ cursor: 'pointer' }}>
-                  <ScoreBadge grade={account.grade} score={account.total_score} />
-                </div>
-              )}
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 500, color: colors.accent, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingRight: 8 }}>
-                  {anon.company(account.name || 'Unnamed')}
-                </div>
-                <SignalBadges dataQuality={account.data_quality} companyType={account.company_type} />
+              <div style={{ fontSize: 13, fontWeight: 500, color: colors.accent, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingRight: 8 }}>
+                {anon.company(account.name || 'Unnamed')}
               </div>
               <div style={{ fontSize: 12, color: colors.textSecondary, fontFamily: fonts.mono, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {account.domain || '\u2014'}
+                {account.domain || '—'}
               </div>
+              {/* Score column — only shown when scoring is active */}
+              {scoringActive && (
+                <div>
+                  <ScoreBadge grade={account.grade} score={account.total_score} scoreDelta={account.score_delta} dataConfidence={account.data_confidence} />
+                  <div style={{ marginTop: 4 }}>
+                    <SignalBadges signals={account.signals} confidence={account.classification_confidence} />
+                  </div>
+                </div>
+              )}
               {hasIndustryData && (
                 <div style={{ fontSize: 12, color: colors.textMuted }}>
-                  {account.industry || '\u2014'}
+                  {account.industry || '—'}
                 </div>
               )}
               {hasDealData && (
                 <div style={{ fontSize: 12, fontFamily: fonts.mono, color: colors.text }}>
-                  {account.open_deal_count || '\u2014'}
+                  {account.open_deal_count || '—'}
                 </div>
               )}
               {hasPipelineData && (
                 <div style={{ fontSize: 12, fontFamily: fonts.mono, color: colors.text }}>
-                  {account.total_pipeline ? formatCurrency(anon.amount(account.total_pipeline)) : '\u2014'}
+                  {account.total_pipeline ? formatCurrency(anon.amount(account.total_pipeline)) : '—'}
                 </div>
               )}
               {hasContactData && (
                 <div style={{ fontSize: 12, fontFamily: fonts.mono, color: colors.textMuted }}>
-                  {account.contact_count || '\u2014'}
+                  {account.contact_count || '—'}
                 </div>
               )}
               {hasActivityData && (
                 <div style={{ fontSize: 11, color: colors.textMuted }}>
-                  {account.last_activity ? formatTimeAgo(account.last_activity) : '\u2014'}
+                  {account.last_activity ? formatTimeAgo(account.last_activity) : '—'}
                 </div>
               )}
             </div>
@@ -479,136 +668,135 @@ export default function AccountList() {
       )}
 
       {/* Score Drawer */}
-      {drawerAccountId && (
-        <ScoreDrawer
-          accountId={drawerAccountId}
-          accountName={accounts.find(a => a.id === drawerAccountId)?.name || ''}
-          data={drawerData}
-          loading={drawerLoading}
-          onClose={() => { setDrawerAccountId(null); setDrawerData(null); }}
-          anon={anon}
-        />
-      )}
-    </div>
-  );
-}
-
-function ScoreDrawer({ accountId, accountName, data, loading, onClose, anon }: {
-  accountId: string;
-  accountName: string;
-  data: ScoreDetail | null;
-  loading: boolean;
-  onClose: () => void;
-  anon: any;
-}) {
-  return (
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-        background: 'rgba(0,0,0,0.4)', zIndex: 1000,
-        display: 'flex', justifyContent: 'flex-end',
-      }}
-    >
-      <div
-        onClick={e => e.stopPropagation()}
-        style={{
-          width: 380, background: colors.surface, height: '100%',
-          borderLeft: `1px solid ${colors.border}`,
-          display: 'flex', flexDirection: 'column', overflow: 'auto',
-          padding: 24,
-        }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-          <h3 style={{ fontSize: 15, fontWeight: 600, color: colors.text, margin: 0 }}>
-            {anon.company(accountName)}
-          </h3>
-          <button onClick={onClose} style={{
-            background: 'none', border: 'none', fontSize: 18, color: colors.textMuted,
-            cursor: 'pointer', lineHeight: 1,
+      {selectedAccount && (
+        <>
+          {/* Overlay */}
+          <div
+            onClick={() => setSelectedAccount(null)}
+            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.3)', zIndex: 100 }}
+          />
+          {/* Panel */}
+          <div style={{
+            position: 'fixed', top: 0, right: 0, bottom: 0, width: 400,
+            background: colors.surface, borderLeft: `1px solid ${colors.border}`,
+            zIndex: 101, overflowY: 'auto', padding: 24, display: 'flex', flexDirection: 'column', gap: 16,
           }}>
-            \u2715
-          </button>
-        </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <h3 style={{ fontSize: 15, fontWeight: 600, color: colors.text, margin: 0 }}>
+                  {anon.company(selectedAccount.name)}
+                </h3>
+                {selectedAccount.domain && (
+                  <span style={{ fontSize: 11, color: colors.textMuted }}>{selectedAccount.domain}</span>
+                )}
+              </div>
+              <button onClick={() => setSelectedAccount(null)} style={{
+                background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, color: colors.textMuted, lineHeight: 1,
+              }}>×</button>
+            </div>
 
-        {loading ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <Skeleton height={60} />
-            <Skeleton height={120} />
-            <Skeleton height={120} />
-          </div>
-        ) : !data?.scored ? (
-          <div style={{ textAlign: 'center', padding: 40 }}>
-            <p style={{ fontSize: 13, color: colors.textMuted }}>No score data yet.</p>
-            <p style={{ fontSize: 11, color: colors.textDim, marginTop: 8 }}>
-              Run account enrichment to generate scores.
-            </p>
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {/* Overall Score */}
-            <div style={{
-              background: colors.surfaceRaised, borderRadius: 8, padding: 16,
-              textAlign: 'center',
-            }}>
-              <ScoreBadge grade={data.grade ?? null} score={data.totalScore ?? null} />
-              <p style={{ fontSize: 12, color: colors.textMuted, marginTop: 8 }}>
-                Overall Score: {data.totalScore}/100
-              </p>
-              {data.scoredAt && (
-                <p style={{ fontSize: 10, color: colors.textDim, marginTop: 4 }}>
-                  Last scored {formatTimeAgo(data.scoredAt)}
-                </p>
+            {/* Score summary */}
+            <div style={{ background: colors.surfaceRaised, borderRadius: 8, padding: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+                <ScoreBadge grade={selectedAccount.grade} score={selectedAccount.total_score} scoreDelta={selectedAccount.score_delta} dataConfidence={selectedAccount.data_confidence} />
+                {selectedAccount.total_score !== undefined && (
+                  <span style={{ fontSize: 20, fontWeight: 700, color: colors.text }}>{selectedAccount.total_score}/100</span>
+                )}
+              </div>
+              {selectedAccount.data_confidence !== undefined && (
+                <div style={{ fontSize: 11, color: colors.textMuted }}>Data confidence: {selectedAccount.data_confidence}%</div>
+              )}
+              <div style={{ marginTop: 8 }}>
+                <SignalBadges signals={selectedAccount.signals} confidence={selectedAccount.classification_confidence} />
+              </div>
+            </div>
+
+            {/* Score breakdown */}
+            {selectedAccount.grade && (
+              <div>
+                <h4 style={{ fontSize: 12, fontWeight: 600, color: colors.textSecondary, margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Score Breakdown</h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {[
+                    { label: 'Firmographic fit', max: 30 },
+                    { label: 'Signals', max: 30 },
+                    { label: 'Engagement', max: 20 },
+                    { label: 'Deal history', max: 15 },
+                  ].map(item => (
+                    <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 12, color: colors.textSecondary, width: 130, flexShrink: 0 }}>{item.label}</span>
+                      <div style={{ flex: 1, height: 6, background: colors.border, borderRadius: 3 }}>
+                        <div style={{
+                          width: `${Math.min(100, ((selectedAccount.total_score || 0) / 100) * 100)}%`,
+                          height: '100%', background: colors.accent, borderRadius: 3,
+                        }} />
+                      </div>
+                      <span style={{ fontSize: 11, color: colors.textMuted, width: 40, textAlign: 'right' }}>/{item.max}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Signals */}
+            {selectedAccount.signals && selectedAccount.signals.length > 0 && (
+              <div>
+                <h4 style={{ fontSize: 12, fontWeight: 600, color: colors.textSecondary, margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Signals Detected</h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {selectedAccount.signals.slice(0, 5).map((s, i) => (
+                    <div key={i} style={{ fontSize: 12, color: colors.text, background: colors.surfaceRaised, borderRadius: 6, padding: '6px 10px' }}>
+                      <span style={{ fontWeight: 500, textTransform: 'capitalize' }}>{s.type.replace('_', ' ')}</span>
+                      {' — '}{s.signal}
+                      {s.date && <span style={{ color: colors.textMuted }}> · {s.date}</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Why this matters */}
+            <div>
+              <h4 style={{ fontSize: 12, fontWeight: 600, color: colors.textSecondary, margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Why This Matters</h4>
+              {drawerWhyLoading ? (
+                <div style={{ fontSize: 12, color: colors.textMuted, fontStyle: 'italic' }}>Analyzing...</div>
+              ) : (
+                <p style={{ fontSize: 12, color: colors.text, lineHeight: 1.6, margin: 0 }}>{drawerWhy || '—'}</p>
               )}
             </div>
 
-            {/* Category Breakdown */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <ScoreBar label="Firmographic" score={data.firmographicScore ?? 0} max={25} color="#3b82f6" />
-              <ScoreBar label="Engagement" score={data.engagementScore ?? 0} max={35} color="#10b981" />
-              <ScoreBar label="Signals" score={data.signalScore ?? 0} max={20} color="#8b5cf6" />
-              <ScoreBar label="Relationship" score={data.relationshipScore ?? 0} max={20} color="#f59e0b" />
+            {/* Actions */}
+            <div style={{ display: 'flex', gap: 10, marginTop: 'auto', paddingTop: 16, borderTop: `1px solid ${colors.border}` }}>
+              <button
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  setEnrichingId(selectedAccount.id);
+                  try {
+                    await api.post(`/accounts/${selectedAccount.id}/enrich`, {});
+                    await fetchAccounts();
+                  } catch {}
+                  setEnrichingId(null);
+                }}
+                disabled={enrichingId === selectedAccount.id}
+                style={{
+                  fontSize: 12, padding: '7px 14px', borderRadius: 6, cursor: 'pointer',
+                  background: colors.accentSoft, color: colors.accent, border: `1px solid ${colors.accent}`,
+                  opacity: enrichingId === selectedAccount.id ? 0.6 : 1,
+                }}
+              >
+                {enrichingId === selectedAccount.id ? 'Enriching...' : 'Enrich Now'}
+              </button>
+              <button
+                onClick={() => navigate(`/accounts/${selectedAccount.id}`)}
+                style={{
+                  fontSize: 12, padding: '7px 14px', borderRadius: 6, cursor: 'pointer',
+                  background: 'none', color: colors.textSecondary, border: `1px solid ${colors.border}`,
+                }}
+              >
+                View Deals
+              </button>
             </div>
-
-            {/* Detailed Breakdown */}
-            {data.breakdown && (
-              <div style={{ fontSize: 11, color: colors.textMuted }}>
-                <p style={{ fontWeight: 600, color: colors.text, marginBottom: 8 }}>Score Details</p>
-                {Object.entries(data.breakdown).map(([category, items]: [string, any]) => (
-                  <div key={category} style={{ marginBottom: 10 }}>
-                    <p style={{ fontWeight: 600, color: colors.textSecondary, textTransform: 'capitalize', marginBottom: 4 }}>
-                      {category}
-                    </p>
-                    {Object.entries(items).map(([key, value]: [string, any]) => (
-                      <div key={key} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
-                        <span>{key.replace(/_/g, ' ')}</span>
-                        <span style={{ fontFamily: fonts.mono, color: Number(value) > 0 ? colors.green : Number(value) < 0 ? colors.red : colors.textDim }}>
-                          {Number(value) > 0 ? `+${value}` : value}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function ScoreBar({ label, score, max, color }: { label: string; score: number; max: number; color: string }) {
-  const pct = max > 0 ? Math.round((score / max) * 100) : 0;
-  return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-        <span style={{ fontSize: 11, color: colors.text }}>{label}</span>
-        <span style={{ fontSize: 10, fontFamily: fonts.mono, color: colors.textMuted }}>{score}/{max}</span>
-      </div>
-      <div style={{ height: 6, background: colors.surfaceRaised, borderRadius: 3, overflow: 'hidden' }}>
-        <div style={{ height: '100%', width: `${pct}%`, background: color, borderRadius: 3, transition: 'width 0.3s' }} />
-      </div>
+        </>
+      )}
     </div>
   );
 }

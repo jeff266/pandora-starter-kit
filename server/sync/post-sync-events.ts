@@ -69,6 +69,13 @@ export async function emitSyncCompleted(
 
   const crmSynced = connectorTypes.some(c => ['hubspot', 'salesforce'].includes(c));
   if (crmSynced) {
+    // Recompute scoring state — closed_won count may have changed
+    import('../scoring/workspace-scoring-state.js').then(({ recomputeScoringState }) => {
+      recomputeScoringState(workspaceId).catch(err => {
+        console.error(`[ScoringState] Post-sync recompute failed:`, err instanceof Error ? err.message : err);
+      });
+    }).catch(() => {});
+
     triggerEnrichmentForNewlyClosedDeals(workspaceId).catch(err => {
       console.error(`[Enrichment] Post-sync trigger failed:`, err instanceof Error ? err.message : err);
     });

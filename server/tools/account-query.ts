@@ -17,6 +17,16 @@ export interface Account {
   custom_fields: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+  // Account scoring fields (joined from account_scores + account_signals)
+  total_score?: number;
+  grade?: string;
+  score_delta?: number;
+  data_confidence?: number;
+  signals?: unknown[];
+  signal_score?: number;
+  signal_industry?: string;
+  growth_stage?: string;
+  classification_confidence?: number;
 }
 
 interface AccountDeal {
@@ -44,56 +54,55 @@ export interface AccountFilters {
   offset?: number;
 }
 
-function buildWhereClause(workspaceId: string, filters: AccountFilters, tableAlias: string = '') {
-  const t = tableAlias ? `${tableAlias}.` : '';
-  const conditions: string[] = [`${t}workspace_id = $1`];
+function buildWhereClause(workspaceId: string, filters: AccountFilters) {
+  const conditions: string[] = ['workspace_id = $1'];
   const params: unknown[] = [workspaceId];
   let idx = 2;
 
   if (filters.domain !== undefined) {
-    conditions.push(`${t}domain = $${idx}`);
+    conditions.push(`domain = $${idx}`);
     params.push(filters.domain);
     idx++;
   }
 
   if (filters.industry !== undefined) {
-    conditions.push(`${t}industry = $${idx}`);
+    conditions.push(`industry = $${idx}`);
     params.push(filters.industry);
     idx++;
   }
 
   if (filters.owner !== undefined) {
-    conditions.push(`${t}owner = $${idx}`);
+    conditions.push(`owner = $${idx}`);
     params.push(filters.owner);
     idx++;
   }
 
   if (filters.employeeCountMin !== undefined) {
-    conditions.push(`${t}employee_count >= $${idx}`);
+    conditions.push(`employee_count >= $${idx}`);
     params.push(filters.employeeCountMin);
     idx++;
   }
 
   if (filters.employeeCountMax !== undefined) {
-    conditions.push(`${t}employee_count <= $${idx}`);
+    conditions.push(`employee_count <= $${idx}`);
     params.push(filters.employeeCountMax);
     idx++;
   }
 
   if (filters.revenueMin !== undefined) {
-    conditions.push(`${t}annual_revenue >= $${idx}`);
+    conditions.push(`annual_revenue >= $${idx}`);
     params.push(filters.revenueMin);
     idx++;
   }
 
   if (filters.revenueMax !== undefined) {
-    conditions.push(`${t}annual_revenue <= $${idx}`);
+    conditions.push(`annual_revenue <= $${idx}`);
     params.push(filters.revenueMax);
     idx++;
   }
 
   if (filters.search !== undefined) {
-    conditions.push(`(${t}name ILIKE $${idx} OR ${t}domain ILIKE $${idx})`);
+    conditions.push(`(name ILIKE $${idx} OR domain ILIKE $${idx})`);
     params.push(`%${filters.search}%`);
     idx++;
   }
@@ -103,32 +112,35 @@ function buildWhereClause(workspaceId: string, filters: AccountFilters, tableAli
 
 const VALID_SORT_COLUMNS = new Set(['name', 'annual_revenue', 'employee_count', 'health_score', 'created_at', 'total_score']);
 
-export async function queryAccounts(workspaceId: string, filters: AccountFilters): Promise<{ accounts: (Account & { total_score?: number; grade?: string; signal_summary?: string; data_quality?: string; company_type?: string })[]; total: number; limit: number; offset: number }> {
-  const { where, params, idx } = buildWhereClause(workspaceId, filters, 'a');
+export async function queryAccounts(workspaceId: string, filters: AccountFilters): Promise<{ accounts: Account[]; total: number; limit: number; offset: number }> {
+  const { where, params, idx } = buildWhereClause(workspaceId, filters);
 
-  const sortBy = filters.sortBy && VALID_SORT_COLUMNS.has(filters.sortBy) ? filters.sortBy : 'name';
+  const rawSort = filters.sortBy && VALID_SORT_COLUMNS.has(filters.sortBy) ? filters.sortBy : 'name';
   const sortDir = filters.sortDir === 'desc' ? 'DESC' : 'ASC';
-  const limit = Math.min(Math.max(filters.limit ?? 50, 1), 200);
+  // Score sort uses joined column; others use accounts table prefix
+  const sortExpr = rawSort === 'total_score'
+    ? `acs.total_score ${sortDir} NULLS LAST`
+    : `a.${rawSort} ${sortDir}`;
+  const limit = Math.min(Math.max(filters.limit ?? 50, 1), 500);
   const offset = Math.max(filters.offset ?? 0, 0);
 
   const countResult = await query<{ count: string }>(
-    `SELECT COUNT(*) AS count FROM accounts a WHERE ${where}`,
+    `SELECT COUNT(*) AS count FROM accounts a WHERE ${where.replace('workspace_id', 'a.workspace_id')}`,
     params,
   );
   const total = parseInt(countResult.rows[0].count, 10);
 
-  const sortColumn = sortBy === 'total_score' ? 'acs.total_score' : `a.${sortBy}`;
-  const nullsClause = sortBy === 'total_score' ? (sortDir === 'DESC' ? ' NULLS LAST' : ' NULLS FIRST') : '';
-
   const dataParams = [...params, limit, offset];
-  const dataResult = await query<Account & { total_score: number | null; grade: string | null; signal_summary: string | null; data_quality: string | null; company_type: string | null }>(
-    `SELECT a.*, acs.total_score, acs.grade,
-            asi.signal_summary, asi.data_quality, asi.company_type
+  const dataResult = await query<Account>(
+    `SELECT a.*,
+       acs.total_score, acs.grade, acs.score_delta, acs.data_confidence,
+       asig.signals, asig.signal_score, asig.industry AS signal_industry,
+       asig.growth_stage, asig.classification_confidence
      FROM accounts a
      LEFT JOIN account_scores acs ON acs.account_id = a.id AND acs.workspace_id = a.workspace_id
-     LEFT JOIN account_signals asi ON asi.account_id = a.id AND asi.workspace_id = a.workspace_id
-     WHERE ${where}
-     ORDER BY ${sortColumn} ${sortDir}${nullsClause}
+     LEFT JOIN account_signals asig ON asig.account_id = a.id AND asig.workspace_id = a.workspace_id
+     WHERE ${where.replace(/\bworkspace_id\b/g, 'a.workspace_id')}
+     ORDER BY ${sortExpr}
      LIMIT $${idx} OFFSET $${idx + 1}`,
     dataParams,
   );
