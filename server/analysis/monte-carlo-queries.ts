@@ -19,6 +19,8 @@ export type QueryType =
   | 'scenario_decompose'
   | 'component_sensitivity'
   | 'rep_impact'
+  | 'time_slice'
+  | 'pipeline_creation_target'
   | 'unknown';
 
 // ─── Result Types ─────────────────────────────────────────────────────────────
@@ -456,5 +458,158 @@ export function queryRepImpact(
     withoutRepP50: Math.round(withoutRepP50),
     withoutRepProb: withoutRepProb !== null ? Math.round(withoutRepProb * 1000) / 10 : null,
     p50Delta: withoutRepP50 - baselineP50,
+  };
+}
+
+// ─── Pipeline Creation Target ─────────────────────────────────────────────────
+
+export interface PipelineCreationTargetResult {
+  componentBTargetRevenue: number;
+  componentBPct: number;
+  winRateP50: number;
+  winRateP10: number;
+  winRateP90: number;
+  dealSizeP50: number;
+  dealSizeP25: number;
+  dealSizeP75: number;
+  cycleLengthDays: number;
+  requiredPipelinePerMonth: number;
+  requiredPipelinePerMonthLow: number;
+  requiredPipelinePerMonthHigh: number;
+  requiredDealsPerMonth: number;
+  requiredDealsPerMonthLow: number;
+  requiredDealsPerMonthHigh: number;
+  forecastWindowMonths: number;
+  currentCreationRate: number | null;
+  onPace: boolean | null;
+  paceGap: number | null;
+  warnings: string[];
+}
+
+export function queryPipelineCreationTarget(
+  simulationInputs: SimulationInputs,
+  ccPayload: any
+): PipelineCreationTargetResult {
+  const warnings: string[] = [];
+
+  // 1. What does Component B need to deliver?
+  const p50Total         = ccPayload.p50 ?? 0;
+  const existingP50      = ccPayload.existingPipelineP50 ?? 0;
+  const componentBTarget = Math.max(0, p50Total - existingP50);
+  const componentBPct    = p50Total > 0 ? componentBTarget / p50Total : 0;
+
+  if (componentBTarget === 0) {
+    warnings.push('Existing pipeline covers P50 entirely — new pipeline creation is not on the critical path for this forecast window.');
+  }
+
+  // 2. Win rate range from Beta distributions
+  const stageWinRates = simulationInputs.distributions.stageWinRates ?? {};
+  const stages = Object.values(stageWinRates) as { alpha: number; beta: number }[];
+
+  let winRateP50 = 0.20;
+  let winRateP10 = 0.12;
+  let winRateP90 = 0.32;
+
+  if (stages.length > 0) {
+    const entryStage = stages.reduce((min, s) =>
+      ((s.alpha + s.beta) < (min.alpha + min.beta)) ? s : min
+    );
+    winRateP50 = entryStage.alpha / (entryStage.alpha + entryStage.beta);
+    const variance = (entryStage.alpha * entryStage.beta) /
+      (Math.pow(entryStage.alpha + entryStage.beta, 2) * (entryStage.alpha + entryStage.beta + 1));
+    const sd = Math.sqrt(variance);
+    winRateP10 = Math.max(0.01, winRateP50 - 1.28 * sd);
+    winRateP90 = Math.min(0.99, winRateP50 + 1.28 * sd);
+
+    if (winRateP50 < 0.05) {
+      warnings.push('Win rate is below 5% — pipeline creation requirements may be very high. Verify stage win rate data quality.');
+    }
+  } else {
+    warnings.push('No stage win rate distributions available — using 20% default win rate. Re-run skill to fit distributions.');
+  }
+
+  // 3. Deal size distribution
+  const dealSizeDist = simulationInputs.distributions.dealSize;
+  let dealSizeP50 = 50000;
+  let dealSizeP25 = 30000;
+  let dealSizeP75 = 80000;
+
+  if (dealSizeDist) {
+    dealSizeP50 = Math.exp(dealSizeDist.mu);
+    dealSizeP25 = Math.exp(dealSizeDist.mu - 0.674 * dealSizeDist.sigma);
+    dealSizeP75 = Math.exp(dealSizeDist.mu + 0.674 * dealSizeDist.sigma);
+  } else {
+    warnings.push('No deal size distribution available — using $50K default. Re-run skill to fit distributions.');
+  }
+
+  // 4. Sales cycle
+  const cycleDist = simulationInputs.distributions.cycleLength;
+  const cycleLengthDays = cycleDist ? Math.round(Math.exp(cycleDist.mu)) : 60;
+
+  if (!cycleDist) {
+    warnings.push('No cycle length distribution available — using 60-day default.');
+  }
+
+  // 5. Forecast window
+  const today = simulationInputs.today instanceof Date ? simulationInputs.today : new Date(simulationInputs.today ?? Date.now());
+  const windowEnd = simulationInputs.forecastWindowEnd instanceof Date ? simulationInputs.forecastWindowEnd : new Date(simulationInputs.forecastWindowEnd ?? today);
+  const msRemaining = Math.max(0, windowEnd.getTime() - today.getTime());
+  const forecastWindowMonths = Math.max(0.5, msRemaining / (1000 * 60 * 60 * 24 * 30));
+
+  // 6. Monthly creation requirements
+  const effectiveMonths = Math.max(0.5, forecastWindowMonths - (cycleLengthDays / 30));
+
+  const totalPipelineNeeded         = componentBTarget / winRateP50;
+  const requiredPipelinePerMonth    = totalPipelineNeeded / effectiveMonths;
+  const requiredDealsPerMonth       = requiredPipelinePerMonth / dealSizeP50;
+
+  const totalPipelineNeededLow      = componentBTarget / winRateP10;
+  const requiredPipelinePerMonthLow = totalPipelineNeededLow / effectiveMonths;
+  const requiredDealsPerMonthLow    = requiredPipelinePerMonthLow / dealSizeP25;
+
+  const totalPipelineNeededHigh      = componentBTarget / winRateP90;
+  const requiredPipelinePerMonthHigh = totalPipelineNeededHigh / effectiveMonths;
+  const requiredDealsPerMonthHigh    = requiredPipelinePerMonthHigh / dealSizeP75;
+
+  // 7. Historical pace comparison — pipelineRates are per-rep NormalDistributions with mu = monthly deals/month
+  const pipelineRates = simulationInputs.distributions.pipelineRates;
+  let currentCreationRate: number | null = null;
+  if (pipelineRates && typeof pipelineRates === 'object') {
+    const repRates = Object.values(pipelineRates);
+    if (repRates.length > 0) {
+      // Sum of per-rep monthly deal creation rates (mean), converted to $ using median deal size
+      const totalDealsPerMonth = repRates.reduce((sum, r) => sum + (r.mean ?? 0), 0);
+      currentCreationRate = totalDealsPerMonth * dealSizeP50;
+    }
+  }
+
+  const onPace  = currentCreationRate !== null ? currentCreationRate >= requiredPipelinePerMonth : null;
+  const paceGap = currentCreationRate !== null ? currentCreationRate - requiredPipelinePerMonth : null;
+
+  if (paceGap !== null && paceGap < 0) {
+    warnings.push(`Current creation rate is ${Math.abs(Math.round(paceGap / 1000))}K/month below what's needed.`);
+  }
+
+  return {
+    componentBTargetRevenue:        Math.round(componentBTarget),
+    componentBPct:                  Math.round(componentBPct * 100) / 100,
+    winRateP50:                     Math.round(winRateP50 * 1000) / 1000,
+    winRateP10:                     Math.round(winRateP10 * 1000) / 1000,
+    winRateP90:                     Math.round(winRateP90 * 1000) / 1000,
+    dealSizeP50:                    Math.round(dealSizeP50),
+    dealSizeP25:                    Math.round(dealSizeP25),
+    dealSizeP75:                    Math.round(dealSizeP75),
+    cycleLengthDays,
+    requiredPipelinePerMonth:       Math.round(requiredPipelinePerMonth),
+    requiredPipelinePerMonthLow:    Math.round(requiredPipelinePerMonthLow),
+    requiredPipelinePerMonthHigh:   Math.round(requiredPipelinePerMonthHigh),
+    requiredDealsPerMonth:          Math.round(requiredDealsPerMonth * 10) / 10,
+    requiredDealsPerMonthLow:       Math.round(requiredDealsPerMonthLow * 10) / 10,
+    requiredDealsPerMonthHigh:      Math.round(requiredDealsPerMonthHigh * 10) / 10,
+    forecastWindowMonths:           Math.round(forecastWindowMonths * 10) / 10,
+    currentCreationRate:            currentCreationRate !== null ? Math.round(currentCreationRate) : null,
+    onPace,
+    paceGap:                        paceGap !== null ? Math.round(paceGap) : null,
+    warnings,
   };
 }

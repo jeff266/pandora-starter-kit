@@ -783,119 +783,155 @@ router.post('/:workspaceId/monte-carlo/query', async (req, res) => {
       scope: { type: 'mc_run', runId: row.run_id, pipelineId },
     });
 
-    // Route to query handler
-    let queryData: any = {};
-    const {
-      queryDealProbability,
-      queryMustClose,
-      queryWhatIfWinRate,
-      queryWhatIfDeal,
-      queryScenarioDecompose,
-      queryComponentSensitivity,
-      queryRepImpact,
-    } = await import('../analysis/monte-carlo-queries.js');
+    // Three-tier routing: structured (≥0.65) → context_only (0.40–0.64) → fallback (<0.40)
+    type RoutingTier = 'structured' | 'context_only' | 'fallback';
 
-    const targetRevenue = intent.params.targetRevenue ?? commandCenter.quota ?? null;
-
-    switch (intent.type) {
-      case 'deal_probability': {
-        const matched = intent.params.dealName
-          ? fuzzyMatch(intent.params.dealName, openDeals)
-          : null;
-        if (!matched && intent.params.dealName) {
-          return res.json({
-            answer: `I couldn't find a deal called "${intent.params.dealName}" in the current simulation. Open deals include: ${openDealNames.slice(0, 8).join(', ')}. Which did you mean?`,
-            queryType: 'deal_probability',
-            data: {},
-            confidence: intent.confidence,
-            followUps: [],
-          });
-        }
-        const dealsToQuery = matched
-          ? [matched].map(d => ({ ...d, amount: openDeals.find(od => od.id === d.id)?.amount ?? 0 }))
-          : openDeals.slice(0, 5).map(d => ({ id: d.id, name: d.name, amount: d.amount }));
-        queryData = queryDealProbability(iterations, dealsToQuery);
-        break;
-      }
-
-      case 'must_close': {
-        const target = targetRevenue ?? commandCenter.p50;
-        queryData = queryMustClose(iterations, target, 5);
-        // Resolve deal names from openDeals
-        queryData.mustCloseDeals = queryData.mustCloseDeals.map((d: any) => {
-          const deal = openDeals.find(od => od.id === d.dealId);
-          return { ...d, dealName: deal?.name ?? d.dealId, amount: deal?.amount ?? 0 };
-        });
-        break;
-      }
-
-      case 'what_if_win_rate': {
-        if (!simulationInputs) {
-          queryData = { error: 'simulationInputs not stored in this run' };
-          break;
-        }
-        const multiplier = intent.params.winRateImprovement
-          ? (intent.params.winRateImprovement > 1 ? intent.params.winRateImprovement : 1 + intent.params.winRateImprovement)
-          : 1.3;
-        queryData = await queryWhatIfWinRate(
-          simulationInputs,
-          commandCenter.p50,
-          commandCenter.probOfHittingTarget,
-          multiplier
-        );
-        break;
-      }
-
-      case 'what_if_deal': {
-        const matched = intent.params.dealName
-          ? fuzzyMatch(intent.params.dealName, openDeals)
-          : null;
-        if (!matched) {
-          return res.json({
-            answer: `I couldn't find a deal called "${intent.params.dealName ?? '(unknown)'}" in the current simulation. Open deals: ${openDealNames.slice(0, 8).join(', ')}.`,
-            queryType: 'what_if_deal',
-            data: {},
-            confidence: intent.confidence,
-            followUps: [],
-          });
-        }
-        const dealAmount = openDeals.find(d => d.id === matched.id)?.amount ?? 0;
-        queryData = queryWhatIfDeal(iterations, matched.id, matched.name, dealAmount, targetRevenue);
-        break;
-      }
-
-      case 'scenario_decompose': {
-        const threshold = intent.params.threshold
-          ?? (targetRevenue ? 'above_target' : 'top_quartile');
-        queryData = queryScenarioDecompose(iterations, threshold, targetRevenue);
-        break;
-      }
-
-      case 'component_sensitivity': {
-        queryData = queryComponentSensitivity(iterations, targetRevenue);
-        break;
-      }
-
-      case 'rep_impact': {
-        const matchedRep = intent.params.repName
-          ? fuzzyMatch(intent.params.repName, repNames.map(r => ({ id: r, name: r })))
-          : null;
-        if (!matchedRep) {
-          return res.json({
-            answer: `I couldn't find a rep called "${intent.params.repName ?? '(unknown)'}". Known reps: ${repNames.slice(0, 6).join(', ')}.`,
-            queryType: 'rep_impact',
-            data: {},
-            confidence: intent.confidence,
-            followUps: [],
-          });
-        }
-        queryData = queryRepImpact(iterations, matchedRep.id, matchedRep.name, targetRevenue);
-        break;
-      }
-
-      default:
-        queryData = {};
+    function getRoutingTier(confidence: number, hasIterations: boolean): RoutingTier {
+      if (!hasIterations)      return 'context_only';
+      if (confidence >= 0.65)  return 'structured';
+      if (confidence >= 0.40)  return 'context_only';
+      return 'fallback';
     }
+
+    const tier = getRoutingTier(intent.confidence, iterations.length > 0);
+    let queryData: any = {};
+    let routingTier: RoutingTier = tier;
+
+    if (tier === 'structured') {
+      const {
+        queryDealProbability,
+        queryMustClose,
+        queryWhatIfWinRate,
+        queryWhatIfDeal,
+        queryScenarioDecompose,
+        queryComponentSensitivity,
+        queryRepImpact,
+        queryPipelineCreationTarget,
+      } = await import('../analysis/monte-carlo-queries.js');
+
+      const targetRevenue = intent.params.targetRevenue ?? commandCenter.quota ?? null;
+
+      try {
+        switch (intent.type) {
+          case 'deal_probability': {
+            const matched = intent.params.dealName
+              ? fuzzyMatch(intent.params.dealName, openDeals)
+              : null;
+            if (!matched && intent.params.dealName) {
+              return res.json({
+                answer: `I couldn't find a deal called "${intent.params.dealName}" in the current simulation. Open deals include: ${openDealNames.slice(0, 8).join(', ')}. Which did you mean?`,
+                queryType: 'deal_probability',
+                data: {},
+                confidence: intent.confidence,
+                routingTier: 'structured',
+                followUps: [],
+                sessionId,
+              });
+            }
+            const dealsToQuery = matched
+              ? [matched].map(d => ({ ...d, amount: openDeals.find(od => od.id === d.id)?.amount ?? 0 }))
+              : openDeals.slice(0, 5).map(d => ({ id: d.id, name: d.name, amount: d.amount }));
+            queryData = queryDealProbability(iterations, dealsToQuery);
+            break;
+          }
+
+          case 'must_close': {
+            const target = targetRevenue ?? commandCenter.p50;
+            queryData = queryMustClose(iterations, target, 5);
+            queryData.mustCloseDeals = queryData.mustCloseDeals.map((d: any) => {
+              const deal = openDeals.find(od => od.id === d.dealId);
+              return { ...d, dealName: deal?.name ?? d.dealId, amount: deal?.amount ?? 0 };
+            });
+            break;
+          }
+
+          case 'what_if_win_rate': {
+            if (!simulationInputs) {
+              queryData = { error: 'simulationInputs not stored in this run' };
+              break;
+            }
+            const multiplier = intent.params.winRateImprovement
+              ? (intent.params.winRateImprovement > 1 ? intent.params.winRateImprovement : 1 + intent.params.winRateImprovement)
+              : 1.3;
+            queryData = await queryWhatIfWinRate(
+              simulationInputs,
+              commandCenter.p50,
+              commandCenter.probOfHittingTarget,
+              multiplier
+            );
+            break;
+          }
+
+          case 'what_if_deal': {
+            const matched = intent.params.dealName
+              ? fuzzyMatch(intent.params.dealName, openDeals)
+              : null;
+            if (!matched) {
+              return res.json({
+                answer: `I couldn't find a deal called "${intent.params.dealName ?? '(unknown)'}" in the current simulation. Open deals: ${openDealNames.slice(0, 8).join(', ')}.`,
+                queryType: 'what_if_deal',
+                data: {},
+                confidence: intent.confidence,
+                routingTier: 'structured',
+                followUps: [],
+                sessionId,
+              });
+            }
+            const dealAmount = openDeals.find(d => d.id === matched.id)?.amount ?? 0;
+            queryData = queryWhatIfDeal(iterations, matched.id, matched.name, dealAmount, targetRevenue);
+            break;
+          }
+
+          case 'scenario_decompose': {
+            const threshold = intent.params.threshold
+              ?? (targetRevenue ? 'above_target' : 'top_quartile');
+            queryData = queryScenarioDecompose(iterations, threshold, targetRevenue);
+            break;
+          }
+
+          case 'component_sensitivity': {
+            queryData = queryComponentSensitivity(iterations, targetRevenue);
+            break;
+          }
+
+          case 'rep_impact': {
+            const matchedRep = intent.params.repName
+              ? fuzzyMatch(intent.params.repName, repNames.map(r => ({ id: r, name: r })))
+              : null;
+            if (!matchedRep) {
+              return res.json({
+                answer: `I couldn't find a rep called "${intent.params.repName ?? '(unknown)'}". Known reps: ${repNames.slice(0, 6).join(', ')}.`,
+                queryType: 'rep_impact',
+                data: {},
+                confidence: intent.confidence,
+                routingTier: 'structured',
+                followUps: [],
+                sessionId,
+              });
+            }
+            queryData = queryRepImpact(iterations, matchedRep.id, matchedRep.name, targetRevenue);
+            break;
+          }
+
+          case 'pipeline_creation_target': {
+            if (!simulationInputs) {
+              queryData = { error: 'simulationInputs not stored in this run' };
+              break;
+            }
+            queryData = queryPipelineCreationTarget(simulationInputs, commandCenter);
+            break;
+          }
+
+          default:
+            queryData = {};
+        }
+      } catch (err) {
+        console.error('[mc-query] Handler failed, downgrading to context_only:', err);
+        routingTier = 'context_only';
+        queryData = {};
+      }
+    }
+    // context_only and fallback: queryData stays {}
 
     // Synthesize answer with Claude — include conversation history for follow-up context
     const { callLLM } = await import('../utils/llm-router.js');
@@ -903,15 +939,22 @@ router.post('/:workspaceId/monte-carlo/query', async (req, res) => {
       ? `PRIOR CONVERSATION:\n${safeHistory.map(t => `${t.role === 'user' ? 'User' : 'Pandora'}: ${t.content}`).join('\n')}\n\n---\n\n`
       : '';
 
-    const synthesisPrompt = `You are answering a question about a Monte Carlo revenue forecast for a B2B SaaS company.
-
-FORECAST CONTEXT:
-Pipeline: ${commandCenter.pipelineFilter ?? 'all pipelines'} (${commandCenter.pipelineType ?? 'new_business'})
+    const forecastContextBlock = `Pipeline: ${commandCenter.pipelineFilter ?? 'all pipelines'} (${commandCenter.pipelineType ?? 'new_business'})
 P10: $${Math.round(commandCenter.p10 ?? 0).toLocaleString()} | P50: $${Math.round(commandCenter.p50 ?? 0).toLocaleString()} | P90: $${Math.round(commandCenter.p90 ?? 0).toLocaleString()}
 Annual quota: ${commandCenter.quota ? `$${Math.round(commandCenter.quota).toLocaleString()}` : 'not set'}
 Probability of hitting target: ${commandCenter.probOfHittingTarget !== null && commandCenter.probOfHittingTarget !== undefined ? `${Math.round(commandCenter.probOfHittingTarget * 100)}%` : 'n/a'}
 Forecast window end: ${commandCenter.forecastWindowEnd ?? 'unknown'}
-Open deals in simulation: ${commandCenter.dealsInSimulation ?? 0}
+Existing pipeline P50: ${commandCenter.existingPipelineP50 != null ? `$${Math.round(commandCenter.existingPipelineP50).toLocaleString()}` : 'n/a'}
+Future pipeline P50: ${commandCenter.projectedPipelineP50 != null ? `$${Math.round(commandCenter.projectedPipelineP50).toLocaleString()}` : 'n/a'}
+Open deals in simulation: ${commandCenter.dealsInSimulation ?? 0}`;
+
+    let synthesisPrompt: string;
+
+    if (routingTier === 'structured') {
+      synthesisPrompt = `You are answering a question about a Monte Carlo revenue forecast for a B2B SaaS company.
+
+FORECAST CONTEXT:
+${forecastContextBlock}
 
 ${historyBlock}CURRENT QUESTION: "${question.trim()}"
 
@@ -927,12 +970,42 @@ Answer the question in 2–4 sentences. Rules:
 - End with one implication sentence: what should the reader do with this information?
 - Do not explain how Monte Carlo works
 - Do not hedge with "based on the simulation" — just state the finding
-${intent.type === 'unknown' ? '- This question is outside the scope of the stored simulation data. Give a helpful answer using only the forecast context above.' : ''}
 
 After the answer, output exactly this JSON on a new line:
 {"followUps": ["question 1", "question 2", "question 3"]}
 
 Pick follow-up questions that logically extend the current answer.`;
+    } else if (routingTier === 'context_only') {
+      synthesisPrompt = `You are answering a question about a Monte Carlo revenue forecast for a B2B SaaS company.
+
+The classifier identified this as a "${intent.type}" question with moderate confidence (${intent.confidence.toFixed(2)}). No structured query was run.
+
+Answer from the simulation context below. Be honest about what you can and cannot derive from the available data. Do not invent specific deal names or numbers that aren't in the context.
+
+SIMULATION CONTEXT:
+${forecastContextBlock}
+
+${historyBlock}CURRENT QUESTION: "${question.trim()}"
+
+Answer the question as best you can from this context. If the question requires data not available here, say so plainly and suggest what the user should do (e.g., "run a new simulation" or "check the Pipeline Hygiene skill for rep-level creation rates"). Keep to 2–4 sentences.
+
+After the answer, output exactly this JSON on a new line:
+{"followUps": ["question 1", "question 2", "question 3"]}`;
+    } else {
+      synthesisPrompt = `You are answering a question about a Monte Carlo revenue forecast for a B2B SaaS company.
+
+This question didn't match a recognized forecast query type.
+
+SIMULATION CONTEXT:
+${forecastContextBlock}
+
+${historyBlock}CURRENT QUESTION: "${question.trim()}"
+
+Answer what you can from the simulation context. If the question is unrelated to the forecast, say so briefly and suggest what part of Pandora might help (e.g., "this sounds like a rep activity question — the Rep Scorecard skill covers that"). Keep to 2–3 sentences.
+
+After the answer, output exactly this JSON on a new line:
+{"followUps": ["question 1", "question 2", "question 3"]}`;
+    }
 
     const llmResponse = await callLLM(workspaceId, 'generate', {
       messages: [{ role: 'user', content: synthesisPrompt }],
@@ -955,14 +1028,14 @@ Pick follow-up questions that logically extend the current answer.`;
       }
     }
 
-    // Log assistant response
+    // Log assistant response — intentType includes routing tier for observability
     await logChatMessage({
       workspaceId,
       sessionId,
       surface: 'mc_query',
       role: 'assistant',
       content: answer,
-      intentType: intent.type,
+      intentType: `${intent.type}:${routingTier}`,
       scope: { type: 'mc_run', runId: row.run_id, pipelineId },
       tokenCost: llmResponse.usage != null
         ? (llmResponse.usage.input + (llmResponse.usage.output ?? 0))
@@ -974,6 +1047,7 @@ Pick follow-up questions that logically extend the current answer.`;
       queryType: intent.type,
       data: queryData,
       confidence: intent.confidence,
+      routingTier,
       followUps,
       sessionId,
     });

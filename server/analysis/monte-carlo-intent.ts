@@ -61,7 +61,15 @@ Classify this question into one of these types:
 - scenario_decompose: asks what winning/losing scenarios look like, what do top/bottom scenarios have in common
 - component_sensitivity: asks what happens with no new deals / if pipeline generation stops
 - rep_impact: asks about impact of a specific rep leaving or changing
+- pipeline_creation_target: asks how much pipeline to create, how many deals needed per month/quarter, what prospecting pace is required to hit target, what creation rate is needed
 - unknown: question is about something else not covered above
+
+Examples of pipeline_creation_target:
+- "how much pipeline do I need to create per month?"
+- "how many new deals do we need to hit target?"
+- "what's our required pipeline creation rate?"
+- "if we keep creating pipeline at this pace, do we hit the number?"
+- "how much do reps need to prospect?"
 
 Extract any named entities (deal names, rep names) and numerical values (percentages, dollar amounts).
 For winRateImprovement: extract the TARGET rate, not the delta. E.g. "improve to 25%" → 0.25, "improve by 30%" → multiply current by 1.3 (return 1.3 as multiplier).
