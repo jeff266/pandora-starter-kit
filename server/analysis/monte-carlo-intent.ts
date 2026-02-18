@@ -7,6 +7,7 @@
 
 import { callLLM } from '../utils/llm-router.js';
 import type { QueryType } from './monte-carlo-queries.js';
+import type { HistoryTurn } from '../lib/conversation-history.js';
 
 export interface QueryIntent {
   type: QueryType;
@@ -31,8 +32,15 @@ export async function classifyQueryIntent(
     quota: number | null;
     openDealNames: string[];
     repNames: string[];
+    conversationHistory?: HistoryTurn[];
   }
 ): Promise<QueryIntent> {
+  const historyText = (context.conversationHistory ?? [])
+    .slice()
+    .reverse()
+    .map(t => `${t.role === 'user' ? 'User' : 'Pandora'}: ${t.content.slice(0, 150)}`)
+    .join('\n');
+
   const prompt = `You are classifying a question about a Monte Carlo revenue forecast simulation.
 
 WORKSPACE CONTEXT:
@@ -41,6 +49,7 @@ P50 (most likely outcome): $${Math.round(context.p50).toLocaleString()}
 Annual quota: ${context.quota ? `$${Math.round(context.quota).toLocaleString()}` : 'not set'}
 Open deals: ${context.openDealNames.slice(0, 20).join(', ') || 'none'}
 Reps: ${context.repNames.slice(0, 10).join(', ') || 'none'}
+${historyText ? `\nCONVERSATION HISTORY (most recent first):\n${historyText}\n\nUse this to resolve pronouns and references. "that deal" → refers to the most recently mentioned deal name in history. "those three" → refers to the list most recently enumerated. If no history or no reference, classify based on the question alone.` : ''}
 
 QUESTION: "${question}"
 

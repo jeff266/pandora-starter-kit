@@ -17,6 +17,7 @@ import {
   appendMessage,
   checkRateLimit,
 } from '../chat/conversation-state.js';
+import { logChatMessage } from '../lib/chat-logger.js';
 
 const router = Router();
 
@@ -106,15 +107,19 @@ async function handleThreadedReply(event: any, teamId: string): Promise<void> {
   if (!anchor) {
     const existingState = await findConversationByThread(event.channel, event.thread_ts);
     if (existingState) {
+      const wid = existingState.workspace_id;
+      const sessionId = event.thread_ts ?? event.ts;
+      await logChatMessage({ workspaceId: wid, sessionId, surface: 'slack', role: 'user', content: event.text || '', scope: { type: 'slack_thread', channelId: event.channel, threadTs: event.thread_ts ?? event.ts } });
       const result = await handleConversationTurn({
         surface: 'slack_thread',
-        workspaceId: existingState.workspace_id,
+        workspaceId: wid,
         threadId: event.thread_ts,
         channelId: event.channel,
         message: event.text || '',
       });
+      await logChatMessage({ workspaceId: wid, sessionId, surface: 'slack', role: 'assistant', content: result.answer, scope: { type: 'slack_thread', channelId: event.channel, threadTs: event.thread_ts ?? event.ts } });
       const client = getSlackAppClient();
-      await client.postMessage(existingState.workspace_id, event.channel, [{
+      await client.postMessage(wid, event.channel, [{
         type: 'section',
         text: { type: 'mrkdwn', text: result.answer },
       }], { thread_ts: event.thread_ts });
@@ -199,6 +204,8 @@ async function handleThreadedReply(event: any, teamId: string): Promise<void> {
         await sendHelpMessage(workspaceId, event);
     }
   } else {
+    const sessionId = event.thread_ts ?? event.ts;
+    await logChatMessage({ workspaceId, sessionId, surface: 'slack', role: 'user', content: event.text || '', scope: { type: 'slack_thread', channelId: event.channel, threadTs: event.thread_ts ?? event.ts } });
     const result = await handleConversationTurn({
       surface: 'slack_thread',
       workspaceId,
@@ -210,6 +217,7 @@ async function handleThreadedReply(event: any, teamId: string): Promise<void> {
         report_type: anchor.report_type || undefined,
       } : undefined,
     });
+    await logChatMessage({ workspaceId, sessionId, surface: 'slack', role: 'assistant', content: result.answer, scope: { type: 'slack_thread', channelId: event.channel, threadTs: event.thread_ts ?? event.ts } });
 
     const client = getSlackAppClient();
     await client.postMessage(workspaceId, event.channel, [{
@@ -239,6 +247,8 @@ async function handleAppMention(event: any, teamId: string): Promise<void> {
   if (event.thread_ts) {
     const existingState = await getConversationState(workspaceId, event.channel, event.thread_ts);
     if (existingState) {
+      const sessionId = event.thread_ts;
+      await logChatMessage({ workspaceId, sessionId, surface: 'slack', role: 'user', content: question, scope: { type: 'slack_thread', channelId: event.channel, threadTs: event.thread_ts } });
       const result = await handleConversationTurn({
         surface: 'slack_thread',
         workspaceId,
@@ -246,6 +256,7 @@ async function handleAppMention(event: any, teamId: string): Promise<void> {
         channelId: event.channel,
         message: question,
       });
+      await logChatMessage({ workspaceId, sessionId, surface: 'slack', role: 'assistant', content: result.answer, scope: { type: 'slack_thread', channelId: event.channel, threadTs: event.thread_ts } });
       const client = getSlackAppClient();
       await client.postMessage(workspaceId, event.channel, [{
         type: 'section',
@@ -263,6 +274,7 @@ async function handleAppMention(event: any, teamId: string): Promise<void> {
     elements: [{ type: 'mrkdwn', text: `_Thinking..._` }],
   }], { thread_ts: threadTs });
 
+  await logChatMessage({ workspaceId, sessionId: threadTs, surface: 'slack', role: 'user', content: question, scope: { type: 'slack_thread', channelId: event.channel, threadTs } });
   const result = await handleConversationTurn({
     surface: 'slack_dm',
     workspaceId,
@@ -270,6 +282,7 @@ async function handleAppMention(event: any, teamId: string): Promise<void> {
     channelId: event.channel,
     message: question,
   });
+  await logChatMessage({ workspaceId, sessionId: threadTs, surface: 'slack', role: 'assistant', content: result.answer, scope: { type: 'slack_thread', channelId: event.channel, threadTs } });
 
   if (thinking.ts) {
     await client.updateMessage(workspaceId, {

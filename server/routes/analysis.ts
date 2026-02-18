@@ -6,6 +6,8 @@ import {
   getAnalysisSuggestions,
   type AnalysisRequest,
 } from '../analysis/scoped-analysis.js';
+import { logChatMessage } from '../lib/chat-logger.js';
+import { randomUUID } from 'crypto';
 
 const router = Router();
 
@@ -50,7 +52,8 @@ router.post('/:workspaceId/analyze', async (req: Request, res: Response): Promis
       return;
     }
 
-    const { question, scope, format, max_tokens } = req.body;
+    const { question, scope, format, max_tokens, sessionId: reqSessionId } = req.body;
+    const sessionId = reqSessionId ?? randomUUID();
 
     if (!question || typeof question !== 'string' || question.trim().length === 0) {
       res.status(400).json({ error: 'question is required and must be a non-empty string' });
@@ -77,6 +80,16 @@ router.post('/:workspaceId/analyze', async (req: Request, res: Response): Promis
       return;
     }
 
+    // Log user question
+    await logChatMessage({
+      workspaceId,
+      sessionId,
+      surface: 'ask_pandora',
+      role: 'user',
+      content: question.trim(),
+      scope: scope ?? { type: 'workspace' },
+    });
+
     const result = await analyzeQuestion(
       workspaceId,
       question.trim(),
@@ -89,6 +102,17 @@ router.post('/:workspaceId/analyze', async (req: Request, res: Response): Promis
         filters: scope.filters,
       }
     );
+
+    // Log assistant answer
+    await logChatMessage({
+      workspaceId,
+      sessionId,
+      surface: 'ask_pandora',
+      role: 'assistant',
+      content: result.answer,
+      scope: scope ?? { type: 'workspace' },
+      tokenCost: result.tokens_used ?? null,
+    });
 
     try {
       await query(
@@ -110,7 +134,7 @@ router.post('/:workspaceId/analyze', async (req: Request, res: Response): Promis
 
     console.log(`[analysis] ${scope.type}${scope.entity_id ? `:${scope.entity_id.slice(0, 8)}` : ''} answered in ${result.latency_ms}ms (${result.tokens_used} tokens, confidence: ${result.confidence})`);
 
-    res.json(result);
+    res.json({ ...result, sessionId });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('[analysis] Error:', msg);

@@ -10,6 +10,10 @@ import { runScheduledSkills } from '../sync/skill-scheduler.js';
 import { generateWorkbook } from '../delivery/workbook-generator.js';
 import type { SkillResult } from '../skills/types.js';
 import { requireAuth } from '../middleware/auth.js';
+import { logChatMessage } from '../lib/chat-logger.js';
+import { buildConversationHistory } from '../lib/conversation-history.js';
+import type { HistoryTurn } from '../lib/conversation-history.js';
+import { randomUUID } from 'crypto';
 
 const router = Router();
 
@@ -114,7 +118,7 @@ router.post('/skills/:skillId/run', requireAuth, async (req, res) => {
     if (req.workspace && req.workspace.id !== workspaceId) {
       return res.status(403).json({ error: 'API key does not have access to this workspace' });
     }
-    return await handleSkillRun(workspaceId, skillId, params, res);
+    return await handleSkillRun(workspaceId as string, skillId as string, params, res);
   } catch (err) {
     console.error('[skills] Error running skill:', err);
     return res.status(500).json({ error: 'Internal server error' });
@@ -688,7 +692,12 @@ router.get('/:workspaceId/monte-carlo/latest', async (req, res) => {
 router.post('/:workspaceId/monte-carlo/query', async (req, res) => {
   try {
     const { workspaceId } = req.params;
-    const { question, pipelineId } = req.body || {};
+    const {
+      question,
+      pipelineId = null,
+      sessionId = randomUUID(),
+      conversationHistory = [] as HistoryTurn[],
+    } = req.body || {};
 
     if (!question || typeof question !== 'string' || !question.trim()) {
       return res.status(400).json({ error: 'question is required' });
@@ -696,6 +705,11 @@ router.post('/:workspaceId/monte-carlo/query', async (req, res) => {
 
     const ws = await query('SELECT id FROM workspaces WHERE id = $1', [workspaceId]);
     if (ws.rows.length === 0) return res.status(404).json({ error: 'Workspace not found' });
+
+    // Build token-safe sliding window history
+    const safeHistory = buildConversationHistory(
+      Array.isArray(conversationHistory) ? conversationHistory : []
+    );
 
     // Load most recent completed MC run
     const runResult = await query<{ run_id: string; created_at: string; result: any }>(
@@ -719,6 +733,7 @@ router.post('/:workspaceId/monte-carlo/query', async (req, res) => {
         data: {},
         confidence: 0,
         followUps: [],
+        sessionId,
       });
     }
 
@@ -736,6 +751,7 @@ router.post('/:workspaceId/monte-carlo/query', async (req, res) => {
         data: {},
         confidence: 0,
         followUps: [],
+        sessionId,
       });
     }
 
@@ -744,7 +760,7 @@ router.post('/:workspaceId/monte-carlo/query', async (req, res) => {
     const repNames = [...new Set(openDeals.map((d: any) => d.ownerEmail).filter(Boolean))] as string[];
     const openDealNames = openDeals.map((d: any) => d.name);
 
-    // Classify intent
+    // Classify intent — pass conversation history for pronoun/reference resolution
     const { classifyQueryIntent, fuzzyMatch } = await import('../analysis/monte-carlo-intent.js');
     const intent = await classifyQueryIntent(question.trim(), {
       workspaceId,
@@ -753,6 +769,18 @@ router.post('/:workspaceId/monte-carlo/query', async (req, res) => {
       quota: commandCenter.quota ?? null,
       openDealNames,
       repNames,
+      conversationHistory: safeHistory,
+    });
+
+    // Log user message
+    await logChatMessage({
+      workspaceId,
+      sessionId,
+      surface: 'mc_query',
+      role: 'user',
+      content: question.trim(),
+      intentType: intent.type,
+      scope: { type: 'mc_run', runId: row.run_id, pipelineId },
     });
 
     // Route to query handler
@@ -869,8 +897,12 @@ router.post('/:workspaceId/monte-carlo/query', async (req, res) => {
         queryData = {};
     }
 
-    // Synthesize answer with Claude
+    // Synthesize answer with Claude — include conversation history for follow-up context
     const { callLLM } = await import('../utils/llm-router.js');
+    const historyBlock = safeHistory.length > 0
+      ? `PRIOR CONVERSATION:\n${safeHistory.map(t => `${t.role === 'user' ? 'User' : 'Pandora'}: ${t.content}`).join('\n')}\n\n---\n\n`
+      : '';
+
     const synthesisPrompt = `You are answering a question about a Monte Carlo revenue forecast for a B2B SaaS company.
 
 FORECAST CONTEXT:
@@ -881,7 +913,7 @@ Probability of hitting target: ${commandCenter.probOfHittingTarget !== null && c
 Forecast window end: ${commandCenter.forecastWindowEnd ?? 'unknown'}
 Open deals in simulation: ${commandCenter.dealsInSimulation ?? 0}
 
-QUESTION: "${question.trim()}"
+${historyBlock}CURRENT QUESTION: "${question.trim()}"
 
 QUERY TYPE: ${intent.type}
 
@@ -923,12 +955,19 @@ Pick follow-up questions that logically extend the current answer.`;
       }
     }
 
-    // Log to monte_carlo_queries
-    await query(
-      `INSERT INTO monte_carlo_queries (workspace_id, run_id, pipeline_id, question, intent_type, confidence, answer, query_data)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [workspaceId, row.run_id, pipelineId ?? null, question.trim(), intent.type, intent.confidence, answer, JSON.stringify(queryData)]
-    ).catch(err => console.warn('[mc-query] Failed to log query:', err.message));
+    // Log assistant response
+    await logChatMessage({
+      workspaceId,
+      sessionId,
+      surface: 'mc_query',
+      role: 'assistant',
+      content: answer,
+      intentType: intent.type,
+      scope: { type: 'mc_run', runId: row.run_id, pipelineId },
+      tokenCost: llmResponse.usage != null
+        ? (llmResponse.usage.input + (llmResponse.usage.output ?? 0))
+        : null,
+    });
 
     return res.json({
       answer,
@@ -936,6 +975,7 @@ Pick follow-up questions that logically extend the current answer.`;
       data: queryData,
       confidence: intent.confidence,
       followUps,
+      sessionId,
     });
   } catch (err) {
     console.error('[mc-query] Error:', err);
@@ -945,39 +985,75 @@ Pick follow-up questions that logically extend the current answer.`;
 
 /**
  * GET /api/workspaces/:workspaceId/monte-carlo/queries
- * Returns recent questions asked against this workspace's MC runs.
+ * Backward-compat redirect to unified chat history endpoint.
  */
-router.get('/:workspaceId/monte-carlo/queries', async (req, res) => {
+router.get('/:workspaceId/monte-carlo/queries', (req, res) => {
+  const limit = req.query.limit ?? '5';
+  res.redirect(307, `/api/workspaces/${req.params.workspaceId}/chat/history?surface=mc_query&limit=${limit}`);
+});
+
+/**
+ * GET /api/workspaces/:workspaceId/chat/history
+ * Unified chat log across all surfaces (Ask Pandora, MC queries, Slack).
+ * Query params: ?surface=mc_query|ask_pandora|slack  ?sessionId=<uuid>  ?limit=20
+ */
+router.get('/:workspaceId/chat/history', async (req, res) => {
   try {
     const { workspaceId } = req.params;
-    const limit = Math.min(parseInt(String(req.query.limit || '10')), 50);
+    const { surface, sessionId, limit = '20' } = req.query;
 
-    const result = await query<{
+    const conditions: string[] = ['workspace_id = $1'];
+    const params: unknown[]    = [workspaceId];
+    let   idx = 2;
+
+    if (surface) {
+      conditions.push(`surface = $${idx++}`);
+      params.push(surface);
+    }
+    if (sessionId) {
+      conditions.push(`session_id = $${idx++}`);
+      params.push(sessionId);
+    }
+
+    const limitVal = Math.min(parseInt(String(limit), 10) || 20, 100);
+    params.push(limitVal);
+
+    const rows = await query<{
       id: string;
-      question: string;
-      intent_type: string;
-      answer: string;
+      session_id: string;
+      surface: string;
+      role: string;
+      content: string;
+      intent_type: string | null;
+      scope: any;
+      token_cost: number | null;
       created_at: string;
     }>(
-      `SELECT id, question, intent_type, answer, created_at
-       FROM monte_carlo_queries
-       WHERE workspace_id = $1
+      `SELECT id, session_id, surface, role, content, intent_type, scope, token_cost, created_at
+       FROM chat_messages
+       WHERE ${conditions.join(' AND ')}
        ORDER BY created_at DESC
-       LIMIT $2`,
-      [workspaceId, limit]
+       LIMIT $${idx}`,
+      params
     );
 
+    // Also expose as "queries" for backward compat with the MC card UI
+    const messages = rows.rows;
     return res.json({
-      queries: result.rows.map(r => ({
-        id: r.id,
-        question: r.question,
-        intentType: r.intent_type,
-        answer: r.answer,
-        createdAt: r.created_at,
-      })),
+      messages,
+      // Legacy shape for GET /monte-carlo/queries consumers
+      queries: messages
+        .filter(m => m.role === 'user')
+        .map(m => ({
+          id: m.id,
+          question: m.content,
+          intentType: m.intent_type,
+          answer: '',  // filled by pairing with assistant turn if needed
+          createdAt: m.created_at,
+        })),
     });
   } catch (err) {
-    console.error('[mc-queries] Error:', err);
+    console.error('[chat-history] Error:', err);
     return res.status(500).json({ error: 'Internal server error' });
   }
 });
