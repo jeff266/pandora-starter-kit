@@ -346,18 +346,97 @@ router.post('/:workspaceId/connectors/google-drive/content/:sourceId', async (re
   }
 });
 
+// ─── PATCH /:workspaceId/connectors/:connectorType/sync-interval ─────────────
+const VALID_SYNC_INTERVALS = [60, 240, 720, 1440] as const;
+type SyncIntervalMinutes = typeof VALID_SYNC_INTERVALS[number];
+const SYNC_INTERVAL_LABELS: Record<SyncIntervalMinutes, string> = {
+  60: 'Every hour',
+  240: 'Every 4 hours',
+  720: 'Every 12 hours',
+  1440: 'Daily',
+};
+
+router.patch('/:workspaceId/connectors/:connectorType/sync-interval', async (req: Request<WorkspaceParams & { connectorType: string }>, res: Response) => {
+  try {
+    const { workspaceId, connectorType } = req.params;
+    const { sync_interval_minutes } = req.body;
+
+    if (!VALID_SYNC_INTERVALS.includes(sync_interval_minutes)) {
+      res.status(400).json({ error: `Invalid sync interval. Must be one of: ${VALID_SYNC_INTERVALS.join(', ')}` });
+      return;
+    }
+
+    const connResult = await dbQuery<{
+      status: string;
+      last_sync_at: Date | null;
+      sync_interval_minutes: number;
+    }>(
+      `SELECT status, last_sync_at, sync_interval_minutes
+       FROM connections
+       WHERE workspace_id = $1 AND connector_name = $2`,
+      [workspaceId, connectorType]
+    );
+
+    if (connResult.rows.length === 0 || connResult.rows[0].status !== 'connected' && connResult.rows[0].status !== 'synced' && connResult.rows[0].status !== 'healthy') {
+      res.status(400).json({ error: `No connected ${connectorType} connector found for this workspace` });
+      return;
+    }
+
+    const updatedAt = new Date().toISOString();
+    await dbQuery(
+      `UPDATE connections
+       SET sync_interval_minutes = $3, updated_at = NOW()
+       WHERE workspace_id = $1 AND connector_name = $2`,
+      [workspaceId, connectorType, sync_interval_minutes]
+    );
+
+    const lastSyncAt = connResult.rows[0].last_sync_at;
+    const nextSyncAt = lastSyncAt
+      ? new Date(new Date(lastSyncAt).getTime() + sync_interval_minutes * 60 * 1000).toISOString()
+      : null;
+
+    res.json({
+      connector_type: connectorType,
+      sync_interval_minutes,
+      label: SYNC_INTERVAL_LABELS[sync_interval_minutes as SyncIntervalMinutes],
+      next_sync_at: nextSyncAt,
+      updated_at: updatedAt,
+    });
+  } catch (err: any) {
+    console.error('[connectors] sync-interval update error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/:workspaceId/connectors/status', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
 
     const connResult = await dbQuery(
-      `SELECT connector_name, status, last_sync_at, error_message, metadata
+      `SELECT connector_name, status, last_sync_at, error_message, metadata, sync_interval_minutes
        FROM connections
        WHERE workspace_id = $1
          AND connector_name NOT IN ('enrichment_config', 'csv_import')
        ORDER BY created_at DESC`,
       [workspaceId]
     );
+
+    const connectorNames = connResult.rows.map((r: any) => r.connector_name);
+
+    const openFieldFindingsResult = await dbQuery<{ connector_type: string; cnt: string }>(
+      `SELECT metadata->>'connector_type' AS connector_type, COUNT(*)::text AS cnt
+       FROM findings
+       WHERE workspace_id = $1
+         AND category = 'new_crm_fields'
+         AND resolved_at IS NULL
+       GROUP BY metadata->>'connector_type'`,
+      [workspaceId]
+    ).catch(() => ({ rows: [] as any[] }));
+
+    const fieldFindingsByConnector: Record<string, number> = {};
+    for (const row of openFieldFindingsResult.rows) {
+      fieldFindingsByConnector[row.connector_type] = parseInt(row.cnt, 10);
+    }
 
     const [dealsResult, contactsResult, accountsResult, conversationsResult] = await Promise.all([
       dbQuery(
@@ -397,6 +476,13 @@ router.get('/:workspaceId/connectors/status', async (req: Request<WorkspaceParam
         health = 'green';
       }
 
+      const intervalMinutes: SyncIntervalMinutes = (VALID_SYNC_INTERVALS as readonly number[]).includes(conn.sync_interval_minutes)
+        ? conn.sync_interval_minutes as SyncIntervalMinutes
+        : 60;
+      const nextSyncAt = conn.last_sync_at
+        ? new Date(new Date(conn.last_sync_at).getTime() + intervalMinutes * 60 * 1000).toISOString()
+        : null;
+
       return {
         type: conn.connector_name,
         status: conn.status,
@@ -409,6 +495,10 @@ router.get('/:workspaceId/connectors/status', async (req: Request<WorkspaceParam
         },
         health,
         last_error: conn.error_message || null,
+        sync_interval_minutes: intervalMinutes,
+        sync_interval_label: SYNC_INTERVAL_LABELS[intervalMinutes],
+        next_sync_at: nextSyncAt,
+        open_field_findings: fieldFindingsByConnector[conn.connector_name] ?? 0,
       };
     });
 

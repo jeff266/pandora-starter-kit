@@ -7,6 +7,7 @@ import { enrichClosedDeal } from '../enrichment/closed-deal-enrichment.js';
 import { getEnrichmentConfig } from '../enrichment/config.js';
 import { extractConversationSignals } from '../conversations/signal-extractor.js';
 import { query } from '../db.js';
+import { captureCurrentSchema, detectNewFields, insertNewFieldsFinding } from './field-detector.js';
 
 interface SyncResult {
   connector: string;
@@ -71,6 +72,21 @@ export async function emitSyncCompleted(
     triggerEnrichmentForNewlyClosedDeals(workspaceId).catch(err => {
       console.error(`[Enrichment] Post-sync trigger failed:`, err instanceof Error ? err.message : err);
     });
+
+    // Field detection — cheap SQL diff, runs after every CRM sync
+    for (const connectorType of connectorTypes.filter(c => ['hubspot', 'salesforce'].includes(c))) {
+      (async () => {
+        try {
+          const currentSchema = await captureCurrentSchema(workspaceId, connectorType);
+          const result = await detectNewFields(workspaceId, connectorType, currentSchema);
+          if (result.hasNewFields) {
+            await insertNewFieldsFinding(workspaceId, connectorType, result.newFields);
+          }
+        } catch (err) {
+          console.error(`[FieldDetector] Error during field detection for ${workspaceId}/${connectorType}:`, err instanceof Error ? err.message : err);
+        }
+      })();
+    }
   }
 
   const registry = getSkillRegistry();

@@ -8,16 +8,14 @@ import { syncConsultantFireflies } from '../connectors/consultant-fireflies-sync
 
 const INTERNAL_CONNECTORS = ['enrichment_config', 'csv_import'];
 
+// CRM connectors (hubspot, salesforce) are handled by a 15-min dynamic heartbeat
+// that checks each connector's sync_interval_minutes against last_sync_at.
+// Non-CRM connectors remain on fixed schedules below.
 const SYNC_SCHEDULES: Array<{
   label: string;
   cron: string;
   connectorTypes: string[];
 }> = [
-  {
-    label: 'CRM (every 4 hours)',
-    cron: '0 */4 * * *',
-    connectorTypes: ['hubspot', 'salesforce'],
-  },
   {
     label: 'Call Intelligence (every 12 hours)',
     cron: '0 */12 * * *',
@@ -29,6 +27,9 @@ const SYNC_SCHEDULES: Array<{
     connectorTypes: ['monday', 'google-drive'],
   },
 ];
+
+// CRM connectors eligible for dynamic interval scheduling
+const CRM_CONNECTOR_TYPES = ['hubspot', 'salesforce'];
 
 export class SyncScheduler {
   private tasks: cron.ScheduledTask[] = [];
@@ -45,6 +46,16 @@ export class SyncScheduler {
       this.tasks.push(task);
     }
 
+    // CRM sync eligibility heartbeat — runs every 15 minutes.
+    // Fires incremental syncs for connectors whose last_sync_at + sync_interval_minutes <= NOW().
+    // The actual sync may fire up to 15 minutes after it becomes due (acceptable).
+    const crmHeartbeat = cron.schedule('*/15 * * * *', () => {
+      this.checkSyncEligibility().catch((err) => {
+        console.error('[Scheduler] Unhandled error in CRM sync eligibility check:', err);
+      });
+    }, { timezone: 'UTC' });
+    this.tasks.push(crmHeartbeat);
+
     // Consultant connector sync (every 6 hours)
     const consultantTask = cron.schedule('0 */6 * * *', () => {
       this.runConsultantSync().catch((err) => {
@@ -54,7 +65,7 @@ export class SyncScheduler {
     this.tasks.push(consultantTask);
 
     const scheduleDescriptions = SYNC_SCHEDULES.map(s => s.label).join(', ');
-    console.log(`[Scheduler] Sync schedules registered: ${scheduleDescriptions}, Consultant (every 6 hours)`);
+    console.log(`[Scheduler] Sync schedules registered: ${scheduleDescriptions}, CRM (dynamic 15-min heartbeat), Consultant (every 6 hours)`);
   }
 
   stop(): void {
@@ -138,6 +149,66 @@ export class SyncScheduler {
     }
 
     console.log(`[Scheduler] ${label}: ${queued} sync job(s) queued`);
+  }
+
+  async checkSyncEligibility(): Promise<void> {
+    const dueSyncs = await query<{
+      workspace_id: string;
+      connector_name: string;
+      sync_interval_minutes: number;
+    }>(
+      `SELECT
+         cc.workspace_id,
+         cc.connector_name,
+         cc.sync_interval_minutes
+       FROM connections cc
+       WHERE cc.connector_name = ANY($1)
+         AND cc.status IN ('connected', 'synced', 'healthy')
+         AND cc.last_sync_at IS NOT NULL
+         AND (
+           cc.last_sync_at + (cc.sync_interval_minutes || ' minutes')::interval
+         ) <= NOW()
+         AND NOT EXISTS (
+           SELECT 1 FROM sync_log sl
+           WHERE sl.workspace_id = cc.workspace_id
+             AND sl.connector_type = cc.connector_name
+             AND sl.status IN ('pending', 'running')
+             AND sl.started_at > NOW() - INTERVAL '30 minutes'
+         )`,
+      [CRM_CONNECTOR_TYPES]
+    ).catch(err => {
+      console.error('[Scheduler] Eligibility check query failed:', err instanceof Error ? err.message : err);
+      return { rows: [] as any[] };
+    });
+
+    if (dueSyncs.rows.length === 0) return;
+
+    console.log(`[Scheduler] CRM heartbeat: ${dueSyncs.rows.length} connector(s) due for sync`);
+    const jobQueue = getJobQueue();
+
+    for (const row of dueSyncs.rows) {
+      try {
+        const logResult = await query<{ id: string }>(
+          `INSERT INTO sync_log (workspace_id, connector_type, sync_type, status, started_at)
+           VALUES ($1, $2, 'scheduled', 'pending', NOW())
+           RETURNING id`,
+          [row.workspace_id, row.connector_name]
+        );
+        const syncLogId = logResult.rows[0].id;
+
+        const jobId = await jobQueue.createJob({
+          workspaceId: row.workspace_id,
+          jobType: 'sync',
+          payload: { connectorType: row.connector_name, syncLogId },
+          priority: 0,
+        });
+
+        console.log(`[Scheduler] Queued ${row.connector_name} sync for workspace ${row.workspace_id} (interval: ${row.sync_interval_minutes}min, job: ${jobId})`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[Scheduler] Failed to queue ${row.connector_name} for ${row.workspace_id}: ${msg}`);
+      }
+    }
   }
 
   async runConsultantSync(): Promise<void> {
