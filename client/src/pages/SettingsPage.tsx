@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { colors, fonts } from '../styles/theme';
 import { api } from '../lib/api';
 import Skeleton from '../components/Skeleton';
+import { formatCurrency } from '../lib/format';
 
 type Tab = 'voice' | 'skills' | 'tokens' | 'learning' | 'quotas' | 'ws-general' | 'ws-stages' | 'ws-filters' | 'ws-team' | 'ws-thresholds' | 'ws-suggestions';
 
@@ -644,7 +645,7 @@ function SkillsSection() {
                     <option key={p.value} value={p.value}>{p.label}</option>
                   ))}
                 </select>
-                {s.preset === "__custom__" && (
+                {isCustom && (
                   <details style={{ marginTop: 6 }}>
                     <summary style={{ fontSize: 11, color: colors.textMuted, cursor: "pointer", fontFamily: fonts.sans, userSelect: "none" }}>
                       Advanced: Custom cron expression
@@ -2843,7 +2844,7 @@ function WsTeamSection() {
                   </select>
                 </td>
                 <td style={{ padding: '10px 10px', fontSize: 13, fontFamily: fonts.mono, color: colors.textSecondary }}>{o.open_deals}</td>
-                <td style={{ padding: '10px 10px', fontSize: 13, fontFamily: fonts.mono, color: colors.textSecondary }}>${(o.open_pipeline / 1000).toFixed(0)}K</td>
+                <td style={{ padding: '10px 10px', fontSize: 13, fontFamily: fonts.mono, color: colors.textSecondary }}>{formatCurrency(o.open_pipeline)}</td>
                 <td style={{ padding: '10px 10px' }}>
                   <WsToggle on={!o.is_excluded} onChange={v => { const next = [...owners]; next[i] = { ...next[i], is_excluded: !v }; setOwners(next); }} />
                 </td>
