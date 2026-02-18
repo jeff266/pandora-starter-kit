@@ -553,7 +553,7 @@ export default function CommandCenter() {
       </SectionErrorBoundary>
 
       <SectionErrorBoundary fallbackMessage="Failed to load forecast panel.">
-        <MonteCarloPanel />
+        <MonteCarloPanel wsId={wsId} />
       </SectionErrorBoundary>
 
       <SectionErrorBoundary fallbackMessage="Failed to load pipeline chart.">

@@ -53,26 +53,25 @@ function probColor(p: number): string {
   return colors.red;
 }
 
-export default function MonteCarloPanel() {
+export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
   const { anon } = useDemoMode();
   const [state, setState] = useState<PanelState>('loading');
   const [data, setData] = useState<MonteCarloPayload | null>(null);
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
   const [triggeringRun, setTriggeringRun] = useState(false);
-  const cachedRef = useRef(false);
+  const prevWsRef = useRef<string | undefined>(undefined);
 
   const fetchData = async () => {
-    if (cachedRef.current && data) return;
     setState('loading');
     try {
       const res: MCResponse = await api.get('/monte-carlo/latest');
       setData(res.commandCenter);
       setGeneratedAt(res.generatedAt);
-      cachedRef.current = true;
       setState('ready');
     } catch (err: any) {
       const msg = err?.message || '';
       if (msg.includes('404') || msg.includes('No completed')) {
+        setData(null);
         setState('empty');
       } else {
         setState('error');
@@ -80,7 +79,13 @@ export default function MonteCarloPanel() {
     }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => {
+    if (wsId !== prevWsRef.current) {
+      setData(null);
+      prevWsRef.current = wsId;
+    }
+    fetchData();
+  }, [wsId]);
 
   const handleRunForecast = async () => {
     setTriggeringRun(true);
