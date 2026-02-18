@@ -103,12 +103,17 @@ export function sampleBernoulli(p: number): boolean {
   return Math.random() < p;
 }
 
-function addDays(date: Date, days: number): Date {
-  return new Date(date.getTime() + days * 86400 * 1000);
+function toDate(d: Date | string | number): Date {
+  return d instanceof Date ? d : new Date(d);
 }
 
-function daysBetween(a: Date, b: Date): number {
-  return Math.max(0, (b.getTime() - a.getTime()) / 86400000);
+function addDays(date: Date | string, days: number): Date {
+  const d = toDate(date);
+  return new Date(d.getTime() + days * 86400 * 1000);
+}
+
+function daysBetween(a: Date | string, b: Date | string): number {
+  return Math.max(0, (toDate(b).getTime() - toDate(a).getTime()) / 86400000);
 }
 
 // ─── Risk Adjustments ─────────────────────────────────────────────────────────
@@ -127,7 +132,7 @@ export async function computeDealRiskAdjustments(
 
   // 1. Close date in the past
   for (const deal of openDeals) {
-    if (deal.closeDate < now) {
+    if (toDate(deal.closeDate) < now) {
       adjustments[deal.id].multiplier *= 0.80;
       adjustments[deal.id].signals.push('close_date_past');
     }
@@ -266,7 +271,9 @@ function runIteration(
 ): { existing: number; projected: number } {
   let existingRevenue = 0;
   let projectedRevenue = 0;
-  const daysRemaining = daysBetween(inputs.today, inputs.forecastWindowEnd);
+  const today = toDate(inputs.today);
+  const forecastEnd = toDate(inputs.forecastWindowEnd);
+  const daysRemaining = daysBetween(today, forecastEnd);
 
   // ── Component A: Existing pipeline ──
   for (const deal of inputs.openDeals) {
@@ -284,7 +291,7 @@ function runIteration(
     const slippageDays = sampleNormal(slippageDist?.mean ?? 14, slippageDist?.sigma ?? 21);
     const simulatedCloseDate = addDays(deal.closeDate, slippageDays);
 
-    if (simulatedCloseDate > inputs.forecastWindowEnd) continue;
+    if (simulatedCloseDate > forecastEnd) continue;
 
     // Sample amount variation (clip to 0.5x–2x CRM value)
     const amountMultiplier = sampleLogNormal(0, inputs.distributions.dealSize.sigma * 0.3);

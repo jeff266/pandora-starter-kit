@@ -6187,7 +6187,11 @@ const mcComputeRiskAdjustments: ToolDefinition = {
     return safeExecute('mcComputeRiskAdjustments', async () => {
       const { computeDealRiskAdjustments } = await import('../analysis/monte-carlo-engine.js');
       const openDealsKey = (context as any).stepResults?.['open_deals'];
-      const openDeals = openDealsKey?.openDeals || [];
+      const openDealsRaw = openDealsKey?.openDeals || [];
+      const openDeals = openDealsRaw.map((d: any) => ({
+        ...d,
+        closeDate: d.closeDate ? new Date(d.closeDate) : new Date(Date.now() + 90 * 86400000),
+      }));
 
       const adjustments = await computeDealRiskAdjustments(context.workspaceId, openDeals);
 
@@ -6231,7 +6235,11 @@ const mcRunSimulation: ToolDefinition = {
 
       const stepResults = (context as any).stepResults || {};
       const distributions = stepResults['distributions']?.distributions;
-      const openDeals = stepResults['open_deals']?.openDeals || [];
+      const openDealsRaw = stepResults['open_deals']?.openDeals || [];
+      const openDeals = openDealsRaw.map((d: any) => ({
+        ...d,
+        closeDate: d.closeDate ? new Date(d.closeDate) : new Date(Date.now() + 90 * 86400000),
+      }));
       const riskAdjustments = stepResults['risk_adjustments']?.adjustments || {};
       const forecastWindow = stepResults['forecast_window'] || {};
       const closedDealCount = stepResults['distributions']?.closedDealCount || 0;
