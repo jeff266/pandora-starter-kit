@@ -1,0 +1,296 @@
+```
+Read REPLIT_CONTEXT.md first.
+
+Build the Push API settings UI. The backend endpoints are already live 
+at /push/channels, /push/rules, and /push/log — your job is purely 
+frontend. All data comes from those APIs.
+
+Add "Push" to the sidebar under OPERATIONS, between Playbooks and 
+Insights Feed. Icon: Bell (lucide-react).
+
+---
+
+PAGE STRUCTURE: 3 tabs
+
+  [Channels]  [Rules]  [Delivery Log]
+
+Default to Channels tab on first visit, Rules tab if at least one 
+channel is verified.
+
+---
+
+TAB 1: CHANNELS
+
+List view:
+  Card per channel showing:
+    - Name + type badge (Slack / Email / Webhook)
+    - Status: "Verified ✅" (green) or "Unverified ⚠️" (amber)
+    - Last used: "2h ago" or "Never"
+    - Edit + Delete icon buttons (right side)
+  
+  Empty state: 
+    Illustration + "No delivery channels yet"
+    "Add your first channel to start pushing findings out of Pandora"
+    Primary CTA: "Add Channel"
+
+Add Channel button (top right) → opens a right-side drawer (480px):
+
+  Step 1 — Select type:
+    3 large option cards in a row:
+      [Slack]    [Email]    [Webhook]
+    Each with icon + one-line description:
+      Slack: "Post to a Slack channel via webhook"
+      Email: "Send HTML digest to one or more addresses"
+      Webhook: "POST JSON to any HTTP endpoint"
+
+  Step 2 — Configure (fields change by type):
+    
+    SLACK:
+      Channel Name (text) — e.g. "#revenue-ops" — for display only
+      Webhook URL (text, required) — paste from Slack app config
+      Helper link: "How to create a Slack webhook →" 
+        (links to https://api.slack.com/messaging/webhooks)
+    
+    EMAIL:
+      Recipients (tag input — add multiple email addresses)
+      From Name (text, default: "Pandora")
+    
+    WEBHOOK:
+      Name (text) — e.g. "Zapier Catch Hook"
+      Endpoint URL (text, required)
+      Secret (text, optional) — used for HMAC signing
+        Helper text: "We'll include X-Pandora-Signature header with 
+        each request so you can verify it came from Pandora"
+  
+  Step 3 — Test + Save:
+    Channel Name field (display name in Pandora, e.g. "Rev Ops Slack")
+    
+    "Send Test Message" button
+      → POST /push/channels/:id/test
+      → Inline result below button:
+          ✅ "Message delivered successfully" (green)
+          ❌ "Failed: [error message]" (red)
+      Must succeed before Save is enabled.
+    
+    "Save Channel" button (disabled until test passes)
+
+Edit flow: re-opens same drawer pre-populated. Re-test required if 
+webhook URL or email changes.
+
+---
+
+TAB 2: RULES
+
+List view:
+  Table with columns:
+    Rule Name | Channel | Trigger | Last Delivered | Status | Actions
+  
+  Status badges:
+    Active (green pill)
+    Inactive (grey pill)  
+    Failed (red pill — show error icon, hover reveals last error message)
+    Auto-disabled (red pill + lock icon — "Auto-disabled after 5 failures")
+  
+  Last Delivered column:
+    "2h ago" or "Never" or "Empty — no findings matched" (muted)
+  
+  Actions column (icon buttons):
+    Toggle on/off (switch)
+    ▶ Manual trigger (play icon) → POST /push/rules/:id/trigger
+      → Toast: "Delivery triggered — check Log tab for results"
+    Edit (pencil)
+    Delete (trash, with confirm dialog)
+  
+  Empty state:
+    "No delivery rules yet"
+    "Rules tell Pandora when to send findings and where."
+    CTA: "Add Rule" (disabled + tooltip if no verified channels: 
+    "Add and verify a channel first")
+
+Add Rule button → opens a full-screen modal (not a drawer — needs space):
+
+  STEP INDICATOR: ① Channel → ② Trigger → ③ Filters → ④ Template → ⑤ Name
+
+  STEP 1 — Pick a Channel:
+    Dropdown of verified channels only.
+    If none verified: grey state + "Verify a channel first" link to Channels tab.
+    Show channel type icon next to each option.
+
+  STEP 2 — Configure Trigger:
+    3 trigger type cards:
+    
+    [📅 Schedule]
+      "Send on a repeating schedule"
+      When selected, show:
+        Day picker: [Mon] [Tue] [Wed] [Thu] [Fri] [Sat] [Sun] (toggleable chips)
+        Time picker: hour + AM/PM dropdowns
+        Timezone: dropdown (default workspace timezone)
+        Preview: "Fires every Monday at 8:00 AM ET"
+    
+    [⚡ After Skill Run]
+      "Send immediately after a skill completes"
+      When selected, show:
+        Skill dropdown: list of all 16 registered skills by name
+        Preview: "Fires after every Deal Scoring Model run"
+    
+    [🎯 Score Threshold]
+      "Alert when a deal's score drops below a value"
+      When selected, show:
+        Threshold value: number input (default: 30, range 1-100)
+        Min deal amount: number input, optional (e.g. $25,000)
+        Check every: dropdown [15 min / 30 min / 1 hour / 4 hours]
+        Preview: "Fires when any deal's AI Score drops below 30"
+
+  STEP 3 — Configure Filters:
+    What findings to include in this delivery:
+    
+    Severity (required, at least one):
+      [🔴 Critical]  [🟡 Warning]  [🔵 Info]  (toggleable, default: Critical + Warning)
+    
+    Skills (which skill findings to include):
+      "All skills" toggle (default on)
+      If off: multi-select checkboxes of skill names
+    
+    Min deal amount (optional):
+      Number input with $ prefix. "Only include findings on deals above this amount"
+      Placeholder: "No minimum"
+    
+    Max findings per delivery:
+      Slider: 1 — 50, default 20
+      Label: "Send at most [N] findings per delivery"
+    
+    Preview line (dynamic, updates as user configures):
+      "Will send up to 20 critical and warning findings from all skills"
+
+  STEP 4 — Choose Template:
+    4 option cards with preview thumbnails (simple illustrated mockups):
+    
+    [Standard]
+      "Grouped findings list with deal details"
+      Best for: Slack digests, most use cases
+    
+    [Alert]  
+      "Single-finding card with action buttons"
+      Best for: Threshold triggers, urgent alerts
+      (Auto-selected + locked when trigger type is Threshold)
+    
+    [Digest]
+      "Full HTML email with metrics summary + findings"
+      Best for: Email channel
+      (Auto-selected + locked when channel type is Email)
+    
+    [Raw JSON]
+      "Structured JSON payload for automation tools"
+      Best for: Webhook channel, Zapier, n8n
+      (Auto-selected + locked when channel type is Webhook)
+    
+    Auto-selection logic: if channel type or trigger type implies a 
+    template, pre-select and lock it. User can still change if desired.
+
+  STEP 5 — Name + Save:
+    Rule Name: text input
+      Auto-suggested based on config, editable:
+        Cron → "Monday Pipeline Brief" (if Mon 8AM selected)
+        Skill run → "Deal Scoring Alert"
+        Threshold → "Critical Deal Score Alert"
+    
+    Summary card (read-only recap of all choices):
+      Channel: Rev Ops Slack
+      Trigger: Every Monday at 8:00 AM ET
+      Filters: Critical + Warning · All skills · Max 20
+      Template: Standard
+    
+    "Save Rule" button → POST /push/rules → success toast → close modal
+    
+    "Save as inactive" checkbox (default: unchecked — saves as active)
+
+Edit flow: same modal pre-populated, step indicator shows current step.
+User can jump between steps freely when editing (not linear).
+
+---
+
+TAB 3: DELIVERY LOG
+
+Table:
+  Rule Name | Triggered By | Findings Sent | Status | Time | Actions
+
+Triggered By values:
+  "Cron schedule"
+  "Deal Scoring Model (skill run)"
+  "Score threshold breach"
+  "Manual trigger"
+
+Status badges:
+  ✅ Success (green)
+  ❌ Failed (red)
+  ○ Empty (grey) — "No findings matched filters"
+  ⏭ Skipped (grey) — rule was inactive
+
+Filters (above table):
+  Status filter: All | Success | Failed | Empty
+  Rule filter: "All rules" or specific rule dropdown
+  Time range: Last 24h / 7d / 30d (default 7d)
+
+Row expand (click to expand):
+  Payload preview: first 500 chars in a code block (monospace)
+  Error message if failed
+  Finding count breakdown: "3 critical, 5 warning"
+
+Actions column:
+  ↩ Re-trigger button on Failed rows only
+    → POST /push/rules/:ruleId/trigger
+    → Adds new row to log with triggered_by: "Manual re-trigger"
+
+Pagination: 25 rows per page, load more button at bottom.
+
+---
+
+COMMAND CENTER INTEGRATION (P3):
+
+1. In Command Center header bar (right side, next to any existing controls):
+   Add a bell icon with status dot:
+     Green dot = last delivery < 4h ago
+     Grey dot = no deliveries yet or > 24h ago
+     Red dot = last delivery failed
+   
+   Hover tooltip: "Last sent 2h ago to Rev Ops Slack"
+   Click → opens Push settings page on Rules tab
+
+2. In AskPandoraDrawer, at bottom of each AI response that mentions a 
+   specific deal:
+   Add a small link: "🔔 Alert me if this deal's score changes"
+   
+   Clicking it:
+     If at least one verified channel exists:
+       Opens Add Rule modal pre-filled:
+         Trigger: Score Threshold, value: current ai_score - 10
+         Filter: that deal's id (add deal_id filter to filter_config if not 
+         there yet, or just min_amount = deal amount as proxy)
+         Template: Alert
+         Name: "Score Alert — [deal name]"
+       User reviews Step 5 and saves.
+     
+     If no verified channel:
+       Toast: "Set up a delivery channel first" with link to Push → Channels
+
+3. Empty state in Command Center if no rules are active:
+   Subtle banner below the header:
+   "💡 Push findings to Slack automatically — Set up delivery rules →"
+   Dismissable (localStorage key: pandora_push_banner_dismissed)
+
+---
+
+GENERAL UI NOTES:
+
+- Use existing component patterns from the rest of the app (same card styles, 
+  same drawer/modal patterns, same toast system)
+- All API calls use the existing workspace context for workspace_id
+- Error states: if any /push/* endpoint returns an error, show inline 
+  error message near the relevant component, not just a generic toast
+- Loading states: skeleton loaders on initial tab load, spinner on 
+  form submissions
+- The multi-step Add Rule modal should be dismissable with Escape or X, 
+  with a confirm dialog if user has filled in any fields ("Discard changes?")
+- Mobile: Push settings don't need to be mobile-optimized — this is an 
+  ops configuration screen. Minimum viable at tablet width (768px+).
+```
