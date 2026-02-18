@@ -2,7 +2,7 @@
 -- Every AI call through the LLM router is logged here so we can
 -- fine-tune a Llama 3.1 8B model on Fireworks for GTM classification.
 
-CREATE TABLE training_pairs (
+CREATE TABLE IF NOT EXISTS training_pairs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
 
@@ -41,21 +41,21 @@ CREATE TABLE training_pairs (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_training_pairs_export
+CREATE INDEX IF NOT EXISTS idx_training_pairs_export
   ON training_pairs(capability, quality_score)
   WHERE exported_at IS NULL;
 
-CREATE INDEX idx_training_pairs_overrides
+CREATE INDEX IF NOT EXISTS idx_training_pairs_overrides
   ON training_pairs(capability)
   WHERE was_overridden = TRUE;
 
-CREATE INDEX idx_training_pairs_workspace
+CREATE INDEX IF NOT EXISTS idx_training_pairs_workspace
   ON training_pairs(workspace_id, created_at DESC);
 
-CREATE INDEX idx_training_pairs_skill_run
+CREATE INDEX IF NOT EXISTS idx_training_pairs_skill_run
   ON training_pairs(skill_run_id)
   WHERE skill_run_id IS NOT NULL;
 
-CREATE INDEX idx_training_pairs_quality
+CREATE INDEX IF NOT EXISTS idx_training_pairs_quality
   ON training_pairs(capability, quality_score)
   WHERE quality_score >= 3;
