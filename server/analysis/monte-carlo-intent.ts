@@ -123,11 +123,12 @@ Respond ONLY with valid JSON:
  * or whose query contains the candidate's name.
  */
 export function fuzzyMatch(
-  query: string | undefined,
+  query: string | undefined | unknown,
   candidates: { id: string; name: string }[]
 ): { id: string; name: string } | null {
-  if (!query) return null;
+  if (!query || typeof query !== 'string') return null;
   const q = query.toLowerCase().trim();
+  if (!q) return null;
 
   // Exact match first
   for (const c of candidates) {
