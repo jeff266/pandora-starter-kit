@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
@@ -128,6 +128,9 @@ export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
   const [queryError, setQueryError] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [history, setHistory] = useState<QueryHistoryItem[]>([]);
+  // Session management for conversation history
+  const sessionIdRef = useRef<string>(crypto.randomUUID());
+  const [turns, setTurns] = useState<{ role: 'user' | 'assistant'; content: string }[]>([]);
 
   const fetchPipelines = async () => {
     try {
@@ -169,6 +172,10 @@ export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
   }, [wsId]);
 
   const handlePipelineChange = (value: string) => {
+    // Reset conversation session when pipeline changes — new context = fresh session
+    sessionIdRef.current = crypto.randomUUID();
+    setTurns([]);
+    setQueryAnswer(null);
     if (value === '__all__') {
       setSelectedPipeline(null);
       setSelectedPipelineType(null);
@@ -209,12 +216,12 @@ export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
   // Fetch query history on mount / workspace change
   useEffect(() => {
     if (!wsId) return;
-    api.get('/monte-carlo/queries?limit=5')
+    api.get('/chat/history?surface=mc_query&limit=5')
       .then((res: any) => setHistory(res?.queries || []))
       .catch(() => {});
   }, [wsId]);
 
-  const submitQuestion = async (q: string) => {
+  const submitQuestion = useCallback(async (q: string) => {
     if (!q.trim() || queryLoading) return;
     setQueryLoading(true);
     setQueryError(null);
@@ -222,9 +229,17 @@ export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
       const res = await api.post('/monte-carlo/query', {
         question: q.trim(),
         pipelineId: selectedPipeline ?? null,
+        sessionId: sessionIdRef.current,
+        conversationHistory: turns,
       }) as QueryResponse;
       setQueryAnswer(res);
       setQuestion('');
+      // Accumulate turns for follow-up context — only answer text, not raw data
+      setTurns(prev => [
+        ...prev,
+        { role: 'user', content: q.trim() },
+        { role: 'assistant', content: res.answer },
+      ]);
       setHistory(prev => [{
         question: q.trim(),
         answer: res.answer,
@@ -235,7 +250,7 @@ export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
     } finally {
       setQueryLoading(false);
     }
-  };
+  }, [queryLoading, selectedPipeline, turns]);
 
   const pipelineSelector = (
     <select
