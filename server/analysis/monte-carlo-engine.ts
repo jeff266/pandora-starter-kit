@@ -26,6 +26,16 @@ export interface DealRiskAdjustment {
   signals: string[];
 }
 
+export type PipelineType = 'new_business' | 'renewal' | 'expansion';
+
+export interface UpcomingRenewal {
+  dealId: string;
+  name: string;
+  contractValue: number;
+  expectedCloseDate: Date;
+  owner: string | null;
+}
+
 export interface SimulationInputs {
   openDeals: OpenDeal[];
   distributions: FittedDistributions;
@@ -33,6 +43,10 @@ export interface SimulationInputs {
   forecastWindowEnd: Date;
   today: Date;
   iterations: number;
+  pipelineType?: PipelineType;
+  upcomingRenewals?: UpcomingRenewal[];
+  customerBaseARR?: number;
+  expansionRate?: { mean: number; sigma: number } | null;
 }
 
 export interface SimulationOutputs {
@@ -303,34 +317,73 @@ function runIteration(
     existingRevenue += simulatedAmount;
   }
 
-  // ── Component B: Projected pipeline ──
   const monthsRemaining = daysRemaining / 30;
+  const pipelineType = inputs.pipelineType ?? 'new_business';
 
-  for (const [, rateDist] of Object.entries(inputs.distributions.pipelineRates)) {
-    for (let month = 0; month < Math.ceil(monthsRemaining); month++) {
-      const monthFraction = Math.min(1, monthsRemaining - month);
-      const dealsThisMonth = Math.max(0, Math.round(
-        sampleNormal(rateDist.mean * rateDist.rampFactor * monthFraction, rateDist.sigma * 0.5)
+  if (pipelineType === 'renewal') {
+    for (const renewal of (inputs.upcomingRenewals ?? [])) {
+      const renewalClose = toDate(renewal.expectedCloseDate);
+      if (renewalClose > forecastEnd) continue;
+
+      const renewalDist = inputs.distributions.stageWinRates['renewal'];
+      const renewalWinRate = renewalDist
+        ? sampleBeta(renewalDist.alpha, renewalDist.beta)
+        : sampleBeta(7, 3);
+
+      if (!sampleBernoulli(renewalWinRate)) continue;
+
+      const logMu = Math.log(renewal.contractValue);
+      const amount = sampleLogNormal(logMu, inputs.distributions.dealSize.sigma * 0.15);
+      projectedRevenue += amount;
+    }
+  } else if (pipelineType === 'expansion') {
+    if ((inputs.customerBaseARR ?? 0) > 0) {
+      const expRate = Math.max(0, sampleNormal(
+        inputs.expansionRate?.mean ?? 0.15,
+        inputs.expansionRate?.sigma ?? 0.08
       ));
 
-      for (let d = 0; d < dealsThisMonth; d++) {
-        const cycleDays = Math.max(14, sampleLogNormal(
-          inputs.distributions.cycleLength.mu,
-          inputs.distributions.cycleLength.sigma
+      const cycleMonths = (Math.max(14, sampleLogNormal(
+        inputs.distributions.cycleLength.mu,
+        inputs.distributions.cycleLength.sigma
+      )) * 0.7) / 30;
+
+      const windowFraction = Math.min(1, monthsRemaining / cycleMonths);
+
+      const expansionDist = inputs.distributions.stageWinRates['expansion'];
+      const expansionWinRate = expansionDist
+        ? sampleBeta(expansionDist.alpha, expansionDist.beta)
+        : sampleBeta(6, 4);
+
+      const expansionRevenue = inputs.customerBaseARR! * expRate * windowFraction * expansionWinRate;
+      projectedRevenue += expansionRevenue;
+    }
+  } else {
+    for (const [, rateDist] of Object.entries(inputs.distributions.pipelineRates)) {
+      for (let month = 0; month < Math.ceil(monthsRemaining); month++) {
+        const monthFraction = Math.min(1, monthsRemaining - month);
+        const dealsThisMonth = Math.max(0, Math.round(
+          sampleNormal(rateDist.mean * rateDist.rampFactor * monthFraction, rateDist.sigma * 0.5)
         ));
-        const dealCreatedDaysFromNow = month * 30 + Math.random() * 30;
-        const projectedCloseDaysFromNow = dealCreatedDaysFromNow + cycleDays;
 
-        if (projectedCloseDaysFromNow > daysRemaining) continue;
+        for (let d = 0; d < dealsThisMonth; d++) {
+          const cycleDays = Math.max(14, sampleLogNormal(
+            inputs.distributions.cycleLength.mu,
+            inputs.distributions.cycleLength.sigma
+          ));
+          const dealCreatedDaysFromNow = month * 30 + Math.random() * 30;
+          const projectedCloseDaysFromNow = dealCreatedDaysFromNow + cycleDays;
 
-        // ~25% baseline win rate for new pipeline
-        if (!sampleBernoulli(sampleBeta(2, 6))) continue;
+          if (projectedCloseDaysFromNow > daysRemaining) continue;
 
-        const amount = Math.max(1000, sampleLogNormal(
-          inputs.distributions.dealSize.mu,
-          inputs.distributions.dealSize.sigma
-        ));
-        projectedRevenue += amount;
+          if (!sampleBernoulli(sampleBeta(2, 6))) continue;
+
+          const amount = Math.max(1000, sampleLogNormal(
+            inputs.distributions.dealSize.mu,
+            inputs.distributions.dealSize.sigma
+          ));
+          projectedRevenue += amount;
+        }
       }
     }
   }

@@ -13,6 +13,13 @@ import { requireAuth } from '../middleware/auth.js';
 
 const router = Router();
 
+function inferPipelineType(pipelineName: string): 'new_business' | 'renewal' | 'expansion' {
+  const name = pipelineName.toLowerCase();
+  if (name.includes('renew') || name.includes('retention')) return 'renewal';
+  if (name.includes('expan') || name.includes('upsell') || name.includes('cross')) return 'expansion';
+  return 'new_business';
+}
+
 async function handleSkillRun(workspaceId: string, skillId: string, params: any, res: any) {
   const ws = await query('SELECT id, name FROM workspaces WHERE id = $1', [workspaceId]);
   if (ws.rows.length === 0) {
@@ -573,35 +580,72 @@ function extractTopDeals(result: SkillResult): Array<{ id: string; name: string 
   return deals;
 }
 
-/**
- * GET /api/workspaces/:workspaceId/monte-carlo/latest
- * Returns the command_center payload from the most recent completed monte-carlo-forecast run.
- * Used by the Command Center UI (Flight Plan tab).
- */
+router.get('/:workspaceId/monte-carlo/pipelines', async (req, res) => {
+  try {
+    const { workspaceId } = req.params;
+    const result = await query<{
+      pipeline: string;
+      deal_count: string;
+      total_value: string;
+    }>(
+      `SELECT pipeline, COUNT(*)::text AS deal_count, COALESCE(SUM(amount), 0)::text AS total_value
+       FROM deals
+       WHERE workspace_id = $1
+         AND pipeline IS NOT NULL
+       GROUP BY pipeline
+       ORDER BY COALESCE(SUM(amount), 0) DESC`,
+      [workspaceId]
+    );
+
+    const pipelines = result.rows.map(r => ({
+      name: r.pipeline,
+      dealCount: parseInt(r.deal_count, 10),
+      totalValue: parseFloat(r.total_value),
+      inferredType: inferPipelineType(r.pipeline),
+    }));
+
+    return res.json({ pipelines });
+  } catch (err) {
+    console.error('[skills] Error fetching MC pipelines:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 router.get('/:workspaceId/monte-carlo/latest', async (req, res) => {
   try {
     const { workspaceId } = req.params;
+    const pipeline = req.query.pipeline as string | undefined;
 
     const ws = await query('SELECT id FROM workspaces WHERE id = $1', [workspaceId]);
     if (ws.rows.length === 0) {
       return res.status(404).json({ error: 'Workspace not found' });
     }
 
-    // result column holds stepData JSONB; command_center lives under simulation key
     const result = await query<{
       run_id: string;
       created_at: string;
       result: any;
     }>(
-      `SELECT run_id, created_at, result
-       FROM skill_runs
-       WHERE workspace_id = $1
-         AND skill_id = 'monte-carlo-forecast'
-         AND status = 'completed'
-         AND result IS NOT NULL
-       ORDER BY created_at DESC
-       LIMIT 1`,
-      [workspaceId]
+      pipeline
+        ? `SELECT run_id, created_at, result
+           FROM skill_runs
+           WHERE workspace_id = $1
+             AND skill_id = 'monte-carlo-forecast'
+             AND status = 'completed'
+             AND result IS NOT NULL
+             AND result->>'simulation' IS NOT NULL
+             AND result->'simulation'->'commandCenter'->>'pipelineFilter' = $2
+           ORDER BY created_at DESC
+           LIMIT 1`
+        : `SELECT run_id, created_at, result
+           FROM skill_runs
+           WHERE workspace_id = $1
+             AND skill_id = 'monte-carlo-forecast'
+             AND status = 'completed'
+             AND result IS NOT NULL
+           ORDER BY created_at DESC
+           LIMIT 1`,
+      pipeline ? [workspaceId, pipeline] : [workspaceId]
     );
 
     if (result.rows.length === 0) {

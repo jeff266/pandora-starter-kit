@@ -154,20 +154,12 @@ export interface SkillStep {
 // ============================================================================
 
 export interface SkillExecutionContext {
-  /** Workspace executing this skill */
   workspaceId: string;
-
-  /** Skill being executed */
   skillId: string;
-
-  /** Unique run ID (UUID) */
   runId: string;
-
-  /** Business context from context layer */
   businessContext: Record<string, any>;
-
-  /** Accumulated results from completed steps */
   stepResults: Record<string, any>;
+  params?: Record<string, any>;
 
   /** Execution metadata */
   metadata: {

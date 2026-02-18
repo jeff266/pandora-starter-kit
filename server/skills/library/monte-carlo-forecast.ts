@@ -12,6 +12,7 @@ export const monteCarloForecastSkill: SkillDefinition = {
     'mcResolveForecastWindow',
     'mcFitDistributions',
     'mcLoadOpenDeals',
+    'mcLoadUpcomingRenewals',
     'mcComputeRiskAdjustments',
     'mcRunSimulation',
     'calculateOutputBudget',
@@ -52,6 +53,17 @@ export const monteCarloForecastSkill: SkillDefinition = {
       outputKey: 'open_deals',
     },
 
+    // ── Step 3b: Load upcoming renewals (renewal pipelines only) ──────────
+    {
+      id: 'load-upcoming-renewals',
+      name: 'Load Upcoming Renewal Deals',
+      tier: 'compute',
+      dependsOn: ['resolve-forecast-window'],
+      computeFn: 'mcLoadUpcomingRenewals',
+      computeArgs: {},
+      outputKey: 'upcoming_renewals',
+    },
+
     // ── Step 4: Compute deal risk adjustments ─────────────────────────────
     {
       id: 'compute-risk-adjustments',
@@ -68,7 +80,7 @@ export const monteCarloForecastSkill: SkillDefinition = {
       id: 'run-simulation',
       name: 'Run Monte Carlo Simulation (10,000 iterations)',
       tier: 'compute',
-      dependsOn: ['fit-distributions', 'load-open-deals', 'compute-risk-adjustments', 'resolve-forecast-window'],
+      dependsOn: ['fit-distributions', 'load-open-deals', 'load-upcoming-renewals', 'compute-risk-adjustments', 'resolve-forecast-window'],
       computeFn: 'mcRunSimulation',
       computeArgs: {},
       outputKey: 'simulation',

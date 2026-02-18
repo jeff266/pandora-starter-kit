@@ -132,6 +132,7 @@ export class SkillRuntime {
       runId,
       businessContext,
       stepResults: {},
+      params: params || {},
       metadata: {
         startedAt: new Date(),
         tokenUsage: {

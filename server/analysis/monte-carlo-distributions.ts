@@ -48,9 +48,9 @@ function stdev(values: number[]): number {
 
 export async function fitStageWinRates(
   workspaceId: string,
+  pipelineFilter?: string | null,
   lookbackMonths: number = 24
 ): Promise<Record<string, BetaDistribution>> {
-  // Primary: use deal_stage_history joined to closed deals
   const histResult = await query<{
     stage_normalized: string;
     wins: string;
@@ -65,14 +65,14 @@ export async function fitStageWinRates(
      WHERE d.workspace_id = $1
        AND d.stage_normalized IN ('closed_won', 'closed_lost')
        AND d.updated_at > NOW() - ($2 || ' months')::interval
+       ${pipelineFilter ? `AND d.pipeline = $3` : ''}
      GROUP BY dsh.stage_normalized
      HAVING dsh.stage_normalized IS NOT NULL`,
-    [workspaceId, lookbackMonths]
+    [workspaceId, lookbackMonths, ...(pipelineFilter ? [pipelineFilter] : [])]
   );
 
   const result: Record<string, BetaDistribution> = {};
 
-  // Fallback: if stage history is sparse, use deal-level stage_normalized
   let rows = histResult.rows;
   if (rows.length < 2) {
     const fallback = await query<{
@@ -89,8 +89,9 @@ export async function fitStageWinRates(
          AND stage_normalized IN ('closed_won', 'closed_lost')
          AND updated_at > NOW() - ($2 || ' months')::interval
          AND stage_normalized IS NOT NULL
+         ${pipelineFilter ? `AND pipeline = $3` : ''}
        GROUP BY stage_normalized`,
-      [workspaceId, lookbackMonths]
+      [workspaceId, lookbackMonths, ...(pipelineFilter ? [pipelineFilter] : [])]
     );
     rows = fallback.rows;
   }
@@ -117,6 +118,7 @@ export async function fitStageWinRates(
 
 export async function fitDealSizeDistribution(
   workspaceId: string,
+  pipelineFilter?: string | null,
   lookbackMonths: number = 24
 ): Promise<LogNormalDistribution> {
   const result = await query<{ amount: string }>(
@@ -125,8 +127,9 @@ export async function fitDealSizeDistribution(
      WHERE workspace_id = $1
        AND stage_normalized = 'closed_won'
        AND updated_at > NOW() - ($2 || ' months')::interval
-       AND amount > 0`,
-    [workspaceId, lookbackMonths]
+       AND amount > 0
+       ${pipelineFilter ? `AND pipeline = $3` : ''}`,
+    [workspaceId, lookbackMonths, ...(pipelineFilter ? [pipelineFilter] : [])]
   );
 
   const amounts = result.rows.map(r => parseFloat(r.amount)).filter(a => a > 0);
@@ -164,6 +167,7 @@ export async function fitDealSizeDistribution(
 
 export async function fitCycleLengthDistribution(
   workspaceId: string,
+  pipelineFilter?: string | null,
   lookbackMonths: number = 24
 ): Promise<LogNormalDistribution> {
   const result = await query<{ cycle_days: string }>(
@@ -173,8 +177,9 @@ export async function fitCycleLengthDistribution(
      WHERE workspace_id = $1
        AND stage_normalized IN ('closed_won', 'closed_lost')
        AND updated_at > NOW() - ($2 || ' months')::interval
-       AND updated_at > created_at`,
-    [workspaceId, lookbackMonths]
+       AND updated_at > created_at
+       ${pipelineFilter ? `AND pipeline = $3` : ''}`,
+    [workspaceId, lookbackMonths, ...(pipelineFilter ? [pipelineFilter] : [])]
   );
 
   const days = result.rows
@@ -202,9 +207,9 @@ export async function fitCycleLengthDistribution(
 
 export async function fitCloseSlippageDistribution(
   workspaceId: string,
+  pipelineFilter?: string | null,
   lookbackMonths: number = 24
 ): Promise<Record<string, NormalDistribution>> {
-  // Try close_date_at_stage_entry first; fall back to close_date vs updated_at
   const result = await query<{
     stage_normalized: string;
     mean_slippage: string | null;
@@ -227,10 +232,11 @@ export async function fitCloseSlippageDistribution(
          AND d.close_date IS NOT NULL
          AND d.updated_at IS NOT NULL
          AND d.stage_normalized IS NOT NULL
+         ${pipelineFilter ? `AND d.pipeline = $3` : ''}
      ) subq
      WHERE slippage_days BETWEEN -365 AND 365
      GROUP BY stage_normalized`,
-    [workspaceId, lookbackMonths]
+    [workspaceId, lookbackMonths, ...(pipelineFilter ? [pipelineFilter] : [])]
   );
 
   const slippage: Record<string, NormalDistribution> = {};
@@ -256,6 +262,7 @@ export interface PipelineRateDistribution extends NormalDistribution {
 
 export async function fitPipelineCreationRates(
   workspaceId: string,
+  pipelineFilter?: string | null,
   lookbackMonths: number = 12
 ): Promise<Record<string, PipelineRateDistribution>> {
   const result = await query<{
@@ -273,8 +280,9 @@ export async function fitPipelineCreationRates(
      WHERE workspace_id = $1
        AND created_at > NOW() - ($2 || ' months')::interval
        AND owner IS NOT NULL
+       ${pipelineFilter ? `AND pipeline = $3` : ''}
      GROUP BY owner, DATE_TRUNC('month', created_at)`,
-    [workspaceId, lookbackMonths]
+    [workspaceId, lookbackMonths, ...(pipelineFilter ? [pipelineFilter] : [])]
   );
 
   // Group by rep
@@ -330,6 +338,80 @@ export async function fitPipelineCreationRates(
   return rates;
 }
 
+// ─── 2f. Expansion Rate ──────────────────────────────────────────────────────
+
+export async function fitExpansionRateDistribution(
+  workspaceId: string,
+  pipelineFilter?: string | null,
+  lookbackMonths: number = 24
+): Promise<{ mean: number; sigma: number; customerBaseARR: number; sampleSize: number; isReliable: boolean } | null> {
+  const params: (string | number)[] = [workspaceId, lookbackMonths];
+  if (pipelineFilter) params.push(pipelineFilter);
+
+  const rateResult = await query<{
+    mean_expansion_rate: string | null;
+    sigma_expansion_rate: string | null;
+    sample_size: string;
+  }>(
+    `SELECT
+       AVG(d.amount / NULLIF(a.annual_revenue, 0))::text AS mean_expansion_rate,
+       STDDEV(d.amount / NULLIF(a.annual_revenue, 0))::text AS sigma_expansion_rate,
+       COUNT(*)::text AS sample_size
+     FROM deals d
+     JOIN accounts a ON d.account_id = a.id AND a.workspace_id = d.workspace_id
+     WHERE d.workspace_id = $1
+       AND d.stage_normalized = 'closed_won'
+       AND d.updated_at > NOW() - ($2 || ' months')::interval
+       AND a.annual_revenue > 0
+       ${pipelineFilter ? `AND d.pipeline = $3` : ''}`,
+    params
+  );
+
+  const row = rateResult.rows[0];
+  const sampleSize = row ? parseInt(row.sample_size, 10) : 0;
+
+  let customerBaseARR = 0;
+  const arrResult = await query<{ customer_base_arr: string }>(
+    `SELECT COALESCE(SUM(annual_revenue), 0)::text AS customer_base_arr
+     FROM accounts
+     WHERE workspace_id = $1
+       AND annual_revenue > 0`,
+    [workspaceId]
+  );
+  customerBaseARR = parseFloat(arrResult.rows[0]?.customer_base_arr || '0');
+
+  if (customerBaseARR === 0) {
+    const fallbackArr = await query<{ total_amount: string }>(
+      `SELECT COALESCE(SUM(amount), 0)::text AS total_amount
+       FROM deals
+       WHERE workspace_id = $1
+         AND stage_normalized = 'closed_won'
+         AND updated_at > NOW() - ('12 months')::interval
+         AND amount > 0`,
+      [workspaceId]
+    );
+    customerBaseARR = parseFloat(fallbackArr.rows[0]?.total_amount || '0');
+  }
+
+  if (sampleSize < 5) {
+    return {
+      mean: 0.15,
+      sigma: 0.08,
+      customerBaseARR,
+      sampleSize,
+      isReliable: false,
+    };
+  }
+
+  return {
+    mean: row.mean_expansion_rate ? parseFloat(row.mean_expansion_rate) : 0.15,
+    sigma: row.sigma_expansion_rate ? Math.max(parseFloat(row.sigma_expansion_rate), 0.01) : 0.08,
+    customerBaseARR,
+    sampleSize,
+    isReliable: sampleSize >= 10,
+  };
+}
+
 // ─── Data Quality Report ─────────────────────────────────────────────────────
 
 export interface FittedDistributions {
@@ -338,6 +420,7 @@ export interface FittedDistributions {
   cycleLength: LogNormalDistribution;
   slippage: Record<string, NormalDistribution>;
   pipelineRates: Record<string, PipelineRateDistribution>;
+  expansionRate?: { mean: number; sigma: number; customerBaseARR: number; sampleSize: number; isReliable: boolean } | null;
 }
 
 export function assessDataQuality(

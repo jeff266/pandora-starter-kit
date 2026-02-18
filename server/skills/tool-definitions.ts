@@ -6099,26 +6099,35 @@ const mcFitDistributions: ToolDefinition = {
         fitCycleLengthDistribution,
         fitCloseSlippageDistribution,
         fitPipelineCreationRates,
+        fitExpansionRateDistribution,
         assessDataQuality,
       } = await import('../analysis/monte-carlo-distributions.js');
 
+      const pipelineFilter: string | null = context.params?.pipelineFilter ?? null;
+      const pipelineType: string = context.params?.pipelineType ?? 'new_business';
+
       const [stageWinRates, dealSize, cycleLength, slippage, pipelineRates] = await Promise.all([
-        fitStageWinRates(context.workspaceId),
-        fitDealSizeDistribution(context.workspaceId),
-        fitCycleLengthDistribution(context.workspaceId),
-        fitCloseSlippageDistribution(context.workspaceId),
-        fitPipelineCreationRates(context.workspaceId),
+        fitStageWinRates(context.workspaceId, pipelineFilter),
+        fitDealSizeDistribution(context.workspaceId, pipelineFilter),
+        fitCycleLengthDistribution(context.workspaceId, pipelineFilter),
+        fitCloseSlippageDistribution(context.workspaceId, pipelineFilter),
+        fitPipelineCreationRates(context.workspaceId, pipelineFilter),
       ]);
 
-      // Count closed deals for tier assessment
+      let expansionRate = null;
+      if (pipelineType === 'expansion') {
+        expansionRate = await fitExpansionRateDistribution(context.workspaceId, pipelineFilter);
+      }
+
       const closedResult = await query<{ cnt: string }>(
         `SELECT COUNT(*)::text AS cnt FROM deals
-         WHERE workspace_id = $1 AND stage_normalized IN ('closed_won', 'closed_lost')`,
-        [context.workspaceId]
+         WHERE workspace_id = $1 AND stage_normalized IN ('closed_won', 'closed_lost')
+         ${pipelineFilter ? 'AND pipeline = $2' : ''}`,
+        pipelineFilter ? [context.workspaceId, pipelineFilter] : [context.workspaceId]
       );
       const closedDealCount = parseInt(closedResult.rows[0]?.cnt || '0', 10);
 
-      const distributions = { stageWinRates, dealSize, cycleLength, slippage, pipelineRates };
+      const distributions = { stageWinRates, dealSize, cycleLength, slippage, pipelineRates, expansionRate };
       const dataQuality = assessDataQuality(distributions, closedDealCount);
 
       return { distributions, dataQuality, closedDealCount };
@@ -6133,6 +6142,13 @@ const mcLoadOpenDeals: ToolDefinition = {
   parameters: { type: 'object', properties: {}, required: [] },
   execute: async (_params, context) => {
     return safeExecute('mcLoadOpenDeals', async () => {
+      const pipelineFilter: string | null = context.params?.pipelineFilter ?? null;
+      const params: any[] = [context.workspaceId];
+      let pipelineClause = '';
+      if (pipelineFilter) {
+        params.push(pipelineFilter);
+        pipelineClause = `AND pipeline = $${params.length}`;
+      }
       const result = await query<{
         id: string;
         name: string;
@@ -6147,9 +6163,10 @@ const mcLoadOpenDeals: ToolDefinition = {
          WHERE workspace_id = $1
            AND stage_normalized NOT IN ('closed_won', 'closed_lost')
            AND (close_date IS NULL OR close_date <= NOW() + INTERVAL '24 months')
+           ${pipelineClause}
          ORDER BY amount DESC NULLS LAST
          LIMIT 500`,
-        [context.workspaceId]
+        params
       );
 
       const openDeals = result.rows.map(r => ({
@@ -6223,6 +6240,77 @@ const mcComputeRiskAdjustments: ToolDefinition = {
   },
 };
 
+const mcLoadUpcomingRenewals: ToolDefinition = {
+  name: 'mcLoadUpcomingRenewals',
+  tier: 'compute',
+  description: 'Load upcoming renewal deals for renewal pipeline simulation.',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (_params, context) => {
+    return safeExecute('mcLoadUpcomingRenewals', async () => {
+      const pipelineType = context.params?.pipelineType ?? 'new_business';
+      if (pipelineType !== 'renewal') {
+        return { upcomingRenewals: [], renewalCount: 0, totalRenewalValue: 0 };
+      }
+
+      const pipelineFilter: string | null = context.params?.pipelineFilter ?? null;
+      const forecastWindow = (context as any).stepResults?.['forecast_window'] || {};
+      const forecastWindowEnd = forecastWindow.forecastWindowEnd
+        ? forecastWindow.forecastWindowEnd
+        : new Date(new Date().getFullYear(), 11, 31).toISOString();
+
+      const sqlParams: any[] = [context.workspaceId, forecastWindowEnd];
+      let pipelineClause = '';
+      if (pipelineFilter) {
+        sqlParams.push(pipelineFilter);
+        pipelineClause = `AND pipeline = $${sqlParams.length}`;
+      }
+
+      const result = await query<{
+        id: string;
+        name: string;
+        amount: string | null;
+        close_date: string | null;
+        owner: string | null;
+        custom_fields: any;
+      }>(
+        `SELECT id, name, amount::text, close_date::text, owner, custom_fields
+         FROM deals
+         WHERE workspace_id = $1
+           AND stage_normalized NOT IN ('closed_won', 'closed_lost')
+           AND close_date IS NOT NULL
+           AND close_date BETWEEN CURRENT_DATE AND $2::date
+           ${pipelineClause}
+         ORDER BY close_date ASC
+         LIMIT 500`,
+        sqlParams
+      );
+
+      const upcomingRenewals = result.rows.map(r => {
+        let expectedCloseDate = r.close_date ? new Date(r.close_date) : new Date();
+        const cf = r.custom_fields || {};
+        const renewalDateKey = Object.keys(cf).find(k =>
+          /renewal_date|contract_end_date|renewal_due_date/i.test(k)
+        );
+        if (renewalDateKey && cf[renewalDateKey]) {
+          const parsed = new Date(cf[renewalDateKey]);
+          if (!isNaN(parsed.getTime())) expectedCloseDate = parsed;
+        }
+        return {
+          dealId: r.id,
+          name: r.name,
+          contractValue: r.amount ? Math.max(0, parseFloat(r.amount)) : 50000,
+          expectedCloseDate,
+          owner: r.owner,
+        };
+      });
+
+      const totalRenewalValue = upcomingRenewals.reduce((s, r) => s + r.contractValue, 0);
+
+      return { upcomingRenewals, renewalCount: upcomingRenewals.length, totalRenewalValue };
+    }, _params);
+  },
+};
+
 const mcRunSimulation: ToolDefinition = {
   name: 'mcRunSimulation',
   description: 'Run 10,000-iteration Monte Carlo simulation and compute variance drivers.',
@@ -6244,6 +6332,20 @@ const mcRunSimulation: ToolDefinition = {
       const forecastWindow = stepResults['forecast_window'] || {};
       const closedDealCount = stepResults['distributions']?.closedDealCount || 0;
 
+      const pipelineType = context.params?.pipelineType ?? 'new_business';
+      const pipelineFilter = context.params?.pipelineFilter ?? null;
+
+      const upcomingRenewals = stepResults['upcoming_renewals']?.upcomingRenewals || [];
+      const hydratedRenewals = upcomingRenewals.map((r: any) => ({
+        ...r,
+        expectedCloseDate: r.expectedCloseDate ? new Date(r.expectedCloseDate) : new Date(Date.now() + 90 * 86400000),
+      }));
+
+      const customerBaseARR = distributions?.expansionRate?.customerBaseARR ?? 0;
+      const expansionRate = distributions?.expansionRate
+        ? { mean: distributions.expansionRate.mean, sigma: distributions.expansionRate.sigma }
+        : null;
+
       if (!distributions) {
         return { error: 'Distributions not available — fit-distributions step must complete first.' };
       }
@@ -6261,12 +6363,16 @@ const mcRunSimulation: ToolDefinition = {
         forecastWindowEnd,
         today,
         iterations: 10000,
+        pipelineType,
+        upcomingRenewals: hydratedRenewals,
+        customerBaseARR,
+        expansionRate,
       };
 
       const simulation = runSimulation(simInputs, quota);
       simulation.closedDealsUsedForFitting = closedDealCount;
 
-      const varianceDrivers = computeVarianceDrivers(simInputs, simulation.p50);
+      const varianceDrivers = computeVarianceDrivers(simInputs, simulation.p50, pipelineType);
 
       const p50Total = simulation.p50;
       const existingPct = p50Total > 0
@@ -6275,11 +6381,13 @@ const mcRunSimulation: ToolDefinition = {
 
       const histogram = buildHistogram(simulation.iterationResults, 100);
 
-      // Determine data quality tier
       const dataQualityTier: 1 | 2 | 3 =
         closedDealCount < 20 ? 1 : quota !== null ? 3 : 2;
 
-      // Command center payload
+      const componentBMethod = pipelineType === 'renewal' ? 'fixed_population'
+        : pipelineType === 'expansion' ? 'bounded_expansion'
+        : 'generation';
+
       const commandCenter = {
         p50: simulation.p50,
         probOfHittingTarget: simulation.probOfHittingTarget,
@@ -6302,6 +6410,9 @@ const mcRunSimulation: ToolDefinition = {
         dataQualityTier,
         warnings: simulation.dataQuality.warnings,
         histogram,
+        pipelineFilter,
+        pipelineType,
+        componentBMethod,
       };
 
       return {
@@ -6429,6 +6540,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['mcResolveForecastWindow', mcResolveForecastWindow],
   ['mcFitDistributions', mcFitDistributions],
   ['mcLoadOpenDeals', mcLoadOpenDeals],
+  ['mcLoadUpcomingRenewals', mcLoadUpcomingRenewals],
   ['mcComputeRiskAdjustments', mcComputeRiskAdjustments],
   ['mcRunSimulation', mcRunSimulation],
 ]);

@@ -30,6 +30,9 @@ interface MonteCarloPayload {
   dataQualityTier: 1 | 2 | 3;
   warnings: string[];
   histogram: { bucketMin: number; bucketMax: number; count: number }[];
+  pipelineFilter?: string | null;
+  pipelineType?: string;
+  componentBMethod?: string;
 }
 
 interface MCResponse {
@@ -38,7 +41,20 @@ interface MCResponse {
   commandCenter: MonteCarloPayload;
 }
 
+interface PipelineOption {
+  name: string;
+  dealCount: number;
+  totalValue: number;
+  inferredType: 'new_business' | 'renewal' | 'expansion';
+}
+
 type PanelState = 'loading' | 'empty' | 'running' | 'error' | 'ready';
+
+const INFERRED_TYPE_LABELS: Record<string, string> = {
+  new_business: 'New Business',
+  renewal: 'Renewal',
+  expansion: 'Expansion',
+};
 
 function fmtCompact(n: number): string {
   if (n >= 1_000_000_000) return `$${(n / 1_000_000_000).toFixed(1)}B`;
@@ -53,6 +69,24 @@ function probColor(p: number): string {
   return colors.red;
 }
 
+function SpinnerIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ animation: 'mc-spin 1s linear infinite' }}>
+      <style>{`@keyframes mc-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+      <circle cx="12" cy="12" r="10" stroke={colors.textMuted} strokeWidth="2.5" strokeDasharray="31.4 31.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function RefreshIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="23 4 23 10 17 10" />
+      <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+    </svg>
+  );
+}
+
 export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
   const { anon } = useDemoMode();
   const [state, setState] = useState<PanelState>('loading');
@@ -61,10 +95,24 @@ export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
   const [triggeringRun, setTriggeringRun] = useState(false);
   const prevWsRef = useRef<string | undefined>(undefined);
 
-  const fetchData = async () => {
+  const [pipelines, setPipelines] = useState<PipelineOption[]>([]);
+  const [selectedPipeline, setSelectedPipeline] = useState<string | null>(null);
+  const [selectedPipelineType, setSelectedPipelineType] = useState<string | null>(null);
+
+  const fetchPipelines = async () => {
+    try {
+      const res = await api.get('/monte-carlo/pipelines');
+      setPipelines(Array.isArray(res) ? res : (res?.pipelines || []));
+    } catch {
+      setPipelines([]);
+    }
+  };
+
+  const fetchData = async (pipeline?: string | null) => {
     setState('loading');
     try {
-      const res: MCResponse = await api.get('/monte-carlo/latest');
+      const path = pipeline ? `/monte-carlo/latest?pipeline=${encodeURIComponent(pipeline)}` : '/monte-carlo/latest';
+      const res: MCResponse = await api.get(path);
       setData(res.commandCenter);
       setGeneratedAt(res.generatedAt);
       setState('ready');
@@ -82,22 +130,40 @@ export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
   useEffect(() => {
     if (wsId !== prevWsRef.current) {
       setData(null);
+      setSelectedPipeline(null);
+      setSelectedPipelineType(null);
       prevWsRef.current = wsId;
     }
-    fetchData();
+    fetchPipelines();
+    fetchData(null);
   }, [wsId]);
+
+  const handlePipelineChange = (value: string) => {
+    if (value === '__all__') {
+      setSelectedPipeline(null);
+      setSelectedPipelineType(null);
+      setData(null);
+      fetchData(null);
+    } else {
+      const found = pipelines.find(p => p.name === value);
+      setSelectedPipeline(value);
+      setSelectedPipelineType(found?.inferredType || null);
+      setData(null);
+      fetchData(value);
+    }
+  };
 
   const handleRunForecast = async () => {
     setTriggeringRun(true);
     try {
-      await api.post('/skills/monte-carlo-forecast/run');
+      await api.post('/skills/monte-carlo-forecast/run', { params: { pipelineFilter: selectedPipeline, pipelineType: selectedPipelineType } });
       setState('running');
       const poll = setInterval(async () => {
         try {
-          const res: MCResponse = await api.get('/monte-carlo/latest');
+          const path = selectedPipeline ? `/monte-carlo/latest?pipeline=${encodeURIComponent(selectedPipeline)}` : '/monte-carlo/latest';
+          const res: MCResponse = await api.get(path);
           setData(res.commandCenter);
           setGeneratedAt(res.generatedAt);
-          cachedRef.current = true;
           setState('ready');
           setTriggeringRun(false);
           clearInterval(poll);
@@ -110,6 +176,61 @@ export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
     }
   };
 
+  const pipelineSelector = (
+    <select
+      value={selectedPipeline || '__all__'}
+      onChange={(e) => handlePipelineChange(e.target.value)}
+      style={{
+        background: colors.surfaceRaised,
+        color: colors.text,
+        border: `1px solid ${colors.border}`,
+        borderRadius: 6,
+        padding: '4px 8px',
+        fontSize: 12,
+        fontFamily: fonts.sans,
+        cursor: 'pointer',
+        outline: 'none',
+        maxWidth: 220,
+      }}
+    >
+      <option value="__all__">All Pipelines</option>
+      {pipelines.map(p => (
+        <option key={p.name} value={p.name}>
+          {p.name} · {INFERRED_TYPE_LABELS[p.inferredType] || p.inferredType} · {p.dealCount} deals
+        </option>
+      ))}
+    </select>
+  );
+
+  const pipelineContextBadge = data?.pipelineFilter ? (
+    <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+      <span style={{
+        display: 'inline-block',
+        fontSize: 10,
+        fontWeight: 600,
+        background: colors.purpleSoft,
+        color: colors.purple,
+        padding: '2px 8px',
+        borderRadius: 4,
+      }}>
+        {data.pipelineFilter}
+      </span>
+      {data.pipelineType && (
+        <span style={{
+          display: 'inline-block',
+          fontSize: 10,
+          fontWeight: 600,
+          background: colors.accentSoft,
+          color: colors.accent,
+          padding: '2px 8px',
+          borderRadius: 4,
+        }}>
+          {INFERRED_TYPE_LABELS[data.pipelineType] || data.pipelineType}
+        </span>
+      )}
+    </div>
+  ) : null;
+
   if (state === 'loading') {
     return (
       <div style={{
@@ -119,7 +240,10 @@ export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
         padding: '18px 20px',
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>Monte Carlo Forecast</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>Monte Carlo Forecast</div>
+            {pipelineSelector}
+          </div>
           <span style={{ fontSize: 11, color: colors.textMuted }}>Computing 10,000 scenarios...</span>
         </div>
         <div style={{ display: 'flex', gap: 16 }}>
@@ -140,9 +264,16 @@ export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
         padding: '18px 20px',
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>Monte Carlo Forecast</div>
-          <span style={{ fontSize: 11, color: colors.accent }}>Computing 10,000 scenarios...</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>Monte Carlo Forecast</div>
+            {pipelineSelector}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 11, color: colors.accent }}>Computing 10,000 scenarios...</span>
+            <SpinnerIcon size={14} />
+          </div>
         </div>
+        {pipelineContextBadge}
         <div style={{ display: 'flex', gap: 16 }}>
           <Skeleton height={120} style={{ flex: '0 0 40%' }} />
           <Skeleton height={120} style={{ flex: '0 0 35%' }} />
@@ -161,6 +292,9 @@ export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
         padding: '18px 20px',
         textAlign: 'center',
       }}>
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 8 }}>
+          {pipelineSelector}
+        </div>
         <div style={{ fontSize: 28, marginBottom: 8 }}>{'\uD83C\uDFB2'}</div>
         <div style={{ fontSize: 14, fontWeight: 600, color: colors.text, marginBottom: 4 }}>
           Revenue forecast not yet computed
@@ -202,11 +336,14 @@ export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
         justifyContent: 'space-between',
       }}>
         <div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>Monte Carlo Forecast</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>Monte Carlo Forecast</div>
+            {pipelineSelector}
+          </div>
           <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>Forecast unavailable</div>
         </div>
         <button
-          onClick={() => { cachedRef.current = false; fetchData(); }}
+          onClick={() => { fetchData(selectedPipeline); }}
           style={{
             padding: '6px 14px',
             fontSize: 12,
@@ -267,13 +404,44 @@ export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
         </div>
       )}
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <div style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>Monte Carlo Forecast</div>
-        <span style={{ fontSize: 11, color: colors.textMuted }}>
-          {(iterationsRun || 10000).toLocaleString()} simulations · {dealsInSimulation} deals
-          {generatedAt ? ` · updated ${formatTimeAgo(generatedAt)}` : ''}
-        </span>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>Monte Carlo Forecast</div>
+          {pipelineSelector}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 11, color: colors.textMuted }}>
+            {(iterationsRun || 10000).toLocaleString()} simulations · {dealsInSimulation} deals
+            {generatedAt ? ` · updated ${formatTimeAgo(generatedAt)}` : ''}
+          </span>
+          <button
+            onClick={handleRunForecast}
+            disabled={triggeringRun}
+            title="Re-run forecast"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 28,
+              height: 28,
+              borderRadius: '50%',
+              background: 'transparent',
+              border: `1px solid ${colors.border}`,
+              color: colors.textMuted,
+              cursor: triggeringRun ? 'not-allowed' : 'pointer',
+              padding: 0,
+              transition: 'all 0.15s ease',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = colors.surfaceRaised; e.currentTarget.style.color = colors.text; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = colors.textMuted; }}
+          >
+            {triggeringRun ? <SpinnerIcon size={14} /> : <RefreshIcon size={14} />}
+          </button>
+        </div>
       </div>
+
+      {pipelineContextBadge && <div style={{ marginBottom: 12 }}>{pipelineContextBadge}</div>}
+      {!pipelineContextBadge && <div style={{ marginBottom: 12 }} />}
 
       <div style={{ display: 'flex', gap: 20, alignItems: 'stretch' }}>
         <HeadlineColumn
