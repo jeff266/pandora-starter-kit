@@ -17,6 +17,16 @@ export interface Account {
   custom_fields: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+  // Account scoring fields (joined from account_scores + account_signals)
+  total_score?: number;
+  grade?: string;
+  score_delta?: number;
+  data_confidence?: number;
+  signals?: unknown[];
+  signal_score?: number;
+  signal_industry?: string;
+  growth_stage?: string;
+  classification_confidence?: number;
 }
 
 interface AccountDeal {
@@ -38,7 +48,7 @@ export interface AccountFilters {
   revenueMin?: number;
   revenueMax?: number;
   search?: string;
-  sortBy?: 'name' | 'annual_revenue' | 'employee_count' | 'health_score' | 'created_at';
+  sortBy?: 'name' | 'annual_revenue' | 'employee_count' | 'health_score' | 'created_at' | 'total_score';
   sortDir?: 'asc' | 'desc';
   limit?: number;
   offset?: number;
@@ -100,25 +110,38 @@ function buildWhereClause(workspaceId: string, filters: AccountFilters) {
   return { where: conditions.join(' AND '), params, idx };
 }
 
-const VALID_SORT_COLUMNS = new Set(['name', 'annual_revenue', 'employee_count', 'health_score', 'created_at']);
+const VALID_SORT_COLUMNS = new Set(['name', 'annual_revenue', 'employee_count', 'health_score', 'created_at', 'total_score']);
 
 export async function queryAccounts(workspaceId: string, filters: AccountFilters): Promise<{ accounts: Account[]; total: number; limit: number; offset: number }> {
   const { where, params, idx } = buildWhereClause(workspaceId, filters);
 
-  const sortBy = filters.sortBy && VALID_SORT_COLUMNS.has(filters.sortBy) ? filters.sortBy : 'name';
+  const rawSort = filters.sortBy && VALID_SORT_COLUMNS.has(filters.sortBy) ? filters.sortBy : 'name';
   const sortDir = filters.sortDir === 'desc' ? 'DESC' : 'ASC';
-  const limit = Math.min(Math.max(filters.limit ?? 50, 1), 200);
+  // Score sort uses joined column; others use accounts table prefix
+  const sortExpr = rawSort === 'total_score'
+    ? `acs.total_score ${sortDir} NULLS LAST`
+    : `a.${rawSort} ${sortDir}`;
+  const limit = Math.min(Math.max(filters.limit ?? 50, 1), 500);
   const offset = Math.max(filters.offset ?? 0, 0);
 
   const countResult = await query<{ count: string }>(
-    `SELECT COUNT(*) AS count FROM accounts WHERE ${where}`,
+    `SELECT COUNT(*) AS count FROM accounts a WHERE ${where.replace('workspace_id', 'a.workspace_id')}`,
     params,
   );
   const total = parseInt(countResult.rows[0].count, 10);
 
   const dataParams = [...params, limit, offset];
   const dataResult = await query<Account>(
-    `SELECT * FROM accounts WHERE ${where} ORDER BY ${sortBy} ${sortDir} LIMIT $${idx} OFFSET $${idx + 1}`,
+    `SELECT a.*,
+       acs.total_score, acs.grade, acs.score_delta, acs.data_confidence,
+       asig.signals, asig.signal_score, asig.industry AS signal_industry,
+       asig.growth_stage, asig.classification_confidence
+     FROM accounts a
+     LEFT JOIN account_scores acs ON acs.account_id = a.id AND acs.workspace_id = a.workspace_id
+     LEFT JOIN account_signals asig ON asig.account_id = a.id AND asig.workspace_id = a.workspace_id
+     WHERE ${where.replace(/\bworkspace_id\b/g, 'a.workspace_id')}
+     ORDER BY ${sortExpr}
+     LIMIT $${idx} OFFSET $${idx + 1}`,
     dataParams,
   );
 

@@ -308,6 +308,48 @@ export function startSkillScheduler(): void {
   console.log(`[Skill Scheduler] ${scheduledSkills.length} cron schedule(s) registered (${agentCronCount} agent(s))`);
 }
 
+// ── Account enrichment & scoring cron jobs ────────────────────────────────
+
+// Sunday 2am UTC — refresh stale account enrichments
+cron.schedule('0 2 * * 0', async () => {
+  console.log('[Skill Scheduler] Running weekly account enrichment batch');
+  try {
+    const workspacesResult = await query<{ id: string }>(
+      `SELECT DISTINCT w.id FROM workspaces w
+       INNER JOIN connections c ON c.workspace_id = w.id
+       WHERE c.status IN ('connected', 'synced', 'error')`
+    );
+    for (const ws of workspacesResult.rows) {
+      const { runAccountEnrichmentBatch } = await import('../enrichment/account-enrichment-batch.js');
+      await runAccountEnrichmentBatch(ws.id, { limit: 200 }).catch(err =>
+        console.error('[Skill Scheduler] Account enrichment failed for workspace', ws.id, err)
+      );
+    }
+  } catch (err) {
+    console.error('[Skill Scheduler] Account enrichment cron error:', err);
+  }
+}, { timezone: 'UTC' });
+
+// Daily 3am UTC — refresh scores for accounts with open deals
+cron.schedule('0 3 * * *', async () => {
+  console.log('[Skill Scheduler] Running daily account scoring pass');
+  try {
+    const workspacesResult = await query<{ id: string }>(
+      `SELECT DISTINCT w.id FROM workspaces w
+       INNER JOIN connections c ON c.workspace_id = w.id
+       WHERE c.status IN ('connected', 'synced', 'error')`
+    );
+    for (const ws of workspacesResult.rows) {
+      const { runAccountScoringBatch } = await import('../enrichment/account-enrichment-batch.js');
+      await runAccountScoringBatch(ws.id, { limit: 500 }).catch(err =>
+        console.error('[Skill Scheduler] Account scoring failed for workspace', ws.id, err)
+      );
+    }
+  } catch (err) {
+    console.error('[Skill Scheduler] Account scoring cron error:', err);
+  }
+}, { timezone: 'UTC' });
+
 /**
  * Stop the skill scheduler (graceful shutdown)
  */

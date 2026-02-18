@@ -8,6 +8,14 @@ import { useDemoMode } from '../contexts/DemoModeContext';
 
 const PAGE_SIZE = 50;
 
+interface Signal {
+  type: string;
+  signal: string;
+  source_url: string;
+  relevance: number;
+  date: string | null;
+}
+
 interface Account {
   id: string;
   name: string;
@@ -19,9 +27,70 @@ interface Account {
   finding_count: number;
   last_activity: string;
   owner: string;
+  // Score fields
+  total_score?: number;
+  grade?: string;
+  score_delta?: number;
+  data_confidence?: number;
+  signals?: Signal[];
+  signal_score?: number;
+  classification_confidence?: number;
 }
 
-type SortField = 'name' | 'domain' | 'industry' | 'open_deals' | 'pipeline' | 'contacts' | 'last_activity';
+const GRADE_COLORS: Record<string, { bg: string; text: string }> = {
+  A: { bg: '#dcfce7', text: '#16a34a' },
+  B: { bg: '#ccfbf1', text: '#0d9488' },
+  C: { bg: '#fef9c3', text: '#ca8a04' },
+  D: { bg: '#ffedd5', text: '#ea580c' },
+  F: { bg: '#f3f4f6', text: '#9ca3af' },
+};
+
+function ScoreBadge({ grade, score, scoreDelta, dataConfidence }: {
+  grade?: string; score?: number; scoreDelta?: number; dataConfidence?: number;
+}) {
+  if (!grade) return <span style={{ color: '#9ca3af', fontSize: 12 }}>—</span>;
+  const c = GRADE_COLORS[grade] || GRADE_COLORS.F;
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+      <span style={{
+        background: c.bg, color: c.text, fontWeight: 700, fontSize: 13,
+        borderRadius: 4, padding: '1px 7px',
+      }}>{grade}</span>
+      <span style={{ fontSize: 11, color: '#6b7280' }}>{score}</span>
+      {scoreDelta !== undefined && scoreDelta >= 10 && (
+        <span style={{ fontSize: 11, color: '#16a34a' }}>↑+{scoreDelta}</span>
+      )}
+      {(dataConfidence ?? 100) < 40 && (
+        <span title="Limited data available" style={{ color: '#ca8a04', fontSize: 11 }}>⚠</span>
+      )}
+    </span>
+  );
+}
+
+function SignalBadges({ signals, confidence }: { signals?: Signal[]; confidence?: number }) {
+  const badges: { label: string; color: string }[] = [];
+  if (signals) {
+    if (signals.some(s => s.type === 'hiring')) badges.push({ label: 'Hiring', color: '#16a34a' });
+    if (signals.some(s => s.type === 'funding')) badges.push({ label: 'Funded', color: '#2563eb' });
+    if (signals.some(s => s.type === 'expansion')) badges.push({ label: 'Expanding', color: '#ca8a04' });
+    if (signals.some(s => s.type === 'layoff')) badges.push({ label: 'Layoffs', color: '#dc2626' });
+  }
+  if ((confidence ?? 100) < 40 && signals !== undefined) badges.push({ label: 'Limited data', color: '#9ca3af' });
+  if (!signals && confidence === undefined) return <span style={{ fontSize: 11, color: '#9ca3af' }}>Unscored</span>;
+  if (badges.length === 0) return null;
+  return (
+    <span style={{ display: 'inline-flex', gap: 4, flexWrap: 'wrap' }}>
+      {badges.slice(0, 3).map((b, i) => (
+        <span key={i} style={{
+          fontSize: 11, color: b.color, border: `1px solid ${b.color}`,
+          borderRadius: 10, padding: '0px 6px', whiteSpace: 'nowrap',
+        }}>{b.label}</span>
+      ))}
+    </span>
+  );
+}
+
+type SortField = 'name' | 'domain' | 'industry' | 'open_deals' | 'pipeline' | 'contacts' | 'last_activity' | 'score';
 type SortDir = 'asc' | 'desc';
 
 export default function AccountList() {
@@ -38,6 +107,10 @@ export default function AccountList() {
   const [sortField, setSortField] = useState<SortField>('name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [page, setPage] = useState(0);
+  const [selectedAccount, setSelectedAccount] = useState<Account | null>(null);
+  const [drawerWhy, setDrawerWhy] = useState<string | null>(null);
+  const [drawerWhyLoading, setDrawerWhyLoading] = useState(false);
+  const [enrichingId, setEnrichingId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchAccounts();
@@ -59,6 +132,13 @@ export default function AccountList() {
         finding_count: a.finding_count || 0,
         last_activity: a.last_activity || a.updated_at || '',
         owner: a.owner || a.owner_email || '',
+        total_score: a.total_score ?? undefined,
+        grade: a.grade ?? undefined,
+        score_delta: a.score_delta ?? undefined,
+        data_confidence: a.data_confidence ?? undefined,
+        signals: Array.isArray(a.signals) ? a.signals : undefined,
+        signal_score: a.signal_score ?? undefined,
+        classification_confidence: a.classification_confidence ?? undefined,
       })));
       setError('');
     } catch (err: any) {
@@ -116,6 +196,7 @@ export default function AccountList() {
           cmp = da - db;
           break;
         }
+        case 'score': cmp = (a.total_score ?? -1) - (b.total_score ?? -1); break;
       }
       if (cmp === 0) cmp = a.name.localeCompare(b.name);
       return sortDir === 'desc' ? -cmp : cmp;
@@ -141,14 +222,16 @@ export default function AccountList() {
   const clearFilters = () => { setSearch(''); setIndustryFilter('all'); setOwnerFilter('all'); };
 
   type ColDef = { field: SortField; label: string; width: string; show: boolean };
+  const hasScoreData = accounts.some(a => a.grade);
   const columns: ColDef[] = [
-    { field: 'name', label: 'Account Name', width: '25%', show: true },
-    { field: 'domain', label: 'Domain', width: '15%', show: true },
-    { field: 'industry', label: 'Industry', width: '15%', show: hasIndustryData },
-    { field: 'open_deals', label: 'Open Deals', width: '10%', show: hasDealData },
-    { field: 'pipeline', label: 'Pipeline Value', width: '12%', show: hasPipelineData },
-    { field: 'contacts', label: 'Contacts', width: '8%', show: hasContactData },
-    { field: 'last_activity', label: 'Last Activity', width: '15%', show: hasActivityData },
+    { field: 'name', label: 'Account Name', width: '22%', show: true },
+    { field: 'domain', label: 'Domain', width: '13%', show: true },
+    { field: 'score', label: 'Score', width: '10%', show: true },
+    { field: 'industry', label: 'Industry', width: '12%', show: hasIndustryData },
+    { field: 'open_deals', label: 'Open Deals', width: '8%', show: hasDealData },
+    { field: 'pipeline', label: 'Pipeline', width: '10%', show: hasPipelineData },
+    { field: 'contacts', label: 'Contacts', width: '7%', show: hasContactData },
+    { field: 'last_activity', label: 'Last Activity', width: '13%', show: hasActivityData },
   ];
   const visibleColumns = columns.filter(c => c.show);
   const gridTemplate = visibleColumns.map(c => c.width).join(' ');
@@ -277,7 +360,15 @@ export default function AccountList() {
           pageAccounts.map(account => (
             <div
               key={account.id}
-              onClick={() => navigate(`/accounts/${account.id}`)}
+              onClick={() => {
+                setSelectedAccount(account);
+                setDrawerWhy(null);
+                setDrawerWhyLoading(true);
+                api.get(`/accounts/${account.id}/score/why`)
+                  .then((r: any) => setDrawerWhy(r.why || ''))
+                  .catch(() => setDrawerWhy('Unable to load analysis.'))
+                  .finally(() => setDrawerWhyLoading(false));
+              }}
               style={{
                 display: 'grid', gridTemplateColumns: gridTemplate,
                 padding: '12px 20px',
@@ -293,6 +384,13 @@ export default function AccountList() {
               </div>
               <div style={{ fontSize: 12, color: colors.textSecondary, fontFamily: fonts.mono, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {account.domain || '—'}
+              </div>
+              {/* Score column — always shown */}
+              <div>
+                <ScoreBadge grade={account.grade} score={account.total_score} scoreDelta={account.score_delta} dataConfidence={account.data_confidence} />
+                <div style={{ marginTop: 4 }}>
+                  <SignalBadges signals={account.signals} confidence={account.classification_confidence} />
+                </div>
               </div>
               {hasIndustryData && (
                 <div style={{ fontSize: 12, color: colors.textMuted }}>
@@ -360,6 +458,137 @@ export default function AccountList() {
             </button>
           </div>
         </div>
+      )}
+
+      {/* Score Drawer */}
+      {selectedAccount && (
+        <>
+          {/* Overlay */}
+          <div
+            onClick={() => setSelectedAccount(null)}
+            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.3)', zIndex: 100 }}
+          />
+          {/* Panel */}
+          <div style={{
+            position: 'fixed', top: 0, right: 0, bottom: 0, width: 400,
+            background: colors.surface, borderLeft: `1px solid ${colors.border}`,
+            zIndex: 101, overflowY: 'auto', padding: 24, display: 'flex', flexDirection: 'column', gap: 16,
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <h3 style={{ fontSize: 15, fontWeight: 600, color: colors.text, margin: 0 }}>
+                  {anon.company(selectedAccount.name)}
+                </h3>
+                {selectedAccount.domain && (
+                  <span style={{ fontSize: 11, color: colors.textMuted }}>{selectedAccount.domain}</span>
+                )}
+              </div>
+              <button onClick={() => setSelectedAccount(null)} style={{
+                background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, color: colors.textMuted, lineHeight: 1,
+              }}>×</button>
+            </div>
+
+            {/* Score summary */}
+            <div style={{ background: colors.surfaceRaised, borderRadius: 8, padding: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+                <ScoreBadge grade={selectedAccount.grade} score={selectedAccount.total_score} scoreDelta={selectedAccount.score_delta} dataConfidence={selectedAccount.data_confidence} />
+                {selectedAccount.total_score !== undefined && (
+                  <span style={{ fontSize: 20, fontWeight: 700, color: colors.text }}>{selectedAccount.total_score}/100</span>
+                )}
+              </div>
+              {selectedAccount.data_confidence !== undefined && (
+                <div style={{ fontSize: 11, color: colors.textMuted }}>Data confidence: {selectedAccount.data_confidence}%</div>
+              )}
+              <div style={{ marginTop: 8 }}>
+                <SignalBadges signals={selectedAccount.signals} confidence={selectedAccount.classification_confidence} />
+              </div>
+            </div>
+
+            {/* Score breakdown */}
+            {selectedAccount.grade && (
+              <div>
+                <h4 style={{ fontSize: 12, fontWeight: 600, color: colors.textSecondary, margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Score Breakdown</h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {[
+                    { label: 'Firmographic fit', max: 30 },
+                    { label: 'Signals', max: 30 },
+                    { label: 'Engagement', max: 20 },
+                    { label: 'Deal history', max: 15 },
+                  ].map(item => (
+                    <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 12, color: colors.textSecondary, width: 130, flexShrink: 0 }}>{item.label}</span>
+                      <div style={{ flex: 1, height: 6, background: colors.border, borderRadius: 3 }}>
+                        <div style={{
+                          width: `${Math.min(100, ((selectedAccount.total_score || 0) / 100) * 100)}%`,
+                          height: '100%', background: colors.accent, borderRadius: 3,
+                        }} />
+                      </div>
+                      <span style={{ fontSize: 11, color: colors.textMuted, width: 40, textAlign: 'right' }}>/{item.max}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Signals */}
+            {selectedAccount.signals && selectedAccount.signals.length > 0 && (
+              <div>
+                <h4 style={{ fontSize: 12, fontWeight: 600, color: colors.textSecondary, margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Signals Detected</h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {selectedAccount.signals.slice(0, 5).map((s, i) => (
+                    <div key={i} style={{ fontSize: 12, color: colors.text, background: colors.surfaceRaised, borderRadius: 6, padding: '6px 10px' }}>
+                      <span style={{ fontWeight: 500, textTransform: 'capitalize' }}>{s.type.replace('_', ' ')}</span>
+                      {' — '}{s.signal}
+                      {s.date && <span style={{ color: colors.textMuted }}> · {s.date}</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Why this matters */}
+            <div>
+              <h4 style={{ fontSize: 12, fontWeight: 600, color: colors.textSecondary, margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Why This Matters</h4>
+              {drawerWhyLoading ? (
+                <div style={{ fontSize: 12, color: colors.textMuted, fontStyle: 'italic' }}>Analyzing...</div>
+              ) : (
+                <p style={{ fontSize: 12, color: colors.text, lineHeight: 1.6, margin: 0 }}>{drawerWhy || '—'}</p>
+              )}
+            </div>
+
+            {/* Actions */}
+            <div style={{ display: 'flex', gap: 10, marginTop: 'auto', paddingTop: 16, borderTop: `1px solid ${colors.border}` }}>
+              <button
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  setEnrichingId(selectedAccount.id);
+                  try {
+                    await api.post(`/accounts/${selectedAccount.id}/enrich`, {});
+                    await fetchAccounts();
+                  } catch {}
+                  setEnrichingId(null);
+                }}
+                disabled={enrichingId === selectedAccount.id}
+                style={{
+                  fontSize: 12, padding: '7px 14px', borderRadius: 6, cursor: 'pointer',
+                  background: colors.accentSoft, color: colors.accent, border: `1px solid ${colors.accent}`,
+                  opacity: enrichingId === selectedAccount.id ? 0.6 : 1,
+                }}
+              >
+                {enrichingId === selectedAccount.id ? 'Enriching...' : 'Enrich Now'}
+              </button>
+              <button
+                onClick={() => navigate(`/accounts/${selectedAccount.id}`)}
+                style={{
+                  fontSize: 12, padding: '7px 14px', borderRadius: 6, cursor: 'pointer',
+                  background: 'none', color: colors.textSecondary, border: `1px solid ${colors.border}`,
+                }}
+              >
+                View Deals
+              </button>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );
