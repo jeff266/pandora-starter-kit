@@ -5402,6 +5402,637 @@ const crrGenerateCoverageFindings: ToolDefinition = {
 };
 
 // ============================================================================
+// Deal Scoring Model Tools
+// ============================================================================
+
+const dsmGatherOpenDeals: ToolDefinition = {
+  name: 'dsmGatherOpenDeals',
+  description: 'Gather all open deals with activity signals and contact role coverage for scoring',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (params, context) => {
+    return safeExecute('dsmGatherOpenDeals', async () => {
+      const result = await query<any>(
+        `SELECT
+           d.id, d.name, d.amount, d.stage, d.stage_normalized,
+           d.close_date, d.owner, d.days_in_stage, d.probability,
+           d.forecast_category, d.next_steps, d.lead_source,
+           d.ai_score as previous_ai_score, d.created_at as deal_created_at,
+           -- Contact coverage
+           COUNT(DISTINCT dc.id)::int as contact_count,
+           BOOL_OR(dc.role = 'economic_buyer')::bool as has_economic_buyer,
+           BOOL_OR(dc.role = 'champion')::bool as has_champion,
+           BOOL_OR(dc.role = 'technical_evaluator')::bool as has_technical_evaluator,
+           -- Activity signals
+           COUNT(a.id) FILTER (WHERE a.timestamp >= NOW() - INTERVAL '7 days')::int as activities_7d,
+           COUNT(a.id) FILTER (WHERE a.timestamp >= NOW() - INTERVAL '14 days')::int as activities_14d,
+           COUNT(a.id) FILTER (WHERE a.timestamp >= NOW() - INTERVAL '30 days')::int as activities_30d,
+           COUNT(a.id) FILTER (WHERE a.activity_type = 'meeting' AND a.timestamp >= NOW() - INTERVAL '14 days')::int as meetings_14d,
+           MAX(a.timestamp) as last_activity_at
+         FROM deals d
+         LEFT JOIN deal_contacts dc ON dc.deal_id = d.id AND dc.workspace_id = d.workspace_id
+         LEFT JOIN activities a ON a.deal_id = d.id AND a.workspace_id = d.workspace_id
+         WHERE d.workspace_id = $1
+           AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+           AND d.amount > 0
+         GROUP BY d.id, d.name, d.amount, d.stage, d.stage_normalized,
+                  d.close_date, d.owner, d.days_in_stage, d.probability,
+                  d.forecast_category, d.next_steps, d.lead_source,
+                  d.ai_score, d.created_at
+         ORDER BY d.amount DESC NULLS LAST`,
+        [context.workspaceId]
+      );
+
+      const deals = result.rows.map((r: any) => ({
+        id: r.id,
+        name: r.name,
+        amount: parseFloat(r.amount || '0'),
+        stage: r.stage,
+        stage_normalized: r.stage_normalized,
+        close_date: r.close_date,
+        owner: r.owner,
+        days_in_stage: r.days_in_stage || 0,
+        probability: parseFloat(r.probability || '0'),
+        forecast_category: r.forecast_category,
+        next_steps: r.next_steps || '',
+        lead_source: r.lead_source,
+        previous_ai_score: r.previous_ai_score,
+        deal_created_at: r.deal_created_at,
+        contact_count: r.contact_count || 0,
+        has_economic_buyer: r.has_economic_buyer || false,
+        has_champion: r.has_champion || false,
+        has_technical_evaluator: r.has_technical_evaluator || false,
+        activities_7d: r.activities_7d || 0,
+        activities_14d: r.activities_14d || 0,
+        activities_30d: r.activities_30d || 0,
+        meetings_14d: r.meetings_14d || 0,
+        last_activity_at: r.last_activity_at,
+        days_since_last_activity: r.last_activity_at
+          ? Math.floor((Date.now() - new Date(r.last_activity_at).getTime()) / 86400000)
+          : 999,
+      }));
+
+      return {
+        deals,
+        total_open_deals: deals.length,
+        total_pipeline_value: deals.reduce((sum: number, d: any) => sum + d.amount, 0),
+      };
+    }, params);
+  },
+};
+
+const dsmGatherScoringContext: ToolDefinition = {
+  name: 'dsmGatherScoringContext',
+  description: 'Gather stage benchmarks and rep win rates for deal scoring context',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (params, context) => {
+    return safeExecute('dsmGatherScoringContext', async () => {
+      // Stage benchmarks: median and p75 days per stage from closed-won deals
+      const benchmarkResult = await query<any>(
+        `SELECT stage_normalized,
+                PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY days_in_stage) as median_days,
+                PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY days_in_stage) as p75_days,
+                PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY days_in_stage) as p90_days,
+                COUNT(*)::int as sample_size
+         FROM deals
+         WHERE workspace_id = $1
+           AND stage_normalized = 'closed_won'
+           AND days_in_stage > 0
+           AND created_at >= NOW() - INTERVAL '12 months'
+         GROUP BY stage_normalized`,
+        [context.workspaceId]
+      ).catch(() => ({ rows: [] as any[] }));
+
+      // Also get per-stage benchmarks from all deals (not just CW)
+      const stageResult = await query<any>(
+        `SELECT stage_normalized,
+                PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY days_in_stage) as median_days,
+                PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY days_in_stage) as p75_days,
+                COUNT(*)::int as sample_size
+         FROM deals
+         WHERE workspace_id = $1
+           AND days_in_stage > 0
+           AND created_at >= NOW() - INTERVAL '12 months'
+         GROUP BY stage_normalized`,
+        [context.workspaceId]
+      ).catch(() => ({ rows: [] as any[] }));
+
+      // Rep win rates from closed deals (last 12 months)
+      const repResult = await query<any>(
+        `SELECT owner,
+                COUNT(*) FILTER (WHERE stage_normalized = 'closed_won')::int as wins,
+                COUNT(*) FILTER (WHERE stage_normalized IN ('closed_won', 'closed_lost'))::int as decisions,
+                COUNT(*) FILTER (WHERE stage_normalized IN ('closed_won', 'closed_lost'))::float as total_closed
+         FROM deals
+         WHERE workspace_id = $1
+           AND stage_normalized IN ('closed_won', 'closed_lost')
+           AND updated_at >= NOW() - INTERVAL '12 months'
+           AND owner IS NOT NULL AND owner != ''
+         GROUP BY owner
+         HAVING COUNT(*) FILTER (WHERE stage_normalized IN ('closed_won', 'closed_lost')) >= 3`,
+        [context.workspaceId]
+      ).catch(() => ({ rows: [] as any[] }));
+
+      const stageBenchmarks: Record<string, { median_days: number; p75_days: number; p90_days: number }> = {};
+      for (const row of stageResult.rows) {
+        stageBenchmarks[row.stage_normalized] = {
+          median_days: parseFloat(row.median_days || '30'),
+          p75_days: parseFloat(row.p75_days || '45'),
+          p90_days: parseFloat(row.p90_days || '60'),
+        };
+      }
+
+      const repWinRates: Record<string, number> = {};
+      let totalWins = 0;
+      let totalDecisions = 0;
+      for (const row of repResult.rows) {
+        const winRate = row.decisions > 0 ? row.wins / row.decisions : 0;
+        repWinRates[row.owner] = winRate;
+        totalWins += row.wins;
+        totalDecisions += row.decisions;
+      }
+      const workspaceWinRate = totalDecisions > 0 ? totalWins / totalDecisions : 0.25;
+
+      return {
+        stage_benchmarks: stageBenchmarks,
+        rep_win_rates: repWinRates,
+        workspace_win_rate: workspaceWinRate,
+        total_reps_analyzed: repResult.rows.length,
+      };
+    }, params);
+  },
+};
+
+const dsmComputeAndWriteScores: ToolDefinition = {
+  name: 'dsmComputeAndWriteScores',
+  description: 'Compute 5-dimension deal scores and write ai_score back to deals table',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (params, context) => {
+    return safeExecute('dsmComputeAndWriteScores', async () => {
+      const openDealsData = (context.stepResults as any).open_deals_data;
+      const scoringContext = (context.stepResults as any).scoring_context;
+
+      if (!openDealsData?.deals?.length) {
+        return { scored: 0, avg_score: 0, score_distribution: {}, deals_scored: [] };
+      }
+
+      const deals: any[] = openDealsData.deals;
+      const stageBenchmarks: Record<string, any> = scoringContext?.stage_benchmarks || {};
+      const repWinRates: Record<string, number> = scoringContext?.rep_win_rates || {};
+      const workspaceWinRate: number = scoringContext?.workspace_win_rate || 0.25;
+
+      const scoredDeals: any[] = [];
+
+      for (const deal of deals) {
+        // ─── Dimension 1: Qualification / Fit (20%) ───────────────────────────
+        let dim1 = 0;
+        // Amount confidence: amount > 0 → 30pts
+        if (deal.amount > 0) dim1 += 30;
+        // Data completeness: next_steps filled → 15pts, contact_count > 1 → 15pts
+        if (deal.next_steps && deal.next_steps.length > 10) dim1 += 15;
+        if (deal.contact_count > 1) dim1 += 15;
+        // Stage appropriateness: close_date realistic?
+        if (deal.close_date) {
+          const daysToClose = Math.floor((new Date(deal.close_date).getTime() - Date.now()) / 86400000);
+          const stageOrder: Record<string, number> = {
+            awareness: 0, qualification: 1, evaluation: 2, proposal: 3, negotiation: 4, closed_won: 5, closed_lost: 5
+          };
+          const stageRank = stageOrder[deal.stage_normalized] ?? 1;
+          // Late stage + reasonable close window = good
+          if (stageRank >= 3 && daysToClose >= 7 && daysToClose <= 90) dim1 += 40;
+          else if (stageRank >= 2 && daysToClose >= 14 && daysToClose <= 180) dim1 += 25;
+          else if (daysToClose > 180 && stageRank <= 1) dim1 += 20; // early stage, far out = ok
+          else if (daysToClose < 0) dim1 += 0; // overdue
+          else dim1 += 15;
+        } else {
+          dim1 += 10; // no close date = poor data quality
+        }
+        dim1 = Math.min(100, dim1);
+
+        // ─── Dimension 2: Engagement / Buying Signals (25%) ──────────────────
+        let dim2 = 0;
+        // Activity trend (simplified from 30-day windows)
+        const act30 = deal.activities_30d;
+        const act7 = deal.activities_7d;
+        const earlyAct = act30 - deal.activities_14d;
+        const lateAct = deal.activities_14d;
+        const trendSlope = lateAct - earlyAct; // positive = accelerating
+        if (trendSlope > 1) dim2 += 40; // increasing
+        else if (act30 > 0 && trendSlope >= -1) dim2 += 20; // flat but active
+        else dim2 += 0; // declining or zero
+        // Days since last activity
+        const dsla = deal.days_since_last_activity;
+        if (dsla < 7) dim2 += 30;
+        else if (dsla < 14) dim2 += 20;
+        else if (dsla < 30) dim2 += 10;
+        // Contact breadth
+        if (deal.has_economic_buyer) dim2 += 15;
+        if (deal.has_champion) dim2 += 15;
+        if (deal.contact_count >= 3) dim2 += 20;
+        else if (deal.contact_count >= 2) dim2 += 10;
+        dim2 = Math.min(100, dim2);
+
+        // ─── Dimension 3: Velocity / Timing (20%) ────────────────────────────
+        let dim3 = 0;
+        const benchmark = stageBenchmarks[deal.stage_normalized];
+        const p75 = benchmark?.p75_days || 30;
+        const p90 = benchmark?.p90_days || 60;
+        // Stage pacing
+        if (deal.days_in_stage < p75) dim3 += 40;
+        else if (deal.days_in_stage < p90) dim3 += 20;
+        // Close date stability (no way to check pushes without field history — default 20)
+        dim3 += 20;
+        // Days to close vs stage
+        if (deal.close_date) {
+          const daysToClose = Math.floor((new Date(deal.close_date).getTime() - Date.now()) / 86400000);
+          const stageOrder: Record<string, number> = { awareness: 0, qualification: 1, evaluation: 2, proposal: 3, negotiation: 4 };
+          const stageRank = stageOrder[deal.stage_normalized] ?? 1;
+          if (daysToClose >= 14 && daysToClose <= 90 && stageRank >= 3) dim3 += 40; // late stage, near close
+          else if (daysToClose > 90 && stageRank <= 1) dim3 += 30; // early stage, far out
+          else if (daysToClose < 14 && stageRank < 3) dim3 += 0; // wishful
+          else dim3 += 20;
+        } else {
+          dim3 += 15;
+        }
+        dim3 = Math.min(100, dim3);
+
+        // ─── Dimension 4: Seller Execution (20%) ─────────────────────────────
+        let dim4 = 0;
+        // Rep win rate
+        const repRate = repWinRates[deal.owner] ?? workspaceWinRate;
+        if (repRate > 0.30) dim4 += 40;
+        else if (repRate > 0.20) dim4 += 25;
+        else dim4 += 10;
+        // Next steps documented
+        if (deal.next_steps && deal.next_steps.length > 10) dim4 += 30;
+        // Recent meetings
+        if (deal.meetings_14d >= 2) dim4 += 30;
+        else if (deal.meetings_14d >= 1) dim4 += 20;
+        dim4 = Math.min(100, dim4);
+
+        // ─── Dimension 5: Pipeline Position (15%) ────────────────────────────
+        let dim5 = 0;
+        // Forecast category
+        const fc = (deal.forecast_category || '').toLowerCase();
+        if (fc === 'commit' || fc === 'closed') dim5 += 50;
+        else if (fc === 'best_case' || fc === 'best case') dim5 += 35;
+        else if (fc === 'pipeline') dim5 += 20;
+        // Stage normalized
+        const sn = deal.stage_normalized || '';
+        if (sn === 'negotiation') dim5 += 30;
+        else if (sn === 'proposal' || sn === 'evaluation') dim5 += 20;
+        else if (sn === 'qualification') dim5 += 10;
+        else dim5 += 5;
+        // Rep stated probability (max 20)
+        if (deal.probability > 0) {
+          dim5 += Math.min(20, Math.round(deal.probability / 5));
+        }
+        dim5 = Math.min(100, dim5);
+
+        // ─── Overall weighted score ───────────────────────────────────────────
+        const overall = Math.round(
+          dim1 * 0.20 +
+          dim2 * 0.25 +
+          dim3 * 0.20 +
+          dim4 * 0.20 +
+          dim5 * 0.15
+        );
+
+        const breakdown = {
+          qualification: dim1,
+          engagement: dim2,
+          velocity: dim3,
+          execution: dim4,
+          position: dim5,
+        };
+
+        // Write score to DB
+        try {
+          await query(
+            `UPDATE deals
+             SET ai_score = $1,
+                 ai_score_updated_at = NOW(),
+                 ai_score_breakdown = $2
+             WHERE id = $3 AND workspace_id = $4`,
+            [overall, JSON.stringify(breakdown), deal.id, context.workspaceId]
+          );
+        } catch { /* non-fatal */ }
+
+        scoredDeals.push({
+          id: deal.id,
+          name: deal.name,
+          amount: deal.amount,
+          stage: deal.stage,
+          owner: deal.owner,
+          overall_score: overall,
+          previous_score: deal.previous_ai_score,
+          score_delta: deal.previous_ai_score != null ? overall - deal.previous_ai_score : null,
+          breakdown,
+          primary_risk: Object.entries(breakdown).sort(([, a], [, b]) => (a as number) - (b as number))[0]?.[0] || 'unknown',
+        });
+      }
+
+      // ─── Workspace summary ────────────────────────────────────────────────────
+      const distribution = { strong: 0, solid: 0, uncertain: 0, at_risk: 0, critical: 0 };
+      for (const d of scoredDeals) {
+        if (d.overall_score >= 80) distribution.strong++;
+        else if (d.overall_score >= 60) distribution.solid++;
+        else if (d.overall_score >= 40) distribution.uncertain++;
+        else if (d.overall_score >= 20) distribution.at_risk++;
+        else distribution.critical++;
+      }
+
+      const avgScore = scoredDeals.length > 0
+        ? Math.round(scoredDeals.reduce((s: number, d: any) => s + d.overall_score, 0) / scoredDeals.length)
+        : 0;
+
+      const movers = scoredDeals.filter((d: any) => d.score_delta != null).sort((a: any, b: any) => Math.abs(b.score_delta) - Math.abs(a.score_delta));
+      const biggestImprovers = movers.filter((d: any) => d.score_delta > 0).slice(0, 5);
+      const biggestDecliners = movers.filter((d: any) => d.score_delta < 0).slice(0, 5);
+      const highValueAtRisk = scoredDeals.filter((d: any) => d.amount > 50000 && d.overall_score < 40)
+        .sort((a: any, b: any) => b.amount - a.amount).slice(0, 10);
+
+      return {
+        scored: scoredDeals.length,
+        avg_score: avgScore,
+        score_distribution: distribution,
+        biggest_improvers: biggestImprovers,
+        biggest_decliners: biggestDecliners,
+        high_value_at_risk: highValueAtRisk,
+        // Top 20 at-risk by amount for DeepSeek
+        top_at_risk: scoredDeals
+          .filter((d: any) => d.overall_score < 60)
+          .sort((a: any, b: any) => b.amount - a.amount)
+          .slice(0, 20),
+      };
+    }, params);
+  },
+};
+
+const dsmBuildFindings: ToolDefinition = {
+  name: 'dsmBuildFindings',
+  description: 'Emit findings for critical and at-risk deals based on ai_score',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (params, context) => {
+    return safeExecute('dsmBuildFindings', async () => {
+      const scores = (context.stepResults as any).score_results;
+      if (!scores?.top_at_risk) return { findings_emitted: 0 };
+
+      const allScored: any[] = [
+        ...(scores.high_value_at_risk || []),
+        ...(scores.top_at_risk || []),
+      ];
+      // deduplicate by id
+      const seen = new Set<string>();
+      const unique = allScored.filter((d: any) => { if (seen.has(d.id)) return false; seen.add(d.id); return true; });
+
+      let emitted = 0;
+      for (const deal of unique) {
+        const severity = deal.overall_score < 20 ? 'critical' : 'warning';
+        const category = deal.overall_score < 20 ? 'deal_score_critical' : 'deal_score_at_risk';
+        const weakDim = deal.primary_risk || 'unknown';
+        try {
+          await query(
+            `INSERT INTO findings (workspace_id, deal_id, severity, category, message, evidence, expires_at)
+             VALUES ($1, $2, $3, $4, $5, $6, NOW() + INTERVAL '7 days')
+             ON CONFLICT (workspace_id, deal_id, category)
+             DO UPDATE SET severity = EXCLUDED.severity, message = EXCLUDED.message,
+                          evidence = EXCLUDED.evidence, updated_at = NOW()`,
+            [
+              context.workspaceId,
+              deal.id,
+              severity,
+              category,
+              `${deal.name} scored ${deal.overall_score}/100 — weakest dimension: ${weakDim}`,
+              JSON.stringify({ score: deal.overall_score, breakdown: deal.breakdown, amount: deal.amount }),
+            ]
+          );
+          emitted++;
+        } catch { /* non-fatal — findings table may lack ON CONFLICT clause, skip */ }
+      }
+
+      return { findings_emitted: emitted, total_at_risk: unique.length };
+    }, params);
+  },
+};
+
+// ============================================================================
+
+const icpScoreOpenDeals: ToolDefinition = {
+  name: 'icpScoreOpenDeals',
+  description: 'Score all open deals against ICP profile and write icp_fit_score to deals table',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (params, context) => {
+    return safeExecute('icpScoreOpenDeals', async () => {
+      const discoveryResult = (context.stepResults as any).discovery_result;
+      if (!discoveryResult) return { scored: 0, top_icp: [], bottom_icp: [] };
+
+      // Extract ICP profile from discoverICP output
+      const profile = discoveryResult.companyProfile || {};
+      const sweetSpots: any[] = profile.sweetSpots || [];
+      const idealIndustries: string[] = (profile.industryWinRates || [])
+        .filter((i: any) => (i.winRate || 0) >= 0.40)
+        .map((i: any) => (i.industry || '').toLowerCase());
+      const dealAmounts: number[] = (discoveryResult.wonDeals || []).map((d: any) => d.amount || 0);
+      dealAmounts.sort((a, b) => a - b);
+      const p25Amount = dealAmounts[Math.floor(dealAmounts.length * 0.25)] || 0;
+      const p75Amount = dealAmounts[Math.floor(dealAmounts.length * 0.75)] || 500000;
+      const topSources: string[] = (profile.leadSourceFunnel || [])
+        .filter((s: any) => (s.fullFunnelRate || 0) >= 0.20)
+        .map((s: any) => (s.source || '').toLowerCase());
+
+      // Get all open deals with account info
+      const dealsResult = await query<any>(
+        `SELECT d.id, d.name, d.amount, d.lead_source,
+                a.industry, a.employee_count
+         FROM deals d
+         LEFT JOIN accounts a ON a.id = d.account_id AND a.workspace_id = d.workspace_id
+         WHERE d.workspace_id = $1
+           AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+           AND d.amount > 0
+         ORDER BY d.amount DESC`,
+        [context.workspaceId]
+      ).catch(() => ({ rows: [] as any[] }));
+
+      const scored: any[] = [];
+      let totalScored = 0;
+
+      for (const deal of dealsResult.rows) {
+        let score = 0;
+
+        // Industry match (0-30 pts)
+        const dealIndustry = (deal.industry || '').toLowerCase();
+        if (dealIndustry && idealIndustries.length > 0) {
+          const matched = idealIndustries.some(ind => dealIndustry.includes(ind) || ind.includes(dealIndustry));
+          score += matched ? 30 : 0;
+        } else {
+          score += 15; // unknown = neutral
+        }
+
+        // Deal size match (0-25 pts)
+        const amount = parseFloat(deal.amount || '0');
+        if (amount >= p25Amount && amount <= p75Amount) {
+          score += 25;
+        } else if (amount < p25Amount) {
+          score += Math.max(0, 25 - Math.round((p25Amount - amount) / p25Amount * 25));
+        } else {
+          score += Math.max(0, 25 - Math.round((amount - p75Amount) / p75Amount * 20));
+        }
+
+        // Employee count match (0-25 pts) — use sweet spots
+        const empCount = deal.employee_count || 0;
+        if (sweetSpots.length > 0 && empCount > 0) {
+          // Check if any sweet spot description matches the employee count range
+          const topSweetSpot = sweetSpots[0]?.description || '';
+          const sizeMatch = topSweetSpot.toLowerCase().includes('employee') || empCount > 0;
+          score += sizeMatch ? 20 : 10;
+        } else {
+          score += 15; // neutral if no data
+        }
+
+        // Lead source match (0-20 pts)
+        const leadSource = (deal.lead_source || '').toLowerCase();
+        if (leadSource && topSources.length > 0) {
+          const matched = topSources.some(src => leadSource.includes(src) || src.includes(leadSource));
+          score += matched ? 20 : 0;
+        } else {
+          score += 10; // neutral
+        }
+
+        score = Math.min(100, score);
+
+        // Write score to DB
+        try {
+          await query(
+            `UPDATE deals SET icp_fit_score = $1, icp_fit_at = NOW()
+             WHERE id = $2 AND workspace_id = $3`,
+            [score, deal.id, context.workspaceId]
+          );
+          totalScored++;
+        } catch { /* non-fatal */ }
+
+        scored.push({
+          id: deal.id,
+          name: deal.name,
+          amount,
+          icp_fit_score: score,
+          industry: deal.industry,
+        });
+      }
+
+      const topIcp = [...scored].sort((a, b) => b.icp_fit_score - a.icp_fit_score).slice(0, 5);
+      const bottomIcp = [...scored].sort((a, b) => a.icp_fit_score - b.icp_fit_score).slice(0, 5);
+      const pipelineInIcp = scored.filter(d => d.icp_fit_score >= 60);
+      const pipelineOffIcp = scored.filter(d => d.icp_fit_score < 40);
+
+      const pipelineTotal = scored.reduce((s, d) => s + d.amount, 0);
+      const pipelineInIcpValue = pipelineInIcp.reduce((s, d) => s + d.amount, 0);
+      const pipelineOffIcpValue = pipelineOffIcp.reduce((s, d) => s + d.amount, 0);
+
+      return {
+        scored: totalScored,
+        total_open_deals: scored.length,
+        avg_icp_fit: scored.length > 0
+          ? Math.round(scored.reduce((s, d) => s + d.icp_fit_score, 0) / scored.length)
+          : 0,
+        pipeline_in_icp_pct: pipelineTotal > 0 ? Math.round(pipelineInIcpValue / pipelineTotal * 100) : 0,
+        pipeline_off_icp_pct: pipelineTotal > 0 ? Math.round(pipelineOffIcpValue / pipelineTotal * 100) : 0,
+        pipeline_in_icp_value: pipelineInIcpValue,
+        pipeline_off_icp_value: pipelineOffIcpValue,
+        top_icp_deals: topIcp,
+        bottom_icp_deals: bottomIcp,
+      };
+    }, params);
+  },
+};
+
+const icpPersistProfile: ToolDefinition = {
+  name: 'icpPersistProfile',
+  description: 'Write ICP profile to icp_profiles table and emit findings for off-ICP deals',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (params, context) => {
+    return safeExecute('icpPersistProfile', async () => {
+      const discoveryResult = (context.stepResults as any).discovery_result;
+      const fitScores = (context.stepResults as any).icp_fit_scores;
+
+      // Write ICP profile
+      let profileId: string | null = null;
+      if (discoveryResult) {
+        const confidence = discoveryResult.metadata?.dealsAnalyzed >= 20 ? 'high'
+          : discoveryResult.metadata?.dealsAnalyzed >= 10 ? 'medium' : 'low';
+        try {
+          const insertResult = await query<any>(
+            `INSERT INTO icp_profiles (workspace_id, profile, deal_sample_size, confidence)
+             VALUES ($1, $2, $3, $4)
+             RETURNING id`,
+            [
+              context.workspaceId,
+              JSON.stringify(discoveryResult),
+              discoveryResult.metadata?.dealsAnalyzed || 0,
+              confidence,
+            ]
+          );
+          profileId = insertResult.rows[0]?.id;
+        } catch { /* table may not exist yet */ }
+      }
+
+      // Emit findings for off-ICP high-value deals
+      let findingsEmitted = 0;
+      const bottomIcpDeals: any[] = fitScores?.bottom_icp_deals || [];
+      for (const deal of bottomIcpDeals) {
+        if (deal.amount < 10000) continue;
+        try {
+          await query(
+            `INSERT INTO findings (workspace_id, deal_id, severity, category, message, evidence, expires_at)
+             VALUES ($1, $2, $3, $4, $5, $6, NOW() + INTERVAL '30 days')
+             ON CONFLICT (workspace_id, deal_id, category)
+             DO UPDATE SET message = EXCLUDED.message, evidence = EXCLUDED.evidence, updated_at = NOW()`,
+            [
+              context.workspaceId,
+              deal.id,
+              'warning',
+              'off_icp_deal',
+              `${deal.name} scores ${deal.icp_fit_score}/100 on ICP fit`,
+              JSON.stringify({ icp_fit_score: deal.icp_fit_score, amount: deal.amount }),
+            ]
+          );
+          findingsEmitted++;
+        } catch { /* non-fatal */ }
+      }
+
+      // Emit pipeline-level finding if <50% pipeline is ICP-fit
+      if (fitScores?.pipeline_in_icp_pct < 50 && fitScores?.total_open_deals >= 5) {
+        try {
+          await query(
+            `INSERT INTO findings (workspace_id, severity, category, message, evidence, expires_at)
+             VALUES ($1, $2, $3, $4, $5, NOW() + INTERVAL '30 days')
+             ON CONFLICT DO NOTHING`,
+            [
+              context.workspaceId,
+              'warning',
+              'icp_misalignment',
+              `Only ${fitScores.pipeline_in_icp_pct}% of pipeline matches ICP — review sourcing strategy`,
+              JSON.stringify({ pipeline_in_icp_pct: fitScores.pipeline_in_icp_pct, pipeline_off_icp_value: fitScores.pipeline_off_icp_value }),
+            ]
+          );
+        } catch { /* non-fatal — findings table may not have this conflict path */ }
+      }
+
+      return {
+        profile_id: profileId,
+        findings_emitted: findingsEmitted,
+        pipeline_alignment_pct: fitScores?.pipeline_in_icp_pct || 0,
+      };
+    }, params);
+  },
+};
+
+// ============================================================================
 
 export const toolRegistry = new Map<string, ToolDefinition>([
   ['queryDeals', queryDeals],
@@ -5502,6 +6133,12 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['crrGatherConversationContext', crrGatherConversationContext],
   ['crrPersistRoleEnrichments', crrPersistRoleEnrichments],
   ['crrGenerateCoverageFindings', crrGenerateCoverageFindings],
+  ['dsmGatherOpenDeals', dsmGatherOpenDeals],
+  ['dsmGatherScoringContext', dsmGatherScoringContext],
+  ['dsmComputeAndWriteScores', dsmComputeAndWriteScores],
+  ['dsmBuildFindings', dsmBuildFindings],
+  ['icpScoreOpenDeals', icpScoreOpenDeals],
+  ['icpPersistProfile', icpPersistProfile],
 ]);
 
 // ============================================================================
