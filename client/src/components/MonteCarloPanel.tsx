@@ -6,10 +6,21 @@ import { formatCurrency, formatTimeAgo } from '../lib/format';
 import Skeleton from './Skeleton';
 import { useDemoMode } from '../contexts/DemoModeContext';
 
+interface TornadoAssumption {
+  label: string;
+  value: string;
+  low: string;
+  high: string;
+  unit: 'currency' | 'percent' | 'days' | 'count';
+  implication: string;
+  skew: 'upside_heavy' | 'downside_heavy' | 'balanced';
+}
+
 interface VarianceDriver {
   label: string;
   upsideImpact: number;
   downsideImpact: number;
+  assumption?: TornadoAssumption;
 }
 
 interface MonteCarloPayload {
@@ -938,6 +949,176 @@ function ProbabilityBand({ p10, p25, p50, p75, p90, quota, quotaInRange, quotaPo
   );
 }
 
+interface TornadoTooltipProps {
+  driver: VarianceDriver;
+  pos: { x: number; y: number; rowHeight: number };
+}
+
+function TornadoTooltip({ driver, pos }: TornadoTooltipProps) {
+  const TOOLTIP_WIDTH = 320;
+  const TOOLTIP_APPROX_HEIGHT = 200;
+  const MARGIN = 8;
+
+  const windowW = window.innerWidth;
+  let left = pos.x + (pos.rowHeight / 2) - (TOOLTIP_WIDTH / 2);
+  left = Math.max(MARGIN, Math.min(left, windowW - TOOLTIP_WIDTH - MARGIN));
+
+  // Place above the row if there's room, else below
+  const spaceAbove = pos.y - MARGIN;
+  const top = spaceAbove >= TOOLTIP_APPROX_HEIGHT
+    ? pos.y - TOOLTIP_APPROX_HEIGHT - 6
+    : pos.y + pos.rowHeight + 6;
+
+  const { assumption } = driver;
+
+  const skewColor = !assumption ? '#64748B'
+    : assumption.skew === 'downside_heavy' ? '#EF4444'
+    : assumption.skew === 'upside_heavy'   ? '#22C55E'
+    : '#64748B';
+
+  const skewLabel = !assumption ? ''
+    : assumption.skew === 'downside_heavy' ? 'DOWNSIDE RISK'
+    : assumption.skew === 'upside_heavy'   ? 'UPSIDE POTENTIAL'
+    : 'BALANCED';
+
+  // Parse numeric values for the range dot position
+  // Values come as formatted strings like "$18,400", "19%", "45 days"
+  function parseNumericValue(s: string): number {
+    const stripped = s.replace(/[$,%]/g, '').replace(/[KkMmBb]$/, '').trim();
+    return parseFloat(stripped) || 0;
+  }
+
+  if (!assumption) {
+    // Minimal tooltip for runs before enrichment
+    return (
+      <div style={{
+        position: 'fixed',
+        top,
+        left,
+        width: TOOLTIP_WIDTH,
+        background: '#1A1F2B',
+        border: '1px solid #2A3142',
+        borderRadius: 8,
+        padding: '12px 14px',
+        zIndex: 1000,
+        boxShadow: '0 4px 24px rgba(0,0,0,0.5)',
+        pointerEvents: 'none',
+      }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: '#E2E8F0', marginBottom: 6 }}>{driver.label}</div>
+        <div style={{ fontSize: 11, color: '#94A3B8' }}>
+          Impact: <span style={{ color: '#EF4444' }}>-{fmtCompact(Math.abs(driver.downsideImpact))}</span> pessimistic
+          {' / '}
+          <span style={{ color: '#22C55E' }}>+{fmtCompact(driver.upsideImpact)}</span> optimistic
+        </div>
+      </div>
+    );
+  }
+
+  const lowNum   = parseNumericValue(assumption.low);
+  const highNum  = parseNumericValue(assumption.high);
+  const currNum  = parseNumericValue(assumption.value);
+  const dotPct   = highNum > lowNum
+    ? Math.max(0, Math.min(100, ((currNum - lowNum) / (highNum - lowNum)) * 100))
+    : 50;
+
+  return (
+    <div style={{
+      position: 'fixed',
+      top,
+      left,
+      width: TOOLTIP_WIDTH,
+      background: '#1A1F2B',
+      border: '1px solid #2A3142',
+      borderRadius: 8,
+      overflow: 'hidden',
+      zIndex: 1000,
+      boxShadow: '0 4px 24px rgba(0,0,0,0.5)',
+      pointerEvents: 'none',
+    }}>
+      {/* Header */}
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: '10px 14px 8px',
+        borderBottom: `2px solid ${skewColor}30`,
+        background: `${skewColor}10`,
+      }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: '#E2E8F0' }}>{driver.label}</span>
+        <span style={{ fontSize: 10, fontWeight: 700, color: skewColor, letterSpacing: '0.06em' }}>{skewLabel}</span>
+      </div>
+
+      <div style={{ padding: '10px 14px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {/* Current assumption */}
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 600, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>
+            Current assumption
+          </div>
+          <div style={{ fontSize: 11, color: '#94A3B8', lineHeight: 1.4 }}>{assumption.label}</div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#E2E8F0', marginTop: 2 }}>{assumption.value}</div>
+        </div>
+
+        {/* Modeled range */}
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 600, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
+            Modeled range
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 10, color: '#EF4444', minWidth: 32, textAlign: 'right', flexShrink: 0 }}>{assumption.low}</span>
+            <div style={{ flex: 1, position: 'relative', height: 8 }}>
+              {/* Track */}
+              <div style={{ position: 'absolute', inset: 0, borderRadius: 4, overflow: 'hidden', display: 'flex' }}>
+                <div style={{ width: `${dotPct}%`, background: '#EF444440', borderRadius: '4px 0 0 4px' }} />
+                <div style={{ flex: 1, background: '#22C55E40', borderRadius: '0 4px 4px 0' }} />
+              </div>
+              {/* Dot */}
+              <div style={{
+                position: 'absolute',
+                top: '50%',
+                left: `${dotPct}%`,
+                transform: 'translate(-50%, -50%)',
+                width: 10,
+                height: 10,
+                borderRadius: '50%',
+                background: '#E2E8F0',
+                border: '2px solid #1A1F2B',
+                boxShadow: '0 0 0 1px #64748B',
+              }} />
+            </div>
+            <span style={{ fontSize: 10, color: '#22C55E', minWidth: 32, flexShrink: 0 }}>{assumption.high}</span>
+          </div>
+        </div>
+
+        {/* Forecast impact */}
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 600, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+            Forecast impact
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: 11, color: '#EF4444' }}>
+              ▼ {fmtCompact(Math.abs(driver.downsideImpact))} if {driver.label.toLowerCase()} falls
+            </span>
+            <span style={{ fontSize: 11, color: '#22C55E' }}>
+              ▲ +{fmtCompact(driver.upsideImpact)} if it rises
+            </span>
+          </div>
+        </div>
+
+        {/* Implication */}
+        <div style={{
+          fontSize: 11,
+          color: '#94A3B8',
+          lineHeight: 1.5,
+          borderTop: '1px solid #2A3142',
+          paddingTop: 8,
+        }}>
+          {assumption.implication}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function VarianceDriversColumn({ drivers, maxImpact, anon }: {
   drivers: VarianceDriver[];
   maxImpact: number;
@@ -945,9 +1126,10 @@ function VarianceDriversColumn({ drivers, maxImpact, anon }: {
 }) {
   const top5 = drivers.slice(0, 5);
   const barMaxWidth = 60;
+  const [hoveredDriver, setHoveredDriver] = useState<{ driver: VarianceDriver; pos: { x: number; y: number; rowHeight: number } } | null>(null);
 
   return (
-    <div style={{ flex: '0 0 24%', display: 'flex', flexDirection: 'column', gap: 8 }}>
+    <div style={{ flex: '0 0 24%', display: 'flex', flexDirection: 'column', gap: 8, position: 'relative' }}>
       <div style={{ fontSize: 11, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
         What Moves The Number
       </div>
@@ -959,7 +1141,15 @@ function VarianceDriversColumn({ drivers, maxImpact, anon }: {
           const upWidth = maxImpact > 0 ? (d.upsideImpact / maxImpact) * barMaxWidth : 0;
           const downWidth = maxImpact > 0 ? (Math.abs(d.downsideImpact) / maxImpact) * barMaxWidth : 0;
           return (
-            <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <div
+              key={i}
+              style={{ display: 'flex', flexDirection: 'column', gap: 2, cursor: 'default' }}
+              onMouseEnter={(e) => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                setHoveredDriver({ driver: d, pos: { x: rect.left, y: rect.top, rowHeight: rect.height } });
+              }}
+              onMouseLeave={() => setHoveredDriver(null)}
+            >
               <div style={{ fontSize: 11, color: colors.textSecondary, fontWeight: 500 }}>{d.label}</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 0, height: 14 }}>
                 <div style={{ display: 'flex', justifyContent: 'flex-end', width: barMaxWidth, marginRight: 2 }}>
@@ -987,6 +1177,10 @@ function VarianceDriversColumn({ drivers, maxImpact, anon }: {
             </div>
           );
         })
+      )}
+
+      {hoveredDriver && (
+        <TornadoTooltip driver={hoveredDriver.driver} pos={hoveredDriver.pos} />
       )}
     </div>
   );
