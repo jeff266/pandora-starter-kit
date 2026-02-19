@@ -1,0 +1,223 @@
+We've just completed a 5-prompt Claude Code build for Analysis Scopes (Phase 1).
+Before moving to Phase 2 we need to validate everything works correctly against
+real workspace data. This is a testing-only session — no new features, no
+refactoring. Fix bugs found during testing, nothing else.
+
+Read these files before starting:
+- PANDORA_ANALYSIS_SCOPES_SPEC.md — the source of truth for expected behavior
+- server/migrations/057_deals_scope_id.sql
+- server/migrations/058_analysis_scopes.sql
+- server/config/scope-inference.ts
+- server/config/scope-stamper.ts
+- server/config/scope-loader.ts
+- server/routes/admin-scopes.ts
+
+---
+
+STEP 1: Run migrations
+
+Run 057 then 058 against the database in order. Log the output of each.
+
+After running, verify:
+
+  SELECT column_name, data_type, column_default
+  FROM information_schema.columns
+  WHERE table_name = 'deals' AND column_name = 'scope_id';
+  -- Expected: scope_id | text | default
+
+  SELECT scope_id, COUNT(*) FROM analysis_scopes GROUP BY scope_id;
+  -- Expected: one 'default' row per workspace
+
+  SELECT scope_id, COUNT(*) FROM deals GROUP BY scope_id;
+  -- Expected: all deals show scope_id = 'default'
+
+If any migration fails, fix it before continuing. Do not proceed to Step 2
+until all three verification queries pass.
+
+---
+
+STEP 2: CLI inference dry-run on each workspace
+
+For each active workspace, run the dry-run CLI harness:
+
+  npx ts-node server/config/scope-inference.ts <workspaceId>
+
+Run this for all four workspaces: Imubit, Frontera, GrowthBook, GrowthX.
+
+For each workspace, log and verify:
+
+  a. Which detection path fired (hubspot_pipeline, salesforce_record_type,
+     or custom_field:<name>) — or "no scopes detected" if only one segment
+  b. How many InferredScope objects were returned
+  c. What the filter_field and filter_values are for each scope
+  d. How many deals each scope would match (deal_count in the result)
+  e. That deal counts across all scopes sum to approximately the total
+     deal count for that workspace (within a few — some deals may not
+     match any custom field pattern)
+
+Expected behavior by workspace:
+  - Imubit (Salesforce): Path 2 should fire on record_type_name if record
+    types are configured. If not, Path 3 should check deal_type / opportunity_type.
+  - Frontera, GrowthBook, GrowthX (HubSpot): Path 1 fires if multiple
+    pipelines exist. If single pipeline, Path 3 checks for deal_type values.
+
+If a workspace produces 0 inferred scopes, that is valid — it means the
+data is a single homogeneous segment. Log it as "no segmentation detected"
+and continue. Do not force scopes where none are warranted.
+
+---
+
+STEP 3: Apply scopes and stamp deals for one workspace
+
+Pick whichever workspace produced the most interesting inference result
+in Step 2 (most likely Imubit if Salesforce record types are populated,
+or Frontera otherwise).
+
+Manually trigger the full flow for that workspace:
+
+  1. Call applyInferredScopes() to write inferred scopes to analysis_scopes
+     with confirmed=false
+  2. Verify the rows exist:
+       SELECT scope_id, name, filter_field, filter_values, confirmed, confidence
+       FROM analysis_scopes
+       WHERE workspace_id = '<id>';
+  3. Manually set one scope to confirmed=true:
+       UPDATE analysis_scopes
+       SET confirmed = true
+       WHERE workspace_id = '<id>' AND scope_id != 'default'
+       LIMIT 1;
+  4. Call stampAllDealsForWorkspace(workspaceId)
+  5. Verify deal distribution:
+       SELECT scope_id, COUNT(*), ROUND(SUM(amount)) as total_value
+       FROM deals
+       WHERE workspace_id = '<id>'
+       GROUP BY scope_id
+       ORDER BY COUNT(*) DESC;
+
+Expected: deals are now split between the confirmed scope and 'default'.
+The counts should make sense given what you know about that workspace.
+Any deal that doesn't match the confirmed scope's filter stays at 'default'.
+
+---
+
+STEP 4: Test the admin UI
+
+Load /admin/scopes in the browser for the workspace you used in Step 3.
+
+Check Panel 1 (Scope Inventory):
+  a. The confirmed scope shows a green "Yes" badge
+  b. Any unconfirmed inferred scopes show a yellow "Pending" badge and
+     a "Confirm" button
+  c. Deal counts in the table match the SQL output from Step 3
+  d. If confirmed scope exists and unscoped_deals > 0, the yellow warning
+     appears. If all deals are accounted for, no warning appears.
+
+Check Panel 2 (Filter Preview):
+  a. Click the confirmed scope — 20 deals load
+  b. Visually scan the deals — do they look correct for that segment?
+     (e.g. if scope is "New Business", deals should not be renewals)
+  c. Click 'default' scope — the remaining deals load
+
+Check Panel 3 (Config Status):
+  a. "Skills running as" shows "Scoped (per scope)" — green badge
+  b. Adapter source is correct (Salesforce for Imubit, HubSpot for others)
+  c. Confirmed count matches what's in the DB
+
+Click "Re-run Inference" and verify:
+  a. The request completes without error
+  b. Table refreshes — no duplicate scopes created
+  c. Already-confirmed scopes remain confirmed (not reset)
+
+Click "Confirm" on an unconfirmed scope:
+  a. Badge turns green immediately
+  b. stampAllDealsForWorkspace fires in background
+  c. After a moment, deal counts update to reflect the newly confirmed scope
+
+---
+
+STEP 5: Verify skill fan-out behavior
+
+Find the skill scheduler (server/sync/skill-scheduler.ts or equivalent).
+Add a temporary console.log at the top of the skill execution loop:
+
+  console.log(`[FAN-OUT TEST] workspace=${workspaceId} scope=${scope.scope_id} skill=${skillId}`);
+
+Trigger a manual skill run for the workspace you've been testing.
+
+Verify in the logs:
+  a. If the workspace has confirmed non-default scopes: the log fires once
+     per confirmed scope, and does NOT fire for 'default'
+  b. If a workspace has only the default scope: the log fires exactly once
+
+Then remove the console.log.
+
+---
+
+STEP 6: Verify totalPipelineValue is no longer scope-blind
+
+Find the totalPipelineValue function (server/analysis/aggregations.ts or
+data-collection.ts).
+
+Confirm it no longer contains:
+  .filter(d => !d.stage?.toLowerCase().includes('closed'))
+
+It should now use a SQL WHERE clause with scope filtering. If you see the
+JavaScript filter still present, that is a bug — fix it by routing the
+query through getScopeWhereClause().
+
+---
+
+STEP 7: Check for regressions on unconfigured workspaces
+
+Pick a workspace that produced 0 inferred scopes in Step 2, OR manually
+reset a workspace to only have the default scope:
+
+  DELETE FROM analysis_scopes
+  WHERE workspace_id = '<id>' AND scope_id != 'default';
+
+  UPDATE deals SET scope_id = 'default'
+  WHERE workspace_id = '<id>';
+
+Trigger a skill run and verify:
+  a. Skills run exactly once (no fan-out)
+  b. Output is identical to pre-build behavior
+  c. No errors in logs referencing scope_id or analysis_scopes
+
+This confirms the default pass-through behavior is intact.
+
+---
+
+REPORT
+
+When all steps are complete, produce a test report in this format:
+
+  STEP 1 — Migrations: PASS / FAIL
+    Notes: <anything unexpected>
+
+  STEP 2 — Inference dry-run:
+    Imubit: <path fired> | <n> scopes | <deal counts>
+    Frontera: <path fired> | <n> scopes | <deal counts>
+    GrowthBook: <path fired> | <n> scopes | <deal counts>
+    GrowthX: <path fired> | <n> scopes | <deal counts>
+
+  STEP 3 — Apply + stamp: PASS / FAIL
+    Workspace tested: <name>
+    Deal distribution: <scope_id: count> for each scope
+
+  STEP 4 — Admin UI: PASS / FAIL
+    Panel 1 accurate: yes/no
+    Panel 2 preview correct: yes/no
+    Panel 3 status correct: yes/no
+    Re-run inference works: yes/no
+    Confirm button works: yes/no
+
+  STEP 5 — Fan-out: PASS / FAIL
+    Scoped workspace runs N times: yes/no (N=<n>)
+    Unscoped workspace runs once: yes/no
+
+  STEP 6 — totalPipelineValue fixed: PASS / FAIL
+
+  STEP 7 — No regression on unconfigured: PASS / FAIL
+
+  BUGS FOUND AND FIXED: <list any bugs that were fixed during testing>
+  BUGS FOUND BUT NOT FIXED: <list anything deferred, with reason>
