@@ -137,17 +137,18 @@ const WHAT_IF_EXAMPLES = [
   "What if top 3 deals slip to next quarter?",
 ];
 
-export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
+export default function MonteCarloPanel({ wsId, activePipeline }: { wsId?: string; activePipeline?: string }) {
   const { anon } = useDemoMode();
   const [state, setState] = useState<PanelState>('loading');
   const [data, setData] = useState<MonteCarloPayload | null>(null);
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
   const [triggeringRun, setTriggeringRun] = useState(false);
   const prevWsRef = useRef<string | undefined>(undefined);
+  const prevPipelineRef = useRef<string | null | undefined>(undefined);
 
-  const [pipelines, setPipelines] = useState<PipelineOption[]>([]);
-  const [selectedPipeline, setSelectedPipeline] = useState<string | null>(null);
-  const [selectedPipelineType, setSelectedPipelineType] = useState<string | null>(null);
+  const [mcPipelines, setMcPipelines] = useState<PipelineOption[]>([]);
+  const selectedPipeline = activePipeline && activePipeline !== 'all' ? activePipeline : null;
+  const selectedPipelineType = mcPipelines.find(p => p.name === selectedPipeline)?.inferredType || null;
 
   // Query section state
   const [question, setQuestion] = useState('');
@@ -166,12 +167,12 @@ export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
   const [runsOpen, setRunsOpen] = useState(false);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
 
-  const fetchPipelines = async () => {
+  const fetchMcPipelines = async () => {
     try {
       const res = await api.get('/monte-carlo/pipelines');
-      setPipelines(Array.isArray(res) ? res : (res?.pipelines || []));
+      setMcPipelines(Array.isArray(res) ? res : (res?.pipelines || []));
     } catch {
-      setPipelines([]);
+      setMcPipelines([]);
     }
   };
 
@@ -205,36 +206,31 @@ export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
   useEffect(() => {
     if (wsId !== prevWsRef.current) {
       setData(null);
-      setSelectedPipeline(null);
-      setSelectedPipelineType(null);
       prevWsRef.current = wsId;
     }
-    fetchPipelines();
-    fetchData(null);
-    // Fetch run history list
+    fetchMcPipelines();
+    const pipelineArg = activePipeline && activePipeline !== 'all' ? activePipeline : null;
+    fetchData(pipelineArg);
+    prevPipelineRef.current = pipelineArg;
     api.get('/monte-carlo/runs?limit=20')
       .then((res: any) => setRunHistory(res?.runs || []))
       .catch(() => {});
   }, [wsId]);
 
-  const handlePipelineChange = (value: string) => {
-    // Reset conversation session when pipeline changes — new context = fresh session
-    sessionIdRef.current = crypto.randomUUID();
-    setTurns([]);
-    setQueryAnswer(null);
-    if (value === '__all__') {
-      setSelectedPipeline(null);
-      setSelectedPipelineType(null);
-      setData(null);
-      fetchData(null);
-    } else {
-      const found = pipelines.find(p => p.name === value);
-      setSelectedPipeline(value);
-      setSelectedPipelineType(found?.inferredType || null);
-      setData(null);
-      fetchData(value);
+  useEffect(() => {
+    if (prevPipelineRef.current === undefined) {
+      prevPipelineRef.current = selectedPipeline;
+      return;
     }
-  };
+    if (prevPipelineRef.current !== selectedPipeline) {
+      sessionIdRef.current = crypto.randomUUID();
+      setTurns([]);
+      setQueryAnswer(null);
+      setData(null);
+      fetchData(selectedPipeline);
+      prevPipelineRef.current = selectedPipeline;
+    }
+  }, [selectedPipeline]);
 
   const handleRunForecast = async () => {
     setTriggeringRun(true);
@@ -298,31 +294,24 @@ export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
     }
   }, [queryLoading, selectedPipeline, turns]);
 
-  const pipelineSelector = (
-    <select
-      value={selectedPipeline || '__all__'}
-      onChange={(e) => handlePipelineChange(e.target.value)}
-      style={{
-        background: colors.surfaceRaised,
-        color: colors.text,
-        border: `1px solid ${colors.border}`,
-        borderRadius: 6,
-        padding: '4px 8px',
-        fontSize: 12,
-        fontFamily: fonts.sans,
-        cursor: 'pointer',
-        outline: 'none',
-        maxWidth: 220,
-      }}
-    >
-      <option value="__all__">All Pipelines</option>
-      {pipelines.map(p => (
-        <option key={p.name} value={p.name}>
-          {p.name} · {INFERRED_TYPE_LABELS[p.inferredType] || p.inferredType} · {p.dealCount} deals
-        </option>
-      ))}
-    </select>
-  );
+  const pipelineBadge = selectedPipeline ? (
+    <span style={{
+      display: 'inline-block',
+      fontSize: 11,
+      fontWeight: 500,
+      background: colors.surfaceRaised,
+      color: colors.textSecondary,
+      border: `1px solid ${colors.border}`,
+      borderRadius: 6,
+      padding: '3px 8px',
+      maxWidth: 220,
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+    }}>
+      {selectedPipeline}
+    </span>
+  ) : null;
 
   const pipelineContextBadge = data?.pipelineFilter ? (
     <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
@@ -364,7 +353,7 @@ export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>Monte Carlo Forecast</div>
-            {pipelineSelector}
+            {pipelineBadge}
           </div>
           <span style={{ fontSize: 11, color: colors.textMuted }}>Computing 10,000 scenarios...</span>
         </div>
@@ -388,7 +377,7 @@ export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>Monte Carlo Forecast</div>
-            {pipelineSelector}
+            {pipelineBadge}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontSize: 11, color: colors.accent }}>Computing 10,000 scenarios...</span>
@@ -414,8 +403,8 @@ export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
         padding: '18px 20px',
         textAlign: 'center',
       }}>
-        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 8 }}>
-          {pipelineSelector}
+        <div style={{ fontSize: 14, fontWeight: 600, color: colors.text, marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+          Monte Carlo Forecast {pipelineBadge}
         </div>
         <div style={{ fontSize: 28, marginBottom: 8 }}>{'\uD83C\uDFB2'}</div>
         <div style={{ fontSize: 14, fontWeight: 600, color: colors.text, marginBottom: 4 }}>
@@ -465,7 +454,7 @@ export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>Monte Carlo Forecast</div>
-            {pipelineSelector}
+            {pipelineBadge}
           </div>
           <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>Forecast unavailable</div>
         </div>
@@ -534,7 +523,7 @@ export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>Monte Carlo Forecast</div>
-          {pipelineSelector}
+          {pipelineBadge}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 11, color: colors.textMuted }}>

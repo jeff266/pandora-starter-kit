@@ -515,6 +515,32 @@ export default function CommandCenter() {
           <span style={{ fontSize: 11, color: colors.textMuted }}>{updatedText}</span>
           {refreshing && <InlineSpinner />}
         </div>
+        {availablePipelines.length > 1 && (
+          <select
+            value={selectedPipeline}
+            onChange={e => handlePipelineChange(e.target.value)}
+            style={{
+              fontSize: 12,
+              fontFamily: fonts.sans,
+              fontWeight: 500,
+              color: colors.text,
+              background: colors.surfaceRaised,
+              border: `1px solid ${colors.border}`,
+              borderRadius: 6,
+              padding: '5px 10px',
+              outline: 'none',
+              cursor: 'pointer',
+              minWidth: 140,
+            }}
+          >
+            <option value="all">All Pipelines</option>
+            {availablePipelines.map(p => (
+              <option key={p.name} value={p.name}>
+                {p.name} ({p.deal_count})
+              </option>
+            ))}
+          </select>
+        )}
       </div>
 
       <SectionErrorBoundary fallbackMessage="Failed to load metrics.">
@@ -562,7 +588,7 @@ export default function CommandCenter() {
       </SectionErrorBoundary>
 
       <SectionErrorBoundary fallbackMessage="Failed to load forecast panel.">
-        <MonteCarloPanel wsId={wsId} />
+        <MonteCarloPanel wsId={wsId} activePipeline={selectedPipeline} />
       </SectionErrorBoundary>
 
       <SectionErrorBoundary fallbackMessage="Failed to load pipeline chart.">
@@ -572,39 +598,11 @@ export default function CommandCenter() {
           borderRadius: 10,
           padding: 20,
         }}>
-          <div style={{ marginBottom: 16, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-            <div>
-              <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>Pipeline by Stage</h3>
-              <p style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
-                {formatCurrency(anon.amount(totalPipeline))} total {'·'} {stageData.reduce((sum, s) => sum + s.deal_count, 0)} deals across {stageData.length} stages
-              </p>
-            </div>
-            {availablePipelines.length > 1 && (
-              <select
-                value={selectedPipeline}
-                onChange={e => handlePipelineChange(e.target.value)}
-                style={{
-                  fontSize: 12,
-                  fontFamily: fonts.sans,
-                  fontWeight: 500,
-                  color: colors.text,
-                  background: colors.surfaceRaised,
-                  border: `1px solid ${colors.border}`,
-                  borderRadius: 6,
-                  padding: '5px 10px',
-                  outline: 'none',
-                  cursor: 'pointer',
-                  minWidth: 140,
-                }}
-              >
-                <option value="all">All Pipelines</option>
-                {availablePipelines.map(p => (
-                  <option key={p.name} value={p.name}>
-                    {p.name} ({p.deal_count})
-                  </option>
-                ))}
-              </select>
-            )}
+          <div style={{ marginBottom: 16 }}>
+            <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>Pipeline by Stage</h3>
+            <p style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
+              {formatCurrency(anon.amount(totalPipeline))} total {'·'} {stageData.reduce((sum, s) => sum + s.deal_count, 0)} deals across {stageData.length} stages
+            </p>
           </div>
           {authLoading || loading.pipeline ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
