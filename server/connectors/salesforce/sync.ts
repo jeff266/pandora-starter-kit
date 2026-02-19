@@ -55,7 +55,7 @@ async function upsertDeals(deals: NormalizedDeal[]): Promise<number> {
             $1, $2, $3, $4,
             $5, $6, $7, $8, $9, $10,
             $11, $12, $13, $14,
-            $15, $16, $17, $18, NOW(), NOW()
+            $15, $16, $17, $18, COALESCE($19::timestamptz, NOW()), NOW()
           )
           ON CONFLICT (workspace_id, source, source_id) DO UPDATE SET
             source_data = EXCLUDED.source_data,
@@ -79,6 +79,7 @@ async function upsertDeals(deals: NormalizedDeal[]): Promise<number> {
             deal.name, deal.amount, deal.stage, deal.stage_normalized, deal.close_date, deal.owner,
             deal.probability, deal.forecast_category, deal.forecast_category_source, deal.pipeline,
             deal.last_activity_date, JSON.stringify(deal.custom_fields), deal.next_steps, deal.lead_source,
+            deal.source_data?.CreatedDate || null,
           ]
         );
         stored++;

@@ -24,6 +24,7 @@ export interface NormalizedDeal {
   contact_source_ids: string[];
   next_steps: string | null;
   lead_source: string | null;
+  source_created_at: string | null;
 }
 
 // TODO: Allow per-workspace override via context_layer.definitions.stage_mapping
@@ -396,6 +397,7 @@ export function transformDeal(
     contact_source_ids: contactSourceIds,
     next_steps: sanitizeText(props.hs_next_step) || null,
     lead_source: sanitizeText(props.hs_lead_status) || null,
+    source_created_at: sanitizeDate(props.createdate) || null,
   };
 }
 
