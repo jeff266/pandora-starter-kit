@@ -1810,7 +1810,7 @@ async function computeMetricSegmented(workspaceId: string, params: Record<string
   // Inject metric-contextual tool filters
   const segToolFilters = await getToolFilters(workspaceId, metricToContext(metric), values.length + 1, 'd').catch(()=>({whereClause: '', params: [], paramOffset: values.length + 1, appliedRules: []}));
   if (segToolFilters.whereClause) {
-    sql = sql.replace(/\n      GROUP BY/, segToolFilters.whereClause + '\n      GROUP BY');
+    sql = sql.replace(/\n      GROUP BY/, () => segToolFilters.whereClause + '\n      GROUP BY');
     values.push(...segToolFilters.params);
   }
 
@@ -2632,13 +2632,13 @@ async function computePipelineCreation(workspaceId: string, params: Record<strin
     // Inject pipeline_filter before GROUP BY
     if (pipelineFilter) {
       vals.push(pipelineFilter);
-      baseQuery = baseQuery.replace(/GROUP/, `AND d.pipeline ILIKE $${vals.length} GROUP`);
+      baseQuery = baseQuery.replace(/GROUP/, () => `AND d.pipeline ILIKE $${vals.length} GROUP`);
     }
 
     // Inject pipeline_value tool filters
     const pipeCreationTF = await getToolFilters(workspaceId, 'pipeline_value', vals.length + 1, 'd').catch(()=>({whereClause: '', params: [], paramOffset: vals.length + 1, appliedRules: []}));
     if (pipeCreationTF.whereClause) {
-      baseQuery = baseQuery.replace(/GROUP/, pipeCreationTF.whereClause + ' GROUP');
+      baseQuery = baseQuery.replace(/GROUP/, () => pipeCreationTF.whereClause + ' GROUP');
       vals.push(...pipeCreationTF.params);
     }
 
