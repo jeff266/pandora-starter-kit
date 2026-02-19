@@ -1062,7 +1062,8 @@ function LearningSection() {
 
   const resolveSuggestion = async (id: string, action: 'accepted' | 'dismissed') => {
     try {
-      await api.post(`/workspace-config/suggestions/${id}/resolve`, { action });
+      const verb = action === 'accepted' ? 'accept' : 'dismiss';
+      await api.post(`/config/suggestions/${id}/${verb}`);
       setData(prev => prev ? {
         ...prev,
         configSuggestions: {
