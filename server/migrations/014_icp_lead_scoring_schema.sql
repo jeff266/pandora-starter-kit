@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS account_signals (
   signal_score NUMERIC,               -- 0-100
 
   scraped_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  stale_after TIMESTAMPTZ,             -- scraped_at + 90 days
+  stale_after TIMESTAMPTZ,             -- scraped_at + 180 days
 
   created_at TIMESTAMPTZ DEFAULT now(),
   UNIQUE(workspace_id, account_id)

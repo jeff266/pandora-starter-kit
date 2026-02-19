@@ -294,7 +294,7 @@ async function upsertAccountSignals(
        industry, business_model, employee_range, growth_stage, classification_confidence,
        signals, signal_summary, signal_score, scraped_text, scraped_url,
        enriched_at, stale_after, updated_at
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW() + INTERVAL '90 days', NOW())
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW() + INTERVAL '180 days', NOW())
      ON CONFLICT (workspace_id, account_id) DO UPDATE SET
        scrape_status = EXCLUDED.scrape_status,
        enrichment_method = EXCLUDED.enrichment_method,
@@ -310,7 +310,7 @@ async function upsertAccountSignals(
        scraped_text = EXCLUDED.scraped_text,
        scraped_url = EXCLUDED.scraped_url,
        enriched_at = NOW(),
-       stale_after = NOW() + INTERVAL '90 days',
+       stale_after = NOW() + INTERVAL '180 days',
        updated_at = NOW()`,
     [
       workspaceId, accountId,

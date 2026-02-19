@@ -714,12 +714,23 @@ function DossierView({ addToast, conversationsConnected }: { addToast: (msg: str
     setRerunning(true);
     try {
       await api.post('/scoring/activate', {});
-      addToast('ICP Discovery re-run started. This may take a few minutes.', 'info');
-      // Refresh profile once backend confirms activation
-      setTimeout(() => fetchProfile(), 3000);
+      // Poll until state leaves 'processing', then refresh profile
+      const poll = async () => {
+        try {
+          const res = (await api.get('/scoring/state/poll')) as { state?: string };
+          if (res.state !== 'processing') {
+            setRerunning(false);
+            fetchProfile();
+          } else {
+            setTimeout(poll, 5000);
+          }
+        } catch {
+          setRerunning(false);
+        }
+      };
+      setTimeout(poll, 5000);
     } catch {
       addToast('Failed to start re-run', 'error');
-    } finally {
       setRerunning(false);
     }
   };
@@ -804,13 +815,21 @@ function DossierView({ addToast, conversationsConnected }: { addToast: (msg: str
               onClick={handleRerun}
               disabled={rerunning}
               style={{
-                padding: '6px 14px', border: `1px solid ${colors.border}`,
-                background: 'transparent', color: rerunning ? colors.textMuted : colors.textSecondary,
+                padding: '6px 14px', border: `1px solid ${rerunning ? colors.accent : colors.border}`,
+                background: 'transparent', color: rerunning ? colors.accent : colors.textSecondary,
                 borderRadius: 6, fontSize: 12, cursor: rerunning ? 'not-allowed' : 'pointer',
-                opacity: rerunning ? 0.6 : 1,
+                display: 'flex', alignItems: 'center', gap: 6,
               }}
             >
-              {rerunning ? 'Starting...' : 'Re-run'}
+              {rerunning && (
+                <span style={{
+                  width: 8, height: 8, borderRadius: '50%',
+                  background: colors.accent,
+                  display: 'inline-block',
+                  animation: 'skeleton-pulse 1.2s ease-in-out infinite',
+                }} />
+              )}
+              {rerunning ? 'Running...' : 'Re-run'}
             </button>
             <button
               onClick={() => setShowChangelog(true)}
@@ -835,6 +854,22 @@ function DossierView({ addToast, conversationsConnected }: { addToast: (msg: str
           </div>
         </div>
       </div>
+
+      {/* Running banner */}
+      {rerunning && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '10px 16px', marginBottom: 20,
+          background: 'rgba(100,136,234,0.08)', border: `1px solid ${colors.accent}`,
+          borderRadius: 8, fontSize: 13, color: colors.accent,
+        }}>
+          <span style={{
+            width: 8, height: 8, borderRadius: '50%', background: colors.accent, flexShrink: 0,
+            animation: 'skeleton-pulse 1.2s ease-in-out infinite',
+          }} />
+          ICP Discovery is running — enriching accounts and analyzing deal patterns. This page will refresh automatically when complete.
+        </div>
+      )}
 
       {/* IDEAL COMPANY */}
       <SectionHeader title="Ideal Company" onEdit={() => setEditingSection(editingSection === 'industries' ? null : 'industries')} />
