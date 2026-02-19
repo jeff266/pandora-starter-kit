@@ -14,7 +14,9 @@ interface ScoringStateResponse {
 }
 
 interface ReadinessSource {
-  ready: boolean;
+  ready?: boolean;
+  connected?: boolean;
+  configured?: boolean;
   accounts?: number;
   closedWonDeals?: number;
   closedLostDeals?: number;
@@ -49,30 +51,59 @@ interface PainCluster {
 }
 
 interface BuyingCombo {
-  roles: string[];
+  roles?: string[];
+  personaNames?: string[];
+  personas?: string[];
   win_rate?: number;
+  winRate?: number;
+  lift?: number;
+  wonCount?: number;
+  lostCount?: number;
+  totalCount?: number;
+  avgDealSize?: number;
 }
 
-interface ScoringWeights {
-  [key: string]: number;
+interface IndustryWinRate {
+  industry: string;
+  winRate: number;
+  count: number;
+  avgDeal: number;
+}
+
+interface SizeWinRate {
+  bucket: string;
+  winRate: number;
+  count: number;
+  avgDeal: number;
 }
 
 interface IcpProfile {
   id: string;
   version: number;
   created_at: string;
-  tier?: number;
   status: string;
+  won_deals?: number;
+  deals_analyzed?: number;
   company_profile?: {
     industries?: Array<IndustryEntry | string>;
+    industryWinRates?: IndustryWinRate[];
     size_ranges?: string[];
+    sizeWinRates?: SizeWinRate[];
     disqualifiers?: string[];
+    sweetSpots?: Array<{ description: string; winRate: number; lift: number; count: number; avgDeal: number }>;
+    signal_analysis?: {
+      signal_types?: Array<{ type: string; lift: number; won_rate: number; count_won: number }>;
+      hiring_lift?: number;
+      funding_lift?: number;
+      expansion_lift?: number;
+      risk_lift?: number;
+    };
   };
   conversation_insights?: {
     pain_point_clusters?: PainCluster[];
   };
   buying_committees?: BuyingCombo[];
-  scoring_weights?: ScoringWeights;
+  scoring_weights?: Record<string, unknown>;
 }
 
 interface ChangelogEntry {
@@ -213,10 +244,14 @@ function DataReadinessStep({ onActivate }: { onActivate: () => void }) {
     );
   }
 
-  const crm = readiness?.crm ?? { ready: false };
-  const conv = readiness?.conversations ?? { ready: false };
-  const enr = readiness?.enrichment ?? { ready: false };
+  const crm = readiness?.crm ?? {};
+  const conv = readiness?.conversations ?? {};
+  const enr = readiness?.enrichment ?? {};
   const canRun = readiness?.canRun ?? false;
+
+  const crmReady = crm.ready ?? (crm.connected ?? false);
+  const convReady = conv.connected ?? (conv.ready ?? false);
+  const enrReady = enr.configured ?? (enr.ready ?? false);
 
   const crmDetails = [
     `${crm.accounts ?? 0} accounts · ${crm.closedWonDeals ?? 0} closed-won · ${crm.closedLostDeals ?? 0} closed-lost`,
@@ -240,20 +275,20 @@ function DataReadinessStep({ onActivate }: { onActivate: () => void }) {
       <div style={{ display: 'flex', gap: 16, marginBottom: 24 }}>
         <SourceCard
           name="CRM"
-          ready={crm.ready}
-          statusLabel={crm.ready ? 'Ready' : 'Needs Attention'}
+          ready={crmReady}
+          statusLabel={crmReady ? 'Ready' : 'Needs Attention'}
           details={crmDetails}
         />
         <SourceCard
           name="Conversations"
-          ready={conv.ready}
-          statusLabel={conv.ready ? 'Ready' : 'Limited'}
+          ready={convReady}
+          statusLabel={convReady ? 'Connected' : 'Not Connected'}
           details={convDetails}
         />
         <SourceCard
           name="Enrichment"
-          ready={enr.ready}
-          statusLabel={enr.ready ? 'Ready' : 'Partial'}
+          ready={enrReady}
+          statusLabel={enrReady ? 'Ready' : 'Partial'}
           details={enrDetails}
         />
       </div>
@@ -714,30 +749,43 @@ function DossierView({ addToast, conversationsConnected }: { addToast: (msg: str
     ? new Date(profile.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
     : '';
 
-  const tier = profile.tier ?? 1;
+  const wonDeals = profile.won_deals ?? 0;
+  const tier = wonDeals >= 200 ? 3 : wonDeals >= 100 ? 2 : 1;
 
-  // Industries
-  const industries = profile.company_profile?.industries ?? [];
-  const industryEntries: IndustryEntry[] = industries.map(ind =>
-    typeof ind === 'string' ? { name: ind } : ind as IndustryEntry
-  );
+  const iwRates = profile.company_profile?.industryWinRates ?? [];
+  const oldIndustries = profile.company_profile?.industries ?? [];
+  const industryEntries: IndustryEntry[] = iwRates.length > 0
+    ? iwRates.map(iw => ({ name: iw.industry, win_rate: iw.winRate }))
+    : oldIndustries.map(ind => typeof ind === 'string' ? { name: ind } : ind as IndustryEntry);
   const rates = industryEntries.map(e => e.win_rate ?? 0).filter(r => r > 0);
   const baseline = rates.length > 0 ? rates.reduce((a, b) => a + b, 0) / rates.length : 0;
 
-  // Buying triggers
+  const sizeRates = profile.company_profile?.sizeWinRates ?? [];
+
   const clusters = profile.conversation_insights?.pain_point_clusters ?? [];
 
-  // Buying committee combos
   const committees = profile.buying_committees ?? [];
   const topCombos = [...committees]
-    .sort((a, b) => (b.win_rate ?? 0) - (a.win_rate ?? 0))
-    .slice(0, 2);
+    .sort((a, b) => (b.winRate ?? b.win_rate ?? 0) - (a.winRate ?? a.win_rate ?? 0))
+    .slice(0, 5);
 
-  // Disqualifiers
   const disqualifiers = profile.company_profile?.disqualifiers ?? [];
 
-  // Scoring weights
-  const weights = profile.scoring_weights ?? {};
+  const rawWeights = profile.scoring_weights ?? {};
+  const flatWeights: Record<string, number> = {};
+  for (const [section, val] of Object.entries(rawWeights)) {
+    if (section === 'method' || section === 'note') continue;
+    if (typeof val === 'number') {
+      flatWeights[section] = val;
+    } else if (val && typeof val === 'object' && !Array.isArray(val)) {
+      for (const [subKey, subVal] of Object.entries(val as Record<string, unknown>)) {
+        if (typeof subVal === 'number') {
+          flatWeights[subKey] = subVal;
+        }
+      }
+    }
+  }
+  const maxWeight = Math.max(...Object.values(flatWeights), 1);
 
   return (
     <div>
@@ -853,17 +901,25 @@ function DossierView({ addToast, conversationsConnected }: { addToast: (msg: str
       )}
 
       {/* Size ranges */}
-      {profile.company_profile?.size_ranges && profile.company_profile.size_ranges.length > 0 && (
-        <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {profile.company_profile.size_ranges.map((sz, i) => (
-            <span key={i} style={{
-              fontSize: 12, padding: '4px 12px', borderRadius: 20,
-              background: colors.surfaceHover, border: `1px solid ${colors.border}`,
-              color: colors.textSecondary,
-            }}>
-              {sz}
-            </span>
-          ))}
+      {sizeRates.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: colors.textMuted, letterSpacing: '0.06em', marginBottom: 8 }}>
+            COMPANY SIZE
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {sizeRates.filter(s => s.count > 0).map((sz, i) => (
+              <div key={i} style={{
+                fontSize: 12, padding: '6px 14px', borderRadius: 8,
+                background: colors.surface, border: `1px solid ${colors.border}`,
+                color: colors.text, display: 'flex', gap: 8, alignItems: 'center',
+              }}>
+                <span>{sz.bucket} employees</span>
+                <span style={{ color: colors.textMuted, fontFamily: fonts.mono }}>
+                  {Math.round(sz.winRate * 100)}% win · {sz.count} deals
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -916,32 +972,49 @@ function DossierView({ addToast, conversationsConnected }: { addToast: (msg: str
       <SectionHeader title="Buying Committee" onEdit={() => setEditingSection(editingSection === 'committee' ? null : 'committee')} />
       {editingSection === 'committee' && (
         <InlineEditArea
-          initial={topCombos.map(c => (c.roles ?? []).join(', ')).join('\n')}
+          initial={topCombos.map(c => (c.personaNames ?? c.roles ?? []).join(', ')).join('\n')}
           onSave={(v, n) => handleSave('buying_committees', v, n)}
           onCancel={() => setEditingSection(null)}
         />
       )}
       {topCombos.length > 0 ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {topCombos.map((combo, i) => (
-            <div key={i} style={{
-              display: 'flex', alignItems: 'center', gap: 12,
-              padding: '10px 14px', background: colors.surface,
-              border: `1px solid ${colors.border}`, borderRadius: 8, fontSize: 13,
-            }}>
-              <span style={{ fontSize: 10, fontWeight: 700, color: colors.textMuted }}>#{i + 1}</span>
-              <span style={{ flex: 1, color: colors.text }}>
-                {(combo.roles ?? []).join(' + ')}
-              </span>
-              {combo.win_rate != null && (
-                <span style={{
-                  fontSize: 12, fontFamily: fonts.mono, color: colors.green, fontWeight: 600,
-                }}>
-                  {Math.round(combo.win_rate * 100)}% win rate
+          {topCombos.map((combo, i) => {
+            const names = combo.personaNames ?? combo.roles ?? [];
+            const wr = combo.winRate ?? combo.win_rate;
+            const lift = combo.lift;
+            return (
+              <div key={i} style={{
+                display: 'flex', alignItems: 'center', gap: 12,
+                padding: '10px 14px', background: colors.surface,
+                border: `1px solid ${colors.border}`, borderRadius: 8, fontSize: 13,
+              }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: colors.textMuted }}>#{i + 1}</span>
+                <span style={{ flex: 1, color: colors.text }}>
+                  {names.join(' + ')}
                 </span>
-              )}
-            </div>
-          ))}
+                {wr != null && (
+                  <span style={{
+                    fontSize: 12, fontFamily: fonts.mono, color: colors.green, fontWeight: 600,
+                  }}>
+                    {Math.round(wr * 100)}% win rate
+                  </span>
+                )}
+                {lift != null && lift > 1 && (
+                  <span style={{
+                    fontSize: 12, fontFamily: fonts.mono, color: colors.accent, fontWeight: 600,
+                  }}>
+                    {lift.toFixed(1)}× lift
+                  </span>
+                )}
+                {combo.wonCount != null && combo.totalCount != null && (
+                  <span style={{ fontSize: 11, color: colors.textMuted, fontFamily: fonts.mono }}>
+                    {combo.wonCount}/{combo.totalCount}
+                  </span>
+                )}
+              </div>
+            );
+          })}
         </div>
       ) : (
         <div style={{ fontSize: 13, color: colors.textMuted, padding: '8px 0' }}>
@@ -990,10 +1063,12 @@ function DossierView({ addToast, conversationsConnected }: { addToast: (msg: str
           onCancel={() => setEditingSection(null)}
         />
       )}
-      {Object.keys(weights).length > 0 ? (
+      {Object.keys(flatWeights).length > 0 ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {Object.entries(weights).map(([key, val]) => {
-            const pct = typeof val === 'number' ? val * 100 : 0;
+          {Object.entries(flatWeights)
+            .sort(([, a], [, b]) => b - a)
+            .map(([key, val]) => {
+            const barPct = maxWeight > 0 ? (val / maxWeight) * 100 : 0;
             const label = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
             return (
               <div key={key} style={{
@@ -1003,13 +1078,13 @@ function DossierView({ addToast, conversationsConnected }: { addToast: (msg: str
               }}>
                 <span style={{ flex: 1, color: colors.textSecondary }}>{label}</span>
                 <span style={{ fontFamily: fonts.mono, color: colors.text, minWidth: 40, textAlign: 'right' }}>
-                  {Math.round(pct)}%
+                  {val}
                 </span>
                 <div style={{
                   width: 80, height: 4, background: colors.surfaceHover, borderRadius: 2, overflow: 'hidden',
                 }}>
                   <div style={{
-                    height: '100%', width: `${Math.min(pct, 100)}%`,
+                    height: '100%', width: `${Math.min(barPct, 100)}%`,
                     background: colors.accent, borderRadius: 2,
                   }} />
                 </div>
@@ -1055,7 +1130,7 @@ export default function IcpProfilePage() {
       setScoringState(sr.state);
       if (readinessRes) {
         const rr = readinessRes as ReadinessResponse;
-        setConversationsConnected(rr.conversations?.ready ?? false);
+        setConversationsConnected(rr.conversations?.connected ?? rr.conversations?.ready ?? false);
       }
     }).catch(() => {
       setScoringState('locked');

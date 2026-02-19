@@ -181,6 +181,14 @@ router.get('/:workspaceId/icp/readiness', async (req: Request, res: Response): P
     const avgConfidence = Number(enrichRow?.avg_confidence ?? 0);
     const totalSignalRows = accountsEnriched + accountsPending;
 
+    // Check if a conversations connector (gong/fireflies) exists
+    const connResult = await query<{ cnt: string }>(
+      `SELECT COUNT(*) AS cnt FROM connections
+       WHERE workspace_id = $1 AND connector_name IN ('gong', 'fireflies')`,
+      [workspaceId]
+    );
+    const hasConversationConnector = Number(connResult.rows[0]?.cnt ?? 0) > 0;
+
     // Build improvements list
     const improvements: string[] = [];
 
@@ -210,7 +218,7 @@ router.get('/:workspaceId/icp/readiness', async (req: Request, res: Response): P
         minimumNeeded: 30,
       },
       conversations: {
-        connected: totalCalls > 0,
+        connected: hasConversationConnector || totalCalls > 0,
         totalCalls,
         wonDealCalls,
         tier,
