@@ -396,6 +396,29 @@ router.post(
             [workspaceId, goal.period_label, goal.period_type, goal.period_start, goal.period_end]
           );
           periodId = newPeriod.rows[0].id;
+
+          if (goal.period_type === 'quarterly') {
+            const year = new Date(goal.period_start).getFullYear();
+            const quarters = [
+              { q: 'Q1', start: `${year}-01-01`, end: `${year}-03-31` },
+              { q: 'Q2', start: `${year}-04-01`, end: `${year}-06-30` },
+              { q: 'Q3', start: `${year}-07-01`, end: `${year}-09-30` },
+              { q: 'Q4', start: `${year}-10-01`, end: `${year}-12-31` },
+            ];
+            for (const qtr of quarters) {
+              if (qtr.start === goal.period_start && qtr.end === goal.period_end) continue;
+              const qExists = await query<{ id: string }>(
+                `SELECT id FROM quota_periods WHERE workspace_id = $1 AND start_date = $2 AND end_date = $3 AND period_type = 'quarterly' LIMIT 1`,
+                [workspaceId, qtr.start, qtr.end]
+              );
+              if (qExists.rows.length === 0) {
+                await query(
+                  `INSERT INTO quota_periods (workspace_id, name, period_type, start_date, end_date, team_quota) VALUES ($1, $2, 'quarterly', $3, $4, 0)`,
+                  [workspaceId, `${qtr.q} ${year}`, qtr.start, qtr.end]
+                );
+              }
+            }
+          }
         }
 
         try {
@@ -558,6 +581,30 @@ router.post(
           [workspaceId, period_label || `${period_type} period`, period_type, period_start, period_end]
         );
         periodId = newPeriod.rows[0].id;
+
+        if (period_type === 'quarterly') {
+          const year = new Date(period_start).getFullYear();
+          const quarters = [
+            { q: 'Q1', start: `${year}-01-01`, end: `${year}-03-31` },
+            { q: 'Q2', start: `${year}-04-01`, end: `${year}-06-30` },
+            { q: 'Q3', start: `${year}-07-01`, end: `${year}-09-30` },
+            { q: 'Q4', start: `${year}-10-01`, end: `${year}-12-31` },
+          ];
+          for (const qtr of quarters) {
+            if (qtr.start === period_start && qtr.end === period_end) continue;
+            const exists = await query<{ id: string }>(
+              `SELECT id FROM quota_periods WHERE workspace_id = $1 AND start_date = $2 AND end_date = $3 AND period_type = 'quarterly' LIMIT 1`,
+              [workspaceId, qtr.start, qtr.end]
+            );
+            if (exists.rows.length === 0) {
+              await query(
+                `INSERT INTO quota_periods (workspace_id, name, period_type, start_date, end_date, team_quota)
+                 VALUES ($1, $2, 'quarterly', $3, $4, 0)`,
+                [workspaceId, `${qtr.q} ${year}`, qtr.start, qtr.end]
+              );
+            }
+          }
+        }
       }
 
       const result = await query<{ id: string }>(

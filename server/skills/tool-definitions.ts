@@ -2526,7 +2526,7 @@ const forecastRollup: ToolDefinition = {
           forecast_category,
           COUNT(*) AS deal_count,
           COALESCE(SUM(amount), 0) AS total_amount,
-          COALESCE(SUM(amount * COALESCE(probability, 0)), 0) AS weighted_amount
+          COALESCE(SUM(amount * CASE WHEN probability IS NULL THEN 0 WHEN probability > 1 THEN probability / 100.0 ELSE probability END), 0) AS weighted_amount
         FROM deals
         WHERE workspace_id = $1
           AND forecast_category IS NOT NULL
@@ -3025,7 +3025,7 @@ const gatherDealConcentrationRisk: ToolDefinition = {
         name: d.name,
         amount: d.amount || 0,
         probability: d.probability || 0,
-        weighted: (d.amount || 0) * (d.probability || 0),
+        weighted: (d.amount || 0) * ((d.probability || 0) > 1 ? (d.probability || 0) / 100 : (d.probability || 0)),
         category: d.forecast_category || 'unknown',
         owner: nameMap[d.owner || ''] || d.owner || 'Unknown',
         closeDate: d.close_date,
@@ -3043,7 +3043,7 @@ const gatherDealConcentrationRisk: ToolDefinition = {
             amount: d.amount || 0,
             percentOfQuota: ((d.amount || 0) / quotaConfig.teamQuota) * 100,
             probability: d.probability || 0,
-            weighted: (d.amount || 0) * (d.probability || 0),
+            weighted: (d.amount || 0) * ((d.probability || 0) > 1 ? (d.probability || 0) / 100 : (d.probability || 0)),
             category: d.forecast_category || 'unknown',
             owner: nameMap[d.owner || ''] || d.owner || 'Unknown',
             closeDate: d.close_date,

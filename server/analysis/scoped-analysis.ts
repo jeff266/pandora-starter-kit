@@ -66,7 +66,11 @@ function compressDealContext(dossier: DealDossier): { text: string; sources: str
   lines.push(`Amount: ${fmtAmount(d.amount)} | Stage: ${d.stage || d.stage_normalized} (${d.days_in_stage ?? '?'} days) | Close: ${fmtDate(d.close_date)}`);
   lines.push(`Owner: ${d.owner_name || d.owner_email || 'unknown'}`);
   if (d.account_name) lines.push(`Account: ${d.account_name}`);
-  if (d.probability != null) lines.push(`Probability: ${Math.round(Number(d.probability) * 100)}% | Forecast: ${d.forecast_category || 'unknown'}`);
+  if (d.probability != null) {
+    const prob = Number(d.probability);
+    const probPct = prob > 1 ? Math.round(prob) : Math.round(prob * 100);
+    lines.push(`Probability: ${probPct}% | Forecast: ${d.forecast_category || 'unknown'}`);
+  }
 
   const hs = dossier.health_signals;
   lines.push(`\nHEALTH: activity=${hs.activity_recency}, threading=${hs.threading}, velocity=${hs.stage_velocity}, completeness=${hs.data_completeness}%`);
@@ -809,7 +813,7 @@ async function gatherContext(request: AnalysisRequest): Promise<{
       const stageContext = `STAGE: ${stageName}
 DEALS (${dealsResult.rows.length} total):
 ${dealsResult.rows.map((d: any) =>
-  `- ${d.name}: $${d.amount || 0} | ${Math.round(d.days_in_stage || 0)} days in stage | ${Math.round((d.probability || 0) * 100)}% prob | close: ${d.close_date || 'unknown'} | forecast: ${d.forecast_category} | owner: ${d.owner_name || d.owner}`
+  `- ${d.name}: $${d.amount || 0} | ${Math.round(d.days_in_stage || 0)} days in stage | ${Math.round((d.probability || 0) > 1 ? (d.probability || 0) : (d.probability || 0) * 100)}% prob | close: ${d.close_date || 'unknown'} | forecast: ${d.forecast_category} | owner: ${d.owner_name || d.owner}`
 ).join('\n')}
 
 ${findingsText ? `FINDINGS:\n${findingsText}` : 'No active findings for this stage.'}`;

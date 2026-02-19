@@ -362,7 +362,7 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
          COALESCE(d.stage, d.stage_normalized, 'Unknown') as stage,
          count(*)::int as deal_count,
          COALESCE(sum(d.amount), 0)::float as total_value,
-         COALESCE(sum(d.amount * COALESCE(d.probability, 0.5)), 0)::float as weighted_value,
+         COALESCE(sum(d.amount * CASE WHEN d.probability IS NULL THEN 0.5 WHEN d.probability > 1 THEN d.probability / 100.0 ELSE d.probability END), 0)::float as weighted_value,
          MAX(sc.display_order) as display_order
        FROM deals d
        LEFT JOIN stage_configs sc

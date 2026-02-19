@@ -848,7 +848,8 @@ async function computeWeightedPipeline(workspaceId: string, params: Record<strin
   );
 
   const rows = result.rows;
-  const weighted = rows.reduce((s: number, r: any) => s + (r.amount || 0) * (r.probability || 0), 0);
+  const normProb = (p: number) => p > 1 ? p / 100 : p;
+  const weighted = rows.reduce((s: number, r: any) => s + (r.amount || 0) * normProb(r.probability || 0), 0);
   const formatted = weighted >= 1_000_000
     ? `$${(weighted / 1_000_000).toFixed(2)}M`
     : `$${(weighted / 1_000).toFixed(0)}K`;
@@ -862,8 +863,8 @@ async function computeWeightedPipeline(workspaceId: string, params: Record<strin
     underlying_records: rows.map((r: any) => ({
       id: r.id,
       name: r.name,
-      amount: (r.amount || 0) * (r.probability || 0),
-      included_because: `${r.stage} at ${Math.round((r.probability || 0) * 100)}% probability`,
+      amount: (r.amount || 0) * normProb(r.probability || 0),
+      included_because: `${r.stage} at ${Math.round(normProb(r.probability || 0) * 100)}% probability`,
     })),
     exclusions: [{ reason: 'Deals without probability set excluded', count: 0 }],
     record_count: rows.length,

@@ -1380,6 +1380,11 @@ function QuotasSection() {
   const [addName, setAddName] = useState('');
   const [addEmail, setAddEmail] = useState('');
   const [addAmount, setAddAmount] = useState('');
+  const [addQuarter, setAddQuarter] = useState(() => {
+    const q = Math.ceil((new Date().getMonth() + 1) / 3);
+    return `Q${q}`;
+  });
+  const [addYear, setAddYear] = useState(() => String(new Date().getFullYear()));
   const [repSuggestions, setRepSuggestions] = useState<Array<{ rep_name: string; rep_email: string | null }>>([]);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -1519,23 +1524,60 @@ function QuotasSection() {
     }
   };
 
+  const getQuarterDates = (quarter: string, year: string) => {
+    const y = parseInt(year);
+    const qNum = parseInt(quarter.replace('Q', ''));
+    const startMonth = (qNum - 1) * 3;
+    const start = new Date(y, startMonth, 1);
+    const end = new Date(y, startMonth + 3, 0);
+    return {
+      start: start.toISOString().slice(0, 10),
+      end: end.toISOString().slice(0, 10),
+    };
+  };
+
   const handleAddQuota = async () => {
     if (!addName || !addEmail || !addAmount) return;
     setError('');
     const currentPeriod = periods[currentPeriodIdx];
+    let periodStart: string;
+    let periodEnd: string;
+    let periodType = 'quarterly';
+    let periodLabelStr: string;
+
+    if (currentPeriod) {
+      periodStart = currentPeriod.start_date;
+      periodEnd = currentPeriod.end_date;
+      periodLabelStr = currentPeriod.name;
+      periodType = currentPeriod.period_type || 'quarterly';
+    } else {
+      const dates = getQuarterDates(addQuarter, addYear);
+      periodStart = dates.start;
+      periodEnd = dates.end;
+      periodLabelStr = `${addQuarter} ${addYear}`;
+    }
+
     try {
       await api.post('/quotas/add', {
         rep_name: addName,
         email: addEmail,
         quota_amount: parseFloat(addAmount),
-        period_start: currentPeriod?.start_date,
-        period_end: currentPeriod?.end_date,
+        period_start: periodStart,
+        period_end: periodEnd,
+        period_type: periodType,
+        period_label: periodLabelStr,
       });
       setShowAddForm(false);
       setAddName('');
       setAddEmail('');
       setAddAmount('');
-      await loadQuotas();
+      const pData = await api.get('/quotas/periods').catch(() => []);
+      const pArr = Array.isArray(pData) ? pData : pData?.periods || [];
+      setPeriods(pArr);
+      const now = new Date();
+      const curIdx = pArr.findIndex((p: any) => new Date(p.start_date) <= now && new Date(p.end_date) >= now);
+      setCurrentPeriodIdx(curIdx >= 0 ? curIdx : 0);
+      await loadQuotas(pArr, curIdx >= 0 ? curIdx : 0);
     } catch (err: any) {
       setError(err.message || 'Failed to add quota');
     }
@@ -1626,6 +1668,17 @@ function QuotasSection() {
     );
   }
 
+  const emptyInputStyle: React.CSSProperties = {
+    fontSize: 12,
+    fontFamily: fonts.sans,
+    color: colors.text,
+    background: colors.surfaceRaised,
+    border: `1px solid ${colors.border}`,
+    borderRadius: 6,
+    padding: '6px 10px',
+    outline: 'none',
+  };
+
   if (quotas.length === 0 && periods.length === 0) {
     return (
       <div style={{ maxWidth: 640 }}>
@@ -1646,8 +1699,156 @@ function QuotasSection() {
           <p style={{ fontSize: 13, color: colors.textSecondary, lineHeight: 1.6, marginBottom: 24, maxWidth: 440, margin: '0 auto 24px' }}>
             Quotas enable attainment tracking, gap analysis, and rep performance scoring across Pipeline Coverage and Forecast reports.
           </p>
-          {importButtons}
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+            {importButtons}
+            <button
+              onClick={() => setShowAddForm(true)}
+              style={{
+                fontSize: 12,
+                fontWeight: 600,
+                fontFamily: fonts.sans,
+                color: colors.green,
+                background: 'transparent',
+                border: `1px solid ${colors.green}`,
+                borderRadius: 6,
+                padding: '8px 16px',
+                cursor: 'pointer',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(34,197,94,0.1)'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+            >
+              + Add Manually
+            </button>
+          </div>
         </div>
+
+        {showAddForm && (
+          <div style={{
+            background: colors.surface,
+            border: `1px solid ${colors.border}`,
+            borderRadius: 10,
+            padding: 20,
+            marginTop: 16,
+          }}>
+            <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text, marginBottom: 12 }}>Add Rep Quota</h3>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+              <select
+                value={addQuarter}
+                onChange={e => setAddQuarter(e.target.value)}
+                style={{ ...emptyInputStyle, width: 80 }}
+              >
+                <option value="Q1">Q1</option>
+                <option value="Q2">Q2</option>
+                <option value="Q3">Q3</option>
+                <option value="Q4">Q4</option>
+              </select>
+              <select
+                value={addYear}
+                onChange={e => setAddYear(e.target.value)}
+                style={{ ...emptyInputStyle, width: 90 }}
+              >
+                {[new Date().getFullYear() - 1, new Date().getFullYear(), new Date().getFullYear() + 1].map(y => (
+                  <option key={y} value={String(y)}>{y}</option>
+                ))}
+              </select>
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <div style={{ flex: 1, minWidth: 120 }}>
+                <label style={{ fontSize: 11, color: colors.textSecondary, display: 'block', marginBottom: 4 }}>Rep Name</label>
+                <input
+                  value={addName}
+                  onChange={e => {
+                    setAddName(e.target.value);
+                    const match = repSuggestions.find(r => r.rep_name === e.target.value);
+                    if (match?.rep_email) setAddEmail(match.rep_email);
+                  }}
+                  list="rep-suggestions-empty"
+                  placeholder="e.g. Jane Smith"
+                  style={{ ...emptyInputStyle, width: '100%' }}
+                />
+                <datalist id="rep-suggestions-empty">
+                  {repSuggestions.map((r, i) => (
+                    <option key={i} value={r.rep_name} />
+                  ))}
+                </datalist>
+              </div>
+              <div style={{ flex: 1, minWidth: 140 }}>
+                <label style={{ fontSize: 11, color: colors.textSecondary, display: 'block', marginBottom: 4 }}>Email</label>
+                <input
+                  value={addEmail}
+                  onChange={e => setAddEmail(e.target.value)}
+                  placeholder="jane@company.com"
+                  style={{ ...emptyInputStyle, width: '100%' }}
+                />
+              </div>
+              <div style={{ minWidth: 100 }}>
+                <label style={{ fontSize: 11, color: colors.textSecondary, display: 'block', marginBottom: 4 }}>Quota ($)</label>
+                <input
+                  type="number"
+                  value={addAmount}
+                  onChange={e => setAddAmount(e.target.value)}
+                  placeholder="500000"
+                  style={{ ...emptyInputStyle, width: '100%' }}
+                />
+              </div>
+              <button
+                onClick={handleAddQuota}
+                disabled={!addName || !addEmail || !addAmount}
+                style={{
+                  fontSize: 12,
+                  fontWeight: 600,
+                  fontFamily: fonts.sans,
+                  color: '#fff',
+                  background: (!addName || !addEmail || !addAmount) ? colors.textMuted : colors.green,
+                  border: 'none',
+                  borderRadius: 6,
+                  padding: '7px 14px',
+                  cursor: (!addName || !addEmail || !addAmount) ? 'not-allowed' : 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                Add
+              </button>
+              <button
+                onClick={() => { setShowAddForm(false); setAddName(''); setAddEmail(''); setAddAmount(''); setAddQuarter(() => { const q = Math.ceil((new Date().getMonth() + 1) / 3); return `Q${q}`; }); setAddYear(String(new Date().getFullYear())); }}
+                style={{
+                  fontSize: 12,
+                  fontFamily: fonts.sans,
+                  color: colors.textMuted,
+                  background: 'transparent',
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: 6,
+                  padding: '7px 14px',
+                  cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {preview && (
+          <div style={{
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999,
+          }}>
+            <div style={{ background: colors.bg, borderRadius: 12, padding: 24, maxWidth: 600, width: '90%', maxHeight: '80vh', overflow: 'auto' }}>
+              <h3 style={{ fontSize: 16, fontWeight: 600, color: colors.text, marginBottom: 16 }}>Confirm Import</h3>
+              <p style={{ fontSize: 13, color: colors.textSecondary, marginBottom: 16 }}>
+                {preview.quotas?.length || preview.goals?.length || 0} rep quotas will be imported.
+              </p>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button onClick={handleConfirmImport} style={{ fontSize: 12, fontWeight: 600, fontFamily: fonts.sans, color: '#fff', background: colors.accent, border: 'none', borderRadius: 6, padding: '8px 16px', cursor: 'pointer' }}>
+                  Confirm
+                </button>
+                <button onClick={() => { setPreview(null); setPreviewSource(null); }} style={{ fontSize: 12, fontFamily: fonts.sans, color: colors.textMuted, background: 'transparent', border: `1px solid ${colors.border}`, borderRadius: 6, padding: '8px 16px', cursor: 'pointer' }}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
