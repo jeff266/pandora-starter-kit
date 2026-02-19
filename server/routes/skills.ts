@@ -615,10 +615,55 @@ router.get('/:workspaceId/monte-carlo/pipelines', async (req, res) => {
   }
 });
 
+router.get('/:workspaceId/monte-carlo/runs', async (req, res) => {
+  try {
+    const { workspaceId } = req.params;
+    const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
+    const rows = await query<{
+      run_id: string; created_at: string;
+      pipeline_filter: string | null; pipeline_type: string | null;
+      p50: string | null; p10: string | null; p90: string | null; deals: string | null;
+    }>(
+      `SELECT run_id, created_at,
+         result->'simulation'->'commandCenter'->>'pipelineFilter' as pipeline_filter,
+         result->'simulation'->'commandCenter'->>'pipelineType' as pipeline_type,
+         result->'simulation'->'commandCenter'->>'p50' as p50,
+         result->'simulation'->'commandCenter'->>'p10' as p10,
+         result->'simulation'->'commandCenter'->>'p90' as p90,
+         result->'simulation'->'commandCenter'->>'dealsInSimulation' as deals
+       FROM skill_runs
+       WHERE workspace_id = $1
+         AND skill_id = 'monte-carlo-forecast'
+         AND status = 'completed'
+         AND result IS NOT NULL
+         AND result->'simulation'->'commandCenter' IS NOT NULL
+       ORDER BY created_at DESC
+       LIMIT $2`,
+      [workspaceId, limit]
+    );
+    return res.json({
+      runs: rows.rows.map(r => ({
+        runId: r.run_id,
+        createdAt: r.created_at,
+        pipelineFilter: r.pipeline_filter,
+        pipelineType: r.pipeline_type,
+        p50: r.p50 ? parseFloat(r.p50) : null,
+        p10: r.p10 ? parseFloat(r.p10) : null,
+        p90: r.p90 ? parseFloat(r.p90) : null,
+        dealsInSimulation: r.deals ? parseInt(r.deals) : null,
+      })),
+    });
+  } catch (err) {
+    console.error('[skills] Error listing MC runs:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 router.get('/:workspaceId/monte-carlo/latest', async (req, res) => {
   try {
     const { workspaceId } = req.params;
     const pipeline = req.query.pipeline as string | undefined;
+    const runId = req.query.runId as string | undefined;
 
     const ws = await query('SELECT id FROM workspaces WHERE id = $1', [workspaceId]);
     if (ws.rows.length === 0) {
@@ -630,7 +675,12 @@ router.get('/:workspaceId/monte-carlo/latest', async (req, res) => {
       created_at: string;
       result: any;
     }>(
-      pipeline
+      runId
+        ? `SELECT run_id, created_at, result
+           FROM skill_runs
+           WHERE workspace_id = $1 AND run_id = $2
+           LIMIT 1`
+        : pipeline
         ? `SELECT run_id, created_at, result
            FROM skill_runs
            WHERE workspace_id = $1
@@ -649,7 +699,7 @@ router.get('/:workspaceId/monte-carlo/latest', async (req, res) => {
              AND result IS NOT NULL
            ORDER BY created_at DESC
            LIMIT 1`,
-      pipeline ? [workspaceId, pipeline] : [workspaceId]
+      runId ? [workspaceId, runId] : pipeline ? [workspaceId, pipeline] : [workspaceId]
     );
 
     if (result.rows.length === 0) {

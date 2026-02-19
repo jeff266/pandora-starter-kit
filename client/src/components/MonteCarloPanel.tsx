@@ -114,10 +114,27 @@ interface QueryHistoryItem {
   createdAt: string;
 }
 
+interface RunSummary {
+  runId: string;
+  createdAt: string;
+  pipelineFilter: string | null;
+  pipelineType: string | null;
+  p50: number | null;
+  p10: number | null;
+  p90: number | null;
+  dealsInSimulation: number | null;
+}
+
 const SUGGESTED_QUESTIONS = [
-  'Which deals must close to hit target?',
-  'What if our win rate improves 20%?',
-  'What happens if we close the biggest deal?',
+  { label: 'Which deals must close to hit target?', category: 'analysis' },
+  { label: 'What if our win rate improves 20%?',    category: 'what-if'  },
+  { label: 'What happens if we close the biggest deal?', category: 'what-if' },
+];
+
+const WHAT_IF_EXAMPLES = [
+  "What if win rate drops 30%?",
+  "What if we add $500K in pipeline?",
+  "What if top 3 deals slip to next quarter?",
 ];
 
 export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
@@ -142,6 +159,12 @@ export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
   // Session management for conversation history
   const sessionIdRef = useRef<string>(crypto.randomUUID());
   const [turns, setTurns] = useState<{ role: 'user' | 'assistant'; content: string }[]>([]);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Run history state
+  const [runHistory, setRunHistory] = useState<RunSummary[]>([]);
+  const [runsOpen, setRunsOpen] = useState(false);
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
 
   const fetchPipelines = async () => {
     try {
@@ -152,13 +175,21 @@ export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
     }
   };
 
-  const fetchData = async (pipeline?: string | null) => {
+  // Auto-scroll chat to bottom when new turns arrive
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [turns]);
+
+  const fetchData = async (pipeline?: string | null, runId?: string | null) => {
     setState('loading');
     try {
-      const path = pipeline ? `/monte-carlo/latest?pipeline=${encodeURIComponent(pipeline)}` : '/monte-carlo/latest';
+      let path = '/monte-carlo/latest';
+      if (runId) path = `/monte-carlo/latest?runId=${encodeURIComponent(runId)}`;
+      else if (pipeline) path = `/monte-carlo/latest?pipeline=${encodeURIComponent(pipeline)}`;
       const res: MCResponse = await api.get(path);
       setData(res.commandCenter);
       setGeneratedAt(res.generatedAt);
+      setActiveRunId(res.runId ?? null);
       setState('ready');
     } catch (err: any) {
       const msg = err?.message || '';
@@ -180,6 +211,10 @@ export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
     }
     fetchPipelines();
     fetchData(null);
+    // Fetch run history list
+    api.get('/monte-carlo/runs?limit=20')
+      .then((res: any) => setRunHistory(res?.runs || []))
+      .catch(() => {});
   }, [wsId]);
 
   const handlePipelineChange = (value: string) => {
@@ -570,93 +605,119 @@ export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
 
       {/* Query Section */}
       <div style={{ borderTop: `1px solid #1A1F2B`, marginTop: 16, paddingTop: 16 }}>
-        <div style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 12 }}>
-          Ask a Question
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <div style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+            Ask a Question
+          </div>
+          <div style={{ fontSize: 10, color: '#3B82F6', fontFamily: fonts.sans }}>
+            What-if scenarios supported ✦
+          </div>
         </div>
 
-        {/* Conversation thread */}
-        {turns.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 14 }}>
-            {turns.reduce<{ q: string; a: string }[]>((pairs, turn, i) => {
-              if (turn.role === 'user') pairs.push({ q: turn.content, a: turns[i + 1]?.content ?? '' });
-              return pairs;
-            }, []).map((pair, i, arr) => (
-              <div key={i}>
-                {/* Question row */}
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginBottom: 6 }}>
-                  <span style={{
-                    fontSize: 9, fontWeight: 700, color: colors.textMuted,
-                    textTransform: 'uppercase', letterSpacing: '0.06em',
-                    flexShrink: 0, marginTop: 2, minWidth: 14,
-                  }}>Q</span>
-                  <span style={{ fontSize: 12, color: colors.textSecondary, lineHeight: 1.5 }}>{pair.q}</span>
-                </div>
-                {/* Answer row */}
-                {pair.a && (
-                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
-                    <span style={{
-                      width: 6, height: 6, borderRadius: '50%', flexShrink: 0, marginTop: 5,
-                      background: '#3B82F6',
-                    }} />
-                    <p style={{ fontSize: 13, color: '#94A3B8', lineHeight: 1.6, margin: 0 }}>{pair.a}</p>
-                  </div>
-                )}
-                {/* Follow-up chips only after the last answer */}
-                {i === arr.length - 1 && queryAnswer?.followUps?.length > 0 && (
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
-                    {queryAnswer.followUps.map((fq, fi) => (
-                      <button
-                        key={fi}
-                        onClick={() => submitQuestion(fq)}
-                        style={{
-                          fontSize: 11, padding: '4px 12px', borderRadius: 20,
-                          background: '#1A1F2A', color: '#5A6578',
-                          border: '1px solid #2A3040', cursor: 'pointer',
-                          fontFamily: fonts.sans, transition: 'border-color 0.15s',
-                        }}
-                        onMouseEnter={e => (e.currentTarget.style.borderColor = '#3B82F6')}
-                        onMouseLeave={e => (e.currentTarget.style.borderColor = '#2A3040')}
-                      >
-                        {fq}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
+        {/* Scrollable messages area */}
+        <div style={{
+          maxHeight: turns.length > 0 ? 380 : undefined,
+          overflowY: turns.length > 0 ? 'auto' : undefined,
+          marginBottom: 10,
+          paddingRight: turns.length > 0 ? 2 : 0,
+        } as React.CSSProperties}>
 
-        {/* Suggested chips — shown until first question submitted */}
-        {turns.length === 0 && (
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
-            {SUGGESTED_QUESTIONS.map((q) => (
-              <button
-                key={q}
-                onClick={() => submitQuestion(q)}
-                style={{
-                  fontSize: 11, padding: '4px 12px', borderRadius: 20,
-                  background: '#1A1F2A', color: '#5A6578',
-                  border: '1px solid #2A3040', cursor: 'pointer',
-                  fontFamily: fonts.sans, transition: 'border-color 0.15s',
-                }}
-                onMouseEnter={e => (e.currentTarget.style.borderColor = '#3B82F6')}
-                onMouseLeave={e => (e.currentTarget.style.borderColor = '#2A3040')}
-              >
-                {q}
-              </button>
-            ))}
-          </div>
-        )}
+          {/* Suggested chips — shown until first question submitted */}
+          {turns.length === 0 && (
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {SUGGESTED_QUESTIONS.map((sq) => (
+                  <button
+                    key={sq.label}
+                    onClick={() => submitQuestion(sq.label)}
+                    style={{
+                      fontSize: 11, padding: '4px 12px', borderRadius: 20,
+                      background: sq.category === 'what-if' ? '#1A2030' : '#1A1F2A',
+                      color: sq.category === 'what-if' ? '#60A5FA' : '#5A6578',
+                      border: sq.category === 'what-if' ? '1px solid #1E3A5F' : '1px solid #2A3040',
+                      cursor: 'pointer', fontFamily: fonts.sans, transition: 'border-color 0.15s',
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.borderColor = '#3B82F6')}
+                    onMouseLeave={e => (e.currentTarget.style.borderColor = sq.category === 'what-if' ? '#1E3A5F' : '#2A3040')}
+                  >
+                    {sq.category === 'what-if' && <span style={{ marginRight: 4, opacity: 0.7 }}>↻</span>}
+                    {sq.label}
+                  </button>
+                ))}
+              </div>
+              <div style={{ fontSize: 10, color: colors.textDim, marginTop: 8 }}>
+                Blue chips are what-if scenarios — try "What if we lose our top rep?" or any scenario question
+              </div>
+            </div>
+          )}
+
+          {/* Conversation thread */}
+          {turns.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {turns.reduce<{ q: string; a: string }[]>((pairs, turn, i) => {
+                if (turn.role === 'user') pairs.push({ q: turn.content, a: turns[i + 1]?.content ?? '' });
+                return pairs;
+              }, []).map((pair, i, arr) => (
+                <div key={i}>
+                  {/* Question row */}
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginBottom: 6 }}>
+                    <span style={{
+                      fontSize: 9, fontWeight: 700, color: '#3B82F6',
+                      textTransform: 'uppercase', letterSpacing: '0.06em',
+                      flexShrink: 0, marginTop: 2, minWidth: 14,
+                    }}>Q</span>
+                    <span style={{ fontSize: 12, color: colors.textSecondary, lineHeight: 1.5 }}>{pair.q}</span>
+                  </div>
+                  {/* Answer row */}
+                  {pair.a && (
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                      <span style={{
+                        width: 6, height: 6, borderRadius: '50%', flexShrink: 0, marginTop: 5,
+                        background: '#3B82F6',
+                      }} />
+                      <p style={{ fontSize: 13, color: '#94A3B8', lineHeight: 1.6, margin: 0 }}>{pair.a}</p>
+                    </div>
+                  )}
+                  {/* Follow-up chips only after the last answer */}
+                  {i === arr.length - 1 && queryAnswer?.followUps?.length > 0 && (
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
+                      {queryAnswer.followUps.map((fq, fi) => (
+                        <button
+                          key={fi}
+                          onClick={() => submitQuestion(fq)}
+                          style={{
+                            fontSize: 11, padding: '4px 12px', borderRadius: 20,
+                            background: '#1A1F2A', color: '#5A6578',
+                            border: '1px solid #2A3040', cursor: 'pointer',
+                            fontFamily: fonts.sans, transition: 'border-color 0.15s',
+                          }}
+                          onMouseEnter={e => (e.currentTarget.style.borderColor = '#3B82F6')}
+                          onMouseLeave={e => (e.currentTarget.style.borderColor = '#2A3040')}
+                        >
+                          {fq}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+              <div ref={messagesEndRef} />
+            </div>
+          )}
+        </div>
 
         {/* Input row */}
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div style={{
+          display: 'flex', gap: 8, alignItems: 'center',
+          borderTop: turns.length > 0 ? `1px solid #1A1F2B` : undefined,
+          paddingTop: turns.length > 0 ? 10 : 0,
+        }}>
           <input
             type="text"
             value={question}
             onChange={e => setQuestion(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') submitQuestion(question); }}
-            placeholder={turns.length > 0 ? 'Ask a follow-up question...' : 'Ask a question about this forecast...'}
+            placeholder={turns.length > 0 ? 'Ask a follow-up or what-if question...' : 'Ask a question or try a what-if scenario...'}
             disabled={queryLoading}
             style={{
               flex: 1, height: 36, padding: '0 12px', fontSize: 12,
@@ -685,44 +746,111 @@ export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
           <div style={{ fontSize: 11, color: colors.red, marginTop: 6 }}>{queryError}</div>
         )}
 
-        {/* Recent questions */}
-        {history.length > 0 && (
-          <div style={{ marginTop: 14 }}>
-            <button
-              onClick={() => setHistoryOpen(o => !o)}
-              style={{
-                fontSize: 10, color: colors.textMuted, background: 'none',
-                border: 'none', cursor: 'pointer', padding: 0, fontFamily: fonts.sans,
-              }}
-            >
-              {historyOpen ? '▾' : '▸'} Recent
-            </button>
-            {historyOpen && (
-              <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 0 }}>
-                {history.map((item, i) => (
-                  <div key={i}>
-                    {i > 0 && <div style={{ height: 1, background: '#1A1F2B', margin: '8px 0' }} />}
-                    <button
-                      onClick={() => setQuestion(item.question)}
-                      style={{
-                        background: 'none', border: 'none', cursor: 'pointer',
-                        padding: 0, textAlign: 'left', width: '100%',
-                      }}
-                    >
-                      <div style={{ fontSize: 11, color: colors.textMuted, fontFamily: fonts.sans }}>{item.question}</div>
-                      <div style={{ fontSize: 12, color: '#94A3B8', marginTop: 2, fontFamily: fonts.sans }}>
-                        {item.answer.length > 80 ? item.answer.slice(0, 80) + '…' : item.answer}
-                      </div>
-                      <div style={{ fontSize: 10, color: colors.textDim, marginTop: 2, fontFamily: fonts.sans }}>
-                        {formatTimeAgo(item.createdAt)}
-                      </div>
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+        {/* Past runs + recent questions footer */}
+        <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {/* Run history */}
+          {runHistory.length > 1 && (
+            <div>
+              <button
+                onClick={() => setRunsOpen(o => !o)}
+                style={{
+                  fontSize: 10, color: colors.textMuted, background: 'none',
+                  border: 'none', cursor: 'pointer', padding: 0, fontFamily: fonts.sans,
+                }}
+              >
+                {runsOpen ? '▾' : '▸'} Past runs ({runHistory.length})
+              </button>
+              {runsOpen && (
+                <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  {runHistory.map((run, i) => {
+                    const isActive = run.runId === activeRunId;
+                    return (
+                      <button
+                        key={run.runId}
+                        onClick={() => {
+                          setTurns([]);
+                          setQueryAnswer(null);
+                          sessionIdRef.current = crypto.randomUUID();
+                          fetchData(null, run.runId);
+                        }}
+                        style={{
+                          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                          padding: '5px 8px', borderRadius: 6, width: '100%',
+                          background: isActive ? '#1A2030' : 'transparent',
+                          border: isActive ? '1px solid #1E3A5F' : '1px solid transparent',
+                          cursor: 'pointer', textAlign: 'left',
+                          transition: 'background 0.1s',
+                        }}
+                        onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = colors.surfaceRaised; }}
+                        onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}
+                      >
+                        <div>
+                          <span style={{ fontSize: 11, color: isActive ? '#60A5FA' : colors.textSecondary, fontWeight: isActive ? 600 : 400 }}>
+                            {run.pipelineFilter ?? 'All pipelines'}
+                          </span>
+                          {run.pipelineType && (
+                            <span style={{ fontSize: 10, color: colors.textDim, marginLeft: 6 }}>
+                              · {INFERRED_TYPE_LABELS[run.pipelineType] ?? run.pipelineType}
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexShrink: 0 }}>
+                          {run.p50 != null && (
+                            <span style={{ fontSize: 11, fontFamily: fonts.mono, color: colors.textMuted }}>
+                              P50 {fmtCompact(run.p50)}
+                            </span>
+                          )}
+                          <span style={{ fontSize: 10, color: colors.textDim }}>
+                            {formatTimeAgo(run.createdAt)}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Recent questions */}
+          {history.length > 0 && (
+            <div>
+              <button
+                onClick={() => setHistoryOpen(o => !o)}
+                style={{
+                  fontSize: 10, color: colors.textMuted, background: 'none',
+                  border: 'none', cursor: 'pointer', padding: 0, fontFamily: fonts.sans,
+                }}
+              >
+                {historyOpen ? '▾' : '▸'} Recent questions
+              </button>
+              {historyOpen && (
+                <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 0 }}>
+                  {history.map((item, i) => (
+                    <div key={i}>
+                      {i > 0 && <div style={{ height: 1, background: '#1A1F2B', margin: '8px 0' }} />}
+                      <button
+                        onClick={() => setQuestion(item.question)}
+                        style={{
+                          background: 'none', border: 'none', cursor: 'pointer',
+                          padding: 0, textAlign: 'left', width: '100%',
+                        }}
+                      >
+                        <div style={{ fontSize: 11, color: colors.textMuted, fontFamily: fonts.sans }}>{item.question}</div>
+                        <div style={{ fontSize: 12, color: '#94A3B8', marginTop: 2, fontFamily: fonts.sans }}>
+                          {item.answer.length > 80 ? item.answer.slice(0, 80) + '…' : item.answer}
+                        </div>
+                        <div style={{ fontSize: 10, color: colors.textDim, marginTop: 2, fontFamily: fonts.sans }}>
+                          {formatTimeAgo(item.createdAt)}
+                        </div>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
