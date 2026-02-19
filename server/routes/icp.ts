@@ -124,7 +124,7 @@ router.get('/:workspaceId/icp/readiness', async (req: Request, res: Response): P
         COUNT(c.id) FILTER (
           WHERE d.stage_normalized = 'closed_won'
         ) AS won_deal_calls,
-        AVG(LENGTH(c.transcript)) AS avg_transcript_length
+        AVG(LENGTH(c.transcript_text)) AS avg_transcript_length
       FROM conversations c
       LEFT JOIN deals d ON c.deal_id = d.id AND d.workspace_id = c.workspace_id
       WHERE c.workspace_id = $1`,
