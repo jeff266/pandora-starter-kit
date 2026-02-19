@@ -30,6 +30,7 @@ import ToolsPage from './pages/ToolsPage';
 import PushPage from './pages/PushPage';
 import ConsultantDashboard from './pages/ConsultantDashboard';
 import IcpProfilePage from './pages/IcpProfilePage';
+import AdminScopesPage from './pages/AdminScopesPage';
 import { colors, fonts } from './styles/theme';
 
 const pageTitles: Record<string, string> = {
@@ -52,6 +53,7 @@ const pageTitles: Record<string, string> = {
   '/marketplace': 'Marketplace',
   '/settings': 'Settings',
   '/icp-profile': 'ICP Profile',
+  '/admin/scopes': 'Workspace Scopes',
 };
 
 function getPageTitle(pathname: string): string {
@@ -197,6 +199,7 @@ export default function App() {
             <Route path="/marketplace" element={<MarketplacePage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/icp-profile" element={<IcpProfilePage />} />
+            <Route path="/admin/scopes" element={<AdminScopesPage />} />
           </Routes>
         </div>
       </main>

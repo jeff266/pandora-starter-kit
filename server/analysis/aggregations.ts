@@ -439,9 +439,14 @@ export interface EnrichedDeal extends ThreadingDeal {
 // Deal Threading Analysis Implementation
 // ============================================================================
 
-export async function dealThreadingAnalysis(workspaceId: string): Promise<ThreadingAnalysis> {
+export async function dealThreadingAnalysis(workspaceId: string, scopeId?: string): Promise<ThreadingAnalysis> {
   // Load workspace config for minimum contacts threshold
   const minContacts = await configLoader.getMinimumContactsPerDeal(workspaceId);
+
+  // Build scope filter — SQL-level, not post-query TypeScript filtering
+  const scopeClause = (scopeId && scopeId !== 'default') ? 'AND d.scope_id = $2' : '';
+  const queryParams: unknown[] = [workspaceId];
+  if (scopeId && scopeId !== 'default') queryParams.push(scopeId);
 
   // Get all open deals with contact counts (PRIORITY: deal_contacts table, FALLBACK: legacy methods)
   const dealsResult = await query(`
@@ -505,8 +510,9 @@ export async function dealThreadingAnalysis(workspaceId: string): Promise<Thread
     WHERE d.workspace_id = $1
       AND (d.stage_normalized IS NULL
            OR d.stage_normalized NOT IN ('closed_won', 'closed_lost'))
+      ${scopeClause}
     ORDER BY d.amount DESC
-  `, [workspaceId]);
+  `, queryParams);
 
   const deals: ThreadingDeal[] = dealsResult.rows.map((row: any) => ({
     dealId: row.deal_id,
@@ -790,13 +796,18 @@ export interface DataQualityAudit {
   ownerBreakdown: OwnerQualityBreakdown[];
 }
 
-export async function dataQualityAudit(workspaceId: string): Promise<DataQualityAudit> {
+export async function dataQualityAudit(workspaceId: string, scopeId?: string): Promise<DataQualityAudit> {
   // Critical fields defaults (TODO: check context layer for quality_critical_fields)
   const criticalFields = {
     deals: ['amount', 'stage', 'close_date', 'owner', 'account_id'],
     contacts: ['email', 'first_name', 'last_name', 'account_id'],
     accounts: ['name', 'domain'],
   };
+
+  // Build scope filter — SQL-level filtering, not post-query TypeScript filtering
+  const scopeClause = (scopeId && scopeId !== 'default') ? 'AND scope_id = $2' : '';
+  const dealParams: unknown[] = [workspaceId];
+  if (scopeId && scopeId !== 'default') dealParams.push(scopeId);
 
   // ===== DEALS ANALYSIS =====
   const dealsFieldStats = await query(`
@@ -809,8 +820,8 @@ export async function dataQualityAudit(workspaceId: string): Promise<DataQuality
       COUNT(account_id) as account_id_filled,
       COUNT(name) as name_filled
     FROM deals
-    WHERE workspace_id = $1
-  `, [workspaceId]);
+    WHERE workspace_id = $1 ${scopeClause}
+  `, dealParams);
 
   const dealsIssues = await query(`
     SELECT
@@ -832,8 +843,8 @@ export async function dataQualityAudit(workspaceId: string): Promise<DataQuality
         ) dupes
       ) as duplicate_suspects
     FROM deals
-    WHERE workspace_id = $1
-  `, [workspaceId]);
+    WHERE workspace_id = $1 ${scopeClause}
+  `, dealParams);
 
   const dealsTotal = parseInt(dealsFieldStats.rows[0].total, 10) || 0;
   const dealsFieldCompleteness: FieldCompleteness[] = [
@@ -1287,7 +1298,8 @@ export async function coverageByRep(
   quarterEnd: Date,
   quotas?: { team?: number; byRep?: Record<string, number> },
   coverageTarget?: number,
-  excludedOwners?: string[]
+  excludedOwners?: string[],
+  scopeId?: string
 ): Promise<CoverageByRep> {
   // Load workspace config
   const configCoverageTarget = coverageTarget ?? await configLoader.getCoverageTarget(workspaceId);
@@ -1299,6 +1311,13 @@ export async function coverageByRep(
     const placeholders = excludedOwners.map((_, i) => `$${params.length + i + 1}`).join(', ');
     excludeClause = `AND (owner IS NULL OR owner NOT IN (${placeholders}))`;
     params.push(...excludedOwners);
+  }
+
+  // SQL-level scope filter — not post-query TypeScript filtering
+  let scopeClause = '';
+  if (scopeId && scopeId !== 'default') {
+    scopeClause = `AND scope_id = $${params.length + 1}`;
+    params.push(scopeId);
   }
 
   const repsResult = await query(`
@@ -1320,6 +1339,7 @@ export async function coverageByRep(
         (stage_normalized = 'closed_won' AND close_date BETWEEN $2 AND $3)
       )
       ${excludeClause}
+      ${scopeClause}
     GROUP BY owner
     ORDER BY pipeline DESC
   `, params);

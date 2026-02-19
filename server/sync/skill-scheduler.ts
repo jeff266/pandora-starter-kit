@@ -14,6 +14,7 @@ import type { SkillDefinition } from '../skills/types.js';
 import { getAgentRegistry } from '../agents/registry.js';
 import { getAgentRuntime } from '../agents/runtime.js';
 import { runDealScoreSnapshots } from '../scoring/deal-score-snapshot.js';
+import { getActiveScopes, DEFAULT_SCOPE, type ActiveScope } from '../config/scope-loader.js';
 
 interface ScheduledSkill {
   skillId: string;
@@ -45,7 +46,8 @@ async function hasRecentRun(workspaceId: string, skillId: string): Promise<boole
 async function executeSkill(
   workspaceId: string,
   skill: SkillDefinition,
-  triggerType: 'scheduled' | 'manual_batch'
+  triggerType: 'scheduled' | 'manual_batch',
+  scope?: ActiveScope
 ): Promise<{ success: boolean; runId?: string; duration_ms?: number; error?: string }> {
   const startTime = Date.now();
 
@@ -77,11 +79,15 @@ async function executeSkill(
       // Continue with skill execution even if sync fails (stale data is better than no data)
     }
 
-    // Execute the skill
-    const runtime = getSkillRuntime();
-    const result = await runtime.executeSkill(skill, workspaceId, {});
+    // Execute the skill — pass scope so tools can filter their SQL queries
+    const scopeParams = scope
+      ? { scopeId: scope.scope_id, scopeName: scope.name }
+      : { scopeId: 'default', scopeName: 'All Deals' };
 
-    // Log to database with trigger type
+    const runtime = getSkillRuntime();
+    const result = await runtime.executeSkill(skill, workspaceId, scopeParams);
+
+    // Log to database with trigger type and scope metadata
     await query(
       `INSERT INTO skill_runs (
         run_id, workspace_id, skill_id, status, trigger_type, params,
@@ -105,7 +111,7 @@ async function executeSkill(
         skill.id,
         result.status,
         triggerType,
-        JSON.stringify({}),
+        JSON.stringify(scopeParams),
         result.stepData ? JSON.stringify(result.stepData) : null,
         result.output ? JSON.stringify(result.output) : null,
         result.output ? (typeof result.output === 'string' ? result.output : JSON.stringify(result.output)) : null,
@@ -146,12 +152,14 @@ async function executeSkill(
 export async function runScheduledSkills(
   workspaceId: string,
   skillIds: string[],
-  triggerType: 'scheduled' | 'manual_batch' = 'scheduled'
+  triggerType: 'scheduled' | 'manual_batch' = 'scheduled',
+  scope?: ActiveScope
 ): Promise<Array<{ skillId: string; success: boolean; runId?: string; duration_ms?: number; error?: string }>> {
   const registry = getSkillRegistry();
   const results: Array<{ skillId: string; success: boolean; runId?: string; duration_ms?: number; error?: string }> = [];
 
-  console.log(`[Skill Scheduler] Running ${skillIds.length} skills for workspace ${workspaceId}`);
+  const scopeLabel = scope && scope.scope_id !== 'default' ? ` [${scope.name}]` : '';
+  console.log(`[Skill Scheduler] Running ${skillIds.length} skills for workspace ${workspaceId}${scopeLabel}`);
 
   for (const skillId of skillIds) {
     const skill = registry.get(skillId);
@@ -161,7 +169,7 @@ export async function runScheduledSkills(
       continue;
     }
 
-    const result = await executeSkill(workspaceId, skill, triggerType);
+    const result = await executeSkill(workspaceId, skill, triggerType, scope);
     results.push({ skillId, ...result });
 
     // Wait 30 seconds before next skill (unless it's the last one)
@@ -219,10 +227,17 @@ export function startSkillScheduler(): void {
 
         console.log(`[Skill Scheduler] Running ${skillIds.length} skills for ${workspaces.length} workspace(s)`);
 
-        // Run skills for each workspace sequentially
+        // Run skills for each workspace, fanning out per confirmed scope
         for (const workspace of workspaces) {
-          console.log(`[Skill Scheduler] Processing workspace: ${workspace.name} (${workspace.id})`);
-          await runScheduledSkills(workspace.id, skillIds, 'scheduled');
+          // getActiveScopes returns [DEFAULT_SCOPE] for unconfigured workspaces (single run, no filter)
+          // Returns confirmed non-default scopes ONLY when configured — never both default + non-default
+          const scopes = await getActiveScopes(workspace.id).catch(() => [DEFAULT_SCOPE]);
+
+          for (const scope of scopes) {
+            const scopeLabel = scope.scope_id !== 'default' ? ` [scope: ${scope.name}]` : '';
+            console.log(`[Skill Scheduler] Processing workspace: ${workspace.name}${scopeLabel} (${workspace.id})`);
+            await runScheduledSkills(workspace.id, skillIds, 'scheduled', scope);
+          }
         }
 
         console.log(`[Skill Scheduler] Cron batch complete: ${cronExpression}`);
