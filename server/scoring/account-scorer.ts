@@ -9,15 +9,15 @@ const DEFAULT_WEIGHTS = {
   industry_match: 10,
   company_size_match: 10,
   growth_stage_match: 10,
-  // Signal score (20 points max)
+  // Signal score (20 points max base)
   signal_score_strong_positive: 20,
   signal_score_positive: 12,
   signal_score_neutral: 5,
-  // Engagement (20 points max)
+  // Engagement (20 points max) — only scored for active accounts
   has_open_deal: 12,
   recent_activity_7d: 8,
   recent_activity_30d: 4,
-  // Deal history (15 points max)
+  // Deal history (15 points max) — only scored for active accounts
   won_deal_exists: 15,
   advanced_deal_exists: 8,
   // Specific signal bonuses (10 points max)
@@ -33,6 +33,14 @@ const DEFAULT_WEIGHTS = {
 };
 
 type Weights = typeof DEFAULT_WEIGHTS;
+
+// Max achievable points per context (used for normalization)
+const PROSPECTING_MAX = 60;  // firmographic (30) + signals (20 base + 10 bonus)
+const ACTIVE_MAX = 95;       // all four dimensions
+
+// 'prospecting' = cold account with no CRM history; score based on fit + signals only
+// 'active' = account with open deals or past activity; score all four dimensions
+type ScoringContext = 'prospecting' | 'active';
 
 function scoreToGrade(score: number): string {
   if (score >= 75) return 'A';
@@ -63,9 +71,9 @@ async function loadScoringWeights(workspaceId: string): Promise<{ mode: string; 
 }
 
 interface AccountFeatures {
-  // Firmographic
-  industryMatch: boolean;
-  companySizeMatch: boolean;
+  // Firmographic (continuous lift values: 0.0–3.0)
+  industryLift: number;
+  sizeLift: number;
   growthStageMatch: boolean;
   // Signals
   signalScore: number;  // -1.0 to 1.0
@@ -82,10 +90,71 @@ interface AccountFeatures {
   hasAdvancedDeal: boolean;
   // Data quality
   classificationConfidence: number;
-  icpFitDetails: Record<string, boolean>;
+  icpFitDetails: Record<string, boolean | number>;
 }
 
-async function loadWorkspaceICPConfig(workspaceId: string): Promise<{ targetIndustries: string[]; targetSizes: string[]; targetStages: string[] }> {
+interface IndustryEntry { name: string; win_rate: number }
+interface SizeEntry { range: string; win_rate: number }
+
+interface ICPFirmographicWeights {
+  industries: IndustryEntry[];       // from icp_profiles company_profile.industries
+  sizeRanges: SizeEntry[];           // from icp_profiles company_profile.size_ranges
+  baselineWinRate: number;           // average win rate across all industries for lift denominator
+  // Fallback: binary lists from workspace_configs
+  targetIndustries: string[];
+  targetSizes: string[];
+  targetStages: string[];
+  source: 'icp_profile' | 'workspace_config';
+}
+
+async function loadICPFirmographicWeights(workspaceId: string): Promise<ICPFirmographicWeights> {
+  // Try to load from active icp_profiles first
+  try {
+    const icpResult = await dbQuery<{ company_profile: any }>(
+      `SELECT company_profile FROM icp_profiles
+       WHERE workspace_id = $1 AND status = 'active'
+       LIMIT 1`,
+      [workspaceId]
+    );
+
+    const profile = icpResult.rows[0]?.company_profile;
+
+    if (profile) {
+      const industries: IndustryEntry[] = Array.isArray(profile.industries)
+        ? (profile.industries as IndustryEntry[]).filter(
+            (i: IndustryEntry) => i && typeof i.name === 'string' && typeof i.win_rate === 'number'
+          )
+        : [];
+
+      const sizeRanges: SizeEntry[] = Array.isArray(profile.size_ranges)
+        ? (profile.size_ranges as SizeEntry[]).filter(
+            (s: SizeEntry) => s && typeof s.range === 'string' && typeof s.win_rate === 'number'
+          )
+        : [];
+
+      // Compute baseline win rate as average of industry win rates (or 0.5 if empty)
+      const baselineWinRate =
+        industries.length > 0
+          ? industries.reduce((sum: number, i: IndustryEntry) => sum + i.win_rate, 0) / industries.length
+          : 0.5;
+
+      if (industries.length > 0 || sizeRanges.length > 0) {
+        return {
+          industries,
+          sizeRanges,
+          baselineWinRate,
+          targetIndustries: [],
+          targetSizes: [],
+          targetStages: [],
+          source: 'icp_profile',
+        };
+      }
+    }
+  } catch {
+    // Fall through to workspace config
+  }
+
+  // Fallback to workspace_configs.goals_and_targets
   try {
     const cfg = await dbQuery<{ config: any }>(
       `SELECT config FROM workspace_configs WHERE workspace_id = $1 LIMIT 1`,
@@ -94,12 +163,24 @@ async function loadWorkspaceICPConfig(workspaceId: string): Promise<{ targetIndu
     const c = cfg.rows[0]?.config || {};
     const goals = c.goals_and_targets || {};
     return {
+      industries: [],
+      sizeRanges: [],
+      baselineWinRate: 0.5,
       targetIndustries: Array.isArray(goals.target_industries) ? goals.target_industries : [],
       targetSizes: Array.isArray(goals.target_company_sizes) ? goals.target_company_sizes : [],
       targetStages: Array.isArray(goals.target_growth_stages) ? goals.target_growth_stages : [],
+      source: 'workspace_config',
     };
   } catch {
-    return { targetIndustries: [], targetSizes: [], targetStages: [] };
+    return {
+      industries: [],
+      sizeRanges: [],
+      baselineWinRate: 0.5,
+      targetIndustries: [],
+      targetSizes: [],
+      targetStages: [],
+      source: 'workspace_config',
+    };
   }
 }
 
@@ -107,7 +188,7 @@ function buildAccountFeatures(
   signals: any,
   deals: any[],
   lastActivity: { last_activity: string | null } | null,
-  icpConfig: { targetIndustries: string[]; targetSizes: string[]; targetStages: string[] }
+  icpWeights: ICPFirmographicWeights
 ): AccountFeatures {
   const signalArr: Array<{ type: string }> = Array.isArray(signals?.signals) ? signals.signals : [];
 
@@ -121,12 +202,52 @@ function buildAccountFeatures(
   const employeeRange = signals?.employee_range || '';
   const growthStage = signals?.growth_stage || '';
 
-  const industryMatch = icpConfig.targetIndustries.length === 0 ||
-    icpConfig.targetIndustries.some(i => industry.toLowerCase().includes(i.toLowerCase()));
-  const companySizeMatch = icpConfig.targetSizes.length === 0 ||
-    icpConfig.targetSizes.some(s => employeeRange.includes(s));
-  const growthStageMatch = icpConfig.targetStages.length === 0 ||
-    icpConfig.targetStages.some(s => growthStage.includes(s));
+  // Compute continuous industryLift (0.0–3.0)
+  let industryLift: number;
+  if (icpWeights.source === 'icp_profile' && icpWeights.industries.length > 0) {
+    // Find matching industry entry by name (case-insensitive)
+    const matched = icpWeights.industries.find(
+      (i: IndustryEntry) => industry.toLowerCase().includes(i.name.toLowerCase())
+    );
+    if (matched && icpWeights.baselineWinRate > 0) {
+      industryLift = Math.min(3.0, matched.win_rate / icpWeights.baselineWinRate);
+    } else if (matched) {
+      industryLift = matched.win_rate > 0 ? 1.0 : 0.0;
+    } else {
+      // No match found — neutral lift (not in ICP target set)
+      industryLift = 0.0;
+    }
+  } else {
+    // Fallback: binary — 1.0 if matches target list, 0.0 if not
+    const industryMatch =
+      icpWeights.targetIndustries.length === 0 ||
+      icpWeights.targetIndustries.some(i => industry.toLowerCase().includes(i.toLowerCase()));
+    industryLift = industryMatch ? 1.0 : 0.0;
+  }
+
+  // Compute continuous sizeLift (0.0–3.0)
+  let sizeLift: number;
+  if (icpWeights.source === 'icp_profile' && icpWeights.sizeRanges.length > 0) {
+    const matched = icpWeights.sizeRanges.find(
+      (s: SizeEntry) => employeeRange.includes(s.range)
+    );
+    if (matched && icpWeights.baselineWinRate > 0) {
+      sizeLift = Math.min(3.0, matched.win_rate / icpWeights.baselineWinRate);
+    } else if (matched) {
+      sizeLift = matched.win_rate > 0 ? 1.0 : 0.0;
+    } else {
+      sizeLift = 0.0;
+    }
+  } else {
+    const companySizeMatch =
+      icpWeights.targetSizes.length === 0 ||
+      icpWeights.targetSizes.some(s => employeeRange.includes(s));
+    sizeLift = companySizeMatch ? 1.0 : 0.0;
+  }
+
+  const growthStageMatch =
+    icpWeights.targetStages.length === 0 ||
+    icpWeights.targetStages.some(s => growthStage.includes(s));
 
   const hasOpenDeal = deals.some(d => !['closed_won', 'closed_lost'].includes(d.stage_normalized || ''));
   const hasWonDeal = deals.some(d => d.stage_normalized === 'closed_won');
@@ -142,8 +263,8 @@ function buildAccountFeatures(
   }
 
   return {
-    industryMatch,
-    companySizeMatch,
+    industryLift,
+    sizeLift,
     growthStageMatch,
     signalScore: typeof signals?.signal_score === 'number' ? signals.signal_score : 0,
     hasHiring,
@@ -156,56 +277,72 @@ function buildAccountFeatures(
     hasWonDeal,
     hasAdvancedDeal,
     classificationConfidence: signals?.classification_confidence ?? 0,
-    icpFitDetails: { industryMatch, companySizeMatch, growthStageMatch, hasWonDeal, hasOpenDeal },
+    icpFitDetails: { industryLift, sizeLift, growthStageMatch, hasWonDeal, hasOpenDeal },
   };
 }
 
 interface ScoreBreakdown {
-  firmographic_fit: { score: number; max: number; details: Record<string, boolean> };
+  firmographic_fit: { score: number; max: number; details: Record<string, boolean | number> };
   signals: { score: number; max: number; details: Record<string, any> };
   engagement: { score: number; max: number; details: Record<string, any> };
   deal_history: { score: number; max: number; details: Record<string, boolean> };
   negative_signals: { deductions: number; details: Record<string, boolean> };
+  scoring_context: ScoringContext;
 }
 
-function computeBreakdown(features: AccountFeatures, weights: Weights): ScoreBreakdown {
-  // Firmographic (30 max)
-  const firmographicScore =
-    (features.industryMatch ? weights.industry_match : 0) +
-    (features.companySizeMatch ? weights.company_size_match : 0) +
-    (features.growthStageMatch ? weights.growth_stage_match : 0);
+function computeBreakdown(
+  features: AccountFeatures,
+  weights: Weights,
+  scoringContext: ScoringContext
+): ScoreBreakdown {
+  // Firmographic (30 max) — continuous lift-based scoring
+  // industryLift and sizeLift are 0.0–3.0; each contributes up to 10 points
+  // growthStageMatch is still binary (10 points)
+  const industryScore = Math.min(10, features.industryLift * 10);
+  const sizeScore = Math.min(10, features.sizeLift * 10);
+  const firmographicScore = Math.min(30,
+    industryScore +
+    sizeScore +
+    (features.growthStageMatch ? weights.growth_stage_match : 0)
+  );
 
-  // Signals (20 max)
-  let signalScore = 0;
-  if (features.signalScore > 0.6) signalScore = weights.signal_score_strong_positive;
-  else if (features.signalScore > 0.2) signalScore = weights.signal_score_positive;
-  else if (features.signalScore >= -0.2) signalScore = weights.signal_score_neutral;
-  // signal_score negative: 0 points
+  // Signals (30 max: 20 base + 10 bonus)
+  let baseSignalScore = 0;
+  if (features.signalScore > 0.6) baseSignalScore = weights.signal_score_strong_positive;
+  else if (features.signalScore > 0.2) baseSignalScore = weights.signal_score_positive;
+  else if (features.signalScore >= -0.2) baseSignalScore = weights.signal_score_neutral;
 
-  // Bonus specific signals (capped at 10)
   const bonusSignals = Math.min(10,
     (features.hasHiring ? weights.hiring_signal : 0) +
     (features.hasFunding ? weights.funding_signal : 0) +
     (features.hasExpansion ? weights.expansion_signal : 0)
   );
 
-  // Engagement (20 max)
-  let engagementScore = features.hasOpenDeal ? weights.has_open_deal : 0;
-  if (features.lastActivityDaysAgo !== null) {
-    if (features.lastActivityDaysAgo <= 7) engagementScore += weights.recent_activity_7d;
-    else if (features.lastActivityDaysAgo <= 30) engagementScore += weights.recent_activity_30d;
+  // Engagement (20 max) — zero for prospecting accounts; not penalized
+  let engagementScore = 0;
+  if (scoringContext === 'active') {
+    engagementScore = features.hasOpenDeal ? weights.has_open_deal : 0;
+    if (features.lastActivityDaysAgo !== null) {
+      if (features.lastActivityDaysAgo <= 7) engagementScore += weights.recent_activity_7d;
+      else if (features.lastActivityDaysAgo <= 30) engagementScore += weights.recent_activity_30d;
+    }
   }
 
-  // Deal history (15 max)
-  const dealScore = features.hasWonDeal ? weights.won_deal_exists :
-    features.hasAdvancedDeal ? weights.advanced_deal_exists : 0;
+  // Deal history (15 max) — zero for prospecting accounts; not penalized
+  let dealScore = 0;
+  if (scoringContext === 'active') {
+    dealScore = features.hasWonDeal ? weights.won_deal_exists :
+      features.hasAdvancedDeal ? weights.advanced_deal_exists : 0;
+  }
 
   // Deductions
   let deductions = 0;
-  if (features.hasOpenDeal && features.lastActivityDaysAgo !== null) {
+  // Stale-engagement deduction only applies to active accounts with open deals
+  if (scoringContext === 'active' && features.hasOpenDeal && features.lastActivityDaysAgo !== null) {
     if (features.lastActivityDaysAgo >= 60) deductions += weights.no_activity_60d;
     else if (features.lastActivityDaysAgo >= 30) deductions += weights.no_activity_30d;
   }
+  // These apply regardless of context — negative signals are meaningful either way
   if (features.hasLayoff) deductions += weights.layoff_signal;
   if (features.hasNegativePress) deductions += weights.negative_press_signal;
   if (features.classificationConfidence < 40) deductions += weights.low_confidence_data;
@@ -213,24 +350,29 @@ function computeBreakdown(features: AccountFeatures, weights: Weights): ScoreBre
   return {
     firmographic_fit: {
       score: firmographicScore, max: 30,
-      details: { industryMatch: features.industryMatch, companySizeMatch: features.companySizeMatch, growthStageMatch: features.growthStageMatch },
+      details: { industryLift: features.industryLift, sizeLift: features.sizeLift, growthStageMatch: features.growthStageMatch },
     },
     signals: {
-      score: signalScore + bonusSignals, max: 30,
+      score: baseSignalScore + bonusSignals, max: 30,
       details: { signalScore: features.signalScore, hasHiring: features.hasHiring, hasFunding: features.hasFunding, hasExpansion: features.hasExpansion },
     },
     engagement: {
-      score: engagementScore, max: 20,
+      // max = 0 for prospecting so the UI doesn't render this dimension
+      score: engagementScore,
+      max: scoringContext === 'prospecting' ? 0 : 20,
       details: { hasOpenDeal: features.hasOpenDeal, lastActivityDaysAgo: features.lastActivityDaysAgo },
     },
     deal_history: {
-      score: dealScore, max: 15,
+      // max = 0 for prospecting so the UI doesn't render this dimension
+      score: dealScore,
+      max: scoringContext === 'prospecting' ? 0 : 15,
       details: { hasWonDeal: features.hasWonDeal, hasAdvancedDeal: features.hasAdvancedDeal },
     },
     negative_signals: {
       deductions,
       details: { hasLayoff: features.hasLayoff, hasNegativePress: features.hasNegativePress, lowConfidence: features.classificationConfidence < 40 },
     },
+    scoring_context: scoringContext,
   };
 }
 
@@ -240,6 +382,7 @@ export interface AccountScore {
   grade: string;
   breakdown: ScoreBreakdown;
   scoreDelta: number | null;
+  scoringContext: ScoringContext;
 }
 
 async function triggerAccountScoreAlert(
@@ -298,22 +441,41 @@ export async function scoreAccount(workspaceId: string, accountId: string): Prom
     [workspaceId, accountId]
   );
 
-  // Load workspace ICP config + scoring weights
-  const icpConfig = await loadWorkspaceICPConfig(workspaceId);
+  // Load ICP firmographic weights + scoring weights
+  const icpWeights = await loadICPFirmographicWeights(workspaceId);
   const { mode, weights } = await loadScoringWeights(workspaceId);
 
-  // Compute features and score
-  const features = buildAccountFeatures(signals, dealsResult.rows, activityResult.rows[0] ?? null, icpConfig);
-  const breakdown = computeBreakdown(features, weights);
+  // Compute features
+  const features = buildAccountFeatures(signals, dealsResult.rows, activityResult.rows[0] ?? null, icpWeights);
 
+  // Determine scoring context:
+  // 'prospecting' = no CRM history (no deals, no activity) — score on ICP fit + signals only
+  // 'active' = account has deals or recorded activity — score all four dimensions
+  const isProspecting =
+    !features.hasOpenDeal &&
+    !features.hasWonDeal &&
+    !features.hasAdvancedDeal &&
+    features.lastActivityDaysAgo === null;
+  const scoringContext: ScoringContext = isProspecting ? 'prospecting' : 'active';
+
+  const breakdown = computeBreakdown(features, weights, scoringContext);
+
+  // For prospecting accounts, normalize firmographic + signals to 100.
+  // For active accounts, sum all four dimensions (max ~95).
   const rawScore =
     breakdown.firmographic_fit.score +
     breakdown.signals.score +
-    breakdown.engagement.score +
-    breakdown.deal_history.score +
+    (scoringContext === 'active' ? breakdown.engagement.score + breakdown.deal_history.score : 0) +
     breakdown.negative_signals.deductions;
 
-  const totalScore = Math.max(0, Math.min(100, rawScore));
+  let totalScore: number;
+  if (scoringContext === 'prospecting') {
+    // Normalize: 60 is the max for prospecting (30 firmo + 30 signals)
+    totalScore = Math.max(0, Math.min(100, Math.round(rawScore / PROSPECTING_MAX * 100)));
+  } else {
+    totalScore = Math.max(0, Math.min(100, rawScore));
+  }
+
   const grade = scoreToGrade(totalScore);
 
   // Load previous score for delta
@@ -362,7 +524,25 @@ export async function scoreAccount(workspaceId: string, accountId: string): Prom
     await triggerAccountScoreAlert(workspaceId, accountName, accountId, totalScore, grade, scoreDelta, topSignal);
   }
 
-  logger.info('Account scored', { workspaceId, accountId, totalScore, grade, mode });
+  logger.info('Account scored', { workspaceId, accountId, totalScore, grade, mode, scoringContext });
 
-  return { accountId, totalScore, grade, breakdown, scoreDelta };
+  return { accountId, totalScore, grade, breakdown, scoreDelta, scoringContext };
+}
+
+export async function scoreAccountsBatch(
+  workspaceId: string,
+  accountIds: string[]
+): Promise<{ scored: number; grades: Record<string, number> }> {
+  const grades: Record<string, number> = {};
+  let scored = 0;
+  for (const accountId of accountIds) {
+    try {
+      const result = await scoreAccount(workspaceId, accountId);
+      grades[result.grade] = (grades[result.grade] ?? 0) + 1;
+      scored++;
+    } catch (err: any) {
+      logger.warn('scoreAccountsBatch: failed to score account', { workspaceId, accountId, error: err.message });
+    }
+  }
+  return { scored, grades };
 }

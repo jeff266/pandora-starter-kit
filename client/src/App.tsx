@@ -29,6 +29,7 @@ import ConnectorHealth from './pages/ConnectorHealth';
 import ToolsPage from './pages/ToolsPage';
 import PushPage from './pages/PushPage';
 import ConsultantDashboard from './pages/ConsultantDashboard';
+import IcpProfilePage from './pages/IcpProfilePage';
 import { colors, fonts } from './styles/theme';
 
 const pageTitles: Record<string, string> = {
@@ -50,6 +51,7 @@ const pageTitles: Record<string, string> = {
   '/members': 'Members',
   '/marketplace': 'Marketplace',
   '/settings': 'Settings',
+  '/icp-profile': 'ICP Profile',
 };
 
 function getPageTitle(pathname: string): string {
@@ -194,6 +196,7 @@ export default function App() {
             <Route path="/data-dictionary" element={<Placeholder title="Data Dictionary" />} />
             <Route path="/marketplace" element={<MarketplacePage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/icp-profile" element={<IcpProfilePage />} />
           </Routes>
         </div>
       </main>

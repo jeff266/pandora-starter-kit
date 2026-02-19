@@ -129,3 +129,34 @@ export async function runAccountScoringBatch(
 
   logger.info('Account scoring batch complete', { workspaceId, count: accounts.rows.length });
 }
+
+export async function enrichAndScoreAccountsBatch(
+  workspaceId: string,
+  options?: { limit?: number }
+): Promise<{ enriched: number; scored: number; grades: Record<string, number> }> {
+  // Step 1: enrich
+  const enrichResult = await runAccountEnrichmentBatch(workspaceId, { limit: options?.limit ?? 100 });
+
+  // Step 2: score all enriched accounts
+  const accounts = await dbQuery<{ id: string }>(
+    `SELECT a.id FROM accounts a
+     INNER JOIN account_signals acs ON acs.account_id = a.id AND acs.workspace_id = a.workspace_id
+     WHERE a.workspace_id = $1
+     LIMIT $2`,
+    [workspaceId, options?.limit ?? 100]
+  );
+
+  const grades: Record<string, number> = {};
+  let scored = 0;
+  for (const account of accounts.rows) {
+    try {
+      const result = await scoreAccount(workspaceId, account.id);
+      grades[result.grade] = (grades[result.grade] ?? 0) + 1;
+      scored++;
+    } catch (err: any) {
+      logger.warn('enrichAndScoreAccountsBatch: scoring failed', { accountId: account.id, error: err.message });
+    }
+  }
+
+  return { enriched: enrichResult.processed, scored, grades };
+}

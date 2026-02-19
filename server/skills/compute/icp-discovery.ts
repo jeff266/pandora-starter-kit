@@ -1945,6 +1945,25 @@ async function persistICPProfile(
 
   const profileId = result.rows[0].id;
 
+  // Insert changelog entry for this regeneration
+  try {
+    await query(`
+      INSERT INTO icp_changelog (
+        workspace_id, profile_id, version, change_type, accounts_affected
+      ) VALUES (
+        $1, $2,
+        (SELECT version::text FROM icp_profiles WHERE id = $2),
+        'regeneration',
+        0
+      )
+    `, [workspaceId, profileId]);
+  } catch (changelogErr) {
+    // Non-fatal — log but don't fail the persist step
+    logger.warn('[Step 10] Failed to insert changelog entry', {
+      error: changelogErr instanceof Error ? changelogErr.message : String(changelogErr),
+    });
+  }
+
   logger.info('[Step 10] ICP profile persisted', { profileId });
 
   return profileId;
