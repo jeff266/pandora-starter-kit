@@ -897,7 +897,7 @@ function DossierView({ addToast }: { addToast: (msg: string, type: 'success' | '
       <SectionHeader title="Buying Committee" onEdit={() => setEditingSection(editingSection === 'committee' ? null : 'committee')} />
       {editingSection === 'committee' && (
         <InlineEditArea
-          initial={topCombos.map(c => c.roles.join(', ')).join('\n')}
+          initial={topCombos.map(c => (c.roles ?? []).join(', ')).join('\n')}
           onSave={(v, n) => handleSave('buying_committees', v, n)}
           onCancel={() => setEditingSection(null)}
         />
@@ -912,7 +912,7 @@ function DossierView({ addToast }: { addToast: (msg: string, type: 'success' | '
             }}>
               <span style={{ fontSize: 10, fontWeight: 700, color: colors.textMuted }}>#{i + 1}</span>
               <span style={{ flex: 1, color: colors.text }}>
-                {combo.roles.join(' + ')}
+                {(combo.roles ?? []).join(' + ')}
               </span>
               {combo.win_rate != null && (
                 <span style={{
