@@ -13,6 +13,7 @@ import { syncWorkspace } from './orchestrator.js';
 import type { SkillDefinition } from '../skills/types.js';
 import { getAgentRegistry } from '../agents/registry.js';
 import { getAgentRuntime } from '../agents/runtime.js';
+import { runDealScoreSnapshots } from '../scoring/deal-score-snapshot.js';
 
 interface ScheduledSkill {
   skillId: string;
@@ -415,6 +416,26 @@ cron.schedule('0 3 * * *', async () => {
     console.error('[Skill Scheduler] Account scoring cron error:', err);
   }
 }, { timezone: 'UTC' });
+
+// Deal score snapshot cron: Sundays 11pm UTC
+const snapshotJob = cron.schedule('0 23 * * 0', async () => {
+  console.log('[DealScoreSnapshot] Weekly snapshot cron triggered');
+  const workspaces = await query<{ id: string; name: string }>(
+    `SELECT DISTINCT w.id, w.name FROM workspaces w
+     INNER JOIN connections c ON c.workspace_id = w.id
+     WHERE c.status IN ('connected','synced','error') ORDER BY w.name`
+  );
+  for (const ws of workspaces.rows) {
+    try {
+      const result = await runDealScoreSnapshots(ws.id);
+      console.log(`[DealScoreSnapshot] ✓ ${ws.name}: ${result.snapped} snapped, ${result.commentaryGenerated} commentaries`);
+    } catch (err: any) {
+      console.error(`[DealScoreSnapshot] ✗ ${ws.name}:`, err.message);
+    }
+  }
+}, { timezone: 'UTC' });
+scheduledSkills.push({ skillId: 'deal-score-snapshot-weekly', cronExpression: '0 23 * * 0', job: snapshotJob });
+console.log('[DealScoreSnapshot] Registered weekly deal score snapshot on cron 0 23 * * 0 (Sundays 11pm UTC)');
 
 /**
  * Stop the skill scheduler (graceful shutdown)

@@ -39,6 +39,9 @@ interface DealRow {
   pipeline: string;
   source_id: string | null;
   source: string | null;
+  mechanical_score: number | null;
+  mechanical_grade: string | null;
+  active_source: 'skill' | 'health' | undefined;
 }
 
 function buildCrmUrl(crm: string | null, portalId: number | null, instanceUrl: string | null, sourceId: string | null, dealSource: string | null): string | null {
@@ -106,6 +109,9 @@ export default function DealList() {
         pipeline: d.pipeline || '',
         source_id: d.source_id ?? null,
         source: d.source ?? null,
+        mechanical_score: d.mechanical_score ?? null,
+        mechanical_grade: d.mechanical_grade ?? null,
+        active_source: d.active_source ?? undefined,
       }));
 
       const riskDealIds = new Set(riskDeals.map(d => d.id));
@@ -132,6 +138,9 @@ export default function DealList() {
             pipeline: d.pipeline || d.source_data?.pipeline || '',
             source_id: d.source_id ?? null,
             source: d.source ?? null,
+            mechanical_score: null,
+            mechanical_grade: null,
+            active_source: undefined,
           };
         });
 
@@ -456,7 +465,7 @@ export default function DealList() {
                 <div style={{ fontSize: 12, color: pastDue ? colors.red : colors.textMuted, fontWeight: pastDue ? 600 : 400 }}>
                   {deal.close_date ? formatDate(deal.close_date) : '—'}
                 </div>
-                <div>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
                   {deal.grade && deal.grade !== '—' ? (
                     <span style={{
                       fontSize: 11, fontWeight: 700, fontFamily: fonts.mono,
@@ -469,6 +478,14 @@ export default function DealList() {
                   ) : (
                     <span style={{ fontSize: 11, color: colors.textDim }}>—</span>
                   )}
+                  <span style={{
+                    fontSize: 9, fontWeight: 600, letterSpacing: '0.06em',
+                    color: deal.active_source === 'skill' ? '#6488ea' : colors.textMuted,
+                    textTransform: 'uppercase',
+                    lineHeight: 1,
+                  }}>
+                    {deal.active_source === 'skill' ? 'SKILL' : 'HEALTH'}
+                  </span>
                 </div>
                 <div style={{ fontSize: 12, fontFamily: fonts.mono, color: daysColor }}>
                   {deal.days_in_stage != null ? `${Math.round(deal.days_in_stage)}` : '—'}

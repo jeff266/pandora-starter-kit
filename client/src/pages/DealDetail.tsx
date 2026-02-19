@@ -85,6 +85,17 @@ function ExternalLinkIcon({ size = 12, color = 'currentColor' }: { size?: number
   );
 }
 
+interface ActiveScore {
+  score: number;
+  grade: string;
+  source: 'skill' | 'health';
+}
+
+interface MechanicalScore {
+  score: number | null;
+  grade: string;
+}
+
 export default function DealDetail() {
   const { dealId } = useParams<{ dealId: string }>();
   const navigate = useNavigate();
@@ -102,6 +113,8 @@ export default function DealDetail() {
   const [askError, setAskError] = useState('');
   const [crmInfo, setCrmInfo] = useState<{ crm: string | null; portalId?: number | null; instanceUrl?: string | null }>({ crm: null });
   const [analysisOpen, setAnalysisOpen] = useState(false);
+  const [showScoreBreakdown, setShowScoreBreakdown] = useState(false);
+  const [scoreHistory, setScoreHistory] = useState<any[]>([]);
 
   const fetchDossier = async (withNarrative = false) => {
     if (!dealId) return;
@@ -123,6 +136,11 @@ export default function DealDetail() {
   useEffect(() => {
     fetchDossier();
     api.get('/crm/link-info').then(setCrmInfo).catch(() => {});
+    if (dealId) {
+      api.get(`/deals/${dealId}/score-history`).then((res: any) => {
+        setScoreHistory(res.snapshots || []);
+      }).catch(() => {});
+    }
   }, [dealId]);
 
   const dismissFinding = async (findingId: string) => {
@@ -238,6 +256,8 @@ export default function DealDetail() {
   const stageHistory = dossier.stage_history || [];
   const narrative = dossier.narrative;
   const riskScore = dossier.risk_score;
+  const activeScore: ActiveScore | undefined = dossier.active_score;
+  const mechanicalScore: MechanicalScore | null = dossier.mechanical_score ?? null;
   const coverageGapsData = dossier.coverage_gaps || {};
 
   const daysInStage = deal.days_in_current_stage ??
@@ -373,30 +393,53 @@ export default function DealDetail() {
               );
             })()}
 
-            {riskScore && riskScore.grade && (
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: 8,
-                padding: '8px 14px', borderRadius: 8,
-                background: gradeBg(riskScore.grade),
-                border: `1px solid ${gradeColor(riskScore.grade)}30`,
-              }}>
-                <span style={{
-                  fontSize: 20, fontWeight: 700,
-                  color: gradeColor(riskScore.grade),
-                  fontFamily: fonts.mono,
-                }}>
-                  {riskScore.grade}
-                </span>
-                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  <span style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase' }}>
-                    Health
-                  </span>
-                  <span style={{ fontSize: 14, fontWeight: 600, fontFamily: fonts.mono, color: colors.text }}>
-                    {riskScore.score}
-                  </span>
+            {(activeScore || (riskScore && riskScore.grade)) && (() => {
+              const displayGrade = activeScore ? activeScore.grade : riskScore.grade;
+              const displayScore = activeScore ? activeScore.score : riskScore.score;
+              const displaySource = activeScore ? activeScore.source : 'health';
+              return (
+                <div style={{ position: 'relative' }}>
+                  <div
+                    onClick={() => setShowScoreBreakdown(v => !v)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      padding: '8px 14px', borderRadius: 8,
+                      background: gradeBg(displayGrade),
+                      border: `1px solid ${gradeColor(displayGrade)}30`,
+                      cursor: 'pointer',
+                      userSelect: 'none',
+                    }}
+                  >
+                    <span style={{
+                      fontSize: 20, fontWeight: 700,
+                      color: gradeColor(displayGrade),
+                      fontFamily: fonts.mono,
+                    }}>
+                      {displayGrade}
+                    </span>
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      <span style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase' }}>
+                        Score
+                      </span>
+                      <span style={{ fontSize: 14, fontWeight: 600, fontFamily: fonts.mono, color: colors.text }}>
+                        {displayScore}
+                      </span>
+                      <span style={{ fontSize: 9, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        {displaySource === 'skill' ? 'SKILL' : 'HEALTH'}
+                      </span>
+                    </div>
+                  </div>
+                  {showScoreBreakdown && riskScore && activeScore && (
+                    <ScoreBreakdownPanel
+                      riskScore={riskScore}
+                      mechanicalScore={mechanicalScore}
+                      activeScore={activeScore}
+                      onClose={() => setShowScoreBreakdown(false)}
+                    />
+                  )}
                 </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
         </div>
 
@@ -856,6 +899,90 @@ export default function DealDetail() {
         </div>
       </div>
 
+      {/* Score History */}
+      <SectionErrorBoundary fallbackMessage="Unable to load score history.">
+      <div style={{
+        background: colors.surface,
+        border: `1px solid ${colors.border}`,
+        borderRadius: 10,
+        padding: 16,
+      }}>
+        <h3 style={{ fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 12 }}>Score History</h3>
+        {scoreHistory.length === 0 ? (
+          <p style={{ fontSize: 12, color: colors.textMuted, padding: '8px 0' }}>
+            No score history yet — history builds weekly.
+          </p>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
+                  {['Week', 'Score', 'Grade', 'Change', 'Notes'].map(h => (
+                    <th key={h} style={{
+                      padding: '6px 10px', textAlign: 'left',
+                      fontSize: 10, fontWeight: 600, textTransform: 'uppercase',
+                      letterSpacing: '0.05em', color: colors.textMuted,
+                    }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {scoreHistory.slice(0, 8).map((s: any, i: number) => {
+                  const delta = s.score_delta;
+                  const deltaEl = delta == null ? (
+                    <span style={{ color: colors.textMuted }}>—</span>
+                  ) : delta > 0 ? (
+                    <span style={{ color: colors.green }}>\u2191{delta}</span>
+                  ) : delta < 0 ? (
+                    <span style={{ color: colors.red }}>\u2193{Math.abs(delta)}</span>
+                  ) : (
+                    <span style={{ color: colors.textMuted }}>—</span>
+                  );
+
+                  const weekLabel = s.snapshot_date
+                    ? new Date(s.snapshot_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                    : '—';
+
+                  const commentary = s.commentary
+                    ? s.commentary.length > 100
+                      ? s.commentary.slice(0, 100) + '...'
+                      : s.commentary
+                    : '';
+
+                  return (
+                    <tr key={i} style={{ borderBottom: `1px solid ${colors.border}` }}>
+                      <td style={{ padding: '8px 10px', color: colors.textSecondary, fontFamily: fonts.mono, fontSize: 11 }}>
+                        {weekLabel}
+                      </td>
+                      <td style={{ padding: '8px 10px', color: colors.text, fontFamily: fonts.mono, fontWeight: 600 }}>
+                        {s.active_score ?? s.health_score ?? '—'}
+                      </td>
+                      <td style={{ padding: '8px 10px' }}>
+                        <span style={{
+                          fontSize: 11, fontWeight: 700, fontFamily: fonts.mono,
+                          padding: '1px 6px', borderRadius: 4,
+                          background: `${gradeColor(s.grade || '—')}20`,
+                          color: gradeColor(s.grade || '—'),
+                        }}>
+                          {s.grade || '—'}
+                        </span>
+                      </td>
+                      <td style={{ padding: '8px 10px', fontFamily: fonts.mono, fontWeight: 600 }}>
+                        {deltaEl}
+                      </td>
+                      <td style={{ padding: '8px 10px', color: colors.textMuted, fontStyle: 'italic', maxWidth: 320 }}>
+                        {commentary}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+      </SectionErrorBoundary>
+
       {dealId && (
         <AnalysisModal
           scope={{ type: 'deal', entity_id: dealId }}
@@ -864,6 +991,121 @@ export default function DealDetail() {
         />
       )}
     </div>
+  );
+}
+
+function ScoreBreakdownPanel({
+  riskScore,
+  mechanicalScore,
+  activeScore,
+  onClose,
+}: {
+  riskScore: { score: number; grade: string; signal_counts: { act: number; watch: number; notable: number; info: number } };
+  mechanicalScore: { score: number | null; grade: string } | null;
+  activeScore: { score: number; grade: string; source: 'skill' | 'health' };
+  onClose: () => void;
+}) {
+  const isSkill = activeScore.source === 'skill';
+  const sc = riskScore.signal_counts;
+  const allZero = sc.act === 0 && sc.watch === 0 && sc.notable === 0 && sc.info === 0;
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        onClick={onClose}
+        style={{
+          position: 'fixed', inset: 0, zIndex: 99,
+        }}
+      />
+      {/* Panel */}
+      <div style={{
+        position: 'absolute', top: 60, right: 0, zIndex: 100,
+        background: colors.surface, border: `1px solid ${colors.border}`,
+        borderRadius: 10, padding: 20, width: 280, fontSize: 13,
+        boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+      }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 12 }}>
+          Score Breakdown
+        </div>
+        <div style={{ height: 1, background: colors.border, marginBottom: 12 }} />
+
+        {/* Two columns: Skill-based vs Health */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+              Skill-based
+            </div>
+            <div style={{ fontSize: 22, fontWeight: 700, fontFamily: fonts.mono, color: gradeColor(riskScore.grade) }}>
+              {riskScore.score}
+            </div>
+            <div style={{ fontSize: 11, color: gradeColor(riskScore.grade), fontWeight: 600 }}>
+              {riskScore.grade}
+            </div>
+          </div>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+              Health
+            </div>
+            <div style={{ fontSize: 22, fontWeight: 700, fontFamily: fonts.mono, color: mechanicalScore ? gradeColor(mechanicalScore.grade) : colors.textMuted }}>
+              {mechanicalScore?.score ?? '—'}
+            </div>
+            <div style={{ fontSize: 11, color: mechanicalScore ? gradeColor(mechanicalScore.grade) : colors.textMuted, fontWeight: 600 }}>
+              {mechanicalScore?.grade ?? '—'}
+            </div>
+          </div>
+        </div>
+
+        <div style={{
+          fontSize: 11, color: colors.textMuted, textAlign: 'center',
+          padding: '6px 10px', background: colors.surfaceRaised, borderRadius: 6, marginBottom: 12,
+        }}>
+          Showing: <span style={{ fontWeight: 600, color: isSkill ? '#6488ea' : colors.accent }}>
+            {isSkill ? 'SKILL' : 'HEALTH'}
+          </span> score (lower of two)
+        </div>
+
+        <div style={{ height: 1, background: colors.border, marginBottom: 10 }} />
+        <div style={{ fontSize: 11, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
+          Active score drivers
+        </div>
+
+        {isSkill ? (
+          allZero ? (
+            <p style={{ fontSize: 12, color: colors.textMuted }}>
+              No active findings — score based on historical baseline
+            </p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+              {sc.act > 0 && (
+                <div style={{ fontSize: 12, color: colors.red }}>
+                  • {sc.act} critical finding{sc.act !== 1 ? 's' : ''}
+                </div>
+              )}
+              {sc.watch > 0 && (
+                <div style={{ fontSize: 12, color: colors.yellow }}>
+                  • {sc.watch} watch finding{sc.watch !== 1 ? 's' : ''}
+                </div>
+              )}
+              {sc.notable > 0 && (
+                <div style={{ fontSize: 12, color: colors.textSecondary }}>
+                  • {sc.notable} notable
+                </div>
+              )}
+              {sc.info > 0 && (
+                <div style={{ fontSize: 12, color: colors.textMuted }}>
+                  • {sc.info} informational
+                </div>
+              )}
+            </div>
+          )
+        ) : (
+          <p style={{ fontSize: 12, color: colors.textMuted }}>
+            No skill findings yet — using activity-based health score
+          </p>
+        )}
+      </div>
+    </>
   );
 }
 

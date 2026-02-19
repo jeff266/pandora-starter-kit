@@ -88,6 +88,15 @@ export interface DealDossier {
     grade: string;
     signal_counts: { act: number; watch: number; notable: number; info: number };
   };
+  mechanical_score: {
+    score: number;
+    grade: string;
+  } | null;
+  active_score: {
+    score: number;
+    grade: string;
+    source: 'skill' | 'health';
+  };
   annotations: Array<{
     id: string;
     annotation_type: string;
@@ -263,6 +272,10 @@ function computeHealthSignals(
   return { activity_recency, threading, stage_velocity, data_completeness };
 }
 
+function gradeFromScore(s: number): string {
+  if (s >= 90) return 'A'; if (s >= 75) return 'B'; if (s >= 50) return 'C'; if (s >= 25) return 'D'; return 'F';
+}
+
 function formatStageLabel(rawStage: string, normalizedStage: string): string {
   if (!rawStage) return normalizedStage || 'Unknown';
   if (/^\d+$/.test(rawStage)) {
@@ -294,6 +307,12 @@ export async function assembleDealDossier(
   if (!deal) {
     throw new Error(`Deal ${dealId} not found in workspace ${workspaceId}`);
   }
+
+  // Compute active score (lower of skill vs mechanical)
+  const healthScoreVal = deal?.health_score != null ? Number(deal.health_score) : null;
+  const riskScore = riskResult ?? { score: 100, grade: 'A', signal_counts: { act: 0, watch: 0, notable: 0, info: 0 } };
+  const activeScore = healthScoreVal != null ? Math.min(riskScore.score, healthScoreVal) : riskScore.score;
+  const activeSource: 'skill' | 'health' = (healthScoreVal != null && healthScoreVal < riskScore.score) ? 'health' : 'skill';
 
   const accountDomain = deal?.account_domain || null;
   const unlinkedCalls = await getUnlinkedCallCount(workspaceId, dealId, accountDomain).catch(() => 0);
@@ -422,6 +441,15 @@ export async function assembleDealDossier(
       score: riskResult?.score ?? 100,
       grade: riskResult?.grade ?? 'A',
       signal_counts: riskResult?.signal_counts ?? { act: 0, watch: 0, notable: 0, info: 0 },
+    },
+    mechanical_score: healthScoreVal != null ? {
+      score: healthScoreVal,
+      grade: gradeFromScore(healthScoreVal),
+    } : null,
+    active_score: {
+      score: activeScore,
+      grade: gradeFromScore(activeScore),
+      source: activeSource,
     },
     annotations: annotations.map((a: any) => ({
       id: a.id,
