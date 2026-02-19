@@ -436,7 +436,8 @@ async function buildConversationContext(
 function compressPipelineContext(
   snapshot: PipelineSnapshot,
   findings: Array<{ severity: string; category: string; message: string; deal_name?: string; owner?: string }>,
-  topDeals: Array<{ name: string; amount: number; stage: string; owner: string; days_in_stage: number }>
+  topDeals: Array<{ name: string; amount: number; stage: string; owner: string; days_in_stage: number; created_at: string | null; close_date: string | null }>,
+  monthlyCreation?: Array<{ month: string; deal_count: string; total_amount: string }>
 ): { text: string; sources: string[] } {
   const lines: string[] = [];
   const sources = ['pipeline_snapshot', 'findings', 'deals'];
@@ -460,10 +461,24 @@ function compressPipelineContext(
     }
   }
 
+  if (monthlyCreation && monthlyCreation.length > 0) {
+    lines.push(`\nPIPELINE CREATION BY MONTH (last 12 months):`);
+    for (const m of monthlyCreation) {
+      const mo = m.month ? m.month.slice(0, 7) : 'unknown';
+      lines.push(`- ${mo}: ${m.deal_count} deals created, ${fmtAmount(Number(m.total_amount))}`);
+    }
+    const totalDeals = monthlyCreation.reduce((s, m) => s + parseInt(m.deal_count, 10), 0);
+    const totalAmt = monthlyCreation.reduce((s, m) => s + Number(m.total_amount), 0);
+    const months = monthlyCreation.length || 1;
+    lines.push(`Average: ${Math.round(totalDeals / months)} deals/month, ${fmtAmount(totalAmt / months)}/month`);
+  }
+
   if (topDeals.length > 0) {
-    lines.push(`\nTOP DEALS:`);
+    lines.push(`\nTOP OPEN DEALS:`);
     for (const d of topDeals.slice(0, 15)) {
-      lines.push(`- ${d.name}: ${fmtAmount(d.amount)} — ${d.stage} (${d.days_in_stage}d) — ${d.owner}`);
+      const created = d.created_at ? `, created: ${fmtDate(d.created_at)}` : '';
+      const close = d.close_date ? `, close: ${fmtDate(d.close_date)}` : '';
+      lines.push(`- ${d.name}: ${fmtAmount(d.amount)} — ${d.stage} (${d.days_in_stage}d) — ${d.owner}${created}${close}`);
     }
   }
 
@@ -480,7 +495,7 @@ function compressPipelineContext(
 }
 
 function compressRepContext(
-  deals: Array<{ name: string; amount: number; stage: string; stage_normalized: string; days_in_stage: number; close_date: string | null }>,
+  deals: Array<{ name: string; amount: number; stage: string; stage_normalized: string; days_in_stage: number; close_date: string | null; created_at: string | null }>,
   findings: Array<{ severity: string; message: string; deal_name?: string; category: string }>,
   repEmail: string
 ): { text: string; sources: string[] } {
@@ -499,7 +514,7 @@ function compressRepContext(
   if (openDeals.length > 0) {
     lines.push(`\nOPEN DEALS (${openDeals.length}):`);
     for (const d of openDeals.slice(0, 15)) {
-      lines.push(`- ${d.name}: ${fmtAmount(d.amount)} — ${d.stage} (${d.days_in_stage}d)${d.close_date ? `, close: ${fmtDate(d.close_date)}` : ''}`);
+      lines.push(`- ${d.name}: ${fmtAmount(d.amount)} — ${d.stage} (${d.days_in_stage}d)${d.created_at ? `, created: ${fmtDate(d.created_at)}` : ''}${d.close_date ? `, close: ${fmtDate(d.close_date)}` : ''}`);
     }
   }
 
@@ -607,7 +622,7 @@ async function gatherContext(request: AnalysisRequest): Promise<{
 
     case 'pipeline':
     case 'workspace': {
-      const [snapshot, findingsResult, topDealsResult, conversationCtx] = await Promise.all([
+      const [snapshot, findingsResult, topDealsResult, monthlyCreationResult, conversationCtx] = await Promise.all([
         generatePipelineSnapshot(workspace_id),
         query<{ severity: string; category: string; message: string; deal_name: string; owner: string }>(
           `SELECT f.severity, f.category, f.message,
@@ -619,9 +634,10 @@ async function gatherContext(request: AnalysisRequest): Promise<{
            LIMIT 50`,
           [workspace_id]
         ),
-        query<{ name: string; amount: number; stage: string; owner: string; days_in_stage: number }>(
+        query<{ name: string; amount: number; stage: string; owner: string; days_in_stage: number; created_at: string | null; close_date: string | null }>(
           `SELECT d.name, d.amount, COALESCE(d.stage, d.stage_normalized) as stage, d.owner as owner,
-                  EXTRACT(DAY FROM NOW() - d.created_at)::int as days_in_stage
+                  EXTRACT(DAY FROM NOW() - d.created_at)::int as days_in_stage,
+                  d.created_at, d.close_date
            FROM deals d
            WHERE d.workspace_id = $1
              AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
@@ -629,10 +645,21 @@ async function gatherContext(request: AnalysisRequest): Promise<{
            LIMIT 20`,
           [workspace_id]
         ),
+        query<{ month: string; deal_count: string; total_amount: string }>(
+          `SELECT TO_CHAR(DATE_TRUNC('month', d.created_at), 'YYYY-MM') as month,
+                  COUNT(*)::text as deal_count,
+                  COALESCE(SUM(d.amount), 0)::text as total_amount
+           FROM deals d
+           WHERE d.workspace_id = $1
+             AND d.created_at >= NOW() - INTERVAL '12 months'
+           GROUP BY DATE_TRUNC('month', d.created_at)
+           ORDER BY DATE_TRUNC('month', d.created_at) DESC`,
+          [workspace_id]
+        ),
         buildConversationContext(workspace_id).catch(() => ({ text: '', count: 0, hasData: false })),
       ]);
 
-      const { text, sources } = compressPipelineContext(snapshot, findingsResult.rows, topDealsResult.rows);
+      const { text, sources } = compressPipelineContext(snapshot, findingsResult.rows, topDealsResult.rows, monthlyCreationResult.rows);
       const fullText = text + conversationCtx.text;
       if (conversationCtx.hasData) sources.push('conversations');
 
@@ -652,10 +679,10 @@ async function gatherContext(request: AnalysisRequest): Promise<{
     case 'rep': {
       if (!scope.rep_email) throw new Error('rep_email is required for rep scope');
       const [dealsResult, findingsResult] = await Promise.all([
-        query<{ name: string; amount: number; stage: string; stage_normalized: string; days_in_stage: number; close_date: string }>(
+        query<{ name: string; amount: number; stage: string; stage_normalized: string; days_in_stage: number; close_date: string | null; created_at: string | null }>(
           `SELECT d.name, d.amount, COALESCE(d.stage, d.stage_normalized) as stage, d.stage_normalized,
                   EXTRACT(DAY FROM NOW() - d.created_at)::int as days_in_stage,
-                  d.close_date
+                  d.close_date, d.created_at
            FROM deals d
            WHERE d.workspace_id = $1 AND d.owner = $2
            ORDER BY d.amount DESC NULLS LAST
