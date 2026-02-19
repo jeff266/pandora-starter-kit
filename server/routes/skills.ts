@@ -759,6 +759,10 @@ router.post('/:workspaceId/monte-carlo/query', async (req, res) => {
       simulationInputs?.openDeals ?? [];
     const repNames = [...new Set(openDeals.map((d: any) => d.ownerEmail).filter(Boolean))] as string[];
     const openDealNames = openDeals.map((d: any) => d.name);
+    const topDealsByAmount = [...openDeals]
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 10)
+      .map(d => `${d.name}: $${Math.round(d.amount).toLocaleString()} (${d.ownerEmail ?? 'unassigned'})`);
 
     // Classify intent — pass conversation history for pronoun/reference resolution
     const { classifyQueryIntent, fuzzyMatch } = await import('../analysis/monte-carlo-intent.js');
@@ -946,7 +950,9 @@ Probability of hitting target: ${commandCenter.probOfHittingTarget !== null && c
 Forecast window end: ${commandCenter.forecastWindowEnd ?? 'unknown'}
 Existing pipeline P50: ${commandCenter.existingPipelineP50 != null ? `$${Math.round(commandCenter.existingPipelineP50).toLocaleString()}` : 'n/a'}
 Future pipeline P50: ${commandCenter.projectedPipelineP50 != null ? `$${Math.round(commandCenter.projectedPipelineP50).toLocaleString()}` : 'n/a'}
-Open deals in simulation: ${commandCenter.dealsInSimulation ?? 0}`;
+Open deals in simulation: ${commandCenter.dealsInSimulation ?? 0}
+Top deals by amount:
+${topDealsByAmount.length > 0 ? topDealsByAmount.map(d => `  • ${d}`).join('\n') : '  (none)'}`;
 
     let synthesisPrompt: string;
 

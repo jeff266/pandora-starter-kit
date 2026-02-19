@@ -574,8 +574,61 @@ export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
           Ask a Question
         </div>
 
+        {/* Conversation thread */}
+        {turns.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 14 }}>
+            {turns.reduce<{ q: string; a: string }[]>((pairs, turn, i) => {
+              if (turn.role === 'user') pairs.push({ q: turn.content, a: turns[i + 1]?.content ?? '' });
+              return pairs;
+            }, []).map((pair, i, arr) => (
+              <div key={i}>
+                {/* Question row */}
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginBottom: 6 }}>
+                  <span style={{
+                    fontSize: 9, fontWeight: 700, color: colors.textMuted,
+                    textTransform: 'uppercase', letterSpacing: '0.06em',
+                    flexShrink: 0, marginTop: 2, minWidth: 14,
+                  }}>Q</span>
+                  <span style={{ fontSize: 12, color: colors.textSecondary, lineHeight: 1.5 }}>{pair.q}</span>
+                </div>
+                {/* Answer row */}
+                {pair.a && (
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                    <span style={{
+                      width: 6, height: 6, borderRadius: '50%', flexShrink: 0, marginTop: 5,
+                      background: '#3B82F6',
+                    }} />
+                    <p style={{ fontSize: 13, color: '#94A3B8', lineHeight: 1.6, margin: 0 }}>{pair.a}</p>
+                  </div>
+                )}
+                {/* Follow-up chips only after the last answer */}
+                {i === arr.length - 1 && queryAnswer?.followUps?.length > 0 && (
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
+                    {queryAnswer.followUps.map((fq, fi) => (
+                      <button
+                        key={fi}
+                        onClick={() => submitQuestion(fq)}
+                        style={{
+                          fontSize: 11, padding: '4px 12px', borderRadius: 20,
+                          background: '#1A1F2A', color: '#5A6578',
+                          border: '1px solid #2A3040', cursor: 'pointer',
+                          fontFamily: fonts.sans, transition: 'border-color 0.15s',
+                        }}
+                        onMouseEnter={e => (e.currentTarget.style.borderColor = '#3B82F6')}
+                        onMouseLeave={e => (e.currentTarget.style.borderColor = '#2A3040')}
+                      >
+                        {fq}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Suggested chips — shown until first question submitted */}
-        {!queryAnswer && (
+        {turns.length === 0 && (
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
             {SUGGESTED_QUESTIONS.map((q) => (
               <button
@@ -603,7 +656,7 @@ export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
             value={question}
             onChange={e => setQuestion(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') submitQuestion(question); }}
-            placeholder="Ask a question about this forecast..."
+            placeholder={turns.length > 0 ? 'Ask a follow-up question...' : 'Ask a question about this forecast...'}
             disabled={queryLoading}
             style={{
               flex: 1, height: 36, padding: '0 12px', fontSize: 12,
@@ -630,45 +683,6 @@ export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
 
         {queryError && (
           <div style={{ fontSize: 11, color: colors.red, marginTop: 6 }}>{queryError}</div>
-        )}
-
-        {/* Answer */}
-        {queryAnswer && (
-          <div style={{ marginTop: 14, opacity: 1, transition: 'opacity 0.2s' }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-              <span style={{
-                width: 7, height: 7, borderRadius: '50%', flexShrink: 0, marginTop: 5,
-                background: queryAnswer.queryType?.includes('risk') ? colors.orange
-                  : queryAnswer.queryType?.includes('opportunity') ? colors.green
-                  : '#3B82F6',
-              }} />
-              <p style={{ fontSize: 13, color: '#94A3B8', lineHeight: 1.6, margin: 0 }}>
-                {queryAnswer.answer}
-              </p>
-            </div>
-
-            {/* Follow-up chips */}
-            {queryAnswer.followUps?.length > 0 && (
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
-                {queryAnswer.followUps.map((fq, i) => (
-                  <button
-                    key={i}
-                    onClick={() => submitQuestion(fq)}
-                    style={{
-                      fontSize: 11, padding: '4px 12px', borderRadius: 20,
-                      background: '#1A1F2A', color: '#5A6578',
-                      border: '1px solid #2A3040', cursor: 'pointer',
-                      fontFamily: fonts.sans, transition: 'border-color 0.15s',
-                    }}
-                    onMouseEnter={e => (e.currentTarget.style.borderColor = '#3B82F6')}
-                    onMouseLeave={e => (e.currentTarget.style.borderColor = '#2A3040')}
-                  >
-                    {fq}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
         )}
 
         {/* Recent questions */}
