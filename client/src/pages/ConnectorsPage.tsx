@@ -499,6 +499,23 @@ export default function ConnectorsPage() {
     setToasts(prev => prev.filter(t => t.id !== id));
   };
 
+  const pollJobUntilDone = async (jobId: string): Promise<any> => {
+    const maxPolls = 300;
+    const pollInterval = 3000;
+    for (let i = 0; i < maxPolls; i++) {
+      await new Promise(r => setTimeout(r, pollInterval));
+      const job = await api.get(`/sync/jobs/${jobId}`);
+      if (job.status === 'completed') {
+        return { ...job, success: true };
+      }
+      if (job.status === 'failed' || job.status === 'cancelled') {
+        const errorMsg = job.error || 'Sync job failed';
+        return { ...job, success: false, errors: [errorMsg] };
+      }
+    }
+    return { success: false, errors: ['Sync timed out waiting for results'] };
+  };
+
   const handleSyncNow = async (connectorType: string) => {
     setSyncingConnector(connectorType);
     setSyncElapsed(0);
@@ -510,21 +527,32 @@ export default function ConnectorsPage() {
 
     try {
       const result = await api.post(`/connectors/${connectorType}/sync`, { mode: 'initial' });
+
+      let finalResult = result;
+      if (result.status === 'queued' && result.jobId) {
+        finalResult = await pollJobUntilDone(result.jobId);
+      }
+
+      const jobResult = finalResult.result || finalResult;
+      const totalRecords = jobResult.totalRecords ?? jobResult.recordsStored ?? 0;
+      const duration = jobResult.duration ?? finalResult.duration;
+      const errors = jobResult.errors || finalResult.errors || [];
+
       const syncResult: SyncResult = {
-        success: result.success !== false && (!result.errors || result.errors.length === 0),
-        recordsFetched: result.recordsFetched,
-        recordsStored: result.recordsStored,
-        duration: result.duration,
-        errors: result.errors,
-        trackedUsers: result.trackedUsers,
-        byUser: result.byUser,
+        success: finalResult.success !== false && errors.length === 0,
+        recordsFetched: jobResult.recordsFetched,
+        recordsStored: totalRecords,
+        duration: duration,
+        errors: errors.length > 0 ? errors : undefined,
+        trackedUsers: jobResult.trackedUsers,
+        byUser: jobResult.byUser,
       };
       setSyncResults(prev => ({ ...prev, [connectorType]: syncResult }));
 
       if (syncResult.success) {
-        addToast(`${connectorType} sync complete: ${syncResult.recordsStored ?? 0} records synced`, 'success');
+        addToast(`${connectorType} sync complete: ${totalRecords} records synced`, 'success');
       } else {
-        addToast(`Sync completed with issues: ${syncResult.errors?.[0] || 'Unknown error'}`, 'error');
+        addToast(`Sync completed with issues: ${errors[0] || 'Unknown error'}`, 'error');
       }
       fetchConnectors();
     } catch (error: any) {
