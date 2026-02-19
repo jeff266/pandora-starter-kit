@@ -30,6 +30,8 @@ import { createLogger } from '../../utils/logger.js';
 const logger = createLogger('Salesforce');
 import { query } from '../../db.js';
 import { updateCredentialFields } from '../../lib/credential-store.js';
+import { inferAnalysisScopes, applyInferredScopes } from '../../config/scope-inference.js';
+import { stampAllDealsForWorkspace, stampDealScopes } from '../../config/scope-stamper.js';
 
 // ============================================================================
 // Salesforce Adapter Implementation
@@ -413,6 +415,20 @@ export class SalesforceAdapter implements CRMAdapter {
     // This runs automatically on first Salesforce sync to seamlessly upgrade workspaces
     await this.runUpgradeIfNeeded(workspaceId);
 
+    // Scope inference + stamping — run after all deals are written
+    // Non-blocking: don't delay sync completion on inference errors
+    if (deals.succeeded.length > 0) {
+      inferAnalysisScopes(workspaceId)
+        .then(async (inferred) => {
+          await applyInferredScopes(workspaceId, inferred);
+          await stampAllDealsForWorkspace(workspaceId);
+          logger.info('[Salesforce Adapter] Scope inference + stamping complete', { workspaceId });
+        })
+        .catch(err => {
+          logger.warn('[Salesforce Adapter] Scope inference failed', { workspaceId, error: err instanceof Error ? err.message : err });
+        });
+    }
+
     return { deals, contacts, accounts };
   }
 
@@ -488,6 +504,22 @@ export class SalesforceAdapter implements CRMAdapter {
       await this.syncStageHistory(client, workspaceId, stageMap, lastSyncTime);
 
       // TODO: Check for deleted records using IsDeleted = true
+
+      // Scope stamping — re-stamp only the deals touched in this incremental sync
+      // Do NOT re-run inference on incremental (scopes are already configured)
+      if (deals.succeeded.length > 0) {
+        const sourceIds = deals.succeeded.map(d => d.source_id);
+        query<{ id: string }>(
+          `SELECT id FROM deals WHERE workspace_id = $1 AND source = 'salesforce' AND source_id = ANY($2)`,
+          [workspaceId, sourceIds]
+        ).then(async (res) => {
+          const dealIds = res.rows.map(r => r.id);
+          await stampDealScopes(workspaceId, dealIds);
+          logger.info('[Salesforce Adapter] Incremental scope stamping complete', { workspaceId, stamped: dealIds.length });
+        }).catch(err => {
+          logger.warn('[Salesforce Adapter] Incremental scope stamping failed', { workspaceId, error: err instanceof Error ? err.message : err });
+        });
+      }
 
       return { deals, contacts, accounts };
     } catch (error) {

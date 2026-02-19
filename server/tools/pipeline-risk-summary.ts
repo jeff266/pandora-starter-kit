@@ -40,6 +40,9 @@ interface PipelineRiskSummary {
     source_id: string | null;
     source: string | null;
     pipeline: string | null;
+    mechanical_score: number | null;
+    mechanical_grade: string | null;
+    active_source: 'skill' | 'health';
   }>;
   filter: {
     rep_email: string | null;
@@ -120,6 +123,9 @@ export async function getPipelineRiskSummary(
       source_id: d.source_id ?? null,
       source: d.source ?? null,
       pipeline: d.pipeline ?? null,
+      mechanical_score: dbHealthScore,
+      mechanical_grade: dbHealthScore != null ? computeGradeFromScore(dbHealthScore) : null,
+      active_source: ((risk?.score != null && (d.health_score == null || risk.score <= Number(d.health_score))) ? 'skill' : 'health') as 'skill' | 'health',
     };
   });
 

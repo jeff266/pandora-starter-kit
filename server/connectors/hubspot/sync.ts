@@ -15,6 +15,8 @@ import type { SyncResult } from '../_interface.js';
 import { transformWithErrorCapture } from '../../utils/sync-helpers.js';
 import { detectStageChanges, recordStageChanges, updateDealStageCache } from './stage-tracker.js';
 import { getStageMapping } from '../../config/index.js';
+import { inferAnalysisScopes, applyInferredScopes } from '../../config/scope-inference.js';
+import { stampAllDealsForWorkspace, stampDealScopes } from '../../config/scope-stamper.js';
 
 async function buildStageMaps(client: HubSpotClient, workspaceId: string): Promise<DealTransformOptions> {
   const stageMap = new Map<string, string>();
@@ -732,6 +734,20 @@ export async function initialSync(
 
     await updateConnectionSyncStatus(workspaceId, 'hubspot', totalStored, errors.length > 0 ? errors[0] : null);
 
+    // Scope inference + stamping — run after deals are written
+    // Non-blocking: don't delay sync completion on inference errors
+    if (dealsStored > 0) {
+      inferAnalysisScopes(workspaceId)
+        .then(async (inferred) => {
+          await applyInferredScopes(workspaceId, inferred);
+          await stampAllDealsForWorkspace(workspaceId);
+          console.log(`[HubSpot Sync] Scope inference + stamping complete for workspace=${workspaceId}`);
+        })
+        .catch(err => {
+          console.error(`[HubSpot Sync] Scope inference failed for workspace=${workspaceId}:`, err instanceof Error ? err.message : err);
+        });
+    }
+
     // Trigger stage history backfill if this is initial sync and deals have stale stage_changed_at
     if (dealsStored > 0) {
       const staleStageTimestamps = await query<{ count: string }>(
@@ -979,6 +995,21 @@ export async function incrementalSync(
 
     totalStored = dealsStored + contactsStored + accountsStored + activitiesStored;
     await updateConnectionSyncStatus(workspaceId, 'hubspot', totalStored, errors.length > 0 ? errors[0] : null);
+
+    // Scope stamping — re-stamp only the deals touched in this incremental sync
+    // Do NOT re-run inference on incremental (scopes are already configured)
+    if (dealsStored > 0 && normalizedDeals.length > 0) {
+      const sourceIds = normalizedDeals.map(d => d.source_id);
+      query<{ id: string }>(
+        `SELECT id FROM deals WHERE workspace_id = $1 AND source = 'hubspot' AND source_id = ANY($2)`,
+        [workspaceId, sourceIds]
+      ).then(async (res) => {
+        const dealIds = res.rows.map(r => r.id);
+        await stampDealScopes(workspaceId, dealIds);
+      }).catch(err => {
+        console.error(`[HubSpot Sync] Incremental scope stamping failed for workspace=${workspaceId}:`, err instanceof Error ? err.message : err);
+      });
+    }
 
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Unknown sync error';

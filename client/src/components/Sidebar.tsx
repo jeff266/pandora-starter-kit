@@ -62,6 +62,7 @@ const sections: NavSection[] = [
       { label: 'Members', path: '/members', icon: '\u2295' },
       { label: 'Marketplace', path: '/marketplace', icon: '\u25EB' },
       { label: 'Settings', path: '/settings', icon: '\u229B' },
+      { label: 'Scopes', path: '/admin/scopes', icon: '\u25A4' },
     ],
   },
 ];

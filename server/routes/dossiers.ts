@@ -161,4 +161,47 @@ router.get('/:workspaceId/accounts', async (req, res) => {
   }
 });
 
+/**
+ * GET /api/workspaces/:workspaceId/deals/:dealId/score-history
+ *
+ * Returns up to 12 weekly deal score snapshots in reverse chronological order.
+ */
+router.get('/:workspaceId/deals/:dealId/score-history', async (req, res) => {
+  try {
+    const { workspaceId, dealId } = req.params;
+
+    // Validate workspace exists
+    const wsCheck = await query(
+      `SELECT id FROM workspaces WHERE id = $1 LIMIT 1`,
+      [workspaceId]
+    );
+    if (wsCheck.rows.length === 0) {
+      return res.status(404).json({ error: `Workspace ${workspaceId} not found` });
+    }
+
+    // Validate deal exists in workspace
+    const dealCheck = await query(
+      `SELECT id FROM deals WHERE id = $1 AND workspace_id = $2 LIMIT 1`,
+      [dealId, workspaceId]
+    );
+    if (dealCheck.rows.length === 0) {
+      return res.status(404).json({ error: `Deal ${dealId} not found in workspace ${workspaceId}` });
+    }
+
+    const result = await query(
+      `SELECT snapshot_date, health_score, skill_score, active_score, active_source, grade, score_delta, commentary
+       FROM deal_score_snapshots
+       WHERE workspace_id = $1 AND deal_id = $2
+       ORDER BY snapshot_date DESC
+       LIMIT 12`,
+      [workspaceId, dealId]
+    );
+
+    res.json({ snapshots: result.rows });
+  } catch (err) {
+    console.error('[Score History]', err);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 export default router;
