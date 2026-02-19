@@ -13,16 +13,39 @@ router.post('/:workspaceId/connectors/salesforce/sync', async (req, res) => {
   const { workspaceId } = req.params;
 
   try {
-    // Check for active Salesforce connection
-    const connResult = await query(
+    // Check for Salesforce connection (including error state for recovery)
+    const connResult = await query<{ status: string }>(
       `SELECT status FROM connections
-       WHERE workspace_id = $1 AND connector_name = 'salesforce' AND status IN ('connected', 'healthy', 'synced')`,
+       WHERE workspace_id = $1 AND connector_name = 'salesforce' AND status IN ('connected', 'healthy', 'synced', 'error')`,
       [workspaceId]
     );
 
     if (connResult.rows.length === 0) {
       res.status(404).json({ error: 'No active Salesforce connection found' });
       return;
+    }
+
+    // If connection is in error state, attempt token refresh to recover
+    if (connResult.rows[0].status === 'error') {
+      logger.info('Connection in error state, attempting token refresh recovery', { workspaceId });
+      try {
+        const refreshedCreds = await getFreshCredentials(workspaceId);
+        if (refreshedCreds) {
+          await query(
+            `UPDATE connections SET status = 'connected', error_message = NULL, updated_at = NOW()
+             WHERE workspace_id = $1 AND connector_name = 'salesforce'`,
+            [workspaceId]
+          );
+          logger.info('Connection recovered from error state via token refresh', { workspaceId });
+        }
+      } catch (refreshErr) {
+        logger.error('Token refresh recovery failed', { workspaceId, error: (refreshErr as Error).message });
+        res.status(401).json({
+          error: 'Salesforce connection requires re-authentication',
+          message: (refreshErr as Error).message,
+        });
+        return;
+      }
     }
 
     // Clean up stale locks (syncs stuck in 'running' for > 1 hour)
