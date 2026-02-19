@@ -35,6 +35,8 @@ interface DealPreview {
   owner_email: string | null;
   pipeline: string | null;
   deal_type: string | null;
+  scope_id: string;
+  scope_override: string | null;
 }
 
 interface InferredScope {
@@ -323,6 +325,12 @@ function FilterPreviewPanel({
   deals,
   loadingPreview,
   scopeName,
+  overrideCount,
+  showOverridesOnly,
+  onToggleOverridesOnly,
+  onOverrideDeal,
+  onClearOverride,
+  overridingDealId,
 }: {
   scopes: ScopeRow[];
   selectedScopeId: string | null;
@@ -330,7 +338,14 @@ function FilterPreviewPanel({
   deals: DealPreview[];
   loadingPreview: boolean;
   scopeName: string;
+  overrideCount: number;
+  showOverridesOnly: boolean;
+  onToggleOverridesOnly: () => void;
+  onOverrideDeal: (dealId: string, scopeId: string) => Promise<void>;
+  onClearOverride: (dealId: string) => Promise<void>;
+  overridingDealId: string | null;
 }) {
+  const [expandedDealId, setExpandedDealId] = useState<string | null>(null);
   const previewScopes = scopes.filter(s => s.scope_id !== 'default');
 
   if (previewScopes.length === 0) {
@@ -343,6 +358,10 @@ function FilterPreviewPanel({
       </div>
     );
   }
+
+  const getScopeName = (scopeId: string): string => {
+    return scopes.find(s => s.scope_id === scopeId)?.name || scopeId;
+  };
 
   return (
     <div style={panelStyle}>
@@ -380,8 +399,28 @@ function FilterPreviewPanel({
         </div>
       ) : (
         <>
-          <div style={{ fontSize: 12, color: colors.textSecondary, fontFamily: fonts.sans, marginBottom: 10 }}>
-            Showing first {deals.length} deal{deals.length !== 1 ? 's' : ''} for <strong style={{ color: colors.text }}>{scopeName}</strong>
+          <div style={{ fontSize: 12, color: colors.textSecondary, fontFamily: fonts.sans, marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span>
+              Showing first {deals.length} deal{deals.length !== 1 ? 's' : ''} for <strong style={{ color: colors.text }}>{scopeName}</strong>
+            </span>
+            {overrideCount > 0 && (
+              <button
+                onClick={onToggleOverridesOnly}
+                style={{
+                  background: showOverridesOnly ? colors.accentSoft : 'transparent',
+                  border: `1px solid ${showOverridesOnly ? colors.accent : colors.border}`,
+                  color: showOverridesOnly ? colors.accent : colors.textSecondary,
+                  padding: '4px 10px',
+                  borderRadius: 4,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  fontFamily: fonts.sans,
+                }}
+              >
+                {overrideCount} manual override{overrideCount !== 1 ? 's' : ''} {showOverridesOnly ? '✓' : ''}
+              </button>
+            )}
           </div>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -389,29 +428,142 @@ function FilterPreviewPanel({
                 <tr>
                   <th style={thStyle}>Name</th>
                   <th style={thStyle}>Amount</th>
+                  <th style={thStyle}>Scope</th>
                   <th style={thStyle}>Stage</th>
                   <th style={thStyle}>Owner</th>
-                  <th style={thStyle}>Pipeline / Type</th>
+                  <th style={thStyle}>Pipeline</th>
                   <th style={thStyle}>Close Date</th>
                 </tr>
               </thead>
               <tbody>
-                {deals.map(deal => (
-                  <tr key={deal.id}>
-                    <td style={{ ...tdStyle, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {deal.name || '—'}
-                    </td>
-                    <td style={tdStyle}>{formatAmount(deal.amount)}</td>
-                    <td style={{ ...tdStyle, color: colors.textSecondary }}>{deal.stage || '—'}</td>
-                    <td style={{ ...tdStyle, color: colors.textSecondary, fontSize: 12 }}>
-                      {deal.owner_email || '—'}
-                    </td>
-                    <td style={{ ...tdStyle, color: colors.textSecondary, fontSize: 12 }}>
-                      {deal.pipeline || deal.deal_type || '—'}
-                    </td>
-                    <td style={{ ...tdStyle, color: colors.textSecondary }}>{formatDate(deal.close_date)}</td>
-                  </tr>
-                ))}
+                {deals.map(deal => {
+                  const hasOverride = deal.scope_override !== null;
+                  const isExpanded = expandedDealId === deal.id;
+                  return (
+                    <tr
+                      key={deal.id}
+                      style={{
+                        background: hasOverride ? colors.surfaceRaised : 'transparent',
+                        borderLeft: hasOverride ? `3px solid ${colors.accent}` : 'none',
+                      }}
+                    >
+                      <td style={{ ...tdStyle, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {deal.name || '—'}
+                      </td>
+                      <td style={tdStyle}>{formatAmount(deal.amount)}</td>
+                      <td style={{ ...tdStyle, position: 'relative' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ fontSize: 12, color: colors.text }}>
+                            {getScopeName(deal.scope_id)}
+                            {hasOverride && <span style={{ marginLeft: 4, fontSize: 14 }}>📌</span>}
+                          </span>
+                          <button
+                            onClick={() => setExpandedDealId(isExpanded ? null : deal.id)}
+                            disabled={overridingDealId === deal.id}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              color: colors.textSecondary,
+                              cursor: overridingDealId === deal.id ? 'wait' : 'pointer',
+                              fontSize: 14,
+                              padding: '2px 4px',
+                            }}
+                          >
+                            {overridingDealId === deal.id ? '⋯' : '⋮'}
+                          </button>
+                        </div>
+                        {isExpanded && (
+                          <div style={{
+                            position: 'absolute',
+                            top: '100%',
+                            left: 0,
+                            zIndex: 10,
+                            background: colors.surface,
+                            border: `1px solid ${colors.border}`,
+                            borderRadius: 4,
+                            boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                            minWidth: 160,
+                            marginTop: 2,
+                          }}>
+                            {scopes.filter(s => s.confirmed).map(s => (
+                              <button
+                                key={s.scope_id}
+                                onClick={() => {
+                                  onOverrideDeal(deal.id, s.scope_id);
+                                  setExpandedDealId(null);
+                                }}
+                                disabled={s.scope_id === deal.scope_id}
+                                style={{
+                                  display: 'block',
+                                  width: '100%',
+                                  padding: '8px 12px',
+                                  textAlign: 'left',
+                                  background: s.scope_id === deal.scope_id ? colors.surfaceHover : 'none',
+                                  border: 'none',
+                                  color: s.scope_id === deal.scope_id ? colors.textMuted : colors.text,
+                                  fontSize: 12,
+                                  cursor: s.scope_id === deal.scope_id ? 'default' : 'pointer',
+                                  fontFamily: fonts.sans,
+                                }}
+                                onMouseEnter={(e) => {
+                                  if (s.scope_id !== deal.scope_id) {
+                                    e.currentTarget.style.background = colors.surfaceHover;
+                                  }
+                                }}
+                                onMouseLeave={(e) => {
+                                  if (s.scope_id !== deal.scope_id) {
+                                    e.currentTarget.style.background = 'none';
+                                  }
+                                }}
+                              >
+                                {s.name}
+                              </button>
+                            ))}
+                            {hasOverride && (
+                              <>
+                                <div style={{ height: 1, background: colors.border, margin: '4px 0' }} />
+                                <button
+                                  onClick={() => {
+                                    onClearOverride(deal.id);
+                                    setExpandedDealId(null);
+                                  }}
+                                  style={{
+                                    display: 'block',
+                                    width: '100%',
+                                    padding: '8px 12px',
+                                    textAlign: 'left',
+                                    background: 'none',
+                                    border: 'none',
+                                    color: colors.red,
+                                    fontSize: 12,
+                                    cursor: 'pointer',
+                                    fontFamily: fonts.sans,
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    e.currentTarget.style.background = colors.surfaceHover;
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    e.currentTarget.style.background = 'none';
+                                  }}
+                                >
+                                  Clear override
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </td>
+                      <td style={{ ...tdStyle, color: colors.textSecondary }}>{deal.stage || '—'}</td>
+                      <td style={{ ...tdStyle, color: colors.textSecondary, fontSize: 12 }}>
+                        {deal.owner_email || '—'}
+                      </td>
+                      <td style={{ ...tdStyle, color: colors.textSecondary, fontSize: 12 }}>
+                        {deal.pipeline || deal.deal_type || '—'}
+                      </td>
+                      <td style={{ ...tdStyle, color: colors.textSecondary }}>{formatDate(deal.close_date)}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -487,11 +639,14 @@ export default function AdminScopesPage() {
   const [selectedScopeId, setSelectedScopeId] = useState<string | null>(null);
   const [previewDeals, setPreviewDeals] = useState<DealPreview[]>([]);
   const [previewScopeName, setPreviewScopeName] = useState('');
+  const [overrideCount, setOverrideCount] = useState(0);
+  const [showOverridesOnly, setShowOverridesOnly] = useState(false);
   const [loadingPreview, setLoadingPreview] = useState(false);
 
   // Action state
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [reInferring, setReInferring] = useState(false);
+  const [overridingDealId, setOverridingDealId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   // ---- Data fetching ----
@@ -514,22 +669,27 @@ export default function AdminScopesPage() {
     }
   }, [selectedScopeId]);
 
-  const fetchPreview = useCallback(async (scopeId: string) => {
+  const fetchPreview = useCallback(async (scopeId: string, overridesOnlyParam?: boolean) => {
     setLoadingPreview(true);
+    const overridesFilter = overridesOnlyParam !== undefined ? overridesOnlyParam : showOverridesOnly;
     try {
-      const result = await api.get(`/admin/scopes/${encodeURIComponent(scopeId)}/preview`) as {
+      const queryParam = overridesFilter ? '?overrides_only=true' : '';
+      const result = await api.get(`/admin/scopes/${encodeURIComponent(scopeId)}/preview${queryParam}`) as {
         deals: DealPreview[];
         scope_name: string;
+        override_count: number;
       };
       setPreviewDeals(result.deals || []);
       setPreviewScopeName(result.scope_name || scopeId);
+      setOverrideCount(result.override_count || 0);
     } catch (err: any) {
       setPreviewDeals([]);
       setPreviewScopeName(scopeId);
+      setOverrideCount(0);
     } finally {
       setLoadingPreview(false);
     }
-  }, []);
+  }, [showOverridesOnly]);
 
   useEffect(() => {
     fetchScopes();
@@ -539,7 +699,7 @@ export default function AdminScopesPage() {
     if (selectedScopeId) {
       fetchPreview(selectedScopeId);
     }
-  }, [selectedScopeId]);
+  }, [selectedScopeId, showOverridesOnly, fetchPreview]);
 
   // ---- Actions ----
 
@@ -576,6 +736,38 @@ export default function AdminScopesPage() {
 
   const handleSelectScope = (scopeId: string) => {
     setSelectedScopeId(scopeId);
+  };
+
+  const handleToggleOverridesOnly = () => {
+    setShowOverridesOnly(prev => !prev);
+  };
+
+  const handleOverrideDeal = async (dealId: string, scopeId: string) => {
+    setOverridingDealId(dealId);
+    try {
+      await api.post(`/admin/scopes/deals/${encodeURIComponent(dealId)}/override`, { scope_id: scopeId });
+      setToast({ type: 'success', message: 'Deal scope override set' });
+      // Refresh both scopes list (for deal counts) and preview
+      await Promise.all([fetchScopes(), selectedScopeId ? fetchPreview(selectedScopeId) : Promise.resolve()]);
+    } catch (err: any) {
+      setToast({ type: 'error', message: err.message || 'Override failed' });
+    } finally {
+      setOverridingDealId(null);
+    }
+  };
+
+  const handleClearOverride = async (dealId: string) => {
+    setOverridingDealId(dealId);
+    try {
+      await api.delete(`/admin/scopes/deals/${encodeURIComponent(dealId)}/override`);
+      setToast({ type: 'success', message: 'Deal scope override cleared' });
+      // Refresh both scopes list and preview
+      await Promise.all([fetchScopes(), selectedScopeId ? fetchPreview(selectedScopeId) : Promise.resolve()]);
+    } catch (err: any) {
+      setToast({ type: 'error', message: err.message || 'Clear override failed' });
+    } finally {
+      setOverridingDealId(null);
+    }
   };
 
   // ---- Render ----
@@ -649,6 +841,12 @@ export default function AdminScopesPage() {
         deals={previewDeals}
         loadingPreview={loadingPreview}
         scopeName={previewScopeName}
+        overrideCount={overrideCount}
+        showOverridesOnly={showOverridesOnly}
+        onToggleOverridesOnly={handleToggleOverridesOnly}
+        onOverrideDeal={handleOverrideDeal}
+        onClearOverride={handleClearOverride}
+        overridingDealId={overridingDealId}
       />
 
       {/* Panel 3 */}

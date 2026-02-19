@@ -151,7 +151,7 @@ export async function stampDealScopes(workspaceId: string, dealIds: string[]): P
 
       await query(
         `UPDATE deals SET scope_id = $1, updated_at = now()
-         WHERE workspace_id = $2 AND id = $3`,
+         WHERE workspace_id = $2 AND id = $3 AND scope_override IS NULL`,
         [scopeId, workspaceId, deal.id]
       );
 
@@ -182,4 +182,95 @@ export async function stampAllDealsForWorkspace(workspaceId: string): Promise<vo
   );
   const allIds = result.rows.map(r => r.id);
   await stampDealScopes(workspaceId, allIds);
+}
+
+// ============================================================================
+// setDealScopeOverride — manual scope assignment
+// ============================================================================
+
+/**
+ * Manually assign a deal to a specific scope, or clear the override.
+ *
+ * When scopeId is set: validates it exists for this workspace, then sets both
+ * scope_override and scope_id to that value atomically.
+ *
+ * When scopeId is null: clears scope_override and re-stamps the deal using
+ * normal inference rules.
+ *
+ * @param workspaceId - workspace ID
+ * @param dealId      - deal UUID
+ * @param scopeId     - target scope_id, or null to clear override
+ */
+export async function setDealScopeOverride(
+  workspaceId: string,
+  dealId: string,
+  scopeId: string | null
+): Promise<void> {
+  if (scopeId === null) {
+    // Clear the override and re-stamp using inference
+    // 1. Fetch confirmed scopes
+    const scopesResult = await query<AnalysisScope>(
+      `SELECT scope_id, filter_field, filter_operator, filter_values
+       FROM analysis_scopes
+       WHERE workspace_id = $1
+         AND confirmed = true
+         AND scope_id != 'default'
+       ORDER BY created_at ASC`,
+      [workspaceId]
+    );
+    const scopes = scopesResult.rows;
+
+    // 2. Fetch the deal row
+    const dealResult = await query<any>(
+      `SELECT id, pipeline, custom_fields FROM deals
+       WHERE workspace_id = $1 AND id = $2`,
+      [workspaceId, dealId]
+    );
+
+    if (dealResult.rows.length === 0) {
+      throw new Error(`Deal ${dealId} not found in workspace ${workspaceId}`);
+    }
+
+    const row = dealResult.rows[0];
+    const deal: DealRow = {
+      id: row.id,
+      pipeline: row.pipeline,
+      deal_type: extractDealType(row),
+      custom_fields: row.custom_fields || {},
+    };
+
+    const inferredScopeId = getScopeIdForDeal(deal, scopes);
+
+    // 3. Clear override + set inferred scope_id
+    await query(
+      `UPDATE deals
+       SET scope_override = NULL, scope_id = $1, updated_at = now()
+       WHERE workspace_id = $2 AND id = $3`,
+      [inferredScopeId, workspaceId, dealId]
+    );
+
+    console.log(`[Scope Override] workspace=${workspaceId} deal=${dealId} scope=cleared (re-stamped to ${inferredScopeId})`);
+  } else {
+    // Set manual override
+    // 1. Validate scopeId exists for this workspace
+    const scopeCheck = await query<{ scope_id: string }>(
+      `SELECT scope_id FROM analysis_scopes
+       WHERE workspace_id = $1 AND scope_id = $2`,
+      [workspaceId, scopeId]
+    );
+
+    if (scopeCheck.rows.length === 0) {
+      throw new Error(`Scope ${scopeId} not found in workspace ${workspaceId}`);
+    }
+
+    // 2. Set both scope_override and scope_id atomically
+    await query(
+      `UPDATE deals
+       SET scope_override = $1, scope_id = $1, updated_at = now()
+       WHERE workspace_id = $2 AND id = $3`,
+      [scopeId, workspaceId, dealId]
+    );
+
+    console.log(`[Scope Override] workspace=${workspaceId} deal=${dealId} scope=${scopeId} (set)`);
+  }
 }

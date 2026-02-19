@@ -14,7 +14,7 @@
 import { Router, type Request, type Response } from 'express';
 import { query } from '../db.js';
 import { inferAnalysisScopes, applyInferredScopes } from '../config/scope-inference.js';
-import { stampAllDealsForWorkspace } from '../config/scope-stamper.js';
+import { stampAllDealsForWorkspace, setDealScopeOverride } from '../config/scope-stamper.js';
 import { getScopeWhereClause, type ActiveScope } from '../config/scope-loader.js';
 
 const router = Router();
@@ -194,6 +194,12 @@ router.get('/:workspaceId/admin/scopes/:scopeId/preview', async (req: Request, r
       whereClause = `workspace_id = $1`;
     }
 
+    // Support filtering to overrides only
+    const overridesOnly = req.query.overrides_only === 'true';
+    if (overridesOnly) {
+      whereClause += ` AND scope_override IS NOT NULL`;
+    }
+
     const deals = await query<{
       id: string;
       name: string;
@@ -202,9 +208,11 @@ router.get('/:workspaceId/admin/scopes/:scopeId/preview', async (req: Request, r
       close_date: string | null;
       owner_email: string | null;
       pipeline: string | null;
+      scope_id: string;
+      scope_override: string | null;
     }>(
       `SELECT id, name, amount, stage_normalized AS stage, close_date,
-              owner AS owner_email, pipeline
+              owner AS owner_email, pipeline, scope_id, scope_override
        FROM deals
        WHERE ${whereClause}
        ORDER BY amount DESC NULLS LAST
@@ -212,7 +220,16 @@ router.get('/:workspaceId/admin/scopes/:scopeId/preview', async (req: Request, r
       [workspaceId]
     );
 
-    res.json({ deals: deals.rows, scope_name: scope.name });
+    // Count total overrides in this scope for the summary line
+    const overrideCountResult = await query<{ cnt: string }>(
+      `SELECT COUNT(*)::text as cnt FROM deals
+       WHERE ${scopeId === 'default' ? 'workspace_id = $1 AND scope_id = \'default\'' : `workspace_id = $1 AND ${scopeWhere}`}
+         AND scope_override IS NOT NULL`,
+      [workspaceId]
+    );
+    const override_count = parseInt(overrideCountResult.rows[0]?.cnt || '0');
+
+    res.json({ deals: deals.rows, scope_name: scope.name, override_count });
   } catch (err) {
     console.error('[Admin Scopes] Preview error:', err);
     res.status(500).json({ error: 'Preview failed', details: (err as Error).message });
@@ -258,6 +275,108 @@ router.post('/:workspaceId/admin/scopes/:scopeId/confirm', async (req: Request, 
   } catch (err) {
     console.error('[Admin Scopes] Confirm error:', err);
     res.status(500).json({ error: 'Confirm failed', details: (err as Error).message });
+  }
+});
+
+// ============================================================================
+// POST /:workspaceId/admin/scopes/deals/:dealId/override
+// ============================================================================
+
+router.post('/:workspaceId/admin/scopes/deals/:dealId/override', async (req: Request, res: Response): Promise<void> => {
+  const workspaceId = req.params.workspaceId as string;
+  const dealId = req.params.dealId as string;
+  const { scope_id } = req.body as { scope_id?: string };
+
+  if (!scope_id || typeof scope_id !== 'string') {
+    res.status(400).json({ error: 'scope_id is required and must be a string' });
+    return;
+  }
+
+  try {
+    // Verify deal belongs to this workspace
+    const dealCheck = await query<{ id: string; workspace_id: string }>(
+      `SELECT id, workspace_id FROM deals WHERE id = $1`,
+      [dealId]
+    );
+
+    if (dealCheck.rows.length === 0) {
+      res.status(404).json({ error: 'Deal not found' });
+      return;
+    }
+
+    if (dealCheck.rows[0].workspace_id !== workspaceId) {
+      res.status(403).json({ error: 'Deal does not belong to this workspace' });
+      return;
+    }
+
+    // Set the override
+    await setDealScopeOverride(workspaceId, dealId, scope_id);
+
+    // Fetch updated deal row
+    const result = await query<{
+      id: string;
+      scope_id: string;
+      scope_override: string | null;
+      updated_at: string;
+    }>(
+      `SELECT id, scope_id, scope_override, updated_at
+       FROM deals
+       WHERE workspace_id = $1 AND id = $2`,
+      [workspaceId, dealId]
+    );
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[Admin Scopes] Override error:', err);
+    res.status(500).json({ error: 'Override failed', details: (err as Error).message });
+  }
+});
+
+// ============================================================================
+// DELETE /:workspaceId/admin/scopes/deals/:dealId/override
+// ============================================================================
+
+router.delete('/:workspaceId/admin/scopes/deals/:dealId/override', async (req: Request, res: Response): Promise<void> => {
+  const workspaceId = req.params.workspaceId as string;
+  const dealId = req.params.dealId as string;
+
+  try {
+    // Verify deal belongs to this workspace
+    const dealCheck = await query<{ id: string; workspace_id: string }>(
+      `SELECT id, workspace_id FROM deals WHERE id = $1`,
+      [dealId]
+    );
+
+    if (dealCheck.rows.length === 0) {
+      res.status(404).json({ error: 'Deal not found' });
+      return;
+    }
+
+    if (dealCheck.rows[0].workspace_id !== workspaceId) {
+      res.status(403).json({ error: 'Deal does not belong to this workspace' });
+      return;
+    }
+
+    // Clear the override (re-stamps using inference)
+    await setDealScopeOverride(workspaceId, dealId, null);
+
+    // Fetch updated deal row
+    const result = await query<{
+      id: string;
+      scope_id: string;
+      scope_override: string | null;
+      updated_at: string;
+    }>(
+      `SELECT id, scope_id, scope_override, updated_at
+       FROM deals
+       WHERE workspace_id = $1 AND id = $2`,
+      [workspaceId, dealId]
+    );
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[Admin Scopes] Clear override error:', err);
+    res.status(500).json({ error: 'Clear override failed', details: (err as Error).message });
   }
 });
 
