@@ -86,7 +86,7 @@ export default function DealList() {
     try {
       const [riskData, dealsData] = await Promise.all([
         api.get('/pipeline/risk-summary').catch(() => null),
-        api.get('/deals?limit=500'),
+        api.get('/deals?limit=1000'),
       ]);
 
       const riskDeals: DealRow[] = (riskData?.deals || []).map((d: any) => ({

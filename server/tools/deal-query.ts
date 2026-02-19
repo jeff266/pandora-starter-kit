@@ -153,7 +153,7 @@ export async function queryDeals(workspaceId: string, filters: DealFilters): Pro
 
   const sortBy = filters.sortBy && VALID_SORT_COLUMNS.has(filters.sortBy) ? filters.sortBy : 'close_date';
   const sortDir = filters.sortDir === 'desc' ? 'DESC' : 'ASC';
-  const limit = Math.min(Math.max(filters.limit ?? 50, 1), 200);
+  const limit = Math.min(Math.max(filters.limit ?? 50, 1), 1000);
   const offset = Math.max(filters.offset ?? 0, 0);
 
   const countResult = await query<{ count: string }>(
