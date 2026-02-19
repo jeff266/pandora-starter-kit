@@ -40,6 +40,14 @@ interface ChatScope {
   entity_id?: string;
   entity_name?: string;
   rep_email?: string;
+  scopeId?: string;
+}
+
+interface AnalysisScope {
+  scope_id: string;
+  name: string;
+  deal_count: number;
+  confirmed: boolean;
 }
 
 interface ChatPanelProps {
@@ -56,6 +64,8 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
   const [error, setError] = useState<string | null>(null);
   const [feedbackMap, setFeedbackMap] = useState<Record<string, 'thumbs_up' | 'thumbs_down'>>({});
   const [hoveredMsgIdx, setHoveredMsgIdx] = useState<number | null>(null);
+  const [availableScopes, setAvailableScopes] = useState<AnalysisScope[]>([]);
+  const [activeScopeId, setActiveScopeId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -64,6 +74,31 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
       inputRef.current.focus();
     }
   }, [isOpen]);
+
+  // Fetch available scopes when panel opens (only for workspace scope)
+  useEffect(() => {
+    if (isOpen && (!scope || scope.type === 'workspace')) {
+      const fetchScopes = async () => {
+        try {
+          const result: any = await api.get('/admin/scopes');
+          const confirmedScopes = result.scopes.filter((s: AnalysisScope) => s.confirmed);
+          setAvailableScopes(confirmedScopes);
+
+          // Set default scope — if only one scope exists (default), set it as active
+          if (confirmedScopes.length === 1) {
+            setActiveScopeId(confirmedScopes[0].scope_id);
+          } else if (confirmedScopes.length > 1) {
+            // Find "default" or first scope
+            const defaultScope = confirmedScopes.find((s: AnalysisScope) => s.scope_id === 'default');
+            setActiveScopeId(defaultScope ? defaultScope.scope_id : confirmedScopes[0].scope_id);
+          }
+        } catch (err) {
+          console.error('Failed to fetch scopes:', err);
+        }
+      };
+      fetchScopes();
+    }
+  }, [isOpen, scope]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -90,6 +125,13 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
     setInput('');
   }, []);
 
+  const switchScope = (newScopeId: string) => {
+    if (newScopeId !== activeScopeId) {
+      setActiveScopeId(newScopeId);
+      startNewChat();
+    }
+  };
+
   useEffect(() => {
     startNewChat();
   }, [scope?.type, scope?.entity_id, startNewChat]);
@@ -112,7 +154,15 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
     try {
       const body: any = { message: text };
       if (threadId) body.thread_id = threadId;
-      if (scope && !threadId) body.scope = scope;
+
+      // Build scope object — merge entity scope + scopeId
+      const mergedScope: ChatScope = { ...scope };
+      if (activeScopeId && activeScopeId !== 'default') {
+        mergedScope.scopeId = activeScopeId;
+      }
+      if (Object.keys(mergedScope).length > 0 && !threadId) {
+        body.scope = mergedScope;
+      }
 
       const result: any = await api.post('/chat', body);
 
@@ -293,6 +343,24 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
 
           <div ref={messagesEndRef} />
         </div>
+
+        {/* Scope selector — only show for workspace scope if 2+ confirmed scopes */}
+        {(!scope || scope.type === 'workspace') && availableScopes.length > 1 && (
+          <div style={styles.scopeSelector}>
+            {availableScopes.map(s => (
+              <button
+                key={s.scope_id}
+                style={{
+                  ...styles.scopePill,
+                  ...(activeScopeId === s.scope_id ? styles.scopePillActive : {}),
+                }}
+                onClick={() => switchScope(s.scope_id)}
+              >
+                {s.name}
+              </button>
+            ))}
+          </div>
+        )}
 
         <div style={styles.inputContainer}>
           <textarea
@@ -881,5 +949,31 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: '#2a3150',
     color: '#475569',
     cursor: 'not-allowed',
+  },
+  scopeSelector: {
+    padding: '8px 20px',
+    borderTop: '1px solid #1e2230',
+    display: 'flex',
+    gap: 6,
+    overflowX: 'auto' as const,
+    flexWrap: 'nowrap' as const,
+  },
+  scopePill: {
+    padding: '6px 12px',
+    fontSize: 12,
+    fontWeight: 500,
+    backgroundColor: 'transparent',
+    color: '#64748b',
+    border: '1px solid #2a3150',
+    borderRadius: 6,
+    cursor: 'pointer',
+    whiteSpace: 'nowrap' as const,
+    flexShrink: 0,
+    transition: 'all 0.15s',
+  },
+  scopePillActive: {
+    backgroundColor: 'rgba(100, 136, 234, 0.15)',
+    color: '#6488ea',
+    borderColor: '#6488ea',
   },
 };

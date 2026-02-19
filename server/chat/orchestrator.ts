@@ -28,6 +28,7 @@ export interface ConversationTurnInput {
     type: string;
     entity_id?: string;
     rep_email?: string;
+    scopeId?: string;  // Analysis scope filter (e.g., "new-business", "renewals")
   };
   anchor?: {
     skill_run_id?: string;
@@ -107,6 +108,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
   let scopeType: string = inputScope?.type || state.context.last_scope?.type || 'workspace';
   let entityId = inputScope?.entity_id || state.context.last_scope?.entity_id;
   let repEmail = inputScope?.rep_email || state.context.last_scope?.rep_email;
+  let scopeId = inputScope?.scopeId || state.context.last_scope?.scopeId;
 
   // Auto-detect conversation questions when no explicit scope provided
   if (!inputScope?.type && scopeType === 'workspace' && isConversationQuestion(message)) {
@@ -247,7 +249,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
         }
       }
 
-      const pandoraResult = await runPandoraAgent(workspaceId, agentMessage, history);
+      const pandoraResult = await runPandoraAgent(workspaceId, agentMessage, history, scopeId);
 
       answer = pandoraResult.answer;
       tokensUsed = pandoraResult.tokens_used;
@@ -266,14 +268,14 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
       } as any);
 
       await updateContext(workspaceId, channelId, threadId, {
-        last_scope: { type: scopeType, entity_id: entityId, rep_email: repEmail },
+        last_scope: { type: scopeType, entity_id: entityId, rep_email: repEmail, scopeId },
       });
       await updateTurnMetrics(workspaceId, channelId, threadId, tokensUsed);
 
       return {
         answer,
         thread_id: threadId,
-        scope: { type: scopeType, entity_id: entityId, rep_email: repEmail },
+        scope: { type: scopeType, entity_id: entityId, rep_email: repEmail, scopeId },
         router_decision: routerDecision,
         data_strategy: dataStrategy,
         tokens_used: tokensUsed,

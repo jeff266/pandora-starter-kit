@@ -8,6 +8,7 @@
 import { query } from '../db.js';
 import { getToolFilters } from '../config/tool-filter-injector.js';
 import { callLLM } from '../utils/llm-router.js';
+import { type ActiveScope } from '../config/scope-loader.js';
 
 // ─── Tool result types ───────────────────────────────────────────────────────
 
@@ -239,6 +240,12 @@ async function queryDeals(workspaceId: string, params: Record<string, any>): Pro
   function addParam(val: any): string {
     values.push(val);
     return `$${values.length}`;
+  }
+
+  // Scope filter — filters to a specific analysis scope segment
+  if (params.scopeId) {
+    conditions.push(`d.scope_id = ${addParam(params.scopeId)}`);
+    descParts.push(`scope: ${params.scopeId}`);
   }
 
   if (params.is_open === true) {
@@ -782,6 +789,10 @@ async function computeTotalPipeline(workspaceId: string, params: Record<string, 
   ];
   const values: any[] = [workspaceId];
 
+  if (params.scopeId) {
+    values.push(params.scopeId);
+    conditions.push(`scope_id = $${values.length}`);
+  }
   if (params.owner_email) {
     values.push(params.owner_email);
     conditions.push(`LOWER(owner) = $${values.length}`);
@@ -837,14 +848,24 @@ async function computeTotalPipeline(workspaceId: string, params: Record<string, 
 }
 
 async function computeWeightedPipeline(workspaceId: string, params: Record<string, any>): Promise<ComputeMetricResult> {
+  const conditions: string[] = [
+    `workspace_id = $1`,
+    `stage_normalized NOT IN ('closed_won', 'closed_lost')`,
+    `probability IS NOT NULL`,
+  ];
+  const values: any[] = [workspaceId];
+
+  if (params.scopeId) {
+    values.push(params.scopeId);
+    conditions.push(`scope_id = $${values.length}`);
+  }
+
   const result = await query<any>(
     `SELECT id, name, amount, probability, stage, owner
      FROM deals
-     WHERE workspace_id = $1
-       AND stage_normalized NOT IN ('closed_won', 'closed_lost')
-       AND probability IS NOT NULL
+     WHERE ${conditions.join(' AND ')}
      ORDER BY amount DESC NULLS LAST`,
-    [workspaceId]
+    values
   );
 
   const rows = result.rows;
@@ -882,6 +903,10 @@ async function computeWinRate(workspaceId: string, params: Record<string, any>):
   ];
   const values: any[] = [workspaceId, lookbackDays];
 
+  if (params.scopeId) {
+    values.push(params.scopeId);
+    conditions.push(`scope_id = $${values.length}`);
+  }
   if (params.owner_email) {
     values.push(params.owner_email);
     conditions.push(`LOWER(owner) = $${values.length}`);
@@ -930,6 +955,10 @@ async function computeWinRate(workspaceId: string, params: Record<string, any>):
 async function computeAvgDealSize(workspaceId: string, params: Record<string, any>): Promise<ComputeMetricResult> {
   const conditions = ['workspace_id = $1', "stage_normalized = 'closed_won'", 'amount > 0'];
   const values: any[] = [workspaceId];
+  if (params.scopeId) {
+    values.push(params.scopeId);
+    conditions.push(`scope_id = $${values.length}`);
+  }
   const toolFilters = await getToolFilters(workspaceId, 'win_rate', values.length + 1, 'deals').catch(()=>({whereClause: '', params: [], paramOffset: values.length + 1, appliedRules: []}));
   if (toolFilters.whereClause) {
     conditions.push(toolFilters.whereClause.replace(/^\s*AND\s+/, ''));
@@ -970,6 +999,10 @@ async function computeAvgDealSize(workspaceId: string, params: Record<string, an
 async function computeAvgSalesCycle(workspaceId: string, params: Record<string, any>): Promise<ComputeMetricResult> {
   const conditions = ['workspace_id = $1', "stage_normalized = 'closed_won'", 'close_date IS NOT NULL', 'created_at IS NOT NULL'];
   const values: any[] = [workspaceId];
+  if (params.scopeId) {
+    values.push(params.scopeId);
+    conditions.push(`scope_id = $${values.length}`);
+  }
   const toolFilters = await getToolFilters(workspaceId, 'win_rate', values.length + 1, 'deals').catch(()=>({whereClause: '', params: [], paramOffset: values.length + 1, appliedRules: []}));
   if (toolFilters.whereClause) {
     conditions.push(toolFilters.whereClause.replace(/^\s*AND\s+/, ''));
@@ -1026,6 +1059,10 @@ async function computeCoverageRatio(workspaceId: string, params: Record<string, 
 
   const covConditions = ['workspace_id = $1', "stage_normalized NOT IN ('closed_won', 'closed_lost')"];
   const covValues: any[] = [workspaceId];
+  if (params.scopeId) {
+    covValues.push(params.scopeId);
+    covConditions.push(`scope_id = $${covValues.length}`);
+  }
   const toolFilters = await getToolFilters(workspaceId, 'pipeline_value', covValues.length + 1, 'deals').catch(()=>({whereClause: '', params: [], paramOffset: covValues.length + 1, appliedRules: []}));
   if (toolFilters.whereClause) {
     covConditions.push(toolFilters.whereClause.replace(/^\s*AND\s+/, ''));

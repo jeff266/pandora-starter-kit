@@ -14,6 +14,7 @@ export interface ConversationContext {
     type: string;
     entity_id?: string;
     rep_email?: string;
+    scopeId?: string;
   };
 }
 

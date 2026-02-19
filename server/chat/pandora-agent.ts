@@ -10,6 +10,7 @@
 import { callLLM, type ToolDef, type LLMCallOptions } from '../utils/llm-router.js';
 import { executeDataTool } from './data-tools.js';
 import type { ConversationMessage } from './conversation-state.js';
+import { query } from '../db.js';
 
 // ─── Tool definitions ──────────────────────────────────────────────────────────
 // Using ToolDef format (parameters) — the router converts to input_schema for Anthropic.
@@ -22,6 +23,7 @@ const PANDORA_TOOLS: ToolDef[] = [
     parameters: {
       type: 'object',
       properties: {
+        scopeId: { type: 'string', description: 'Filter by analysis scope (e.g., "new-business", "renewals") — when set, only returns deals in that segment' },
         is_open: { type: 'boolean', description: 'true for open pipeline, false for closed deals' },
         stage: { type: 'string', description: 'Filter by stage name (partial match supported)' },
         owner_email: { type: 'string', description: 'Filter by deal owner email' },
@@ -121,6 +123,7 @@ const PANDORA_TOOLS: ToolDef[] = [
           enum: ['total_pipeline', 'weighted_pipeline', 'win_rate', 'avg_deal_size', 'avg_sales_cycle', 'coverage_ratio', 'pipeline_created', 'pipeline_closed'],
           description: 'The metric to calculate',
         },
+        scopeId: { type: 'string', description: 'Filter by analysis scope (e.g., "new-business", "renewals") — when set, only calculates from deals in that segment' },
         owner_email: { type: 'string', description: 'Scope to one rep' },
         date_from: { type: 'string', description: 'Start of period (ISO date)' },
         date_to: { type: 'string', description: 'End of period (ISO date)' },
@@ -487,12 +490,29 @@ async function classifyQuestion(workspaceId: string, question: string): Promise<
 export async function runPandoraAgent(
   workspaceId: string,
   message: string,
-  conversationHistory: Array<{ role: 'user' | 'assistant'; content: any }>
+  conversationHistory: Array<{ role: 'user' | 'assistant'; content: any }>,
+  scopeId?: string
 ): Promise<PandoraResponse> {
   const startTime = Date.now();
   const toolTrace: PandoraToolCall[] = [];
   let totalTokens = 0;
   const MAX_ITERATIONS = 8;
+
+  // Look up scope name if scopeId is provided (for response labeling)
+  let scopeName: string | null = null;
+  if (scopeId && scopeId !== 'default') {
+    try {
+      const scopeResult = await query<{ name: string }>(
+        `SELECT name FROM analysis_scopes WHERE workspace_id = $1 AND scope_id = $2`,
+        [workspaceId, scopeId]
+      );
+      if (scopeResult.rows.length > 0) {
+        scopeName = scopeResult.rows[0].name;
+      }
+    } catch (err) {
+      console.error('[PandoraAgent] Failed to lookup scope name:', err);
+    }
+  }
 
   const classification = await classifyQuestion(workspaceId, message);
   console.log(`[PandoraAgent] classification:`, JSON.stringify(classification));
@@ -575,8 +595,12 @@ export async function runPandoraAgent(
         continue;
       }
 
+      const answer = scopeName
+        ? `Analyzing ${scopeName} pipeline —\n\n${response.content}`
+        : response.content;
+
       return {
-        answer: response.content,
+        answer,
         evidence: {
           tool_calls: toolTrace,
           cited_records: extractCitedRecords(toolTrace),
@@ -599,10 +623,16 @@ export async function runPandoraAgent(
       let isError = false;
 
       try {
-        result = await executeDataTool(workspaceId, toolCall.name, toolCall.input);
+        // Auto-inject scopeId into tool calls that support it (if not already set by Claude)
+        const toolInput = { ...toolCall.input };
+        if (scopeId && !toolInput.scopeId && ['query_deals', 'compute_metric'].includes(toolCall.name)) {
+          toolInput.scopeId = scopeId;
+        }
+
+        result = await executeDataTool(workspaceId, toolCall.name, toolInput);
         toolTrace.push({
           tool: toolCall.name,
-          params: toolCall.input,
+          params: toolInput,
           result,
           description: result?.query_description || result?.formatted || `${toolCall.name} call`,
         });
@@ -643,8 +673,12 @@ export async function runPandoraAgent(
 
   totalTokens += (finalResponse.usage?.input || 0) + (finalResponse.usage?.output || 0);
 
+  const finalAnswer = scopeName
+    ? `Analyzing ${scopeName} pipeline —\n\n${finalResponse.content}`
+    : finalResponse.content;
+
   return {
-    answer: finalResponse.content,
+    answer: finalAnswer,
     evidence: {
       tool_calls: toolTrace,
       cited_records: extractCitedRecords(toolTrace),
