@@ -20,6 +20,7 @@ import AccountList from './pages/AccountList';
 import SkillsPage from './pages/SkillsPage';
 import SkillRunsPage from './pages/SkillRunsPage';
 import ConnectorsPage from './pages/ConnectorsPage';
+import MarketplacePage from './pages/MarketplacePage';
 import InsightsPage from './pages/InsightsPage';
 import Actions from './pages/Actions';
 import Playbooks from './pages/Playbooks';
@@ -191,7 +192,7 @@ export default function App() {
             <Route path="/actions" element={<Actions />} />
             <Route path="/connectors/health" element={<ConnectorHealth />} />
             <Route path="/data-dictionary" element={<Placeholder title="Data Dictionary" />} />
-            <Route path="/marketplace" element={<Placeholder title="Marketplace" />} />
+            <Route path="/marketplace" element={<MarketplacePage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Routes>
         </div>

@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import { formatTimeAgo } from '../lib/format';
@@ -408,6 +409,7 @@ function ConsultantConnectorSection({ addToast }: { addToast: (message: string, 
 }
 
 export default function ConnectorsPage() {
+  const navigate = useNavigate();
   const { workspaces, token } = useWorkspace();
   const isConsultant = workspaces && workspaces.length > 1;
 
@@ -481,7 +483,17 @@ export default function ConnectorsPage() {
   };
 
   useEffect(() => {
-    fetchConnectors();
+    const params = new URLSearchParams(window.location.search);
+    const justConnected = params.get('connected');
+
+    if (justConnected) {
+      window.history.replaceState({}, '', window.location.pathname);
+      fetchConnectors().then(() => {
+        addToast(`${justConnected} connected successfully`, 'success');
+      });
+    } else {
+      fetchConnectors();
+    }
   }, []);
 
   useEffect(() => {
@@ -631,33 +643,70 @@ export default function ConnectorsPage() {
 
     if (connectors.length === 0) {
       return (
-        <div style={{ textAlign: 'center', padding: 60 }}>
-          <p style={{ fontSize: 15, color: colors.textSecondary }}>Connect your first data source to get started.</p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginTop: 24 }}>
-            {Object.entries(sourceIcons).map(([key, { color, letter }]) => (
-              <div key={key} style={{
-                background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, padding: 20,
-                textAlign: 'center', opacity: 0.6,
-              }}>
-                <div style={{
-                  width: 40, height: 40, borderRadius: 8, background: `${color}20`,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 18, fontWeight: 700, color, margin: '0 auto 8px',
-                }}>
-                  {letter}
-                </div>
-                <div style={{ fontSize: 13, fontWeight: 500, color: colors.text, textTransform: 'capitalize' }}>
-                  {key.replace('-', ' ')}
-                </div>
-                <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 4 }}>Not connected</div>
-              </div>
-            ))}
-          </div>
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '80px 24px',
+          gap: 16,
+          textAlign: 'center',
+        }}>
+          <div style={{ fontSize: 48, marginBottom: 8 }}>🔌</div>
+          <h2 style={{ fontSize: 20, fontWeight: 600, color: colors.text, margin: 0 }}>
+            No connectors yet
+          </h2>
+          <p style={{ fontSize: 14, color: colors.textSecondary, maxWidth: 400, lineHeight: 1.6, margin: 0 }}>
+            Connect your CRM, conversation intelligence tools, and other data sources
+            to start running skills and generating insights.
+          </p>
+          <button
+            onClick={() => navigate('/marketplace')}
+            style={{
+              marginTop: 8,
+              padding: '10px 24px',
+              background: colors.accent,
+              border: 'none',
+              borderRadius: 8,
+              color: '#fff',
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            Browse Marketplace →
+          </button>
         </div>
       );
     }
 
     return (
+      <>
+        {/* Connected tools header with "+ Add connector" link */}
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 20,
+        }}>
+          <h2 style={{ fontSize: 16, fontWeight: 600, color: colors.text, margin: 0 }}>
+            Connected tools
+          </h2>
+          <button
+            onClick={() => navigate('/marketplace')}
+            style={{
+              background: 'none',
+              border: `1px solid ${colors.border}`,
+              borderRadius: 8,
+              color: colors.textSecondary,
+              fontSize: 13,
+              padding: '6px 14px',
+              cursor: 'pointer',
+            }}
+          >
+            + Add connector
+          </button>
+        </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }}>
         {connectors.map((connector) => {
           const icon = sourceIcons[connector.type] || { color: colors.textMuted, letter: connector.type.charAt(0).toUpperCase() };
@@ -880,6 +929,7 @@ export default function ConnectorsPage() {
           );
         })}
       </div>
+      </>
     );
   };
 
