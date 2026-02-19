@@ -2584,21 +2584,21 @@ async function computePipelineCreation(workspaceId: string, params: Record<strin
     if (segmentBy && ['source', 'owner', 'pipeline'].includes(segmentBy)) {
       const segCol = segmentBy === 'owner' ? 'd.owner' : segmentBy === 'pipeline' ? 'd.pipeline' : 'd.source';
       baseQuery = `
-        SELECT DATE_TRUNC('${truncUnit}', d.created_date)::text as period,
+        SELECT DATE_TRUNC('${truncUnit}', d.created_at)::text as period,
                ${segCol} as segment_value,
                COUNT(*)::int as deals_created,
                COALESCE(SUM(d.amount), 0)::numeric as amount_created,
                COALESCE(AVG(d.amount), 0)::numeric as avg_deal_size
         FROM deals d
         WHERE d.workspace_id = $1
-          AND d.created_date >= NOW() - ($2::interval)
-          AND d.created_date IS NOT NULL
+          AND d.created_at >= NOW() - ($2::interval)
+          AND d.created_at IS NOT NULL
           AND d.amount > 0
         GROUP BY period, segment_value
         ORDER BY period, segment_value`;
     } else if (segmentBy === 'deal_size_band') {
       baseQuery = `
-        SELECT DATE_TRUNC('${truncUnit}', d.created_date)::text as period,
+        SELECT DATE_TRUNC('${truncUnit}', d.created_at)::text as period,
                CASE WHEN d.amount < 10000 THEN 'small'
                     WHEN d.amount < 50000 THEN 'mid'
                     WHEN d.amount < 150000 THEN 'large'
@@ -2608,21 +2608,21 @@ async function computePipelineCreation(workspaceId: string, params: Record<strin
                COALESCE(AVG(d.amount), 0)::numeric as avg_deal_size
         FROM deals d
         WHERE d.workspace_id = $1
-          AND d.created_date >= NOW() - ($2::interval)
-          AND d.created_date IS NOT NULL
+          AND d.created_at >= NOW() - ($2::interval)
+          AND d.created_at IS NOT NULL
           AND d.amount > 0
         GROUP BY period, segment_value
         ORDER BY period, segment_value`;
     } else {
       baseQuery = `
-        SELECT DATE_TRUNC('${truncUnit}', d.created_date)::text as period,
+        SELECT DATE_TRUNC('${truncUnit}', d.created_at)::text as period,
                COUNT(*)::int as deals_created,
                COALESCE(SUM(d.amount), 0)::numeric as amount_created,
                COALESCE(AVG(d.amount), 0)::numeric as avg_deal_size
         FROM deals d
         WHERE d.workspace_id = $1
-          AND d.created_date >= NOW() - ($2::interval)
-          AND d.created_date IS NOT NULL
+          AND d.created_at >= NOW() - ($2::interval)
+          AND d.created_at IS NOT NULL
           AND d.amount > 0
         GROUP BY period
         ORDER BY period`;
@@ -2742,11 +2742,11 @@ const r = await query<any>(
            COALESCE(SUM(d.amount), 0)::numeric as amount_created,
            COALESCE(SUM(d.amount) FILTER (WHERE d.stage_normalized = 'closed_won'
              AND d.close_date >= $2 AND d.close_date < $3), 0)::numeric as amount_closed_in_qtr,
-           COALESCE(AVG(EXTRACT(DAY FROM (d.close_date - d.created_date::date))) FILTER (WHERE d.stage_normalized = 'closed_won'
+           COALESCE(AVG(EXTRACT(DAY FROM (d.close_date - d.created_at::date))) FILTER (WHERE d.stage_normalized = 'closed_won'
              AND d.close_date >= $2 AND d.close_date < $3), 0)::numeric as avg_cycle_days
          FROM deals d
          WHERE d.workspace_id = $1
-           AND d.created_date >= $2 AND d.created_date < $3
+           AND d.created_at >= $2 AND d.created_at < $3
            AND d.amount > 0${inqtrExtraWhere}`,
         [workspaceId, qStart.toISOString(), qEnd.toISOString(), ...inqtrParams]
       );
@@ -2861,7 +2861,7 @@ async function computeCompetitiveRates(workspaceId: string, params: Record<strin
        WHERE di.workspace_id = $1
          AND di.insight_type = 'competition'
          AND di.is_current = true
-         AND d.created_date >= NOW() - ($2 || ' months')::interval`,
+         AND d.created_at >= NOW() - ($2 || ' months')::interval`,
       [workspaceId, String(lookbackMonths)]
     ).catch(() => ({ rows: [] as any[] }));
 
@@ -2872,7 +2872,7 @@ async function computeCompetitiveRates(workspaceId: string, params: Record<strin
               d.custom_fields->>'loss_reason' as loss_reason
        FROM deals d
        WHERE d.workspace_id = $1
-         AND d.created_date >= NOW() - ($2 || ' months')::interval
+         AND d.created_at >= NOW() - ($2 || ' months')::interval
          AND (d.custom_fields->>'competitor' IS NOT NULL OR d.custom_fields->>'loss_reason' IS NOT NULL)`,
       [workspaceId, String(lookbackMonths)]
     ).catch(() => ({ rows: [] as any[] }));
@@ -2921,7 +2921,7 @@ async function computeCompetitiveRates(workspaceId: string, params: Record<strin
          COUNT(*) FILTER (WHERE d.stage_normalized IN ('closed_won','closed_lost'))::int as total_closed
        FROM deals d
        WHERE d.workspace_id = $1
-         AND d.created_date >= NOW() - ($2 || ' months')::interval
+         AND d.created_at >= NOW() - ($2 || ' months')::interval
          AND NOT EXISTS (
            SELECT 1 FROM conversations cv
            WHERE cv.deal_id = d.id AND cv.workspace_id = $1
@@ -2966,7 +2966,7 @@ async function computeCompetitiveRates(workspaceId: string, params: Record<strin
       `SELECT COUNT(*)::text as cnt,
               COUNT(*) FILTER (WHERE stage_normalized = 'closed_won')::text as wins
        FROM deals WHERE workspace_id = $1
-         AND created_date >= NOW() - ($2 || ' months')::interval`,
+         AND created_at >= NOW() - ($2 || ' months')::interval`,
       [workspaceId, String(lookbackMonths)]
     ).catch(() => ({ rows: [{ cnt: '0', wins: '0' }] as any[] }));
 
