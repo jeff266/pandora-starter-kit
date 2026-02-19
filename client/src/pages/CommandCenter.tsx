@@ -181,24 +181,33 @@ export default function CommandCenter() {
     return () => clearInterval(tickInterval);
   }, []);
 
-  // Returns the validated pipeline selection for this workspace.
-  // If the stored value doesn't exist in this workspace's pipelines, resets to 'all'.
+  useEffect(() => {
+    setPipeline(null);
+    setSummary(null);
+    setFindings([]);
+    setErrors({});
+    setLoading({ pipeline: true, summary: true, findings: true });
+    const storedPipeline = localStorage.getItem(`pandora_selected_pipeline_${wsId}`) || 'all';
+    setSelectedPipeline(storedPipeline);
+  }, [wsId]);
+
   const fetchPipelines = useCallback(async (): Promise<string> => {
     try {
       const data = await api.get('/pipeline/pipelines');
       const pipelines: Array<{ name: string }> = data.pipelines || [];
       setAvailablePipelines(pipelines);
-      const stored = localStorage.getItem('pandora_selected_pipeline') || 'all';
+      const stored = localStorage.getItem(`pandora_selected_pipeline_${wsId}`) || 'all';
       if (stored !== 'all' && !pipelines.some(p => p.name === stored)) {
-        localStorage.setItem('pandora_selected_pipeline', 'all');
+        localStorage.setItem(`pandora_selected_pipeline_${wsId}`, 'all');
         setSelectedPipeline('all');
         return 'all';
       }
+      setSelectedPipeline(stored);
       return stored;
     } catch {
       return 'all';
     }
-  }, []);
+  }, [wsId]);
 
   const fetchData = useCallback(async (pipelineParam?: string, isRefresh?: boolean) => {
     const pFilter = pipelineParam ?? selectedPipeline;
