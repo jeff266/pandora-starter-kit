@@ -635,9 +635,10 @@ function InlineEditArea({
 
 // ─── Dossier View ─────────────────────────────────────────────────────────────
 
-function DossierView({ addToast }: { addToast: (msg: string, type: 'success' | 'error' | 'info') => void }) {
+function DossierView({ addToast, conversationsConnected }: { addToast: (msg: string, type: 'success' | 'error' | 'info') => void; conversationsConnected: boolean }) {
   const [profile, setProfile] = useState<IcpProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [rerunning, setRerunning] = useState(false);
   const [showChangelog, setShowChangelog] = useState(false);
   const [editingSection, setEditingSection] = useState<string | null>(null);
 
@@ -671,6 +672,20 @@ function DossierView({ addToast }: { addToast: (msg: string, type: 'success' | '
       fetchProfile();
     } catch {
       addToast('Failed to save changes', 'error');
+    }
+  };
+
+  const handleRerun = async () => {
+    setRerunning(true);
+    try {
+      await api.post('/scoring/activate', {});
+      addToast('ICP Discovery re-run started. This may take a few minutes.', 'info');
+      // Refresh profile once backend confirms activation
+      setTimeout(() => fetchProfile(), 3000);
+    } catch {
+      addToast('Failed to start re-run', 'error');
+    } finally {
+      setRerunning(false);
     }
   };
 
@@ -738,14 +753,16 @@ function DossierView({ addToast }: { addToast: (msg: string, type: 'success' | '
           </span>
           <div style={{ display: 'flex', gap: 8 }}>
             <button
-              onClick={() => addToast('Re-run triggered', 'info')}
+              onClick={handleRerun}
+              disabled={rerunning}
               style={{
                 padding: '6px 14px', border: `1px solid ${colors.border}`,
-                background: 'transparent', color: colors.textSecondary,
-                borderRadius: 6, fontSize: 12, cursor: 'pointer',
+                background: 'transparent', color: rerunning ? colors.textMuted : colors.textSecondary,
+                borderRadius: 6, fontSize: 12, cursor: rerunning ? 'not-allowed' : 'pointer',
+                opacity: rerunning ? 0.6 : 1,
               }}
             >
-              Re-run
+              {rerunning ? 'Starting...' : 'Re-run'}
             </button>
             <button
               onClick={() => setShowChangelog(true)}
@@ -889,7 +906,9 @@ function DossierView({ addToast }: { addToast: (msg: string, type: 'success' | '
           border: `1px solid ${colors.border}`, borderRadius: 8,
           fontSize: 13, color: colors.textMuted,
         }}>
-          Connect Gong or Fireflies and re-run ICP Discovery to unlock buying triggers.
+          {conversationsConnected
+            ? 'No buying triggers extracted yet. Re-run ICP Discovery to analyze your call data.'
+            : 'Connect Gong or Fireflies and re-run ICP Discovery to unlock buying triggers.'}
         </div>
       )}
 
@@ -1071,7 +1090,7 @@ export default function IcpProfilePage() {
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
 
       {scoringState === 'active' ? (
-        <DossierView addToast={addToast} />
+        <DossierView addToast={addToast} conversationsConnected={conversationsConnected} />
       ) : (
         <div style={{
           background: colors.surface, border: `1px solid ${colors.border}`,
