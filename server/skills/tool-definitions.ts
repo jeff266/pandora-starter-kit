@@ -6403,6 +6403,7 @@ const mcRunSimulation: ToolDefinition = {
           label: d.label,
           upsideImpact: d.upsideImpact,
           downsideImpact: d.downsideImpact,
+          assumption: d.assumption,
         })),
         iterationsRun: 10000,
         dealsInSimulation: openDeals.length,
