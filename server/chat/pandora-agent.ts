@@ -291,6 +291,7 @@ const PANDORA_TOOLS: ToolDef[] = [
         lookback_months: { type: 'number', description: 'How many months of history (default 12)' },
         segment_by: { type: 'string', enum: ['source', 'owner', 'pipeline', 'deal_size_band'], description: 'Optional segmentation' },
         include_current_period: { type: 'boolean', description: 'Include the current incomplete period (default true)' },
+        pipeline_filter: { type: 'string', description: 'Filter to a specific pipeline by name (e.g. "Core Sales"). Use when user asks about a specific pipeline.' },
       },
       required: [],
     },

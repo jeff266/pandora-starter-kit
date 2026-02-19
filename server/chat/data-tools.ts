@@ -2573,6 +2573,7 @@ async function computePipelineCreation(workspaceId: string, params: Record<strin
     const groupBy = params.group_by || 'month';
     const lookbackMonths = params.lookback_months || 12;
     const segmentBy: string | null = params.segment_by || null;
+    const pipelineFilter: string | null = params.pipeline_filter || null;
     // Map group_by to date_trunc argument
     const truncUnit = groupBy === 'quarter' ? 'quarter' : groupBy === 'week' ? 'week' : 'month';
 
@@ -2628,7 +2629,13 @@ async function computePipelineCreation(workspaceId: string, params: Record<strin
         ORDER BY period`;
     }
 
-        // Inject pipeline_value tool filters
+    // Inject pipeline_filter before GROUP BY
+    if (pipelineFilter) {
+      vals.push(pipelineFilter);
+      baseQuery = baseQuery.replace(/GROUP/, `AND d.pipeline ILIKE $${vals.length} GROUP`);
+    }
+
+    // Inject pipeline_value tool filters
     const pipeCreationTF = await getToolFilters(workspaceId, 'pipeline_value', vals.length + 1, 'd').catch(()=>({whereClause: '', params: [], paramOffset: vals.length + 1, appliedRules: []}));
     if (pipeCreationTF.whereClause) {
       baseQuery = baseQuery.replace(/GROUP/, pipeCreationTF.whereClause + ' GROUP');
@@ -2703,7 +2710,7 @@ async function computePipelineCreation(workspaceId: string, params: Record<strin
         change_pct: changePct,
       },
       total_periods_analyzed: periods.length,
-      query_description: `Pipeline creation ${groupBy}ly over ${lookbackMonths} months: ${periods.length} periods, avg $${Math.round(avgMonthlyAmount).toLocaleString()}/${groupBy}${segmentBy ? `, segmented by ${segmentBy}` : ''}. Trend: ${direction} (${changePct > 0 ? '+' : ''}${changePct}%)`,
+      query_description: `Pipeline creation ${groupBy}ly over ${lookbackMonths} months${pipelineFilter ? ` (pipeline: ${pipelineFilter})` : ''}: ${periods.length} periods, avg $${Math.round(avgMonthlyAmount).toLocaleString()}/${groupBy}${segmentBy ? `, segmented by ${segmentBy}` : ''}. Trend: ${direction} (${changePct > 0 ? '+' : ''}${changePct}%)`,
     };
   } catch (err: any) {
     console.error('[compute_pipeline_creation] error:', err?.message);
