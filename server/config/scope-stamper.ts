@@ -77,8 +77,15 @@ export function getScopeIdForDeal(deal: DealRow, scopes: AnalysisScope[]): strin
       dealValue = (deal as any)[scope.filter_field] ?? null;
     }
 
-    if (dealValue != null && scope.filter_values.includes(String(dealValue))) {
-      return scope.scope_id;
+    if (scope.filter_operator === 'not_in') {
+      const strVal = dealValue != null ? String(dealValue) : null;
+      if (strVal == null || !scope.filter_values.includes(strVal)) {
+        return scope.scope_id;
+      }
+    } else {
+      if (dealValue != null && scope.filter_values.includes(String(dealValue))) {
+        return scope.scope_id;
+      }
     }
   }
 

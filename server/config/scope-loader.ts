@@ -136,21 +136,21 @@ export function getScopeWhereClause(scope: ActiveScope): string {
   const escaped = scope.filter_values.map(v => `'${String(v).replace(/'/g, "''")}'`);
   const arrayLiteral = `ARRAY[${escaped.join(',')}]`;
 
-  // 'pipeline' is the correct column name on the deals table
-  // (HubSpot stores pipeline label here; not 'pipeline_id')
+  const isNotIn = scope.filter_operator === 'not_in';
+
+  // Resolve the SQL column/expression for the filter field
+  let fieldExpr: string;
   if (scope.filter_field === 'pipeline') {
-    return `pipeline = ANY(${arrayLiteral})`;
+    fieldExpr = 'pipeline';
+  } else if (scope.filter_field === 'deal_type') {
+    fieldExpr = 'deal_type';
+  } else {
+    fieldExpr = scope.filter_field;
   }
 
-  if (scope.filter_field === 'deal_type') {
-    return `deal_type = ANY(${arrayLiteral})`;
+  if (isNotIn) {
+    return `(${fieldExpr} IS NULL OR ${fieldExpr} != ALL(${arrayLiteral}))`;
   }
 
-  // JSONB path: "custom_fields->>'record_type_name'"
-  if (scope.filter_field.includes("custom_fields->>'")) {
-    return `${scope.filter_field} = ANY(${arrayLiteral})`;
-  }
-
-  // Generic top-level field fallback
-  return `${scope.filter_field} = ANY(${arrayLiteral})`;
+  return `${fieldExpr} = ANY(${arrayLiteral})`;
 }

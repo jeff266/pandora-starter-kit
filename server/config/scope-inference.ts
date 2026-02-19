@@ -26,7 +26,7 @@ export interface InferredScope {
   scope_id: string;         // slugified name: "new-business", "renewals"
   name: string;             // human label: "New Business", "Renewals"
   filter_field: string;     // normalized field name or JSONB path
-  filter_operator: 'in';   // always 'in' for now
+  filter_operator: 'in' | 'not_in';
   filter_values: string[]; // the values that match this scope
   confidence: number;       // 0.0–1.0
   source: string;           // 'hubspot_pipeline' | 'salesforce_record_type' | 'custom_field:<name>'
@@ -185,6 +185,29 @@ function matchesSegmentationPattern(val: string): boolean {
   return SEGMENTATION_VALUE_PATTERNS.some(p => lower.includes(p));
 }
 
+const COMPLEMENT_LABELS: Record<string, string> = {
+  'renewal':    'New Business',
+  'renew':      'New Business',
+  'expansion':  'New Business',
+  'expand':     'New Business',
+  'upsell':     'New Business',
+  'cross-sell': 'New Business',
+  'cross sell': 'New Business',
+  'crosssell':  'New Business',
+  'nfr':        'New Business',
+  'new business': 'Renewal / Expansion',
+  'new_business': 'Renewal / Expansion',
+  'newbusiness':  'Renewal / Expansion',
+};
+
+function getComplementLabel(matchedValue: string): string {
+  const lower = matchedValue.toLowerCase();
+  for (const [pattern, label] of Object.entries(COMPLEMENT_LABELS)) {
+    if (lower.includes(pattern)) return label;
+  }
+  return 'Other';
+}
+
 async function detectCustomSegmentationField(workspaceId: string): Promise<InferredScope[]> {
   for (const fieldName of SEGMENTATION_FIELDS) {
     const rows = await query<{ val: string; deal_count: string }>(
@@ -202,6 +225,7 @@ async function detectCustomSegmentationField(workspaceId: string): Promise<Infer
     );
 
     const matching = rows.rows.filter(r => matchesSegmentationPattern(r.val));
+
     if (matching.length >= 2) {
       return matching.map(row => ({
         scope_id: slugify(row.val),
@@ -213,6 +237,46 @@ async function detectCustomSegmentationField(workspaceId: string): Promise<Infer
         source: `custom_field:${fieldName}`,
         deal_count: parseInt(row.deal_count, 10),
       }));
+    }
+
+    if (matching.length === 1) {
+      const matchedRow = matching[0];
+      const matchedCount = parseInt(matchedRow.deal_count, 10);
+
+      const totalResult = await query<{ cnt: string }>(
+        `SELECT COUNT(*)::text as cnt FROM deals WHERE workspace_id = $1`,
+        [workspaceId]
+      );
+      const totalDeals = parseInt(totalResult.rows[0]?.cnt || '0', 10);
+      const complementCount = totalDeals - matchedCount;
+
+      if (complementCount < 5) continue;
+
+      const complementLabel = getComplementLabel(matchedRow.val);
+      const allMatchedValues = rows.rows.map(r => r.val);
+
+      return [
+        {
+          scope_id: slugify(matchedRow.val),
+          name: matchedRow.val,
+          filter_field: `custom_fields->>'${fieldName}'`,
+          filter_operator: 'in' as const,
+          filter_values: [matchedRow.val],
+          confidence: 0.80,
+          source: `custom_field:${fieldName}`,
+          deal_count: matchedCount,
+        },
+        {
+          scope_id: slugify(complementLabel),
+          name: complementLabel,
+          filter_field: `custom_fields->>'${fieldName}'`,
+          filter_operator: 'not_in' as const,
+          filter_values: allMatchedValues,
+          confidence: 0.75,
+          source: `custom_field:${fieldName}:complement`,
+          deal_count: complementCount,
+        },
+      ];
     }
   }
 
