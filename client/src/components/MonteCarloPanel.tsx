@@ -678,7 +678,7 @@ export default function MonteCarloPanel({ wsId }: { wsId?: string }) {
                   <div key={i}>
                     {i > 0 && <div style={{ height: 1, background: '#1A1F2B', margin: '8px 0' }} />}
                     <button
-                      onClick={() => submitQuestion(item.question)}
+                      onClick={() => setQuestion(item.question)}
                       style={{
                         background: 'none', border: 'none', cursor: 'pointer',
                         padding: 0, textAlign: 'left', width: '100%',
