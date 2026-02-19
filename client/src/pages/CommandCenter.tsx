@@ -153,9 +153,9 @@ export default function CommandCenter() {
   const [connectorStatus, setConnectorStatus] = useState<any[]>([]);
   const [loading, setLoading] = useState({ pipeline: true, summary: true, findings: true });
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [availablePipelines, setAvailablePipelines] = useState<Array<{ name: string; deal_count: number; total_value: number }>>([]);
+  const [availablePipelines, setAvailablePipelines] = useState<Array<{ name: string; label?: string; deal_count: number; total_value: number }>>([]);
   const [selectedPipeline, setSelectedPipeline] = useState<string>(() => {
-    return localStorage.getItem(`pandora_selected_pipeline_${wsId}`) || 'all';
+    return localStorage.getItem(`pandora_selected_pipeline_${wsId}`) || 'default';
   });
 
   const [stageFilter, setStageFilter] = useState<string | null>(null);
@@ -187,31 +187,38 @@ export default function CommandCenter() {
     setFindings([]);
     setErrors({});
     setLoading({ pipeline: true, summary: true, findings: true });
-    const storedPipeline = localStorage.getItem(`pandora_selected_pipeline_${wsId}`) || 'all';
+    const storedPipeline = localStorage.getItem(`pandora_selected_pipeline_${wsId}`) || 'default';
     setSelectedPipeline(storedPipeline);
   }, [wsId]);
 
   const fetchPipelines = useCallback(async (): Promise<string> => {
     try {
-      const data = await api.get('/pipeline/pipelines');
-      const pipelines: Array<{ name: string }> = data.pipelines || [];
+      // Fetch confirmed analysis scopes instead of pipeline field values
+      const data = await api.get('/admin/scopes');
+      const confirmedScopes = (data.scopes || []).filter((s: any) => s.confirmed);
+      const pipelines = confirmedScopes.map((s: any) => ({
+        name: s.scope_id,
+        label: s.name,
+        deal_count: s.deal_count,
+        total_value: 0,
+      }));
       setAvailablePipelines(pipelines);
-      const stored = localStorage.getItem(`pandora_selected_pipeline_${wsId}`) || 'all';
-      if (stored !== 'all' && !pipelines.some(p => p.name === stored)) {
-        localStorage.setItem(`pandora_selected_pipeline_${wsId}`, 'all');
-        setSelectedPipeline('all');
-        return 'all';
+      const stored = localStorage.getItem(`pandora_selected_pipeline_${wsId}`) || 'default';
+      if (stored !== 'default' && !pipelines.some((p: any) => p.name === stored)) {
+        localStorage.setItem(`pandora_selected_pipeline_${wsId}`, 'default');
+        setSelectedPipeline('default');
+        return 'default';
       }
       setSelectedPipeline(stored);
       return stored;
     } catch {
-      return 'all';
+      return 'default';
     }
   }, [wsId]);
 
   const fetchData = useCallback(async (pipelineParam?: string, isRefresh?: boolean) => {
     const pFilter = pipelineParam ?? selectedPipeline;
-    const pipelineQs = pFilter && pFilter !== 'all' ? `?pipeline=${encodeURIComponent(pFilter)}` : '';
+    const pipelineQs = pFilter && pFilter !== 'default' ? `?scopeId=${encodeURIComponent(pFilter)}` : '';
 
     if (isRefresh) {
       setRefreshing(true);
@@ -328,7 +335,7 @@ export default function CommandCenter() {
     setActiveThread(null);
 
     try {
-      const pFilter = selectedPipeline !== 'all' ? `&pipeline=${encodeURIComponent(selectedPipeline)}` : '';
+      const pFilter = selectedPipeline !== 'default' ? `&scopeId=${encodeURIComponent(selectedPipeline)}` : '';
       const result = await api.get(`/pipeline/snapshot?stage=${encodeURIComponent(stageName)}${pFilter}`);
       const dealsForStage = Array.isArray(result.deals) ? result.deals : [];
       setSelectedStageData({
@@ -533,10 +540,9 @@ export default function CommandCenter() {
               minWidth: 140,
             }}
           >
-            <option value="all">All Pipelines</option>
             {availablePipelines.map(p => (
               <option key={p.name} value={p.name}>
-                {p.name} ({p.deal_count})
+                {p.label || p.name} {p.deal_count > 0 ? `(${p.deal_count})` : ''}
               </option>
             ))}
           </select>

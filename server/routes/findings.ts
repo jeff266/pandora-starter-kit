@@ -284,7 +284,8 @@ router.get('/:workspaceId/pipeline/pipelines', async (req: Request, res: Respons
 router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response): Promise<void> => {
   try {
     const { workspaceId } = req.params;
-    const pipelineFilter = req.query.pipeline as string | undefined;
+    const scopeId = req.query.scopeId as string | undefined;
+    const pipelineFilter = req.query.pipeline as string | undefined; // Legacy support
 
     let excludedFromPipeline: string[] = [];
     let excludedFromForecast: string[] = [];
@@ -331,7 +332,16 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
     let stageConfigPipelineClause = '';
     let stageFilterClause = '';
     let pipelineParamIdx = -1;
-    if (pipelineFilter && pipelineFilter !== 'all') {
+
+    // Use scopeId if provided, otherwise fall back to pipeline field for legacy support
+    if (scopeId && scopeId !== 'default') {
+      params.push(scopeId);
+      pipelineParamIdx = params.length;
+      pipelineClause = ` AND d.scope_id = $${pipelineParamIdx}`;
+      // No stage config filtering for scopes
+      stageConfigPipelineClause = '';
+      stageFilterClause = '';
+    } else if (pipelineFilter && pipelineFilter !== 'all') {
       params.push(pipelineFilter);
       pipelineParamIdx = params.length;
       pipelineClause = ` AND d.pipeline = $${pipelineParamIdx}`;

@@ -147,7 +147,7 @@ export default function MonteCarloPanel({ wsId, activePipeline }: { wsId?: strin
   const prevPipelineRef = useRef<string | null | undefined>(undefined);
 
   const [mcPipelines, setMcPipelines] = useState<PipelineOption[]>([]);
-  const selectedPipeline = activePipeline && activePipeline !== 'all' ? activePipeline : null;
+  const selectedPipeline = activePipeline && activePipeline !== 'default' ? activePipeline : null;
   const selectedPipelineType = mcPipelines.find(p => p.name === selectedPipeline)?.inferredType || null;
 
   // Query section state
