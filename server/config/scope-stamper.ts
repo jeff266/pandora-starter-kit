@@ -32,6 +32,10 @@ export interface DealRow {
   custom_fields: Record<string, any>;
 }
 
+function extractDealType(row: any): string | null {
+  return row.custom_fields?.deal_type ?? row.custom_fields?.opportunity_type ?? null;
+}
+
 // ============================================================================
 // getScopeIdForDeal — pure, no DB calls
 // ============================================================================
@@ -122,14 +126,20 @@ export async function stampDealScopes(workspaceId: string, dealIds: string[]): P
   for (let i = 0; i < dealIds.length; i += STAMP_BATCH_SIZE) {
     const batchIds = dealIds.slice(i, i + STAMP_BATCH_SIZE);
 
-    const dealsResult = await query<DealRow>(
-      `SELECT id, pipeline, deal_type, custom_fields
+    const dealsResult = await query<any>(
+      `SELECT id, pipeline, custom_fields
        FROM deals
        WHERE workspace_id = $1 AND id = ANY($2)`,
       [workspaceId, batchIds]
     );
 
-    for (const deal of dealsResult.rows) {
+    for (const row of dealsResult.rows) {
+      const deal: DealRow = {
+        id: row.id,
+        pipeline: row.pipeline,
+        deal_type: extractDealType(row),
+        custom_fields: row.custom_fields || {},
+      };
       const scopeId = getScopeIdForDeal(deal, scopes);
 
       await query(

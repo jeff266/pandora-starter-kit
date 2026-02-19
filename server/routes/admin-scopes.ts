@@ -184,9 +184,15 @@ router.get('/:workspaceId/admin/scopes/:scopeId/preview', async (req: Request, r
       field_overrides: scopeRow.field_overrides || {},
     };
 
-    // Build WHERE clause from scope filter (all values come from DB, not user input)
     const scopeWhere = getScopeWhereClause(scope);
-    const whereClause = scopeWhere ? `workspace_id = $1 AND ${scopeWhere}` : `workspace_id = $1`;
+    let whereClause: string;
+    if (scopeId === 'default') {
+      whereClause = `workspace_id = $1 AND scope_id = 'default'`;
+    } else if (scopeWhere) {
+      whereClause = `workspace_id = $1 AND ${scopeWhere}`;
+    } else {
+      whereClause = `workspace_id = $1`;
+    }
 
     const deals = await query<{
       id: string;
@@ -196,10 +202,9 @@ router.get('/:workspaceId/admin/scopes/:scopeId/preview', async (req: Request, r
       close_date: string | null;
       owner_email: string | null;
       pipeline: string | null;
-      deal_type: string | null;
     }>(
       `SELECT id, name, amount, stage_normalized AS stage, close_date,
-              owner AS owner_email, pipeline, deal_type
+              owner AS owner_email, pipeline
        FROM deals
        WHERE ${whereClause}
        ORDER BY amount DESC NULLS LAST
