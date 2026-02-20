@@ -284,7 +284,14 @@ router.get('/:workspaceId/pipeline/pipelines', async (req: Request, res: Respons
 router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response): Promise<void> => {
   try {
     const { workspaceId } = req.params;
+    // Support both legacy 'pipeline' and new 'scopeId' query params
+    const scopeId = req.query.scopeId as string | undefined;
     const pipelineFilter = req.query.pipeline as string | undefined;
+
+    // Determine filter mode: scopeId takes precedence
+    const filterValue = scopeId || pipelineFilter;
+    const filterColumn = scopeId ? 'scope_id' : 'pipeline';
+    const useFilter = filterValue && filterValue !== 'all' && filterValue !== 'default';
 
     let excludedFromPipeline: string[] = [];
     let excludedFromForecast: string[] = [];
@@ -331,22 +338,24 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
     let stageConfigPipelineClause = '';
     let stageFilterClause = '';
     let pipelineParamIdx = -1;
-    if (pipelineFilter && pipelineFilter !== 'all') {
-      params.push(pipelineFilter);
+    if (useFilter) {
+      params.push(filterValue);
       pipelineParamIdx = params.length;
-      pipelineClause = ` AND d.pipeline = $${pipelineParamIdx}`;
-      // Scope the stage_configs JOIN to this pipeline only
-      stageConfigPipelineClause = ` AND sc.pipeline_name = $${pipelineParamIdx}`;
-      // Hide stages that don't belong to this pipeline's stage_configs —
-      // but only once stage_configs has been populated (otherwise show everything).
-      stageFilterClause = `
-        AND (
-          NOT EXISTS (
-            SELECT 1 FROM stage_configs
-            WHERE workspace_id = $1 AND pipeline_name = $${pipelineParamIdx}
-          )
-          OR sc.stage_name IS NOT NULL
-        )`;
+      pipelineClause = ` AND d.${filterColumn} = $${pipelineParamIdx}`;
+      // Scope the stage_configs JOIN to this pipeline only (only for legacy pipeline filter)
+      if (filterColumn === 'pipeline') {
+        stageConfigPipelineClause = ` AND sc.pipeline_name = $${pipelineParamIdx}`;
+        // Hide stages that don't belong to this pipeline's stage_configs —
+        // but only once stage_configs has been populated (otherwise show everything).
+        stageFilterClause = `
+          AND (
+            NOT EXISTS (
+              SELECT 1 FROM stage_configs
+              WHERE workspace_id = $1 AND pipeline_name = $${pipelineParamIdx}
+            )
+            OR sc.stage_name IS NOT NULL
+          )`;
+      }
     }
 
     let excludeStagesClause = '';
@@ -385,9 +394,9 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
 
     const findingsParams: any[] = [workspaceId];
     let findingsPipelineClause = '';
-    if (pipelineFilter && pipelineFilter !== 'all') {
-      findingsParams.push(pipelineFilter);
-      findingsPipelineClause = ` AND d.pipeline = $${findingsParams.length}`;
+    if (useFilter) {
+      findingsParams.push(filterValue);
+      findingsPipelineClause = ` AND d.${filterColumn} = $${findingsParams.length}`;
     }
 
     let findingsExcludeClause = '';
@@ -472,9 +481,9 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
 
     const winRateParams: any[] = [workspaceId];
     let winRatePipelineClause = '';
-    if (pipelineFilter && pipelineFilter !== 'all') {
-      winRateParams.push(pipelineFilter);
-      winRatePipelineClause = ` AND pipeline = $${winRateParams.length}`;
+    if (useFilter) {
+      winRateParams.push(filterValue);
+      winRatePipelineClause = ` AND ${filterColumn} = $${winRateParams.length}`;
     }
 
     let winRateExcludeClause = '';
@@ -511,9 +520,9 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
     if (stageQueryParam && !includeDealsBool) {
       const stageDealsParams: any[] = [workspaceId, stageQueryParam];
       let stageDealsFilter = '';
-      if (pipelineFilter && pipelineFilter !== 'all') {
-        stageDealsParams.push(pipelineFilter);
-        stageDealsFilter = ` AND d.pipeline = $${stageDealsParams.length}`;
+      if (useFilter) {
+        stageDealsParams.push(filterValue);
+        stageDealsFilter = ` AND d.${filterColumn} = $${stageDealsParams.length}`;
       }
       const stageDealsResult = await query(
         `SELECT
@@ -579,9 +588,9 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
         incDealsParams.push(stageQueryParam);
         incStageFilter = ` AND (d.stage = $${incDealsParams.length} OR d.stage_normalized = $${incDealsParams.length})`;
       }
-      if (pipelineFilter && pipelineFilter !== 'all') {
-        incDealsParams.push(pipelineFilter);
-        incPipelineFilter = ` AND d.pipeline = $${incDealsParams.length}`;
+      if (useFilter) {
+        incDealsParams.push(filterValue);
+        incPipelineFilter = ` AND d.${filterColumn} = $${incDealsParams.length}`;
       }
 
       const allDealsResult = await query(
