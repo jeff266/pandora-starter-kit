@@ -526,6 +526,17 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
     // For win rate query, deals table has no alias, so we need to strip the 'd.' prefix
     const winRateScopeClause = scopeFilterClause.replace(/d\./g, '');
 
+    // Debug logging
+    console.log('[Pipeline Snapshot] Win Rate Query Debug:', {
+      workspaceId,
+      scopeId,
+      pipelineFilter,
+      scopeFilterClause,
+      winRateScopeClause,
+      useLegacyPipeline,
+      legacyPipelineValue,
+    });
+
     let winRateExcludeClause = '';
     const winRateExcludeParams: any[] = [];
     if (excludedFromWinRate.length > 0) {
@@ -550,6 +561,14 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
     const wr = winRateResult.rows[0];
     const trailing_90d = wr.total_closed_90 > 0 ? wr.won_90 / wr.total_closed_90 : 0;
     const prev_rate = wr.total_closed_prev > 0 ? wr.won_prev / wr.total_closed_prev : 0;
+
+    // Debug logging
+    console.log('[Pipeline Snapshot] Win Rate Result:', {
+      won_90: wr.won_90,
+      total_closed_90: wr.total_closed_90,
+      trailing_90d,
+      prev_rate,
+    });
     const win_trend = trailing_90d > prev_rate + 0.02 ? 'up' : trailing_90d < prev_rate - 0.02 ? 'down' : 'stable';
 
     // --- D1: include_deals support ---
