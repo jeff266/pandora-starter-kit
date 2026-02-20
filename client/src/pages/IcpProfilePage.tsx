@@ -506,6 +506,144 @@ function ProcessingStep({
   );
 }
 
+// ─── Export Modal ─────────────────────────────────────────────────────────────
+
+function ExportModal({
+  onClose,
+  onExport,
+}: {
+  onClose: () => void;
+  onExport: (email: string, format: 'html' | 'text' | 'both') => void;
+}) {
+  const [email, setEmail] = useState('');
+  const [format, setFormat] = useState<'html' | 'text' | 'both'>('both');
+  const [sending, setSending] = useState(false);
+
+  const handleSend = async () => {
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return;
+    }
+    setSending(true);
+    await onExport(email, format);
+    setSending(false);
+  };
+
+  return (
+    <div
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000,
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          background: colors.surface, border: `1px solid ${colors.border}`,
+          borderRadius: 12, padding: 28, width: 480, maxWidth: '90vw',
+        }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+          <span style={{ fontSize: 16, fontWeight: 600, color: colors.text }}>Export ICP Profile</span>
+          <button
+            onClick={onClose}
+            disabled={sending}
+            style={{
+              background: 'none', border: 'none', color: colors.textMuted,
+              fontSize: 18, cursor: sending ? 'not-allowed' : 'pointer', padding: '0 4px',
+            }}
+          >
+            ×
+          </button>
+        </div>
+
+        <div style={{ marginBottom: 20 }}>
+          <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: colors.textMuted, marginBottom: 6 }}>
+            Email Address
+          </label>
+          <input
+            type="email"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            placeholder="recipient@company.com"
+            disabled={sending}
+            style={{
+              width: '100%', padding: '8px 12px', fontSize: 13,
+              background: colors.surfaceHover, border: `1px solid ${colors.border}`,
+              borderRadius: 6, color: colors.text, outline: 'none',
+              boxSizing: 'border-box',
+            }}
+          />
+        </div>
+
+        <div style={{ marginBottom: 24 }}>
+          <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: colors.textMuted, marginBottom: 8 }}>
+            Format
+          </label>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {[
+              { value: 'both' as const, label: 'Both (HTML + Text)', desc: 'Send both pretty HTML and business text versions' },
+              { value: 'html' as const, label: 'HTML Only', desc: 'Send formatted HTML version' },
+              { value: 'text' as const, label: 'Text Only', desc: 'Send plain text business update' },
+            ].map(opt => (
+              <label
+                key={opt.value}
+                style={{
+                  display: 'flex', alignItems: 'flex-start', gap: 10, padding: 10,
+                  background: format === opt.value ? colors.surfaceRaised : 'transparent',
+                  border: `1px solid ${format === opt.value ? colors.accent : colors.border}`,
+                  borderRadius: 6, cursor: sending ? 'not-allowed' : 'pointer',
+                }}
+              >
+                <input
+                  type="radio"
+                  name="format"
+                  value={opt.value}
+                  checked={format === opt.value}
+                  onChange={e => setFormat(e.target.value as 'html' | 'text' | 'both')}
+                  disabled={sending}
+                  style={{ marginTop: 2 }}
+                />
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: colors.text }}>{opt.label}</div>
+                  <div style={{ fontSize: 11, color: colors.textMuted }}>{opt.desc}</div>
+                </div>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button
+            onClick={onClose}
+            disabled={sending}
+            style={{
+              padding: '8px 16px', border: `1px solid ${colors.border}`,
+              background: 'transparent', color: colors.textSecondary,
+              borderRadius: 6, fontSize: 13, cursor: sending ? 'not-allowed' : 'pointer',
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSend}
+            disabled={!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || sending}
+            style={{
+              padding: '8px 16px', border: 'none',
+              background: email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && !sending ? colors.accent : colors.surfaceHover,
+              color: email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && !sending ? '#fff' : colors.textMuted,
+              borderRadius: 6, fontSize: 13, fontWeight: 600,
+              cursor: email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && !sending ? 'pointer' : 'not-allowed',
+            }}
+          >
+            {sending ? 'Sending...' : 'Send Export'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Changelog Modal ──────────────────────────────────────────────────────────
 
 function ChangelogModal({ onClose }: { onClose: () => void }) {
@@ -1024,6 +1162,7 @@ function DossierView({ addToast, conversationsConnected }: { addToast: (msg: str
   const [loading, setLoading] = useState(true);
   const [rerunning, setRerunning] = useState(false);
   const [showChangelog, setShowChangelog] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
   const [editingSection, setEditingSection] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'advanced' | 'pro'>('advanced');
 
@@ -1082,6 +1221,16 @@ function DossierView({ addToast, conversationsConnected }: { addToast: (msg: str
     } catch {
       addToast('Failed to start re-run', 'error');
       setRerunning(false);
+    }
+  };
+
+  const handleExport = async (email: string, format: 'html' | 'text' | 'both') => {
+    try {
+      await api.post('/icp/export', { to: email, format });
+      addToast(`ICP Profile exported to ${email}`, 'success');
+      setShowExportModal(false);
+    } catch (err) {
+      addToast('Failed to export ICP profile', 'error');
     }
   };
 
@@ -1192,7 +1341,7 @@ function DossierView({ addToast, conversationsConnected }: { addToast: (msg: str
               Changelog
             </button>
             <button
-              onClick={() => addToast('Export coming soon', 'info')}
+              onClick={() => setShowExportModal(true)}
               style={{
                 padding: '6px 14px', border: `1px solid ${colors.border}`,
                 background: 'transparent', color: colors.textSecondary,
@@ -1519,6 +1668,12 @@ function DossierView({ addToast, conversationsConnected }: { addToast: (msg: str
       </>)}
 
       {showChangelog && <ChangelogModal onClose={() => setShowChangelog(false)} />}
+      {showExportModal && (
+        <ExportModal
+          onClose={() => setShowExportModal(false)}
+          onExport={handleExport}
+        />
+      )}
     </div>
   );
 }

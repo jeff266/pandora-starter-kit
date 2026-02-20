@@ -409,4 +409,80 @@ router.get('/:workspaceId/icp/taxonomy', async (req: Request, res: Response): Pr
   }
 });
 
+// ============================================================================
+// POST /:workspaceId/icp/export
+// Export ICP profile via email (HTML and text versions)
+// ============================================================================
+
+router.post('/:workspaceId/icp/export', async (req: Request, res: Response): Promise<void> => {
+  const { workspaceId } = req.params;
+  const { to, format = 'both' } = req.body as { to: string; format?: 'html' | 'text' | 'both' };
+
+  if (!to) {
+    res.status(400).json({ error: 'Email address (to) is required' });
+    return;
+  }
+
+  if (!process.env.RESEND_API_KEY) {
+    res.status(500).json({ error: 'RESEND_API_KEY not configured' });
+    return;
+  }
+
+  try {
+    // Fetch active ICP profile
+    const profileResult = await query<Record<string, unknown>>(
+      `SELECT * FROM icp_profiles
+       WHERE workspace_id = $1 AND status = 'active'
+       ORDER BY version DESC LIMIT 1`,
+      [workspaceId]
+    );
+
+    if (profileResult.rows.length === 0) {
+      res.status(404).json({ error: 'No active ICP profile found' });
+      return;
+    }
+
+    const profile = profileResult.rows[0] as unknown;
+
+    // Import templates
+    const { generateHtmlTemplate, generateTextTemplate } = await import('../email/icp-export-templates.js');
+
+    // Generate email content based on format
+    let htmlContent: string | undefined;
+    let textContent: string | undefined;
+
+    if (format === 'html' || format === 'both') {
+      htmlContent = generateHtmlTemplate(profile as never);
+    }
+
+    if (format === 'text' || format === 'both') {
+      textContent = generateTextTemplate(profile as never);
+    }
+
+    // Send email via Resend
+    const { Resend } = await import('resend');
+    const resend = new Resend(process.env.RESEND_API_KEY);
+
+    const emailPayload = {
+      from: process.env.RESEND_FROM_EMAIL || 'Pandora <onboarding@resend.dev>',
+      to,
+      subject: `ICP Profile Export — v${(profile as { version: number }).version}`,
+      html: htmlContent,
+      text: textContent,
+    };
+
+    const result = await resend.emails.send(emailPayload as never);
+
+    res.json({
+      success: true,
+      emailId: result.data?.id,
+      recipient: to,
+      format,
+    });
+  } catch (err) {
+    console.error('[icp] Error exporting profile:', err);
+    res.status(500).json({ error: 'Failed to export ICP profile' });
+  }
+});
+
 export default router;
