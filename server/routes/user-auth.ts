@@ -567,7 +567,7 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
       FROM user_workspaces uw
       JOIN workspaces w ON w.id = uw.workspace_id
       LEFT JOIN LATERAL (
-        SELECT COUNT(*)::int as cnt FROM connector_registry WHERE workspace_id = w.id
+        SELECT COUNT(*)::int as cnt FROM connections WHERE workspace_id = w.id
       ) cr ON true
       LEFT JOIN LATERAL (
         SELECT COUNT(*)::int as cnt FROM deals WHERE workspace_id = w.id

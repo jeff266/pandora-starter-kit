@@ -49,3 +49,4 @@ externalPort = 80
 SALESFORCE_CALLBACK_URL = "https://2249ba4a-228b-47b6-989b-1bd765452af0-00-zmr8y6ngsujl.janeway.replit.dev/api/auth/salesforce/callback"
 JWT_ACCESS_SECRET = "05cf2e3e2385cf206ee6e35bf0792da422c9f0cddf38b5020424d19f520bb8af"
 JWT_REFRESH_SECRET = "b681f95de2d81f7f6b7d9d70845c94206acb02c4e3addf736fa3ffa9172ab717"
+HUBSPOT_CALLBACK_URL = "https://2249ba4a-228b-47b6-989b-1bd765452af0-00-zmr8y6ngsujl.janeway.replit.dev/api/auth/hubspot/callback"
