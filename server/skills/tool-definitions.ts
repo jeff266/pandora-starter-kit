@@ -6145,9 +6145,53 @@ const mcLoadOpenDeals: ToolDefinition = {
       const pipelineFilter: string | null = context.params?.pipelineFilter ?? null;
       const params: any[] = [context.workspaceId];
       let pipelineClause = '';
-      if (pipelineFilter) {
-        params.push(pipelineFilter);
-        pipelineClause = `AND pipeline = $${params.length}`;
+
+      if (pipelineFilter && pipelineFilter !== 'all' && pipelineFilter !== 'default') {
+        // Try to load as scope first
+        try {
+          const scopeResult = await query<{
+            scope_id: string;
+            name: string;
+            filter_field: string;
+            filter_operator: string;
+            filter_values: string[];
+          }>(
+            `SELECT scope_id, name, filter_field, filter_operator, filter_values
+             FROM analysis_scopes
+             WHERE workspace_id = $1 AND scope_id = $2`,
+            [context.workspaceId, pipelineFilter]
+          );
+
+          if (scopeResult.rows.length > 0) {
+            // It's a scope - use dynamic filtering
+            const { getScopeWhereClause } = await import('../config/scope-loader.js');
+            const scope = {
+              scope_id: scopeResult.rows[0].scope_id,
+              name: scopeResult.rows[0].name,
+              filter_field: scopeResult.rows[0].filter_field,
+              filter_operator: scopeResult.rows[0].filter_operator,
+              filter_values: Array.isArray(scopeResult.rows[0].filter_values)
+                ? scopeResult.rows[0].filter_values
+                : [],
+              field_overrides: {},
+            };
+
+            const whereClause = getScopeWhereClause(scope);
+            if (whereClause) {
+              pipelineClause = `AND ${whereClause}`;
+            }
+          } else {
+            // Not a scope - treat as pipeline name
+            const escapedPipeline = `'${pipelineFilter.replace(/'/g, "''")}'`;
+            pipelineClause = `AND pipeline = ${escapedPipeline}`;
+          }
+        } catch (err) {
+          // Error loading scope, fall back to pipeline filtering
+          const escapedPipeline = `'${pipelineFilter.replace(/'/g, "''")}'`;
+          pipelineClause = `AND pipeline = ${escapedPipeline}`;
+        }
+      } else if (pipelineFilter === 'default') {
+        pipelineClause = `AND scope_id = 'default'`;
       }
       const result = await query<{
         id: string;
