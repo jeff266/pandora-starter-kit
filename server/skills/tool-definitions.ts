@@ -60,9 +60,11 @@ import { discoverICP, type ICPDiscoveryResult } from './compute/icp-discovery.js
 import {
   buildICPTaxonomy,
   enrichTopAccounts,
+  compressForClassification,
   persistTaxonomy,
   type TaxonomyFoundation,
   type EnrichedAccountsResult,
+  type CompressedAccountsResult,
   type PersistResult,
 } from './compute/icp-taxonomy.js';
 import { prepareBowtieSummary, type BowtieSummary } from './compute/bowtie-analysis.js';
@@ -3954,6 +3956,27 @@ const enrichTopAccountsTool: ToolDefinition = {
   },
 };
 
+const compressForClassificationTool: ToolDefinition = {
+  name: 'compressForClassification',
+  description: 'Compress enriched account data for DeepSeek classification — caps research summaries, strips unnecessary fields',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('compressForClassification', async () => {
+      const scopeId = context.scopeId || 'default';
+      const result = compressForClassification(context.workspaceId, scopeId, context.stepResults);
+
+      console.log(`[ICP Taxonomy] Compressed ${result.total} accounts for DeepSeek`);
+
+      return result;
+    }, params);
+  },
+};
+
 const classifyAccountPatternsTool: ToolDefinition = {
   name: 'classifyAccountPatterns',
   description: 'DeepSeek classification of account patterns (placeholder - handled by skill step)',
@@ -6666,6 +6689,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['discoverICP', discoverICPTool],
   ['buildICPTaxonomy', buildICPTaxonomyTool],
   ['enrichTopAccounts', enrichTopAccountsTool],
+  ['compressForClassification', compressForClassificationTool],
   ['classifyAccountPatterns', classifyAccountPatternsTool],
   ['persistTaxonomy', persistTaxonomyTool],
   ['prepareBowtieSummary', prepareBowtieSummaryTool],

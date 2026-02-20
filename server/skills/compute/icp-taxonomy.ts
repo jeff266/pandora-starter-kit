@@ -4,7 +4,8 @@
  * Three-phase compute pipeline:
  * 1. buildICPTaxonomy — Foundation analysis (0 tokens)
  * 2. enrichTopAccounts — Serper signal enrichment (0 tokens)
- * 3. persistTaxonomy — Write results to database (0 tokens)
+ * 3. compressForClassification — Compact enriched data for DeepSeek (0 tokens)
+ * 4. persistTaxonomy — Write results to database (0 tokens)
  */
 
 import { query } from '../../db.js';
@@ -262,6 +263,56 @@ export async function enrichTopAccounts(
   });
 
   return result;
+}
+
+// ============================================================================
+// Phase 2B: Compress Enriched Data for DeepSeek (COMPUTE)
+// ============================================================================
+
+export interface CompressedAccount {
+  id: string;
+  name: string;
+  industry: string;
+  employee_count: number | null;
+  amount: number;
+  research_summary: string;
+}
+
+export interface CompressedAccountsResult {
+  accounts: CompressedAccount[];
+  total: number;
+}
+
+export function compressForClassification(
+  _workspaceId: string,
+  _scopeId: string = 'default',
+  stepData?: Record<string, any>
+): CompressedAccountsResult {
+  const enriched = stepData?.enriched_accounts;
+  if (!enriched || !enriched.top_accounts) {
+    return { accounts: [], total: 0 };
+  }
+
+  const compressed: CompressedAccount[] = enriched.top_accounts.map((acc: any) => {
+    let researchSummary = '';
+    if (acc.signals && acc.signals.length > 0) {
+      const firstSnippet = acc.signals[0].snippet || '';
+      researchSummary = firstSnippet.length > 150
+        ? firstSnippet.slice(0, 147) + '...'
+        : firstSnippet;
+    }
+
+    return {
+      id: acc.id,
+      name: acc.name,
+      industry: acc.industry || 'Unknown',
+      employee_count: acc.employee_count || null,
+      amount: acc.amount || 0,
+      research_summary: researchSummary,
+    };
+  });
+
+  return { accounts: compressed, total: compressed.length };
 }
 
 // ============================================================================
