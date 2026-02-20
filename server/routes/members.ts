@@ -10,6 +10,9 @@ import { requirePermission } from '../middleware/permissions.js';
 import { createHash } from 'crypto';
 import { query } from '../db.js';
 import { ensureNotLastAdmin, validateRoleInWorkspace, isAdminRole } from '../permissions/guards.js';
+import { notificationService } from '../notifications/service.js';
+import { sendWorkspaceInvite, sendInviteRequestNotification, sendInviteRequestResolved } from '../notifications/email.js';
+import { generateInviteToken, verifyInviteToken } from '../auth/tokens.js';
 
 const router = Router();
 
@@ -165,8 +168,51 @@ router.post('/invite', async (req: Request, res: Response) => {
 
     const memberId = memberResult.rows[0].id;
 
-    // TODO: Trigger send_invite_email notification (queued — see Prompt 7)
-    // TODO: Create in-app notification for the invited user
+    // Get workspace and inviter details for email
+    const contextResult = await query<{
+      workspace_name: string;
+      inviter_name: string;
+      role_name: string;
+    }>(`
+      SELECT
+        w.name as workspace_name,
+        u.name as inviter_name,
+        wr.name as role_name
+      FROM workspaces w
+      JOIN users u ON u.id = $2
+      JOIN workspace_roles wr ON wr.id = $3
+      WHERE w.id = $1
+    `, [workspaceId, invitedBy, roleId]);
+
+    const context = contextResult.rows[0];
+
+    // Generate invite token (24 hour expiry)
+    const inviteToken = generateInviteToken({
+      workspaceId,
+      memberId,
+      email: normalizedEmail,
+    });
+
+    // Send email invitation
+    const acceptUrl = `${process.env.PANDORA_CUSTOM_DOMAIN || ''}/accept-invite/${inviteToken}`;
+    await sendWorkspaceInvite({
+      toEmail: normalizedEmail,
+      toName: normalizedEmail.split('@')[0],
+      workspaceName: context.workspace_name,
+      inviterName: context.inviter_name,
+      role: context.role_name,
+      acceptUrl,
+    });
+
+    // Create in-app notification for the invited user
+    await notificationService.create({
+      workspaceId,
+      userId,
+      type: 'workspace_invite',
+      title: `You've been invited to ${context.workspace_name}`,
+      body: `${context.inviter_name} invited you to join as ${context.role_name}`,
+      actionUrl: acceptUrl,
+    });
 
     res.status(201).json({
       memberId,
@@ -230,7 +276,56 @@ router.post('/invite-request', async (req: Request, res: Response) => {
 
     const requestId = requestResult.rows[0].id;
 
-    // TODO: Trigger notification to all Admin members in this workspace
+    // Get workspace and requester details for notifications
+    const contextResult = await query<{
+      workspace_name: string;
+      requester_name: string;
+      role_name: string;
+    }>(`
+      SELECT
+        w.name as workspace_name,
+        u.name as requester_name,
+        wr.name as role_name
+      FROM workspaces w
+      JOIN users u ON u.id = $2
+      JOIN workspace_roles wr ON wr.id = $3
+      WHERE w.id = $1
+    `, [workspaceId, requesterId, proposedRoleId]);
+
+    const context = contextResult.rows[0];
+
+    // Notify all admins in workspace
+    const reviewUrl = `${process.env.PANDORA_CUSTOM_DOMAIN || ''}/workspaces/${workspaceId}/settings/members?tab=requests`;
+
+    await notificationService.createForAdmins(workspaceId, {
+      type: 'invite_request',
+      title: 'New invite request',
+      body: `${context.requester_name} wants to invite ${normalizedEmail} as ${context.role_name}`,
+      actionUrl: reviewUrl,
+    });
+
+    // Send email to each admin
+    const adminsResult = await query<{ user_id: string; email: string; name: string }>(`
+      SELECT u.id as user_id, u.email, u.name
+      FROM workspace_members wm
+      JOIN users u ON u.id = wm.user_id
+      JOIN workspace_roles wr ON wr.id = wm.role_id
+      WHERE wm.workspace_id = $1
+        AND wm.status = 'active'
+        AND wr.system_type = 'admin'
+    `, [workspaceId]);
+
+    for (const admin of adminsResult.rows) {
+      await sendInviteRequestNotification({
+        toEmail: admin.email,
+        toName: admin.name,
+        workspaceName: context.workspace_name,
+        requestorName: context.requester_name,
+        inviteeEmail: normalizedEmail,
+        proposedRole: context.role_name,
+        reviewUrl,
+      });
+    }
 
     res.status(201).json({
       requestId,
@@ -308,7 +403,8 @@ router.get('/invite-requests', async (req: Request, res: Response) => {
  */
 router.post('/invite-requests/:requestId/resolve', async (req: Request, res: Response) => {
   try {
-    const { workspaceId, requestId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
+    const requestId = req.params.requestId as string;
     const { action, note } = req.body;
 
     if (action !== 'approve' && action !== 'reject') {
@@ -375,7 +471,43 @@ router.post('/invite-requests/:requestId/resolve', async (req: Request, res: Res
 
       memberId = memberResult.rows[0].id;
 
-      // TODO: Trigger send_invite_email notification
+      // Get workspace details for email
+      const workspaceResult = await query<{ name: string }>(`
+        SELECT name FROM workspaces WHERE id = $1
+      `, [workspaceId]);
+
+      const workspaceName = workspaceResult.rows[0].name;
+
+      // Send email invitation to the invited user
+      const roleResult = await query<{ name: string }>(`
+        SELECT name FROM workspace_roles WHERE id = $1
+      `, [request.suggested_role]);
+
+      const roleName = roleResult.rows[0].name;
+
+      const inviterResult = await query<{ name: string }>(`
+        SELECT name FROM users WHERE id = $1
+      `, [resolvedBy]);
+
+      const inviterName = inviterResult.rows[0]?.name || 'Admin';
+
+      // Generate invite token (24 hour expiry)
+      const inviteToken = generateInviteToken({
+        workspaceId,
+        memberId,
+        email: normalizedEmail,
+      });
+
+      const acceptUrl = `${process.env.PANDORA_CUSTOM_DOMAIN || ''}/accept-invite/${inviteToken}`;
+
+      await sendWorkspaceInvite({
+        toEmail: normalizedEmail,
+        toName: normalizedEmail.split('@')[0],
+        workspaceName,
+        inviterName,
+        role: roleName,
+        acceptUrl,
+      });
     }
 
     // Update request status
@@ -387,7 +519,35 @@ router.post('/invite-requests/:requestId/resolve', async (req: Request, res: Res
       WHERE id = $3
     `, [action === 'approve' ? 'approved' : 'rejected', resolvedBy, requestId]);
 
-    // TODO: Notify requestor of outcome
+    // Notify requester of outcome
+    const workspaceResult = await query<{ name: string }>(`
+      SELECT name FROM workspaces WHERE id = $1
+    `, [workspaceId]);
+
+    const workspaceName = workspaceResult.rows[0].name;
+
+    const requesterResult = await query<{ email: string; name: string }>(`
+      SELECT email, name FROM users WHERE id = $1
+    `, [request.requester_id]);
+
+    const requester = requesterResult.rows[0];
+
+    await notificationService.create({
+      workspaceId,
+      userId: request.requester_id,
+      type: 'invite_request_resolved',
+      title: `Invite request ${action === 'approve' ? 'approved' : 'rejected'}`,
+      body: `Your request to invite ${request.invite_email} was ${action === 'approve' ? 'approved' : 'rejected'}`,
+    });
+
+    await sendInviteRequestResolved({
+      toEmail: requester.email,
+      toName: requester.name,
+      workspaceName,
+      action: action === 'approve' ? 'approved' : 'rejected',
+      inviteeEmail: request.invite_email,
+      note,
+    });
 
     res.json({
       requestId,
@@ -461,13 +621,30 @@ router.patch('/:memberId/role', async (req: Request, res: Response) => {
       SELECT name FROM workspace_roles WHERE id = $1
     `, [roleId]);
 
-    // TODO: Create notification for affected member
+    const newRoleName = newRoleResult.rows[0]?.name;
+
+    // Get workspace name for notification
+    const workspaceResult = await query<{ name: string }>(`
+      SELECT name FROM workspaces WHERE id = $1
+    `, [workspaceId]);
+
+    const workspaceName = workspaceResult.rows[0].name;
+
+    // Notify the member
+    await notificationService.create({
+      workspaceId,
+      userId: member.user_id,
+      type: 'role_changed',
+      title: 'Your role has been updated',
+      body: `Your role in ${workspaceName} has been changed to ${newRoleName}`,
+      actionUrl: `/workspaces/${workspaceId}/settings/members`,
+    });
 
     res.json({
       memberId,
       newRole: {
         id: roleId,
-        name: newRoleResult.rows[0]?.name,
+        name: newRoleName,
       },
     });
   } catch (err) {
@@ -526,7 +703,32 @@ router.patch('/:memberId/status', async (req: Request, res: Response) => {
       WHERE id = $2
     `, [status, memberId]);
 
-    // TODO: Create notification for affected member if suspending
+    // Get workspace name for notification
+    const workspaceResult = await query<{ name: string }>(`
+      SELECT name FROM workspaces WHERE id = $1
+    `, [workspaceId]);
+
+    const workspaceName = workspaceResult.rows[0].name;
+
+    // Notify the member
+    if (status === 'suspended') {
+      await notificationService.create({
+        workspaceId,
+        userId: member.user_id,
+        type: 'member_suspended',
+        title: 'Account suspended',
+        body: `Your access to ${workspaceName} has been suspended`,
+      });
+    } else if (status === 'active' && member.current_status === 'suspended') {
+      await notificationService.create({
+        workspaceId,
+        userId: member.user_id,
+        type: 'member_reactivated',
+        title: 'Account reactivated',
+        body: `Your access to ${workspaceName} has been restored`,
+        actionUrl: `/workspaces/${workspaceId}`,
+      });
+    }
 
     res.json({
       memberId,
@@ -596,18 +798,67 @@ router.delete('/:memberId', async (req: Request, res: Response) => {
 /**
  * POST /accept-invite/:token
  * Accept a workspace invitation (public route)
- * TODO: Implement after invite token generation system is built (Prompt 8)
+ * Uses JWT tokens with 24 hour expiry
  */
 router.post('/accept-invite/:token', async (req: Request, res: Response) => {
   try {
-    const { token } = req.params;
+    const token = req.params.token as string;
 
-    // TODO: Validate invite token
-    // TODO: Set workspace_members.status = 'active', accepted_at = now()
-    // TODO: If new user: redirect to account setup flow
-    // TODO: If existing user: redirect to workspace
+    // Verify invite token
+    const payload = verifyInviteToken(token);
 
-    res.status(501).json({ error: 'Invite token system not yet implemented (see Prompt 8)' });
+    if (!payload || !payload.workspaceId || !payload.memberId) {
+      res.status(401).json({ error: 'Invalid or expired invitation link' });
+      return;
+    }
+
+    // Get membership record
+    const memberResult = await query<{
+      id: string;
+      user_id: string;
+      workspace_id: string;
+      status: string;
+    }>(`
+      SELECT id, user_id, workspace_id, status
+      FROM workspace_members
+      WHERE id = $1 AND workspace_id = $2
+    `, [payload.memberId, payload.workspaceId]);
+
+    if (memberResult.rows.length === 0) {
+      res.status(404).json({ error: 'Invitation not found' });
+      return;
+    }
+
+    const member = memberResult.rows[0];
+
+    // Check if already accepted
+    if (member.status === 'active') {
+      res.status(409).json({ error: 'Invitation already accepted' });
+      return;
+    }
+
+    // Activate membership
+    await query<Record<string, never>>(`
+      UPDATE workspace_members
+      SET status = 'active', accepted_at = NOW()
+      WHERE id = $1
+    `, [member.id]);
+
+    // Get workspace details
+    const workspaceResult = await query<{ name: string }>(`
+      SELECT name FROM workspaces WHERE id = $1
+    `, [member.workspace_id]);
+
+    const workspaceName = workspaceResult.rows[0]?.name || 'Unknown Workspace';
+
+    res.json({
+      success: true,
+      workspace: {
+        id: member.workspace_id,
+        name: workspaceName,
+      },
+      message: `Successfully joined ${workspaceName}`,
+    });
   } catch (err) {
     console.error('[members] Error accepting invite:', err instanceof Error ? err.message : err);
     res.status(500).json({ error: 'Failed to accept invite' });

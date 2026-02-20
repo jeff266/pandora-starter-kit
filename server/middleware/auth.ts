@@ -5,7 +5,7 @@ declare global {
   namespace Express {
     interface Request {
       workspace?: { id: string; name: string };
-      user?: { user_id: string; email: string; name: string; platform_role: string };
+      user?: { user_id: string; email: string; name?: string; account_type?: string; platform_role?: string } | null;
       authMethod?: 'api_key' | 'session';
       userWorkspaceRole?: string;
     }

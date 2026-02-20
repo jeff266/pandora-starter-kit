@@ -8,6 +8,8 @@
 import { Router, Request, Response } from 'express';
 import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { query } from '../db.js';
+import { notificationService } from '../notifications/service.js';
+import { sendAgentReviewResolved } from '../notifications/email.js';
 
 const router = Router();
 
@@ -77,8 +79,22 @@ router.post('/:agentId/submit-for-review', async (req: Request, res: Response) =
       WHERE id = $1
     `, [agentId]);
 
-    // TODO: Notify all Admin members in workspace (in-app + email)
-    // This would be implemented in Prompt 7 (notifications system)
+    // Get workspace name for notifications
+    const workspaceResult = await query<{ name: string }>(`
+      SELECT name FROM workspaces WHERE id = $1
+    `, [workspaceId]);
+
+    const workspaceName = workspaceResult.rows[0].name;
+
+    // Notify all admins in workspace
+    const reviewUrl = `${process.env.PANDORA_CUSTOM_DOMAIN || ''}/workspaces/${workspaceId}/agents/${agentId}`;
+
+    await notificationService.createForAdmins(workspaceId, {
+      type: 'agent_review_request',
+      title: 'Agent submitted for review',
+      body: `${agent.name} has been submitted for review in ${workspaceName}`,
+      actionUrl: reviewUrl,
+    });
 
     res.json({
       agentId,
@@ -145,8 +161,45 @@ router.post('/:agentId/review', async (req: Request, res: Response) => {
       WHERE id = $3
     `, [newStatus, userId, agentId]);
 
-    // TODO: Notify agent owner of outcome (in-app + email)
-    // This would be implemented in Prompt 7 (notifications system)
+    // Get workspace name and owner details for notifications
+    const contextResult = await query<{
+      workspace_name: string;
+      owner_email: string;
+      owner_name: string;
+    }>(`
+      SELECT
+        w.name as workspace_name,
+        u.email as owner_email,
+        u.name as owner_name
+      FROM workspaces w, users u
+      WHERE w.id = $1 AND u.id = $2
+    `, [workspaceId, agent.owner_id]);
+
+    if (contextResult.rows.length > 0 && agent.owner_id) {
+      const context = contextResult.rows[0];
+      const agentUrl = `${process.env.PANDORA_CUSTOM_DOMAIN || ''}/workspaces/${workspaceId}/agents/${agentId}`;
+
+      // Create in-app notification
+      await notificationService.create({
+        workspaceId,
+        userId: agent.owner_id,
+        type: 'agent_review_resolved',
+        title: `Agent ${action === 'approve' ? 'approved' : 'rejected'}`,
+        body: `Your agent "${agent.name}" was ${action === 'approve' ? 'approved and published' : 'rejected'}${note ? `: ${note}` : ''}`,
+        actionUrl: agentUrl,
+      });
+
+      // Send email notification
+      await sendAgentReviewResolved({
+        toEmail: context.owner_email,
+        toName: context.owner_name,
+        workspaceName: context.workspace_name,
+        agentName: agent.name,
+        action: action === 'approve' ? 'approved' : 'rejected',
+        note,
+        agentUrl,
+      });
+    }
 
     res.json({
       agentId,

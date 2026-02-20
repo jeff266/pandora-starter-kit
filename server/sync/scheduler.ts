@@ -6,6 +6,7 @@ import { getJobQueue } from '../jobs/queue.js';
 import { getActiveConsultantConnectors, updateConsultantConnector } from '../connectors/consultant-connector.js';
 import { syncConsultantFireflies } from '../connectors/consultant-fireflies-sync.js';
 import { hardDeleteExpiredAgents } from '../jobs/cleanup-agents.js';
+import { cleanupExpiredRefreshTokens } from '../auth/cleanup.js';
 
 const INTERNAL_CONNECTORS = ['enrichment_config', 'csv_import'];
 
@@ -73,8 +74,16 @@ export class SyncScheduler {
     }, { timezone: 'UTC' });
     this.tasks.push(agentCleanupTask);
 
+    // Refresh token cleanup (daily at 3:00 AM UTC)
+    const refreshTokenCleanupTask = cron.schedule('0 3 * * *', () => {
+      cleanupExpiredRefreshTokens().catch((err) => {
+        console.error('[Scheduler] Unhandled error in refresh token cleanup:', err);
+      });
+    }, { timezone: 'UTC' });
+    this.tasks.push(refreshTokenCleanupTask);
+
     const scheduleDescriptions = SYNC_SCHEDULES.map(s => s.label).join(', ');
-    console.log(`[Scheduler] Sync schedules registered: ${scheduleDescriptions}, CRM (dynamic 15-min heartbeat), Consultant (every 6 hours), Agent cleanup (daily at 3 AM)`);
+    console.log(`[Scheduler] Sync schedules registered: ${scheduleDescriptions}, CRM (dynamic 15-min heartbeat), Consultant (every 6 hours), Agent cleanup (daily at 3 AM), Refresh token cleanup (daily at 3 AM)`);
   }
 
   stop(): void {

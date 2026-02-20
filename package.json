@@ -28,7 +28,9 @@
     "@types/react-dom": "^19.2.3",
     "@types/uuid": "^10.0.0",
     "@vitejs/plugin-react": "^5.1.4",
+    "bcryptjs": "^3.0.3",
     "chardet": "^2.1.1",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
     "date-fns": "^4.1.0",
     "docx": "^9.5.3",
@@ -39,6 +41,7 @@
     "express-rate-limit": "^8.2.1",
     "form-data": "^4.0.5",
     "handlebars": "^4.7.8",
+    "jsonwebtoken": "^9.0.3",
     "multer": "^2.0.2",
     "node-cron": "^4.2.1",
     "p-limit": "^7.3.0",
@@ -58,7 +61,10 @@
     "zod-validation-error": "^5.0.0"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
     "@types/chardet": "^0.8.3",
+    "@types/cookie-parser": "^1.4.10",
+    "@types/jsonwebtoken": "^9.0.10",
     "@vitest/coverage-v8": "^4.0.18",
     "puppeteer": "^24.37.3",
     "tsx": "^4.21.0",

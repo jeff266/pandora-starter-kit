@@ -2,6 +2,7 @@ import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
+import cookieParser from "cookie-parser";
 import { verifyConnection } from "./db.js";
 import { requireWorkspaceAccess } from "./middleware/auth.js";
 import { attachWorkspaceContext } from "./middleware/workspace-context.js";
@@ -84,6 +85,7 @@ import accountScoringRouter from './routes/account-scoring.js';
 import scoringStateRouter from './routes/scoring-state.js';
 import adminScopesRouter from './routes/admin-scopes.js';
 import targetsRouter from './routes/targets.js';
+import { workspaceNotificationsRouter, userNotificationsRouter } from './routes/notifications.js';
 import { startPushTriggers, stopPushTriggers } from './push/trigger-manager.js';
 import { initRenderers } from './renderers/index.js';
 import { cleanupExpiredAnnotations } from './feedback/cleanup.js';
@@ -170,6 +172,7 @@ app.use(express.json({
   },
 }));
 app.use(express.urlencoded({ extended: true, verify: (req: any, _res, buf) => { req.rawBody = buf.toString(); } }));
+app.use(cookieParser());
 
 app.get("/", (_req, res) => {
   res.json({
@@ -185,6 +188,7 @@ app.use("/api/slack/events", slackEventsRouter);
 app.use("/api/slack/interactions", slackInteractionsRouter);
 
 app.use("/api/auth", userAuthRouter);
+app.use("/api/users/me/notifications", userNotificationsRouter);
 
 app.use("/api/consultant", consultantRouter);
 
@@ -248,6 +252,7 @@ workspaceApiRouter.use('/members', membersRouter);
 workspaceApiRouter.use('/roles', rolesRouter);
 workspaceApiRouter.use('/flags', flagsRouter);
 workspaceApiRouter.use('/agents', agentLifecycleRouter);
+workspaceApiRouter.use(workspaceNotificationsRouter);
 workspaceApiRouter.use(dealIntelligenceRouter);
 workspaceApiRouter.use(toolsRouter);
 workspaceApiRouter.use(chatRouter);
