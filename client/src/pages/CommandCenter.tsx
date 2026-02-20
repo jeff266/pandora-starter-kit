@@ -1265,12 +1265,28 @@ function StageDrillDownPanel({
           padding: '8px 16px', borderBottom: '1px solid #1E293B',
           position: 'sticky', top: 0, background: '#111827', zIndex: 2,
         }}>
-          {['Deal', 'Category', 'Amount', 'Days', 'Prob', ''].map(h => (
-            <div key={h} style={{
-              fontSize: 10, fontWeight: 600, color: '#5A6A80',
-              textTransform: 'uppercase', letterSpacing: '0.05em',
-              textAlign: (h === 'Amount' || h === 'Days' || h === 'Prob') ? 'right' : 'left',
-            }}>{h}</div>
+          {[
+            { label: 'Deal', sortKey: null },
+            { label: 'Category', sortKey: null },
+            { label: 'Amount', sortKey: 'amount' as const },
+            { label: 'Days', sortKey: 'days' as const },
+            { label: 'Prob', sortKey: 'probability' as const },
+            { label: '', sortKey: null },
+          ].map(h => (
+            <div
+              key={h.label}
+              onClick={() => h.sortKey && setSortBy(h.sortKey)}
+              style={{
+                fontSize: 10, fontWeight: 600,
+                color: h.sortKey && sortBy === h.sortKey ? '#3B82F6' : '#5A6A80',
+                textTransform: 'uppercase', letterSpacing: '0.05em',
+                textAlign: (h.label === 'Amount' || h.label === 'Days' || h.label === 'Prob') ? 'right' : 'left',
+                cursor: h.sortKey ? 'pointer' : 'default',
+                transition: 'color 0.15s',
+              }}
+              onMouseEnter={(e) => h.sortKey && (e.currentTarget.style.color = '#3B82F6')}
+              onMouseLeave={(e) => h.sortKey && !h.sortKey || sortBy !== h.sortKey && (e.currentTarget.style.color = '#5A6A80')}
+            >{h.label}{h.sortKey && sortBy === h.sortKey ? ' \u2193' : ''}</div>
           ))}
         </div>
 
@@ -1361,14 +1377,26 @@ function DrilldownDealRow({ deal, isLast, isAsking, onAsk }: {
               transition: 'text-decoration 0.1s',
             }}
           >{deal.name}</span>
-          {deal.findings.map(f => {
+          {deal.findings && deal.findings.map(f => {
             const fl = FINDING_LABELS_MAP[f];
-            return fl ? (
-              <span key={f} style={{
-                fontSize: 10, fontWeight: 600, fontFamily: 'IBM Plex Mono, monospace',
-                padding: '1px 6px', borderRadius: 3, color: fl.color, background: fl.bg,
-              }}>{fl.icon} {fl.label}</span>
-            ) : null;
+            // Show mapped findings with full styling, unknown findings with default styling
+            if (fl) {
+              return (
+                <span key={f} style={{
+                  fontSize: 10, fontWeight: 600, fontFamily: 'IBM Plex Mono, monospace',
+                  padding: '1px 6px', borderRadius: 3, color: fl.color, background: fl.bg,
+                }}>{fl.icon} {fl.label}</span>
+              );
+            } else {
+              // Fallback for unmapped findings - show them with default risk styling
+              return (
+                <span key={f} style={{
+                  fontSize: 10, fontWeight: 600, fontFamily: 'IBM Plex Mono, monospace',
+                  padding: '1px 6px', borderRadius: 3,
+                  color: '#EF4444', background: 'rgba(239,68,68,0.12)',
+                }} title={`Finding: ${f}`}>\u26A0 {f.replace(/_/g, ' ')}</span>
+              );
+            }
           })}
         </div>
         <div style={{ fontSize: 11.5, color: '#5A6A80', marginTop: 2 }}>
