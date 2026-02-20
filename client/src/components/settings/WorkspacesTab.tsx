@@ -67,7 +67,7 @@ export default function WorkspacesTab() {
   const fetchWorkspaces = async () => {
     try {
       setLoading(true);
-      const token = localStorage.getItem('pandora_token');
+      const token = localStorage.getItem('pandora_session');
       const res = await fetch('/api/auth/me', {
         headers: { 'Authorization': `Bearer ${token}` },
       });
@@ -94,7 +94,7 @@ export default function WorkspacesTab() {
 
     try {
       setLeaving(true);
-      const token = localStorage.getItem('pandora_token');
+      const token = localStorage.getItem('pandora_session');
 
       // Get member ID for this user in this workspace
       // For now, we'll use the user ID - the backend should handle finding the member record

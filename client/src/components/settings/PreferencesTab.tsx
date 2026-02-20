@@ -22,7 +22,7 @@ export default function PreferencesTab() {
   const fetchPreferences = async () => {
     try {
       setLoading(true);
-      const token = localStorage.getItem('pandora_token');
+      const token = localStorage.getItem('pandora_session');
       const res = await fetch('/api/auth/me', {
         headers: { 'Authorization': `Bearer ${token}` },
       });
@@ -46,7 +46,7 @@ export default function PreferencesTab() {
 
     try {
       setSaving(true);
-      const token = localStorage.getItem('pandora_token');
+      const token = localStorage.getItem('pandora_session');
       const res = await fetch('/api/auth/profile', {
         method: 'PATCH',
         headers: {

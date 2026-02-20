@@ -64,7 +64,7 @@ export default function SecurityTab() {
 
     try {
       setSubmitting(true);
-      const token = localStorage.getItem('pandora_token');
+      const token = localStorage.getItem('pandora_session');
       const res = await fetch('/api/auth/change-password', {
         method: 'POST',
         headers: {
@@ -98,7 +98,7 @@ export default function SecurityTab() {
 
   const handleLogoutAll = async () => {
     try {
-      const token = localStorage.getItem('pandora_token');
+      const token = localStorage.getItem('pandora_session');
       const res = await fetch('/api/auth/logout-all', {
         method: 'POST',
         headers: {
@@ -111,7 +111,7 @@ export default function SecurityTab() {
       }
 
       // Clear local storage and redirect
-      localStorage.removeItem('pandora_token');
+      localStorage.removeItem('pandora_session');
       localStorage.removeItem('pandora_last_workspace');
       navigate('/login?reason=signed_out_all');
     } catch (err) {

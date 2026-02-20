@@ -14,7 +14,7 @@ import { notificationService } from '../notifications/service.js';
 import { sendWorkspaceInvite, sendInviteRequestNotification, sendInviteRequestResolved } from '../notifications/email.js';
 import { generateInviteToken, verifyInviteToken } from '../auth/tokens.js';
 
-const router = Router();
+const router = Router({ mergeParams: true });
 
 function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
@@ -28,7 +28,6 @@ router.get('/', async (req: Request, res: Response) => {
   try {
     const { workspaceId } = req.params;
 
-    // Get active and pending members
     const membersResult = await query<{
       id: string;
       user_id: string;
@@ -79,8 +78,7 @@ router.get('/', async (req: Request, res: Response) => {
       status: m.status,
     }));
 
-    // Check if caller has invite permission to see pending invites
-    const canSeeInvites = req.userPermissions?.['members.invite'] === true;
+    const canSeeInvites = req.userWorkspaceRole === 'admin' || req.authMethod === 'api_key';
 
     res.json({
       members,

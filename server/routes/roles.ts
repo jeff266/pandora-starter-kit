@@ -12,7 +12,7 @@ import { query } from '../db.js';
 import { PermissionSet, createPermissionSet } from '../permissions/types.js';
 import { validateRoleInWorkspace } from '../permissions/guards.js';
 
-const router = Router();
+const router = Router({ mergeParams: true });
 
 // Reserved role names that cannot be used for custom roles
 const RESERVED_ROLE_NAMES = ['admin', 'manager', 'analyst', 'viewer'];

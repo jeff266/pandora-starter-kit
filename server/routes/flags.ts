@@ -9,7 +9,7 @@ import { Router, Request, Response } from 'express';
 import { requirePermission } from '../middleware/permissions.js';
 import { query } from '../db.js';
 
-const router = Router();
+const router = Router({ mergeParams: true });
 
 interface FlagRow {
   key: string;

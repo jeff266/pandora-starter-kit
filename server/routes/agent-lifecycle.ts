@@ -11,7 +11,7 @@ import { query } from '../db.js';
 import { notificationService } from '../notifications/service.js';
 import { sendAgentReviewResolved } from '../notifications/email.js';
 
-const router = Router();
+const router = Router({ mergeParams: true });
 
 interface AgentRow {
   id: string;

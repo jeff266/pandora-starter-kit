@@ -13,7 +13,7 @@ import { query } from '../db.js';
 
 const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || '';
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || '';
-const ACCESS_TOKEN_EXPIRES_IN = parseInt(process.env.ACCESS_TOKEN_EXPIRES_IN || '900', 10); // 15 minutes
+const ACCESS_TOKEN_EXPIRES_IN = parseInt(process.env.ACCESS_TOKEN_EXPIRES_IN || '86400', 10); // 24 hours
 const REFRESH_TOKEN_EXPIRES_IN = parseInt(process.env.REFRESH_TOKEN_EXPIRES_IN || '604800', 10); // 7 days
 
 if (!JWT_ACCESS_SECRET || !JWT_REFRESH_SECRET) {

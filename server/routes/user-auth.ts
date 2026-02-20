@@ -192,8 +192,8 @@ router.post('/login', async (req: Request, res: Response) => {
     // Store session for workspace middleware compatibility
     await query<Record<string, never>>(`
       INSERT INTO user_sessions (user_id, token, expires_at)
-      VALUES ($1, $2, NOW() + INTERVAL '15 minutes')
-      ON CONFLICT (token) DO UPDATE SET expires_at = NOW() + INTERVAL '15 minutes'
+      VALUES ($1, $2, NOW() + INTERVAL '24 hours')
+      ON CONFLICT (token) DO UPDATE SET expires_at = NOW() + INTERVAL '24 hours'
     `, [user.id, accessToken]);
 
     // Set refresh token cookie
@@ -269,8 +269,8 @@ router.post('/refresh', async (req: Request, res: Response) => {
     // Store session for workspace middleware compatibility
     await query<Record<string, never>>(`
       INSERT INTO user_sessions (user_id, token, expires_at)
-      VALUES ($1, $2, NOW() + INTERVAL '15 minutes')
-      ON CONFLICT (token) DO UPDATE SET expires_at = NOW() + INTERVAL '15 minutes'
+      VALUES ($1, $2, NOW() + INTERVAL '24 hours')
+      ON CONFLICT (token) DO UPDATE SET expires_at = NOW() + INTERVAL '24 hours'
     `, [user.id, accessToken]);
 
     // Set new refresh token cookie
@@ -615,6 +615,131 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
   } catch (err) {
     console.error('[auth] /me error:', err instanceof Error ? err.message : err);
     res.status(500).json({ error: 'Failed to fetch user info' });
+  }
+});
+
+/**
+ * POST /workspaces/join
+ * Join an existing workspace via API key
+ */
+router.post('/workspaces/join', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.user_id;
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+
+    const { api_key } = req.body;
+    if (!api_key || typeof api_key !== 'string') {
+      res.status(400).json({ error: 'API key is required' });
+      return;
+    }
+
+    const wsResult = await query<{ id: string; name: string; slug: string }>(`
+      SELECT id, name, COALESCE(slug, '') as slug FROM workspaces WHERE api_key = $1
+    `, [api_key.trim()]);
+
+    if (wsResult.rows.length === 0) {
+      res.status(404).json({ error: 'Invalid API key' });
+      return;
+    }
+
+    const ws = wsResult.rows[0];
+
+    const existing = await query<{ user_id: string }>(`
+      SELECT user_id FROM user_workspaces WHERE user_id = $1 AND workspace_id = $2
+    `, [userId, ws.id]);
+
+    if (existing.rows.length > 0) {
+      res.status(409).json({ error: 'Already a member of this workspace' });
+      return;
+    }
+
+    await query<Record<string, never>>(`
+      INSERT INTO user_workspaces (user_id, workspace_id, role) VALUES ($1, $2, 'member')
+    `, [userId, ws.id]);
+
+    const adminRole = await query<{ id: string }>(`
+      SELECT id FROM workspace_roles WHERE workspace_id = $1 AND system_type = 'member' LIMIT 1
+    `, [ws.id]);
+
+    if (adminRole.rows.length > 0) {
+      await query<Record<string, never>>(`
+        INSERT INTO workspace_members (workspace_id, user_id, role_id, accepted_at, status)
+        VALUES ($1, $2, $3, now(), 'active')
+        ON CONFLICT (workspace_id, user_id) DO NOTHING
+      `, [ws.id, userId, adminRole.rows[0].id]);
+    }
+
+    res.json({ id: ws.id, name: ws.name, slug: ws.slug, role: 'member' });
+  } catch (err) {
+    console.error('[auth] Join workspace error:', err instanceof Error ? err.message : err);
+    res.status(500).json({ error: 'Failed to join workspace' });
+  }
+});
+
+/**
+ * POST /workspaces/create
+ * Create a new workspace
+ */
+router.post('/workspaces/create', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.user_id;
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+
+    const { name } = req.body;
+    if (!name || typeof name !== 'string' || name.trim().length === 0) {
+      res.status(400).json({ error: 'Workspace name is required' });
+      return;
+    }
+
+    const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+
+    const crypto = await import('crypto');
+    const apiKey = `pk_${crypto.randomBytes(24).toString('hex')}`;
+
+    const wsResult = await query<{ id: string; name: string; slug: string }>(`
+      INSERT INTO workspaces (name, slug, api_key)
+      VALUES ($1, $2, $3)
+      RETURNING id, name, slug
+    `, [name.trim(), slug, apiKey]);
+
+    const ws = wsResult.rows[0];
+
+    await query<Record<string, never>>(`
+      INSERT INTO user_workspaces (user_id, workspace_id, role) VALUES ($1, $2, 'admin')
+    `, [userId, ws.id]);
+
+    const roleInserts = [
+      { name: 'Admin', desc: 'Full workspace access', type: 'admin' },
+      { name: 'Member', desc: 'Standard workspace access', type: 'member' },
+      { name: 'Viewer', desc: 'Read-only workspace access', type: 'viewer' },
+    ];
+
+    for (const r of roleInserts) {
+      const roleResult = await query<{ id: string }>(`
+        INSERT INTO workspace_roles (workspace_id, name, description, is_system, system_type, permissions)
+        VALUES ($1, $2, $3, true, $4, '{}')
+        RETURNING id
+      `, [ws.id, r.name, r.desc, r.type]);
+
+      if (r.type === 'admin') {
+        await query<Record<string, never>>(`
+          INSERT INTO workspace_members (workspace_id, user_id, role_id, accepted_at, status)
+          VALUES ($1, $2, $3, now(), 'active')
+          ON CONFLICT (workspace_id, user_id) DO NOTHING
+        `, [ws.id, userId, roleResult.rows[0].id]);
+      }
+    }
+
+    res.json({ id: ws.id, name: ws.name, slug: ws.slug, role: 'admin' });
+  } catch (err) {
+    console.error('[auth] Create workspace error:', err instanceof Error ? err.message : err);
+    res.status(500).json({ error: 'Failed to create workspace' });
   }
 });
 
