@@ -295,7 +295,7 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
     let useLegacyPipeline = false;
     let legacyPipelineValue = '';
 
-    if (scopeId && scopeId !== 'default') {
+    if (scopeId && scopeId !== 'default' && scopeId !== 'all') {
       // Try to load scope definition from analysis_scopes
       try {
         const scopeResult = await query<{
