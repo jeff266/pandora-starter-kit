@@ -81,7 +81,7 @@ export async function buildICPTaxonomy(
   // Count won/lost deals
   const countResult = await query<{ outcome: string; cnt: string }>(
     `SELECT
-       CASE WHEN is_won = true THEN 'won' ELSE 'lost' END as outcome,
+       CASE WHEN stage_normalized = 'closed_won' THEN 'won' ELSE 'lost' END as outcome,
        COUNT(*)::text as cnt
      FROM deals
      WHERE workspace_id = $1
@@ -105,8 +105,8 @@ export async function buildICPTaxonomy(
     `SELECT
        COALESCE(a.industry, 'Unknown') as industry,
        COUNT(*)::text as total,
-       SUM(CASE WHEN d.is_won THEN 1 ELSE 0 END)::text as won,
-       AVG(CASE WHEN d.is_won THEN d.amount ELSE NULL END)::text as avg_amount
+       SUM(CASE WHEN d.stage_normalized = 'closed_won' THEN 1 ELSE 0 END)::text as won,
+       AVG(CASE WHEN d.stage_normalized = 'closed_won' THEN d.amount ELSE NULL END)::text as avg_amount
      FROM deals d
      LEFT JOIN accounts a ON d.account_id = a.id
      WHERE d.workspace_id = $1
@@ -141,7 +141,7 @@ export async function buildICPTaxonomy(
          ELSE '5K+'
        END as size_bucket,
        COUNT(*)::text as total,
-       SUM(CASE WHEN d.is_won THEN 1 ELSE 0 END)::text as won
+       SUM(CASE WHEN d.stage_normalized = 'closed_won' THEN 1 ELSE 0 END)::text as won
      FROM deals d
      LEFT JOIN accounts a ON d.account_id = a.id
      WHERE d.workspace_id = $1
@@ -226,7 +226,7 @@ export async function enrichTopAccounts(
      FROM accounts a
      JOIN deals d ON d.account_id = a.id
      WHERE d.workspace_id = $1
-       AND d.is_won = true
+       AND d.stage_normalized = 'closed_won'
        ${scopeWhere ? `AND ${scopeWhere}` : ''}
      GROUP BY a.id, a.name, a.industry, a.employee_count
      ORDER BY SUM(d.amount) DESC
@@ -286,8 +286,20 @@ export async function persistTaxonomy(
   const accountClassifications = stepData?.account_classifications;
   const taxonomyReport = stepData?.taxonomy_report;
 
+  // Check for missing data
   if (!foundation || !enrichedAccounts || !taxonomyReport) {
     throw new Error('Missing required step data for taxonomy persistence');
+  }
+
+  // Check for upstream step failures
+  if (foundation.error) {
+    throw new Error(`Taxonomy foundation failed: ${foundation.error}`);
+  }
+  if (enrichedAccounts.error) {
+    throw new Error(`Account enrichment failed: ${enrichedAccounts.error}`);
+  }
+  if (!enrichedAccounts.top_accounts || enrichedAccounts.top_accounts.length === 0) {
+    throw new Error('No accounts were enriched - cannot persist taxonomy');
   }
 
   // Detect vertical from classifications
