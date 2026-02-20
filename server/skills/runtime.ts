@@ -473,7 +473,17 @@ export class SkillRuntime {
               }
             }
 
-            if (!bestKey && arrayValues.length > 0) {
+            if (!bestKey && expectedFields && expectedFields.length > 0) {
+              const selfMatchCount = expectedFields.filter(f => f in parsed).length;
+              if (selfMatchCount >= Math.ceil(expectedFields.length / 2)) {
+                console.log(`[LLM Step] ${step.id} wrapped single object as array (matched ${selfMatchCount}/${expectedFields.length} expected fields)`);
+                parsed = [parsed];
+              } else if (arrayValues.length > 0) {
+                arrayValues.sort(([, a], [, b]) => (b as any[]).length - (a as any[]).length);
+                bestKey = arrayValues[0][0];
+                bestArr = arrayValues[0][1] as any[];
+              }
+            } else if (!bestKey && arrayValues.length > 0) {
               arrayValues.sort(([, a], [, b]) => (b as any[]).length - (a as any[]).length);
               bestKey = arrayValues[0][0];
               bestArr = arrayValues[0][1] as any[];
@@ -482,21 +492,18 @@ export class SkillRuntime {
             if (bestKey) {
               console.log(`[LLM Step] ${step.id} unwrapped object to array via key '${bestKey}' (${bestArr.length} items)`);
               parsed = bestArr;
-            } else if (expectedFields && expectedFields.length > 0) {
-              const matchCount = expectedFields.filter(f => f in parsed).length;
-              if (matchCount >= Math.ceil(expectedFields.length / 2)) {
-                console.log(`[LLM Step] ${step.id} wrapped single object as array (matched ${matchCount}/${expectedFields.length} expected fields)`);
-                parsed = [parsed];
-              } else {
-                console.warn(`[LLM Step] ${step.id} expected array but got object (keys: ${Object.keys(parsed).slice(0, 5).join(', ')})`);
-              }
-            } else {
-              console.warn(`[LLM Step] ${step.id} expected array but got object with no array values`);
+            } else if (!Array.isArray(parsed)) {
+              console.warn(`[LLM Step] ${step.id} expected array but got object (keys: ${Object.keys(parsed).slice(0, 5).join(', ')})`);
             }
           }
 
           const shape = Array.isArray(parsed) ? `array[${parsed.length}]` : typeof parsed;
           console.log(`[LLM Step] ${step.id} parsed JSON: ${shape}`);
+
+          if (expectedType === 'array' && (!Array.isArray(parsed) || parsed.length < 3)) {
+            console.error(`[LLM Step] ${step.id} parse quality warning — expected array, got: ${typeof parsed}, length: ${Array.isArray(parsed) ? parsed.length : 'N/A'}`);
+          }
+
           return parsed;
         } catch {
           console.warn(`[LLM Step] Failed to parse JSON from ${capability}, returning raw text (${response.content.length} chars)`);

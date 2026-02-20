@@ -12,6 +12,7 @@ import { query } from '../../db.js';
 import { createLogger } from '../../utils/logger.js';
 import { enrichTopAccountsWithSignals, type CompanyWithSignals } from '../../integrations/serper.js';
 import { getActiveScopes, getScopeWhereClause, DEFAULT_SCOPE, type ActiveScope } from '../../config/scope-loader.js';
+import { callLLM } from '../../utils/llm-router.js';
 
 const logger = createLogger('ICPTaxonomy');
 
@@ -313,6 +314,131 @@ export function compressForClassification(
   });
 
   return { accounts: compressed, total: compressed.length };
+}
+
+// ============================================================================
+// Phase 2C: Classify Accounts in Batches (COMPUTE + DeepSeek)
+// ============================================================================
+
+const CLASSIFY_BATCH_SIZE = 15;
+
+const CLASSIFICATION_SYSTEM_PROMPT = `You are a B2B sales intelligence analyst classifying company patterns from closed deals and web signals.
+
+For EACH account provided, return a classification object. Respond with ONLY a JSON array containing one object per account.
+
+Each object must have:
+- account_id: the account index as a string
+- account_name: the company name
+- vertical_pattern: one of "healthcare_provider", "healthcare_tech", "industrial_manufacturing", "industrial_services", "software_b2b", "software_consumer", "professional_services", "generic_b2b"
+- buying_signals: array of up to 5 signals from: "expansion", "digital_transformation", "regulatory_pressure", "leadership_change", "market_disruption", "cost_optimization", "revenue_growth"
+- company_maturity: "early_stage" | "growth_stage" | "established" | "enterprise"
+- use_case_archetype: brief 1-2 sentence description of why they bought
+- lookalike_indicators: 3-5 characteristics defining similar prospects
+- confidence: 0.0-1.0
+
+CRITICAL: Return one object per account. If given 15 accounts, return an array of 15 objects.`;
+
+export interface AccountClassification {
+  account_id: string;
+  account_name: string;
+  vertical_pattern: string;
+  buying_signals: string[];
+  company_maturity: string;
+  use_case_archetype: string;
+  lookalike_indicators: string[];
+  confidence: number;
+}
+
+export async function classifyAccountsBatched(
+  workspaceId: string,
+  _scopeId: string = 'default',
+  stepData?: Record<string, any>
+): Promise<AccountClassification[]> {
+  const compressed = stepData?.compressed_accounts;
+  if (!compressed || !compressed.accounts || compressed.accounts.length === 0) {
+    logger.warn('No compressed accounts available for classification', { workspaceId });
+    return [];
+  }
+
+  const accounts: CompressedAccount[] = compressed.accounts;
+  const batches: CompressedAccount[][] = [];
+  for (let i = 0; i < accounts.length; i += CLASSIFY_BATCH_SIZE) {
+    batches.push(accounts.slice(i, i + CLASSIFY_BATCH_SIZE));
+  }
+
+  logger.info('Classifying accounts in batches', {
+    workspaceId,
+    totalAccounts: accounts.length,
+    batchCount: batches.length,
+    batchSize: CLASSIFY_BATCH_SIZE,
+  });
+
+  const allClassifications: AccountClassification[] = [];
+
+  for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+    const batch = batches[batchIdx];
+    const batchPrompt = batch.map((acc, i) => {
+      const globalIdx = batchIdx * CLASSIFY_BATCH_SIZE + i;
+      return `## Account ${globalIdx}: ${acc.name}\n- Industry: ${acc.industry}\n- Size: ${acc.employee_count || 'Unknown'} employees\n- Deal Amount: $${Math.round(acc.amount).toLocaleString()}\n- Web Signal: ${acc.research_summary || 'None'}`;
+    }).join('\n\n');
+
+    try {
+      const response = await callLLM(workspaceId, 'extract', {
+        messages: [{ role: 'user', content: `Classify these ${batch.length} accounts:\n\n${batchPrompt}` }],
+        systemPrompt: CLASSIFICATION_SYSTEM_PROMPT,
+        maxTokens: 4096,
+        temperature: 0.1,
+      });
+
+      if (response.content) {
+        let jsonStr = response.content.trim();
+        const fenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+        if (fenceMatch) jsonStr = fenceMatch[1].trim();
+
+        let parsed = JSON.parse(jsonStr);
+        if (!Array.isArray(parsed)) {
+          if (typeof parsed === 'object') {
+            const arrayVal = Object.values(parsed).find(v => Array.isArray(v));
+            if (arrayVal) {
+              parsed = arrayVal;
+            } else {
+              const requiredFields = ['account_name', 'vertical_pattern', 'confidence'];
+              const matchCount = requiredFields.filter(f => f in parsed).length;
+              if (matchCount >= 2) {
+                parsed = [parsed];
+              } else {
+                logger.warn('DeepSeek batch returned unexpected shape', { batchIdx, keys: Object.keys(parsed) });
+                continue;
+              }
+            }
+          }
+        }
+
+        if (Array.isArray(parsed)) {
+          allClassifications.push(...parsed);
+          logger.info('Batch classified', { batchIdx, returned: parsed.length, expected: batch.length });
+        }
+      }
+    } catch (err: any) {
+      logger.warn('DeepSeek batch classification failed', { batchIdx, error: err.message });
+    }
+  }
+
+  if (allClassifications.length < 3) {
+    logger.error('Classification returned too few results', {
+      workspaceId,
+      expected: accounts.length,
+      got: allClassifications.length,
+    });
+  }
+
+  logger.info('Account classification complete', {
+    workspaceId,
+    classified: allClassifications.length,
+    sent: accounts.length,
+  });
+
+  return allClassifications;
 }
 
 // ============================================================================

@@ -61,10 +61,12 @@ import {
   buildICPTaxonomy,
   enrichTopAccounts,
   compressForClassification,
+  classifyAccountsBatched,
   persistTaxonomy,
   type TaxonomyFoundation,
   type EnrichedAccountsResult,
   type CompressedAccountsResult,
+  type AccountClassification,
   type PersistResult,
 } from './compute/icp-taxonomy.js';
 import { prepareBowtieSummary, type BowtieSummary } from './compute/bowtie-analysis.js';
@@ -3979,7 +3981,7 @@ const compressForClassificationTool: ToolDefinition = {
 
 const classifyAccountPatternsTool: ToolDefinition = {
   name: 'classifyAccountPatterns',
-  description: 'DeepSeek classification of account patterns (placeholder - handled by skill step)',
+  description: 'Classify account patterns using DeepSeek in batches of 15 accounts',
   tier: 'compute',
   parameters: {
     type: 'object',
@@ -3987,8 +3989,14 @@ const classifyAccountPatternsTool: ToolDefinition = {
     required: [],
   },
   execute: async (params, context) => {
-    // This is handled by DeepSeek step in the skill definition
-    return { message: 'Classification handled by DeepSeek step' };
+    return safeExecute('classifyAccountPatterns', async () => {
+      const scopeId = context.scopeId || 'default';
+      const result = await classifyAccountsBatched(context.workspaceId, scopeId, context.stepResults);
+
+      console.log(`[ICP Taxonomy] Classified ${result.length} accounts in batches`);
+
+      return result;
+    }, params);
   },
 };
 
