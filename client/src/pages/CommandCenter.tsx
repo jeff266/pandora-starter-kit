@@ -503,6 +503,13 @@ export default function CommandCenter() {
     if (d.findings?.act) findingSummaryParts.push(`${d.findings.act} act`);
     if (d.findings?.watch) findingSummaryParts.push(`${d.findings.watch} watch`);
     const findingSummary = findingSummaryParts.length > 0 ? findingSummaryParts.join(', ') : null;
+
+    const handleAskClick = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      const scope = { type: 'stage' as const, stage: d.stage };
+      handleAskPandora(`Tell me about ${d.stage} stage`, scope);
+    };
+
     return (
       <div style={{
         background: colors.surfaceRaised,
@@ -522,9 +529,33 @@ export default function CommandCenter() {
             {findingSummary}
           </div>
         )}
-        <div style={{ marginTop: 6, fontSize: 10, color: colors.textMuted, fontFamily: fonts.sans }}>
-          Click to drill down → Ask Pandora
-        </div>
+        <button
+          onClick={handleAskClick}
+          style={{
+            marginTop: 8,
+            width: '100%',
+            fontSize: 11,
+            fontWeight: 600,
+            color: colors.accent,
+            background: colors.accentSoft,
+            border: `1px solid ${colors.accent}`,
+            borderRadius: 4,
+            padding: '4px 8px',
+            cursor: 'pointer',
+            transition: 'all 0.15s',
+            fontFamily: fonts.sans,
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = colors.accent;
+            e.currentTarget.style.color = '#fff';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = colors.accentSoft;
+            e.currentTarget.style.color = colors.accent;
+          }}
+        >
+          Ask Pandora →
+        </button>
       </div>
     );
   };
