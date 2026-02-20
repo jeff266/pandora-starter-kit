@@ -93,8 +93,8 @@ export async function computeGap(
     FROM deals
     WHERE workspace_id = $1
       AND stage_normalized = 'closed_won'
-      AND closed_at >= $2
-      AND closed_at <= LEAST($3::DATE, NOW())`,
+      AND close_date >= $2
+      AND close_date <= LEAST($3::DATE, CURRENT_DATE)`,
     [workspaceId, target.period_start, target.period_end]
   );
   const closedAmount = Number(closedResult.rows[0]?.closed_amount || 0);
@@ -102,8 +102,8 @@ export async function computeGap(
   const attainmentPct = target.amount > 0 ? closedAmount / target.amount : 0;
 
   // 2. Monte Carlo latest run (if available)
-  const mcResult = await query<{ result_data: any }>(
-    `SELECT result_data
+  const mcResult = await query<{ result: any }>(
+    `SELECT result
     FROM skill_runs
     WHERE workspace_id = $1
       AND skill_id = 'monte-carlo-forecast'
@@ -112,7 +112,7 @@ export async function computeGap(
     LIMIT 1`,
     [workspaceId]
   );
-  const mcData = mcResult.rows[0]?.result_data;
+  const mcData = mcResult.rows[0]?.result;
   const monteCarloP50 = mcData?.commandCenter?.p50 ?? null;
   const monteCarloP10 = mcData?.commandCenter?.p10 ?? null;
   const monteCarloP90 = mcData?.commandCenter?.p90 ?? null;
@@ -144,7 +144,7 @@ export async function computeGap(
       COUNT(*) AS total_deals,
       COUNT(*) FILTER (WHERE stage_normalized = 'closed_won') AS closed_won,
       AVG(amount) FILTER (WHERE stage_normalized = 'closed_won') AS avg_amount,
-      AVG(EXTRACT(EPOCH FROM (closed_at - created_at)) / 86400)
+      AVG(close_date - created_at::DATE)
         FILTER (WHERE stage_normalized = 'closed_won') AS avg_cycle_days
     FROM deals
     WHERE workspace_id = $1
@@ -222,8 +222,8 @@ export async function computeGap(
         WHERE workspace_id = $1
           AND owner_email = $2
           AND stage_normalized = 'closed_won'
-          AND closed_at >= $3
-          AND closed_at <= LEAST($4::DATE, NOW())`,
+          AND close_date >= $3
+          AND close_date <= LEAST($4::DATE, CURRENT_DATE)`,
         [workspaceId, quota.rep_email, target.period_start, target.period_end]
       );
       const repClosed = Number(repClosedResult.rows[0]?.rep_closed || 0);
