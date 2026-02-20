@@ -5,6 +5,7 @@ import { backfillHubSpotAssociations } from './backfill.js';
 import { getJobQueue } from '../jobs/queue.js';
 import { getActiveConsultantConnectors, updateConsultantConnector } from '../connectors/consultant-connector.js';
 import { syncConsultantFireflies } from '../connectors/consultant-fireflies-sync.js';
+import { hardDeleteExpiredAgents } from '../jobs/cleanup-agents.js';
 
 const INTERNAL_CONNECTORS = ['enrichment_config', 'csv_import'];
 
@@ -64,8 +65,16 @@ export class SyncScheduler {
     }, { timezone: 'UTC' });
     this.tasks.push(consultantTask);
 
+    // Agent cleanup (daily at 3:00 AM UTC)
+    const agentCleanupTask = cron.schedule('0 3 * * *', () => {
+      hardDeleteExpiredAgents().catch((err) => {
+        console.error('[Scheduler] Unhandled error in agent cleanup:', err);
+      });
+    }, { timezone: 'UTC' });
+    this.tasks.push(agentCleanupTask);
+
     const scheduleDescriptions = SYNC_SCHEDULES.map(s => s.label).join(', ');
-    console.log(`[Scheduler] Sync schedules registered: ${scheduleDescriptions}, CRM (dynamic 15-min heartbeat), Consultant (every 6 hours)`);
+    console.log(`[Scheduler] Sync schedules registered: ${scheduleDescriptions}, CRM (dynamic 15-min heartbeat), Consultant (every 6 hours), Agent cleanup (daily at 3 AM)`);
   }
 
   stop(): void {

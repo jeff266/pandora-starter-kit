@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from 'express';
+import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { query } from '../db.js';
 import { generatePipelineSnapshot } from '../analysis/pipeline-snapshot.js';
 import { formatPipelineSnapshot, formatPipelineOneLiner, postToSlack } from '../connectors/slack/client.js';
@@ -14,7 +15,7 @@ interface WorkspaceParams {
   workspaceId: string;
 }
 
-router.post('/:workspaceId/actions/pipeline-snapshot', async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/actions/pipeline-snapshot', requirePermission('skills.run_manual'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId;
     const {
@@ -100,7 +101,7 @@ router.post('/:workspaceId/actions/pipeline-snapshot', async (req: Request<Works
   }
 });
 
-router.post('/:workspaceId/actions/compute-fields', async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/actions/compute-fields', requirePermission('skills.run_manual'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId;
 
@@ -128,7 +129,7 @@ router.post('/:workspaceId/actions/compute-fields', async (req: Request<Workspac
   }
 });
 
-router.post('/:workspaceId/actions/refresh-computed-fields', async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/actions/refresh-computed-fields', requirePermission('skills.run_manual'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
     const result = await refreshComputedFields(workspaceId);

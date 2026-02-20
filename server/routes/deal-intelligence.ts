@@ -1,10 +1,11 @@
 import { Router } from 'express';
+import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { getDealRiskScore } from '../tools/deal-risk-score.js';
 import { getPipelineRiskSummary } from '../tools/pipeline-risk-summary.js';
 
 const router = Router();
 
-router.get('/:workspaceId/deals/:dealId/risk-score', async (req, res) => {
+router.get('/:workspaceId/deals/:dealId/risk-score', requirePermission('data.deals_view'), async (req, res) => {
   try {
     const { workspaceId, dealId } = req.params;
     const result = await getDealRiskScore(workspaceId, dealId);
@@ -15,7 +16,7 @@ router.get('/:workspaceId/deals/:dealId/risk-score', async (req, res) => {
   }
 });
 
-router.get('/:workspaceId/pipeline/risk-summary', async (req, res) => {
+router.get('/:workspaceId/pipeline/risk-summary', requirePermission('data.deals_view'), async (req, res) => {
   try {
     const { workspaceId } = req.params;
     const { rep_email, sort_by, limit } = req.query;

@@ -10,6 +10,7 @@
  */
 
 import { Router, type Request, type Response } from 'express';
+import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { query } from '../db.js';
 import { listTemplates, getTemplate } from '../funnel/templates.js';
 import {
@@ -40,7 +41,7 @@ interface TemplateParams extends WorkspaceParams {
  * GET /api/funnel/templates
  * List all available funnel templates
  */
-router.get('/templates', async (req: Request, res: Response) => {
+router.get('/templates', requirePermission('config.view'), async (req: Request, res: Response) => {
   try {
     const templates = listTemplates();
     res.json({ success: true, templates });
@@ -55,7 +56,7 @@ router.get('/templates', async (req: Request, res: Response) => {
  * GET /api/funnel/templates/:modelType
  * Get a specific template definition
  */
-router.get('/templates/:modelType', async (req: Request<TemplateParams>, res: Response) => {
+router.get('/templates/:modelType', requirePermission('config.view'), async (req: Request<TemplateParams>, res: Response) => {
   try {
     const { modelType } = req.params;
     const template = getTemplate(modelType);
@@ -77,7 +78,7 @@ router.get('/templates/:modelType', async (req: Request<TemplateParams>, res: Re
  * GET /api/workspaces/:workspaceId/funnel
  * Get the workspace's current funnel definition
  */
-router.get('/:workspaceId/funnel', async (req: Request<WorkspaceParams>, res: Response) => {
+router.get('/:workspaceId/funnel', requirePermission('config.view'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
 
@@ -111,7 +112,7 @@ router.get('/:workspaceId/funnel', async (req: Request<WorkspaceParams>, res: Re
  * POST /api/workspaces/:workspaceId/funnel/discover
  * Run AI-assisted funnel discovery
  */
-router.post('/:workspaceId/funnel/discover', async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/funnel/discover', requirePermission('config.edit'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
 
@@ -140,7 +141,7 @@ router.post('/:workspaceId/funnel/discover', async (req: Request<WorkspaceParams
  * POST /api/workspaces/:workspaceId/funnel/from-template
  * Create a funnel from a template with optional customizations
  */
-router.post('/:workspaceId/funnel/from-template', async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/funnel/from-template', requirePermission('config.edit'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
     const { model_type, stage_overrides } = req.body as {
@@ -200,7 +201,7 @@ router.post('/:workspaceId/funnel/from-template', async (req: Request<WorkspaceP
  * PUT /api/workspaces/:workspaceId/funnel
  * Full update - replace the entire funnel definition
  */
-router.put('/:workspaceId/funnel', async (req: Request<WorkspaceParams>, res: Response) => {
+router.put('/:workspaceId/funnel', requirePermission('config.edit'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
     const funnelData = req.body as Partial<FunnelDefinition>;
@@ -233,7 +234,7 @@ router.put('/:workspaceId/funnel', async (req: Request<WorkspaceParams>, res: Re
  * PATCH /api/workspaces/:workspaceId/funnel/stages
  * Partial update - add, remove, or modify individual stages
  */
-router.patch('/:workspaceId/funnel/stages', async (req: Request<WorkspaceParams>, res: Response) => {
+router.patch('/:workspaceId/funnel/stages', requirePermission('config.edit'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
     const { add, remove, update } = req.body as {
@@ -321,7 +322,7 @@ router.patch('/:workspaceId/funnel/stages', async (req: Request<WorkspaceParams>
  * DELETE /api/workspaces/:workspaceId/funnel
  * Delete the funnel definition
  */
-router.delete('/:workspaceId/funnel', async (req: Request<WorkspaceParams>, res: Response) => {
+router.delete('/:workspaceId/funnel', requirePermission('config.edit'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
 

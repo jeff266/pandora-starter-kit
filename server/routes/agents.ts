@@ -1,11 +1,19 @@
 import { Router, type Request, type Response } from 'express';
+import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { getAgentRegistry } from '../agents/registry.js';
+import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { getAgentRuntime } from '../agents/runtime.js';
+import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { query } from '../db.js';
+import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { generateWorkbook } from '../delivery/workbook-generator.js';
+import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { getSkillRegistry } from '../skills/registry.js';
+import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import type { AgentDefinition } from '../agents/types.js';
+import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { requireAdmin } from '../middleware/auth.js';
+import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 
 const agentsGlobalRouter = Router();
 const agentsWorkspaceRouter = Router();

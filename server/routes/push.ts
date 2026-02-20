@@ -19,6 +19,7 @@
  */
 
 import { Router, type Request, type Response } from 'express';
+import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { query } from '../db.js';
 import { assembleFindingsForRule, type DeliveryRuleRow } from '../push/finding-assembler.js';
 import { executeDelivery, type DeliveryChannelRow } from '../push/delivery-executor.js';
@@ -35,7 +36,7 @@ async function getWorkspaceName(workspaceId: string): Promise<string> {
 
 // ─── Channels ─────────────────────────────────────────────────────────────────
 
-router.post('/:workspaceId/push/channels', async (req: Request, res: Response) => {
+router.post('/:workspaceId/push/channels', requirePermission('config.edit'), async (req: Request, res: Response) => {
   const { workspaceId } = req.params;
   const { name, channel_type, config } = req.body;
 
@@ -58,7 +59,7 @@ router.post('/:workspaceId/push/channels', async (req: Request, res: Response) =
   }
 });
 
-router.get('/:workspaceId/push/channels', async (req: Request, res: Response) => {
+router.get('/:workspaceId/push/channels', requirePermission('config.view'), async (req: Request, res: Response) => {
   const { workspaceId } = req.params;
   try {
     const r = await query<any>(
@@ -71,7 +72,7 @@ router.get('/:workspaceId/push/channels', async (req: Request, res: Response) =>
   }
 });
 
-router.patch('/:workspaceId/push/channels/:id', async (req: Request, res: Response) => {
+router.patch('/:workspaceId/push/channels/:id', requirePermission('config.edit'), async (req: Request, res: Response) => {
   const { workspaceId, id } = req.params;
   const { name, config, is_active } = req.body;
   const sets: string[] = ['updated_at = NOW()'];
@@ -93,7 +94,7 @@ router.patch('/:workspaceId/push/channels/:id', async (req: Request, res: Respon
   }
 });
 
-router.delete('/:workspaceId/push/channels/:id', async (req: Request, res: Response) => {
+router.delete('/:workspaceId/push/channels/:id', requirePermission('config.edit'), async (req: Request, res: Response) => {
   const { workspaceId, id } = req.params;
   try {
     await query('DELETE FROM delivery_channels WHERE id = $1 AND workspace_id = $2', [id, workspaceId]);
@@ -103,7 +104,7 @@ router.delete('/:workspaceId/push/channels/:id', async (req: Request, res: Respo
   }
 });
 
-router.post('/:workspaceId/push/channels/:id/test', async (req: Request, res: Response) => {
+router.post('/:workspaceId/push/channels/:id/test', requirePermission('config.edit'), async (req: Request, res: Response) => {
   const workspaceId = req.params.workspaceId as string;
   const id = req.params.id as string;
   try {
@@ -167,7 +168,7 @@ router.post('/:workspaceId/push/channels/:id/test', async (req: Request, res: Re
 
 // ─── Rules ────────────────────────────────────────────────────────────────────
 
-router.post('/:workspaceId/push/rules', async (req: Request, res: Response) => {
+router.post('/:workspaceId/push/rules', requirePermission('config.edit'), async (req: Request, res: Response) => {
   const { workspaceId } = req.params;
   const { channel_id, name, trigger_type, trigger_config, filter_config, template } = req.body;
 
@@ -197,7 +198,7 @@ router.post('/:workspaceId/push/rules', async (req: Request, res: Response) => {
   }
 });
 
-router.get('/:workspaceId/push/rules', async (req: Request, res: Response) => {
+router.get('/:workspaceId/push/rules', requirePermission('config.view'), async (req: Request, res: Response) => {
   const { workspaceId } = req.params;
   try {
     const r = await query<any>(
@@ -214,7 +215,7 @@ router.get('/:workspaceId/push/rules', async (req: Request, res: Response) => {
   }
 });
 
-router.patch('/:workspaceId/push/rules/:id', async (req: Request, res: Response) => {
+router.patch('/:workspaceId/push/rules/:id', requirePermission('config.edit'), async (req: Request, res: Response) => {
   const { workspaceId, id } = req.params;
   const { name, filter_config, trigger_config, template, is_active } = req.body;
   const sets: string[] = ['updated_at = NOW()'];
@@ -239,7 +240,7 @@ router.patch('/:workspaceId/push/rules/:id', async (req: Request, res: Response)
   }
 });
 
-router.delete('/:workspaceId/push/rules/:id', async (req: Request, res: Response) => {
+router.delete('/:workspaceId/push/rules/:id', requirePermission('config.edit'), async (req: Request, res: Response) => {
   const { workspaceId, id } = req.params;
   try {
     await query('DELETE FROM delivery_rules WHERE id = $1 AND workspace_id = $2', [id, workspaceId]);
@@ -250,7 +251,7 @@ router.delete('/:workspaceId/push/rules/:id', async (req: Request, res: Response
   }
 });
 
-router.patch('/:workspaceId/push/rules/:id/toggle', async (req: Request, res: Response) => {
+router.patch('/:workspaceId/push/rules/:id/toggle', requirePermission('config.edit'), async (req: Request, res: Response) => {
   const { workspaceId, id } = req.params;
   try {
     const r = await query<any>(
@@ -266,7 +267,7 @@ router.patch('/:workspaceId/push/rules/:id/toggle', async (req: Request, res: Re
   }
 });
 
-router.post('/:workspaceId/push/rules/:id/trigger', async (req: Request, res: Response) => {
+router.post('/:workspaceId/push/rules/:id/trigger', requirePermission('config.edit'), async (req: Request, res: Response) => {
   const workspaceId = req.params.workspaceId as string;
   const id = req.params.id as string;
   try {
@@ -300,7 +301,7 @@ router.post('/:workspaceId/push/rules/:id/trigger', async (req: Request, res: Re
 
 // ─── Delivery Log ─────────────────────────────────────────────────────────────
 
-router.get('/:workspaceId/push/log', async (req: Request, res: Response) => {
+router.get('/:workspaceId/push/log', requirePermission('config.view'), async (req: Request, res: Response) => {
   const { workspaceId } = req.params;
   const status = req.query.status as string | undefined;
   const ruleId = req.query.rule_id as string | undefined;
@@ -341,7 +342,7 @@ router.get('/:workspaceId/push/log', async (req: Request, res: Response) => {
   }
 });
 
-router.get('/:workspaceId/push/log/:ruleId', async (req: Request, res: Response) => {
+router.get('/:workspaceId/push/log/:ruleId', requirePermission('config.view'), async (req: Request, res: Response) => {
   const { workspaceId, ruleId } = req.params;
   const limit = parseInt(req.query.limit as string || '20', 10);
 

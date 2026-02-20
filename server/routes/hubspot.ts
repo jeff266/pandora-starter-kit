@@ -1,9 +1,15 @@
 import { Router, type Request, type Response } from 'express';
+import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { query } from '../db.js';
+import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { hubspotConnector } from '../connectors/hubspot/index.js';
+import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { populateDealContactsFromSourceData } from '../connectors/hubspot/sync.js';
+import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import type { Connection, ConnectorCredentials } from '../connectors/_interface.js';
+import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { getConnectorCredentials } from '../lib/credential-store.js';
+import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 
 const router = Router();
 
@@ -11,7 +17,7 @@ interface WorkspaceParams {
   workspaceId: string;
 }
 
-router.post('/:workspaceId/connectors/hubspot/connect', async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/connectors/hubspot/connect', requirePermission('connectors.connect'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId;
     const { accessToken, refreshToken } = req.body as { accessToken?: string; refreshToken?: string };
@@ -46,7 +52,7 @@ router.post('/:workspaceId/connectors/hubspot/connect', async (req: Request<Work
   }
 });
 
-router.post('/:workspaceId/connectors/hubspot/sync', async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/connectors/hubspot/sync', requirePermission('connectors.trigger_sync'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId;
     const { mode = 'initial', since } = req.body as { mode?: string; since?: string };
@@ -121,7 +127,7 @@ router.post('/:workspaceId/connectors/hubspot/sync', async (req: Request<Workspa
   }
 });
 
-router.get('/:workspaceId/connectors/hubspot/health', async (req: Request<WorkspaceParams>, res: Response) => {
+router.get('/:workspaceId/connectors/hubspot/health', requirePermission('connectors.view'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId;
     const health = await hubspotConnector.health(workspaceId);
@@ -133,7 +139,7 @@ router.get('/:workspaceId/connectors/hubspot/health', async (req: Request<Worksp
   }
 });
 
-router.post('/:workspaceId/connectors/hubspot/discover-schema', async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/connectors/hubspot/discover-schema', requirePermission('connectors.connect'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId;
 
@@ -188,7 +194,7 @@ router.post('/:workspaceId/connectors/hubspot/discover-schema', async (req: Requ
   }
 });
 
-router.post('/:workspaceId/connectors/hubspot/populate-deal-contacts', async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/connectors/hubspot/populate-deal-contacts', requirePermission('connectors.trigger_sync'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
     const populated = await populateDealContactsFromSourceData(workspaceId);
@@ -200,7 +206,7 @@ router.post('/:workspaceId/connectors/hubspot/populate-deal-contacts', async (re
   }
 });
 
-router.post('/:workspaceId/connectors/hubspot/resolve-contact-roles', async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/connectors/hubspot/resolve-contact-roles', requirePermission('connectors.trigger_sync'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
 

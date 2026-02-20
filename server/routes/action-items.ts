@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from 'express';
+import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import dbPool, { query as dbQuery } from '../db.js';
 import { executeAction } from '../actions/executor.js';
 
@@ -8,7 +9,7 @@ interface WorkspaceParams {
   workspaceId: string;
 }
 
-router.get('/:workspaceId/action-items', async (req: Request<WorkspaceParams>, res: Response) => {
+router.get('/:workspaceId/action-items', requirePermission('skills.view_results'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
     const {
@@ -105,7 +106,7 @@ router.get('/:workspaceId/action-items', async (req: Request<WorkspaceParams>, r
   }
 });
 
-router.get('/:workspaceId/action-items/summary', async (req: Request<WorkspaceParams>, res: Response) => {
+router.get('/:workspaceId/action-items/summary', requirePermission('skills.view_results'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
 
@@ -156,7 +157,7 @@ router.get('/:workspaceId/action-items/summary', async (req: Request<WorkspacePa
   }
 });
 
-router.get('/:workspaceId/action-items/:actionId', async (req: Request<WorkspaceParams & { actionId: string }>, res: Response) => {
+router.get('/:workspaceId/action-items/:actionId', requirePermission('skills.view_results'), async (req: Request<WorkspaceParams & { actionId: string }>, res: Response) => {
   try {
     const { workspaceId, actionId } = req.params;
 
@@ -189,7 +190,7 @@ router.get('/:workspaceId/action-items/:actionId', async (req: Request<Workspace
   }
 });
 
-router.put('/:workspaceId/action-items/:actionId/status', async (req: Request<WorkspaceParams & { actionId: string }>, res: Response) => {
+router.put('/:workspaceId/action-items/:actionId/status', requirePermission('skills.view_results'), async (req: Request<WorkspaceParams & { actionId: string }>, res: Response) => {
   try {
     const { workspaceId, actionId } = req.params;
     const { status, actor, reason, details } = req.body;
@@ -269,7 +270,7 @@ router.put('/:workspaceId/action-items/:actionId/status', async (req: Request<Wo
   }
 });
 
-router.post('/:workspaceId/action-items/:actionId/execute', async (req: Request<WorkspaceParams & { actionId: string }>, res: Response) => {
+router.post('/:workspaceId/action-items/:actionId/execute', requirePermission('skills.run_manual'), async (req: Request<WorkspaceParams & { actionId: string }>, res: Response) => {
   try {
     const { workspaceId, actionId } = req.params;
     const { actor = 'user', dry_run = false } = req.body;
@@ -294,7 +295,7 @@ router.post('/:workspaceId/action-items/:actionId/execute', async (req: Request<
   }
 });
 
-router.post('/:workspaceId/action-items/:actionId/snooze', async (req: Request<WorkspaceParams & { actionId: string }>, res: Response) => {
+router.post('/:workspaceId/action-items/:actionId/snooze', requirePermission('skills.view_results'), async (req: Request<WorkspaceParams & { actionId: string }>, res: Response) => {
   try {
     const { workspaceId, actionId } = req.params;
     const { days = 7, actor = 'user' } = req.body;

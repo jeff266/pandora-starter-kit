@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { query } from '../db.js';
 import { backfillStageHistory, getBackfillStats } from '../connectors/hubspot/stage-history-backfill.js';
 import { getDealStageHistory } from '../analysis/stage-history-queries.js';
@@ -15,7 +16,7 @@ async function validateWorkspace(workspaceId: string, res: any): Promise<boolean
   return true;
 }
 
-router.post('/:workspaceId/connectors/hubspot/backfill-stage-history', async (req, res) => {
+router.post('/:workspaceId/connectors/hubspot/backfill-stage-history', requirePermission('connectors.trigger_sync'), async (req, res) => {
   try {
     const { workspaceId } = req.params;
     if (!(await validateWorkspace(workspaceId, res))) return;
@@ -60,7 +61,7 @@ router.post('/:workspaceId/connectors/hubspot/backfill-stage-history', async (re
   }
 });
 
-router.get('/:workspaceId/stage-history/stats', async (req, res) => {
+router.get('/:workspaceId/connectors/hubspot/backfill-stage-history/stats', requirePermission('data.deals_view'), async (req, res) => {
   try {
     const { workspaceId } = req.params;
     if (!(await validateWorkspace(workspaceId, res))) return;
@@ -74,7 +75,7 @@ router.get('/:workspaceId/stage-history/stats', async (req, res) => {
   }
 });
 
-router.get('/:workspaceId/deals/:dealId/stage-history', async (req, res) => {
+router.get('/:workspaceId/deals/:dealId/stage-history', requirePermission('data.deals_view'), async (req, res) => {
   try {
     const { workspaceId, dealId } = req.params;
     if (!(await validateWorkspace(workspaceId, res))) return;

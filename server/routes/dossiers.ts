@@ -6,6 +6,7 @@
  */
 
 import { Router } from 'express';
+import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { assembleDealDossier } from '../dossiers/deal-dossier.js';
 import { assembleAccountDossier } from '../dossiers/account-dossier.js';
 import { synthesizeDealNarrative, synthesizeAccountNarrative } from '../dossiers/narrative.js';
@@ -21,7 +22,7 @@ const router = Router({ mergeParams: true });
  *
  * Target latency: <2s without narrative, <5s with narrative
  */
-router.get('/:workspaceId/deals/:dealId/dossier', async (req, res) => {
+router.get('/:workspaceId/deals/:dealId/dossier', requirePermission('data.deals_view'), async (req, res) => {
   const startTime = Date.now();
   try {
     const { workspaceId, dealId } = req.params;
@@ -60,7 +61,7 @@ router.get('/:workspaceId/deals/:dealId/dossier', async (req, res) => {
  * Assembles complete account dossier with deals, contacts, conversations,
  * relationship health, and findings.
  */
-router.get('/:workspaceId/accounts/:accountId/dossier', async (req, res) => {
+router.get('/:workspaceId/accounts/:accountId/dossier', requirePermission('data.accounts_view'), async (req, res) => {
   const startTime = Date.now();
   try {
     const { workspaceId, accountId } = req.params;
@@ -98,7 +99,7 @@ router.get('/:workspaceId/accounts/:accountId/dossier', async (req, res) => {
  *
  * Account list view for Command Center with sorting and filtering.
  */
-router.get('/:workspaceId/accounts', async (req, res) => {
+router.get('/:workspaceId/accounts', requirePermission('data.accounts_view'), async (req, res) => {
   try {
     const { workspaceId } = req.params;
     const { sort, industry, owner, limit, offset } = req.query;
@@ -166,7 +167,7 @@ router.get('/:workspaceId/accounts', async (req, res) => {
  *
  * Returns up to 12 weekly deal score snapshots in reverse chronological order.
  */
-router.get('/:workspaceId/deals/:dealId/score-history', async (req, res) => {
+router.get('/:workspaceId/deals/:dealId/score-history', requirePermission('data.deals_view'), async (req, res) => {
   try {
     const { workspaceId, dealId } = req.params;
 

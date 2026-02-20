@@ -12,6 +12,7 @@
  */
 
 import { Router, type Request, type Response } from 'express';
+import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { query } from '../db.js';
 import { inferAnalysisScopes, applyInferredScopes } from '../config/scope-inference.js';
 import { stampAllDealsForWorkspace, setDealScopeOverride } from '../config/scope-stamper.js';
@@ -23,7 +24,7 @@ const router = Router();
 // GET /:workspaceId/admin/scopes
 // ============================================================================
 
-router.get('/:workspaceId/admin/scopes', async (req: Request, res: Response): Promise<void> => {
+router.get('/:workspaceId/admin/scopes', requirePermission('config.edit'), async (req: Request, res: Response): Promise<void> => {
   const workspaceId = req.params.workspaceId as string;
 
   try {
@@ -128,7 +129,7 @@ router.get('/:workspaceId/admin/scopes', async (req: Request, res: Response): Pr
 // Must be declared BEFORE /:scopeId routes to avoid param ambiguity.
 // ============================================================================
 
-router.post('/:workspaceId/admin/scopes/re-infer', async (req: Request, res: Response): Promise<void> => {
+router.post('/:workspaceId/admin/scopes/re-infer', requirePermission('config.edit'), async (req: Request, res: Response): Promise<void> => {
   const workspaceId = req.params.workspaceId as string;
 
   try {
@@ -149,7 +150,7 @@ router.post('/:workspaceId/admin/scopes/re-infer', async (req: Request, res: Res
 // GET /:workspaceId/admin/scopes/:scopeId/preview
 // ============================================================================
 
-router.get('/:workspaceId/admin/scopes/:scopeId/preview', async (req: Request, res: Response): Promise<void> => {
+router.get('/:workspaceId/admin/scopes/:scopeId/preview', requirePermission('config.edit'), async (req: Request, res: Response): Promise<void> => {
   const workspaceId = req.params.workspaceId as string;
   const scopeId = req.params.scopeId as string;
 
@@ -240,7 +241,7 @@ router.get('/:workspaceId/admin/scopes/:scopeId/preview', async (req: Request, r
 // POST /:workspaceId/admin/scopes/:scopeId/confirm
 // ============================================================================
 
-router.post('/:workspaceId/admin/scopes/:scopeId/confirm', async (req: Request, res: Response): Promise<void> => {
+router.post('/:workspaceId/admin/scopes/:scopeId/confirm', requirePermission('config.edit'), async (req: Request, res: Response): Promise<void> => {
   const workspaceId = req.params.workspaceId as string;
   const scopeId = req.params.scopeId as string;
 
@@ -282,7 +283,7 @@ router.post('/:workspaceId/admin/scopes/:scopeId/confirm', async (req: Request, 
 // POST /:workspaceId/admin/scopes/deals/:dealId/override
 // ============================================================================
 
-router.post('/:workspaceId/admin/scopes/deals/:dealId/override', async (req: Request, res: Response): Promise<void> => {
+router.post('/:workspaceId/admin/scopes/deals/:dealId/override', requirePermission('config.edit'), async (req: Request, res: Response): Promise<void> => {
   const workspaceId = req.params.workspaceId as string;
   const dealId = req.params.dealId as string;
   const { scope_id } = req.body as { scope_id?: string };
@@ -336,7 +337,7 @@ router.post('/:workspaceId/admin/scopes/deals/:dealId/override', async (req: Req
 // DELETE /:workspaceId/admin/scopes/deals/:dealId/override
 // ============================================================================
 
-router.delete('/:workspaceId/admin/scopes/deals/:dealId/override', async (req: Request, res: Response): Promise<void> => {
+router.delete('/:workspaceId/admin/scopes/deals/:dealId/override', requirePermission('config.edit'), async (req: Request, res: Response): Promise<void> => {
   const workspaceId = req.params.workspaceId as string;
   const dealId = req.params.dealId as string;
 

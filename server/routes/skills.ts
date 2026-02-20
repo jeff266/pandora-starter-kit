@@ -10,6 +10,7 @@ import { runScheduledSkills } from '../sync/skill-scheduler.js';
 import { generateWorkbook } from '../delivery/workbook-generator.js';
 import type { SkillResult } from '../skills/types.js';
 import { requireAuth } from '../middleware/auth.js';
+import { requirePermission } from '../middleware/permissions.js';
 import { logChatMessage } from '../lib/chat-logger.js';
 import { buildConversationHistory } from '../lib/conversation-history.js';
 import type { HistoryTurn } from '../lib/conversation-history.js';
@@ -125,7 +126,7 @@ router.post('/skills/:skillId/run', requireAuth, async (req, res) => {
   }
 });
 
-router.post('/:workspaceId/skills/:skillId/run', async (req, res) => {
+router.post('/:workspaceId/skills/:skillId/run', requirePermission('skills.run_manual'), async (req, res) => {
   try {
     const { workspaceId, skillId } = req.params;
     const { params } = req.body || {};
@@ -136,7 +137,7 @@ router.post('/:workspaceId/skills/:skillId/run', async (req, res) => {
   }
 });
 
-router.get('/:workspaceId/skills', async (req, res) => {
+router.get('/:workspaceId/skills/:skillId/results', requirePermission('skills.view_results'), async (req, res) => {
   try {
     const { workspaceId } = req.params;
 
@@ -231,7 +232,7 @@ router.get('/:workspaceId/skills', async (req, res) => {
   }
 });
 
-router.patch('/:workspaceId/skills/:skillId/schedule', async (req, res) => {
+router.patch('/:workspaceId/skills/:skillId/schedule', requirePermission('skills.configure'), async (req, res) => {
   try {
     const { workspaceId, skillId } = req.params;
     const { cron, enabled } = req.body || {};
@@ -258,7 +259,7 @@ router.patch('/:workspaceId/skills/:skillId/schedule', async (req, res) => {
   }
 });
 
-router.get('/:workspaceId/skills/:skillId/runs', async (req, res) => {
+router.get('/:workspaceId/skills/:skillId/runs', requirePermission('skills.view_results'), async (req, res) => {
   try {
     const { workspaceId, skillId } = req.params;
     const limit = parseInt(req.query.limit as string) || 20;
@@ -289,7 +290,7 @@ router.get('/:workspaceId/skills/:skillId/runs', async (req, res) => {
   }
 });
 
-router.get('/:workspaceId/skills/:skillId/runs/:runId', async (req, res) => {
+router.get('/:workspaceId/skills/:skillId/runs/:runId', requirePermission('skills.view_results'), async (req, res) => {
   try {
     const { workspaceId, skillId, runId } = req.params;
 
@@ -332,7 +333,7 @@ router.get('/:workspaceId/skills/:skillId/runs/:runId', async (req, res) => {
  * POST /api/workspaces/:workspaceId/skills/run-all
  * Run all (or filtered) skills for a workspace in staggered sequence
  */
-router.post('/:workspaceId/skills/run-all', async (req, res) => {
+router.post('/:workspaceId/skills/run-all', requirePermission('skills.run_manual'), async (req, res) => {
   try {
     const { workspaceId } = req.params;
     const { skills } = req.body || {};
@@ -388,7 +389,7 @@ router.post('/:workspaceId/skills/run-all', async (req, res) => {
   }
 });
 
-router.get('/:workspaceId/skills/:skillId/runs/:runId/export', async (req, res) => {
+router.get('/:workspaceId/skills/:skillId/runs/:runId/export', requirePermission('skills.view_results'), async (req, res) => {
   try {
     const { workspaceId, skillId, runId } = req.params;
 
@@ -584,7 +585,7 @@ function extractTopDeals(result: SkillResult): Array<{ id: string; name: string 
   return deals;
 }
 
-router.get('/:workspaceId/monte-carlo/pipelines', async (req, res) => {
+router.get('/:workspaceId/monte-carlo/pipelines', requirePermission('skills.view_results'), async (req, res) => {
   try {
     const { workspaceId } = req.params;
     const result = await query<{
@@ -615,7 +616,7 @@ router.get('/:workspaceId/monte-carlo/pipelines', async (req, res) => {
   }
 });
 
-router.get('/:workspaceId/monte-carlo/runs', async (req, res) => {
+router.get('/:workspaceId/monte-carlo/runs', requirePermission('skills.view_results'), async (req, res) => {
   try {
     const { workspaceId } = req.params;
     const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
@@ -659,7 +660,7 @@ router.get('/:workspaceId/monte-carlo/runs', async (req, res) => {
   }
 });
 
-router.get('/:workspaceId/monte-carlo/latest', async (req, res) => {
+router.get('/:workspaceId/monte-carlo/latest', requirePermission('skills.view_results'), async (req, res) => {
   try {
     const { workspaceId } = req.params;
     const pipeline = req.query.pipeline as string | undefined;
@@ -739,7 +740,7 @@ router.get('/:workspaceId/monte-carlo/latest', async (req, res) => {
  * POST /api/workspaces/:workspaceId/monte-carlo/query
  * Ask a natural language question about the most recent Monte Carlo run.
  */
-router.post('/:workspaceId/monte-carlo/query', async (req, res) => {
+router.post('/:workspaceId/monte-carlo/query', requirePermission('skills.run_manual'), async (req, res) => {
   try {
     const { workspaceId } = req.params;
     const {
@@ -1117,7 +1118,7 @@ After the answer, output exactly this JSON on a new line:
  * GET /api/workspaces/:workspaceId/monte-carlo/queries
  * Backward-compat redirect to unified chat history endpoint.
  */
-router.get('/:workspaceId/monte-carlo/queries', (req, res) => {
+router.get('/:workspaceId/monte-carlo/queries', requirePermission('skills.view_results'), (req, res) => {
   const limit = req.query.limit ?? '5';
   res.redirect(307, `/api/workspaces/${req.params.workspaceId}/chat/history?surface=mc_query&limit=${limit}`);
 });
@@ -1127,7 +1128,7 @@ router.get('/:workspaceId/monte-carlo/queries', (req, res) => {
  * Unified chat log across all surfaces (Ask Pandora, MC queries, Slack).
  * Query params: ?surface=mc_query|ask_pandora|slack  ?sessionId=<uuid>  ?limit=20
  */
-router.get('/:workspaceId/chat/history', async (req, res) => {
+router.get('/:workspaceId/chat/history', requirePermission('data.deals_view'), async (req, res) => {
   try {
     const { workspaceId } = req.params;
     const { surface, sessionId, limit = '20' } = req.query;

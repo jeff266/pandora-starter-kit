@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from 'express';
+import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { query } from '../db.js';
 import {
   getContext,
@@ -46,7 +47,7 @@ async function validateWorkspace(workspaceId: string, res: Response): Promise<bo
   return true;
 }
 
-router.get('/:workspaceId/context', async (req: Request<WorkspaceParams>, res: Response) => {
+router.get('/:workspaceId/context', requirePermission('config.view'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     if (!(await validateWorkspace(req.params.workspaceId, res))) return;
     const context = await getContext(req.params.workspaceId);
@@ -58,7 +59,7 @@ router.get('/:workspaceId/context', async (req: Request<WorkspaceParams>, res: R
   }
 });
 
-router.get('/:workspaceId/context/version', async (req: Request<WorkspaceParams>, res: Response) => {
+router.get('/:workspaceId/context/version', requirePermission('config.view'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     if (!(await validateWorkspace(req.params.workspaceId, res))) return;
     const version = await getContextVersion(req.params.workspaceId);
@@ -70,7 +71,7 @@ router.get('/:workspaceId/context/version', async (req: Request<WorkspaceParams>
   }
 });
 
-router.get('/:workspaceId/context/:section', async (req: Request<SectionParams>, res: Response) => {
+router.get('/:workspaceId/context/:section', requirePermission('config.view'), async (req: Request<SectionParams>, res: Response) => {
   try {
     if (!(await validateWorkspace(req.params.workspaceId, res))) return;
 
@@ -94,7 +95,7 @@ router.get('/:workspaceId/context/:section', async (req: Request<SectionParams>,
   }
 });
 
-router.put('/:workspaceId/context/:section', async (req: Request<SectionParams>, res: Response) => {
+router.put('/:workspaceId/context/:section', requirePermission('config.edit'), async (req: Request<SectionParams>, res: Response) => {
   try {
     if (!(await validateWorkspace(req.params.workspaceId, res))) return;
 
@@ -128,7 +129,7 @@ router.put('/:workspaceId/context/:section', async (req: Request<SectionParams>,
   }
 });
 
-router.post('/:workspaceId/context/onboard', async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/context/onboard', requirePermission('config.edit'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     if (!(await validateWorkspace(req.params.workspaceId, res))) return;
 
@@ -188,7 +189,7 @@ router.post('/:workspaceId/context/onboard', async (req: Request<WorkspaceParams
 // Forecast Thresholds API
 // ============================================================================
 
-router.get('/:workspaceId/forecast-thresholds', async (req: Request<WorkspaceParams>, res: Response) => {
+router.get('/:workspaceId/forecast-thresholds', requirePermission('config.view'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     if (!(await validateWorkspace(req.params.workspaceId, res))) return;
 
@@ -212,7 +213,7 @@ router.get('/:workspaceId/forecast-thresholds', async (req: Request<WorkspacePar
   }
 });
 
-router.put('/:workspaceId/forecast-thresholds', async (req: Request<WorkspaceParams>, res: Response) => {
+router.put('/:workspaceId/forecast-thresholds', requirePermission('config.edit'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     if (!(await validateWorkspace(req.params.workspaceId, res))) return;
 
@@ -259,7 +260,7 @@ router.put('/:workspaceId/forecast-thresholds', async (req: Request<WorkspacePar
 // Quota Periods API
 // ============================================================================
 
-router.get('/:workspaceId/quotas/periods', async (req: Request<WorkspaceParams>, res: Response) => {
+router.get('/:workspaceId/quotas/periods', requirePermission('config.view'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     if (!(await validateWorkspace(req.params.workspaceId, res))) return;
 
@@ -287,7 +288,7 @@ router.get('/:workspaceId/quotas/periods', async (req: Request<WorkspaceParams>,
   }
 });
 
-router.post('/:workspaceId/quotas/periods', async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/quotas/periods', requirePermission('config.edit'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     if (!(await validateWorkspace(req.params.workspaceId, res))) return;
 
@@ -319,7 +320,7 @@ router.post('/:workspaceId/quotas/periods', async (req: Request<WorkspaceParams>
   }
 });
 
-router.put('/:workspaceId/quotas/periods/:periodId', async (req: Request<WorkspaceParams & { periodId: string }>, res: Response) => {
+router.put('/:workspaceId/quotas/periods/:periodId', requirePermission('config.edit'), async (req: Request<WorkspaceParams & { periodId: string }>, res: Response) => {
   try {
     if (!(await validateWorkspace(req.params.workspaceId, res))) return;
 
@@ -345,7 +346,7 @@ router.put('/:workspaceId/quotas/periods/:periodId', async (req: Request<Workspa
   }
 });
 
-router.delete('/:workspaceId/quotas/periods/:periodId', async (req: Request<WorkspaceParams & { periodId: string }>, res: Response) => {
+router.delete('/:workspaceId/quotas/periods/:periodId', requirePermission('config.edit'), async (req: Request<WorkspaceParams & { periodId: string }>, res: Response) => {
   try {
     if (!(await validateWorkspace(req.params.workspaceId, res))) return;
 
@@ -366,7 +367,7 @@ router.delete('/:workspaceId/quotas/periods/:periodId', async (req: Request<Work
 // Rep Quotas API
 // ============================================================================
 
-router.get('/:workspaceId/quotas/periods/:periodId/reps', async (req: Request<WorkspaceParams & { periodId: string }>, res: Response) => {
+router.get('/:workspaceId/quotas/periods/:periodId/reps', requirePermission('config.view'), async (req: Request<WorkspaceParams & { periodId: string }>, res: Response) => {
   try {
     if (!(await validateWorkspace(req.params.workspaceId, res))) return;
 
@@ -391,7 +392,7 @@ router.get('/:workspaceId/quotas/periods/:periodId/reps', async (req: Request<Wo
   }
 });
 
-router.put('/:workspaceId/quotas/periods/:periodId/reps/:repName', async (req: Request<WorkspaceParams & { periodId: string; repName: string }>, res: Response) => {
+router.put('/:workspaceId/quotas/periods/:periodId/reps/:repName', requirePermission('config.edit'), async (req: Request<WorkspaceParams & { periodId: string; repName: string }>, res: Response) => {
   try {
     if (!(await validateWorkspace(req.params.workspaceId, res))) return;
 
@@ -418,7 +419,7 @@ router.put('/:workspaceId/quotas/periods/:periodId/reps/:repName', async (req: R
   }
 });
 
-router.delete('/:workspaceId/quotas/periods/:periodId/reps/:repName', async (req: Request<WorkspaceParams & { periodId: string; repName: string }>, res: Response) => {
+router.delete('/:workspaceId/quotas/periods/:periodId/reps/:repName', requirePermission('config.edit'), async (req: Request<WorkspaceParams & { periodId: string; repName: string }>, res: Response) => {
   try {
     if (!(await validateWorkspace(req.params.workspaceId, res))) return;
 
@@ -436,7 +437,7 @@ router.delete('/:workspaceId/quotas/periods/:periodId/reps/:repName', async (req
   }
 });
 
-router.post('/:workspaceId/bowtie/discover', async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/bowtie/discover', requirePermission('config.edit'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     if (!(await validateWorkspace(req.params.workspaceId, res))) return;
     const result = await discoverBowtieStages(req.params.workspaceId);
@@ -448,7 +449,7 @@ router.post('/:workspaceId/bowtie/discover', async (req: Request<WorkspaceParams
   }
 });
 
-router.put('/:workspaceId/bowtie', async (req: Request<WorkspaceParams>, res: Response) => {
+router.put('/:workspaceId/bowtie', requirePermission('config.edit'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     if (!(await validateWorkspace(req.params.workspaceId, res))) return;
     const bowtieData = req.body;
@@ -466,7 +467,7 @@ router.put('/:workspaceId/bowtie', async (req: Request<WorkspaceParams>, res: Re
   }
 });
 
-router.get('/:workspaceId/bowtie', async (req: Request<WorkspaceParams>, res: Response) => {
+router.get('/:workspaceId/bowtie', requirePermission('config.view'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     if (!(await validateWorkspace(req.params.workspaceId, res))) return;
     const result = await getBowtieDiscovery(req.params.workspaceId);

@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from 'express';
+import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { query } from '../db.js';
 import { getConnectorCredentials } from '../lib/credential-store.js';
 import { HubSpotClient } from '../connectors/hubspot/client.js';
@@ -10,7 +11,7 @@ import { getScopeWhereClause, type ActiveScope } from '../config/scope-loader.js
 
 const router = Router();
 
-router.get('/:workspaceId/crm/link-info', async (req: Request, res: Response): Promise<void> => {
+router.get('/:workspaceId/crm/link-info', requirePermission('skills.view_results'), async (req: Request, res: Response): Promise<void> => {
   try {
     const { workspaceId } = req.params;
     const connResult = await query(
@@ -77,7 +78,7 @@ router.get('/:workspaceId/crm/link-info', async (req: Request, res: Response): P
 
 const SEVERITY_ORDER: Record<string, number> = { act: 1, watch: 2, notable: 3, info: 4 };
 
-router.get('/:workspaceId/findings/summary', async (req: Request, res: Response): Promise<void> => {
+router.get('/:workspaceId/findings/summary', requirePermission('skills.view_results'), async (req: Request, res: Response): Promise<void> => {
   try {
     const { workspaceId } = req.params;
 
@@ -136,7 +137,7 @@ router.get('/:workspaceId/findings/summary', async (req: Request, res: Response)
   }
 });
 
-router.get('/:workspaceId/findings', async (req: Request, res: Response): Promise<void> => {
+router.get('/:workspaceId/findings', requirePermission('skills.view_results'), async (req: Request, res: Response): Promise<void> => {
   try {
     const { workspaceId } = req.params;
     const q = req.query;
@@ -259,7 +260,7 @@ router.get('/:workspaceId/findings', async (req: Request, res: Response): Promis
   }
 });
 
-router.get('/:workspaceId/pipeline/pipelines', async (req: Request, res: Response): Promise<void> => {
+router.get('/:workspaceId/pipeline/pipelines', requirePermission('data.deals_view'), async (req: Request, res: Response): Promise<void> => {
   try {
     const { workspaceId } = req.params;
 
@@ -340,7 +341,7 @@ router.get('/:workspaceId/pipeline/pipelines', async (req: Request, res: Respons
   }
 });
 
-router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response): Promise<void> => {
+router.get('/:workspaceId/pipeline/snapshot', requirePermission('data.deals_view'), async (req: Request, res: Response): Promise<void> => {
   try {
     const { workspaceId } = req.params;
 
@@ -799,7 +800,7 @@ function normalizeSeverities(input: string): string[] {
   }).filter(Boolean);
 }
 
-router.patch('/:workspaceId/findings/:findingId/resolve', async (req: Request, res: Response): Promise<void> => {
+router.patch('/:workspaceId/findings/:findingId/resolve', requirePermission('skills.view_results'), async (req: Request, res: Response): Promise<void> => {
   try {
     const { workspaceId, findingId } = req.params;
     const { resolution_method } = req.body || {};
@@ -840,7 +841,7 @@ router.patch('/:workspaceId/findings/:findingId/resolve', async (req: Request, r
   }
 });
 
-router.post('/:workspaceId/findings/:findingId/snooze', async (req: Request, res: Response): Promise<void> => {
+router.post('/:workspaceId/findings/:findingId/snooze', requirePermission('skills.view_results'), async (req: Request, res: Response): Promise<void> => {
   try {
     const { workspaceId, findingId } = req.params;
     const { days } = req.body || {};
@@ -868,7 +869,7 @@ router.post('/:workspaceId/findings/:findingId/snooze', async (req: Request, res
   }
 });
 
-router.patch('/:workspaceId/findings/:findingId', async (req: Request, res: Response): Promise<void> => {
+router.patch('/:workspaceId/findings/:findingId', requirePermission('skills.view_results'), async (req: Request, res: Response): Promise<void> => {
   try {
     const { workspaceId, findingId } = req.params;
     const body = req.body || {};
@@ -923,7 +924,7 @@ router.patch('/:workspaceId/findings/:findingId', async (req: Request, res: Resp
   }
 });
 
-router.post('/:workspaceId/admin/backfill-findings', async (req: Request, res: Response): Promise<void> => {
+router.post('/:workspaceId/admin/backfill-findings', requirePermission('config.edit'), async (req: Request, res: Response): Promise<void> => {
   try {
     const { workspaceId } = req.params;
 

@@ -4,6 +4,7 @@ import cors from "cors";
 import rateLimit from "express-rate-limit";
 import { verifyConnection } from "./db.js";
 import { requireWorkspaceAccess } from "./middleware/auth.js";
+import { attachWorkspaceContext } from "./middleware/workspace-context.js";
 import healthRouter, { setAPHealthChecker, setServerReady } from "./routes/health.js";
 import workspacesRouter from "./routes/workspaces.js";
 import connectorsRouter from "./routes/connectors.js";
@@ -70,6 +71,9 @@ import analysisRouter from './routes/analysis.js';
 import userAuthRouter from './routes/user-auth.js';
 import consultantRouter from './routes/consultant.js';
 import membersRouter from './routes/members.js';
+import rolesRouter from './routes/roles.js';
+import flagsRouter from './routes/flags.js';
+import agentLifecycleRouter from './routes/agent-lifecycle.js';
 import dealIntelligenceRouter from './routes/deal-intelligence.js';
 import toolsRouter from './routes/tools.js';
 import chatRouter from './routes/chat.js';
@@ -188,6 +192,7 @@ app.use("/api/workspaces", workspacesRouter);
 
 const workspaceApiRouter = express.Router();
 workspaceApiRouter.use(requireWorkspaceAccess);
+workspaceApiRouter.use(attachWorkspaceContext);
 
 workspaceApiRouter.use((req, _res, next) => {
   const path = req.path;
@@ -240,6 +245,9 @@ workspaceApiRouter.use(deliverablesRouter);
 workspaceApiRouter.use(downloadsRouter);
 workspaceApiRouter.use('/workspace-downloads', workspaceDownloadsRouter);
 workspaceApiRouter.use('/members', membersRouter);
+workspaceApiRouter.use('/roles', rolesRouter);
+workspaceApiRouter.use('/flags', flagsRouter);
+workspaceApiRouter.use('/agents', agentLifecycleRouter);
 workspaceApiRouter.use(dealIntelligenceRouter);
 workspaceApiRouter.use(toolsRouter);
 workspaceApiRouter.use(chatRouter);

@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from 'express';
+import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { query } from '../db.js';
 import { computeGap, getActiveTarget } from '../analysis/gap-calculator.js';
 
@@ -9,7 +10,7 @@ const router = Router();
 // Returns all active targets for workspace
 // ============================================================================
 
-router.get('/:workspaceId/targets', async (req: Request, res: Response): Promise<void> => {
+router.get('/:workspaceId/targets', requirePermission('data.deals_view'), async (req: Request, res: Response): Promise<void> => {
   const { workspaceId } = req.params;
   const { period_type, active_only } = req.query;
 
@@ -45,7 +46,7 @@ router.get('/:workspaceId/targets', async (req: Request, res: Response): Promise
 // Create a new target (deactivates prior target for same period if exists)
 // ============================================================================
 
-router.post('/:workspaceId/targets', async (req: Request, res: Response): Promise<void> => {
+router.post('/:workspaceId/targets', requirePermission('config.edit'), async (req: Request, res: Response): Promise<void> => {
   const { workspaceId } = req.params;
   const { metric, period_type, period_start, period_end, period_label, amount, notes, set_by } = req.body as {
     metric: string;
@@ -123,7 +124,7 @@ router.post('/:workspaceId/targets', async (req: Request, res: Response): Promis
 // Update target amount or notes (creates revision)
 // ============================================================================
 
-router.patch('/:workspaceId/targets/:targetId', async (req: Request, res: Response): Promise<void> => {
+router.patch('/:workspaceId/targets/:targetId', requirePermission('config.edit'), async (req: Request, res: Response): Promise<void> => {
   const { workspaceId, targetId } = req.params;
   const { amount, notes, set_by } = req.body as { amount?: number; notes?: string; set_by?: string };
 
@@ -185,7 +186,7 @@ router.patch('/:workspaceId/targets/:targetId', async (req: Request, res: Respon
 // Returns GapCalculation for the active target
 // ============================================================================
 
-router.get('/:workspaceId/targets/gap', async (req: Request, res: Response): Promise<void> => {
+router.get('/:workspaceId/targets/gap', requirePermission('data.deals_view'), async (req: Request, res: Response): Promise<void> => {
   const workspaceId = req.params.workspaceId as string;
   const { period_start, period_end } = req.query;
 
@@ -214,7 +215,7 @@ router.get('/:workspaceId/targets/gap', async (req: Request, res: Response): Pro
 // Returns all active quotas, grouped by period
 // ============================================================================
 
-router.get('/:workspaceId/quotas', async (req: Request, res: Response): Promise<void> => {
+router.get('/:workspaceId/quotas', requirePermission('data.deals_view'), async (req: Request, res: Response): Promise<void> => {
   const { workspaceId } = req.params;
   const { period_start } = req.query;
 
@@ -246,7 +247,7 @@ router.get('/:workspaceId/quotas', async (req: Request, res: Response): Promise<
 // Upsert multiple rep quotas (paste-from-spreadsheet flow)
 // ============================================================================
 
-router.post('/:workspaceId/quotas/bulk', async (req: Request, res: Response): Promise<void> => {
+router.post('/:workspaceId/quotas/bulk', requirePermission('config.edit'), async (req: Request, res: Response): Promise<void> => {
   const { workspaceId } = req.params;
   const { quotas, set_by } = req.body as {
     quotas: {
@@ -326,7 +327,7 @@ router.post('/:workspaceId/quotas/bulk', async (req: Request, res: Response): Pr
 // Update single quota amount
 // ============================================================================
 
-router.patch('/:workspaceId/quotas/:quotaId', async (req: Request, res: Response): Promise<void> => {
+router.patch('/:workspaceId/quotas/:quotaId', requirePermission('config.edit'), async (req: Request, res: Response): Promise<void> => {
   const { workspaceId, quotaId } = req.params;
   const { amount, set_by } = req.body as { amount: number; set_by?: string };
 
@@ -390,7 +391,7 @@ router.patch('/:workspaceId/quotas/:quotaId', async (req: Request, res: Response
 // Returns detected revenue model with confidence and signals
 // ============================================================================
 
-router.get('/:workspaceId/targets/revenue-model', async (req: Request, res: Response): Promise<void> => {
+router.get('/:workspaceId/targets/revenue-model', requirePermission('data.deals_view'), async (req: Request, res: Response): Promise<void> => {
   const workspaceId = req.params.workspaceId as string;
 
   try {
@@ -426,7 +427,7 @@ router.get('/:workspaceId/targets/revenue-model', async (req: Request, res: Resp
 // Override detected revenue model
 // ============================================================================
 
-router.patch('/:workspaceId/targets/revenue-model', async (req: Request, res: Response): Promise<void> => {
+router.patch('/:workspaceId/targets/revenue-model', requirePermission('config.edit'), async (req: Request, res: Response): Promise<void> => {
   const { workspaceId } = req.params;
   const { metric } = req.body as { metric: string };
 
