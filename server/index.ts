@@ -22,6 +22,8 @@ import webhooksRouter from "./routes/webhooks.js";
 import llmConfigRouter from "./routes/llm-config.js";
 import salesforceAuthRouter from "./routes/salesforce-auth.js";
 import salesforceSyncRouter from "./routes/salesforce-sync.js";
+import hubspotAuthRouter from "./routes/hubspot-auth.js";
+import googleAuthRouter from "./routes/google-auth.js";
 import webhookConfigRouter from "./routes/webhook-config.js";
 import salesRosterRouter from "./routes/sales-roster.js";
 import linkerRouter from "./routes/linker.js";
@@ -188,6 +190,11 @@ app.use("/health", healthRouter);
 app.use("/api/slack/events", slackEventsRouter);
 app.use("/api/slack/interactions", slackInteractionsRouter);
 
+// OAuth routes - PUBLIC (no auth required for browser redirects)
+app.use("/api/auth/hubspot", hubspotAuthRouter);
+app.use("/api/auth/salesforce", salesforceAuthRouter);
+app.use("/api/auth/google", googleAuthRouter);
+
 app.use("/api/auth", userAuthRouter);
 app.use("/api/users/me/notifications", userNotificationsRouter);
 
@@ -269,7 +276,6 @@ app.use("/api/workspaces", workspaceApiRouter);
 
 app.use("/api", skillsRouter);
 app.use("/api/webhooks", webhooksRouter);
-app.use("/api/auth/salesforce", salesforceAuthRouter);
 app.use("/api", quotasRouter);
 app.use("/api/funnel", funnelRouter);
 app.use("/api", agentsGlobalRouter);
