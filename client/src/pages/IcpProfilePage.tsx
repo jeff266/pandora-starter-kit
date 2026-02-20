@@ -116,6 +116,50 @@ interface ChangelogEntry {
   impact?: string;
 }
 
+interface TaxonomyDimension {
+  key: string;
+  label: string;
+  ideal_values: string[];
+  win_rate: number;
+  lift: number;
+  why_it_matters: string;
+  data_source: string;
+}
+
+interface TaxonomyNegativeIndicator {
+  dimension: string;
+  value: string;
+  win_rate: number;
+  recommendation: string;
+}
+
+interface TaxonomyArchetype {
+  name: string;
+  deal_count: number;
+  description: string;
+  example_accounts: string[];
+}
+
+interface TaxonomyReport {
+  icp_summary: string;
+  top_dimensions: TaxonomyDimension[];
+  negative_indicators: TaxonomyNegativeIndicator[];
+  archetypes: TaxonomyArchetype[];
+  confidence: string;
+  confidence_notes: string;
+}
+
+interface TaxonomyData {
+  id: string;
+  scope_id: string;
+  vertical: string;
+  taxonomy_report: TaxonomyReport;
+  accounts_analyzed: number;
+  won_deals_count: number;
+  serper_searches: number;
+  generated_at: string;
+}
+
 interface ToastItem {
   id: number;
   message: string;
@@ -668,6 +712,311 @@ function InlineEditArea({
   );
 }
 
+// ─── Taxonomy Pro View ────────────────────────────────────────────────────────
+
+function TaxonomyProView({ addToast }: { addToast: (msg: string, type: 'success' | 'error' | 'info') => void }) {
+  const [taxonomy, setTaxonomy] = useState<TaxonomyData | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.get('/icp/taxonomy')
+      .then((data: unknown) => {
+        const resp = data as { taxonomy?: TaxonomyData | null };
+        setTaxonomy(resp.taxonomy ?? null);
+      })
+      .catch((err: Error) => {
+        addToast(err.message || 'Failed to load taxonomy data', 'error');
+        setTaxonomy(null);
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) {
+    return (
+      <div style={{ padding: 60, textAlign: 'center' }}>
+        <div style={{
+          width: 28, height: 28, border: `3px solid ${colors.border}`,
+          borderTopColor: colors.accent, borderRadius: '50%',
+          animation: 'spin 0.8s linear infinite', margin: '0 auto 12px',
+        }} />
+        <div style={{ fontSize: 13, color: colors.textMuted }}>Loading taxonomy...</div>
+      </div>
+    );
+  }
+
+  if (!taxonomy || !taxonomy.taxonomy_report) {
+    return (
+      <div style={{
+        padding: '40px 20px', textAlign: 'center', color: colors.textMuted,
+        background: colors.surfaceHover, border: `1px solid ${colors.border}`,
+        borderRadius: 10, fontSize: 14,
+      }}>
+        <div style={{ fontSize: 18, marginBottom: 8 }}>No taxonomy data yet</div>
+        <div style={{ fontSize: 13 }}>
+          Run the ICP Taxonomy Builder skill to generate web-enriched customer intelligence.
+        </div>
+      </div>
+    );
+  }
+
+  const report = taxonomy.taxonomy_report;
+  const generatedDate = new Date(taxonomy.generated_at).toLocaleDateString('en-US', {
+    month: 'short', day: 'numeric', year: 'numeric',
+  });
+
+  const confidenceColor = report.confidence === 'high' ? colors.green
+    : report.confidence === 'medium' ? colors.yellow : colors.red;
+
+  return (
+    <div>
+      {/* ICP Summary Banner */}
+      <div style={{
+        background: 'linear-gradient(135deg, rgba(100,136,234,0.08), rgba(100,136,234,0.02))',
+        border: `1px solid ${colors.accent}33`,
+        borderRadius: 10, padding: '20px 24px', marginBottom: 24,
+      }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          marginBottom: 12,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{
+              fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
+              color: colors.accent, textTransform: 'uppercase',
+            }}>
+              ICP Summary
+            </span>
+            <span style={{
+              fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 10,
+              background: taxonomy.vertical === 'healthcare' ? '#052E16' : colors.surfaceHover,
+              color: taxonomy.vertical === 'healthcare' ? colors.green : colors.textMuted,
+              border: `1px solid ${taxonomy.vertical === 'healthcare' ? '#166534' : colors.border}`,
+              textTransform: 'capitalize',
+            }}>
+              {taxonomy.vertical}
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{
+              fontSize: 11, color: confidenceColor, fontWeight: 600,
+              textTransform: 'capitalize',
+            }}>
+              {report.confidence} confidence
+            </span>
+            <span style={{ fontSize: 11, color: colors.textMuted }}>
+              {generatedDate}
+            </span>
+          </div>
+        </div>
+        <div style={{ fontSize: 14, color: colors.text, lineHeight: 1.6 }}>
+          {report.icp_summary}
+        </div>
+        {report.confidence_notes && (
+          <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 8, fontStyle: 'italic' }}>
+            {report.confidence_notes}
+          </div>
+        )}
+      </div>
+
+      {/* Stats row */}
+      <div style={{ display: 'flex', gap: 12, marginBottom: 24 }}>
+        {[
+          { label: 'Accounts Analyzed', value: taxonomy.accounts_analyzed },
+          { label: 'Won Deals', value: taxonomy.won_deals_count },
+          { label: 'Web Searches', value: taxonomy.serper_searches },
+          { label: 'Dimensions', value: report.top_dimensions?.length ?? 0 },
+        ].map((stat, i) => (
+          <div key={i} style={{
+            flex: 1, padding: '14px 16px', background: colors.surface,
+            border: `1px solid ${colors.border}`, borderRadius: 8, textAlign: 'center',
+          }}>
+            <div style={{ fontSize: 20, fontWeight: 700, color: colors.text, fontFamily: fonts.mono }}>
+              {stat.value}
+            </div>
+            <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 4 }}>
+              {stat.label}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Top Dimensions */}
+      {report.top_dimensions && report.top_dimensions.length > 0 && (
+        <>
+          <div style={{
+            fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
+            color: colors.textDim, textTransform: 'uppercase',
+            marginBottom: 12, marginTop: 8,
+          }}>
+            Top Dimensions
+          </div>
+          <div style={{
+            border: `1px solid ${colors.border}`, borderRadius: 8, overflow: 'hidden',
+            marginBottom: 24,
+          }}>
+            <div style={{
+              display: 'grid', gridTemplateColumns: '140px 1fr 80px 60px',
+              padding: '8px 14px', background: colors.surfaceRaised,
+              fontSize: 11, fontWeight: 600, color: colors.textMuted, letterSpacing: '0.06em',
+            }}>
+              <span>Dimension</span>
+              <span>Ideal Values</span>
+              <span style={{ textAlign: 'right' }}>Win Rate</span>
+              <span style={{ textAlign: 'right' }}>Lift</span>
+            </div>
+            {report.top_dimensions.map((dim, i) => (
+              <div key={i}>
+                <div style={{
+                  display: 'grid', gridTemplateColumns: '140px 1fr 80px 60px',
+                  padding: '12px 14px', alignItems: 'center',
+                  borderTop: `1px solid ${colors.border}`, fontSize: 13,
+                }}>
+                  <span style={{ color: colors.text, fontWeight: 500 }}>{dim.label}</span>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {dim.ideal_values.map((v, j) => (
+                      <span key={j} style={{
+                        fontSize: 11, padding: '2px 8px', borderRadius: 4,
+                        background: colors.surfaceHover, color: colors.text,
+                        border: `1px solid ${colors.border}`,
+                      }}>
+                        {v}
+                      </span>
+                    ))}
+                  </div>
+                  <span style={{
+                    textAlign: 'right', fontFamily: fonts.mono, color: colors.textSecondary,
+                  }}>
+                    {dim.win_rate > 0 ? `${Math.round(dim.win_rate * 100)}%` : '—'}
+                  </span>
+                  <span style={{
+                    textAlign: 'right', fontFamily: fonts.mono,
+                    color: dim.lift >= 1.5 ? colors.green : colors.textSecondary,
+                    fontWeight: dim.lift >= 1.5 ? 600 : 400,
+                  }}>
+                    {dim.lift > 0 ? `${dim.lift.toFixed(1)}x` : '—'}
+                  </span>
+                </div>
+                {dim.why_it_matters && (
+                  <div style={{
+                    padding: '0 14px 10px 14px', fontSize: 12,
+                    color: colors.textMuted, lineHeight: 1.5,
+                  }}>
+                    {dim.why_it_matters}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* Customer Archetypes */}
+      {report.archetypes && report.archetypes.length > 0 && (
+        <>
+          <div style={{
+            fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
+            color: colors.textDim, textTransform: 'uppercase',
+            marginBottom: 12,
+          }}>
+            Customer Archetypes
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 24 }}>
+            {report.archetypes.map((arch, i) => (
+              <div key={i} style={{
+                padding: '16px 18px', background: colors.surface,
+                border: `1px solid ${colors.border}`, borderRadius: 10,
+              }}>
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  marginBottom: 8,
+                }}>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>
+                    {arch.name}
+                  </span>
+                  <span style={{
+                    fontSize: 11, fontFamily: fonts.mono, color: colors.accent,
+                    fontWeight: 600,
+                  }}>
+                    ~{arch.deal_count} deals
+                  </span>
+                </div>
+                <div style={{ fontSize: 13, color: colors.textSecondary, lineHeight: 1.5, marginBottom: 10 }}>
+                  {arch.description}
+                </div>
+                {arch.example_accounts && arch.example_accounts.length > 0 && (
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {arch.example_accounts.slice(0, 5).map((acc, j) => (
+                      <span key={j} style={{
+                        fontSize: 11, padding: '3px 10px', borderRadius: 12,
+                        background: 'rgba(100,136,234,0.08)',
+                        border: `1px solid ${colors.accent}22`,
+                        color: colors.accent,
+                      }}>
+                        {acc}
+                      </span>
+                    ))}
+                    {arch.example_accounts.length > 5 && (
+                      <span style={{
+                        fontSize: 11, padding: '3px 10px', color: colors.textMuted,
+                      }}>
+                        +{arch.example_accounts.length - 5} more
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* Negative Indicators */}
+      {report.negative_indicators && report.negative_indicators.length > 0 && (
+        <>
+          <div style={{
+            fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
+            color: colors.textDim, textTransform: 'uppercase',
+            marginBottom: 12,
+          }}>
+            Negative Indicators
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 24 }}>
+            {report.negative_indicators.map((neg, i) => (
+              <div key={i} style={{
+                display: 'flex', alignItems: 'center', gap: 14,
+                padding: '10px 14px',
+                background: 'rgba(239,68,68,0.04)',
+                border: `1px solid rgba(239,68,68,0.15)`,
+                borderRadius: 8, fontSize: 13,
+              }}>
+                <span style={{ color: colors.red, flexShrink: 0 }}>!</span>
+                <div style={{ flex: 1 }}>
+                  <span style={{ color: colors.text, fontWeight: 500 }}>
+                    {neg.value}
+                  </span>
+                  <span style={{ color: colors.textMuted }}> ({neg.dimension})</span>
+                  {neg.recommendation && (
+                    <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
+                      {neg.recommendation}
+                    </div>
+                  )}
+                </div>
+                <span style={{
+                  fontFamily: fonts.mono, fontSize: 12,
+                  color: neg.win_rate === 0 ? colors.red : colors.yellow,
+                  fontWeight: 600, flexShrink: 0,
+                }}>
+                  {Math.round(neg.win_rate * 100)}% win
+                </span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── Dossier View ─────────────────────────────────────────────────────────────
 
 function DossierView({ addToast, conversationsConnected }: { addToast: (msg: string, type: 'success' | 'error' | 'info') => void; conversationsConnected: boolean }) {
@@ -676,6 +1025,7 @@ function DossierView({ addToast, conversationsConnected }: { addToast: (msg: str
   const [rerunning, setRerunning] = useState(false);
   const [showChangelog, setShowChangelog] = useState(false);
   const [editingSection, setEditingSection] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'advanced' | 'pro'>('advanced');
 
   const fetchProfile = useCallback(async () => {
     try {
@@ -871,6 +1221,39 @@ function DossierView({ addToast, conversationsConnected }: { addToast: (msg: str
         </div>
       )}
 
+      {/* Tab Switcher */}
+      <div style={{
+        display: 'flex', gap: 0, marginBottom: 24,
+        borderBottom: `1px solid ${colors.border}`,
+      }}>
+        {(['advanced', 'pro'] as const).map(tab => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            style={{
+              padding: '10px 20px',
+              background: 'none',
+              border: 'none',
+              borderBottom: `2px solid ${activeTab === tab ? colors.accent : 'transparent'}`,
+              color: activeTab === tab ? colors.text : colors.textMuted,
+              fontSize: 13,
+              fontWeight: activeTab === tab ? 600 : 400,
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+              textTransform: 'capitalize',
+              marginBottom: -1,
+            }}
+          >
+            {tab === 'advanced' ? 'Advanced' : 'Pro'}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === 'pro' && (
+        <TaxonomyProView addToast={addToast} />
+      )}
+
+      {activeTab === 'advanced' && (<>
       {/* IDEAL COMPANY */}
       <SectionHeader title="Ideal Company" onEdit={() => setEditingSection(editingSection === 'industries' ? null : 'industries')} />
       {editingSection === 'industries' && (
@@ -1093,7 +1476,7 @@ function DossierView({ addToast, conversationsConnected }: { addToast: (msg: str
       <SectionHeader title="Score Weights" onEdit={() => setEditingSection(editingSection === 'weights' ? null : 'weights')} />
       {editingSection === 'weights' && (
         <InlineEditArea
-          initial={JSON.stringify(weights, null, 2)}
+          initial={JSON.stringify(rawWeights, null, 2)}
           onSave={(v, n) => handleSave('scoring_weights', v, n)}
           onCancel={() => setEditingSection(null)}
         />
@@ -1132,6 +1515,8 @@ function DossierView({ addToast, conversationsConnected }: { addToast: (msg: str
           No scoring weights configured.
         </div>
       )}
+
+      </>)}
 
       {showChangelog && <ChangelogModal onClose={() => setShowChangelog(false)} />}
     </div>

@@ -370,4 +370,43 @@ router.get('/:workspaceId/icp/changelog', async (req: Request, res: Response): P
   }
 });
 
+// ============================================================================
+// GET /:workspaceId/icp/taxonomy
+// Returns the latest ICP taxonomy report for the Pro view
+// ============================================================================
+
+router.get('/:workspaceId/icp/taxonomy', async (req: Request, res: Response): Promise<void> => {
+  const { workspaceId } = req.params;
+
+  try {
+    const result = await query(
+      `SELECT
+        id,
+        scope_id,
+        vertical,
+        taxonomy_report,
+        account_classifications,
+        accounts_analyzed,
+        won_deals_count,
+        serper_searches,
+        generated_at
+      FROM icp_taxonomy
+      WHERE workspace_id = $1
+      ORDER BY generated_at DESC
+      LIMIT 1`,
+      [workspaceId]
+    );
+
+    if (result.rows.length === 0) {
+      res.json({ taxonomy: null });
+      return;
+    }
+
+    res.json({ taxonomy: result.rows[0] });
+  } catch (err) {
+    console.error('[icp] Error fetching taxonomy:', err);
+    res.status(500).json({ error: 'Failed to fetch ICP taxonomy' });
+  }
+});
+
 export default router;
