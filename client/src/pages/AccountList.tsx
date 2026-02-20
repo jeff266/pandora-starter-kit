@@ -291,6 +291,8 @@ export default function AccountList() {
   const [search, setSearch] = useState('');
   const [industryFilter, setIndustryFilter] = useState('all');
   const [ownerFilter, setOwnerFilter] = useState('all');
+  const [domainFilter, setDomainFilter] = useState('all');
+  const [scoreFilter, setScoreFilter] = useState('all');
 
   const [sortField, setSortField] = useState<SortField>('name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
@@ -344,6 +346,10 @@ export default function AccountList() {
     Array.from(new Set(accounts.map(a => a.owner).filter(Boolean))).sort(),
   [accounts]);
 
+  const uniqueDomains = useMemo(() =>
+    Array.from(new Set(accounts.map(a => a.domain).filter(Boolean))).sort(),
+  [accounts]);
+
   const hasIndustryData = accounts.some(a => a.industry);
   const hasDealData = accounts.some(a => a.open_deal_count > 0);
   const hasPipelineData = accounts.some(a => a.total_pipeline > 0);
@@ -358,6 +364,12 @@ export default function AccountList() {
     if (ownerFilter !== 'all') {
       result = result.filter(a => a.owner === ownerFilter);
     }
+    if (domainFilter !== 'all') {
+      result = result.filter(a => a.domain === domainFilter);
+    }
+    if (scoreFilter !== 'all') {
+      result = result.filter(a => a.grade === scoreFilter);
+    }
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       result = result.filter(a =>
@@ -365,7 +377,7 @@ export default function AccountList() {
       );
     }
     return result;
-  }, [accounts, industryFilter, ownerFilter, search]);
+  }, [accounts, industryFilter, ownerFilter, domainFilter, scoreFilter, search]);
 
   const sorted = useMemo(() => {
     const arr = [...filtered];
@@ -395,7 +407,7 @@ export default function AccountList() {
   const totalPages = Math.ceil(sorted.length / PAGE_SIZE);
   const pageAccounts = sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
-  useEffect(() => { setPage(0); }, [search, industryFilter, ownerFilter]);
+  useEffect(() => { setPage(0); }, [search, industryFilter, ownerFilter, domainFilter, scoreFilter]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -406,8 +418,14 @@ export default function AccountList() {
     }
   };
 
-  const hasFilters = search || industryFilter !== 'all' || ownerFilter !== 'all';
-  const clearFilters = () => { setSearch(''); setIndustryFilter('all'); setOwnerFilter('all'); };
+  const hasFilters = search || industryFilter !== 'all' || ownerFilter !== 'all' || domainFilter !== 'all' || scoreFilter !== 'all';
+  const clearFilters = () => {
+    setSearch('');
+    setIndustryFilter('all');
+    setOwnerFilter('all');
+    setDomainFilter('all');
+    setScoreFilter('all');
+  };
 
   type ColDef = { field: SortField; label: string; width: string; show: boolean };
   const scoringActive = scoringState?.state === 'active';
@@ -510,6 +528,21 @@ export default function AccountList() {
         {uniqueOwners.length > 0 && (
           <FilterSelect label="Owner" value={ownerFilter} onChange={setOwnerFilter}
             options={[{ value: 'all', label: 'All' }, ...uniqueOwners.map(o => ({ value: o, label: anon.person(o) }))]} />
+        )}
+        {uniqueDomains.length > 0 && (
+          <FilterSelect label="Domain" value={domainFilter} onChange={setDomainFilter}
+            options={[{ value: 'all', label: 'All' }, ...uniqueDomains.map(d => ({ value: d, label: d }))]} />
+        )}
+        {accounts.some(a => a.grade) && (
+          <FilterSelect label="Score" value={scoreFilter} onChange={setScoreFilter}
+            options={[
+              { value: 'all', label: 'All' },
+              { value: 'A', label: 'A' },
+              { value: 'B', label: 'B' },
+              { value: 'C', label: 'C' },
+              { value: 'D', label: 'D' },
+              { value: 'F', label: 'F' },
+            ]} />
         )}
         {hasFilters && (
           <button onClick={clearFilters} style={{

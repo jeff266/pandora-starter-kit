@@ -6,6 +6,7 @@ import { extractFindings, insertFindings } from '../findings/extractor.js';
 import { generatePipelineSnapshot } from '../analysis/pipeline-snapshot.js';
 import { getGoals } from '../context/index.js';
 import { configLoader } from '../config/workspace-config-loader.js';
+import { getScopeWhereClause, type ActiveScope } from '../config/scope-loader.js';
 
 const router = Router();
 
@@ -261,19 +262,77 @@ router.get('/:workspaceId/findings', async (req: Request, res: Response): Promis
 router.get('/:workspaceId/pipeline/pipelines', async (req: Request, res: Response): Promise<void> => {
   try {
     const { workspaceId } = req.params;
-    const result = await query(
-      `SELECT
-         COALESCE(pipeline, 'Unknown') as name,
-         count(*)::int as deal_count,
-         COALESCE(sum(amount), 0)::float as total_value
-       FROM deals
-       WHERE workspace_id = $1
-         AND stage_normalized NOT IN ('closed_won', 'closed_lost')
-       GROUP BY pipeline
-       ORDER BY sum(amount) DESC NULLS LAST`,
-      [workspaceId]
-    );
-    res.json({ pipelines: result.rows });
+
+    // First, check if workspace has confirmed analysis scopes
+    let hasScopes = false;
+    let scopeRows: Array<{ scope_id: string; name: string; deal_count: number }> = [];
+
+    try {
+      const scopesResult = await query<{
+        scope_id: string;
+        name: string;
+      }>(
+        `SELECT scope_id, name
+         FROM analysis_scopes
+         WHERE workspace_id = $1 AND confirmed = true
+         ORDER BY CASE WHEN scope_id = 'default' THEN 1 ELSE 0 END ASC, created_at ASC`,
+        [workspaceId]
+      );
+
+      if (scopesResult.rows.length > 0) {
+        hasScopes = true;
+
+        // Get deal counts per scope
+        const countsResult = await query<{ scope_id: string; cnt: string }>(
+          `SELECT scope_id, COUNT(*)::text as cnt
+           FROM deals
+           WHERE workspace_id = $1 AND stage_normalized NOT IN ('closed_won', 'closed_lost')
+           GROUP BY scope_id`,
+          [workspaceId]
+        );
+
+        const countMap = new Map(countsResult.rows.map(r => [r.scope_id, parseInt(r.cnt)]));
+
+        scopeRows = scopesResult.rows.map(s => ({
+          scope_id: s.scope_id,
+          name: s.name,
+          deal_count: countMap.get(s.scope_id) || 0,
+        }));
+      }
+    } catch (err) {
+      // analysis_scopes table may not exist, continue with pipeline-based approach
+      console.log('[findings] Scopes table not available, using pipeline column');
+    }
+
+    if (hasScopes) {
+      // Return scopes as filter options
+      res.json({
+        pipelines: scopeRows.map(s => ({
+          scope_id: s.scope_id,
+          name: s.name,
+          deal_count: s.deal_count,
+        })),
+        use_scopes: true,
+      });
+    } else {
+      // Fall back to pipeline column values
+      const result = await query(
+        `SELECT
+           COALESCE(pipeline, 'Unknown') as name,
+           count(*)::int as deal_count,
+           COALESCE(sum(amount), 0)::float as total_value
+         FROM deals
+         WHERE workspace_id = $1
+           AND stage_normalized NOT IN ('closed_won', 'closed_lost')
+         GROUP BY pipeline
+         ORDER BY sum(amount) DESC NULLS LAST`,
+        [workspaceId]
+      );
+      res.json({
+        pipelines: result.rows,
+        use_scopes: false,
+      });
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('[findings] Pipelines list error:', msg);
@@ -284,7 +343,68 @@ router.get('/:workspaceId/pipeline/pipelines', async (req: Request, res: Respons
 router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response): Promise<void> => {
   try {
     const { workspaceId } = req.params;
+
+    // Support both legacy 'pipeline' and new 'scopeId' query params
+    const scopeId = req.query.scopeId as string | undefined;
     const pipelineFilter = req.query.pipeline as string | undefined;
+
+    // Build scope filter clause
+    let scopeFilterClause = '';
+    let useLegacyPipeline = false;
+    let legacyPipelineValue = '';
+
+    if (scopeId && scopeId !== 'default' && scopeId !== 'all') {
+      // Try to load scope definition from analysis_scopes
+      try {
+        const scopeResult = await query<{
+          scope_id: string;
+          name: string;
+          filter_field: string;
+          filter_operator: string;
+          filter_values: string[];
+        }>(
+          `SELECT scope_id, name, filter_field, filter_operator, filter_values
+           FROM analysis_scopes
+           WHERE workspace_id = $1 AND scope_id = $2`,
+          [workspaceId, scopeId]
+        );
+
+        if (scopeResult.rows.length > 0) {
+          // Found a scope definition - use dynamic filtering
+          const scope: ActiveScope = {
+            scope_id: scopeResult.rows[0].scope_id,
+            name: scopeResult.rows[0].name,
+            filter_field: scopeResult.rows[0].filter_field,
+            filter_operator: scopeResult.rows[0].filter_operator,
+            filter_values: Array.isArray(scopeResult.rows[0].filter_values)
+              ? scopeResult.rows[0].filter_values
+              : [],
+            field_overrides: {},
+          };
+
+          const whereClause = getScopeWhereClause(scope);
+          if (whereClause) {
+            scopeFilterClause = ` AND ${whereClause}`;
+          }
+        } else {
+          // Scope ID not found - treat it as a pipeline name (fallback for legacy behavior)
+          useLegacyPipeline = true;
+          legacyPipelineValue = scopeId;
+        }
+      } catch (err) {
+        console.error('[Pipeline Snapshot] Failed to load scope:', err);
+        // On error, treat as pipeline name
+        useLegacyPipeline = true;
+        legacyPipelineValue = scopeId;
+      }
+    } else if (scopeId === 'default') {
+      // Filter by scope_id column for 'default' scope
+      scopeFilterClause = ` AND d.scope_id = 'default'`;
+    } else if (pipelineFilter && pipelineFilter !== 'all') {
+      // Legacy pipeline filtering via explicit pipeline parameter
+      useLegacyPipeline = true;
+      legacyPipelineValue = pipelineFilter;
+    }
 
     let excludedFromPipeline: string[] = [];
     let excludedFromForecast: string[] = [];
@@ -326,24 +446,23 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
       findings_summary[row.severity] = row.count;
     }
 
+    // Build query parameters and clauses
     const params: any[] = [workspaceId];
-    let pipelineClause = '';
     let stageConfigPipelineClause = '';
     let stageFilterClause = '';
-    let pipelineParamIdx = -1;
-    if (pipelineFilter && pipelineFilter !== 'all') {
-      params.push(pipelineFilter);
-      pipelineParamIdx = params.length;
-      pipelineClause = ` AND d.pipeline = $${pipelineParamIdx}`;
-      // Scope the stage_configs JOIN to this pipeline only
-      stageConfigPipelineClause = ` AND sc.pipeline_name = $${pipelineParamIdx}`;
-      // Hide stages that don't belong to this pipeline's stage_configs —
-      // but only once stage_configs has been populated (otherwise show everything).
+
+    // Handle legacy pipeline filtering - use SQL-escaped literal values instead of parameters
+    // This allows scopeFilterClause to be reused across different query param arrays
+    if (useLegacyPipeline) {
+      // SQL-escape the pipeline value: replace single quotes with ''
+      const escapedPipeline = `'${legacyPipelineValue.replace(/'/g, "''")}'`;
+      scopeFilterClause = ` AND d.pipeline = ${escapedPipeline}`;
+      stageConfigPipelineClause = ` AND sc.pipeline_name = ${escapedPipeline}`;
       stageFilterClause = `
         AND (
           NOT EXISTS (
             SELECT 1 FROM stage_configs
-            WHERE workspace_id = $1 AND pipeline_name = $${pipelineParamIdx}
+            WHERE workspace_id = $1 AND pipeline_name = ${escapedPipeline}
           )
           OR sc.stage_name IS NOT NULL
         )`;
@@ -371,7 +490,7 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
          ${stageConfigPipelineClause}
        WHERE d.workspace_id = $1
          AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
-         ${pipelineClause}
+         ${scopeFilterClause}
          ${excludeStagesClause}
          ${stageFilterClause}
        GROUP BY COALESCE(d.stage, d.stage_normalized, 'Unknown')
@@ -383,12 +502,8 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
     const total_deals = stageResult.rows.reduce((s, r) => s + r.deal_count, 0);
     const weighted_pipeline = stageResult.rows.reduce((s, r) => s + r.weighted_value, 0);
 
+    // Findings queries use the same scope filter (scopeFilterClause uses literals, not params)
     const findingsParams: any[] = [workspaceId];
-    let findingsPipelineClause = '';
-    if (pipelineFilter && pipelineFilter !== 'all') {
-      findingsParams.push(pipelineFilter);
-      findingsPipelineClause = ` AND d.pipeline = $${findingsParams.length}`;
-    }
 
     let findingsExcludeClause = '';
     const findingsExcludeParams: any[] = [];
@@ -408,7 +523,7 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
        WHERE f.workspace_id = $1
          AND f.resolved_at IS NULL
          AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
-         ${findingsPipelineClause}
+         ${scopeFilterClause}
          ${findingsExcludeClause}
        GROUP BY COALESCE(d.stage, d.stage_normalized, 'Unknown'), f.severity`,
       [...findingsParams, ...findingsExcludeParams]
@@ -432,7 +547,7 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
        WHERE f.workspace_id = $1
          AND f.resolved_at IS NULL
          AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
-         ${findingsPipelineClause}
+         ${scopeFilterClause}
          ${findingsExcludeClause}
          AND f.severity IN ('act', 'watch')
        ORDER BY CASE f.severity WHEN 'act' THEN 1 WHEN 'watch' THEN 2 ELSE 3 END, f.found_at DESC
@@ -470,12 +585,22 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
       };
     });
 
+    // Win rate uses the same scope filter (scopeFilterClause uses literals, not params)
     const winRateParams: any[] = [workspaceId];
-    let winRatePipelineClause = '';
-    if (pipelineFilter && pipelineFilter !== 'all') {
-      winRateParams.push(pipelineFilter);
-      winRatePipelineClause = ` AND pipeline = $${winRateParams.length}`;
-    }
+    // Note: scopeFilterClause already includes 'd.' prefix for deals table
+    // For win rate query, deals table has no alias, so we need to strip the 'd.' prefix
+    const winRateScopeClause = scopeFilterClause.replace(/d\./g, '');
+
+    // Debug logging
+    console.log('[Pipeline Snapshot] Win Rate Query Debug:', {
+      workspaceId,
+      scopeId,
+      pipelineFilter,
+      scopeFilterClause,
+      winRateScopeClause,
+      useLegacyPipeline,
+      legacyPipelineValue,
+    });
 
     let winRateExcludeClause = '';
     const winRateExcludeParams: any[] = [];
@@ -493,7 +618,7 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
          count(*) FILTER (WHERE stage_normalized IN ('closed_won', 'closed_lost') AND close_date >= now() - interval '120 days' AND close_date < now() - interval '30 days')::int as total_closed_prev
        FROM deals
        WHERE workspace_id = $1
-         ${winRatePipelineClause}
+         ${winRateScopeClause}
          ${winRateExcludeClause}`,
       [...winRateParams, ...winRateExcludeParams]
     );
@@ -501,6 +626,14 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
     const wr = winRateResult.rows[0];
     const trailing_90d = wr.total_closed_90 > 0 ? wr.won_90 / wr.total_closed_90 : 0;
     const prev_rate = wr.total_closed_prev > 0 ? wr.won_prev / wr.total_closed_prev : 0;
+
+    // Debug logging
+    console.log('[Pipeline Snapshot] Win Rate Result:', {
+      won_90: wr.won_90,
+      total_closed_90: wr.total_closed_90,
+      trailing_90d,
+      prev_rate,
+    });
     const win_trend = trailing_90d > prev_rate + 0.02 ? 'up' : trailing_90d < prev_rate - 0.02 ? 'down' : 'stable';
 
     // --- D1: include_deals support ---
@@ -510,11 +643,7 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
     // If ?stage= is given without ?include_deals=true, return simple deals response
     if (stageQueryParam && !includeDealsBool) {
       const stageDealsParams: any[] = [workspaceId, stageQueryParam];
-      let stageDealsFilter = '';
-      if (pipelineFilter && pipelineFilter !== 'all') {
-        stageDealsParams.push(pipelineFilter);
-        stageDealsFilter = ` AND d.pipeline = $${stageDealsParams.length}`;
-      }
+      // Use the same scope filter clause (already includes 'd.' prefix)
       const stageDealsResult = await query(
         `SELECT
            d.id,
@@ -532,7 +661,7 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
          WHERE d.workspace_id = $1
            AND (d.stage = $2 OR d.stage_normalized = $2)
            AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
-           ${stageDealsFilter}
+           ${scopeFilterClause}
          ORDER BY d.amount DESC NULLS LAST
          LIMIT 50`,
         stageDealsParams
@@ -574,15 +703,11 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
     if (includeDealsBool) {
       const incDealsParams: any[] = [workspaceId];
       let incStageFilter = '';
-      let incPipelineFilter = '';
       if (stageQueryParam) {
         incDealsParams.push(stageQueryParam);
         incStageFilter = ` AND (d.stage = $${incDealsParams.length} OR d.stage_normalized = $${incDealsParams.length})`;
       }
-      if (pipelineFilter && pipelineFilter !== 'all') {
-        incDealsParams.push(pipelineFilter);
-        incPipelineFilter = ` AND d.pipeline = $${incDealsParams.length}`;
-      }
+      // Use the same scope filter clause (already includes 'd.' prefix)
 
       const allDealsResult = await query(
         `SELECT
@@ -601,7 +726,7 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
          WHERE d.workspace_id = $1
            AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
            ${incStageFilter}
-           ${incPipelineFilter}
+           ${scopeFilterClause}
          ORDER BY d.amount DESC NULLS LAST
          LIMIT 50`,
         incDealsParams

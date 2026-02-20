@@ -57,6 +57,14 @@ import {
 import { scoreLeads } from './compute/lead-scoring.js';
 import { resolveContactRoles, type ResolutionResult } from './compute/contact-role-resolution.js';
 import { discoverICP, type ICPDiscoveryResult } from './compute/icp-discovery.js';
+import {
+  buildICPTaxonomy,
+  enrichTopAccounts,
+  persistTaxonomy,
+  type TaxonomyFoundation,
+  type EnrichedAccountsResult,
+  type PersistResult,
+} from './compute/icp-taxonomy.js';
 import { prepareBowtieSummary, type BowtieSummary } from './compute/bowtie-analysis.js';
 import { preparePipelineGoalsSummary } from './compute/pipeline-goals.js';
 import { prepareProjectRecap } from './compute/project-recap.js';
@@ -3901,6 +3909,88 @@ const discoverICPTool: ToolDefinition = {
 };
 
 // ============================================================================
+// ICP Taxonomy Builder Tools
+// ============================================================================
+
+const buildICPTaxonomyTool: ToolDefinition = {
+  name: 'buildICPTaxonomy',
+  description: 'Build taxonomy foundation from closed deals - check minimum thresholds and identify top industries/sizes',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('buildICPTaxonomy', async () => {
+      const scopeId = context.scopeId || 'default';
+      const result = await buildICPTaxonomy(context.workspaceId, scopeId);
+
+      console.log(`[ICP Taxonomy] Foundation built: ${result.won_count} won deals, scope: ${result.scope_name}, threshold met: ${result.meets_threshold}`);
+
+      return result;
+    }, params);
+  },
+};
+
+const enrichTopAccountsTool: ToolDefinition = {
+  name: 'enrichTopAccounts',
+  description: 'Enrich top 50 won accounts with Serper web signals for ICP taxonomy building',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('enrichTopAccounts', async () => {
+      const scopeId = context.scopeId || 'default';
+      const result = await enrichTopAccounts(context.workspaceId, scopeId, context.stepResults);
+
+      console.log(`[ICP Taxonomy] Enriched ${result.accounts_enriched} accounts, ${result.accounts_with_signals} with signals`);
+
+      return result;
+    }, params);
+  },
+};
+
+const classifyAccountPatternsTool: ToolDefinition = {
+  name: 'classifyAccountPatterns',
+  description: 'DeepSeek classification of account patterns (placeholder - handled by skill step)',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    // This is handled by DeepSeek step in the skill definition
+    return { message: 'Classification handled by DeepSeek step' };
+  },
+};
+
+const persistTaxonomyTool: ToolDefinition = {
+  name: 'persistTaxonomy',
+  description: 'Write ICP taxonomy results to database and link to icp_profiles',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('persistTaxonomy', async () => {
+      const scopeId = context.scopeId || 'default';
+      const result = await persistTaxonomy(context.workspaceId, scopeId, context.stepResults);
+
+      console.log(`[ICP Taxonomy] Persisted taxonomy ${result.taxonomy_id} for scope ${result.scope_id}`);
+
+      return result;
+    }, params);
+  },
+};
+
+// ============================================================================
 // Bowtie Analysis Tools
 // ============================================================================
 
@@ -6145,9 +6235,53 @@ const mcLoadOpenDeals: ToolDefinition = {
       const pipelineFilter: string | null = context.params?.pipelineFilter ?? null;
       const params: any[] = [context.workspaceId];
       let pipelineClause = '';
-      if (pipelineFilter) {
-        params.push(pipelineFilter);
-        pipelineClause = `AND pipeline = $${params.length}`;
+
+      if (pipelineFilter && pipelineFilter !== 'all' && pipelineFilter !== 'default') {
+        // Try to load as scope first
+        try {
+          const scopeResult = await query<{
+            scope_id: string;
+            name: string;
+            filter_field: string;
+            filter_operator: string;
+            filter_values: string[];
+          }>(
+            `SELECT scope_id, name, filter_field, filter_operator, filter_values
+             FROM analysis_scopes
+             WHERE workspace_id = $1 AND scope_id = $2`,
+            [context.workspaceId, pipelineFilter]
+          );
+
+          if (scopeResult.rows.length > 0) {
+            // It's a scope - use dynamic filtering
+            const { getScopeWhereClause } = await import('../config/scope-loader.js');
+            const scope = {
+              scope_id: scopeResult.rows[0].scope_id,
+              name: scopeResult.rows[0].name,
+              filter_field: scopeResult.rows[0].filter_field,
+              filter_operator: scopeResult.rows[0].filter_operator,
+              filter_values: Array.isArray(scopeResult.rows[0].filter_values)
+                ? scopeResult.rows[0].filter_values
+                : [],
+              field_overrides: {},
+            };
+
+            const whereClause = getScopeWhereClause(scope);
+            if (whereClause) {
+              pipelineClause = `AND ${whereClause}`;
+            }
+          } else {
+            // Not a scope - treat as pipeline name
+            const escapedPipeline = `'${pipelineFilter.replace(/'/g, "''")}'`;
+            pipelineClause = `AND pipeline = ${escapedPipeline}`;
+          }
+        } catch (err) {
+          // Error loading scope, fall back to pipeline filtering
+          const escapedPipeline = `'${pipelineFilter.replace(/'/g, "''")}'`;
+          pipelineClause = `AND pipeline = ${escapedPipeline}`;
+        }
+      } else if (pipelineFilter === 'default') {
+        pipelineClause = `AND scope_id = 'default'`;
       }
       const result = await query<{
         id: string;
@@ -6531,6 +6665,10 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['resolveContactRoles', resolveContactRolesTool],
   ['generateContactRoleReport', generateContactRoleReportTool],
   ['discoverICP', discoverICPTool],
+  ['buildICPTaxonomy', buildICPTaxonomyTool],
+  ['enrichTopAccounts', enrichTopAccountsTool],
+  ['classifyAccountPatterns', classifyAccountPatternsTool],
+  ['persistTaxonomy', persistTaxonomyTool],
   ['prepareBowtieSummary', prepareBowtieSummaryTool],
   ['preparePipelineGoalsSummary', preparePipelineGoalsSummaryTool],
   ['prepareProjectRecap', prepareProjectRecapTool],

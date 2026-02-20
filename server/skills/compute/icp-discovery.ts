@@ -1970,6 +1970,49 @@ async function persistICPProfile(
 }
 
 // ============================================================================
+// Taxonomy Integration Helpers
+// ============================================================================
+
+/**
+ * Fetch latest taxonomy for this workspace/scope if available
+ * Returns taxonomy data to enrich ICP Discovery synthesis
+ */
+export async function fetchLatestTaxonomy(
+  workspaceId: string,
+  scopeId: string = 'default'
+): Promise<{ vertical: string; report: string } | null> {
+  try {
+    const result = await query<{ vertical: string; taxonomy_report: any }>(
+      `SELECT vertical, taxonomy_report
+       FROM icp_taxonomy
+       WHERE workspace_id = $1 AND scope_id = $2
+       ORDER BY generated_at DESC
+       LIMIT 1`,
+      [workspaceId, scopeId]
+    );
+
+    if (result.rows.length === 0) return null;
+
+    const row = result.rows[0];
+    const reportObj = typeof row.taxonomy_report === 'string'
+      ? JSON.parse(row.taxonomy_report)
+      : row.taxonomy_report;
+
+    return {
+      vertical: row.vertical,
+      report: reportObj?.report || '',
+    };
+  } catch (err) {
+    logger.warn('Failed to fetch taxonomy', {
+      error: err instanceof Error ? err.message : String(err),
+      workspaceId,
+      scopeId,
+    });
+    return null;
+  }
+}
+
+// ============================================================================
 // Step 2.5: Extract Conversation Signals (NEW)
 // ============================================================================
 
