@@ -1,0 +1,64 @@
+I'm debugging the ICP Taxonomy Builder skill. The skill shows
+   as "completed" (22.9s, green checkmark) in the UI at        
+  /skills, but no data is being written to the database.       
+                                                               
+  SYMPTOMS:                                                    
+  - Skill run shows: "Last run: 1m ago · 22.9s · ✅ completed" 
+  - Run ID in UI: c85f150e (truncated)                         
+  - Query `SELECT * FROM icp_taxonomy WHERE workspace_id =     
+  (SELECT id FROM workspaces WHERE name = 'Frontera')` returns 
+  0 rows                                                       
+  - Query `SELECT * FROM skill_runs WHERE skill_id =           
+  'icp-taxonomy-builder' AND workspace_id = (SELECT id FROM    
+  workspaces WHERE name = 'Frontera')` returns 0 rows          
+                                                               
+  RELEVANT FILES:                                              
+  1. /server/skills/library/icp-taxonomy-builder.ts (skill     
+  definition)                                                  
+  2. /server/skills/compute/icp-taxonomy.ts (compute functions 
+  including persistTaxonomy)                                   
+  3. /server/routes/skills.ts (POST                            
+  /:workspaceId/skills/:skillId/run endpoint)                  
+  4. /server/skills/runtime.ts (skill execution logic)         
+                                                               
+  QUESTIONS TO INVESTIGATE:                                    
+  1. What workspace ID is the skill actually running against?  
+  Check the POST request to /skills/icp-taxonomy-builder/run - 
+  does it include a workspaceId in the body?                   
+                                                               
+  2. Check the skill_runs table without workspace filter:      
+  `SELECT workspace_id, run_id, status, error, created_at FROM 
+  skill_runs WHERE skill_id = 'icp-taxonomy-builder' ORDER BY  
+  created_at DESC LIMIT 3`                                     
+                                                               
+  3. In /server/routes/skills.ts line 111-126, the POST        
+  /skills/:skillId/run endpoint - where does it get the        
+  workspaceId from? Is it from req.body.workspaceId or from    
+  req.workspace?                                               
+                                                               
+  4. In /server/skills/runtime.ts, look at the executeSkill    
+  method - does it pass workspaceId correctly to all compute   
+  functions?                                                   
+                                                               
+  5. In /server/skills/compute/icp-taxonomy.ts line 277-372    
+  (persistTaxonomy function) - add console.log statements to   
+  verify:                                                      
+     - What workspaceId is being passed                        
+     - Whether stepData contains the expected data             
+     - Whether the INSERT query actually executes              
+     - What error (if any) is thrown                           
+                                                               
+  6. Check server logs for any errors or warnings during the   
+  skill run. Look for "[ICPTaxonomy]" log messages.            
+                                                               
+  EXPECTED BEHAVIOR:                                           
+  The persistTaxonomy function should write a row to           
+  icp_taxonomy table with the taxonomy report, classifications,
+   and metadata.                                               
+                                                               
+  Please help me find why the skill completes successfully but 
+  writes no data.                                              
+                                                               
+  This prompt gives Replit all the context needed to trace     
+  through the execution flow and identify where the data is    
+  getting lost.       
