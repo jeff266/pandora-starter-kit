@@ -189,6 +189,13 @@ router.post('/login', async (req: Request, res: Response) => {
     // Store refresh token
     await storeRefreshToken(user.id, refreshToken.hash);
 
+    // Store session for workspace middleware compatibility
+    await query<Record<string, never>>(`
+      INSERT INTO user_sessions (user_id, token, expires_at)
+      VALUES ($1, $2, NOW() + INTERVAL '15 minutes')
+      ON CONFLICT (token) DO UPDATE SET expires_at = NOW() + INTERVAL '15 minutes'
+    `, [user.id, accessToken]);
+
     // Set refresh token cookie
     setRefreshTokenCookie(res, refreshToken.raw);
 
@@ -258,6 +265,13 @@ router.post('/refresh', async (req: Request, res: Response) => {
     await revokeRefreshToken(refreshTokenRaw);
     const newRefreshToken = generateRefreshToken();
     await storeRefreshToken(user.id, newRefreshToken.hash);
+
+    // Store session for workspace middleware compatibility
+    await query<Record<string, never>>(`
+      INSERT INTO user_sessions (user_id, token, expires_at)
+      VALUES ($1, $2, NOW() + INTERVAL '15 minutes')
+      ON CONFLICT (token) DO UPDATE SET expires_at = NOW() + INTERVAL '15 minutes'
+    `, [user.id, accessToken]);
 
     // Set new refresh token cookie
     setRefreshTokenCookie(res, newRefreshToken.raw);
