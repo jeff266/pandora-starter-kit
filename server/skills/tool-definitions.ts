@@ -57,6 +57,14 @@ import {
 import { scoreLeads } from './compute/lead-scoring.js';
 import { resolveContactRoles, type ResolutionResult } from './compute/contact-role-resolution.js';
 import { discoverICP, type ICPDiscoveryResult } from './compute/icp-discovery.js';
+import {
+  buildICPTaxonomy,
+  enrichTopAccounts,
+  persistTaxonomy,
+  type TaxonomyFoundation,
+  type EnrichedAccountsResult,
+  type PersistResult,
+} from './compute/icp-taxonomy.js';
 import { prepareBowtieSummary, type BowtieSummary } from './compute/bowtie-analysis.js';
 import { preparePipelineGoalsSummary } from './compute/pipeline-goals.js';
 import { prepareProjectRecap } from './compute/project-recap.js';
@@ -3901,6 +3909,88 @@ const discoverICPTool: ToolDefinition = {
 };
 
 // ============================================================================
+// ICP Taxonomy Builder Tools
+// ============================================================================
+
+const buildICPTaxonomyTool: ToolDefinition = {
+  name: 'buildICPTaxonomy',
+  description: 'Build taxonomy foundation from closed deals - check minimum thresholds and identify top industries/sizes',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('buildICPTaxonomy', async () => {
+      const scopeId = context.scopeId || 'default';
+      const result = await buildICPTaxonomy(context.workspaceId, scopeId);
+
+      console.log(`[ICP Taxonomy] Foundation built: ${result.won_count} won deals, scope: ${result.scope_name}, threshold met: ${result.meets_threshold}`);
+
+      return result;
+    }, params);
+  },
+};
+
+const enrichTopAccountsTool: ToolDefinition = {
+  name: 'enrichTopAccounts',
+  description: 'Enrich top 50 won accounts with Serper web signals for ICP taxonomy building',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('enrichTopAccounts', async () => {
+      const scopeId = context.scopeId || 'default';
+      const result = await enrichTopAccounts(context.workspaceId, scopeId, context.stepResults);
+
+      console.log(`[ICP Taxonomy] Enriched ${result.accounts_enriched} accounts, ${result.accounts_with_signals} with signals`);
+
+      return result;
+    }, params);
+  },
+};
+
+const classifyAccountPatternsTool: ToolDefinition = {
+  name: 'classifyAccountPatterns',
+  description: 'DeepSeek classification of account patterns (placeholder - handled by skill step)',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    // This is handled by DeepSeek step in the skill definition
+    return { message: 'Classification handled by DeepSeek step' };
+  },
+};
+
+const persistTaxonomyTool: ToolDefinition = {
+  name: 'persistTaxonomy',
+  description: 'Write ICP taxonomy results to database and link to icp_profiles',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('persistTaxonomy', async () => {
+      const scopeId = context.scopeId || 'default';
+      const result = await persistTaxonomy(context.workspaceId, scopeId, context.stepResults);
+
+      console.log(`[ICP Taxonomy] Persisted taxonomy ${result.taxonomy_id} for scope ${result.scope_id}`);
+
+      return result;
+    }, params);
+  },
+};
+
+// ============================================================================
 // Bowtie Analysis Tools
 // ============================================================================
 
@@ -6575,6 +6665,10 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['resolveContactRoles', resolveContactRolesTool],
   ['generateContactRoleReport', generateContactRoleReportTool],
   ['discoverICP', discoverICPTool],
+  ['buildICPTaxonomy', buildICPTaxonomyTool],
+  ['enrichTopAccounts', enrichTopAccountsTool],
+  ['classifyAccountPatterns', classifyAccountPatternsTool],
+  ['persistTaxonomy', persistTaxonomyTool],
   ['prepareBowtieSummary', prepareBowtieSummaryTool],
   ['preparePipelineGoalsSummary', preparePipelineGoalsSummaryTool],
   ['prepareProjectRecap', prepareProjectRecapTool],
