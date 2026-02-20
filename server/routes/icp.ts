@@ -416,7 +416,7 @@ router.get('/:workspaceId/icp/taxonomy', async (req: Request, res: Response): Pr
 
 router.post('/:workspaceId/icp/export', async (req: Request, res: Response): Promise<void> => {
   const { workspaceId } = req.params;
-  const { to, format = 'both' } = req.body as { to: string; format?: 'html' | 'text' | 'both' };
+  const { to } = req.body as { to: string };
 
   if (!to) {
     res.status(400).json({ error: 'Email address (to) is required' });
@@ -444,22 +444,38 @@ router.post('/:workspaceId/icp/export', async (req: Request, res: Response): Pro
 
     const profile = profileResult.rows[0] as unknown;
 
-    // Import templates
-    const { generateHtmlTemplate, generateTextTemplate } = await import('../email/icp-export-templates.js');
+    // Generate Word document
+    const { generateWordDocument } = await import('../email/icp-export-docx.js');
+    const docxBuffer = await generateWordDocument(profile as never);
 
-    // Generate email content based on format
-    let htmlContent: string | undefined;
-    let textContent: string | undefined;
+    // Generate email body (simple text version)
+    const versionDate = new Date((profile as { created_at: string }).created_at).toLocaleDateString('en-US', {
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+    });
 
-    if (format === 'html' || format === 'both') {
-      htmlContent = generateHtmlTemplate(profile as never);
-    }
+    const emailBody = `Hi there,
 
-    if (format === 'text' || format === 'both') {
-      textContent = generateTextTemplate(profile as never);
-    }
+Your ICP Profile export is ready! Please find the attached Word document with your complete ICP analysis.
 
-    // Send email via Resend
+This export includes:
+• Ideal company profile with industry win rates
+• Company size patterns and sweet spots
+• Buying triggers from conversation analysis
+• Winning buying committee patterns
+• Disqualification criteria
+• Recommended actions
+
+Version: ${(profile as { version: number }).version}
+Generated: ${versionDate}
+
+This document contains proprietary RevOps intelligence. Please distribute internally only.
+
+Best,
+Pandora Intelligence Platform`;
+
+    // Send email via Resend with attachment
     const { Resend } = await import('resend');
     const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -467,8 +483,13 @@ router.post('/:workspaceId/icp/export', async (req: Request, res: Response): Pro
       from: process.env.RESEND_FROM_EMAIL || 'Pandora <onboarding@resend.dev>',
       to,
       subject: `ICP Profile Export — v${(profile as { version: number }).version}`,
-      html: htmlContent,
-      text: textContent,
+      text: emailBody,
+      attachments: [
+        {
+          filename: `ICP_Profile_v${(profile as { version: number }).version}.docx`,
+          content: docxBuffer,
+        },
+      ],
     };
 
     const result = await resend.emails.send(emailPayload as never);
@@ -477,7 +498,7 @@ router.post('/:workspaceId/icp/export', async (req: Request, res: Response): Pro
       success: true,
       emailId: result.data?.id,
       recipient: to,
-      format,
+      format: 'docx',
     });
   } catch (err) {
     console.error('[icp] Error exporting profile:', err);

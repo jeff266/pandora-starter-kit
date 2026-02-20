@@ -513,10 +513,9 @@ function ExportModal({
   onExport,
 }: {
   onClose: () => void;
-  onExport: (email: string, format: 'html' | 'text' | 'both') => void;
+  onExport: (email: string) => void;
 }) {
   const [email, setEmail] = useState('');
-  const [format, setFormat] = useState<'html' | 'text' | 'both'>('both');
   const [sending, setSending] = useState(false);
 
   const handleSend = async () => {
@@ -524,7 +523,7 @@ function ExportModal({
       return;
     }
     setSending(true);
-    await onExport(email, format);
+    await onExport(email);
     setSending(false);
   };
 
@@ -557,7 +556,7 @@ function ExportModal({
           </button>
         </div>
 
-        <div style={{ marginBottom: 20 }}>
+        <div style={{ marginBottom: 16 }}>
           <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: colors.textMuted, marginBottom: 6 }}>
             Email Address
           </label>
@@ -576,41 +575,19 @@ function ExportModal({
           />
         </div>
 
-        <div style={{ marginBottom: 24 }}>
-          <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: colors.textMuted, marginBottom: 8 }}>
-            Format
-          </label>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {[
-              { value: 'both' as const, label: 'Both (HTML + Text)', desc: 'Send both pretty HTML and business text versions' },
-              { value: 'html' as const, label: 'HTML Only', desc: 'Send formatted HTML version' },
-              { value: 'text' as const, label: 'Text Only', desc: 'Send plain text business update' },
-            ].map(opt => (
-              <label
-                key={opt.value}
-                style={{
-                  display: 'flex', alignItems: 'flex-start', gap: 10, padding: 10,
-                  background: format === opt.value ? colors.surfaceRaised : 'transparent',
-                  border: `1px solid ${format === opt.value ? colors.accent : colors.border}`,
-                  borderRadius: 6, cursor: sending ? 'not-allowed' : 'pointer',
-                }}
-              >
-                <input
-                  type="radio"
-                  name="format"
-                  value={opt.value}
-                  checked={format === opt.value}
-                  onChange={e => setFormat(e.target.value as 'html' | 'text' | 'both')}
-                  disabled={sending}
-                  style={{ marginTop: 2 }}
-                />
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 500, color: colors.text }}>{opt.label}</div>
-                  <div style={{ fontSize: 11, color: colors.textMuted }}>{opt.desc}</div>
-                </div>
-              </label>
-            ))}
-          </div>
+        <div style={{
+          padding: '12px 16px', marginBottom: 24,
+          background: colors.surfaceHover, border: `1px solid ${colors.border}`,
+          borderRadius: 8, fontSize: 12, color: colors.textMuted, lineHeight: 1.6,
+        }}>
+          <div style={{ fontWeight: 600, color: colors.text, marginBottom: 4 }}>📄 Word Document (.docx)</div>
+          A beautifully formatted Word document will be sent as an email attachment with:
+          <ul style={{ margin: '8px 0 0 0', paddingLeft: 18 }}>
+            <li>Industry win rates and lift analysis</li>
+            <li>Buying triggers and committee patterns</li>
+            <li>Sweet spots and disqualifiers</li>
+            <li>Recommended RevOps actions</li>
+          </ul>
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
@@ -1224,10 +1201,10 @@ function DossierView({ addToast, conversationsConnected }: { addToast: (msg: str
     }
   };
 
-  const handleExport = async (email: string, format: 'html' | 'text' | 'both') => {
+  const handleExport = async (email: string) => {
     try {
-      await api.post('/icp/export', { to: email, format });
-      addToast(`ICP Profile exported to ${email}`, 'success');
+      await api.post('/icp/export', { to: email });
+      addToast(`Word document sent to ${email}`, 'success');
       setShowExportModal(false);
     } catch (err) {
       addToast('Failed to export ICP profile', 'error');
