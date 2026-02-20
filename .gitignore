@@ -4,3 +4,5 @@ dist/
 *.js.map
 *.d.ts
 !tsconfig.json
+.cache/
+.local/
