@@ -28,7 +28,7 @@ interface AuthState {
 }
 
 interface WorkspaceContextType extends AuthState {
-  login: (email: string, name?: string) => Promise<{ status: string; message: string }>;
+  login: (email: string, password: string, name?: string) => Promise<void>;
   handleCallback: (sessionToken: string) => Promise<void>;
   logout: () => Promise<void>;
   selectWorkspace: (workspace: WorkspaceInfo) => void;
@@ -43,7 +43,7 @@ const WorkspaceContext = createContext<WorkspaceContextType>({
   currentWorkspace: null,
   isAuthenticated: false,
   isLoading: true,
-  login: async () => ({ status: '', message: '' }),
+  login: async () => {},
   handleCallback: async () => {},
   logout: async () => {},
   selectWorkspace: () => {},
@@ -125,18 +125,29 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     }
   }, [loadSession]);
 
-  const login = useCallback(async (email: string, name?: string) => {
-    const body: Record<string, string> = { email };
+  const login = useCallback(async (email: string, password: string, name?: string) => {
+    const endpoint = name ? '/api/auth/register' : '/api/auth/login';
+    const body: Record<string, string> = { email, password };
     if (name) body.name = name;
 
-    const res = await fetch('/api/auth/login', {
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify(body),
     });
-    if (!res.ok) throw new Error('Login failed');
-    return res.json();
-  }, []);
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || 'Login failed');
+    }
+
+    const data = await res.json();
+    if (data.accessToken) {
+      localStorage.setItem('pandora_session', data.accessToken);
+      await loadSession(data.accessToken);
+    }
+  }, [loadSession]);
 
   const handleCallback = useCallback(async (sessionToken: string) => {
     localStorage.setItem('pandora_session', sessionToken);
