@@ -854,9 +854,16 @@ function HeadlineColumn({ p10, p50, p90, probOfHittingTarget, quota, dataQuality
   const navigate = useNavigate();
   const hasQuota = probOfHittingTarget != null && quota != null;
   const isThinData = dataQualityTier === 1;
+  const [hoveredChip, setHoveredChip] = useState<string | null>(null);
+
+  const percentileTooltips: Record<string, string> = {
+    P10: 'Pessimistic: Only 10% chance outcome is worse than this',
+    P50: 'Most Likely: 50/50 chance of hitting this number (median)',
+    P90: 'Optimistic: Only 10% chance outcome is better than this',
+  };
 
   return (
-    <div style={{ flex: '0 0 38%', display: 'flex', flexDirection: 'column', gap: 14 }}>
+    <div style={{ flex: '0 0 30%', display: 'flex', flexDirection: 'column', gap: 14 }}>
       {hasQuota ? (
         <div>
           <div style={{
@@ -909,23 +916,57 @@ function HeadlineColumn({ p10, p50, p90, probOfHittingTarget, quota, dataQuality
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 10 }}>
+      {/* Stacked percentile chips with tooltips */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, position: 'relative' }}>
         {[
-          { label: 'P10', value: p10 },
-          { label: 'P50', value: p50 },
-          { label: 'P90', value: p90 },
+          { label: 'P10', value: p10, color: colors.red },
+          { label: 'P50', value: p50, color: colors.text },
+          { label: 'P90', value: p90, color: colors.green },
         ].map(chip => (
-          <div key={chip.label} style={{
-            background: colors.surfaceRaised,
-            border: `1px solid ${colors.border}`,
-            borderRadius: 6,
-            padding: '5px 10px',
-            fontSize: 11,
-            fontFamily: fonts.mono,
-            color: colors.text,
-          }}>
-            <span style={{ color: colors.textMuted, fontSize: 10, marginRight: 4 }}>{chip.label}</span>
-            {fmtCompact(anon.amount(chip.value))}
+          <div
+            key={chip.label}
+            style={{
+              background: colors.surfaceRaised,
+              border: `1px solid ${colors.border}`,
+              borderRadius: 6,
+              padding: '5px 10px',
+              fontSize: 11,
+              fontFamily: fonts.mono,
+              color: colors.text,
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              cursor: 'help',
+              position: 'relative',
+            }}
+            onMouseEnter={() => setHoveredChip(chip.label)}
+            onMouseLeave={() => setHoveredChip(null)}
+          >
+            <span style={{ color: colors.textMuted, fontSize: 10, marginRight: 8 }}>{chip.label}</span>
+            <span style={{ fontWeight: 600, color: chip.color }}>{fmtCompact(anon.amount(chip.value))}</span>
+
+            {/* Tooltip */}
+            {hoveredChip === chip.label && (
+              <div style={{
+                position: 'absolute',
+                left: '100%',
+                top: '50%',
+                transform: 'translateY(-50%)',
+                marginLeft: 10,
+                background: '#1A1F2B',
+                border: `1px solid ${colors.border}`,
+                borderRadius: 6,
+                padding: '6px 10px',
+                fontSize: 11,
+                color: colors.textSecondary,
+                whiteSpace: 'nowrap',
+                zIndex: 100,
+                boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                pointerEvents: 'none',
+              }}>
+                {percentileTooltips[chip.label]}
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -968,14 +1009,14 @@ function ProbabilityDistribution({ p10, p50, p90, histogram, anon }: {
   const maxFreq = Math.max(...chartData.map(d => d.frequency), 1);
 
   return (
-    <div style={{ flex: '0 0 33%', display: 'flex', flexDirection: 'column', gap: 6 }}>
+    <div style={{ flex: '0 0 42%', display: 'flex', flexDirection: 'column', gap: 6 }}>
       <div style={{ fontSize: 11, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
         Probability Distribution
       </div>
 
       <div style={{ height: 200, width: '100%' }}>
         <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={chartData} margin={{ top: 20, right: 10, bottom: 20, left: 10 }}>
+          <ComposedChart data={chartData} margin={{ top: 10, right: 10, bottom: 20, left: 10 }}>
             <defs>
               <linearGradient id="distributionGradient" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.4}/>
@@ -994,7 +1035,7 @@ function ProbabilityDistribution({ p10, p50, p90, histogram, anon }: {
 
             <YAxis hide />
 
-            {/* Shaded area between P10 and P90 */}
+            {/* Shaded area distribution */}
             <Area
               type="monotone"
               dataKey="frequency"
@@ -1003,54 +1044,46 @@ function ProbabilityDistribution({ p10, p50, p90, histogram, anon }: {
               fillOpacity={1}
             />
 
-            {/* P10 reference line (pessimistic) */}
+            {/* P10 reference line (pessimistic) - no label to avoid overlap */}
             <ReferenceLine
               x={p10}
               stroke={colors.red}
               strokeWidth={2}
               strokeOpacity={0.7}
-              label={{
-                value: `P10\n${fmtCompact(anon.amount(p10))}`,
-                position: 'top',
-                fill: colors.red,
-                fontSize: 10,
-                fontWeight: 600,
-                fontFamily: fonts.mono,
-              }}
             />
 
-            {/* P50 reference line (median - most prominent) */}
+            {/* P50 reference line (median - most prominent) - no label to avoid overlap */}
             <ReferenceLine
               x={p50}
               stroke="#F1F5F9"
               strokeWidth={3}
-              label={{
-                value: `P50\n${fmtCompact(anon.amount(p50))}`,
-                position: 'top',
-                fill: colors.text,
-                fontSize: 11,
-                fontWeight: 700,
-                fontFamily: fonts.mono,
-              }}
             />
 
-            {/* P90 reference line (optimistic) */}
+            {/* P90 reference line (optimistic) - no label to avoid overlap */}
             <ReferenceLine
               x={p90}
               stroke={colors.green}
               strokeWidth={2}
               strokeOpacity={0.7}
-              label={{
-                value: `P90\n${fmtCompact(anon.amount(p90))}`,
-                position: 'top',
-                fill: colors.green,
-                fontSize: 10,
-                fontWeight: 600,
-                fontFamily: fonts.mono,
-              }}
             />
           </ComposedChart>
         </ResponsiveContainer>
+      </div>
+
+      {/* Legend below chart */}
+      <div style={{ display: 'flex', gap: 12, fontSize: 10, color: colors.textMuted, justifyContent: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <div style={{ width: 12, height: 2, background: colors.red, opacity: 0.7 }} />
+          <span>P10 Pessimistic</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <div style={{ width: 12, height: 3, background: '#F1F5F9' }} />
+          <span>P50 Median</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <div style={{ width: 12, height: 2, background: colors.green, opacity: 0.7 }} />
+          <span>P90 Optimistic</span>
+        </div>
       </div>
     </div>
   );
@@ -1232,11 +1265,11 @@ function VarianceDriversColumn({ drivers, maxImpact, anon }: {
   anon: any;
 }) {
   const top5 = drivers.slice(0, 5);
-  const barMaxWidth = 60;
+  const barMaxWidth = 50;
   const [hoveredDriver, setHoveredDriver] = useState<{ driver: VarianceDriver; pos: { x: number; y: number; rowHeight: number } } | null>(null);
 
   return (
-    <div style={{ flex: '0 0 24%', display: 'flex', flexDirection: 'column', gap: 8, position: 'relative' }}>
+    <div style={{ flex: '0 0 28%', display: 'flex', flexDirection: 'column', gap: 8, position: 'relative', minWidth: 0 }}>
       <div style={{ fontSize: 11, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
         What Moves The Number
       </div>
@@ -1250,14 +1283,23 @@ function VarianceDriversColumn({ drivers, maxImpact, anon }: {
           return (
             <div
               key={i}
-              style={{ display: 'flex', flexDirection: 'column', gap: 2, cursor: 'default' }}
+              style={{ display: 'flex', flexDirection: 'column', gap: 2, cursor: 'default', minWidth: 0 }}
               onMouseEnter={(e) => {
                 const rect = e.currentTarget.getBoundingClientRect();
                 setHoveredDriver({ driver: d, pos: { x: rect.left, y: rect.top, rowHeight: rect.height } });
               }}
               onMouseLeave={() => setHoveredDriver(null)}
             >
-              <div style={{ fontSize: 11, color: colors.textSecondary, fontWeight: 500 }}>{d.label}</div>
+              <div style={{
+                fontSize: 11,
+                color: colors.textSecondary,
+                fontWeight: 500,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}>
+                {d.label}
+              </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 0, height: 14 }}>
                 <div style={{ display: 'flex', justifyContent: 'flex-end', width: barMaxWidth, marginRight: 2 }}>
                   <div style={{
