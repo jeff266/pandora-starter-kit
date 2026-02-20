@@ -207,6 +207,7 @@ export default function App() {
             <Route path="/data-dictionary" element={<Placeholder title="Data Dictionary" />} />
             <Route path="/marketplace" element={<MarketplacePage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/settings/:tab" element={<SettingsPage />} />
             <Route path="/icp-profile" element={<IcpProfilePage />} />
             <Route path="/admin/scopes" element={<AdminScopesPage />} />
           </Routes>

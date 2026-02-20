@@ -408,7 +408,7 @@ router.post('/change-password', requireAuth, async (req: Request, res: Response)
 
 /**
  * PATCH /profile
- * Update user profile (name, avatar_url)
+ * Update user profile (name, avatar_url, anonymize_mode)
  * Requires authentication
  */
 router.patch('/profile', requireAuth, async (req: Request, res: Response) => {
@@ -420,11 +420,11 @@ router.patch('/profile', requireAuth, async (req: Request, res: Response) => {
       return;
     }
 
-    const { name, avatar_url } = req.body;
+    const { name, avatar_url, anonymize_mode } = req.body;
 
     // Validation - at least one field required
-    if (!name && !avatar_url) {
-      res.status(400).json({ error: 'At least one field (name or avatar_url) is required' });
+    if (name === undefined && avatar_url === undefined && anonymize_mode === undefined) {
+      res.status(400).json({ error: 'At least one field (name, avatar_url, or anonymize_mode) is required' });
       return;
     }
 
@@ -470,6 +470,15 @@ router.patch('/profile', requireAuth, async (req: Request, res: Response) => {
       values.push(avatar_url);
     }
 
+    if (anonymize_mode !== undefined) {
+      if (typeof anonymize_mode !== 'boolean') {
+        res.status(400).json({ error: 'anonymize_mode must be a boolean' });
+        return;
+      }
+      updates.push(`anonymize_mode = $${paramIndex++}`);
+      values.push(anonymize_mode);
+    }
+
     updates.push('updated_at = NOW()');
     values.push(userId);
 
@@ -477,7 +486,7 @@ router.patch('/profile', requireAuth, async (req: Request, res: Response) => {
       UPDATE users
       SET ${updates.join(', ')}
       WHERE id = $${paramIndex}
-      RETURNING id, email, name, avatar_url, account_type
+      RETURNING id, email, name, avatar_url, account_type, anonymize_mode
     `;
 
     const result = await query<{
@@ -486,6 +495,7 @@ router.patch('/profile', requireAuth, async (req: Request, res: Response) => {
       name: string;
       avatar_url: string | null;
       account_type: string;
+      anonymize_mode: boolean;
     }>(updateQuery, values);
 
     if (result.rows.length === 0) {
@@ -515,6 +525,27 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
     }
 
     const userId = req.user.user_id;
+
+    // Fetch full user data from database
+    const userResult = await query<{
+      id: string;
+      email: string;
+      name: string;
+      account_type: string;
+      anonymize_mode: boolean;
+      avatar_url: string | null;
+    }>(`
+      SELECT id, email, name, account_type, anonymize_mode, avatar_url
+      FROM users
+      WHERE id = $1
+    `, [userId]);
+
+    if (userResult.rows.length === 0) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    const user = userResult.rows[0];
 
     const wsResult = await query<{
       id: string;
@@ -550,9 +581,12 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
 
     res.json({
       user: {
-        id: userId,
-        email: req.user.email,
-        account_type: req.user.account_type,
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        account_type: user.account_type,
+        anonymize_mode: user.anonymize_mode,
+        avatar_url: user.avatar_url,
       },
       workspaces: wsResult.rows.map(w => ({
         id: w.id,

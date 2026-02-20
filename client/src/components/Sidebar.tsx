@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useWorkspace, WorkspaceInfo } from '../context/WorkspaceContext';
 import { useDemoMode } from '../contexts/DemoModeContext';
 import { colors, fonts } from '../styles/theme';
+import NotificationBell from './notifications/NotificationBell';
 
 interface NavItem {
   label: string;
@@ -269,6 +270,13 @@ export default function Sidebar({ badges, showAllClients }: SidebarProps) {
       </nav>
 
       <div style={{ borderTop: `1px solid ${colors.border}`, padding: '10px 14px' }}>
+        {/* Notification Bell */}
+        {currentWorkspace?.id && (
+          <div style={{ padding: '6px 0', marginBottom: 8 }}>
+            <NotificationBell workspaceId={currentWorkspace.id} />
+          </div>
+        )}
+
         <div
           onClick={toggleDemoMode}
           style={{
