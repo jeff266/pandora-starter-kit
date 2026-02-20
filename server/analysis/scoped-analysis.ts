@@ -5,6 +5,7 @@ import { assembleDealDossier, type DealDossier } from '../dossiers/deal-dossier.
 import { assembleAccountDossier, type AccountDossier } from '../dossiers/account-dossier.js';
 import { generatePipelineSnapshot, type PipelineSnapshot } from './pipeline-snapshot.js';
 import { searchTranscripts } from '../conversations/transcript-search.js';
+import { getActiveTarget, computeGap } from './gap-calculator.js';
 
 export interface AnalysisRequest {
   workspace_id: string;
@@ -549,6 +550,26 @@ After your answer, on a new line starting with "CONFIDENCE:", rate your confiden
 
 On another new line starting with "FOLLOWUPS:", suggest 2-3 natural follow-up questions, separated by pipes (|).`;
 
+async function getTargetContext(workspaceId: string): Promise<string> {
+  try {
+    const target = await getActiveTarget(workspaceId);
+    if (!target) return '';
+
+    const gap = await computeGap(workspaceId, target);
+    const fmt = (n: number) => `$${Math.round(n / 1000)}K`;
+
+    return `\n\nCOMPANY TARGET CONTEXT:
+Company target: ${fmt(target.amount)} ${target.metric.toUpperCase()} for ${target.period_label}.
+Closed to date: ${fmt(gap.closed_amount)} (${(gap.attainment_pct * 100).toFixed(0)}% attained).
+Gap remaining: ${fmt(Math.abs(gap.gap_to_target))}.
+Monte Carlo P50: ${gap.monte_carlo_p50 ? fmt(gap.monte_carlo_p50) : 'not yet run'}.
+Hit probability: ${gap.hit_probability !== null ? (gap.hit_probability * 100).toFixed(0) + '%' : 'unknown'}.
+Pipeline deadline: ${gap.pipeline_deadline} (${gap.days_to_pipeline_deadline} days ${gap.days_to_pipeline_deadline >= 0 ? 'away' : 'past'}).`;
+  } catch {
+    return '';
+  }
+}
+
 function parseAnalysisResponse(raw: string): { answer: string; confidence: 'high' | 'medium' | 'low'; followups: string[] } {
   let answer = raw;
   let confidence: 'high' | 'medium' | 'low' = 'medium';
@@ -878,11 +899,12 @@ export async function analyzeQuestion(
   }
 
   const voiceConfig = await configLoader.getVoiceConfig(workspaceId).catch(() => ({ promptBlock: '' }));
+  const targetContext = await getTargetContext(workspaceId);
 
   const basePrompt = scope.type === 'conversations' ? CONVERSATIONS_SYSTEM_PROMPT : SYSTEM_PROMPT;
 
   const response = await callLLM(workspaceId, 'reason', {
-    systemPrompt: basePrompt + (voiceConfig.promptBlock ? `\n\n${voiceConfig.promptBlock}` : ''),
+    systemPrompt: basePrompt + targetContext + (voiceConfig.promptBlock ? `\n\n${voiceConfig.promptBlock}` : ''),
     messages: [
       {
         role: 'user' as const,
@@ -939,9 +961,10 @@ export async function runScopedAnalysis(request: AnalysisRequest): Promise<Analy
   }
 
   const voiceConfig = await configLoader.getVoiceConfig(workspace_id).catch(() => ({ promptBlock: '' }));
+  const targetContext = await getTargetContext(workspace_id);
 
   const basePrompt = scope.type === 'conversations' ? CONVERSATIONS_SYSTEM_PROMPT : SYSTEM_PROMPT;
-  const systemPrompt = basePrompt + (voiceConfig.promptBlock ? `\n\n${voiceConfig.promptBlock}` : '');
+  const systemPrompt = basePrompt + targetContext + (voiceConfig.promptBlock ? `\n\n${voiceConfig.promptBlock}` : '');
 
   const messages: Array<{ role: 'user' | 'assistant' | 'tool'; content: any; toolCallId?: string }> = [
     {

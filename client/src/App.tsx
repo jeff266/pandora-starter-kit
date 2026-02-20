@@ -101,10 +101,11 @@ export default function App() {
   const fetchBadges = useCallback(async () => {
     if (!currentWorkspace) return;
     try {
-      const [skillsRes, findingsRes, actionsRes] = await Promise.allSettled([
+      const [skillsRes, findingsRes, actionsRes, gapRes] = await Promise.allSettled([
         api.get('/skills'),
         api.get('/findings/summary'),
         api.get('/action-items/summary'),
+        api.get('/targets/gap'),
       ]);
       const newBadges: Record<string, number> = {};
       if (skillsRes.status === 'fulfilled') {
@@ -118,6 +119,11 @@ export default function App() {
       if (actionsRes.status === 'fulfilled') {
         const actionSummary = actionsRes.value;
         newBadges['actions'] = Number(actionSummary?.open_total) || 0;
+      }
+      if (gapRes.status === 'fulfilled' && gapRes.value?.gap_status) {
+        // Encode target status as number: 1=on_track(green), 2=at_risk(amber), 3=critical(red), 4=achieved(green)
+        const statusMap: Record<string, number> = { 'on_track': 1, 'at_risk': 2, 'critical': 3, 'achieved': 4 };
+        newBadges['targets'] = statusMap[gapRes.value.gap_status] || 0;
       }
       setBadges(newBadges);
       setLastRefreshed(new Date());

@@ -27,7 +27,6 @@ const sections: NavSection[] = [
     items: [
       { label: 'Deals', path: '/deals', icon: '\u25C6' },
       { label: 'Accounts', path: '/accounts', icon: '\u25C7' },
-      { label: 'Targets', path: '/targets', icon: '\u25CE' },
     ],
   },
   {
@@ -43,6 +42,7 @@ const sections: NavSection[] = [
   {
     title: 'OPERATIONS',
     items: [
+      { label: 'Targets', path: '/targets', icon: '\u25CE' },
       { label: 'Playbooks', path: '/playbooks', icon: '\u25B6' },
       { label: 'Push', path: '/push', icon: '\uD83D\uDD14' },
       { label: 'Insights Feed', path: '/insights', icon: '\u25C9' },
@@ -246,7 +246,16 @@ export default function Sidebar({ badges, showAllClients }: SidebarProps) {
                 >
                   <span style={{ fontSize: 14, width: 18, textAlign: 'center', opacity: 0.8 }}>{item.icon}</span>
                   <span style={{ flex: 1, fontWeight: active ? 600 : 400 }}>{item.label}</span>
-                  {badgeCount !== undefined && badgeCount > 0 && (
+                  {item.label === 'Targets' && badgeCount !== undefined && badgeCount > 0 && (
+                    <span style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: '50%',
+                      background: badgeCount === 1 || badgeCount === 4 ? colors.green : badgeCount === 2 ? colors.orange : colors.red,
+                      flexShrink: 0,
+                    }} />
+                  )}
+                  {item.label !== 'Targets' && badgeCount !== undefined && badgeCount > 0 && (
                     <span style={{ fontSize: 10, fontWeight: 600, background: colors.accentSoft, color: colors.accent, padding: '1px 6px', borderRadius: 8, fontFamily: fonts.mono }}>{badgeCount}</span>
                   )}
                   {item.label === 'Marketplace' && (
