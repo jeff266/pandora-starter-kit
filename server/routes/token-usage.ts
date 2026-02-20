@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { query } from '../db.js';
 
 const router = Router();
@@ -12,7 +13,7 @@ function parsePeriod(period?: string): string {
   }
 }
 
-router.get('/:workspaceId/token-usage/summary', async (req, res) => {
+router.get('/:workspaceId/token-usage/summary', requirePermission('config.view'), async (req, res) => {
   try {
     const { workspaceId } = req.params;
     const period = parsePeriod(req.query.period as string | undefined);
@@ -153,7 +154,7 @@ router.get('/:workspaceId/token-usage/summary', async (req, res) => {
   }
 });
 
-router.get('/:workspaceId/token-usage/skill/:skillId', async (req, res) => {
+router.get('/:workspaceId/token-usage/skill/:skillId', requirePermission('config.view'), async (req, res) => {
   try {
     const { workspaceId, skillId } = req.params;
 
@@ -250,7 +251,7 @@ router.get('/:workspaceId/token-usage/skill/:skillId', async (req, res) => {
   }
 });
 
-router.get('/:workspaceId/token-usage/anomalies', async (req, res) => {
+router.get('/:workspaceId/token-usage/anomalies', requirePermission('config.view'), async (req, res) => {
   try {
     const { workspaceId } = req.params;
 

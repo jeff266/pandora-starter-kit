@@ -47,6 +47,37 @@ async function lookupWorkspaceByKey(apiKey: string): Promise<{ id: string; name:
   return workspace;
 }
 
+export async function requireUserSession(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const token = extractBearerToken(req);
+  if (!token) {
+    res.status(401).json({ error: 'Authentication required' });
+    return;
+  }
+
+  try {
+    const session = await query<{
+      user_id: string; email: string; name: string; platform_role: string;
+    }>(`
+      SELECT us.user_id, u.email, u.name, u.role as platform_role
+      FROM user_sessions us
+      JOIN users u ON u.id = us.user_id
+      WHERE us.token = $1 AND us.expires_at > now()
+    `, [token]);
+
+    if (session.rows.length === 0) {
+      res.status(401).json({ error: 'Invalid or expired token' });
+      return;
+    }
+
+    req.user = session.rows[0];
+    req.authMethod = 'session';
+    next();
+  } catch (err) {
+    console.error('[auth] Error validating session:', err instanceof Error ? err.message : err);
+    res.status(500).json({ error: 'Authentication service error' });
+  }
+}
+
 export async function requireAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
   const token = extractBearerToken(req);
   if (!token) {

@@ -1,10 +1,11 @@
 import { Router } from 'express';
+import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import pool from '../db.js';
 import { testSlackWebhook, getSlackWebhook } from '../connectors/slack/client.js';
 
 const router = Router();
 
-router.post('/:id/settings/slack', async (req, res) => {
+router.post('/:id/settings/slack', requirePermission('config.edit'), async (req, res) => {
   try {
     const { id } = req.params;
     const { webhook_url } = req.body;
@@ -37,7 +38,7 @@ router.post('/:id/settings/slack', async (req, res) => {
   }
 });
 
-router.post('/:id/settings/slack/test', async (req, res) => {
+router.post('/:id/settings/slack/test', requirePermission('config.edit'), async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -59,7 +60,7 @@ router.post('/:id/settings/slack/test', async (req, res) => {
   }
 });
 
-router.post('/:id/settings/slack/test-dm', async (req, res) => {
+router.post('/:id/settings/slack/test-dm', requirePermission('config.edit'), async (req, res) => {
   try {
     const { id } = req.params;
     const { user_id } = req.body;

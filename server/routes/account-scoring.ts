@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { query } from '../db.js';
 import { enrichAccount } from '../enrichment/account-enrichment.js';
 import { scoreAccount } from '../scoring/account-scorer.js';
@@ -12,7 +13,7 @@ const router = Router();
  * Returns all accounts with their scores, sorted by score desc.
  * Query params: ?grade=A,B&limit=50&offset=0
  */
-router.get('/:workspaceId/accounts/scores', async (req, res) => {
+router.get('/:workspaceId/accounts/scores', requirePermission('data.accounts_view'), async (req, res) => {
   try {
     const { workspaceId } = req.params;
     const gradeFilter = req.query.grade ? String(req.query.grade).split(',') : null;
@@ -61,7 +62,7 @@ router.get('/:workspaceId/accounts/scores', async (req, res) => {
  * GET /:workspaceId/accounts/:accountId/score
  * Returns full score breakdown + signals for one account.
  */
-router.get('/:workspaceId/accounts/:accountId/score', async (req, res) => {
+router.get('/:workspaceId/accounts/:accountId/score', requirePermission('data.accounts_view'), async (req, res) => {
   try {
     const { workspaceId, accountId } = req.params;
 
@@ -95,7 +96,7 @@ router.get('/:workspaceId/accounts/:accountId/score', async (req, res) => {
  * Returns a short LLM synthesis of why this account scores well/poorly.
  * Cached per account per day in account_scores.synthesis_text.
  */
-router.get('/:workspaceId/accounts/:accountId/score/why', async (req, res) => {
+router.get('/:workspaceId/accounts/:accountId/score/why', requirePermission('data.accounts_view'), async (req, res) => {
   try {
     const { workspaceId, accountId } = req.params;
 
@@ -117,7 +118,7 @@ router.get('/:workspaceId/accounts/:accountId/score/why', async (req, res) => {
  * POST /:workspaceId/accounts/:accountId/enrich
  * Triggers enrichment + scoring for a single account.
  */
-router.post('/:workspaceId/accounts/:accountId/enrich', async (req, res) => {
+router.post('/:workspaceId/accounts/:accountId/enrich', requirePermission('data.accounts_view'), async (req, res) => {
   try {
     const { workspaceId, accountId } = req.params;
     const { forceApollo } = req.body || {};
@@ -140,7 +141,7 @@ router.post('/:workspaceId/accounts/:accountId/enrich', async (req, res) => {
  * POST /:workspaceId/accounts/enrich/batch
  * Triggers batch enrichment job.
  */
-router.post('/:workspaceId/accounts/enrich/batch', async (req, res) => {
+router.post('/:workspaceId/accounts/enrich/batch', requirePermission('data.accounts_view'), async (req, res) => {
   try {
     const { workspaceId } = req.params;
     const { limit, forceRefresh, accountIds } = req.body || {};
@@ -161,7 +162,7 @@ router.post('/:workspaceId/accounts/enrich/batch', async (req, res) => {
  * GET /:workspaceId/accounts/enrich/status
  * Returns enrichment coverage stats.
  */
-router.get('/:workspaceId/accounts/enrich/status', async (req, res) => {
+router.get('/:workspaceId/accounts/enrich/status', requirePermission('data.accounts_view'), async (req, res) => {
   try {
     const { workspaceId } = req.params;
 

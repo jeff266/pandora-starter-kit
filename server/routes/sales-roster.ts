@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from 'express';
+import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { query } from '../db.js';
 import { getSalesRoster } from '../connectors/shared/tracked-users.js';
 
@@ -8,7 +9,7 @@ interface WorkspaceParams {
   workspaceId: string;
 }
 
-router.get('/:workspaceId/sales-roster', async (req: Request<WorkspaceParams>, res: Response) => {
+router.get('/:workspaceId/sales-roster', requirePermission('data.reps_view_all'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId;
 

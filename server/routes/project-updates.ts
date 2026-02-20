@@ -1,11 +1,12 @@
 import { Router, type Request, type Response } from 'express';
+import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { query } from '../db.js';
 
 const router = Router();
 
 // POST /api/workspaces/:workspaceId/project-updates
 // Upsert project updates for a given week
-router.post('/:workspaceId/project-updates', async (req: Request, res: Response) => {
+router.post('/:workspaceId/project-updates', requirePermission('skills.run_manual'), async (req: Request, res: Response) => {
   const { workspaceId } = req.params;
   const { week_of, updates, notes } = req.body;
 
@@ -36,7 +37,7 @@ router.post('/:workspaceId/project-updates', async (req: Request, res: Response)
 
 // GET /api/workspaces/:workspaceId/project-updates
 // Get updates for a specific week (defaults to current week)
-router.get('/:workspaceId/project-updates', async (req: Request, res: Response) => {
+router.get('/:workspaceId/project-updates', requirePermission('data.deals_view'), async (req: Request, res: Response) => {
   const { workspaceId } = req.params;
   const weekOf = req.query.week_of as string || getMondayOfWeek(new Date()).toISOString().split('T')[0];
 
@@ -56,7 +57,7 @@ router.get('/:workspaceId/project-updates', async (req: Request, res: Response) 
 
 // GET /api/workspaces/:workspaceId/project-updates/latest
 // Get the most recent update regardless of week
-router.get('/:workspaceId/project-updates/latest', async (req: Request, res: Response) => {
+router.get('/:workspaceId/project-updates/latest', requirePermission('data.deals_view'), async (req: Request, res: Response) => {
   const { workspaceId } = req.params;
 
   try {

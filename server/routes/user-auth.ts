@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import { query } from '../db.js';
 import { sendMagicLink, sendWaitlistEmail, isAllowedEmail } from '../services/email.js';
+import { requireUserSession } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -146,15 +147,13 @@ router.get('/verify', async (req: Request, res: Response) => {
   }
 });
 
-router.post('/logout', async (req: Request, res: Response) => {
+router.post('/logout', requireUserSession, async (req: Request, res: Response) => {
   try {
     const header = req.headers.authorization;
-    if (!header?.startsWith('Bearer ')) {
-      res.status(401).json({ error: 'Authentication required' });
-      return;
+    const token = header?.slice(7);
+    if (token) {
+      await query('DELETE FROM user_sessions WHERE token = $1', [token]);
     }
-    const token = header.slice(7);
-    await query('DELETE FROM user_sessions WHERE token = $1', [token]);
     res.json({ success: true });
   } catch (err) {
     console.error('[auth] Logout error:', err instanceof Error ? err.message : err);
@@ -162,38 +161,14 @@ router.post('/logout', async (req: Request, res: Response) => {
   }
 });
 
-router.get('/me', async (req: Request, res: Response) => {
+router.get('/me', requireUserSession, async (req: Request, res: Response) => {
   try {
-    const header = req.headers.authorization;
-    if (!header?.startsWith('Bearer ')) {
-      res.status(401).json({ error: 'Authentication required' });
-      return;
-    }
-    const token = header.slice(7);
-
-    const sessionResult = await query<{ user_id: string }>(
-      'SELECT user_id FROM user_sessions WHERE token = $1 AND expires_at > now()',
-      [token]
-    );
-
-    if (sessionResult.rows.length === 0) {
-      res.status(401).json({ error: 'Invalid or expired session' });
-      return;
-    }
-
-    const userId = sessionResult.rows[0].user_id;
-
-    const userResult = await query<{ id: string; email: string; name: string; role: string }>(
-      'SELECT id, email, name, role FROM users WHERE id = $1',
-      [userId]
-    );
-
-    if (userResult.rows.length === 0) {
+    if (!req.user) {
       res.status(401).json({ error: 'User not found' });
       return;
     }
 
-    const user = userResult.rows[0];
+    const userId = req.user.user_id;
 
     const wsResult = await query<{
       id: string; name: string; slug: string; role: string;
@@ -215,7 +190,7 @@ router.get('/me', async (req: Request, res: Response) => {
     `, [userId]);
 
     res.json({
-      user: { id: user.id, email: user.email, name: user.name, role: user.role },
+      user: { id: userId, email: req.user.email, name: req.user.name, role: req.user.platform_role },
       workspaces: wsResult.rows.map(w => ({
         id: w.id,
         name: w.name,
@@ -232,37 +207,27 @@ router.get('/me', async (req: Request, res: Response) => {
   }
 });
 
-router.post('/workspaces/join', async (req: Request, res: Response) => {
+router.post('/workspaces/join', requireUserSession, async (req: Request, res: Response) => {
   try {
-    const header = req.headers.authorization;
-    if (!header?.startsWith('Bearer ')) {
+    if (!req.user) {
       res.status(401).json({ error: 'Authentication required' });
       return;
     }
-    const token = header.slice(7);
+    const userId = req.user.user_id;
 
-    const sessionResult = await query<{ user_id: string }>(
-      'SELECT user_id FROM user_sessions WHERE token = $1 AND expires_at > now()',
-      [token]
-    );
-    if (sessionResult.rows.length === 0) {
-      res.status(401).json({ error: 'Invalid or expired session' });
-      return;
-    }
-    const userId = sessionResult.rows[0].user_id;
-
-    const apiKey = (req.body.api_key || '').trim();
-    if (!apiKey) {
-      res.status(400).json({ error: 'API key is required' });
+    const inviteToken = (req.body.invite_token || '').trim();
+    if (!inviteToken) {
+      res.status(400).json({ error: 'Invite token is required' });
       return;
     }
 
+    // Validate invite token (for now using API key, TODO: implement JWT-based invites)
     const wsResult = await query<{ id: string; name: string; slug: string }>(
       'SELECT id, name, slug FROM workspaces WHERE api_key = $1',
-      [apiKey]
+      [inviteToken]
     );
     if (wsResult.rows.length === 0) {
-      res.status(404).json({ error: 'No workspace found with that API key' });
+      res.status(401).json({ error: 'Invalid or expired invite' });
       return;
     }
 

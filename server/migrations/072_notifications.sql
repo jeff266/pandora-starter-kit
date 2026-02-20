@@ -1,25 +1,25 @@
--- Migration: Notifications
--- Create notifications table for in-app notifications
+-- Migration: In-app notification system
+-- Enables alerts for agent approvals, skill requests, mentions, etc.
 
 CREATE TABLE IF NOT EXISTS notifications (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  workspace_id    UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  type            TEXT NOT NULL,
+  workspace_id    UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  notification_type TEXT NOT NULL, -- agent_review | skill_request | mention | system
   title           TEXT NOT NULL,
   body            TEXT,
-  action_url      TEXT,
-  read            BOOLEAN NOT NULL DEFAULT false,
+  link_url        TEXT,
+  link_entity_type TEXT, -- agent | skill | deal | account
+  link_entity_id  UUID,
+  is_read         BOOLEAN NOT NULL DEFAULT false,
   read_at         TIMESTAMPTZ,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_notifications_user_unread
-  ON notifications(user_id, workspace_id, read)
-  WHERE read = false;
-CREATE INDEX IF NOT EXISTS idx_notifications_created
-  ON notifications(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notifications_user
+  ON notifications(user_id, is_read, created_at DESC);
 
-COMMENT ON TABLE notifications IS 'In-app notification system for workspace events';
-COMMENT ON COLUMN notifications.type IS 'Notification type: invite_received | invite_request_submitted | invite_request_resolved | agent_pending_review | agent_review_resolved | skill_run_request | skill_run_resolved | member_suspended | role_changed';
-COMMENT ON COLUMN notifications.action_url IS 'Optional URL to navigate to when clicking notification';
+CREATE INDEX IF NOT EXISTS idx_notifications_workspace
+  ON notifications(workspace_id, created_at DESC);
+
+COMMENT ON TABLE notifications IS 'In-app notification system for user alerts';

@@ -6,6 +6,7 @@
  */
 
 import { Router, type Request, type Response } from 'express';
+import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { query } from '../db.js';
 import { configLoader } from '../config/workspace-config-loader.js';
 import {
@@ -591,7 +592,7 @@ router.get(
 );
 
 // GET /:workspaceId/workspace-config/field-options
-router.get('/:workspaceId/workspace-config/field-options', async (req, res) => {
+router.get('/:workspaceId/workspace-config/field-options', requirePermission('config.view'), async (req, res) => {
   try {
     const { workspaceId } = req.params;
     const wsCheck = await query('SELECT id FROM workspaces WHERE id = $1', [workspaceId]);
@@ -664,7 +665,7 @@ router.get('/:workspaceId/workspace-config/field-options', async (req, res) => {
 });
 
 // GET /:workspaceId/workspace-config/stages
-router.get('/:workspaceId/workspace-config/stages', async (req, res) => {
+router.get('/:workspaceId/workspace-config/stages', requirePermission('config.view'), async (req, res) => {
   try {
     const { workspaceId } = req.params;
     const wsCheck = await query('SELECT id FROM workspaces WHERE id = $1', [workspaceId]);
@@ -712,7 +713,7 @@ router.get('/:workspaceId/workspace-config/stages', async (req, res) => {
 });
 
 // GET /:workspaceId/workspace-config/owners
-router.get('/:workspaceId/workspace-config/owners', async (req, res) => {
+router.get('/:workspaceId/workspace-config/owners', requirePermission('config.view'), async (req, res) => {
   try {
     const { workspaceId } = req.params;
     const wsCheck = await query('SELECT id FROM workspaces WHERE id = $1', [workspaceId]);
@@ -753,7 +754,7 @@ router.get('/:workspaceId/workspace-config/owners', async (req, res) => {
 });
 
 // POST /:workspaceId/workspace-config/preview-filter
-router.post('/:workspaceId/workspace-config/preview-filter', async (req, res) => {
+router.post('/:workspaceId/workspace-config/preview-filter', requirePermission('config.edit'), async (req, res) => {
   try {
     const { workspaceId } = req.params;
     const wsCheck = await query('SELECT id FROM workspaces WHERE id = $1', [workspaceId]);

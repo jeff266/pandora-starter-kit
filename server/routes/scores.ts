@@ -1,9 +1,10 @@
 import { Router, type Request, type Response } from 'express';
+import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { query } from '../db.js';
 
 const router = Router();
 
-router.get('/:id/scores', async (req: Request, res: Response): Promise<void> => {
+router.get('/:id/scores', requirePermission('data.deals_view'), async (req: Request, res: Response): Promise<void> => {
   const workspaceId = req.params.id;
   const { entity_type, grade, min_score, limit = '50', offset = '0' } = req.query;
 
@@ -94,7 +95,7 @@ router.get('/:id/scores', async (req: Request, res: Response): Promise<void> => 
   }
 });
 
-router.get('/:id/scores/:entityType/:entityId', async (req: Request, res: Response): Promise<void> => {
+router.get('/:id/scores/:entityType/:entityId', requirePermission('data.deals_view'), async (req: Request, res: Response): Promise<void> => {
   const { id: workspaceId, entityType, entityId } = req.params;
 
   try {

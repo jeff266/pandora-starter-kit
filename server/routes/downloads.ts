@@ -5,6 +5,7 @@
  */
 
 import { Router } from 'express';
+import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -33,7 +34,7 @@ const downloadStore = new Map<string, {
  * Body: { format: 'xlsx' | 'pdf' | 'pptx', source: 'latest_agent_run' | 'latest_deliverable' | run_id, options?: RenderOptions }
  * Renders the specified output and returns download URL
  */
-router.post('/render', async (req, res) => {
+router.post('/render', requirePermission('data.export'), async (req, res) => {
   try {
     const { workspaceId } = req.params;
     const { format, source, options, document_type } = req.body;
@@ -120,7 +121,7 @@ router.post('/render', async (req, res) => {
  * Body: { formats: ['xlsx', 'pdf'], source, options }
  * Renders in multiple formats simultaneously
  */
-router.post('/render-multiple', async (req, res) => {
+router.post('/render-multiple', requirePermission('data.export'), async (req, res) => {
   try {
     const { workspaceId } = req.params;
     const { formats, source, options } = req.body;
@@ -162,7 +163,7 @@ router.post('/render-multiple', async (req, res) => {
  *
  * Streams the file to the client
  */
-router.get('/:downloadId', async (req, res) => {
+router.get('/:downloadId', requirePermission('data.export'), async (req, res) => {
   try {
     const ref = await getDownloadReference(req.params.downloadId);
     if (!ref) {

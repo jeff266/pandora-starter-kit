@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { query } from '../db.js';
 import { getJobQueue } from '../jobs/queue.js';
 import { createLogger } from '../utils/logger.js';
@@ -9,7 +10,7 @@ import { getFreshCredentials } from '../utils/salesforce-token-refresh.js';
 const router = Router();
 const logger = createLogger('SalesforceSync');
 
-router.post('/:workspaceId/connectors/salesforce/sync', async (req, res) => {
+router.post('/:workspaceId/connectors/salesforce/sync', requirePermission('connectors.trigger_sync'), async (req, res) => {
   const { workspaceId } = req.params;
 
   try {
@@ -135,7 +136,7 @@ router.post('/:workspaceId/connectors/salesforce/sync', async (req, res) => {
 });
 
 // Test connection
-router.post('/:workspaceId/connectors/salesforce/test', async (req, res) => {
+router.post('/:workspaceId/connectors/salesforce/test', requirePermission('connectors.trigger_sync'), async (req, res) => {
   const { workspaceId } = req.params;
 
   try {
@@ -170,7 +171,7 @@ router.post('/:workspaceId/connectors/salesforce/test', async (req, res) => {
 });
 
 // Discover schema
-router.post('/:workspaceId/connectors/salesforce/discover-schema', async (req, res) => {
+router.post('/:workspaceId/connectors/salesforce/discover-schema', requirePermission('connectors.trigger_sync'), async (req, res) => {
   const { workspaceId } = req.params;
 
   try {
@@ -217,7 +218,7 @@ router.post('/:workspaceId/connectors/salesforce/discover-schema', async (req, r
 });
 
 // Health check
-router.get('/:workspaceId/connectors/salesforce/health', async (req, res) => {
+router.get('/:workspaceId/connectors/salesforce/health', requirePermission('connectors.view'), async (req, res) => {
   const { workspaceId } = req.params;
 
   try {
@@ -234,7 +235,7 @@ router.get('/:workspaceId/connectors/salesforce/health', async (req, res) => {
 });
 
 // Disconnect
-router.delete('/:workspaceId/connectors/salesforce/disconnect', async (req, res) => {
+router.delete('/:workspaceId/connectors/salesforce/disconnect', requirePermission('connectors.disconnect'), async (req, res) => {
   const { workspaceId } = req.params;
 
   try {

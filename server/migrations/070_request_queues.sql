@@ -1,36 +1,37 @@
--- Migration: Request Queues
--- Create request queue tables for skill runs and member invitations
+-- Migration: Request queues for skill runs and member invites
+-- Enables non-admin users to request actions that require approval
 
 CREATE TABLE IF NOT EXISTS skill_run_requests (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   workspace_id    UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-  requested_by    UUID NOT NULL REFERENCES users(id),
-  skill_id        TEXT NOT NULL,
-  note            TEXT,
-  status          TEXT NOT NULL DEFAULT 'pending',
-  resolved_by     UUID REFERENCES users(id),
-  resolved_at     TIMESTAMPTZ,
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS member_invite_requests (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  workspace_id    UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-  requested_by    UUID NOT NULL REFERENCES users(id),
-  invitee_email   TEXT NOT NULL,
-  proposed_role_id UUID REFERENCES workspace_roles(id),
-  note            TEXT,
-  status          TEXT NOT NULL DEFAULT 'pending',
-  resolved_by     UUID REFERENCES users(id),
-  resolved_at     TIMESTAMPTZ,
+  requester_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  skill_key       TEXT NOT NULL,
+  request_reason  TEXT,
+  status          TEXT NOT NULL DEFAULT 'pending', -- pending | approved | rejected
+  approved_by     UUID REFERENCES users(id),
+  reviewed_at     TIMESTAMPTZ,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_skill_run_requests_workspace
   ON skill_run_requests(workspace_id, status);
+
+CREATE TABLE IF NOT EXISTS member_invite_requests (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id    UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  requester_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  invite_email    TEXT NOT NULL,
+  invite_name     TEXT,
+  suggested_role  TEXT NOT NULL DEFAULT 'viewer',
+  request_reason  TEXT,
+  status          TEXT NOT NULL DEFAULT 'pending', -- pending | approved | rejected
+  approved_by     UUID REFERENCES users(id),
+  reviewed_at     TIMESTAMPTZ,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE INDEX IF NOT EXISTS idx_member_invite_requests_workspace
   ON member_invite_requests(workspace_id, status);
 
-COMMENT ON TABLE skill_run_requests IS 'Analyst requests for admin-approved skill runs';
-COMMENT ON COLUMN skill_run_requests.status IS 'Request status: pending | approved | rejected';
-COMMENT ON TABLE member_invite_requests IS 'Analyst requests for admin-approved member invitations';
+COMMENT ON TABLE skill_run_requests IS 'Requests from non-admin users to run restricted skills';
+COMMENT ON TABLE member_invite_requests IS 'Requests from managers/analysts to invite new workspace members';

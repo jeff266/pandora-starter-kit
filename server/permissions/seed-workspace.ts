@@ -21,10 +21,13 @@ interface SeedResult {
 /**
  * Seed a new workspace with system roles, creator membership, and feature flags
  * Runs in a single transaction
+ * @param workspaceId - The workspace to seed
+ * @param userId - The global user ID (users.id) who will be the workspace admin
+ * @param plan - The plan tier (starter, growth, pro, enterprise)
  */
 export async function seedNewWorkspace(
   workspaceId: string,
-  creatorId: string,
+  userId: string,
   plan: string
 ): Promise<SeedResult> {
   const client = await query('BEGIN');
@@ -58,16 +61,35 @@ export async function seedNewWorkspace(
       roleIds[systemType] = result.rows[0].id;
     }
 
-    // 2. Update creator's role in workspace_users table
-    // Note: Using workspace_users table (existing schema) instead of workspace_members
+    // 2. Get user details for workspace_members
+    const userResult = await query(
+      `SELECT email, name, avatar_url FROM users WHERE id = $1`,
+      [userId]
+    );
+    if (userResult.rows.length === 0) {
+      throw new Error(`User ${userId} not found`);
+    }
+    const user = userResult.rows[0];
+
+    // 3. Create or update workspace_members record with admin role
     await query(
-      `UPDATE workspace_users
-       SET role = $1
-       WHERE id = $2 AND workspace_id = $3`,
-      ['admin', creatorId, workspaceId]
+      `INSERT INTO workspace_members (
+        workspace_id,
+        user_id,
+        display_name,
+        email,
+        avatar_url,
+        role,
+        is_active
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+      ON CONFLICT (workspace_id, user_id)
+      DO UPDATE SET
+        role = EXCLUDED.role,
+        is_active = EXCLUDED.is_active`,
+      [workspaceId, userId, user.name, user.email, user.avatar_url, 'admin', true]
     );
 
-    // 3. Insert workspace_flags rows
+    // 4. Insert workspace_flags rows
     const flags = getFlagsForPlan(plan);
     for (const flag of flags) {
       await query(

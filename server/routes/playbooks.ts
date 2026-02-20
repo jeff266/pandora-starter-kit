@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from 'express';
+import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { query as dbQuery } from '../db.js';
 import { getSkillRegistry } from '../skills/registry.js';
 import { getAgentRegistry } from '../agents/registry.js';
@@ -92,7 +93,7 @@ function derivePlaybooks(): DerivedPlaybook[] {
   return playbooks;
 }
 
-router.get('/:workspaceId/playbooks', async (req: Request<WorkspaceParams>, res: Response) => {
+router.get('/:workspaceId/playbooks', requirePermission('agents.view'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
     const playbooks = derivePlaybooks();
@@ -164,7 +165,7 @@ router.get('/:workspaceId/playbooks', async (req: Request<WorkspaceParams>, res:
   }
 });
 
-router.get('/:workspaceId/playbooks/:playbookId', async (req: Request<WorkspaceParams & { playbookId: string }>, res: Response) => {
+router.get('/:workspaceId/playbooks/:playbookId', requirePermission('agents.view'), async (req: Request<WorkspaceParams & { playbookId: string }>, res: Response) => {
   try {
     const { workspaceId, playbookId } = req.params;
     const playbooks = derivePlaybooks();
@@ -261,7 +262,7 @@ router.get('/:workspaceId/playbooks/:playbookId', async (req: Request<WorkspaceP
   }
 });
 
-router.post('/:workspaceId/playbooks/:playbookId/run', async (req: Request<WorkspaceParams & { playbookId: string }>, res: Response) => {
+router.post('/:workspaceId/playbooks/:playbookId/run', requirePermission('agents.draft'), async (req: Request<WorkspaceParams & { playbookId: string }>, res: Response) => {
   try {
     const { workspaceId, playbookId } = req.params;
     const playbooks = derivePlaybooks();

@@ -21,29 +21,30 @@ async function testWorkspaceSeed() {
     const workspaceId = workspaceResult.rows[0].id;
     console.log(`   ✓ Workspace created: ${workspaceId}\n`);
 
-    // Create a test user (or use existing one)
+    // Create a test user in users table (or use existing one)
     const userResult = await query(
-      `SELECT id FROM workspace_users LIMIT 1`
+      `SELECT id FROM users WHERE email = $1`,
+      ['test-admin@example.com']
     );
 
-    let creatorId: string;
+    let userId: string;
     if (userResult.rows.length > 0) {
-      creatorId = userResult.rows[0].id;
-      console.log(`   ✓ Using existing user: ${creatorId}\n`);
+      userId = userResult.rows[0].id;
+      console.log(`   ✓ Using existing user: ${userId}\n`);
     } else {
       // Create a test user if none exist
       const newUserResult = await query(
-        `INSERT INTO workspace_users (workspace_id, display_name, email)
-         VALUES ($1, $2, $3) RETURNING id`,
-        [workspaceId, 'Test Admin', 'admin@test.com']
+        `INSERT INTO users (email, name)
+         VALUES ($1, $2) RETURNING id`,
+        ['test-admin@example.com', 'Test Admin']
       );
-      creatorId = newUserResult.rows[0].id;
-      console.log(`   ✓ Created test user: ${creatorId}\n`);
+      userId = newUserResult.rows[0].id;
+      console.log(`   ✓ Created test user: ${userId}\n`);
     }
 
     // 2. Call seedNewWorkspace
     console.log('2️⃣  Seeding workspace...');
-    const result = await seedNewWorkspace(workspaceId, creatorId, 'starter');
+    const result = await seedNewWorkspace(workspaceId, userId, 'starter');
     console.log(`   ✓ Seeding complete:`);
     console.log(`     - Roles created: ${Object.keys(result.roles).length}`);
     console.log(`     - Member created: ${result.memberCreated}`);
@@ -72,10 +73,10 @@ async function testWorkspaceSeed() {
     // 4. Verify admin member exists with correct role
     console.log('4️⃣  Verifying admin member...');
     const memberResult = await query(
-      `SELECT wu.*, wu.role as user_role
-       FROM workspace_users wu
-       WHERE wu.workspace_id = $1 AND wu.id = $2`,
-      [workspaceId, creatorId]
+      `SELECT wm.*, wm.role as user_role
+       FROM workspace_members wm
+       WHERE wm.workspace_id = $1 AND wm.user_id = $2`,
+      [workspaceId, userId]
     );
 
     if (memberResult.rows.length === 0) {
@@ -83,7 +84,8 @@ async function testWorkspaceSeed() {
     } else {
       const member = memberResult.rows[0];
       console.log(`   ✓ Admin member found:`);
-      console.log(`     - User ID: ${member.id}`);
+      console.log(`     - Workspace Member ID: ${member.id}`);
+      console.log(`     - User ID: ${member.user_id}`);
       console.log(`     - Role: ${member.user_role}`);
       console.log(`     - Display Name: ${member.display_name}`);
       console.log(`     - Active: ${member.is_active ? 'Yes' : 'No'}\n`);
@@ -134,6 +136,7 @@ async function testWorkspaceSeed() {
     // Cleanup
     console.log('🧹 Cleaning up test data...');
     await query('DELETE FROM workspace_flags WHERE workspace_id = $1', [workspaceId]);
+    await query('DELETE FROM workspace_members WHERE workspace_id = $1', [workspaceId]);
     await query('DELETE FROM workspace_roles WHERE workspace_id = $1', [workspaceId]);
     await query('DELETE FROM workspaces WHERE id = $1', [workspaceId]);
     console.log('   ✓ Cleanup complete\n');

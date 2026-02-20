@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import pool from '../db.js';
 import { WorkflowService } from '../workflows/workflow-service.js';
 import { getAvailablePieces, getConnectedPieces, getRequiredConnectionsForTree } from '../workflows/connector-registry-service.js';
@@ -18,7 +19,7 @@ export function setWorkflowService(svc: WorkflowService) {
   workflowService = svc;
 }
 
-router.get('/:workspaceId/workflows/meta/templates', async (req: Request, res: Response) => {
+router.get('/:workspaceId/workflows/meta/templates', requirePermission('config.view'), async (req: Request, res: Response) => {
   try {
     const result = await pool.query(
       `SELECT * FROM workflow_templates ORDER BY popularity DESC, name ASC`
@@ -29,7 +30,7 @@ router.get('/:workspaceId/workflows/meta/templates', async (req: Request, res: R
   }
 });
 
-router.get('/:workspaceId/workflows/meta/templates/:templateId', async (req: Request, res: Response) => {
+router.get('/:workspaceId/workflows/meta/templates/:templateId', requirePermission('config.view'), async (req: Request, res: Response) => {
   try {
     const { templateId } = req.params;
     const result = await pool.query(
@@ -45,7 +46,7 @@ router.get('/:workspaceId/workflows/meta/templates/:templateId', async (req: Req
   }
 });
 
-router.get('/:workspaceId/workflows/meta/connectors', async (req: Request, res: Response) => {
+router.get('/:workspaceId/workflows/meta/connectors', requirePermission('config.view'), async (req: Request, res: Response) => {
   try {
     const { workspaceId } = req.params;
     const pieces = await getAvailablePieces(pool, workspaceId);
@@ -55,7 +56,7 @@ router.get('/:workspaceId/workflows/meta/connectors', async (req: Request, res: 
   }
 });
 
-router.get('/:workspaceId/workflows/meta/connectors/connected', async (req: Request, res: Response) => {
+router.get('/:workspaceId/workflows/meta/connectors/connected', requirePermission('config.view'), async (req: Request, res: Response) => {
   try {
     const { workspaceId } = req.params;
     const pieces = await getConnectedPieces(pool, workspaceId);
@@ -65,7 +66,7 @@ router.get('/:workspaceId/workflows/meta/connectors/connected', async (req: Requ
   }
 });
 
-router.get('/:workspaceId/workflows', async (req: Request, res: Response) => {
+router.get('/:workspaceId/workflows', requirePermission('config.view'), async (req: Request, res: Response) => {
   try {
     const { workspaceId } = req.params;
     const svc = getWorkflowService();
@@ -82,7 +83,7 @@ router.get('/:workspaceId/workflows', async (req: Request, res: Response) => {
   }
 });
 
-router.post('/:workspaceId/workflows/from-template', async (req: Request, res: Response) => {
+router.post('/:workspaceId/workflows/from-template', requirePermission('config.edit'), async (req: Request, res: Response) => {
   try {
     const { workspaceId } = req.params;
     const { templateId, name, description } = req.body;
@@ -100,7 +101,7 @@ router.post('/:workspaceId/workflows/from-template', async (req: Request, res: R
   }
 });
 
-router.post('/:workspaceId/workflows', async (req: Request, res: Response) => {
+router.post('/:workspaceId/workflows', requirePermission('config.edit'), async (req: Request, res: Response) => {
   try {
     const { workspaceId } = req.params;
     const svc = getWorkflowService();
@@ -114,7 +115,7 @@ router.post('/:workspaceId/workflows', async (req: Request, res: Response) => {
   }
 });
 
-router.get('/:workspaceId/workflows/:workflowId', async (req: Request, res: Response) => {
+router.get('/:workspaceId/workflows/:workflowId', requirePermission('config.view'), async (req: Request, res: Response) => {
   try {
     const { workspaceId, workflowId } = req.params;
     const svc = getWorkflowService();
@@ -125,7 +126,7 @@ router.get('/:workspaceId/workflows/:workflowId', async (req: Request, res: Resp
   }
 });
 
-router.put('/:workspaceId/workflows/:workflowId', async (req: Request, res: Response) => {
+router.put('/:workspaceId/workflows/:workflowId', requirePermission('config.edit'), async (req: Request, res: Response) => {
   try {
     const { workspaceId, workflowId } = req.params;
     const svc = getWorkflowService();
@@ -139,7 +140,7 @@ router.put('/:workspaceId/workflows/:workflowId', async (req: Request, res: Resp
   }
 });
 
-router.delete('/:workspaceId/workflows/:workflowId', async (req: Request, res: Response) => {
+router.delete('/:workspaceId/workflows/:workflowId', requirePermission('config.edit'), async (req: Request, res: Response) => {
   try {
     const { workspaceId, workflowId } = req.params;
     const svc = getWorkflowService();
@@ -150,7 +151,7 @@ router.delete('/:workspaceId/workflows/:workflowId', async (req: Request, res: R
   }
 });
 
-router.post('/:workspaceId/workflows/:workflowId/activate', async (req: Request, res: Response) => {
+router.post('/:workspaceId/workflows/:workflowId/activate', requirePermission('config.edit'), async (req: Request, res: Response) => {
   try {
     const { workflowId } = req.params;
     const svc = getWorkflowService();
@@ -164,7 +165,7 @@ router.post('/:workspaceId/workflows/:workflowId/activate', async (req: Request,
   }
 });
 
-router.post('/:workspaceId/workflows/:workflowId/pause', async (req: Request, res: Response) => {
+router.post('/:workspaceId/workflows/:workflowId/pause', requirePermission('config.edit'), async (req: Request, res: Response) => {
   try {
     const { workflowId } = req.params;
     const svc = getWorkflowService();
@@ -175,7 +176,7 @@ router.post('/:workspaceId/workflows/:workflowId/pause', async (req: Request, re
   }
 });
 
-router.post('/:workspaceId/workflows/:workflowId/execute', async (req: Request, res: Response) => {
+router.post('/:workspaceId/workflows/:workflowId/execute', requirePermission('config.edit'), async (req: Request, res: Response) => {
   try {
     const { workflowId } = req.params;
     const { payload } = req.body;
@@ -187,7 +188,7 @@ router.post('/:workspaceId/workflows/:workflowId/execute', async (req: Request, 
   }
 });
 
-router.get('/:workspaceId/workflows/:workflowId/runs', async (req: Request, res: Response) => {
+router.get('/:workspaceId/workflows/:workflowId/runs', requirePermission('config.view'), async (req: Request, res: Response) => {
   try {
     const { workspaceId, workflowId } = req.params;
     const limit = parseInt(req.query.limit as string, 10) || 50;
@@ -202,7 +203,7 @@ router.get('/:workspaceId/workflows/:workflowId/runs', async (req: Request, res:
   }
 });
 
-router.get('/:workspaceId/workflows/:workflowId/runs/:runId', async (req: Request, res: Response) => {
+router.get('/:workspaceId/workflows/:workflowId/runs/:runId', requirePermission('config.view'), async (req: Request, res: Response) => {
   try {
     const { workspaceId, workflowId, runId } = req.params;
     const result = await pool.query(
@@ -218,7 +219,7 @@ router.get('/:workspaceId/workflows/:workflowId/runs/:runId', async (req: Reques
   }
 });
 
-router.post('/:workspaceId/workflows/:workflowId/runs/:runId/sync', async (req: Request, res: Response) => {
+router.post('/:workspaceId/workflows/:workflowId/runs/:runId/sync', requirePermission('config.edit'), async (req: Request, res: Response) => {
   try {
     const { runId } = req.params;
     const svc = getWorkflowService();
@@ -229,7 +230,7 @@ router.post('/:workspaceId/workflows/:workflowId/runs/:runId/sync', async (req: 
   }
 });
 
-router.post('/:workspaceId/workflows/:workflowId/validate', async (req: Request, res: Response) => {
+router.post('/:workspaceId/workflows/:workflowId/validate', requirePermission('config.edit'), async (req: Request, res: Response) => {
   try {
     const { workspaceId } = req.params;
     const { tree } = req.body;
