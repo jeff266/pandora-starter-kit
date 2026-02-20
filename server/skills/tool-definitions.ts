@@ -6196,24 +6196,47 @@ const mcFitDistributions: ToolDefinition = {
       const pipelineFilter: string | null = context.params?.pipelineFilter ?? null;
       const pipelineType: string = context.params?.pipelineType ?? 'new_business';
 
+      let resolvedFilter: string | null = null;
+      let filterClause = '';
+
+      if (pipelineFilter && pipelineFilter !== 'all' && pipelineFilter !== 'default') {
+        try {
+          const scopeResult = await query<{ scope_id: string }>(
+            `SELECT scope_id FROM analysis_scopes
+             WHERE workspace_id = $1 AND scope_id = $2 AND confirmed = true`,
+            [context.workspaceId, pipelineFilter]
+          );
+          if (scopeResult.rows.length > 0) {
+            const escaped = `'${pipelineFilter.replace(/'/g, "''")}'`;
+            filterClause = `AND d.scope_id = ${escaped}`;
+          } else {
+            resolvedFilter = pipelineFilter;
+          }
+        } catch {
+          resolvedFilter = pipelineFilter;
+        }
+      }
+
       const [stageWinRates, dealSize, cycleLength, slippage, pipelineRates] = await Promise.all([
-        fitStageWinRates(context.workspaceId, pipelineFilter),
-        fitDealSizeDistribution(context.workspaceId, pipelineFilter),
-        fitCycleLengthDistribution(context.workspaceId, pipelineFilter),
-        fitCloseSlippageDistribution(context.workspaceId, pipelineFilter),
-        fitPipelineCreationRates(context.workspaceId, pipelineFilter),
+        fitStageWinRates(context.workspaceId, resolvedFilter, 24, filterClause),
+        fitDealSizeDistribution(context.workspaceId, resolvedFilter, 24, filterClause),
+        fitCycleLengthDistribution(context.workspaceId, resolvedFilter, 24, filterClause),
+        fitCloseSlippageDistribution(context.workspaceId, resolvedFilter, 24, filterClause),
+        fitPipelineCreationRates(context.workspaceId, resolvedFilter, 12, filterClause),
       ]);
 
       let expansionRate = null;
       if (pipelineType === 'expansion') {
-        expansionRate = await fitExpansionRateDistribution(context.workspaceId, pipelineFilter);
+        expansionRate = await fitExpansionRateDistribution(context.workspaceId, resolvedFilter, 24, filterClause);
       }
 
+      const closedClause = filterClause ? filterClause.replace(/\bd\./g, '') : (resolvedFilter ? 'AND pipeline = $2' : '');
+      const closedParams = resolvedFilter ? [context.workspaceId, resolvedFilter] : [context.workspaceId];
       const closedResult = await query<{ cnt: string }>(
         `SELECT COUNT(*)::text AS cnt FROM deals
          WHERE workspace_id = $1 AND stage_normalized IN ('closed_won', 'closed_lost')
-         ${pipelineFilter ? 'AND pipeline = $2' : ''}`,
-        pipelineFilter ? [context.workspaceId, pipelineFilter] : [context.workspaceId]
+         ${closedClause}`,
+        closedParams
       );
       const closedDealCount = parseInt(closedResult.rows[0]?.cnt || '0', 10);
 
@@ -6237,46 +6260,22 @@ const mcLoadOpenDeals: ToolDefinition = {
       let pipelineClause = '';
 
       if (pipelineFilter && pipelineFilter !== 'all' && pipelineFilter !== 'default') {
-        // Try to load as scope first
+        // Check if the filter value matches a confirmed analysis scope
         try {
-          const scopeResult = await query<{
-            scope_id: string;
-            name: string;
-            filter_field: string;
-            filter_operator: string;
-            filter_values: string[];
-          }>(
-            `SELECT scope_id, name, filter_field, filter_operator, filter_values
-             FROM analysis_scopes
-             WHERE workspace_id = $1 AND scope_id = $2`,
+          const scopeResult = await query<{ scope_id: string }>(
+            `SELECT scope_id FROM analysis_scopes
+             WHERE workspace_id = $1 AND scope_id = $2 AND confirmed = true`,
             [context.workspaceId, pipelineFilter]
           );
 
           if (scopeResult.rows.length > 0) {
-            // It's a scope - use dynamic filtering
-            const { getScopeWhereClause } = await import('../config/scope-loader.js');
-            const scope = {
-              scope_id: scopeResult.rows[0].scope_id,
-              name: scopeResult.rows[0].name,
-              filter_field: scopeResult.rows[0].filter_field,
-              filter_operator: scopeResult.rows[0].filter_operator,
-              filter_values: Array.isArray(scopeResult.rows[0].filter_values)
-                ? scopeResult.rows[0].filter_values
-                : [],
-              field_overrides: {},
-            };
-
-            const whereClause = getScopeWhereClause(scope);
-            if (whereClause) {
-              pipelineClause = `AND ${whereClause}`;
-            }
+            const escapedScope = `'${pipelineFilter.replace(/'/g, "''")}'`;
+            pipelineClause = `AND scope_id = ${escapedScope}`;
           } else {
-            // Not a scope - treat as pipeline name
             const escapedPipeline = `'${pipelineFilter.replace(/'/g, "''")}'`;
             pipelineClause = `AND pipeline = ${escapedPipeline}`;
           }
         } catch (err) {
-          // Error loading scope, fall back to pipeline filtering
           const escapedPipeline = `'${pipelineFilter.replace(/'/g, "''")}'`;
           pipelineClause = `AND pipeline = ${escapedPipeline}`;
         }

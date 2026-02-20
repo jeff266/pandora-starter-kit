@@ -85,7 +85,7 @@ export async function buildICPTaxonomy(
        COUNT(*)::text as cnt
      FROM deals
      WHERE workspace_id = $1
-       AND is_closed = true
+       AND stage_normalized IN ('closed_won', 'closed_lost')
        ${scopeWhere ? `AND ${scopeWhere}` : ''}
      GROUP BY outcome`,
     [workspaceId]
@@ -110,7 +110,7 @@ export async function buildICPTaxonomy(
      FROM deals d
      LEFT JOIN accounts a ON d.account_id = a.id
      WHERE d.workspace_id = $1
-       AND d.is_closed = true
+       AND d.stage_normalized IN ('closed_won', 'closed_lost')
        ${scopeWhere ? `AND ${scopeWhere}` : ''}
      GROUP BY a.industry
      HAVING COUNT(*) >= 2
@@ -145,7 +145,7 @@ export async function buildICPTaxonomy(
      FROM deals d
      LEFT JOIN accounts a ON d.account_id = a.id
      WHERE d.workspace_id = $1
-       AND d.is_closed = true
+       AND d.stage_normalized IN ('closed_won', 'closed_lost')
        AND a.employee_count IS NOT NULL
        ${scopeWhere ? `AND ${scopeWhere}` : ''}
      GROUP BY size_bucket

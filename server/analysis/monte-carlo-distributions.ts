@@ -49,8 +49,13 @@ function stdev(values: number[]): number {
 export async function fitStageWinRates(
   workspaceId: string,
   pipelineFilter?: string | null,
-  lookbackMonths: number = 24
+  lookbackMonths: number = 24,
+  filterClause: string = ''
 ): Promise<Record<string, BetaDistribution>> {
+  const pClause = filterClause || (pipelineFilter ? `AND d.pipeline = $3` : '');
+  const pClauseNoAlias = filterClause ? filterClause.replace(/\bd\./g, '') : (pipelineFilter ? `AND pipeline = $3` : '');
+  const params = [workspaceId, lookbackMonths, ...(pipelineFilter && !filterClause ? [pipelineFilter] : [])];
+
   const histResult = await query<{
     stage_normalized: string;
     wins: string;
@@ -65,10 +70,10 @@ export async function fitStageWinRates(
      WHERE d.workspace_id = $1
        AND d.stage_normalized IN ('closed_won', 'closed_lost')
        AND d.updated_at > NOW() - ($2 || ' months')::interval
-       ${pipelineFilter ? `AND d.pipeline = $3` : ''}
+       ${pClause}
      GROUP BY dsh.stage_normalized
      HAVING dsh.stage_normalized IS NOT NULL`,
-    [workspaceId, lookbackMonths, ...(pipelineFilter ? [pipelineFilter] : [])]
+    params
   );
 
   const result: Record<string, BetaDistribution> = {};
@@ -89,9 +94,9 @@ export async function fitStageWinRates(
          AND stage_normalized IN ('closed_won', 'closed_lost')
          AND updated_at > NOW() - ($2 || ' months')::interval
          AND stage_normalized IS NOT NULL
-         ${pipelineFilter ? `AND pipeline = $3` : ''}
+         ${pClauseNoAlias}
        GROUP BY stage_normalized`,
-      [workspaceId, lookbackMonths, ...(pipelineFilter ? [pipelineFilter] : [])]
+      params
     );
     rows = fallback.rows;
   }
@@ -119,8 +124,11 @@ export async function fitStageWinRates(
 export async function fitDealSizeDistribution(
   workspaceId: string,
   pipelineFilter?: string | null,
-  lookbackMonths: number = 24
+  lookbackMonths: number = 24,
+  filterClause: string = ''
 ): Promise<LogNormalDistribution> {
+  const pClause = filterClause ? filterClause.replace(/\bd\./g, '') : (pipelineFilter ? `AND pipeline = $3` : '');
+  const params = [workspaceId, lookbackMonths, ...(pipelineFilter && !filterClause ? [pipelineFilter] : [])];
   const result = await query<{ amount: string }>(
     `SELECT amount::text
      FROM deals
@@ -128,8 +136,8 @@ export async function fitDealSizeDistribution(
        AND stage_normalized = 'closed_won'
        AND updated_at > NOW() - ($2 || ' months')::interval
        AND amount > 0
-       ${pipelineFilter ? `AND pipeline = $3` : ''}`,
-    [workspaceId, lookbackMonths, ...(pipelineFilter ? [pipelineFilter] : [])]
+       ${pClause}`,
+    params
   );
 
   const amounts = result.rows.map(r => parseFloat(r.amount)).filter(a => a > 0);
@@ -168,8 +176,11 @@ export async function fitDealSizeDistribution(
 export async function fitCycleLengthDistribution(
   workspaceId: string,
   pipelineFilter?: string | null,
-  lookbackMonths: number = 24
+  lookbackMonths: number = 24,
+  filterClause: string = ''
 ): Promise<LogNormalDistribution> {
+  const pClause = filterClause ? filterClause.replace(/\bd\./g, '') : (pipelineFilter ? `AND pipeline = $3` : '');
+  const params = [workspaceId, lookbackMonths, ...(pipelineFilter && !filterClause ? [pipelineFilter] : [])];
   const result = await query<{ cycle_days: string }>(
     `SELECT
        (EXTRACT(EPOCH FROM (updated_at - created_at)) / 86400)::text AS cycle_days
@@ -178,8 +189,8 @@ export async function fitCycleLengthDistribution(
        AND stage_normalized IN ('closed_won', 'closed_lost')
        AND updated_at > NOW() - ($2 || ' months')::interval
        AND updated_at > created_at
-       ${pipelineFilter ? `AND pipeline = $3` : ''}`,
-    [workspaceId, lookbackMonths, ...(pipelineFilter ? [pipelineFilter] : [])]
+       ${pClause}`,
+    params
   );
 
   const days = result.rows
@@ -208,8 +219,11 @@ export async function fitCycleLengthDistribution(
 export async function fitCloseSlippageDistribution(
   workspaceId: string,
   pipelineFilter?: string | null,
-  lookbackMonths: number = 24
+  lookbackMonths: number = 24,
+  filterClause: string = ''
 ): Promise<Record<string, NormalDistribution>> {
+  const pClause = filterClause || (pipelineFilter ? `AND d.pipeline = $3` : '');
+  const params = [workspaceId, lookbackMonths, ...(pipelineFilter && !filterClause ? [pipelineFilter] : [])];
   const result = await query<{
     stage_normalized: string;
     mean_slippage: string | null;
@@ -232,11 +246,11 @@ export async function fitCloseSlippageDistribution(
          AND d.close_date IS NOT NULL
          AND d.updated_at IS NOT NULL
          AND d.stage_normalized IS NOT NULL
-         ${pipelineFilter ? `AND d.pipeline = $3` : ''}
+         ${pClause}
      ) subq
      WHERE slippage_days BETWEEN -365 AND 365
      GROUP BY stage_normalized`,
-    [workspaceId, lookbackMonths, ...(pipelineFilter ? [pipelineFilter] : [])]
+    params
   );
 
   const slippage: Record<string, NormalDistribution> = {};
@@ -263,8 +277,11 @@ export interface PipelineRateDistribution extends NormalDistribution {
 export async function fitPipelineCreationRates(
   workspaceId: string,
   pipelineFilter?: string | null,
-  lookbackMonths: number = 12
+  lookbackMonths: number = 12,
+  filterClause: string = ''
 ): Promise<Record<string, PipelineRateDistribution>> {
+  const pClause = filterClause ? filterClause.replace(/\bd\./g, '') : (pipelineFilter ? `AND pipeline = $3` : '');
+  const params = [workspaceId, lookbackMonths, ...(pipelineFilter && !filterClause ? [pipelineFilter] : [])];
   const result = await query<{
     owner: string;
     month: string;
@@ -280,9 +297,9 @@ export async function fitPipelineCreationRates(
      WHERE workspace_id = $1
        AND created_at > NOW() - ($2 || ' months')::interval
        AND owner IS NOT NULL
-       ${pipelineFilter ? `AND pipeline = $3` : ''}
+       ${pClause}
      GROUP BY owner, DATE_TRUNC('month', created_at)`,
-    [workspaceId, lookbackMonths, ...(pipelineFilter ? [pipelineFilter] : [])]
+    params
   );
 
   // Group by rep
@@ -343,10 +360,12 @@ export async function fitPipelineCreationRates(
 export async function fitExpansionRateDistribution(
   workspaceId: string,
   pipelineFilter?: string | null,
-  lookbackMonths: number = 24
+  lookbackMonths: number = 24,
+  filterClause: string = ''
 ): Promise<{ mean: number; sigma: number; customerBaseARR: number; sampleSize: number; isReliable: boolean } | null> {
+  const pClause = filterClause || (pipelineFilter ? `AND d.pipeline = $3` : '');
   const params: (string | number)[] = [workspaceId, lookbackMonths];
-  if (pipelineFilter) params.push(pipelineFilter);
+  if (pipelineFilter && !filterClause) params.push(pipelineFilter);
 
   const rateResult = await query<{
     mean_expansion_rate: string | null;
@@ -363,7 +382,7 @@ export async function fitExpansionRateDistribution(
        AND d.stage_normalized = 'closed_won'
        AND d.updated_at > NOW() - ($2 || ' months')::interval
        AND a.annual_revenue > 0
-       ${pipelineFilter ? `AND d.pipeline = $3` : ''}`,
+       ${pClause}`,
     params
   );
 
