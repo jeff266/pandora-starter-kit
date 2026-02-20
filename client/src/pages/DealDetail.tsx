@@ -21,6 +21,13 @@ const SNOOZE_OPTIONS = [
 ];
 
 const ENGAGEMENT_ORDER: Record<string, number> = { dark: 0, fading: 1, active: 2 };
+const ROLE_PRIORITY: Record<string, number> = {
+  executive_sponsor: 1,
+  decision_maker: 2,
+  influencer: 3,
+  champion: 4,
+  economic_buyer: 5,
+};
 
 function engagementDot(level?: string): { color: string; label: string } {
   switch (level) {
@@ -247,9 +254,18 @@ export default function DealDetail() {
   const health = dossier.health_signals || {};
   const findingsList = dossier.findings || [];
   const contactsList = [...(dossier.contacts || [])].sort((a: any, b: any) => {
-    const aOrder = ENGAGEMENT_ORDER[a.engagement_level] ?? 3;
-    const bOrder = ENGAGEMENT_ORDER[b.engagement_level] ?? 3;
-    return aOrder - bOrder;
+    // Sort by buying role first (Executive Sponsor > Decision Maker > Influencer)
+    const aRole = a.buying_role ? a.buying_role.toLowerCase().replace(/ /g, '_') : '';
+    const bRole = b.buying_role ? b.buying_role.toLowerCase().replace(/ /g, '_') : '';
+    const aRolePriority = ROLE_PRIORITY[aRole] ?? 999;
+    const bRolePriority = ROLE_PRIORITY[bRole] ?? 999;
+    if (aRolePriority !== bRolePriority) {
+      return aRolePriority - bRolePriority;
+    }
+    // Then by engagement level
+    const aEngagement = ENGAGEMENT_ORDER[a.engagement_level] ?? 3;
+    const bEngagement = ENGAGEMENT_ORDER[b.engagement_level] ?? 3;
+    return bEngagement - aEngagement; // Active first
   });
   const activities = dossier.activities || [];
   const conversations = dossier.conversations || [];
