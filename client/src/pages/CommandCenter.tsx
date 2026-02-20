@@ -10,6 +10,7 @@ import QuotaBanner from '../components/QuotaBanner';
 import { useWorkspace } from '../context/WorkspaceContext';
 import SectionErrorBoundary from '../components/SectionErrorBoundary';
 import MonteCarloPanel from '../components/MonteCarloPanel';
+import GapCard from '../components/GapCard';
 import { useDemoMode } from '../contexts/DemoModeContext';
 
 interface Finding {
@@ -640,6 +641,10 @@ export default function CommandCenter() {
             </>
           )}
         </div>
+      </SectionErrorBoundary>
+
+      <SectionErrorBoundary fallbackMessage="Failed to load gap card.">
+        <GapCard wsId={wsId} />
       </SectionErrorBoundary>
 
       <SectionErrorBoundary fallbackMessage="Failed to load forecast panel.">

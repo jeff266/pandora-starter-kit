@@ -89,7 +89,7 @@ interface RevenueModel {
 const statusColors = {
   achieved: { bg: colors.greenSoft, border: colors.green, text: colors.green },
   on_track: { bg: colors.greenSoft, border: colors.green, text: colors.green },
-  at_risk: { bg: colors.orangeSoft, border: colors.orange, text: colors.orange },
+  at_risk: { bg: 'rgba(249,115,22,0.1)', border: colors.orange, text: colors.orange },
   critical: { bg: colors.redSoft, border: colors.red, text: colors.red },
 };
 

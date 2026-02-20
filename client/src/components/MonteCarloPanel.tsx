@@ -583,6 +583,7 @@ export default function MonteCarloPanel({ wsId, activePipeline }: { wsId?: strin
           p10={p10}
           p50={p50}
           p90={p90}
+          quota={quota}
           histogram={histogram || []}
           anon={anon}
         />
@@ -907,10 +908,10 @@ function HeadlineColumn({ p10, p50, p90, probOfHittingTarget, quota, dataQuality
           )}
           {!isThinData && (
             <div
-              onClick={() => navigate('/settings?tab=quotas')}
+              onClick={() => navigate('/targets')}
               style={{ fontSize: 11, color: colors.accent, marginTop: 6, cursor: 'pointer' }}
             >
-              Set quota to unlock probability analysis →
+              Set a target to see hit probability and gap analysis →
             </div>
           )}
         </div>
@@ -994,8 +995,9 @@ function HeadlineColumn({ p10, p50, p90, probOfHittingTarget, quota, dataQuality
   );
 }
 
-function ProbabilityDistribution({ p10, p50, p90, histogram, anon }: {
+function ProbabilityDistribution({ p10, p50, p90, quota, histogram, anon }: {
   p10: number; p50: number; p90: number;
+  quota: number | null;
   histogram: { bucketMin: number; bucketMax: number; count: number }[];
   anon: any;
 }) {
@@ -1066,6 +1068,23 @@ function ProbabilityDistribution({ p10, p50, p90, histogram, anon }: {
               strokeWidth={2}
               strokeOpacity={0.7}
             />
+
+            {/* Target reference line (if quota exists) */}
+            {quota != null && (
+              <ReferenceLine
+                x={quota}
+                stroke={colors.yellow}
+                strokeWidth={2}
+                strokeDasharray="4 4"
+                label={{
+                  value: `Target: ${fmtCompact(quota)}`,
+                  position: 'top',
+                  fill: colors.yellow,
+                  fontSize: 11,
+                  fontWeight: 600,
+                }}
+              />
+            )}
           </ComposedChart>
         </ResponsiveContainer>
       </div>
