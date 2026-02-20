@@ -296,7 +296,7 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
     let legacyPipelineValue = '';
 
     if (scopeId && scopeId !== 'default') {
-      // Load scope definition and build WHERE clause dynamically
+      // Try to load scope definition from analysis_scopes
       try {
         const scopeResult = await query<{
           scope_id: string;
@@ -312,6 +312,7 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
         );
 
         if (scopeResult.rows.length > 0) {
+          // Found a scope definition - use dynamic filtering
           const scope: ActiveScope = {
             scope_id: scopeResult.rows[0].scope_id,
             name: scopeResult.rows[0].name,
@@ -327,15 +328,22 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
           if (whereClause) {
             scopeFilterClause = ` AND ${whereClause}`;
           }
+        } else {
+          // Scope ID not found - treat it as a pipeline name (fallback for legacy behavior)
+          useLegacyPipeline = true;
+          legacyPipelineValue = scopeId;
         }
       } catch (err) {
         console.error('[Pipeline Snapshot] Failed to load scope:', err);
+        // On error, treat as pipeline name
+        useLegacyPipeline = true;
+        legacyPipelineValue = scopeId;
       }
     } else if (scopeId === 'default') {
       // Filter by scope_id column for 'default' scope
       scopeFilterClause = ` AND d.scope_id = 'default'`;
     } else if (pipelineFilter && pipelineFilter !== 'all') {
-      // Legacy pipeline filtering
+      // Legacy pipeline filtering via explicit pipeline parameter
       useLegacyPipeline = true;
       legacyPipelineValue = pipelineFilter;
     }
