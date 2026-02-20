@@ -194,16 +194,40 @@ export default function CommandCenter() {
   const fetchPipelines = useCallback(async (): Promise<string> => {
     try {
       const data = await api.get('/pipeline/pipelines');
-      const pipelines: Array<{ name: string }> = data.pipelines || [];
-      setAvailablePipelines(pipelines);
-      const stored = localStorage.getItem(`pandora_selected_pipeline_${wsId}`) || 'all';
-      if (stored !== 'all' && !pipelines.some(p => p.name === stored)) {
-        localStorage.setItem(`pandora_selected_pipeline_${wsId}`, 'all');
-        setSelectedPipeline('all');
-        return 'all';
+      const useScopes = data.use_scopes || false;
+
+      if (useScopes) {
+        // Response contains scopes - use scope_id for filtering
+        const scopes: Array<{ scope_id: string; name: string; deal_count: number }> = data.pipelines || [];
+        // Map to the format expected by the dropdown
+        const pipelineOptions = scopes.map(s => ({
+          name: s.scope_id, // Use scope_id as the value
+          display_name: s.name, // Use name for display
+          deal_count: s.deal_count,
+        }));
+        setAvailablePipelines(pipelineOptions as any);
+
+        const stored = localStorage.getItem(`pandora_selected_pipeline_${wsId}`) || 'all';
+        if (stored !== 'all' && !scopes.some(s => s.scope_id === stored)) {
+          localStorage.setItem(`pandora_selected_pipeline_${wsId}`, 'all');
+          setSelectedPipeline('all');
+          return 'all';
+        }
+        setSelectedPipeline(stored);
+        return stored;
+      } else {
+        // Response contains pipeline names - use name for filtering
+        const pipelines: Array<{ name: string }> = data.pipelines || [];
+        setAvailablePipelines(pipelines);
+        const stored = localStorage.getItem(`pandora_selected_pipeline_${wsId}`) || 'all';
+        if (stored !== 'all' && !pipelines.some(p => p.name === stored)) {
+          localStorage.setItem(`pandora_selected_pipeline_${wsId}`, 'all');
+          setSelectedPipeline('all');
+          return 'all';
+        }
+        setSelectedPipeline(stored);
+        return stored;
       }
-      setSelectedPipeline(stored);
-      return stored;
     } catch {
       return 'all';
     }
@@ -534,9 +558,9 @@ export default function CommandCenter() {
             }}
           >
             <option value="all">All Pipelines</option>
-            {availablePipelines.map(p => (
+            {availablePipelines.map((p: any) => (
               <option key={p.name} value={p.name}>
-                {p.name} ({p.deal_count})
+                {p.display_name || p.name} {p.deal_count != null ? `(${p.deal_count})` : ''}
               </option>
             ))}
           </select>

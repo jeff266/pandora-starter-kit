@@ -262,19 +262,77 @@ router.get('/:workspaceId/findings', async (req: Request, res: Response): Promis
 router.get('/:workspaceId/pipeline/pipelines', async (req: Request, res: Response): Promise<void> => {
   try {
     const { workspaceId } = req.params;
-    const result = await query(
-      `SELECT
-         COALESCE(pipeline, 'Unknown') as name,
-         count(*)::int as deal_count,
-         COALESCE(sum(amount), 0)::float as total_value
-       FROM deals
-       WHERE workspace_id = $1
-         AND stage_normalized NOT IN ('closed_won', 'closed_lost')
-       GROUP BY pipeline
-       ORDER BY sum(amount) DESC NULLS LAST`,
-      [workspaceId]
-    );
-    res.json({ pipelines: result.rows });
+
+    // First, check if workspace has confirmed analysis scopes
+    let hasScopes = false;
+    let scopeRows: Array<{ scope_id: string; name: string; deal_count: number }> = [];
+
+    try {
+      const scopesResult = await query<{
+        scope_id: string;
+        name: string;
+      }>(
+        `SELECT scope_id, name
+         FROM analysis_scopes
+         WHERE workspace_id = $1 AND confirmed = true
+         ORDER BY CASE WHEN scope_id = 'default' THEN 1 ELSE 0 END ASC, created_at ASC`,
+        [workspaceId]
+      );
+
+      if (scopesResult.rows.length > 0) {
+        hasScopes = true;
+
+        // Get deal counts per scope
+        const countsResult = await query<{ scope_id: string; cnt: string }>(
+          `SELECT scope_id, COUNT(*)::text as cnt
+           FROM deals
+           WHERE workspace_id = $1 AND stage_normalized NOT IN ('closed_won', 'closed_lost')
+           GROUP BY scope_id`,
+          [workspaceId]
+        );
+
+        const countMap = new Map(countsResult.rows.map(r => [r.scope_id, parseInt(r.cnt)]));
+
+        scopeRows = scopesResult.rows.map(s => ({
+          scope_id: s.scope_id,
+          name: s.name,
+          deal_count: countMap.get(s.scope_id) || 0,
+        }));
+      }
+    } catch (err) {
+      // analysis_scopes table may not exist, continue with pipeline-based approach
+      console.log('[findings] Scopes table not available, using pipeline column');
+    }
+
+    if (hasScopes) {
+      // Return scopes as filter options
+      res.json({
+        pipelines: scopeRows.map(s => ({
+          scope_id: s.scope_id,
+          name: s.name,
+          deal_count: s.deal_count,
+        })),
+        use_scopes: true,
+      });
+    } else {
+      // Fall back to pipeline column values
+      const result = await query(
+        `SELECT
+           COALESCE(pipeline, 'Unknown') as name,
+           count(*)::int as deal_count,
+           COALESCE(sum(amount), 0)::float as total_value
+         FROM deals
+         WHERE workspace_id = $1
+           AND stage_normalized NOT IN ('closed_won', 'closed_lost')
+         GROUP BY pipeline
+         ORDER BY sum(amount) DESC NULLS LAST`,
+        [workspaceId]
+      );
+      res.json({
+        pipelines: result.rows,
+        use_scopes: false,
+      });
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('[findings] Pipelines list error:', msg);
