@@ -337,25 +337,35 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
 
     const userId = req.user.user_id;
 
-    // Get user workspaces
     const wsResult = await query<{
       id: string;
       name: string;
-      role_id: string;
-      role_name: string;
-      status: string;
+      slug: string;
+      role: string;
+      connector_count: string;
+      deal_count: string;
+      last_sync: string | null;
     }>(`
       SELECT
         w.id,
         w.name,
-        wm.role_id,
-        wr.name as role_name,
-        wm.status
-      FROM workspace_members wm
-      JOIN workspaces w ON w.id = wm.workspace_id
-      JOIN workspace_roles wr ON wr.id = wm.role_id
-      WHERE wm.user_id = $1
-        AND wm.status IN ('active', 'pending')
+        COALESCE(w.slug, '') as slug,
+        uw.role,
+        COALESCE(cr.cnt, 0) as connector_count,
+        COALESCE(d.cnt, 0) as deal_count,
+        sl.last_sync
+      FROM user_workspaces uw
+      JOIN workspaces w ON w.id = uw.workspace_id
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::int as cnt FROM connector_registry WHERE workspace_id = w.id
+      ) cr ON true
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::int as cnt FROM deals WHERE workspace_id = w.id
+      ) d ON true
+      LEFT JOIN LATERAL (
+        SELECT MAX(completed_at) as last_sync FROM sync_log WHERE workspace_id = w.id
+      ) sl ON true
+      WHERE uw.user_id = $1
       ORDER BY w.name
     `, [userId]);
 
@@ -368,11 +378,11 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
       workspaces: wsResult.rows.map(w => ({
         id: w.id,
         name: w.name,
-        role: {
-          id: w.role_id,
-          name: w.role_name,
-        },
-        status: w.status,
+        slug: w.slug,
+        role: w.role,
+        connector_count: Number(w.connector_count),
+        deal_count: Number(w.deal_count),
+        last_sync: w.last_sync || null,
       })),
     });
   } catch (err) {
