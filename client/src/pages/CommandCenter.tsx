@@ -1326,6 +1326,7 @@ function DrilldownDealRow({ deal, isLast, isAsking, onAsk }: {
   isAsking: boolean;
   onAsk: () => void;
 }) {
+  const navigate = useNavigate();
   const [hovered, setHovered] = useState(false);
   const daysColor = (deal.days_in_stage || 0) > 30 ? '#EF4444' : (deal.days_in_stage || 0) > 14 ? '#F59E0B' : '#8896AB';
   const prob = Math.round(Number(deal.probability || 0) * 100);
@@ -1349,7 +1350,17 @@ function DrilldownDealRow({ deal, isLast, isAsking, onAsk }: {
     >
       <div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 13, fontWeight: 500, color: '#E2E8F0' }}>{deal.name}</span>
+          <span
+            onClick={() => navigate(`/deals/${deal.id}`)}
+            style={{
+              fontSize: 13,
+              fontWeight: 500,
+              color: '#E2E8F0',
+              cursor: 'pointer',
+              textDecoration: hovered ? 'underline' : 'none',
+              transition: 'text-decoration 0.1s',
+            }}
+          >{deal.name}</span>
           {deal.findings.map(f => {
             const fl = FINDING_LABELS_MAP[f];
             return fl ? (
