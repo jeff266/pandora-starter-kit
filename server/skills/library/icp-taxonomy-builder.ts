@@ -6,14 +6,14 @@
  * Enriches ICP Discovery with web signal intelligence to build actionable taxonomies:
  * - Vertical detection (healthcare, industrial, software, generic)
  * - Top 50 won accounts enriched with Serper news/signals
- * - DeepSeek classification of account patterns
- * - Claude synthesis into targeting playbooks
+ * - DeepSeek classification of account patterns (batched)
+ * - Claude synthesis into structured JSON taxonomy (grounded in classification data)
  *
  * Token Budget: < 12K tokens total
  * - Phase 1 (COMPUTE): 0 tokens - SQL aggregation only
  * - Phase 2 (COMPUTE): 0 tokens - Serper enrichment + compression
- * - Phase 3 (CLASSIFY): ~3.6K tokens - DeepSeek classifies compressed accounts
- * - Phase 4 (SYNTHESIZE): ~4.5K tokens - Claude builds taxonomy report
+ * - Phase 3 (COMPUTE+DeepSeek): ~3.6K tokens - Batched classification
+ * - Phase 4 (COMPUTE+Claude): ~4.5K tokens - Grounded synthesis
  *
  * Scheduling:
  * - Monthly on 1st of month at 3am
@@ -23,26 +23,23 @@
  * Cost control:
  * - Top 50 accounts only (Serper API cost limit)
  * - Serper: ~$0.05 per 50 searches
- * - DeepSeek: ~$0.07 per run
+ * - DeepSeek: ~$0.07 per run (4 batches)
  * - Claude: ~$0.15 per run
  * - Total: ~$0.27 per scope per month
  */
 
 import type { SkillDefinition } from '../types.js';
 
-// Handlebars templates - defined as const to avoid TypeScript template literal parsing
-const CLAUDE_PROMPT = 'You are a revenue intelligence strategist building an ICP Taxonomy from closed deal analysis and web signal intelligence.\n\n## FOUNDATION DATA (from ICP Discovery)\n\n**Won Deals Analyzed:** {{taxonomy_foundation.won_count}}\n**Scope:** {{taxonomy_foundation.scope_name}}\n**Minimum Threshold:** {{taxonomy_foundation.min_threshold}} won deals required ({{#if taxonomy_foundation.meets_threshold}}✓ MET{{else}}✗ NOT MET{{/if}})\n\n**Top Industries:**\n{{#each taxonomy_foundation.top_industries}}\n- {{this.industry}}: {{this.count}} deals, {{multiply this.win_rate 100}}% win rate, avg ${{formatNumber this.avg_amount}}\n{{/each}}\n\n**Top Company Sizes:**\n{{#each taxonomy_foundation.top_sizes}}\n- {{this.size_bucket}}: {{this.count}} deals, {{multiply this.win_rate 100}}% win rate\n{{/each}}\n\n## WEB-ENRICHED ACCOUNTS (Top 50 by Amount)\n\nTotal accounts enriched: {{enriched_accounts.accounts_enriched}}\nSerper searches performed: {{enriched_accounts.serper_searches}}\nAccounts with signals: {{enriched_accounts.accounts_with_signals}}\n\n{{#each enriched_accounts.top_accounts}}\n### {{@index}}. {{this.name}} (${{formatNumber this.amount}})\n- Industry: {{this.industry}}\n- Size: {{this.employee_count}} employees\n- Signals: {{this.signals.length}} found\n{{/each}}\n\n## DEEPSEEK CLASSIFICATIONS\n\nVertical distribution:\n{{#each account_classifications}}\n- {{this.vertical_pattern}}: {{this.account_name}} (confidence: {{this.confidence}})\n{{/each}}\n\nCommon buying signals:\n{{#each (groupBy account_classifications "buying_signals")}}\n- {{@key}}: {{this.length}} accounts\n{{/each}}\n\nMaturity distribution:\n{{#each (groupBy account_classifications "company_maturity")}}\n- {{@key}}: {{this.length}} accounts\n{{/each}}\n\n## YOUR TASK\n\nBuild a comprehensive ICP Taxonomy Report with these sections:\n\n### 1. Vertical Classification (100-150 words)\nClassify this company\'s ICP into ONE primary vertical:\n- **Healthcare** (healthcare_provider OR healthcare_tech dominates)\n- **Industrial** (industrial_manufacturing OR industrial_services dominates)\n- **Software** (software_b2b OR software_consumer dominates)\n- **Generic B2B** (no clear vertical pattern OR professional_services)\n\nState the vertical clearly in the first sentence. Explain the reasoning based on:\n- Industry distribution from foundation data\n- Vertical patterns from classifications\n- Signal clustering\n\n### 2. Ideal Customer Archetypes (200-250 words)\nFor each distinct archetype (3-5 archetypes):\n- Archetype name (e.g., "Regional Health System Modernizer")\n- Company profile (size, maturity, industry characteristics)\n- Typical buying signals (what triggers the purchase?)\n- Use case pattern (why they buy, what problem they solve)\n- Example companies (2-3 from the classified accounts)\n\n### 3. Lookalike Targeting Criteria (150-200 words)\nSynthesize lookalike indicators into actionable targeting rules:\n- Firmographic filters (industry, size, revenue, growth rate)\n- Technographic signals (if mentioned in indicators)\n- Behavioral triggers (web signals that indicate readiness)\n- Negative filters (patterns that correlate with lost deals)\n\n### 4. Go-to-Market Implications (100-150 words)\nStrategic recommendations:\n- Should marketing focus on a specific vertical or stay horizontal?\n- What content/messaging themes resonate? (based on use cases + signals)\n- Which buying signals should SDRs prioritize for outreach timing?\n- Any coverage gaps or expansion opportunities?\n\n## RULES\n\n- Be specific with numbers: cite deal counts, percentages, dollar amounts\n- Use real company names from the data when illustrating archetypes\n- If taxonomy_foundation.meets_threshold is false, note data limitations but still provide best-effort insights\n- If no clear vertical pattern emerges, say "Generic B2B" and explain horizontal targeting strategy\n- Total response: 600-800 words (fit in Slack message)\n\n{{voiceBlock}}';
-
 export const icpTaxonomyBuilderSkill: SkillDefinition = {
   id: 'icp-taxonomy-builder',
   name: 'ICP Taxonomy Builder',
   description: 'Monthly enrichment of ICP insights with web signals to detect vertical patterns and build targeting taxonomies',
-  version: '1.0.0',
+  version: '1.1.0',
   category: 'intelligence',
   tier: 'mixed',
   slackTemplate: 'icp-taxonomy',
 
-  requiredTools: ['buildICPTaxonomy', 'enrichTopAccounts', 'compressForClassification', 'classifyAccountPatterns', 'persistTaxonomy'],
+  requiredTools: ['buildICPTaxonomy', 'enrichTopAccounts', 'compressForClassification', 'classifyAccountPatterns', 'synthesizeTaxonomy', 'persistTaxonomy'],
   requiredContext: [],
 
   steps: [
@@ -87,12 +84,12 @@ export const icpTaxonomyBuilderSkill: SkillDefinition = {
 
     {
       id: 'synthesize-taxonomy',
-      name: 'Synthesize ICP Taxonomy (SYNTHESIZE)',
-      tier: 'claude',
-      dependsOn: ['enrich-top-accounts', 'classify-account-patterns'],
-      claudePrompt: CLAUDE_PROMPT,
+      name: 'Synthesize ICP Taxonomy (COMPUTE + Claude)',
+      tier: 'compute',
+      dependsOn: ['build-taxonomy-foundation', 'enrich-top-accounts', 'classify-account-patterns'],
+      computeFn: 'synthesizeTaxonomy',
+      computeArgs: {},
       outputKey: 'taxonomy_report',
-      parseAs: 'markdown',
     },
 
     {

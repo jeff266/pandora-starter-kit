@@ -62,11 +62,13 @@ import {
   enrichTopAccounts,
   compressForClassification,
   classifyAccountsBatched,
+  synthesizeTaxonomy,
   persistTaxonomy,
   type TaxonomyFoundation,
   type EnrichedAccountsResult,
   type CompressedAccountsResult,
   type AccountClassification,
+  type TaxonomyReport,
   type PersistResult,
 } from './compute/icp-taxonomy.js';
 import { prepareBowtieSummary, type BowtieSummary } from './compute/bowtie-analysis.js';
@@ -4000,6 +4002,27 @@ const classifyAccountPatternsTool: ToolDefinition = {
   },
 };
 
+const synthesizeTaxonomyTool: ToolDefinition = {
+  name: 'synthesizeTaxonomy',
+  description: 'Synthesize ICP taxonomy from classification data using Claude with grounded prompt',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('synthesizeTaxonomy', async () => {
+      const scopeId = context.scopeId || 'default';
+      const result = await synthesizeTaxonomy(context.workspaceId, scopeId, context.stepResults);
+
+      console.log(`[ICP Taxonomy] Synthesized taxonomy: ${result.archetypes?.length || 0} archetypes, ${result.top_dimensions?.length || 0} dimensions`);
+
+      return result;
+    }, params);
+  },
+};
+
 const persistTaxonomyTool: ToolDefinition = {
   name: 'persistTaxonomy',
   description: 'Write ICP taxonomy results to database and link to icp_profiles',
@@ -6699,6 +6722,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['enrichTopAccounts', enrichTopAccountsTool],
   ['compressForClassification', compressForClassificationTool],
   ['classifyAccountPatterns', classifyAccountPatternsTool],
+  ['synthesizeTaxonomy', synthesizeTaxonomyTool],
   ['persistTaxonomy', persistTaxonomyTool],
   ['prepareBowtieSummary', prepareBowtieSummaryTool],
   ['preparePipelineGoalsSummary', preparePipelineGoalsSummaryTool],

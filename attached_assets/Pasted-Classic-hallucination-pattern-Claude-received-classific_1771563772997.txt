@@ -1,0 +1,173 @@
+Classic hallucination pattern — Claude received classification data about ABA clinics and invented hospital network archetypes instead of reading what was in front of it. The fix is grounding the prompt more aggressively. Send this to Claude Code:
+
+---
+
+```
+Read server/skills/library/icp-taxonomy-builder.ts — specifically the
+Claude synthesis step (Phase 3).
+
+The synthesis step is hallucinating generic healthcare archetypes (hospital
+networks, EHR migration, Series B health tech) instead of reflecting what
+the account_classifications actually contain. Account names like "Guided
+Roots ABA", "Blaze ABA", "Autism Care Partners" are being ignored in favor
+of invented categories.
+
+Two fixes required:
+
+---
+
+FIX 1: Ground the synthesis prompt in actual classification data
+
+The Claude prompt must include the actual classification labels from
+account_classifications. Currently it's receiving too little grounding data.
+
+Build the prompt input like this:
+
+  // Extract the actual values DeepSeek found — never invent categories
+  const classificationSummary = buildClassificationSummary(accountClassifications);
+
+  function buildClassificationSummary(classifications) {
+    // Count frequency of each value per dimension
+    const dimensionCounts = {};
+    
+    for (const account of classifications) {
+      for (const [key, value] of Object.entries(account.dimensions || {})) {
+        if (!dimensionCounts[key]) dimensionCounts[key] = {};
+        dimensionCounts[key][value] = (dimensionCounts[key][value] || 0) + 1;
+      }
+    }
+    
+    // Return top 3 values per dimension with counts
+    const summary = {};
+    for (const [dim, valueCounts] of Object.entries(dimensionCounts)) {
+      summary[dim] = Object.entries(valueCounts)
+        .sort(([,a], [,b]) => b - a)
+        .slice(0, 3)
+        .map(([value, count]) => ({ value, count }));
+    }
+    
+    return summary;
+  }
+
+  // Also extract a sample of actual account names + snippets
+  const accountSample = accountClassifications
+    .slice(0, 15)
+    .map(a => `${a.account_name}: ${a.vertical_pattern || ''} ${a.use_case_archetype || ''}`.trim());
+
+The Claude prompt must include BOTH:
+  - classificationSummary (what DeepSeek actually found, by frequency)
+  - accountSample (15 real account names so Claude can't ignore them)
+
+---
+
+FIX 2: Force structured JSON output with explicit grounding instruction
+
+Replace the current synthesis prompt with this:
+
+  You are analyzing the ICP (Ideal Customer Profile) for ${workspaceName}.
+
+  IMPORTANT: You must derive ALL insights ONLY from the data below.
+  Do NOT invent categories, archetypes, or patterns not present in this data.
+  If you are unsure, say "insufficient data" rather than guessing.
+
+  ACTUAL ACCOUNT SAMPLE (${accountSample.length} of ${totalAccounts} won accounts):
+  ${accountSample.map(a => `- ${a}`).join('\n')}
+
+  CLASSIFICATION PATTERNS (from analysis of all ${totalAccounts} accounts):
+  ${Object.entries(classificationSummary).map(([dim, values]) =>
+    `${dim}:\n${values.map(v => `  - "${v.value}": ${v.count} accounts`).join('\n')}`
+  ).join('\n\n')}
+
+  WIN RATE BY CRM DIMENSION:
+  ${crmDimensionSummary}
+
+  Based ONLY on the above data, produce a JSON object with this exact shape.
+  Output ONLY valid JSON. No markdown, no explanation, no preamble.
+
+  {
+    "icp_summary": "2-3 sentences describing the ideal customer in plain language,
+      using the specific terminology visible in the account names and classifications
+      above. Must mention the specific service type, population, or industry
+      visible in the data.",
+    "top_dimensions": [
+      {
+        "key": "dimension_key",
+        "label": "Human readable label",
+        "ideal_values": ["value1", "value2"],
+        "win_rate": 0.0,
+        "lift": 0.0,
+        "why_it_matters": "One sentence grounded in the data above",
+        "data_source": "crm | serper | conversation | synthesized"
+      }
+    ],
+    "negative_indicators": [
+      {
+        "dimension": "dimension_key",
+        "value": "value",
+        "win_rate": 0.0,
+        "recommendation": "One sentence"
+      }
+    ],
+    "archetypes": [
+      {
+        "name": "Name derived from actual account patterns above",
+        "deal_count": 0,
+        "description": "Description using only terminology from the data above",
+        "example_accounts": ["actual account names from the sample above"]
+      }
+    ],
+    "confidence": "high | medium | low",
+    "confidence_notes": "Note sample size and data coverage"
+  }
+
+---
+
+FIX 3: Parse and store as structured JSONB, not markdown string
+
+After Claude responds, parse the JSON before storing:
+
+  let taxonomyReport;
+  try {
+    // Strip code fences if present
+    const cleaned = claudeResponse
+      .replace(/```json\n?/g, '')
+      .replace(/```\n?/g, '')
+      .trim();
+    taxonomyReport = JSON.parse(cleaned);
+  } catch (e) {
+    console.error('[ICP Taxonomy] Claude output was not valid JSON:', e);
+    // Store raw string in a fallback key so data isn't lost
+    taxonomyReport = { raw: claudeResponse, parse_error: e.message };
+  }
+
+  // Store as structured JSONB, not { "report": "markdown string" }
+  await db.query(
+    `UPDATE icp_taxonomy SET taxonomy_report = $1 WHERE workspace_id = $2 AND scope_id = $3`,
+    [JSON.stringify(taxonomyReport), workspaceId, scopeId]
+  );
+
+---
+
+VERIFICATION
+
+After fixing, re-run for Frontera:
+  POST /api/workspaces/<frontera_id>/skills/icp-taxonomy-builder/run
+
+Then query:
+  SELECT
+    taxonomy_report->>'icp_summary' as icp_summary,
+    jsonb_array_length(taxonomy_report->'top_dimensions') as dimension_count,
+    jsonb_array_length(taxonomy_report->'archetypes') as archetype_count,
+    taxonomy_report->'archetypes'->0->>'name' as first_archetype,
+    taxonomy_report->'archetypes'->0->'example_accounts' as example_accounts
+  FROM icp_taxonomy
+  WHERE workspace_id = '<frontera_id>';
+
+Pass criteria:
+- icp_summary mentions "ABA", "behavioral health", "autism", or "pediatric"
+- first_archetype name does NOT contain "hospital", "EHR", or "health system"
+- example_accounts contains actual account names like "Guided Roots ABA"
+- dimension_count >= 3
+
+Zero new TypeScript errors.
+```

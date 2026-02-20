@@ -442,7 +442,209 @@ export async function classifyAccountsBatched(
 }
 
 // ============================================================================
-// Phase 3: Persist Taxonomy (COMPUTE)
+// Phase 3: Synthesize Taxonomy (COMPUTE + Claude)
+// ============================================================================
+
+export interface TaxonomyReport {
+  icp_summary: string;
+  top_dimensions: Array<{
+    key: string;
+    label: string;
+    ideal_values: string[];
+    win_rate: number;
+    lift: number;
+    why_it_matters: string;
+    data_source: string;
+  }>;
+  negative_indicators: Array<{
+    dimension: string;
+    value: string;
+    win_rate: number;
+    recommendation: string;
+  }>;
+  archetypes: Array<{
+    name: string;
+    deal_count: number;
+    description: string;
+    example_accounts: string[];
+  }>;
+  confidence: string;
+  confidence_notes: string;
+}
+
+function buildClassificationSummary(classifications: AccountClassification[]): Record<string, Array<{ value: string; count: number }>> {
+  const dimensionCounts: Record<string, Record<string, number>> = {};
+
+  for (const account of classifications) {
+    const dims: Record<string, string | string[]> = {
+      vertical_pattern: account.vertical_pattern,
+      company_maturity: account.company_maturity,
+      use_case_archetype: account.use_case_archetype,
+      buying_signals: account.buying_signals,
+      lookalike_indicators: account.lookalike_indicators,
+    };
+
+    for (const [key, value] of Object.entries(dims)) {
+      if (!dimensionCounts[key]) dimensionCounts[key] = {};
+      if (Array.isArray(value)) {
+        for (const v of value) {
+          dimensionCounts[key][v] = (dimensionCounts[key][v] || 0) + 1;
+        }
+      } else if (typeof value === 'string' && value) {
+        dimensionCounts[key][value] = (dimensionCounts[key][value] || 0) + 1;
+      }
+    }
+  }
+
+  const summary: Record<string, Array<{ value: string; count: number }>> = {};
+  for (const [dim, valueCounts] of Object.entries(dimensionCounts)) {
+    summary[dim] = Object.entries(valueCounts)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 5)
+      .map(([value, count]) => ({ value, count }));
+  }
+
+  return summary;
+}
+
+export async function synthesizeTaxonomy(
+  workspaceId: string,
+  _scopeId: string = 'default',
+  stepData?: Record<string, any>
+): Promise<TaxonomyReport> {
+  const foundation = stepData?.taxonomy_foundation as TaxonomyFoundation | undefined;
+  const enrichedAccounts = stepData?.enriched_accounts as EnrichedAccountsResult | undefined;
+  const accountClassifications = stepData?.account_classifications as AccountClassification[] | undefined;
+
+  if (!foundation || !accountClassifications || accountClassifications.length === 0) {
+    throw new Error('Missing foundation or classification data for synthesis');
+  }
+
+  const classificationSummary = buildClassificationSummary(accountClassifications);
+
+  const accountSample = accountClassifications
+    .slice(0, 20)
+    .map(a => `${a.account_name}: ${a.vertical_pattern || ''} / ${a.use_case_archetype || ''} / maturity: ${a.company_maturity || ''}`.trim());
+
+  const totalAccounts = accountClassifications.length;
+
+  const crmDimensionSummary = foundation.top_industries
+    .map(ind => `- ${ind.industry}: ${ind.count} deals, ${Math.round(ind.win_rate * 100)}% win rate, avg $${Math.round(ind.avg_amount).toLocaleString()}`)
+    .join('\n');
+
+  const sizeSummary = foundation.top_sizes
+    .map(s => `- ${s.size_bucket} employees: ${s.count} deals, ${Math.round(s.win_rate * 100)}% win rate`)
+    .join('\n');
+
+  const workspaceResult = await query<{ name: string }>(
+    `SELECT name FROM workspaces WHERE id = $1`,
+    [workspaceId]
+  );
+  const workspaceName = workspaceResult.rows[0]?.name || 'Unknown';
+
+  const classificationPatterns = Object.entries(classificationSummary)
+    .map(([dim, values]) =>
+      `${dim}:\n${values.map(v => `  - "${v.value}": ${v.count} accounts`).join('\n')}`
+    ).join('\n\n');
+
+  const prompt = `You are analyzing the ICP (Ideal Customer Profile) for ${workspaceName}.
+
+IMPORTANT: You must derive ALL insights ONLY from the data below.
+Do NOT invent categories, archetypes, or patterns not present in this data.
+If you are unsure, say "insufficient data" rather than guessing.
+
+ACTUAL ACCOUNT SAMPLE (${accountSample.length} of ${totalAccounts} won accounts):
+${accountSample.map(a => `- ${a}`).join('\n')}
+
+CLASSIFICATION PATTERNS (from analysis of all ${totalAccounts} accounts):
+${classificationPatterns}
+
+WIN RATE BY CRM INDUSTRY:
+${crmDimensionSummary || 'No industry data available'}
+
+WIN RATE BY COMPANY SIZE:
+${sizeSummary || 'No size data available'}
+
+WON DEALS: ${foundation.won_count} | LOST DEALS: ${foundation.lost_count}
+
+Based ONLY on the above data, produce a JSON object with this exact shape.
+Output ONLY valid JSON. No markdown, no explanation, no preamble.
+
+{
+  "icp_summary": "2-3 sentences describing the ideal customer in plain language, using the specific terminology visible in the account names and classifications above. Must mention the specific service type, population, or industry visible in the data.",
+  "top_dimensions": [
+    {
+      "key": "dimension_key",
+      "label": "Human readable label",
+      "ideal_values": ["value1", "value2"],
+      "win_rate": 0.0,
+      "lift": 0.0,
+      "why_it_matters": "One sentence grounded in the data above",
+      "data_source": "crm | serper | conversation | synthesized"
+    }
+  ],
+  "negative_indicators": [
+    {
+      "dimension": "dimension_key",
+      "value": "value",
+      "win_rate": 0.0,
+      "recommendation": "One sentence"
+    }
+  ],
+  "archetypes": [
+    {
+      "name": "Name derived from actual account patterns above",
+      "deal_count": 0,
+      "description": "Description using only terminology from the data above",
+      "example_accounts": ["actual account names from the sample above"]
+    }
+  ],
+  "confidence": "high | medium | low",
+  "confidence_notes": "Note sample size and data coverage"
+}`;
+
+  logger.info('Synthesizing taxonomy with Claude', {
+    workspaceId,
+    totalAccounts,
+    classificationDimensions: Object.keys(classificationSummary).length,
+    sampleSize: accountSample.length,
+  });
+
+  const response = await callLLM(workspaceId, 'reason', {
+    messages: [{ role: 'user', content: prompt }],
+    systemPrompt: 'You are a revenue intelligence analyst. Respond with ONLY valid JSON. No markdown fences, no explanation.',
+    maxTokens: 4096,
+    temperature: 0.2,
+  });
+
+  if (!response.content) {
+    throw new Error('Claude returned empty response for taxonomy synthesis');
+  }
+
+  let taxonomyReport: TaxonomyReport;
+  try {
+    const cleaned = response.content
+      .replace(/```json\n?/g, '')
+      .replace(/```\n?/g, '')
+      .trim();
+    taxonomyReport = JSON.parse(cleaned);
+  } catch (e: any) {
+    logger.error('Claude output was not valid JSON', { error: e.message, contentPreview: response.content.slice(0, 500) });
+    taxonomyReport = { raw: response.content, parse_error: e.message } as any;
+  }
+
+  logger.info('Taxonomy synthesis complete', {
+    workspaceId,
+    hasIcpSummary: !!taxonomyReport.icp_summary,
+    dimensionCount: taxonomyReport.top_dimensions?.length || 0,
+    archetypeCount: taxonomyReport.archetypes?.length || 0,
+  });
+
+  return taxonomyReport;
+}
+
+// ============================================================================
+// Phase 4: Persist Taxonomy (COMPUTE)
 // ============================================================================
 
 /**
@@ -519,7 +721,7 @@ export async function persistTaxonomy(
       finalVertical,
       JSON.stringify(enrichmentFailed ? [] : enrichedAccounts.top_accounts),
       JSON.stringify(accountClassifications || []),
-      JSON.stringify({ report: taxonomyReport }),
+      JSON.stringify(taxonomyReport),
       enrichmentFailed ? 0 : enrichedAccounts.accounts_enriched,
       foundation.won_count,
       enrichmentFailed ? 0 : enrichedAccounts.serper_searches,
