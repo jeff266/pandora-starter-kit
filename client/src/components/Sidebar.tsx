@@ -27,6 +27,7 @@ const sections: NavSection[] = [
     items: [
       { label: 'Deals', path: '/deals', icon: '\u25C6' },
       { label: 'Accounts', path: '/accounts', icon: '\u25C7' },
+      { label: 'Targets', path: '/targets', icon: '\u25CE' },
     ],
   },
   {

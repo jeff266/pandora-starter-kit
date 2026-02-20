@@ -31,6 +31,7 @@ import PushPage from './pages/PushPage';
 import ConsultantDashboard from './pages/ConsultantDashboard';
 import IcpProfilePage from './pages/IcpProfilePage';
 import AdminScopesPage from './pages/AdminScopesPage';
+import Targets from './pages/Targets';
 import { colors, fonts } from './styles/theme';
 
 const pageTitles: Record<string, string> = {
@@ -38,6 +39,7 @@ const pageTitles: Record<string, string> = {
   '/portfolio': 'All Clients',
   '/deals': 'Open Deals',
   '/accounts': 'Accounts',
+  '/targets': 'Targets',
   '/agents': 'Agents',
   '/agent-builder': 'Agent Builder',
   '/skills': 'Skills',
@@ -182,6 +184,7 @@ export default function App() {
             <Route path="/deals/:dealId" element={<DealDetail />} />
             <Route path="/accounts" element={<AccountList />} />
             <Route path="/accounts/:accountId" element={<AccountDetail />} />
+            <Route path="/targets" element={<Targets />} />
             <Route path="/skills" element={<SkillsPage />} />
             <Route path="/skills/:skillId/runs" element={<SkillRunsPage />} />
             <Route path="/connectors" element={<ConnectorsPage />} />
