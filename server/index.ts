@@ -79,7 +79,7 @@ import agentBuilderRouter from './routes/agent-builder.js';
 import accountScoringRouter from './routes/account-scoring.js';
 import scoringStateRouter from './routes/scoring-state.js';
 import adminScopesRouter from './routes/admin-scopes.js';
-import adminScopesRouter from './routes/admin-scopes.js';
+import targetsRouter from './routes/targets.js';
 import { startPushTriggers, stopPushTriggers } from './push/trigger-manager.js';
 import { initRenderers } from './renderers/index.js';
 import { cleanupExpiredAnnotations } from './feedback/cleanup.js';
@@ -249,6 +249,7 @@ workspaceApiRouter.use(accountScoringRouter);
 workspaceApiRouter.use(scoringStateRouter);
 workspaceApiRouter.use(agentBuilderRouter);
 workspaceApiRouter.use(adminScopesRouter);
+workspaceApiRouter.use(targetsRouter);
 app.use("/api/workspaces", workspaceApiRouter);
 
 app.use("/api", skillsRouter);
