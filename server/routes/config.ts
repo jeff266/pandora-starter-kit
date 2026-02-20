@@ -36,7 +36,7 @@ interface WorkspaceParams {
 // Get full workspace configuration
 // ============================================================================
 
-router.get('/:workspaceId/config', requirePermission('config.view'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.get('/:workspaceId/config', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
 
@@ -69,7 +69,7 @@ router.get('/:workspaceId/config', requirePermission('config.view'), async (req:
 // Update workspace configuration (partial or full)
 // ============================================================================
 
-router.put('/:workspaceId/config', requirePermission('config.edit'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.put('/:workspaceId/config', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
     const updates = req.body as Partial<WorkspaceConfig>;
@@ -114,7 +114,7 @@ router.put('/:workspaceId/config', requirePermission('config.edit'), async (req:
 // Set stage mapping configuration
 // ============================================================================
 
-router.put('/:workspaceId/config/stage-mapping', requirePermission('config.edit'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.put('/:workspaceId/config/stage-mapping', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
     const mapping = req.body.mapping as StageMapping;
@@ -153,7 +153,7 @@ router.put('/:workspaceId/config/stage-mapping', requirePermission('config.edit'
 // Set department patterns configuration
 // ============================================================================
 
-router.put('/:workspaceId/config/department-patterns', requirePermission('config.edit'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.put('/:workspaceId/config/department-patterns', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
     const patterns = req.body.patterns as DepartmentPatterns;
@@ -192,7 +192,7 @@ router.put('/:workspaceId/config/department-patterns', requirePermission('config
 // Set role field mappings configuration
 // ============================================================================
 
-router.put('/:workspaceId/config/role-field-mappings', requirePermission('config.edit'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.put('/:workspaceId/config/role-field-mappings', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
     const mappings = req.body.mappings as RoleFieldMappings;
@@ -231,7 +231,7 @@ router.put('/:workspaceId/config/role-field-mappings', requirePermission('config
 // Set grade thresholds configuration
 // ============================================================================
 
-router.put('/:workspaceId/config/grade-thresholds', requirePermission('config.edit'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.put('/:workspaceId/config/grade-thresholds', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
     const thresholds = req.body.thresholds as GradeThresholds;
@@ -270,7 +270,7 @@ router.put('/:workspaceId/config/grade-thresholds', requirePermission('config.ed
 // Get default values for all configuration options
 // ============================================================================
 
-router.get('/:workspaceId/config/defaults', requirePermission('config.view'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.get('/:workspaceId/config/defaults', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     res.json({
       success: true,
@@ -311,7 +311,7 @@ router.get('/:workspaceId/config/defaults', requirePermission('config.view'), as
   }
 });
 
-router.get('/:workspaceId/config/enrichment', requirePermission('config.view'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.get('/:workspaceId/config/enrichment', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
 
@@ -343,7 +343,7 @@ router.get('/:workspaceId/config/enrichment', requirePermission('config.view'), 
   }
 });
 
-router.put('/:workspaceId/config/enrichment', requirePermission('config.edit'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.put('/:workspaceId/config/enrichment', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
     const body = req.body;

@@ -13,7 +13,7 @@ import { query } from '../db.js';
 
 const router = Router({ mergeParams: true });
 
-router.post('/:id/conversations/extract-signals', requirePermission('skills.run_manual'), async (req: Request, res: Response) => {
+router.post('/:id/conversations/extract-signals', async (req: Request, res: Response) => {
   try {
     const workspaceId = req.params.id;
     const force = req.body.force === true;
@@ -31,7 +31,7 @@ router.post('/:id/conversations/extract-signals', requirePermission('skills.run_
   }
 });
 
-router.get('/:id/conversations/signal-status', requirePermission('skills.view_results'), async (req: Request, res: Response) => {
+router.get('/:id/conversations/signal-status', async (req: Request, res: Response) => {
   try {
     const workspaceId = req.params.id;
 

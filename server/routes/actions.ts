@@ -15,7 +15,7 @@ interface WorkspaceParams {
   workspaceId: string;
 }
 
-router.post('/:workspaceId/actions/pipeline-snapshot', requirePermission('skills.run_manual'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/actions/pipeline-snapshot', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId;
     const {
@@ -101,7 +101,7 @@ router.post('/:workspaceId/actions/pipeline-snapshot', requirePermission('skills
   }
 });
 
-router.post('/:workspaceId/actions/compute-fields', requirePermission('skills.run_manual'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/actions/compute-fields', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId;
 
@@ -129,7 +129,7 @@ router.post('/:workspaceId/actions/compute-fields', requirePermission('skills.ru
   }
 });
 
-router.post('/:workspaceId/actions/refresh-computed-fields', requirePermission('skills.run_manual'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/actions/refresh-computed-fields', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
     const result = await refreshComputedFields(workspaceId);

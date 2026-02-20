@@ -17,7 +17,7 @@ interface WorkspaceParams {
   workspaceId: string;
 }
 
-router.post('/:workspaceId/enrichment/deal/:dealId', requirePermission('data.deals_view'), async (req: Request<WorkspaceDealParams>, res: Response) => {
+router.post('/:workspaceId/enrichment/deal/:dealId', async (req: Request<WorkspaceDealParams>, res: Response) => {
   try {
     const { workspaceId, dealId } = req.params;
 
@@ -44,7 +44,7 @@ router.post('/:workspaceId/enrichment/deal/:dealId', requirePermission('data.dea
   }
 });
 
-router.post('/:workspaceId/enrichment/batch', requirePermission('data.deals_view'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/enrichment/batch', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
     const { lookbackMonths, limit } = req.body || {};
@@ -67,7 +67,7 @@ router.post('/:workspaceId/enrichment/batch', requirePermission('data.deals_view
   }
 });
 
-router.get('/:workspaceId/enrichment/status', requirePermission('data.deals_view'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.get('/:workspaceId/enrichment/status', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
 
@@ -115,7 +115,7 @@ router.get('/:workspaceId/enrichment/status', requirePermission('data.deals_view
   }
 });
 
-router.post('/:workspaceId/enrichment/re-enrich', requirePermission('config.edit'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/enrichment/re-enrich', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
     const { resolveRoles, runApollo, runSerper, apolloLimit, serperLimit } = req.body || {};
@@ -141,7 +141,7 @@ router.post('/:workspaceId/enrichment/re-enrich', requirePermission('config.edit
   }
 });
 
-router.post('/:workspaceId/enrichment/accounts', requirePermission('data.accounts_view'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/enrichment/accounts', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
     const { closedDealsOnly } = req.body || {};
@@ -163,7 +163,7 @@ router.post('/:workspaceId/enrichment/accounts', requirePermission('data.account
   }
 });
 
-router.get('/:workspaceId/deals/:dealId/buying-committee', requirePermission('data.deals_view'), async (req: Request<WorkspaceDealParams>, res: Response) => {
+router.get('/:workspaceId/deals/:dealId/buying-committee', async (req: Request<WorkspaceDealParams>, res: Response) => {
   try {
     const { workspaceId, dealId } = req.params;
 

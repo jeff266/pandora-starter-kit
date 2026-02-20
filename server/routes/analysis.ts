@@ -44,7 +44,7 @@ setInterval(() => {
   }
 }, 5 * 60_000);
 
-router.post('/:workspaceId/analyze', requirePermission('skills.view_results'), async (req: Request, res: Response): Promise<void> => {
+router.post('/:workspaceId/analyze', async (req: Request, res: Response): Promise<void> => {
   try {
     const workspaceId = req.params.workspaceId as string;
 
@@ -149,7 +149,7 @@ router.post('/:workspaceId/analyze', requirePermission('skills.view_results'), a
   }
 });
 
-router.post('/:workspaceId/analyze/legacy', requirePermission('skills.view_results'), async (req: Request, res: Response): Promise<void> => {
+router.post('/:workspaceId/analyze/legacy', async (req: Request, res: Response): Promise<void> => {
   try {
     const workspaceId = req.params.workspaceId as string;
     const { question, scope, format, max_tokens } = req.body;
@@ -183,7 +183,7 @@ router.post('/:workspaceId/analyze/legacy', requirePermission('skills.view_resul
   }
 });
 
-router.get('/:workspaceId/analyze/suggestions', requirePermission('skills.view_results'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:workspaceId/analyze/suggestions', async (req: Request, res: Response): Promise<void> => {
   try {
     const scopeParam = (req.query.scope as string) || '';
 

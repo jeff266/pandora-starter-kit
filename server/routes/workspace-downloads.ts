@@ -16,7 +16,7 @@ const router = Router({ mergeParams: true });
  * GET /api/workspaces/:workspaceId/downloads
  * List all workspace downloads
  */
-router.get('/', requirePermission('data.export'), async (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const { workspaceId } = req.params;
     const limit = parseInt(req.query.limit as string) || 50;
@@ -56,7 +56,7 @@ router.get('/', requirePermission('data.export'), async (req, res) => {
  * GET /api/workspaces/:workspaceId/downloads/:downloadId
  * Get download metadata
  */
-router.get('/:downloadId', requirePermission('data.export'), async (req, res) => {
+router.get('/:downloadId', async (req, res) => {
   try {
     const { workspaceId, downloadId } = req.params;
 
@@ -91,7 +91,7 @@ router.get('/:downloadId', requirePermission('data.export'), async (req, res) =>
  * GET /api/workspaces/:workspaceId/downloads/:downloadId/file
  * Stream the actual file
  */
-router.get('/:downloadId/file', requirePermission('data.export'), async (req, res) => {
+router.get('/:downloadId/file', async (req, res) => {
   try {
     const { workspaceId, downloadId } = req.params;
 
@@ -164,7 +164,7 @@ router.get('/:downloadId/file', requirePermission('data.export'), async (req, re
  * DELETE /api/workspaces/:workspaceId/downloads/:downloadId
  * Delete a download (file + database record)
  */
-router.delete('/:downloadId', requirePermission('data.export'), async (req, res) => {
+router.delete('/:downloadId', async (req, res) => {
   try {
     const { workspaceId, downloadId } = req.params;
 
@@ -207,7 +207,7 @@ router.delete('/:downloadId', requirePermission('data.export'), async (req, res)
  * DELETE /api/workspaces/:workspaceId/downloads
  * Cleanup expired downloads for workspace
  */
-router.delete('/', requirePermission('data.export'), async (req, res) => {
+router.delete('/', async (req, res) => {
   try {
     const { workspaceId } = req.params;
 

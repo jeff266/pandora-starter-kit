@@ -19,7 +19,7 @@ interface WorkspaceParams {
   id: string;
 }
 
-router.post('/:id/linker/run', requirePermission('skills.run_manual'), async (req: Request<WorkspaceParams>, res: Response): Promise<void> => {
+router.post('/:id/linker/run', async (req: Request<WorkspaceParams>, res: Response): Promise<void> => {
   const workspaceId = req.params.id;
 
   try {
@@ -37,7 +37,7 @@ router.post('/:id/linker/run', requirePermission('skills.run_manual'), async (re
   }
 });
 
-router.get('/:id/linker/status', requirePermission('data.deals_view'), async (req: Request<WorkspaceParams>, res: Response): Promise<void> => {
+router.get('/:id/linker/status', async (req: Request<WorkspaceParams>, res: Response): Promise<void> => {
   const workspaceId = req.params.id;
 
   try {
@@ -51,7 +51,7 @@ router.get('/:id/linker/status', requirePermission('data.deals_view'), async (re
   }
 });
 
-router.post('/:id/internal-filter/run', requirePermission('skills.run_manual'), async (req: Request<WorkspaceParams>, res: Response): Promise<void> => {
+router.post('/:id/internal-filter/run', async (req: Request<WorkspaceParams>, res: Response): Promise<void> => {
   const workspaceId = req.params.id;
 
   try {
@@ -66,7 +66,7 @@ router.post('/:id/internal-filter/run', requirePermission('skills.run_manual'), 
   }
 });
 
-router.get('/:id/internal-filter/stats', requirePermission('data.deals_view'), async (req: Request<WorkspaceParams>, res: Response): Promise<void> => {
+router.get('/:id/internal-filter/stats', async (req: Request<WorkspaceParams>, res: Response): Promise<void> => {
   const workspaceId = req.params.id;
 
   try {
@@ -79,7 +79,7 @@ router.get('/:id/internal-filter/stats', requirePermission('data.deals_view'), a
   }
 });
 
-router.get('/:id/config/internal-domains', requirePermission('data.deals_view'), async (req: Request<WorkspaceParams>, res: Response): Promise<void> => {
+router.get('/:id/config/internal-domains', async (req: Request<WorkspaceParams>, res: Response): Promise<void> => {
   const workspaceId = req.params.id;
 
   try {
@@ -115,7 +115,7 @@ router.get('/:id/config/internal-domains', requirePermission('data.deals_view'),
   }
 });
 
-router.put('/:id/config/internal-domains', requirePermission('config.edit'), async (req: Request<WorkspaceParams>, res: Response): Promise<void> => {
+router.put('/:id/config/internal-domains', async (req: Request<WorkspaceParams>, res: Response): Promise<void> => {
   const workspaceId = req.params.id;
 
   try {
@@ -169,7 +169,7 @@ router.put('/:id/config/internal-domains', requirePermission('config.edit'), asy
   }
 });
 
-router.get('/:id/conversations-without-deals', requirePermission('data.deals_view'), async (req: Request<WorkspaceParams>, res: Response): Promise<void> => {
+router.get('/:id/conversations-without-deals', async (req: Request<WorkspaceParams>, res: Response): Promise<void> => {
   const workspaceId = req.params.id;
   const daysBack = parseInt(req.query.days_back as string, 10) || 90;
   const severity = req.query.severity as string | undefined;

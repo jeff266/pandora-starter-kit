@@ -6,7 +6,7 @@ import { getJobQueue } from '../jobs/queue.js';
 
 const router = Router();
 
-router.post('/:id/sync', requirePermission('connectors.trigger_sync'), async (req: Request, res: Response): Promise<void> => {
+router.post('/:id/sync', async (req: Request, res: Response): Promise<void> => {
   const workspaceId = req.params.id;
   const { connectorType } = req.body || {};
 
@@ -96,7 +96,7 @@ router.post('/:id/sync', requirePermission('connectors.trigger_sync'), async (re
   }
 });
 
-router.get('/:id/sync/status', requirePermission('connectors.view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:id/sync/status', async (req: Request, res: Response): Promise<void> => {
   const workspaceId = req.params.id;
 
   try {
@@ -150,7 +150,7 @@ router.get('/:id/sync/status', requirePermission('connectors.view'), async (req:
   }
 });
 
-router.get('/:id/sync/jobs/:jobId', requirePermission('connectors.view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:id/sync/jobs/:jobId', async (req: Request, res: Response): Promise<void> => {
   const workspaceId = req.params.id;
   const jobId = req.params.jobId;
 
@@ -188,7 +188,7 @@ router.get('/:id/sync/jobs/:jobId', requirePermission('connectors.view'), async 
   }
 });
 
-router.get('/:id/sync/jobs', requirePermission('connectors.view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:id/sync/jobs', async (req: Request, res: Response): Promise<void> => {
   const workspaceId = req.params.id;
   const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
 
@@ -215,7 +215,7 @@ router.get('/:id/sync/jobs', requirePermission('connectors.view'), async (req: R
   }
 });
 
-router.get('/:id/sync/history', requirePermission('connectors.view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:id/sync/history', async (req: Request, res: Response): Promise<void> => {
   const workspaceId = req.params.id;
   const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
   const connector = req.query.connector as string | undefined;
@@ -262,7 +262,7 @@ router.get('/:id/sync/history', requirePermission('connectors.view'), async (req
   }
 });
 
-router.get('/:id/connectors/health', requirePermission('connectors.view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:id/connectors/health', async (req: Request, res: Response): Promise<void> => {
   const workspaceId = req.params.id;
 
   try {
@@ -451,7 +451,7 @@ router.get('/:id/connectors/health', requirePermission('connectors.view'), async
   }
 });
 
-router.post('/:id/connectors/disconnect', requirePermission('connectors.trigger_sync'), async (req: Request, res: Response): Promise<void> => {
+router.post('/:id/connectors/disconnect', async (req: Request, res: Response): Promise<void> => {
   const workspaceId = req.params.id;
   const { connectorType } = req.body || {};
 

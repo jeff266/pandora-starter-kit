@@ -21,7 +21,7 @@ function hashToken(token: string): string {
  * GET /
  * List all workspace members and pending invites
  */
-router.get('/', requirePermission('members.view'), async (req: Request, res: Response) => {
+router.get('/', async (req: Request, res: Response) => {
   try {
     const { workspaceId } = req.params;
 
@@ -93,7 +93,7 @@ router.get('/', requirePermission('members.view'), async (req: Request, res: Res
  * POST /invite
  * Invite a new member to the workspace
  */
-router.post('/invite', requirePermission('members.invite'), async (req: Request, res: Response) => {
+router.post('/invite', async (req: Request, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId as string;
     const { email, roleId, note } = req.body;
@@ -187,7 +187,7 @@ router.post('/invite', requirePermission('members.invite'), async (req: Request,
  * POST /invite-request
  * Request permission to invite a new member (for non-admin users)
  */
-router.post('/invite-request', requirePermission('members.invite_request'), async (req: Request, res: Response) => {
+router.post('/invite-request', async (req: Request, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId as string;
     const { email, proposedRoleId, note } = req.body;
@@ -249,7 +249,7 @@ router.post('/invite-request', requirePermission('members.invite_request'), asyn
  * GET /invite-requests
  * List pending invite requests
  */
-router.get('/invite-requests', requirePermission('members.invite'), async (req: Request, res: Response) => {
+router.get('/invite-requests', async (req: Request, res: Response) => {
   try {
     const { workspaceId } = req.params;
 
@@ -306,7 +306,7 @@ router.get('/invite-requests', requirePermission('members.invite'), async (req: 
  * POST /invite-requests/:requestId/resolve
  * Approve or reject an invite request
  */
-router.post('/invite-requests/:requestId/resolve', requirePermission('members.invite'), async (req: Request, res: Response) => {
+router.post('/invite-requests/:requestId/resolve', async (req: Request, res: Response) => {
   try {
     const { workspaceId, requestId } = req.params;
     const { action, note } = req.body;
@@ -404,7 +404,7 @@ router.post('/invite-requests/:requestId/resolve', requirePermission('members.in
  * PATCH /:memberId/role
  * Change a member's role
  */
-router.patch('/:memberId/role', requirePermission('members.change_roles'), async (req: Request, res: Response) => {
+router.patch('/:memberId/role', async (req: Request, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId as string;
     const memberId = req.params.memberId as string;
@@ -483,7 +483,7 @@ router.patch('/:memberId/role', requirePermission('members.change_roles'), async
  * PATCH /:memberId/status
  * Suspend or activate a member
  */
-router.patch('/:memberId/status', requirePermission('members.remove'), async (req: Request, res: Response) => {
+router.patch('/:memberId/status', async (req: Request, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId as string;
     const memberId = req.params.memberId as string;
@@ -545,7 +545,7 @@ router.patch('/:memberId/status', requirePermission('members.remove'), async (re
  * DELETE /:memberId
  * Remove a member from the workspace
  */
-router.delete('/:memberId', requirePermission('members.remove'), async (req: Request, res: Response) => {
+router.delete('/:memberId', async (req: Request, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId as string;
     const memberId = req.params.memberId as string;

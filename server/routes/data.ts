@@ -43,7 +43,7 @@ function parseBool(val: unknown): boolean | undefined {
   return undefined;
 }
 
-router.get('/:id/deals/by-stage', requirePermission('data.deals_view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:id/deals/by-stage', async (req: Request, res: Response): Promise<void> => {
   try {
     const result = await getDealsByStage(req.params.id);
     res.json({ data: result.stages });
@@ -53,7 +53,7 @@ router.get('/:id/deals/by-stage', requirePermission('data.deals_view'), async (r
   }
 });
 
-router.get('/:id/deals/stale', requirePermission('data.deals_view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:id/deals/stale', async (req: Request, res: Response): Promise<void> => {
   try {
     const days = parseNum(req.query.days);
     const result = await getStaleDeals(req.params.id, days);
@@ -64,7 +64,7 @@ router.get('/:id/deals/stale', requirePermission('data.deals_view'), async (req:
   }
 });
 
-router.get('/:id/deals/closing-in-range', requirePermission('data.deals_view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:id/deals/closing-in-range', async (req: Request, res: Response): Promise<void> => {
   try {
     const startDate = parseDate(req.query.startDate);
     const endDate = parseDate(req.query.endDate);
@@ -80,7 +80,7 @@ router.get('/:id/deals/closing-in-range', requirePermission('data.deals_view'), 
   }
 });
 
-router.get('/:id/deals/pipeline-summary', requirePermission('data.deals_view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:id/deals/pipeline-summary', async (req: Request, res: Response): Promise<void> => {
   try {
     const result = await getPipelineSummary(req.params.id);
     res.json({ data: result });
@@ -90,7 +90,7 @@ router.get('/:id/deals/pipeline-summary', requirePermission('data.deals_view'), 
   }
 });
 
-router.get('/:id/deals/:dealId', requirePermission('data.deals_view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:id/deals/:dealId', async (req: Request, res: Response): Promise<void> => {
   try {
     const deal = await getDeal(req.params.id, req.params.dealId);
     if (!deal) {
@@ -104,7 +104,7 @@ router.get('/:id/deals/:dealId', requirePermission('data.deals_view'), async (re
   }
 });
 
-router.get('/:id/deals', requirePermission('data.deals_view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:id/deals', async (req: Request, res: Response): Promise<void> => {
   try {
     const q = req.query;
     const result = await queryDeals(req.params.id, {
@@ -133,7 +133,7 @@ router.get('/:id/deals', requirePermission('data.deals_view'), async (req: Reque
   }
 });
 
-router.get('/:id/contacts/for-deal/:dealId', requirePermission('data.deals_view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:id/contacts/for-deal/:dealId', async (req: Request, res: Response): Promise<void> => {
   try {
     const result = await getContactsForDeal(req.params.id, req.params.dealId);
     res.json({ data: result });
@@ -143,7 +143,7 @@ router.get('/:id/contacts/for-deal/:dealId', requirePermission('data.deals_view'
   }
 });
 
-router.get('/:id/contacts/stakeholder-map/:accountId', requirePermission('data.accounts_view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:id/contacts/stakeholder-map/:accountId', async (req: Request, res: Response): Promise<void> => {
   try {
     const result = await getStakeholderMap(req.params.id, req.params.accountId);
     if (!result) {
@@ -157,7 +157,7 @@ router.get('/:id/contacts/stakeholder-map/:accountId', requirePermission('data.a
   }
 });
 
-router.get('/:id/contacts/:contactId', requirePermission('data.accounts_view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:id/contacts/:contactId', async (req: Request, res: Response): Promise<void> => {
   try {
     const contact = await getContact(req.params.id, req.params.contactId);
     if (!contact) {
@@ -171,7 +171,7 @@ router.get('/:id/contacts/:contactId', requirePermission('data.accounts_view'), 
   }
 });
 
-router.get('/:id/contacts', requirePermission('data.accounts_view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:id/contacts', async (req: Request, res: Response): Promise<void> => {
   try {
     const q = req.query;
     const result = await queryContacts(req.params.id, {
@@ -193,7 +193,7 @@ router.get('/:id/contacts', requirePermission('data.accounts_view'), async (req:
   }
 });
 
-router.get('/:id/accounts/:accountId/health', requirePermission('data.accounts_view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:id/accounts/:accountId/health', async (req: Request, res: Response): Promise<void> => {
   try {
     const result = await getAccountHealth(req.params.id, req.params.accountId);
     if (!result) {
@@ -207,7 +207,7 @@ router.get('/:id/accounts/:accountId/health', requirePermission('data.accounts_v
   }
 });
 
-router.get('/:id/accounts/:accountId', requirePermission('data.accounts_view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:id/accounts/:accountId', async (req: Request, res: Response): Promise<void> => {
   try {
     const account = await getAccount(req.params.id, req.params.accountId);
     if (!account) {
@@ -221,7 +221,7 @@ router.get('/:id/accounts/:accountId', requirePermission('data.accounts_view'), 
   }
 });
 
-router.get('/:id/accounts', requirePermission('data.accounts_view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:id/accounts', async (req: Request, res: Response): Promise<void> => {
   try {
     const q = req.query;
     const result = await queryAccounts(req.params.id, {
@@ -245,7 +245,7 @@ router.get('/:id/accounts', requirePermission('data.accounts_view'), async (req:
   }
 });
 
-router.get('/:id/activities/timeline/:dealId', requirePermission('data.deals_view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:id/activities/timeline/:dealId', async (req: Request, res: Response): Promise<void> => {
   try {
     const result = await getActivityTimeline(req.params.id, req.params.dealId);
     res.json({ data: result });
@@ -255,7 +255,7 @@ router.get('/:id/activities/timeline/:dealId', requirePermission('data.deals_vie
   }
 });
 
-router.get('/:id/activities/summary', requirePermission('data.deals_view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:id/activities/summary', async (req: Request, res: Response): Promise<void> => {
   try {
     const dateFrom = parseDate(req.query.dateFrom);
     const dateTo = parseDate(req.query.dateTo);
@@ -271,7 +271,7 @@ router.get('/:id/activities/summary', requirePermission('data.deals_view'), asyn
   }
 });
 
-router.get('/:id/activities', requirePermission('data.deals_view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:id/activities', async (req: Request, res: Response): Promise<void> => {
   try {
     const q = req.query;
     const result = await queryActivities(req.params.id, {
@@ -294,7 +294,7 @@ router.get('/:id/activities', requirePermission('data.deals_view'), async (req: 
   }
 });
 
-router.get('/:id/conversations/for-deal/:dealId', requirePermission('data.deals_view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:id/conversations/for-deal/:dealId', async (req: Request, res: Response): Promise<void> => {
   try {
     const limit = parseNum(req.query.limit);
     const result = await getRecentCallsForDeal(req.params.id, req.params.dealId, limit);
@@ -305,7 +305,7 @@ router.get('/:id/conversations/for-deal/:dealId', requirePermission('data.deals_
   }
 });
 
-router.get('/:id/conversations/insights', requirePermission('data.deals_view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:id/conversations/insights', async (req: Request, res: Response): Promise<void> => {
   try {
     const dateFrom = parseDate(req.query.dateFrom);
     const dateTo = parseDate(req.query.dateTo);
@@ -321,7 +321,7 @@ router.get('/:id/conversations/insights', requirePermission('data.deals_view'), 
   }
 });
 
-router.get('/:id/conversations/:conversationId', requirePermission('data.deals_view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:id/conversations/:conversationId', async (req: Request, res: Response): Promise<void> => {
   try {
     const conversation = await getConversation(req.params.id, req.params.conversationId);
     if (!conversation) {
@@ -335,7 +335,7 @@ router.get('/:id/conversations/:conversationId', requirePermission('data.deals_v
   }
 });
 
-router.get('/:id/conversations', requirePermission('data.deals_view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:id/conversations', async (req: Request, res: Response): Promise<void> => {
   try {
     const q = req.query;
     const result = await queryConversations(req.params.id, {
@@ -357,7 +357,7 @@ router.get('/:id/conversations', requirePermission('data.deals_view'), async (re
   }
 });
 
-router.get('/:id/tasks/overdue', requirePermission('data.deals_view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:id/tasks/overdue', async (req: Request, res: Response): Promise<void> => {
   try {
     const result = await getOverdueTasks(req.params.id);
     res.json({ data: result });
@@ -367,7 +367,7 @@ router.get('/:id/tasks/overdue', requirePermission('data.deals_view'), async (re
   }
 });
 
-router.get('/:id/tasks/summary', requirePermission('data.deals_view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:id/tasks/summary', async (req: Request, res: Response): Promise<void> => {
   try {
     const result = await getTaskSummary(req.params.id);
     res.json({ data: result });
@@ -377,7 +377,7 @@ router.get('/:id/tasks/summary', requirePermission('data.deals_view'), async (re
   }
 });
 
-router.get('/:id/tasks', requirePermission('data.deals_view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:id/tasks', async (req: Request, res: Response): Promise<void> => {
   try {
     const q = req.query;
     const result = await queryTasks(req.params.id, {
@@ -402,7 +402,7 @@ router.get('/:id/tasks', requirePermission('data.deals_view'), async (req: Reque
   }
 });
 
-router.get('/:id/documents/for-deal/:dealId', requirePermission('data.deals_view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:id/documents/for-deal/:dealId', async (req: Request, res: Response): Promise<void> => {
   try {
     const result = await getDocumentsForDeal(req.params.id, req.params.dealId);
     res.json({ data: result });
@@ -412,7 +412,7 @@ router.get('/:id/documents/for-deal/:dealId', requirePermission('data.deals_view
   }
 });
 
-router.get('/:id/documents/:documentId', requirePermission('data.deals_view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:id/documents/:documentId', async (req: Request, res: Response): Promise<void> => {
   try {
     const doc = await getDocument(req.params.id, req.params.documentId);
     if (!doc) {
@@ -426,7 +426,7 @@ router.get('/:id/documents/:documentId', requirePermission('data.deals_view'), a
   }
 });
 
-router.get('/:id/documents', requirePermission('data.deals_view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:id/documents', async (req: Request, res: Response): Promise<void> => {
   try {
     const q = req.query;
     const result = await queryDocuments(req.params.id, {

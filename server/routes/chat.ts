@@ -5,7 +5,7 @@ import { getConversationState } from '../chat/conversation-state.js';
 
 const router = Router();
 
-router.post('/:workspaceId/chat', requirePermission('skills.view_results'), async (req: Request, res: Response): Promise<void> => {
+router.post('/:workspaceId/chat', async (req: Request, res: Response): Promise<void> => {
   try {
     const { workspaceId } = req.params;
     const { message, thread_id, scope } = req.body;
@@ -57,7 +57,7 @@ router.post('/:workspaceId/chat', requirePermission('skills.view_results'), asyn
   }
 });
 
-router.get('/:workspaceId/chat/:threadId/history', requirePermission('skills.view_results'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:workspaceId/chat/:threadId/history', async (req: Request, res: Response): Promise<void> => {
   try {
     const { workspaceId, threadId } = req.params;
 

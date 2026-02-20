@@ -76,7 +76,7 @@ function hasPrivilegeEscalation(
  * GET /
  * List all roles for workspace
  */
-router.get('/', requirePermission('members.view'), async (req: Request, res: Response) => {
+router.get('/', async (req: Request, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId as string;
 
@@ -128,7 +128,7 @@ router.get('/', requirePermission('members.view'), async (req: Request, res: Res
  * GET /:roleId
  * Get single role with full details and member list
  */
-router.get('/:roleId', requirePermission('members.view'), async (req: Request, res: Response) => {
+router.get('/:roleId', async (req: Request, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId as string;
     const roleId = req.params.roleId as string;
@@ -198,7 +198,7 @@ router.get('/:roleId', requirePermission('members.view'), async (req: Request, r
  * POST /
  * Create custom role
  */
-router.post('/', requireFeature('feature.custom_roles'), requirePermission('members.change_roles'), async (req: Request, res: Response) => {
+router.post('/', requireFeature('feature.custom_roles'), async (req: Request, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId as string;
     const { name, description, permissions } = req.body;
@@ -285,7 +285,7 @@ router.post('/', requireFeature('feature.custom_roles'), requirePermission('memb
  * PATCH /:roleId
  * Update custom role
  */
-router.patch('/:roleId', requireFeature('feature.custom_roles'), requirePermission('members.change_roles'), async (req: Request, res: Response) => {
+router.patch('/:roleId', requireFeature('feature.custom_roles'), async (req: Request, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId as string;
     const roleId = req.params.roleId as string;
@@ -420,7 +420,7 @@ router.patch('/:roleId', requireFeature('feature.custom_roles'), requirePermissi
  * DELETE /:roleId
  * Delete custom role
  */
-router.delete('/:roleId', requirePermission('members.change_roles'), async (req: Request, res: Response) => {
+router.delete('/:roleId', async (req: Request, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId as string;
     const roleId = req.params.roleId as string;

@@ -21,7 +21,7 @@ const logger = createLogger('DealInsightsAPI');
 // Get Insight Configuration
 // ============================================================================
 
-router.get('/api/workspaces/:workspaceId/insights/config', requirePermission('config.view'), async (req, res) => {
+router.get('/api/workspaces/:workspaceId/insights/config', async (req, res) => {
   try {
     const { workspaceId } = req.params;
 
@@ -64,7 +64,7 @@ router.get('/api/workspaces/:workspaceId/insights/config', requirePermission('co
 // Update Insight Configuration
 // ============================================================================
 
-router.put('/api/workspaces/:workspaceId/insights/config', requirePermission('config.edit'), async (req, res) => {
+router.put('/api/workspaces/:workspaceId/insights/config', async (req, res) => {
   try {
     const { workspaceId } = req.params;
     const config = req.body;
@@ -136,7 +136,7 @@ router.put('/api/workspaces/:workspaceId/insights/config', requirePermission('co
 // Auto-Detect Framework
 // ============================================================================
 
-router.post('/api/workspaces/:workspaceId/insights/config/auto-detect', requirePermission('config.edit'), async (req, res) => {
+router.post('/api/workspaces/:workspaceId/insights/config/auto-detect', async (req, res) => {
   try {
     const { workspaceId } = req.params;
 
@@ -206,7 +206,7 @@ router.post('/api/workspaces/:workspaceId/insights/config/auto-detect', requireP
 // Get Available Fields for Mapping
 // ============================================================================
 
-router.get('/api/workspaces/:workspaceId/insights/config/available-fields', requirePermission('config.view'), async (req, res) => {
+router.get('/api/workspaces/:workspaceId/insights/config/available-fields', async (req, res) => {
   try {
     const { workspaceId } = req.params;
 
@@ -249,7 +249,7 @@ router.get('/api/workspaces/:workspaceId/insights/config/available-fields', requ
 // Trigger Manual Extraction
 // ============================================================================
 
-router.post('/api/workspaces/:workspaceId/insights/extract', requirePermission('skills.run_manual'), async (req, res) => {
+router.post('/api/workspaces/:workspaceId/insights/extract', async (req, res) => {
   try {
     const { workspaceId } = req.params;
     const { conversation_ids, batch_size } = req.body;
@@ -270,7 +270,7 @@ router.post('/api/workspaces/:workspaceId/insights/extract', requirePermission('
 // Get Insight Extraction Status
 // ============================================================================
 
-router.get('/api/workspaces/:workspaceId/insights/status', requirePermission('data.deals_view'), async (req, res) => {
+router.get('/api/workspaces/:workspaceId/insights/status', async (req, res) => {
   try {
     const { workspaceId } = req.params;
 
@@ -357,7 +357,7 @@ router.get('/api/workspaces/:workspaceId/insights/status', requirePermission('da
 // Get Current Insights for a Deal
 // ============================================================================
 
-router.get('/api/workspaces/:workspaceId/deals/:dealId/insights', requirePermission('data.deals_view'), async (req, res) => {
+router.get('/api/workspaces/:workspaceId/deals/:dealId/insights', async (req, res) => {
   try {
     const { workspaceId, dealId } = req.params;
 
@@ -389,7 +389,7 @@ router.get('/api/workspaces/:workspaceId/deals/:dealId/insights', requirePermiss
 // Get Full Insight History for a Deal
 // ============================================================================
 
-router.get('/api/workspaces/:workspaceId/deals/:dealId/insights/history', requirePermission('data.deals_view'), async (req, res) => {
+router.get('/api/workspaces/:workspaceId/deals/:dealId/insights/history', async (req, res) => {
   try {
     const { workspaceId, dealId } = req.params;
 

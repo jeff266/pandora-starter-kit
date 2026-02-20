@@ -17,7 +17,7 @@ interface WorkspaceParams {
   workspaceId: string;
 }
 
-router.post('/:workspaceId/connectors/hubspot/connect', requirePermission('connectors.connect'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/connectors/hubspot/connect', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId;
     const { accessToken, refreshToken } = req.body as { accessToken?: string; refreshToken?: string };
@@ -52,7 +52,7 @@ router.post('/:workspaceId/connectors/hubspot/connect', requirePermission('conne
   }
 });
 
-router.post('/:workspaceId/connectors/hubspot/sync', requirePermission('connectors.trigger_sync'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/connectors/hubspot/sync', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId;
     const { mode = 'initial', since } = req.body as { mode?: string; since?: string };
@@ -127,7 +127,7 @@ router.post('/:workspaceId/connectors/hubspot/sync', requirePermission('connecto
   }
 });
 
-router.get('/:workspaceId/connectors/hubspot/health', requirePermission('connectors.view'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.get('/:workspaceId/connectors/hubspot/health', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId;
     const health = await hubspotConnector.health(workspaceId);
@@ -139,7 +139,7 @@ router.get('/:workspaceId/connectors/hubspot/health', requirePermission('connect
   }
 });
 
-router.post('/:workspaceId/connectors/hubspot/discover-schema', requirePermission('connectors.connect'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/connectors/hubspot/discover-schema', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId;
 
@@ -194,7 +194,7 @@ router.post('/:workspaceId/connectors/hubspot/discover-schema', requirePermissio
   }
 });
 
-router.post('/:workspaceId/connectors/hubspot/populate-deal-contacts', requirePermission('connectors.trigger_sync'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/connectors/hubspot/populate-deal-contacts', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
     const populated = await populateDealContactsFromSourceData(workspaceId);
@@ -206,7 +206,7 @@ router.post('/:workspaceId/connectors/hubspot/populate-deal-contacts', requirePe
   }
 });
 
-router.post('/:workspaceId/connectors/hubspot/resolve-contact-roles', requirePermission('connectors.trigger_sync'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/connectors/hubspot/resolve-contact-roles', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
 

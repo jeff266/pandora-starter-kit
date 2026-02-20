@@ -4,7 +4,7 @@ import { query } from '../db.js';
 
 const router = Router();
 
-router.get('/:id/icp/profiles', requirePermission('data.accounts_view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:id/icp/profiles', async (req: Request, res: Response): Promise<void> => {
   const workspaceId = req.params.id;
   const { status } = req.query;
 
@@ -55,7 +55,7 @@ router.get('/:id/icp/profiles', requirePermission('data.accounts_view'), async (
   }
 });
 
-router.get('/:id/icp/profiles/:profileId', requirePermission('data.accounts_view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:id/icp/profiles/:profileId', async (req: Request, res: Response): Promise<void> => {
   const { id: workspaceId, profileId } = req.params;
 
   try {
@@ -83,7 +83,7 @@ router.get('/:id/icp/profiles/:profileId', requirePermission('data.accounts_view
 // Returns data readiness for the ICP wizard Step 1
 // ============================================================================
 
-router.get('/:workspaceId/icp/readiness', requirePermission('data.accounts_view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:workspaceId/icp/readiness', async (req: Request, res: Response): Promise<void> => {
   const { workspaceId } = req.params;
 
   try {
@@ -248,7 +248,7 @@ router.get('/:workspaceId/icp/readiness', requirePermission('data.accounts_view'
 
 const ALLOWED_EDIT_FIELDS = ['company_profile', 'conversation_insights', 'scoring_weights'];
 
-router.patch('/:workspaceId/icp/profiles/:profileId', requirePermission('config.edit'), async (req: Request, res: Response): Promise<void> => {
+router.patch('/:workspaceId/icp/profiles/:profileId', async (req: Request, res: Response): Promise<void> => {
   const { workspaceId, profileId } = req.params;
   const { field, value, note, changedBy } = req.body as {
     field: string;
@@ -340,7 +340,7 @@ router.patch('/:workspaceId/icp/profiles/:profileId', requirePermission('config.
 // Returns changelog entries for the workspace
 // ============================================================================
 
-router.get('/:workspaceId/icp/changelog', requirePermission('data.accounts_view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:workspaceId/icp/changelog', async (req: Request, res: Response): Promise<void> => {
   const { workspaceId } = req.params;
 
   try {
@@ -376,7 +376,7 @@ router.get('/:workspaceId/icp/changelog', requirePermission('data.accounts_view'
 // Returns the latest ICP taxonomy report for the Pro view
 // ============================================================================
 
-router.get('/:workspaceId/icp/taxonomy', requirePermission('data.accounts_view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:workspaceId/icp/taxonomy', async (req: Request, res: Response): Promise<void> => {
   const { workspaceId } = req.params;
 
   try {
@@ -415,7 +415,7 @@ router.get('/:workspaceId/icp/taxonomy', requirePermission('data.accounts_view')
 // Export ICP profile via email (HTML and text versions)
 // ============================================================================
 
-router.post('/:workspaceId/icp/export', requirePermission('config.edit'), async (req: Request, res: Response): Promise<void> => {
+router.post('/:workspaceId/icp/export', async (req: Request, res: Response): Promise<void> => {
   const { workspaceId } = req.params;
   const { to } = req.body as { to: string };
 

@@ -5,7 +5,7 @@ import { query } from '../db.js';
 
 const router = Router();
 
-router.get('/:id/llm/config', requirePermission('config.view'), async (req: Request, res: Response) => {
+router.get('/:id/llm/config', async (req: Request, res: Response) => {
   try {
     const config = await getLLMConfig(req.params.id);
     res.json(config);
@@ -16,7 +16,7 @@ router.get('/:id/llm/config', requirePermission('config.view'), async (req: Requ
   }
 });
 
-router.post('/:id/llm/config', requirePermission('config.edit'), async (req: Request, res: Response) => {
+router.post('/:id/llm/config', async (req: Request, res: Response) => {
   try {
     const workspaceId = req.params.id;
     const { routing, providers, default_token_budget } = req.body;
@@ -77,7 +77,7 @@ router.post('/:id/llm/config', requirePermission('config.edit'), async (req: Req
   }
 });
 
-router.get('/:id/llm/usage', requirePermission('config.view'), async (req: Request, res: Response) => {
+router.get('/:id/llm/usage', async (req: Request, res: Response) => {
   try {
     const usage = await getLLMUsage(req.params.id);
     res.json(usage);

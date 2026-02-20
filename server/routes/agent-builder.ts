@@ -41,7 +41,7 @@ router.get('/agents-v2/templates', requireUserSession, (_req, res) => {
 });
 
 // ─── POST /:workspaceId/agents-v2 ─────────────────────────────────────────────
-router.post('/:workspaceId/agents-v2', requirePermission('agents.draft'), async (req, res) => {
+router.post('/:workspaceId/agents-v2', async (req, res) => {
   try {
     const { workspaceId } = req.params;
     const agent = await createAgent(workspaceId, req.body);
@@ -52,7 +52,7 @@ router.post('/:workspaceId/agents-v2', requirePermission('agents.draft'), async 
 });
 
 // ─── GET /:workspaceId/agents-v2 ──────────────────────────────────────────────
-router.get('/:workspaceId/agents-v2', requirePermission('agents.view'), async (req, res) => {
+router.get('/:workspaceId/agents-v2', async (req, res) => {
   try {
     const { workspaceId } = req.params;
     const activeParam = req.query.active as string | undefined;
@@ -67,7 +67,7 @@ router.get('/:workspaceId/agents-v2', requirePermission('agents.view'), async (r
 });
 
 // ─── POST /:workspaceId/agents-v2/tradeoffs/estimate ─────────────────────────
-router.post('/:workspaceId/agents-v2/tradeoffs/estimate', requirePermission('agents.draft'), async (req, res) => {
+router.post('/:workspaceId/agents-v2/tradeoffs/estimate', async (req, res) => {
   try {
     const { workspaceId } = req.params;
     const { skill_ids, trigger_config, filter_config, channel_id } = req.body;
@@ -86,7 +86,7 @@ router.post('/:workspaceId/agents-v2/tradeoffs/estimate', requirePermission('age
 });
 
 // ─── POST /:workspaceId/agents-v2/templates/:templateId/deploy ───────────────
-router.post('/:workspaceId/agents-v2/templates/:templateId/deploy', requirePermission('agents.draft'), async (req, res) => {
+router.post('/:workspaceId/agents-v2/templates/:templateId/deploy', async (req, res) => {
   try {
     const { workspaceId, templateId } = req.params;
     const { channel_id, activate_immediately } = req.body;
@@ -98,7 +98,7 @@ router.post('/:workspaceId/agents-v2/templates/:templateId/deploy', requirePermi
 });
 
 // ─── GET /:workspaceId/agents-v2/:id ─────────────────────────────────────────
-router.get('/:workspaceId/agents-v2/:id', requirePermission('agents.view'), async (req, res) => {
+router.get('/:workspaceId/agents-v2/:id', async (req, res) => {
   try {
     const { workspaceId, id } = req.params;
     const agent = await getAgent(id, workspaceId);
@@ -110,7 +110,7 @@ router.get('/:workspaceId/agents-v2/:id', requirePermission('agents.view'), asyn
 });
 
 // ─── PATCH /:workspaceId/agents-v2/:id ───────────────────────────────────────
-router.patch('/:workspaceId/agents-v2/:id', requirePermission('agents.edit_own'), async (req, res) => {
+router.patch('/:workspaceId/agents-v2/:id', async (req, res) => {
   try {
     const { workspaceId, id } = req.params;
     const agent = await updateAgent(id, workspaceId, req.body);
@@ -121,7 +121,7 @@ router.patch('/:workspaceId/agents-v2/:id', requirePermission('agents.edit_own')
 });
 
 // ─── DELETE /:workspaceId/agents-v2/:id ──────────────────────────────────────
-router.delete('/:workspaceId/agents-v2/:id', requirePermission('agents.delete_own'), async (req, res) => {
+router.delete('/:workspaceId/agents-v2/:id', async (req, res) => {
   try {
     const { workspaceId, id } = req.params;
     await deleteAgent(id, workspaceId);
@@ -132,7 +132,7 @@ router.delete('/:workspaceId/agents-v2/:id', requirePermission('agents.delete_ow
 });
 
 // ─── PATCH /:workspaceId/agents-v2/:id/toggle ────────────────────────────────
-router.patch('/:workspaceId/agents-v2/:id/toggle', requirePermission('agents.edit_own'), async (req, res) => {
+router.patch('/:workspaceId/agents-v2/:id/toggle', async (req, res) => {
   try {
     const { workspaceId, id } = req.params;
     const { is_active } = req.body;
@@ -147,7 +147,7 @@ router.patch('/:workspaceId/agents-v2/:id/toggle', requirePermission('agents.edi
 });
 
 // ─── POST /:workspaceId/agents-v2/:id/trigger ────────────────────────────────
-router.post('/:workspaceId/agents-v2/:id/trigger', requirePermission('agents.run'), async (req, res) => {
+router.post('/:workspaceId/agents-v2/:id/trigger', async (req, res) => {
   try {
     const { workspaceId, id } = req.params;
     const agent = await getAgent(id, workspaceId);
@@ -188,7 +188,7 @@ router.post('/:workspaceId/agents-v2/:id/trigger', requirePermission('agents.run
 });
 
 // ─── GET /:workspaceId/agents-v2/:id/performance ─────────────────────────────
-router.get('/:workspaceId/agents-v2/:id/performance', requirePermission('agents.view'), async (req, res) => {
+router.get('/:workspaceId/agents-v2/:id/performance', async (req, res) => {
   try {
     const { workspaceId, id } = req.params;
     const performance = await getAgentPerformance(id, workspaceId);

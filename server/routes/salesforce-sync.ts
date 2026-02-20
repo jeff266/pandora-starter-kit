@@ -10,7 +10,7 @@ import { getFreshCredentials } from '../utils/salesforce-token-refresh.js';
 const router = Router();
 const logger = createLogger('SalesforceSync');
 
-router.post('/:workspaceId/connectors/salesforce/sync', requirePermission('connectors.trigger_sync'), async (req, res) => {
+router.post('/:workspaceId/connectors/salesforce/sync', async (req, res) => {
   const { workspaceId } = req.params;
 
   try {
@@ -136,7 +136,7 @@ router.post('/:workspaceId/connectors/salesforce/sync', requirePermission('conne
 });
 
 // Test connection
-router.post('/:workspaceId/connectors/salesforce/test', requirePermission('connectors.trigger_sync'), async (req, res) => {
+router.post('/:workspaceId/connectors/salesforce/test', async (req, res) => {
   const { workspaceId } = req.params;
 
   try {
@@ -171,7 +171,7 @@ router.post('/:workspaceId/connectors/salesforce/test', requirePermission('conne
 });
 
 // Discover schema
-router.post('/:workspaceId/connectors/salesforce/discover-schema', requirePermission('connectors.trigger_sync'), async (req, res) => {
+router.post('/:workspaceId/connectors/salesforce/discover-schema', async (req, res) => {
   const { workspaceId } = req.params;
 
   try {
@@ -218,7 +218,7 @@ router.post('/:workspaceId/connectors/salesforce/discover-schema', requirePermis
 });
 
 // Health check
-router.get('/:workspaceId/connectors/salesforce/health', requirePermission('connectors.view'), async (req, res) => {
+router.get('/:workspaceId/connectors/salesforce/health', async (req, res) => {
   const { workspaceId } = req.params;
 
   try {
@@ -235,7 +235,7 @@ router.get('/:workspaceId/connectors/salesforce/health', requirePermission('conn
 });
 
 // Disconnect
-router.delete('/:workspaceId/connectors/salesforce/disconnect', requirePermission('connectors.disconnect'), async (req, res) => {
+router.delete('/:workspaceId/connectors/salesforce/disconnect', async (req, res) => {
   const { workspaceId } = req.params;
 
   try {

@@ -20,7 +20,7 @@ interface WorkspaceParams {
 const mondayAdapter = new MondayTaskAdapter();
 const googleDriveAdapter = new GoogleDriveDocumentAdapter();
 
-router.get('/:workspaceId/connectors', requirePermission('connectors.view'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.get('/:workspaceId/connectors', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
     const result = await dbQuery(
@@ -45,7 +45,7 @@ router.get('/:workspaceId/connectors', requirePermission('connectors.view'), asy
   }
 });
 
-router.post('/:workspaceId/connectors/monday/connect', requirePermission('connectors.connect'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/connectors/monday/connect', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
     const { apiKey, boardId } = req.body;
@@ -78,7 +78,7 @@ router.post('/:workspaceId/connectors/monday/connect', requirePermission('connec
   }
 });
 
-router.post('/:workspaceId/connectors/monday/sync', requirePermission('connectors.trigger_sync'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/connectors/monday/sync', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
     const { mode = 'initial', boardId } = req.body;
@@ -150,7 +150,7 @@ router.post('/:workspaceId/connectors/monday/sync', requirePermission('connector
   }
 });
 
-router.get('/:workspaceId/connectors/monday/health', requirePermission('connectors.view'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.get('/:workspaceId/connectors/monday/health', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
 
@@ -176,7 +176,7 @@ router.get('/:workspaceId/connectors/monday/health', requirePermission('connecto
   }
 });
 
-router.post('/:workspaceId/connectors/google-drive/connect', requirePermission('connectors.connect'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/connectors/google-drive/connect', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
     const { accessToken, refreshToken, clientId, clientSecret, expiresAt } = req.body;
@@ -219,7 +219,7 @@ router.post('/:workspaceId/connectors/google-drive/connect', requirePermission('
   }
 });
 
-router.post('/:workspaceId/connectors/google-drive/sync', requirePermission('connectors.trigger_sync'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/connectors/google-drive/sync', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
     const { mode = 'initial', query: fileQuery } = req.body;
@@ -286,7 +286,7 @@ router.post('/:workspaceId/connectors/google-drive/sync', requirePermission('con
   }
 });
 
-router.get('/:workspaceId/connectors/google-drive/health', requirePermission('connectors.view'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.get('/:workspaceId/connectors/google-drive/health', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
 
@@ -312,7 +312,7 @@ router.get('/:workspaceId/connectors/google-drive/health', requirePermission('co
   }
 });
 
-router.post('/:workspaceId/connectors/google-drive/content/:sourceId', requirePermission('connectors.view'), async (req: Request<WorkspaceParams & { sourceId: string }>, res: Response) => {
+router.post('/:workspaceId/connectors/google-drive/content/:sourceId', async (req: Request<WorkspaceParams & { sourceId: string }>, res: Response) => {
   try {
     const { workspaceId, sourceId } = req.params;
 
@@ -357,7 +357,7 @@ const SYNC_INTERVAL_LABELS: Record<SyncIntervalMinutes, string> = {
   1440: 'Daily',
 };
 
-router.patch('/:workspaceId/connectors/:connectorType/sync-interval', requirePermission('connectors.connect'), async (req: Request<WorkspaceParams & { connectorType: string }>, res: Response) => {
+router.patch('/:workspaceId/connectors/:connectorType/sync-interval', async (req: Request<WorkspaceParams & { connectorType: string }>, res: Response) => {
   try {
     const { workspaceId, connectorType } = req.params;
     const { sync_interval_minutes } = req.body;
@@ -409,7 +409,7 @@ router.patch('/:workspaceId/connectors/:connectorType/sync-interval', requirePer
   }
 });
 
-router.get('/:workspaceId/connectors/status', requirePermission('connectors.view'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.get('/:workspaceId/connectors/status', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
 

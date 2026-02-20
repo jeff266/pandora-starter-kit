@@ -27,7 +27,7 @@ interface FlagRow {
  * GET /
  * List all flags for workspace grouped by type
  */
-router.get('/', requirePermission('config.view'), async (req: Request, res: Response) => {
+router.get('/', async (req: Request, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId as string;
 
@@ -87,7 +87,7 @@ router.get('/', requirePermission('config.view'), async (req: Request, res: Resp
  * PATCH /:flagKey
  * Toggle a feature flag
  */
-router.patch('/:flagKey', requirePermission('flags.toggle'), async (req: Request, res: Response) => {
+router.patch('/:flagKey', async (req: Request, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId as string;
     const flagKey = req.params.flagKey as string;

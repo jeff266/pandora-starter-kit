@@ -8,7 +8,7 @@ const router = Router();
  * GET /api/workspaces/:id/webhook
  * Get webhook configuration for a workspace
  */
-router.get('/:id/webhook', requirePermission('config.view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:id/webhook', async (req: Request, res: Response): Promise<void> => {
   const workspaceId = req.params.id;
 
   try {
@@ -38,7 +38,7 @@ router.get('/:id/webhook', requirePermission('config.view'), async (req: Request
  * PUT /api/workspaces/:id/webhook
  * Configure webhook for a workspace
  */
-router.put('/:id/webhook', requirePermission('config.edit'), async (req: Request, res: Response): Promise<void> => {
+router.put('/:id/webhook', async (req: Request, res: Response): Promise<void> => {
   const workspaceId = req.params.id;
   const { webhookUrl, webhookSecret } = req.body;
 
@@ -80,7 +80,7 @@ router.put('/:id/webhook', requirePermission('config.edit'), async (req: Request
  * DELETE /api/workspaces/:id/webhook
  * Remove webhook configuration from a workspace
  */
-router.delete('/:id/webhook', requirePermission('config.edit'), async (req: Request, res: Response): Promise<void> => {
+router.delete('/:id/webhook', async (req: Request, res: Response): Promise<void> => {
   const workspaceId = req.params.id;
 
   try {
@@ -103,7 +103,7 @@ router.delete('/:id/webhook', requirePermission('config.edit'), async (req: Requ
  * POST /api/workspaces/:id/webhook/test
  * Send a test webhook to verify configuration
  */
-router.post('/:id/webhook/test', requirePermission('config.edit'), async (req: Request, res: Response): Promise<void> => {
+router.post('/:id/webhook/test', async (req: Request, res: Response): Promise<void> => {
   const workspaceId = req.params.id;
 
   try {

@@ -16,7 +16,7 @@ const router = express.Router({ mergeParams: true });
  * Full pipeline: discovery → assembly → population
  * Generates a fully populated deliverable matrix.
  */
-router.post('/deliverables/generate', requirePermission('skills.run_manual'), async (req, res) => {
+router.post('/deliverables/generate', async (req, res) => {
   const { workspaceId } = req.params;
   const { templateType, customDimensions, voiceConfig } = req.body;
 
@@ -58,7 +58,7 @@ router.post('/deliverables/generate', requirePermission('skills.run_manual'), as
  * Discovery + Assembly only, no synthesis.
  * Shows what the deliverable will look like without spending tokens on synthesis.
  */
-router.post('/deliverables/preview', requirePermission('skills.run_manual'), async (req, res) => {
+router.post('/deliverables/preview', async (req, res) => {
   const { workspaceId } = req.params;
   const { templateType, customDimensions } = req.body;
 
@@ -101,7 +101,7 @@ router.post('/deliverables/preview', requirePermission('skills.run_manual'), asy
  * Returns the most recent generated deliverable from cache
  * without regenerating.
  */
-router.get('/deliverables/latest', requirePermission('skills.view_results'), async (req, res) => {
+router.get('/deliverables/latest', async (req, res) => {
   const { workspaceId } = req.params;
   const { templateType = 'sales_process_map' } = req.query;
 

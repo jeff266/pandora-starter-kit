@@ -30,7 +30,7 @@ const routerLimiter = rateLimit({
 // Router Classification
 // ============================================================================
 
-router.post('/:workspaceId/router/classify', routerLimiter, requirePermission('skills.run_manual'), async (req: Request, res: Response): Promise<void> => {
+router.post('/:workspaceId/router/classify', routerLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
     const { workspaceId } = req.params;
     const { input, context } = req.body;
@@ -52,7 +52,7 @@ router.post('/:workspaceId/router/classify', routerLimiter, requirePermission('s
 // Router Dispatch (classify + execute)
 // ============================================================================
 
-router.post('/:workspaceId/router/dispatch', routerLimiter, requirePermission('skills.run_manual'), async (req: Request, res: Response): Promise<void> => {
+router.post('/:workspaceId/router/dispatch', routerLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
     const { workspaceId } = req.params;
     const { input, context } = req.body;
@@ -82,7 +82,7 @@ router.post('/:workspaceId/router/dispatch', routerLimiter, requirePermission('s
 // Workspace State Index
 // ============================================================================
 
-router.get('/:workspaceId/state', routerLimiter, requirePermission('skills.view_results'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:workspaceId/state', routerLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
     const { workspaceId } = req.params;
     const state = await getWorkspaceState(workspaceId);
@@ -93,7 +93,7 @@ router.get('/:workspaceId/state', routerLimiter, requirePermission('skills.view_
   }
 });
 
-router.get('/:workspaceId/state/templates', routerLimiter, requirePermission('skills.view_results'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:workspaceId/state/templates', routerLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
     const { workspaceId } = req.params;
     const state = await getWorkspaceState(workspaceId);
@@ -107,7 +107,7 @@ router.get('/:workspaceId/state/templates', routerLimiter, requirePermission('sk
 // Dimension Discovery
 // ============================================================================
 
-router.post('/:workspaceId/discovery/run', routerLimiter, requirePermission('skills.run_manual'), async (req: Request, res: Response): Promise<void> => {
+router.post('/:workspaceId/discovery/run', routerLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
     const { workspaceId } = req.params;
     const { templateType, customDimensions } = req.body;
@@ -133,7 +133,7 @@ router.post('/:workspaceId/discovery/run', routerLimiter, requirePermission('ski
   }
 });
 
-router.get('/:workspaceId/discovery/latest', routerLimiter, requirePermission('skills.view_results'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:workspaceId/discovery/latest', routerLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
     const { workspaceId } = req.params;
     const { templateType = 'sales_process_map' } = req.query;

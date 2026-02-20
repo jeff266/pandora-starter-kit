@@ -20,7 +20,7 @@ import { getSuggestions, resolveSuggestion } from '../config/config-suggestions.
 
 const router = Router();
 
-router.post('/:workspaceId/feedback', requirePermission('data.deals_view'), async (req: Request, res: Response): Promise<void> => {
+router.post('/:workspaceId/feedback', async (req: Request, res: Response): Promise<void> => {
   try {
     const { workspaceId } = req.params;
     const { targetType, targetId, signalType, metadata, source } = req.body;
@@ -63,7 +63,7 @@ router.post('/:workspaceId/feedback', requirePermission('data.deals_view'), asyn
   }
 });
 
-router.post('/:workspaceId/annotations', requirePermission('data.deals_view'), async (req: Request, res: Response): Promise<void> => {
+router.post('/:workspaceId/annotations', async (req: Request, res: Response): Promise<void> => {
   try {
     const { workspaceId } = req.params;
     const {
@@ -96,7 +96,7 @@ router.post('/:workspaceId/annotations', requirePermission('data.deals_view'), a
   }
 });
 
-router.get('/:workspaceId/annotations', requirePermission('data.deals_view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:workspaceId/annotations', async (req: Request, res: Response): Promise<void> => {
   try {
     const { workspaceId } = req.params;
     const { entityType, entityId, annotationType, active, limit, offset } = req.query;
@@ -117,7 +117,7 @@ router.get('/:workspaceId/annotations', requirePermission('data.deals_view'), as
   }
 });
 
-router.get('/:workspaceId/annotations/entity/:entityType/:entityId', requirePermission('data.deals_view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:workspaceId/annotations/entity/:entityType/:entityId', async (req: Request, res: Response): Promise<void> => {
   try {
     const { workspaceId, entityType, entityId } = req.params;
     const annotations = await getActiveAnnotations(workspaceId, entityType, entityId);
@@ -128,7 +128,7 @@ router.get('/:workspaceId/annotations/entity/:entityType/:entityId', requirePerm
   }
 });
 
-router.get('/:workspaceId/feedback/summary', requirePermission('config.view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:workspaceId/feedback/summary', async (req: Request, res: Response): Promise<void> => {
   try {
     const { workspaceId } = req.params;
     const sinceParam = req.query.since as string | undefined;
@@ -142,7 +142,7 @@ router.get('/:workspaceId/feedback/summary', requirePermission('config.view'), a
   }
 });
 
-router.get('/:workspaceId/learning/summary', requirePermission('config.view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:workspaceId/learning/summary', async (req: Request, res: Response): Promise<void> => {
   try {
     const { workspaceId } = req.params;
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
@@ -259,7 +259,7 @@ router.get('/:workspaceId/learning/summary', requirePermission('config.view'), a
   }
 });
 
-router.get('/:workspaceId/config/suggestions', requirePermission('config.view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:workspaceId/config/suggestions', async (req: Request, res: Response): Promise<void> => {
   try {
     const { workspaceId } = req.params;
     const status = (req.query.status as string) || 'pending';
@@ -271,7 +271,7 @@ router.get('/:workspaceId/config/suggestions', requirePermission('config.view'),
   }
 });
 
-router.post('/:workspaceId/config/suggestions/:suggestionId/accept', requirePermission('config.edit'), async (req: Request, res: Response): Promise<void> => {
+router.post('/:workspaceId/config/suggestions/:suggestionId/accept', async (req: Request, res: Response): Promise<void> => {
   try {
     const { workspaceId, suggestionId } = req.params;
     const ok = await resolveSuggestion(workspaceId, suggestionId, 'accepted');
@@ -286,7 +286,7 @@ router.post('/:workspaceId/config/suggestions/:suggestionId/accept', requirePerm
   }
 });
 
-router.post('/:workspaceId/config/suggestions/:suggestionId/dismiss', requirePermission('config.edit'), async (req: Request, res: Response): Promise<void> => {
+router.post('/:workspaceId/config/suggestions/:suggestionId/dismiss', async (req: Request, res: Response): Promise<void> => {
   try {
     const { workspaceId, suggestionId } = req.params;
     const ok = await resolveSuggestion(workspaceId, suggestionId, 'dismissed');

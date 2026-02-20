@@ -36,7 +36,7 @@ const upload = multer({
 });
 
 // POST /api/workspaces/:id/import/upload
-router.post('/:id/import/upload', upload.single('file'), requirePermission('connectors.connect'), async (req, res) => {
+router.post('/:id/import/upload', upload.single('file'), async (req, res) => {
   try {
     const workspaceId = req.params.id;
     const entityType = req.query.entityType as string;
@@ -293,7 +293,7 @@ router.post('/:id/import/upload', upload.single('file'), requirePermission('conn
 });
 
 // POST /api/workspaces/:id/import/confirm
-router.post('/:id/import/confirm', requirePermission('connectors.connect'), async (req, res) => {
+router.post('/:id/import/confirm', async (req, res) => {
   try {
     const workspaceId = req.params.id;
     const { batchId, overrides, strategy } = req.body;
@@ -392,7 +392,7 @@ router.post('/:id/import/confirm', requirePermission('connectors.connect'), asyn
 });
 
 // DELETE /api/workspaces/:id/import/batch/:batchId
-router.delete('/:id/import/batch/:batchId', requirePermission('data.import'), async (req, res) => {
+router.delete('/:id/import/batch/:batchId', async (req, res) => {
   try {
     const workspaceId = req.params.id;
     const batchId = req.params.batchId;
@@ -452,7 +452,7 @@ router.delete('/:id/import/batch/:batchId', requirePermission('data.import'), as
 });
 
 // POST /api/workspaces/:id/import/cancel/:batchId
-router.post('/:id/import/cancel/:batchId', requirePermission('connectors.connect'), async (req, res) => {
+router.post('/:id/import/cancel/:batchId', async (req, res) => {
   try {
     const workspaceId = req.params.id;
     const batchId = req.params.batchId;
@@ -487,7 +487,7 @@ router.post('/:id/import/cancel/:batchId', requirePermission('connectors.connect
 });
 
 // GET /api/workspaces/:id/import/history
-router.get('/:id/import/history', requirePermission('connectors.view'), async (req, res) => {
+router.get('/:id/import/history', async (req, res) => {
   try {
     const workspaceId = req.params.id;
     const result = await query(
@@ -508,7 +508,7 @@ router.get('/:id/import/history', requirePermission('connectors.view'), async (r
 });
 
 // GET /api/workspaces/:id/import/freshness
-router.get('/:id/import/freshness', requirePermission('connectors.view'), async (req, res) => {
+router.get('/:id/import/freshness', async (req, res) => {
   try {
     const workspaceId = req.params.id;
     const result = await query<{
@@ -544,7 +544,7 @@ router.get('/:id/import/freshness', requirePermission('connectors.view'), async 
 });
 
 // OLD relink endpoint - replaced by improved domain-first linking below
-// router.post('/:id/import/relink', requirePermission('connectors.connect'), async (req, res) => {
+// router.post('/:id/import/relink', async (req, res) => {
 //   try {
 //     const workspaceId = req.params.id;
 //     console.log(`[Import] Running full re-link for workspace ${workspaceId}`);
@@ -868,7 +868,7 @@ export function cleanupTempFiles(): void {
 // ============================================================================
 
 // GET /api/workspaces/:id/import/stage-mapping
-router.get('/:id/import/stage-mapping', requirePermission('connectors.view'), async (req, res) => {
+router.get('/:id/import/stage-mapping', async (req, res) => {
   try {
     const workspaceId = req.params.id;
 
@@ -914,7 +914,7 @@ router.get('/:id/import/stage-mapping', requirePermission('connectors.view'), as
 });
 
 // PUT /api/workspaces/:id/import/stage-mapping
-router.put('/:id/import/stage-mapping', requirePermission('config.edit'), async (req, res) => {
+router.put('/:id/import/stage-mapping', async (req, res) => {
   try {
     const workspaceId = req.params.id;
     const { mappings, source } = req.body;
@@ -962,7 +962,7 @@ router.put('/:id/import/stage-mapping', requirePermission('config.edit'), async 
 });
 
 // DELETE /api/workspaces/:id/import/stage-mapping/:rawStage
-router.delete('/:id/import/stage-mapping/:rawStage', requirePermission('config.edit'), async (req, res) => {
+router.delete('/:id/import/stage-mapping/:rawStage', async (req, res) => {
   try {
     const workspaceId = req.params.id;
     const rawStage = decodeURIComponent(req.params.rawStage);
@@ -989,7 +989,7 @@ router.delete('/:id/import/stage-mapping/:rawStage', requirePermission('config.e
  * Get file import → Salesforce upgrade status
  * GET /import/:workspaceId/upgrade-status
  */
-router.get('/:workspaceId/import/upgrade-status', requirePermission('connectors.view'), async (req, res) => {
+router.get('/:workspaceId/import/upgrade-status', async (req, res) => {
   const { workspaceId } = req.params;
 
   try {
@@ -1026,7 +1026,7 @@ router.get('/:workspaceId/import/upgrade-status', requirePermission('connectors.
 
 // POST /api/workspaces/:id/import/relink
 // Re-link unlinked deals and contacts to accounts using improved domain-first matching
-router.post('/:id/import/relink', requirePermission('connectors.connect'), async (req, res) => {
+router.post('/:id/import/relink', async (req, res) => {
   try {
     const workspaceId = req.params.id;
 

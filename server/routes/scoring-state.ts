@@ -19,7 +19,7 @@ const router = Router();
  * GET /:workspaceId/scoring/state
  * Returns the full scoring state for the workspace.
  */
-router.get('/:workspaceId/scoring/state', requirePermission('data.deals_view'), async (req, res) => {
+router.get('/:workspaceId/scoring/state', async (req, res) => {
   try {
     const { workspaceId } = req.params;
 
@@ -39,7 +39,7 @@ router.get('/:workspaceId/scoring/state', requirePermission('data.deals_view'), 
  * Lightweight polling endpoint for the processing state UI.
  * Returns only the fields needed for the progress banner.
  */
-router.get('/:workspaceId/scoring/state/poll', requirePermission('data.deals_view'), async (req, res) => {
+router.get('/:workspaceId/scoring/state/poll', async (req, res) => {
   try {
     const { workspaceId } = req.params;
 
@@ -79,7 +79,7 @@ router.get('/:workspaceId/scoring/state/poll', requirePermission('data.deals_vie
  * Triggers ICP Discovery → account enrichment → scoring pipeline.
  * Only valid when state = 'ready'.
  */
-router.post('/:workspaceId/scoring/activate', requirePermission('config.edit'), async (req, res) => {
+router.post('/:workspaceId/scoring/activate', async (req, res) => {
   try {
     const { workspaceId } = req.params;
 
@@ -181,7 +181,7 @@ router.post('/:workspaceId/scoring/activate', requirePermission('config.edit'), 
  * Re-runs ICP Discovery and rescores all accounts.
  * Only valid when state = 'active'.
  */
-router.post('/:workspaceId/scoring/refresh-icp', requirePermission('config.edit'), async (req, res) => {
+router.post('/:workspaceId/scoring/refresh-icp', async (req, res) => {
   try {
     const { workspaceId } = req.params;
 

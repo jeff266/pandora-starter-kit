@@ -31,7 +31,7 @@ interface WorkspaceParams {
   workspaceId: string;
 }
 
-router.post('/:workspaceId/connectors/gong/connect', requirePermission('connectors.connect'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/connectors/gong/connect', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId;
     const { apiKey } = req.body as { apiKey?: string };
@@ -71,7 +71,7 @@ router.post('/:workspaceId/connectors/gong/connect', requirePermission('connecto
   }
 });
 
-router.post('/:workspaceId/connectors/gong/sync', requirePermission('connectors.trigger_sync'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/connectors/gong/sync', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId;
     const { mode = 'initial', since, lookbackDays } = req.body as { mode?: string; since?: string; lookbackDays?: number };
@@ -168,7 +168,7 @@ router.post('/:workspaceId/connectors/gong/sync', requirePermission('connectors.
   }
 });
 
-router.get('/:workspaceId/connectors/gong/users', requirePermission('connectors.view'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.get('/:workspaceId/connectors/gong/users', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId;
 
@@ -224,7 +224,7 @@ router.get('/:workspaceId/connectors/gong/users', requirePermission('connectors.
   }
 });
 
-router.post('/:workspaceId/connectors/gong/users/refresh', requirePermission('connectors.connect'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/connectors/gong/users/refresh', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId;
 
@@ -261,7 +261,7 @@ router.post('/:workspaceId/connectors/gong/users/refresh', requirePermission('co
   }
 });
 
-router.post('/:workspaceId/connectors/gong/users/track', requirePermission('connectors.connect'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/connectors/gong/users/track', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId;
     const { user_ids } = req.body as { user_ids?: string[] };
@@ -280,7 +280,7 @@ router.post('/:workspaceId/connectors/gong/users/track', requirePermission('conn
   }
 });
 
-router.get('/:workspaceId/connectors/gong/users/track', requirePermission('connectors.view'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.get('/:workspaceId/connectors/gong/users/track', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId;
     const tracked = await getTrackedUsers(workspaceId, 'gong');
@@ -291,7 +291,7 @@ router.get('/:workspaceId/connectors/gong/users/track', requirePermission('conne
   }
 });
 
-router.delete('/:workspaceId/connectors/gong/users/track', requirePermission('connectors.disconnect'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.delete('/:workspaceId/connectors/gong/users/track', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId;
     await clearTrackedUsers(workspaceId, 'gong');
@@ -302,7 +302,7 @@ router.delete('/:workspaceId/connectors/gong/users/track', requirePermission('co
   }
 });
 
-router.post('/:workspaceId/connectors/gong/transcript/:sourceId', requirePermission('connectors.view'), async (req: Request<WorkspaceParams & { sourceId: string }>, res: Response) => {
+router.post('/:workspaceId/connectors/gong/transcript/:sourceId', async (req: Request<WorkspaceParams & { sourceId: string }>, res: Response) => {
   try {
     const { workspaceId, sourceId } = req.params;
 
@@ -356,7 +356,7 @@ router.post('/:workspaceId/connectors/gong/transcript/:sourceId', requirePermiss
   }
 });
 
-router.post('/:workspaceId/connectors/gong/backfill-transcripts', requirePermission('connectors.trigger_sync'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/connectors/gong/backfill-transcripts', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId;
     const limit = Math.min(typeof req.body.limit === 'number' ? req.body.limit : 20, 100);
@@ -454,7 +454,7 @@ router.post('/:workspaceId/connectors/gong/backfill-transcripts', requirePermiss
   }
 });
 
-router.get('/:workspaceId/connectors/gong/health', requirePermission('connectors.view'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.get('/:workspaceId/connectors/gong/health', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId;
     const health = await gongConnector.health(workspaceId);
