@@ -4,28 +4,14 @@ import { createLogger } from "../utils/logger.js";
 import { query } from "../db.js";
 import { encryptCredentials } from "../lib/encryption.js";
 
-const logger = createLogger("SalesforceAuth");
+const logger = createLogger("HubSpotAuth");
 const router = Router();
 
-const LOGIN_URL = "https://login.salesforce.com";
-const AUTHORIZE_URL = `${LOGIN_URL}/services/oauth2/authorize`;
-const TOKEN_URL = `${LOGIN_URL}/services/oauth2/token`;
+const AUTHORIZE_URL = "https://app.hubspot.com/oauth/authorize";
+const TOKEN_URL = "https://api.hubapi.com/oauth/v1/token";
 
 const STATE_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
 const STATE_MAX_AGE_MS = 10 * 60 * 1000;
-
-function base64url(buffer: Buffer): string {
-  return buffer.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-function generateCodeVerifier(): string {
-  return base64url(crypto.randomBytes(96));
-}
-
-function generateCodeChallenge(verifier: string): string {
-  const hash = crypto.createHash("sha256").update(verifier).digest();
-  return base64url(hash);
-}
 
 function signState(payload: object): string {
   const json = JSON.stringify(payload);
@@ -63,6 +49,10 @@ function verifyState(signedState: string): { valid: boolean; payload?: any } {
   }
 }
 
+/**
+ * GET /api/auth/hubspot/authorize?workspaceId=xxx
+ * Initiates HubSpot OAuth flow - redirects browser to HubSpot
+ */
 function handleAuthorize(req: Request, res: Response): void {
   const workspaceId = req.query.workspaceId as string;
 
@@ -71,31 +61,26 @@ function handleAuthorize(req: Request, res: Response): void {
     return;
   }
 
-  const clientId = process.env.SALESFORCE_CLIENT_ID;
-  const callbackUrl = process.env.SALESFORCE_CALLBACK_URL;
+  const clientId = process.env.HUBSPOT_CLIENT_ID;
+  const callbackUrl = process.env.HUBSPOT_CALLBACK_URL;
 
   if (!clientId || !callbackUrl) {
-    res.status(500).json({ error: "Missing SALESFORCE_CLIENT_ID or SALESFORCE_CALLBACK_URL" });
+    res.status(500).json({ error: "Missing HUBSPOT_CLIENT_ID or HUBSPOT_CALLBACK_URL environment variables" });
     return;
   }
 
-  const codeVerifier = generateCodeVerifier();
-  const codeChallenge = generateCodeChallenge(codeVerifier);
-  const signedState = signState({ workspaceId, cv: codeVerifier, ts: Date.now() });
+  // Sign state with workspace ID and timestamp
+  const signedState = signState({ workspaceId, ts: Date.now() });
 
   const params = new URLSearchParams({
-    response_type: "code",
     client_id: clientId,
     redirect_uri: callbackUrl,
-    scope: "api refresh_token offline_access id",
+    scope: "crm.objects.contacts.read crm.objects.contacts.write crm.objects.companies.read crm.objects.companies.write crm.objects.deals.read crm.objects.deals.write crm.schemas.contacts.read crm.schemas.companies.read crm.schemas.deals.read",
     state: signedState,
-    prompt: "login consent",
-    code_challenge: codeChallenge,
-    code_challenge_method: "S256",
   });
 
   const redirectUrl = `${AUTHORIZE_URL}?${params.toString()}`;
-  logger.info("Redirecting to Salesforce OAuth", { workspaceId });
+  logger.info("Redirecting to HubSpot OAuth", { workspaceId });
   res.redirect(redirectUrl);
 }
 
@@ -104,25 +89,32 @@ router.get("/", handleAuthorize);
 
 router.get("/authorize", handleAuthorize);
 
+/**
+ * GET /api/auth/hubspot/callback?code=xxx&state=xxx
+ * HubSpot redirects here after user authorizes
+ */
 router.get("/callback", async (req: Request, res: Response) => {
-  const { code, state, error: oauthError, error_description } = req.query;
+  const { code, state, error: oauthError } = req.query;
 
+  // Handle OAuth errors
   if (oauthError) {
     if (oauthError === "access_denied") {
-      logger.warn("User denied Salesforce OAuth consent");
-      res.redirect("/?error=salesforce_denied");
+      logger.warn("User denied HubSpot OAuth consent");
+      res.redirect("/?error=hubspot_denied");
       return;
     }
-    logger.error(`OAuth error from Salesforce: ${oauthError}`);
-    res.status(400).json({ error: oauthError, error_description });
+    logger.error(`OAuth error from HubSpot: ${oauthError}`);
+    res.status(400).json({ error: oauthError });
     return;
   }
 
+  // Validate parameters
   if (!code || !state || typeof code !== "string" || typeof state !== "string") {
     res.status(400).json({ error: "Missing code or state parameter" });
     return;
   }
 
+  // Verify state signature and extract workspace ID
   const { valid, payload } = verifyState(state);
   if (!valid || !payload?.workspaceId) {
     logger.error("Invalid or tampered state parameter");
@@ -130,50 +122,44 @@ router.get("/callback", async (req: Request, res: Response) => {
     return;
   }
 
-  const { workspaceId, cv: codeVerifier } = payload;
+  const { workspaceId } = payload;
 
-  const clientId = process.env.SALESFORCE_CLIENT_ID;
-  const clientSecret = process.env.SALESFORCE_CLIENT_SECRET;
-  const callbackUrl = process.env.SALESFORCE_CALLBACK_URL;
+  const clientId = process.env.HUBSPOT_CLIENT_ID;
+  const clientSecret = process.env.HUBSPOT_CLIENT_SECRET;
+  const callbackUrl = process.env.HUBSPOT_CALLBACK_URL;
 
   if (!clientId || !clientSecret || !callbackUrl) {
-    res.status(500).json({ error: "Missing Salesforce OAuth environment variables" });
+    res.status(500).json({ error: "Missing HubSpot OAuth environment variables" });
     return;
   }
 
   try {
-    const tokenParams: Record<string, string> = {
+    // Exchange authorization code for access token
+    const tokenParams = new URLSearchParams({
       grant_type: "authorization_code",
-      code,
       client_id: clientId,
       client_secret: clientSecret,
       redirect_uri: callbackUrl,
-    };
-    if (codeVerifier) {
-      tokenParams.code_verifier = codeVerifier;
-    }
-    const body = new URLSearchParams(tokenParams);
+      code,
+    });
 
     const tokenResponse = await fetch(TOKEN_URL, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: body.toString(),
+      body: tokenParams.toString(),
     });
 
     const tokenData: any = await tokenResponse.json();
 
     if (!tokenResponse.ok) {
       logger.error(`Token exchange failed: ${tokenResponse.status}`);
-      res.redirect("/?error=salesforce_token_failed");
+      res.redirect("/?error=hubspot_token_failed");
       return;
     }
 
-    logger.info("Salesforce OAuth successful", {
-      instance_url: tokenData.instance_url,
-      token_type: tokenData.token_type,
-      scope: tokenData.scope,
-    });
+    logger.info("HubSpot OAuth successful");
 
+    // Verify workspace exists
     const workspaceResult = await query(
       `SELECT id FROM workspaces WHERE id = $1`,
       [workspaceId]
@@ -189,22 +175,24 @@ router.get("/callback", async (req: Request, res: Response) => {
     const encrypted = encryptCredentials({
       accessToken: tokenData.access_token,
       refreshToken: tokenData.refresh_token,
-      instanceUrl: tokenData.instance_url,
     });
 
+    // Store connection in database
     await query(
-      `INSERT INTO connections (workspace_id, connector_name, credentials, status, created_at, updated_at)
-       VALUES ($1, 'salesforce', $2, 'connected', NOW(), NOW())
+      `INSERT INTO connections (workspace_id, connector_name, auth_method, credentials, status, created_at, updated_at)
+       VALUES ($1, 'hubspot', 'oauth', $2, 'connected', NOW(), NOW())
        ON CONFLICT (workspace_id, connector_name) DO UPDATE SET
          credentials = $2, status = 'connected', updated_at = NOW()`,
       [workspaceId, JSON.stringify(encrypted)]
     );
 
-    logger.info("Stored Salesforce connection", { workspaceId });
+    logger.info("Stored HubSpot connection", { workspaceId });
+
+    // Redirect back to connectors page
     res.redirect(`/workspaces/${workspaceId}/connectors`);
   } catch (err) {
     logger.error(`Token exchange error: ${err instanceof Error ? err.message : String(err)}`);
-    res.redirect("/?error=salesforce_callback_failed");
+    res.redirect("/?error=hubspot_callback_failed");
   }
 });
 
