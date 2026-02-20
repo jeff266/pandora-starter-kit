@@ -385,17 +385,18 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
     let stageConfigPipelineClause = '';
     let stageFilterClause = '';
 
-    // Handle legacy pipeline filtering with parameters
+    // Handle legacy pipeline filtering - use SQL-escaped literal values instead of parameters
+    // This allows scopeFilterClause to be reused across different query param arrays
     if (useLegacyPipeline) {
-      params.push(legacyPipelineValue);
-      const pipelineParamIdx = params.length;
-      scopeFilterClause = ` AND d.pipeline = $${pipelineParamIdx}`;
-      stageConfigPipelineClause = ` AND sc.pipeline_name = $${pipelineParamIdx}`;
+      // SQL-escape the pipeline value: replace single quotes with ''
+      const escapedPipeline = `'${legacyPipelineValue.replace(/'/g, "''")}'`;
+      scopeFilterClause = ` AND d.pipeline = ${escapedPipeline}`;
+      stageConfigPipelineClause = ` AND sc.pipeline_name = ${escapedPipeline}`;
       stageFilterClause = `
         AND (
           NOT EXISTS (
             SELECT 1 FROM stage_configs
-            WHERE workspace_id = $1 AND pipeline_name = $${pipelineParamIdx}
+            WHERE workspace_id = $1 AND pipeline_name = ${escapedPipeline}
           )
           OR sc.stage_name IS NOT NULL
         )`;
@@ -435,10 +436,8 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
     const total_deals = stageResult.rows.reduce((s, r) => s + r.deal_count, 0);
     const weighted_pipeline = stageResult.rows.reduce((s, r) => s + r.weighted_value, 0);
 
-    // Findings queries use the same scope filter
+    // Findings queries use the same scope filter (scopeFilterClause uses literals, not params)
     const findingsParams: any[] = [workspaceId];
-    // Note: scopeFilterClause already includes parameterized values for legacy pipeline
-    // For scope-based filtering, values are already SQL-escaped in the clause
 
     let findingsExcludeClause = '';
     const findingsExcludeParams: any[] = [];
@@ -520,7 +519,7 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
       };
     });
 
-    // Win rate uses the same scope filter
+    // Win rate uses the same scope filter (scopeFilterClause uses literals, not params)
     const winRateParams: any[] = [workspaceId];
     // Note: scopeFilterClause already includes 'd.' prefix for deals table
     // For win rate query, deals table has no alias, so we need to strip the 'd.' prefix
