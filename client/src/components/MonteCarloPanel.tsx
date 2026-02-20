@@ -5,6 +5,7 @@ import { colors, fonts } from '../styles/theme';
 import { formatCurrency, formatTimeAgo } from '../lib/format';
 import Skeleton from './Skeleton';
 import { useDemoMode } from '../contexts/DemoModeContext';
+import { ComposedChart, Area, ReferenceLine, XAxis, YAxis, ResponsiveContainer } from 'recharts';
 
 interface TornadoAssumption {
   label: string;
@@ -480,9 +481,13 @@ export default function MonteCarloPanel({ wsId, activePipeline }: { wsId?: strin
 
   if (!data) return null;
 
-  const { p10, p25, p50, p75, p90, probOfHittingTarget, quota, dataQualityTier,
+  let { p10, p25, p50, p75, p90, probOfHittingTarget, quota, dataQualityTier,
     existingPipelineP50, projectedPipelineP50, varianceDrivers,
-    iterationsRun, dealsInSimulation, warnings } = data;
+    iterationsRun, dealsInSimulation, warnings, histogram } = data;
+
+  // Safety check: ensure P10 ≤ P50 ≤ P90 (fix any data corruption)
+  const values = [p10, p25, p50, p75, p90].map(v => v ?? 0).sort((a, b) => a - b);
+  [p10, p25, p50, p75, p90] = values;
 
   const existingPct = p50 > 0 ? Math.round((existingPipelineP50 / p50) * 100) : 0;
   const projectedPct = 100 - existingPct;
@@ -574,12 +579,11 @@ export default function MonteCarloPanel({ wsId, activePipeline }: { wsId?: strin
 
         <div style={{ width: 1, background: colors.border, flexShrink: 0 }} />
 
-        <ProbabilityBand
-          p10={p10} p25={p25} p50={p50} p75={p75} p90={p90}
-          quota={quota}
-          quotaInRange={quotaInRange}
-          quotaPos={quotaPos}
-          pctPos={pctPos}
+        <ProbabilityDistribution
+          p10={p10}
+          p50={p50}
+          p90={p90}
+          histogram={histogram || []}
           anon={anon}
         />
 
@@ -949,132 +953,104 @@ function HeadlineColumn({ p10, p50, p90, probOfHittingTarget, quota, dataQuality
   );
 }
 
-function ProbabilityBand({ p10, p25, p50, p75, p90, quota, quotaInRange, quotaPos, pctPos, anon }: any) {
-  const markers = [
-    { label: 'P10', value: p10, pos: 0 },
-    { label: 'P25', value: p25, pos: pctPos(p25) },
-    { label: 'P50', value: p50, pos: pctPos(p50) },
-    { label: 'P75', value: p75, pos: pctPos(p75) },
-    { label: 'P90', value: p90, pos: 100 },
-  ];
+function ProbabilityDistribution({ p10, p50, p90, histogram, anon }: {
+  p10: number; p50: number; p90: number;
+  histogram: { bucketMin: number; bucketMax: number; count: number }[];
+  anon: any;
+}) {
+  // Build chart data from histogram
+  const chartData = histogram.map(bucket => ({
+    value: (bucket.bucketMin + bucket.bucketMax) / 2,
+    frequency: bucket.count,
+  }));
+
+  // Find max frequency for scaling
+  const maxFreq = Math.max(...chartData.map(d => d.frequency), 1);
 
   return (
-    <div style={{ flex: '0 0 33%', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 6 }}>
+    <div style={{ flex: '0 0 33%', display: 'flex', flexDirection: 'column', gap: 6 }}>
       <div style={{ fontSize: 11, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
-        Probability Band
+        Probability Distribution
       </div>
 
-      <div style={{ position: 'relative', height: 60 }}>
-        <div style={{
-          position: 'absolute',
-          top: 20,
-          left: 0,
-          right: 0,
-          height: 20,
-          borderRadius: 10,
-          background: `linear-gradient(to right, ${colors.red}40, ${colors.yellow}40, ${colors.green}40)`,
-        }} />
+      <div style={{ height: 200, width: '100%' }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={chartData} margin={{ top: 20, right: 10, bottom: 20, left: 10 }}>
+            <defs>
+              <linearGradient id="distributionGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.4}/>
+                <stop offset="95%" stopColor="#3B82F6" stopOpacity={0.05}/>
+              </linearGradient>
+            </defs>
 
-        <div style={{
-          position: 'absolute',
-          top: 20,
-          left: `${pctPos(p25)}%`,
-          width: `${pctPos(p75) - pctPos(p25)}%`,
-          height: 20,
-          borderRadius: 6,
-          background: `linear-gradient(to right, ${colors.yellow}80, ${colors.green}80)`,
-        }} />
+            <XAxis
+              dataKey="value"
+              type="number"
+              domain={['dataMin', 'dataMax']}
+              tick={{ fontSize: 10, fill: colors.textMuted }}
+              tickFormatter={(v) => fmtCompact(anon.amount(v))}
+              stroke={colors.border}
+            />
 
-        {markers.map(m => (
-          <div key={m.label} style={{
-            position: 'absolute',
-            left: `${m.pos}%`,
-            transform: 'translateX(-50%)',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-          }}>
-            <div style={{
-              fontSize: m.label === 'P50' ? 10 : 9,
-              fontWeight: m.label === 'P50' ? 700 : 500,
-              color: m.label === 'P50' ? colors.text : colors.textMuted,
-              marginBottom: 2,
-            }}>
-              {m.label}
-            </div>
-            <div style={{
-              width: m.label === 'P50' ? 3 : 2,
-              height: m.label === 'P50' ? 26 : 20,
-              background: m.label === 'P50' ? colors.text : colors.textMuted,
-              borderRadius: 1,
-              marginTop: m.label === 'P50' ? -3 : 0,
-            }} />
-            <div style={{
-              fontSize: 10,
-              fontFamily: fonts.mono,
-              color: m.label === 'P50' ? colors.text : colors.textMuted,
-              marginTop: 3,
-              whiteSpace: 'nowrap',
-              fontWeight: m.label === 'P50' ? 600 : 400,
-            }}>
-              {fmtCompact(anon.amount(m.value))}
-            </div>
-          </div>
-        ))}
+            <YAxis hide />
 
-        {quota != null && quotaInRange && quotaPos != null && (
-          <div style={{
-            position: 'absolute',
-            left: `${quotaPos}%`,
-            transform: 'translateX(-50%)',
-            top: 14,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            zIndex: 2,
-          }}>
-            <div style={{
-              fontSize: 9,
-              fontWeight: 600,
-              color: colors.accent,
-              marginBottom: 1,
-            }}>
-              target
-            </div>
-            <div style={{
-              width: 2,
-              height: 32,
-              background: colors.accent,
-              borderRadius: 1,
-              opacity: 0.8,
-            }} />
-          </div>
-        )}
+            {/* Shaded area between P10 and P90 */}
+            <Area
+              type="monotone"
+              dataKey="frequency"
+              stroke="none"
+              fill="url(#distributionGradient)"
+              fillOpacity={1}
+            />
 
-        {quota != null && !quotaInRange && (
-          <div style={{
-            position: 'absolute',
-            left: quota < p10 ? '-4px' : 'calc(100% + 4px)',
-            top: 18,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-          }}>
-            <div style={{
-              fontSize: 9,
-              fontWeight: 600,
-              color: colors.accent,
-            }}>
-              target {fmtCompact(anon.amount(quota))}
-            </div>
-            <div style={{
-              width: 0,
-              height: 24,
-              borderLeft: `2px dashed ${colors.accent}`,
-              opacity: 0.6,
-            }} />
-          </div>
-        )}
+            {/* P10 reference line (pessimistic) */}
+            <ReferenceLine
+              x={p10}
+              stroke={colors.red}
+              strokeWidth={2}
+              strokeOpacity={0.7}
+              label={{
+                value: `P10\n${fmtCompact(anon.amount(p10))}`,
+                position: 'top',
+                fill: colors.red,
+                fontSize: 10,
+                fontWeight: 600,
+                fontFamily: fonts.mono,
+              }}
+            />
+
+            {/* P50 reference line (median - most prominent) */}
+            <ReferenceLine
+              x={p50}
+              stroke="#F1F5F9"
+              strokeWidth={3}
+              label={{
+                value: `P50\n${fmtCompact(anon.amount(p50))}`,
+                position: 'top',
+                fill: colors.text,
+                fontSize: 11,
+                fontWeight: 700,
+                fontFamily: fonts.mono,
+              }}
+            />
+
+            {/* P90 reference line (optimistic) */}
+            <ReferenceLine
+              x={p90}
+              stroke={colors.green}
+              strokeWidth={2}
+              strokeOpacity={0.7}
+              label={{
+                value: `P90\n${fmtCompact(anon.amount(p90))}`,
+                position: 'top',
+                fill: colors.green,
+                fontSize: 10,
+                fontWeight: 600,
+                fontFamily: fonts.mono,
+              }}
+            />
+          </ComposedChart>
+        </ResponsiveContainer>
       </div>
     </div>
   );
