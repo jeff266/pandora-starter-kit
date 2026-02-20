@@ -211,7 +211,7 @@ export default function CommandCenter() {
 
   const fetchData = useCallback(async (pipelineParam?: string, isRefresh?: boolean) => {
     const pFilter = pipelineParam ?? selectedPipeline;
-    const pipelineQs = pFilter && pFilter !== 'all' ? `?pipeline=${encodeURIComponent(pFilter)}` : '';
+    const pipelineQs = pFilter && pFilter !== 'default' ? `?scopeId=${encodeURIComponent(pFilter)}` : '';
 
     if (isRefresh) {
       setRefreshing(true);
@@ -328,7 +328,7 @@ export default function CommandCenter() {
     setActiveThread(null);
 
     try {
-      const pFilter = selectedPipeline !== 'all' ? `&pipeline=${encodeURIComponent(selectedPipeline)}` : '';
+      const pFilter = selectedPipeline !== 'default' ? `&scopeId=${encodeURIComponent(selectedPipeline)}` : '';
       const result = await api.get(`/pipeline/snapshot?stage=${encodeURIComponent(stageName)}${pFilter}`);
       const dealsForStage = Array.isArray(result.deals) ? result.deals : [];
       setSelectedStageData({

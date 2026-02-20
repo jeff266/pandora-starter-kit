@@ -6,6 +6,7 @@ import { formatCurrency, formatDate, formatTimeAgo, severityColor } from '../lib
 import Skeleton from '../components/Skeleton';
 import QuotaBanner from '../components/QuotaBanner';
 import { useDemoMode } from '../contexts/DemoModeContext';
+import { useWorkspace } from '../context/WorkspaceContext';
 
 const PAGE_SIZE = 50;
 
@@ -67,6 +68,8 @@ const DEFAULT_SORT: Record<SortField, SortDir> = {
 export default function DealList() {
   const navigate = useNavigate();
   const { anon } = useDemoMode();
+  const { currentWorkspace } = useWorkspace();
+  const wsId = currentWorkspace?.id || '';
   const [searchParams] = useSearchParams();
   const [allDeals, setAllDeals] = useState<DealRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -77,7 +80,7 @@ export default function DealList() {
   const [ownerFilter, setOwnerFilter] = useState(searchParams.get('owner') || 'all');
   const [healthFilter, setHealthFilter] = useState(searchParams.get('health') || 'all');
   const [statusFilter, setStatusFilter] = useState('open');
-  const [pipelineFilter, setPipelineFilter] = useState(() => localStorage.getItem('pandora_deals_pipeline') || 'all');
+  const [pipelineFilter, setPipelineFilter] = useState(() => localStorage.getItem(`pandora_deals_pipeline_${wsId}`) || 'all');
 
   const [sortField, setSortField] = useState<SortField>('amount');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
@@ -251,7 +254,7 @@ export default function DealList() {
     setHealthFilter('all');
     setStatusFilter('open');
     setPipelineFilter('all');
-    localStorage.removeItem('pandora_deals_pipeline');
+    localStorage.removeItem(`pandora_deals_pipeline_${wsId}`);
   };
 
   const hasFilters = search || stageFilter !== 'all' || ownerFilter !== 'all' || healthFilter !== 'all' || statusFilter !== 'open' || pipelineFilter !== 'all';
@@ -330,7 +333,7 @@ export default function DealList() {
             borderRadius: 6, color: colors.text, outline: 'none',
           }}
         />
-        <FilterSelect label="Pipeline" value={pipelineFilter} onChange={(v) => { setPipelineFilter(v); localStorage.setItem('pandora_deals_pipeline', v); }}
+        <FilterSelect label="Pipeline" value={pipelineFilter} onChange={(v) => { setPipelineFilter(v); localStorage.setItem(`pandora_deals_pipeline_${wsId}`, v); }}
           options={[{ value: 'all', label: 'All' }, ...uniquePipelines.map(p => ({ value: p, label: p }))]} />
         <FilterSelect label="Stage" value={stageFilter} onChange={setStageFilter}
           options={[{ value: 'all', label: 'All' }, ...uniqueStages.map(s => ({ value: s, label: s.replace(/_/g, ' ') }))]} />
