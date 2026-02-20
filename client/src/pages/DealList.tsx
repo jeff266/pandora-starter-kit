@@ -38,6 +38,7 @@ interface DealRow {
   is_closed: boolean;
   status: string;
   pipeline: string;
+  scope_id: string;
   source_id: string | null;
   source: string | null;
   mechanical_score: number | null;
@@ -80,7 +81,8 @@ export default function DealList() {
   const [ownerFilter, setOwnerFilter] = useState(searchParams.get('owner') || 'all');
   const [healthFilter, setHealthFilter] = useState(searchParams.get('health') || 'all');
   const [statusFilter, setStatusFilter] = useState('open');
-  const [pipelineFilter, setPipelineFilter] = useState(() => localStorage.getItem(`pandora_deals_pipeline_${wsId}`) || 'all');
+  const [pipelineFilter, setPipelineFilter] = useState(() => localStorage.getItem(`pandora_deals_pipeline_${wsId}`) || 'default');
+  const [scopes, setScopes] = useState<Array<{ scope_id: string; name: string; deal_count: number }>>([]);
 
   const [sortField, setSortField] = useState<SortField>('amount');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
@@ -110,6 +112,7 @@ export default function DealList() {
         is_closed: false,
         status: 'open',
         pipeline: d.pipeline || '',
+        scope_id: d.scope_id || 'default',
         source_id: d.source_id ?? null,
         source: d.source ?? null,
         mechanical_score: d.mechanical_score ?? null,
@@ -139,6 +142,7 @@ export default function DealList() {
             is_closed: ['closed_won', 'closed_lost'].includes(d.stage_normalized),
             status: d.stage_normalized === 'closed_won' ? 'won' : d.stage_normalized === 'closed_lost' ? 'lost' : 'open',
             pipeline: d.pipeline || d.source_data?.pipeline || '',
+            scope_id: d.scope_id || 'default',
             source_id: d.source_id ?? null,
             source: d.source ?? null,
             mechanical_score: null,
@@ -159,6 +163,15 @@ export default function DealList() {
   useEffect(() => {
     fetchDeals();
     api.get('/crm/link-info').then(setCrmInfo).catch(() => {});
+    // Fetch scopes
+    api.get('/admin/scopes').then((data: any) => {
+      const confirmedScopes = (data.scopes || []).filter((s: any) => s.confirmed);
+      setScopes(confirmedScopes.map((s: any) => ({
+        scope_id: s.scope_id,
+        name: s.name,
+        deal_count: s.deal_count,
+      })));
+    }).catch(() => {});
   }, [fetchDeals]);
 
   const uniqueStages = useMemo(() =>
@@ -193,8 +206,8 @@ export default function DealList() {
     if (healthFilter !== 'all') {
       result = result.filter(d => d.grade === healthFilter);
     }
-    if (pipelineFilter !== 'all') {
-      result = result.filter(d => d.pipeline === pipelineFilter);
+    if (pipelineFilter !== 'default') {
+      result = result.filter(d => d.scope_id === pipelineFilter);
     }
     if (search.trim()) {
       const q = search.trim().toLowerCase();
@@ -253,11 +266,11 @@ export default function DealList() {
     setOwnerFilter('all');
     setHealthFilter('all');
     setStatusFilter('open');
-    setPipelineFilter('all');
+    setPipelineFilter('default');
     localStorage.removeItem(`pandora_deals_pipeline_${wsId}`);
   };
 
-  const hasFilters = search || stageFilter !== 'all' || ownerFilter !== 'all' || healthFilter !== 'all' || statusFilter !== 'open' || pipelineFilter !== 'all';
+  const hasFilters = search || stageFilter !== 'all' || ownerFilter !== 'all' || healthFilter !== 'all' || statusFilter !== 'open' || pipelineFilter !== 'default';
 
   if (loading) {
     return (
@@ -334,7 +347,13 @@ export default function DealList() {
           }}
         />
         <FilterSelect label="Pipeline" value={pipelineFilter} onChange={(v) => { setPipelineFilter(v); localStorage.setItem(`pandora_deals_pipeline_${wsId}`, v); }}
-          options={[{ value: 'all', label: 'All' }, ...uniquePipelines.map(p => ({ value: p, label: p }))]} />
+          options={[
+            { value: 'default', label: 'All Deals' },
+            ...scopes.filter(s => s.scope_id !== 'default').map(s => ({
+              value: s.scope_id,
+              label: `${s.name} (${s.deal_count})`,
+            }))
+          ]} />
         <FilterSelect label="Stage" value={stageFilter} onChange={setStageFilter}
           options={[{ value: 'all', label: 'All' }, ...uniqueStages.map(s => ({ value: s, label: s.replace(/_/g, ' ') }))]} />
         <FilterSelect label="Owner" value={ownerFilter} onChange={setOwnerFilter}
