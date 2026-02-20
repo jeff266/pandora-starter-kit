@@ -39,13 +39,25 @@ export async function enrichTopAccountsWithSignals(
     searchingTop: topAccounts.length,
   });
 
-  // Get Serper API key from credential store
-  const credResult = await query<{ value: string }>(
-    `SELECT value FROM credentials WHERE workspace_id = $1 AND service = 'serper' AND key = 'api_key'`,
-    [workspaceId]
-  );
+  // Get Serper API key — try credentials table first, fall back to env var
+  let apiKey: string | null = null;
+  try {
+    const credResult = await query<{ value: string }>(
+      `SELECT value FROM credentials WHERE workspace_id = $1 AND service = 'serper' AND key = 'api_key'`,
+      [workspaceId]
+    );
+    if (credResult.rows.length > 0) {
+      apiKey = credResult.rows[0].value;
+    }
+  } catch {
+    // credentials table may not exist — fall through to env var
+  }
 
-  if (credResult.rows.length === 0) {
+  if (!apiKey) {
+    apiKey = process.env.SERPER_API_KEY || null;
+  }
+
+  if (!apiKey) {
     logger.warn('No Serper API key found, skipping signal enrichment', { workspaceId });
     return topAccounts.map(acc => ({
       ...acc,
@@ -53,8 +65,6 @@ export async function enrichTopAccountsWithSignals(
       signalCount: 0,
     }));
   }
-
-  const apiKey = credResult.rows[0].value;
 
   // Batch search with rate limiting (handled by serper.ts)
   const signalsMap = await searchCompanySignalsBatch(

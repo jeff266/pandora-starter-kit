@@ -286,20 +286,20 @@ export async function persistTaxonomy(
   const accountClassifications = stepData?.account_classifications;
   const taxonomyReport = stepData?.taxonomy_report;
 
-  // Check for missing data
-  if (!foundation || !enrichedAccounts || !taxonomyReport) {
-    throw new Error('Missing required step data for taxonomy persistence');
+  if (!foundation || !taxonomyReport) {
+    throw new Error('Missing required step data for taxonomy persistence (foundation or report)');
   }
 
-  // Check for upstream step failures
   if (foundation.error) {
     throw new Error(`Taxonomy foundation failed: ${foundation.error}`);
   }
-  if (enrichedAccounts.error) {
-    throw new Error(`Account enrichment failed: ${enrichedAccounts.error}`);
-  }
-  if (!enrichedAccounts.top_accounts || enrichedAccounts.top_accounts.length === 0) {
-    throw new Error('No accounts were enriched - cannot persist taxonomy');
+
+  const enrichmentFailed = !enrichedAccounts || enrichedAccounts.error || !enrichedAccounts.top_accounts;
+  if (enrichmentFailed) {
+    logger.warn('Enrichment data unavailable, persisting taxonomy without enrichment', {
+      workspaceId, scopeId,
+      reason: enrichedAccounts?.error || 'no enrichment data',
+    });
   }
 
   // Detect vertical from classifications
@@ -340,12 +340,12 @@ export async function persistTaxonomy(
       workspaceId,
       scopeId,
       finalVertical,
-      JSON.stringify(enrichedAccounts.top_accounts),
+      JSON.stringify(enrichmentFailed ? [] : enrichedAccounts.top_accounts),
       JSON.stringify(accountClassifications || []),
       JSON.stringify({ report: taxonomyReport }),
-      enrichedAccounts.accounts_enriched,
+      enrichmentFailed ? 0 : enrichedAccounts.accounts_enriched,
       foundation.won_count,
-      enrichedAccounts.serper_searches,
+      enrichmentFailed ? 0 : enrichedAccounts.serper_searches,
       JSON.stringify(tokenUsage),
     ]
   );
