@@ -101,23 +101,35 @@ export default function ReportViewer() {
   async function downloadFormat(format: string) {
     if (!generation) return;
     const fileInfo = generation.formats_generated[format];
-    if (!fileInfo?.download_url) return;
+    if (!fileInfo?.download_url) {
+      console.error('No download URL found for format:', format);
+      alert(`No download URL available for ${format.toUpperCase()}`);
+      return;
+    }
 
     try {
       // Use authenticated fetch to download the file
       const token = localStorage.getItem('pandora_token');
+      console.log('Downloading:', fileInfo.download_url);
+
       const response = await fetch(fileInfo.download_url, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
       });
 
+      console.log('Download response:', response.status, response.statusText);
+
       if (!response.ok) {
-        throw new Error(`Download failed: ${response.statusText}`);
+        const errorText = await response.text();
+        console.error('Download error response:', errorText);
+        throw new Error(`Download failed (${response.status}): ${errorText}`);
       }
 
       // Convert response to blob and trigger download
       const blob = await response.blob();
+      console.log('Downloaded blob size:', blob.size, 'type:', blob.type);
+
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -126,9 +138,11 @@ export default function ReportViewer() {
       a.click();
       document.body.removeChild(a);
       window.URL.revokeObjectURL(url);
+
+      console.log('Download complete');
     } catch (err) {
       console.error('Download failed:', err);
-      alert(`Failed to download ${format.toUpperCase()} file`);
+      alert(`Failed to download ${format.toUpperCase()} file: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
