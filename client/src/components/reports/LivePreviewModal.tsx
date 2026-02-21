@@ -3,6 +3,7 @@ import { Download, X } from 'lucide-react';
 import ReportContent from './ReportContent';
 import { colors, fonts } from '../../styles/theme';
 import type { SectionContent } from './types';
+import { api } from '../../lib/api';
 
 interface GenerationResponse {
   id: string;
@@ -47,15 +48,7 @@ export default function LivePreviewModal({
   async function generatePreview() {
     setState('loading');
     try {
-      const res = await fetch(
-        `/api/workspaces/${workspaceId}/reports/${reportId}/generate?preview=true`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-        }
-      );
-      if (!res.ok) throw new Error(await res.text());
-      const data = await res.json();
+      const data = await api.post(`/reports/${reportId}/generate?preview=true`);
       setPreviewData(data);
       setState('ready');
     } catch (err) {

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, FileText, Calendar, Clock, AlertCircle, CheckCircle, Play } from 'lucide-react';
 import { colors, fonts } from '../styles/theme';
+import { api } from '../lib/api';
 
 interface ReportTemplate {
   id: string;
@@ -36,8 +37,7 @@ export default function ReportsPage() {
   async function loadReports() {
     try {
       setLoading(true);
-      const res = await fetch(`/api/workspaces/${workspaceId}/reports`);
-      const data = await res.json();
+      const data = await api.get('/reports');
       setReports(data.reports || []);
     } catch (err) {
       console.error('Failed to load reports:', err);
@@ -48,18 +48,8 @@ export default function ReportsPage() {
 
   async function generateNow(reportId: string) {
     try {
-      const res = await fetch(`/api/workspaces/${workspaceId}/reports/${reportId}/generate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ preview: false }),
-      });
-
-      if (res.ok) {
-        const generation = await res.json();
-        navigate(`/workspace/${workspaceId}/reports/${reportId}/generations/${generation.id}`);
-      } else {
-        alert('Failed to generate report');
-      }
+      const generation = await api.post(`/reports/${reportId}/generate`, { preview: false });
+      navigate(`/workspace/${workspaceId}/reports/${reportId}/generations/${generation.id}`);
     } catch (err) {
       console.error('Failed to generate report:', err);
       alert('Failed to generate report');
