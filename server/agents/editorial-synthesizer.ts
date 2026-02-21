@@ -1,0 +1,300 @@
+/**
+ * Editorial Synthesis Engine
+ *
+ * Replaces section-generator.ts for agent-powered briefings.
+ * Makes editorial decisions about what to include, what to emphasize,
+ * and how to structure the narrative.
+ */
+
+import Anthropic from '@anthropic-ai/sdk';
+import { createLogger } from '../utils/logger.js';
+import type {
+  EditorialInput,
+  EditorialOutput,
+  EditorialDecision,
+  TuningPair,
+} from './editorial-types.js';
+import type { SectionContent, MetricCard, DealCard } from '../reports/types.js';
+import type { SkillEvidence, EvidenceClaim } from '../skills/types.js';
+
+const logger = createLogger('EditorialSynthesizer');
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+/**
+ * Editorial synthesis: One Claude call to produce the entire briefing.
+ * The agent sees all evidence at once and makes holistic editorial decisions.
+ */
+export async function editorialSynthesize(
+  input: EditorialInput
+): Promise<EditorialOutput> {
+  const startTime = Date.now();
+
+  logger.info('[EditorialSynthesize] Starting synthesis', {
+    agent_id: input.agent.id,
+    workspace_id: input.workspaceId,
+    skills_count: Object.keys(input.skillEvidence).length,
+    sections_available: input.availableSections.length,
+  });
+
+  // Build the synthesis prompt
+  const systemPrompt = buildSystemPrompt(input);
+  const userPrompt = buildUserPrompt(input);
+
+  // Call Claude with structured output
+  const response = await anthropic.messages.create({
+    model: 'claude-sonnet-4-20250514',
+    max_tokens: 4096,
+    system: systemPrompt,
+    messages: [
+      {
+        role: 'user',
+        content: userPrompt,
+      },
+    ],
+  });
+
+  const usage = response.usage;
+  const responseText = response.content[0].type === 'text' ? response.content[0].text : '';
+
+  logger.info('[EditorialSynthesize] Claude response received', {
+    input_tokens: usage.input_tokens,
+    output_tokens: usage.output_tokens,
+    response_length: responseText.length,
+  });
+
+  // Parse the structured JSON response
+  const parsedOutput = parseEditorialResponse(responseText);
+
+  const synthesisTime = Date.now() - startTime;
+
+  const output: EditorialOutput = {
+    editorial_decisions: parsedOutput.editorial_decisions,
+    sections: parsedOutput.sections,
+    opening_narrative: parsedOutput.opening_narrative,
+    skills_referenced: Object.keys(input.skillEvidence),
+    sections_included: parsedOutput.sections.map(s => s.section_id),
+    sections_dropped: input.availableSections
+      .map(s => s.id)
+      .filter(id => !parsedOutput.sections.find(sec => sec.section_id === id)),
+    tokens_used: usage.input_tokens + usage.output_tokens,
+    synthesis_duration_ms: synthesisTime,
+  };
+
+  logger.info('[EditorialSynthesize] Synthesis complete', {
+    sections_included: output.sections_included.length,
+    sections_dropped: output.sections_dropped.length,
+    editorial_decisions: output.editorial_decisions.length,
+    tokens_used: output.tokens_used,
+    duration_ms: synthesisTime,
+  });
+
+  return output;
+}
+
+/**
+ * Build the system prompt with role, audience, and tuning
+ */
+function buildSystemPrompt(input: EditorialInput): string {
+  const parts: string[] = [];
+
+  // Role and goal
+  parts.push(`You are the ${input.agent.name} for ${input.agent.workspaceId || 'this workspace'}.`);
+  parts.push(`Your goal: ${input.agent.description}`);
+  parts.push(`Your audience: ${input.audience.role} (detail level: ${input.audience.detail_preference})`);
+  parts.push('');
+
+  // Tuning from feedback
+  if (input.tuningPairs.length > 0) {
+    parts.push('LEARNED PREFERENCES (from previous feedback):');
+    const tuningInstructions = formatTuningForPrompt(input.tuningPairs);
+    parts.push(tuningInstructions);
+    parts.push('');
+  }
+
+  // Memory context (Phase 3)
+  if (input.memoryContext) {
+    parts.push(input.memoryContext);
+    parts.push('');
+  }
+
+  // Core instructions
+  parts.push('INSTRUCTIONS:');
+  parts.push('1. Read all evidence. Identify the 2-3 most important things this week.');
+  parts.push('2. Decide which sections to include, which to drop, and what order.');
+  parts.push('3. For each included section, write the content with appropriate depth.');
+  parts.push('4. Write an opening narrative (2-3 sentences) that frames the briefing.');
+  parts.push('5. Output your editorial decisions and section content as structured JSON.');
+  parts.push('');
+
+  // Vocabulary preferences
+  if (input.audience.vocabulary_avoid || input.audience.vocabulary_prefer) {
+    parts.push('VOCABULARY:');
+    if (input.audience.vocabulary_avoid) {
+      parts.push(`- Avoid: ${input.audience.vocabulary_avoid.join(', ')}`);
+    }
+    if (input.audience.vocabulary_prefer) {
+      parts.push(`- Prefer: ${input.audience.vocabulary_prefer.join(', ')}`);
+    }
+    parts.push('');
+  }
+
+  return parts.join('\n');
+}
+
+/**
+ * Build the user prompt with evidence and section library
+ */
+function buildUserPrompt(input: EditorialInput): string {
+  const parts: string[] = [];
+
+  // Evidence summary
+  parts.push('EVIDENCE FROM SKILLS:');
+  parts.push('');
+  for (const [skillId, evidence] of Object.entries(input.skillEvidence)) {
+    parts.push(`## ${skillId}`);
+    const summary = summarizeEvidence(evidence);
+    parts.push(summary);
+    parts.push('');
+  }
+
+  // Available sections
+  parts.push('AVAILABLE SECTIONS:');
+  parts.push('');
+  for (const section of input.availableSections) {
+    parts.push(`- ${section.id}: ${section.description}`);
+    parts.push(`  Skills: ${section.skills.join(', ')}`);
+  }
+  parts.push('');
+
+  // Output format
+  parts.push('OUTPUT FORMAT:');
+  parts.push('Return a JSON object with this exact structure:');
+  parts.push('{');
+  parts.push('  "editorial_decisions": [');
+  parts.push('    {');
+  parts.push('      "decision": "lead_with" | "drop_section" | "promote_finding" | "merge_sections" | "add_callout" | "adjust_depth",');
+  parts.push('      "reasoning": "Coverage dropped 40% — this is the story this week",');
+  parts.push('      "affected_sections": ["section-id"]');
+  parts.push('    }');
+  parts.push('  ],');
+  parts.push('  "opening_narrative": "2-3 sentence opening that frames the briefing",');
+  parts.push('  "sections": [');
+  parts.push('    {');
+  parts.push('      "section_id": "the-number",');
+  parts.push('      "title": "The Number",');
+  parts.push('      "narrative": "1-3 paragraph summary with specific data points",');
+  parts.push('      "metrics": [{"label": "Forecast", "value": "$1.33M", "delta": "+$200K", "delta_direction": "up", "severity": "good"}],');
+  parts.push('      "deal_cards": [{"name": "Acme Corp", "amount": "$450K", "owner": "Jane", "stage": "Proposal", "signal": "No activity 14 days", "signal_severity": "warning", "detail": "Last engagement was demo on 2/1", "action": "Schedule follow-up call this week"}],');
+  parts.push('      "source_skills": ["forecast-rollup"],');
+  parts.push('      "data_freshness": "2026-02-21T10:00:00Z",');
+  parts.push('      "confidence": 0.9');
+  parts.push('    }');
+  parts.push('  ]');
+  parts.push('}');
+
+  return parts.join('\n');
+}
+
+/**
+ * Summarize skill evidence into key findings (keep under 500 tokens per skill)
+ */
+function summarizeEvidence(evidence: SkillEvidence): string {
+  const parts: string[] = [];
+
+  // Claims (limit to top 5 by severity)
+  if (evidence.claims && evidence.claims.length > 0) {
+    const sortedClaims = evidence.claims
+      .sort((a, b) => {
+        const severityOrder = { critical: 0, warning: 1, info: 2, good: 3 };
+        return (severityOrder[a.severity || 'info'] || 99) - (severityOrder[b.severity || 'info'] || 99);
+      })
+      .slice(0, 5);
+
+    parts.push('Key findings:');
+    for (const claim of sortedClaims) {
+      const severity = claim.severity ? `[${claim.severity.toUpperCase()}]` : '';
+      parts.push(`- ${severity} ${claim.claim_text}`);
+      if (claim.metric_name && claim.metric_values) {
+        const metric = `${claim.metric_name}: ${claim.metric_values.join(', ')}`;
+        parts.push(`  ${metric}`);
+      }
+      if (claim.entity_ids && claim.entity_ids.length > 0 && claim.entity_ids.length <= 3) {
+        parts.push(`  Entities: ${claim.entity_ids.join(', ')}`);
+      } else if (claim.entity_ids && claim.entity_ids.length > 3) {
+        parts.push(`  ${claim.entity_ids.length} entities affected`);
+      }
+    }
+  }
+
+  // Evaluated records summary
+  if (evidence.evaluated_records && evidence.evaluated_records.length > 0) {
+    parts.push(`Evaluated ${evidence.evaluated_records.length} records`);
+  }
+
+  // Data sources
+  if (evidence.data_sources && evidence.data_sources.length > 0) {
+    const sources = evidence.data_sources.map(ds => ds.source).join(', ');
+    parts.push(`Sources: ${sources}`);
+  }
+
+  return parts.join('\n');
+}
+
+/**
+ * Format tuning pairs into prompt instructions
+ */
+function formatTuningForPrompt(pairs: TuningPair[]): string {
+  const instructions = pairs
+    .filter(p => p.confidence >= 0.5)
+    .sort((a, b) => b.confidence - a.confidence)
+    .slice(0, 10)  // Max 10 tuning instructions
+    .map(p => {
+      if (typeof p.value === 'object' && p.value.instruction) {
+        return `- ${p.value.instruction}`;
+      }
+      return `- ${p.key}: ${JSON.stringify(p.value)}`;
+    });
+
+  return instructions.join('\n');
+}
+
+/**
+ * Parse Claude's JSON response into EditorialOutput structure
+ */
+function parseEditorialResponse(responseText: string): {
+  editorial_decisions: EditorialDecision[];
+  opening_narrative: string;
+  sections: SectionContent[];
+} {
+  try {
+    // Extract JSON from response (handle markdown code blocks)
+    let jsonText = responseText.trim();
+    if (jsonText.startsWith('```json')) {
+      jsonText = jsonText.replace(/^```json\n/, '').replace(/\n```$/, '');
+    } else if (jsonText.startsWith('```')) {
+      jsonText = jsonText.replace(/^```\n/, '').replace(/\n```$/, '');
+    }
+
+    const parsed = JSON.parse(jsonText);
+
+    return {
+      editorial_decisions: parsed.editorial_decisions || [],
+      opening_narrative: parsed.opening_narrative || '',
+      sections: parsed.sections || [],
+    };
+  } catch (error) {
+    logger.error('[EditorialSynthesize] Failed to parse Claude response as JSON', error as Error);
+    logger.debug('[EditorialSynthesize] Raw response', { responseText: responseText.substring(0, 500) });
+
+    // Fallback: return empty structure
+    return {
+      editorial_decisions: [{
+        decision: 'add_callout',
+        reasoning: 'Failed to parse editorial response',
+        affected_sections: [],
+      }],
+      opening_narrative: 'Unable to generate briefing due to parsing error.',
+      sections: [],
+    };
+  }
+}

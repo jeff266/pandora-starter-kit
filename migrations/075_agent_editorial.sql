@@ -1,0 +1,23 @@
+-- Phase 1: Agent Editorial Synthesis Engine
+-- Links agents to report templates and adds editorial metadata
+
+-- Link report templates to agents
+ALTER TABLE report_templates ADD COLUMN IF NOT EXISTS agent_id UUID REFERENCES agents(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_rt_agent ON report_templates(agent_id) WHERE agent_id IS NOT NULL;
+
+-- Add editorial metadata to report_generations
+ALTER TABLE report_generations ADD COLUMN IF NOT EXISTS agent_id UUID REFERENCES agents(id);
+ALTER TABLE report_generations ADD COLUMN IF NOT EXISTS editorial_decisions JSONB;
+ALTER TABLE report_generations ADD COLUMN IF NOT EXISTS opening_narrative TEXT;
+ALTER TABLE report_generations ADD COLUMN IF NOT EXISTS run_digest JSONB;
+
+-- Index for fast digest lookup by agent
+CREATE INDEX IF NOT EXISTS idx_rg_agent_digest
+  ON report_generations(workspace_id, agent_id, created_at DESC)
+  WHERE agent_id IS NOT NULL AND triggered_by != 'preview';
+
+-- Comments
+COMMENT ON COLUMN report_templates.agent_id IS 'If set, this template uses agent editorial synthesis instead of static section generation';
+COMMENT ON COLUMN report_generations.editorial_decisions IS 'Editorial decisions made by the agent (lead_with, drop_section, etc.)';
+COMMENT ON COLUMN report_generations.opening_narrative IS 'The narrative opening produced by the agent';
+COMMENT ON COLUMN report_generations.run_digest IS 'Compressed summary of this run for Phase 3 self-reference';

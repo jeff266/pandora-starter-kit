@@ -16,6 +16,7 @@ import { createLogger } from '../utils/logger.js';
 import { renderReportPDF } from '../renderers/report-pdf-renderer.js';
 import { renderDOCX } from '../renderers/docx-renderer.js';
 import { renderPPTX } from '../renderers/pptx-renderer-full.js';
+import { generateEditorialReport } from './editorial-generator.js';
 
 const logger = createLogger('ReportGenerator');
 
@@ -26,7 +27,7 @@ export async function generateReport(request: GenerateReportRequest): Promise<Re
   logger.info('Starting report generation', { workspace_id, report_template_id, triggered_by });
 
   // 1. Load template
-  const templateResult = await query<ReportTemplate>(
+  const templateResult = await query<ReportTemplate & { agent_id?: string }>(
     `SELECT * FROM report_templates WHERE id = $1 AND workspace_id = $2`,
     [report_template_id, workspace_id]
   );
@@ -36,6 +37,15 @@ export async function generateReport(request: GenerateReportRequest): Promise<Re
   }
 
   const template = templateResult.rows[0];
+
+  // EDITORIAL SYNTHESIS ROUTING:
+  // If template has agent_id, use editorial synthesis instead of section-generator
+  if (template.agent_id) {
+    logger.info('Template has agent_id - routing to editorial synthesis', { agent_id: template.agent_id });
+    return generateEditorialReport(request);
+  }
+
+  // Continue with legacy section-generator path for templates without agents
 
   if (!template.is_active && !preview_only) {
     throw new Error(`Report template is not active: ${report_template_id}`);
