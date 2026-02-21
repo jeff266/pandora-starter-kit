@@ -113,4 +113,224 @@ router.get('/:id/conversations/signal-status', async (req: Request, res: Respons
   }
 });
 
+// ============================================================================
+// CWD (Conversations Without Deals) Endpoints
+// ============================================================================
+
+/**
+ * GET /api/workspaces/:id/conversations/without-deals
+ * Returns conversations linked to accounts but not deals
+ */
+router.get('/:id/conversations/without-deals', async (req: Request, res: Response) => {
+  try {
+    const workspaceId = req.params.id;
+    const { status = 'pending', severity = 'all', limit = '25', offset = '0' } = req.query;
+
+    const { findConversationsWithoutDeals } = await import('../analysis/conversation-without-deals.js');
+
+    const daysBack = 90; // TODO: make configurable
+    const result = await findConversationsWithoutDeals(workspaceId, daysBack);
+
+    // Filter by status and severity
+    let filtered = result.conversations;
+
+    if (severity !== 'all') {
+      filtered = filtered.filter(c => c.severity === severity);
+    }
+
+    // Apply pagination
+    const start = parseInt(offset as string, 10);
+    const end = start + parseInt(limit as string, 10);
+    const paginated = filtered.slice(start, end);
+
+    res.json({
+      conversations: paginated,
+      summary: result.summary,
+      pagination: {
+        total: filtered.length,
+        limit: parseInt(limit as string, 10),
+        offset: parseInt(offset as string, 10),
+      },
+    });
+  } catch (err) {
+    console.error('[CWD List]', err);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+/**
+ * GET /api/workspaces/:id/conversations/without-deals/summary
+ * Returns aggregate counts
+ */
+router.get('/:id/conversations/without-deals/summary', async (req: Request, res: Response) => {
+  try {
+    const workspaceId = req.params.id;
+
+    const { findConversationsWithoutDeals } = await import('../analysis/conversation-without-deals.js');
+
+    const result = await findConversationsWithoutDeals(workspaceId, 90);
+
+    // Calculate additional metrics
+    const createdThisMonth = result.conversations.filter(c => {
+      // Placeholder - would need actual created_deal tracking
+      return false;
+    }).length;
+
+    const dismissedThisMonth = 0; // TODO: implement dismissal tracking
+
+    res.json({
+      total_pending: result.summary.total_cwd,
+      high_severity: result.summary.by_severity.high || 0,
+      medium_severity: result.summary.by_severity.medium || 0,
+      low_severity: result.summary.by_severity.low || 0,
+      created_this_month: createdThisMonth,
+      dismissed_this_month: dismissedThisMonth,
+    });
+  } catch (err) {
+    console.error('[CWD Summary]', err);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+/**
+ * POST /api/workspaces/:id/conversations/without-deals/:conversationId/create-deal
+ * Creates a deal in CRM from a CWD conversation
+ */
+router.post('/:id/conversations/without-deals/:conversationId/create-deal', async (req: Request, res: Response) => {
+  try {
+    const { id: workspaceId, conversationId } = req.params;
+    const {
+      deal_name,
+      amount,
+      stage,
+      close_date,
+      owner_email,
+      pipeline_id,
+      contacts_to_associate = [],
+      contacts_to_create = [],
+      notes,
+    } = req.body;
+
+    // Get conversation details
+    const conversationResult = await query(
+      `SELECT * FROM conversations WHERE id = $1 AND workspace_id = $2`,
+      [conversationId, workspaceId]
+    );
+
+    if (conversationResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Conversation not found' });
+    }
+
+    const conversation = conversationResult.rows[0];
+
+    // Determine CRM type
+    const { getConnectorCredentials } = await import('../lib/credential-store.js');
+    const hubspotCreds = await getConnectorCredentials(workspaceId, 'hubspot');
+    const salesforceCreds = await getConnectorCredentials(workspaceId, 'salesforce');
+
+    let dealCrmId: string;
+    let dealUrl: string;
+
+    if (hubspotCreds?.accessToken) {
+      // Create HubSpot deal
+      const { createDealFromCWD } = await import('../crm-writeback/cwd-deal-creator.js');
+      const result = await createDealFromCWD({
+        workspaceId,
+        crmType: 'hubspot',
+        dealName: deal_name,
+        amount,
+        stage,
+        closeDate: close_date,
+        ownerEmail: owner_email,
+        pipelineId: pipeline_id,
+        accountId: conversation.account_id,
+        contactsToAssociate: contacts_to_associate,
+        contactsToCreate: contacts_to_create,
+        notes: notes || `Deal created from conversation: ${conversation.title}`,
+        conversationId,
+      });
+
+      dealCrmId = result.deal_crm_id;
+      dealUrl = result.deal_url;
+    } else if (salesforceCreds?.accessToken) {
+      // Create Salesforce opportunity
+      const { createDealFromCWD } = await import('../crm-writeback/cwd-deal-creator.js');
+      const result = await createDealFromCWD({
+        workspaceId,
+        crmType: 'salesforce',
+        dealName: deal_name,
+        amount,
+        stage,
+        closeDate: close_date,
+        ownerEmail: owner_email,
+        accountId: conversation.account_id,
+        contactsToAssociate: contacts_to_associate,
+        contactsToCreate: contacts_to_create,
+        notes: notes || `Opportunity created from conversation: ${conversation.title}`,
+        conversationId,
+      });
+
+      dealCrmId = result.deal_crm_id;
+      dealUrl = result.deal_url;
+    } else {
+      return res.status(400).json({ error: 'No CRM connected' });
+    }
+
+    // Update conversation with deal link
+    await query(
+      `UPDATE conversations SET deal_id = $1 WHERE id = $2`,
+      [dealCrmId, conversationId]
+    );
+
+    res.json({
+      success: true,
+      deal_crm_id: dealCrmId,
+      deal_url: dealUrl,
+      message: 'Deal created successfully',
+    });
+  } catch (err) {
+    console.error('[CWD Create Deal]', err);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+/**
+ * POST /api/workspaces/:id/conversations/without-deals/:conversationId/dismiss
+ * Dismisses a CWD conversation
+ */
+router.post('/:id/conversations/without-deals/:conversationId/dismiss', async (req: Request, res: Response) => {
+  try {
+    const { id: workspaceId, conversationId } = req.params;
+    const { reason } = req.body;
+
+    // For now, we'll add a flag to the conversation
+    // In production, you might want a separate dismissed_cwds table
+    await query(
+      `UPDATE conversations
+       SET custom_data = jsonb_set(
+         COALESCE(custom_data, '{}'::jsonb),
+         '{cwd_dismissed}',
+         'true'::jsonb
+       ),
+       custom_data = jsonb_set(
+         COALESCE(custom_data, '{}'::jsonb),
+         '{cwd_dismiss_reason}',
+         $2::jsonb
+       ),
+       custom_data = jsonb_set(
+         COALESCE(custom_data, '{}'::jsonb),
+         '{cwd_dismissed_at}',
+         to_jsonb(NOW()::text)
+       )
+       WHERE id = $1 AND workspace_id = $3`,
+      [conversationId, JSON.stringify(reason || ''), workspaceId]
+    );
+
+    res.json({ success: true, message: 'Conversation dismissed' });
+  } catch (err) {
+    console.error('[CWD Dismiss]', err);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 export default router;

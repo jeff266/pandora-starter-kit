@@ -93,6 +93,7 @@ import reportsRouter, { cleanupReportFiles } from './routes/reports.js';
 import { startPushTriggers, stopPushTriggers } from './push/trigger-manager.js';
 import { initRenderers } from './renderers/index.js';
 import { cleanupExpiredAnnotations } from './feedback/cleanup.js';
+import crmWritebackRouter from './routes/crm-writeback.js';
 
 dotenv.config();
 
@@ -254,6 +255,7 @@ workspaceApiRouter.use(dossiersRouter);
 workspaceApiRouter.use(conversationsRouter);
 workspaceApiRouter.use(analysisRouter);
 workspaceApiRouter.use(routerApiRouter);
+workspaceApiRouter.use(crmWritebackRouter);
 workspaceApiRouter.use(deliverablesRouter);
 workspaceApiRouter.use(downloadsRouter);
 workspaceApiRouter.use('/workspace-downloads', workspaceDownloadsRouter);

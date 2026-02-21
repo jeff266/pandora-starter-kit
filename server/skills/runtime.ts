@@ -256,6 +256,32 @@ export class SkillRuntime {
         // Non-fatal — push trigger failure never blocks skill completion
       }
 
+      // CRM Write-back: trigger write-back for mappings with after_skill_run sync trigger
+      try {
+        const { query } = await import('../db.js');
+        const mappingsCheck = await query(
+          `SELECT COUNT(*) as count FROM crm_property_mappings
+           WHERE workspace_id = $1 AND is_active = true AND sync_trigger = 'after_skill_run'`,
+          [workspaceId]
+        );
+        if (mappingsCheck.rows[0]?.count > 0) {
+          // Fire and forget - don't block skill completion
+          import('../crm-writeback/write-engine.js').then(({ executeSkillRunWriteBack }) => {
+            // Get affected entity IDs based on skill type
+            // For now, this is a placeholder - would need skill-specific logic
+            const affectedIds: string[] = [];
+            if (affectedIds.length > 0) {
+              executeSkillRunWriteBack(workspaceId, skill.id, runId, affectedIds)
+                .catch(err => {
+                  console.error(`[CRMWriteback] Post-skill writeback failed:`, err instanceof Error ? err.message : err);
+                });
+            }
+          }).catch(() => {});
+        }
+      } catch {
+        // Non-fatal — write-back failure never blocks skill completion
+      }
+
       // Scoring state: recompute after icp-discovery completes so state transitions locked→ready→active
       if (skill.id === 'icp-discovery') {
         import('../scoring/workspace-scoring-state.js').then(({ recomputeScoringState }) => {
