@@ -530,7 +530,7 @@ function RepQuotasTable({ repAttainment, gap, anon }: {
               const statusStyle = statusColors[rep.status];
               return (
                 <tr key={rep.rep_email} style={{ borderBottom: i < repAttainment.length - 1 ? `1px solid ${colors.border}` : 'none' }}>
-                  <td style={{ padding: '12px 0', fontSize: 14, color: colors.text }}>{anon.name(rep.rep_name)}</td>
+                  <td style={{ padding: '12px 0', fontSize: 14, color: colors.text }}>{anon.person(rep.rep_name)}</td>
                   <td style={{ padding: '12px 0', textAlign: 'right', fontSize: 14, fontFamily: fonts.mono, color: colors.text }}>
                     {formatCurrency(anon.amount(rep.quota))}
                   </td>

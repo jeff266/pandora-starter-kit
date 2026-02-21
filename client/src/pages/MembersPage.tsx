@@ -3,6 +3,7 @@ import { useWorkspace } from '../context/WorkspaceContext';
 import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import Skeleton from '../components/Skeleton';
+import { useDemoMode } from '../contexts/DemoModeContext';
 
 interface Member {
   id: string;
@@ -20,6 +21,7 @@ const roleBadgeColors: Record<string, string> = {
 
 export default function MembersPage() {
   const { user, currentWorkspace } = useWorkspace();
+  const { anon } = useDemoMode();
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -183,8 +185,8 @@ export default function MembersPage() {
             display: 'grid', gridTemplateColumns: isAdmin ? '2fr 2fr 1fr 1fr 80px' : '2fr 2fr 1fr 1fr',
             padding: '12px 16px', borderBottom: `1px solid ${colors.border}`, alignItems: 'center',
           }}>
-            <span style={{ fontSize: 13, fontWeight: 500, color: colors.text }}>{member.name || '--'}</span>
-            <span style={{ fontSize: 13, color: colors.textSecondary }}>{member.email}</span>
+            <span style={{ fontSize: 13, fontWeight: 500, color: colors.text }}>{member.name ? anon.person(member.name) : '--'}</span>
+            <span style={{ fontSize: 13, color: colors.textSecondary }}>{anon.email(member.email)}</span>
             <div>
               {isAdmin && canModify(member) ? (
                 <select value={member.role} onChange={e => handleRoleChange(member.id, e.target.value)}

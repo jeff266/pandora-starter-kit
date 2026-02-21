@@ -1347,6 +1347,7 @@ function DrilldownDealRow({ deal, isLast, isAsking, onAsk }: {
   isAsking: boolean;
   onAsk: () => void;
 }) {
+  const { anon } = useDemoMode();
   const navigate = useNavigate();
   const [hovered, setHovered] = useState(false);
   const daysColor = (deal.days_in_stage || 0) > 30 ? '#EF4444' : (deal.days_in_stage || 0) > 14 ? '#F59E0B' : '#8896AB';
@@ -1381,7 +1382,7 @@ function DrilldownDealRow({ deal, isLast, isAsking, onAsk }: {
               textDecoration: hovered ? 'underline' : 'none',
               transition: 'text-decoration 0.1s',
             }}
-          >{deal.name}</span>
+          >{anon.deal(deal.name)}</span>
           {deal.findings && deal.findings.map(f => {
             const fl = FINDING_LABELS_MAP[f];
             // Show mapped findings with full styling, unknown findings with default styling
@@ -1405,7 +1406,7 @@ function DrilldownDealRow({ deal, isLast, isAsking, onAsk }: {
           })}
         </div>
         <div style={{ fontSize: 11.5, color: '#5A6A80', marginTop: 2 }}>
-          {deal.owner_name || deal.owner_email} &#xB7; Close {deal.close_date ? deal.close_date.split('T')[0] : '\u2014'}
+          {deal.owner_name ? anon.person(deal.owner_name) : deal.owner_email ? anon.email(deal.owner_email) : '--'} &#xB7; Close {deal.close_date ? deal.close_date.split('T')[0] : '\u2014'}
         </div>
       </div>
       <div>
@@ -1416,7 +1417,7 @@ function DrilldownDealRow({ deal, isLast, isAsking, onAsk }: {
         }}>{fcLabel}</span>
       </div>
       <div style={{ fontSize: 13, fontWeight: 600, fontFamily: 'IBM Plex Mono, monospace', color: '#E2E8F0', textAlign: 'right' }}>
-        {fmtAmt(deal.amount || 0)}
+        {fmtAmt(anon.amount(deal.amount || 0))}
       </div>
       <div style={{ fontSize: 13, fontFamily: 'IBM Plex Mono, monospace', color: daysColor, textAlign: 'right' }}>
         {Math.round(deal.days_in_stage || 0)}d

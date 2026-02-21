@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import Toast from '../components/Toast';
+import { useDemoMode } from '../contexts/DemoModeContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -623,7 +624,7 @@ function ExportModal({
 
 // ─── Changelog Modal ──────────────────────────────────────────────────────────
 
-function ChangelogModal({ onClose }: { onClose: () => void }) {
+function ChangelogModal({ onClose, anon }: { onClose: () => void; anon: ReturnType<typeof useDemoMode>['anon'] }) {
   const [entries, setEntries] = useState<ChangelogEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -688,7 +689,7 @@ function ChangelogModal({ onClose }: { onClose: () => void }) {
                     {entry.date}
                   </span>
                   <span style={{ fontSize: 12, color: colors.textSecondary, flex: 1 }}>
-                    {entry.description}
+                    {anon.text(entry.description)}
                   </span>
                   {entry.status && (
                     <span style={{
@@ -703,7 +704,7 @@ function ChangelogModal({ onClose }: { onClose: () => void }) {
                 </div>
                 {entry.author && (
                   <div style={{ fontSize: 11, color: colors.textMuted, marginBottom: 6 }}>
-                    {entry.author}
+                    {anon.person(entry.author)}
                   </div>
                 )}
                 <div style={{ height: 1, background: colors.border, marginBottom: 8 }} />
@@ -712,7 +713,7 @@ function ChangelogModal({ onClose }: { onClose: () => void }) {
                     fontSize: 12, color: colors.textSecondary,
                     fontFamily: fonts.mono, padding: '2px 0',
                   }}>
-                    {ch}
+                    {anon.text(ch)}
                   </div>
                 ))}
                 {entry.impact && (
@@ -720,7 +721,7 @@ function ChangelogModal({ onClose }: { onClose: () => void }) {
                     fontSize: 12, color: colors.yellow, marginTop: 6,
                     fontFamily: fonts.mono,
                   }}>
-                    {entry.impact}
+                    {anon.text(entry.impact)}
                   </div>
                 )}
               </div>
@@ -829,7 +830,7 @@ function InlineEditArea({
 
 // ─── Taxonomy Pro View ────────────────────────────────────────────────────────
 
-function TaxonomyProView({ addToast }: { addToast: (msg: string, type: 'success' | 'error' | 'info') => void }) {
+function TaxonomyProView({ addToast, anon }: { addToast: (msg: string, type: 'success' | 'error' | 'info') => void; anon: ReturnType<typeof useDemoMode>['anon'] }) {
   const [taxonomy, setTaxonomy] = useState<TaxonomyData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -924,11 +925,11 @@ function TaxonomyProView({ addToast }: { addToast: (msg: string, type: 'success'
           </div>
         </div>
         <div style={{ fontSize: 14, color: colors.text, lineHeight: 1.6 }}>
-          {report.icp_summary}
+          {anon.text(report.icp_summary)}
         </div>
         {report.confidence_notes && (
           <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 8, fontStyle: 'italic' }}>
-            {report.confidence_notes}
+            {anon.text(report.confidence_notes)}
           </div>
         )}
       </div>
@@ -1056,7 +1057,7 @@ function TaxonomyProView({ addToast }: { addToast: (msg: string, type: 'success'
                   </span>
                 </div>
                 <div style={{ fontSize: 13, color: colors.textSecondary, lineHeight: 1.5, marginBottom: 10 }}>
-                  {arch.description}
+                  {anon.text(arch.description)}
                 </div>
                 {arch.example_accounts && arch.example_accounts.length > 0 && (
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -1067,7 +1068,7 @@ function TaxonomyProView({ addToast }: { addToast: (msg: string, type: 'success'
                         border: `1px solid ${colors.accent}22`,
                         color: colors.accent,
                       }}>
-                        {acc}
+                        {anon.company(acc)}
                       </span>
                     ))}
                     {arch.example_accounts.length > 5 && (
@@ -1134,7 +1135,7 @@ function TaxonomyProView({ addToast }: { addToast: (msg: string, type: 'success'
 
 // ─── Dossier View ─────────────────────────────────────────────────────────────
 
-function DossierView({ addToast, conversationsConnected }: { addToast: (msg: string, type: 'success' | 'error' | 'info') => void; conversationsConnected: boolean }) {
+function DossierView({ addToast, conversationsConnected, anon }: { addToast: (msg: string, type: 'success' | 'error' | 'info') => void; conversationsConnected: boolean; anon: ReturnType<typeof useDemoMode>['anon'] }) {
   const [profile, setProfile] = useState<IcpProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [rerunning, setRerunning] = useState(false);
@@ -1376,7 +1377,7 @@ function DossierView({ addToast, conversationsConnected }: { addToast: (msg: str
       </div>
 
       {activeTab === 'pro' && (
-        <TaxonomyProView addToast={addToast} />
+        <TaxonomyProView addToast={addToast} anon={anon} />
       )}
 
       {activeTab === 'advanced' && (<>
@@ -1484,7 +1485,7 @@ function DossierView({ addToast, conversationsConnected }: { addToast: (msg: str
               padding: '10px 14px', background: colors.surface,
               border: `1px solid ${colors.border}`, borderRadius: 8, fontSize: 13,
             }}>
-              <span style={{ flex: 1, color: colors.text, fontStyle: 'italic' }}>"{c.label}"</span>
+              <span style={{ flex: 1, color: colors.text, fontStyle: 'italic' }}>"{anon.text(c.label)}"</span>
               {c.total != null && c.won != null && (
                 <span style={{ color: colors.textMuted, fontFamily: fonts.mono, fontSize: 12 }}>
                   {c.won}/{c.total} calls
@@ -1584,7 +1585,7 @@ function DossierView({ addToast, conversationsConnected }: { addToast: (msg: str
               border: `1px solid rgba(239,68,68,0.2)`, borderRadius: 8, fontSize: 13,
             }}>
               <span style={{ color: colors.red }}>✕</span>
-              <span style={{ color: colors.textSecondary }}>{d}</span>
+              <span style={{ color: colors.textSecondary }}>{anon.text(d)}</span>
             </div>
           ))}
         </div>
@@ -1644,7 +1645,7 @@ function DossierView({ addToast, conversationsConnected }: { addToast: (msg: str
 
       </>)}
 
-      {showChangelog && <ChangelogModal onClose={() => setShowChangelog(false)} />}
+      {showChangelog && <ChangelogModal onClose={() => setShowChangelog(false)} anon={anon} />}
       {showExportModal && (
         <ExportModal
           onClose={() => setShowExportModal(false)}
@@ -1658,6 +1659,7 @@ function DossierView({ addToast, conversationsConnected }: { addToast: (msg: str
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function IcpProfilePage() {
+  const { anon } = useDemoMode();
   const [scoringState, setScoringState] = useState<ScoringState | null>(null);
   const [loading, setLoading] = useState(true);
   const [conversationsConnected, setConversationsConnected] = useState(false);
@@ -1717,7 +1719,7 @@ export default function IcpProfilePage() {
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
 
       {scoringState === 'active' ? (
-        <DossierView addToast={addToast} conversationsConnected={conversationsConnected} />
+        <DossierView addToast={addToast} conversationsConnected={conversationsConnected} anon={anon} />
       ) : (
         <div style={{
           background: colors.surface, border: `1px solid ${colors.border}`,
