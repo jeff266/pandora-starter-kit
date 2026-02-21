@@ -47,6 +47,7 @@ const sections: NavSection[] = [
       { label: 'Targets', path: '/targets', icon: '\u25CE' },
       { label: 'Playbooks', path: '/playbooks', icon: '\u25B6' },
       { label: 'Push', path: '/push', icon: '\uD83D\uDD14' },
+      { label: 'Reports', path: '/reports', icon: '\uD83D\uDCC4' },
       { label: 'Insights Feed', path: '/insights', icon: '\u25C9' },
       { label: 'Actions', path: '/actions', icon: '\u26A1' },
     ],

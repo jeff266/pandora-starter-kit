@@ -33,6 +33,8 @@ import IcpProfilePage from './pages/IcpProfilePage';
 import AdminScopesPage from './pages/AdminScopesPage';
 import Targets from './pages/Targets';
 import ReportViewer from './pages/ReportViewer';
+import ReportsPage from './pages/ReportsPage';
+import ReportBuilder from './pages/ReportBuilder';
 import { colors, fonts } from './styles/theme';
 import { useIsMobile } from './hooks/useIsMobile';
 
@@ -50,6 +52,7 @@ const pageTitles: Record<string, string> = {
   '/push': 'Push',
   '/insights': 'Insights Feed',
   '/actions': 'Actions',
+  '/reports': 'Reports',
   '/connectors': 'Connectors',
   '/connectors/health': 'Connector Health',
   '/data-dictionary': 'Data Dictionary',
@@ -65,6 +68,8 @@ function getPageTitle(pathname: string): string {
   if (pathname.startsWith('/accounts/')) return 'Account Detail';
   if (pathname.match(/^\/skills\/[^/]+\/runs/)) return 'Skill Run History';
   if (pathname.match(/^\/workspace\/[^/]+\/reports\//)) return 'Report';
+  if (pathname === '/reports/new') return 'New Report';
+  if (pathname.match(/^\/reports\/[^/]+\/edit/)) return 'Edit Report';
   return pageTitles[pathname] || 'Pandora';
 }
 
@@ -229,6 +234,9 @@ export default function App() {
             <Route path="/settings/:tab" element={<SettingsPage />} />
             <Route path="/icp-profile" element={<IcpProfilePage />} />
             <Route path="/admin/scopes" element={<AdminScopesPage />} />
+            <Route path="/reports" element={<ReportsPage />} />
+            <Route path="/reports/new" element={<ReportBuilder />} />
+            <Route path="/reports/:reportId/edit" element={<ReportBuilder />} />
             <Route path="/workspace/:workspaceId/reports/:reportId" element={<ReportViewer />} />
             <Route path="/workspace/:workspaceId/reports/:reportId/generations/:generationId" element={<ReportViewer />} />
           </Routes>
