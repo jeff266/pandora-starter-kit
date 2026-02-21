@@ -7,6 +7,9 @@ import { ReportTemplate, ReportSection, GenerateReportRequest } from '../reports
 import { generateReport } from '../reports/generator.js';
 import { SECTION_LIBRARY, createSectionFromDefinition } from '../reports/section-library.js';
 import { createLogger } from '../utils/logger.js';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 
 const router = Router();
 const logger = createLogger('ReportsAPI');
@@ -302,6 +305,51 @@ router.get('/:workspaceId/report-sections', async (_req: Request, res: Response)
   } catch (err) {
     logger.error('Failed to get section library', err instanceof Error ? err : undefined);
     res.status(500).json({ error: 'Failed to get section library' });
+  }
+});
+
+// Download generated report file
+router.get('/:workspaceId/reports/:reportId/download/:format', async (req: Request, res: Response) => {
+  try {
+    const { workspaceId, reportId, format } = req.params;
+    const filename = req.query.file as string;
+
+    if (!filename) {
+      res.status(400).json({ error: 'Missing file parameter' });
+      return;
+    }
+
+    const sanitized = path.basename(filename);
+    const outDir = path.join(os.tmpdir(), 'pandora-reports');
+    const filepath = path.join(outDir, sanitized);
+
+    if (!fs.existsSync(filepath)) {
+      res.status(404).json({ error: 'Report file not found. It may have expired — regenerate the report.' });
+      return;
+    }
+
+    const mimeTypes: Record<string, string> = {
+      pdf: 'application/pdf',
+      docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    };
+
+    res.setHeader('Content-Type', mimeTypes[format] || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${sanitized}"`);
+    res.setHeader('Cache-Control', 'no-cache');
+
+    const stream = fs.createReadStream(filepath);
+    stream.pipe(res);
+
+    stream.on('error', (err) => {
+      logger.error('File stream error', err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Failed to stream file' });
+      }
+    });
+  } catch (err) {
+    logger.error('Failed to download report', err instanceof Error ? err : undefined);
+    res.status(500).json({ error: 'Failed to download report' });
   }
 });
 

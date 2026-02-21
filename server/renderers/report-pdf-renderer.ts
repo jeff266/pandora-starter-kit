@@ -1,25 +1,31 @@
-/**
- * Report PDF Renderer
- *
- * Generates professional PDF reports from SectionContent using pdfkit.
- * Section-aware rendering with metrics, tables, deal cards, and action items.
- */
-
 import PDFDocument from 'pdfkit';
-import { ReportGenerationContext } from '../reports/types.js';
+import { ReportGenerationContext, SectionContent, MetricCard, DealCard, ActionItem } from '../reports/types.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-const COLORS = {
-  primary: '#2563EB',
-  secondary: '#1E293B',
-  muted: '#64748B',
-  critical: '#DC2626',
-  warning: '#D97706',
-  success: '#16A34A',
-  background: '#F8FAFC',
-  border: '#E2E8F0',
+const C = {
+  navy: '#0F172A',
+  darkSlate: '#1E293B',
+  slate: '#334155',
+  midGray: '#64748B',
+  lightGray: '#94A3B8',
+  border: '#CBD5E1',
+  softBorder: '#E2E8F0',
+  pageBg: '#FFFFFF',
+  sectionBg: '#F8FAFC',
+  blue: '#2563EB',
+  blueLight: '#DBEAFE',
+  blueDark: '#1D4ED8',
+  green: '#16A34A',
+  greenBg: '#D1FAE5',
+  greenDark: '#15803D',
+  amber: '#D97706',
+  amberBg: '#FEF3C7',
+  amberDark: '#B45309',
+  red: '#DC2626',
+  redBg: '#FEE2E2',
+  redDark: '#B91C1C',
 };
 
 export interface PDFRenderResult {
@@ -28,229 +34,289 @@ export interface PDFRenderResult {
   download_url: string;
 }
 
+function severityColor(severity?: string): { bg: string; fg: string } {
+  switch (severity) {
+    case 'critical': return { bg: C.redBg, fg: C.redDark };
+    case 'warning': return { bg: C.amberBg, fg: C.amberDark };
+    case 'good': return { bg: C.greenBg, fg: C.greenDark };
+    default: return { bg: C.sectionBg, fg: C.slate };
+  }
+}
+
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/\*(.*?)\*/g, '$1')
+    .replace(/#{1,6}\s*/g, '')
+    .replace(/🚨|🔴|🟡|🟢|⚠️|📊|📈|📉|💡|🎯/g, '')
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .trim();
+}
+
+function ensureSpace(doc: any, needed: number): void {
+  if (doc.y + needed > 700) {
+    doc.addPage();
+  }
+}
+
 export async function renderReportPDF(context: ReportGenerationContext): Promise<PDFRenderResult> {
   const { workspace_id, template, sections_content, branding } = context;
 
-  const primaryColor = branding?.primary_color || COLORS.primary;
+  const accentColor = branding?.primary_color || C.blue;
 
   const doc = new PDFDocument({
     size: 'LETTER',
-    margins: { top: 60, bottom: 60, left: 60, right: 60 },
+    margins: { top: 50, bottom: 50, left: 55, right: 55 },
+    bufferPages: true,
     info: {
       Title: template.name,
       Author: branding?.prepared_by || 'Pandora',
-      Creator: 'Pandora',
+      Creator: 'Pandora GTM Intelligence',
     },
   });
 
-  const filename = `${template.name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-${Date.now()}.pdf`;
-  const filepath = path.join(os.tmpdir(), filename);
-  const stream = fs.createWriteStream(filepath);
-  doc.pipe(stream);
+  const pageW = 612;
+  const contentW = pageW - 110;
+  const lMargin = 55;
 
-  // Cover page
-  doc.fontSize(36).fillColor(primaryColor).text(template.name, { align: 'center' });
-  doc.moveDown(0.5);
+  const filename = `${template.name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-${Date.now()}.pdf`;
+  const outDir = path.join(os.tmpdir(), 'pandora-reports');
+  if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+  const filepath = path.join(outDir, filename);
+
+  const chunks: Buffer[] = [];
+  doc.on('data', (chunk: Buffer) => chunks.push(chunk));
+
+  // ── COVER PAGE ──
+  doc.rect(0, 0, pageW, 200).fill(C.navy);
+  doc.rect(0, 200, pageW, 6).fill(accentColor);
+
+  doc.fontSize(38).fillColor('#FFFFFF').text(template.name, lMargin, 70, {
+    width: contentW,
+    align: 'left',
+  });
 
   if (template.description) {
-    doc.fontSize(14).fillColor(COLORS.muted).text(template.description, { align: 'center' });
-    doc.moveDown(1);
+    doc.fontSize(14).fillColor(C.lightGray).text(template.description, lMargin, 130, {
+      width: contentW,
+    });
   }
 
-  doc.fontSize(12).fillColor(COLORS.secondary);
-  doc.text(`Generated on ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`, {
+  doc.fontSize(12).fillColor(C.midGray).text(
+    new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }),
+    lMargin, 250,
+  );
+
+  if (branding?.prepared_by) {
+    doc.fontSize(11).fillColor(C.midGray).text(`Prepared by ${branding.prepared_by}`, lMargin, 270);
+  }
+
+  doc.fontSize(10).fillColor(C.lightGray).text('Pandora GTM Intelligence', lMargin, 700, {
+    width: contentW,
     align: 'center',
   });
 
-  doc.moveDown(1);
-
-  if (branding?.prepared_by) {
-    doc.fontSize(10).fillColor(COLORS.muted).text(branding.prepared_by, { align: 'center' });
-  }
-
-  // Render each section
+  // ── SECTIONS ──
   for (const section of sections_content) {
     doc.addPage();
 
-    // Section title
-    doc.fontSize(24).fillColor(primaryColor).text(section.title);
-    doc.moveDown(0.5);
+    doc.rect(0, 0, pageW, 60).fill(C.navy);
+    doc.fontSize(20).fillColor('#FFFFFF').text(section.title, lMargin, 18, { width: contentW });
+    doc.rect(0, 60, pageW, 3).fill(accentColor);
+
+    doc.y = 80;
+
+    // Metrics cards (grid layout)
+    if (section.metrics && section.metrics.length > 0) {
+      renderMetricGrid(doc, section.metrics, lMargin, contentW);
+    }
 
     // Narrative
-    if (section.narrative) {
-      doc.fontSize(11).fillColor(COLORS.secondary).text(section.narrative, {
-        align: 'justify',
-        lineGap: 4,
-      });
-      doc.moveDown(1);
-    }
-
-    // Metrics
-    if (section.metrics && section.metrics.length > 0) {
-      doc.fontSize(14).fillColor(primaryColor).text('Key Metrics');
-      doc.moveDown(0.5);
-
-      for (const metric of section.metrics) {
-        const y = doc.y;
-        const boxHeight = 50;
-
-        // Metric card background
-        const bgColor =
-          metric.severity === 'critical'
-            ? '#FEE2E2'
-            : metric.severity === 'warning'
-            ? '#FEF3C7'
-            : metric.severity === 'good'
-            ? '#D1FAE5'
-            : '#F8FAFC';
-
-        doc.rect(60, y, 500, boxHeight).fillAndStroke(bgColor, COLORS.border);
-
-        // Metric label
-        doc.fontSize(10).fillColor(COLORS.muted).text(metric.label, 75, y + 10, { width: 200 });
-
-        // Metric value
-        const valueText = metric.delta
-          ? `${metric.value} (${metric.delta_direction === 'up' ? '↑' : metric.delta_direction === 'down' ? '↓' : '→'} ${metric.delta})`
-          : metric.value;
-
-        doc.fontSize(18).fillColor(COLORS.secondary).text(valueText, 280, y + 12, { width: 260, align: 'right' });
-
-        doc.y = y + boxHeight + 10;
-      }
-
-      doc.moveDown(1);
-    }
-
-    // Table
-    if (section.table && section.table.rows.length > 0) {
-      doc.fontSize(14).fillColor(primaryColor).text('Data');
-      doc.moveDown(0.5);
-
-      const tableTop = doc.y;
-      const columnWidth = 500 / section.table.headers.length;
-      const rowHeight = 25;
-
-      // Header row
-      let x = 60;
-      for (const header of section.table.headers) {
-        doc.rect(x, tableTop, columnWidth, rowHeight).fillAndStroke('#E5E7EB', COLORS.border);
-        doc.fontSize(10).fillColor(COLORS.secondary).text(header, x + 5, tableTop + 7, {
-          width: columnWidth - 10,
-          ellipsis: true,
+    if (section.narrative && !section.narrative.startsWith('⚠')) {
+      ensureSpace(doc, 60);
+      const cleanText = stripMarkdown(section.narrative);
+      const lines = cleanText.split('\n').filter(l => l.trim());
+      for (const line of lines.slice(0, 15)) {
+        ensureSpace(doc, 16);
+        doc.fontSize(10).fillColor(C.darkSlate).text(line.trim(), lMargin, doc.y, {
+          width: contentW,
+          lineGap: 3,
         });
-        x += columnWidth;
+        doc.moveDown(0.3);
       }
-
-      // Data rows
-      let y = tableTop + rowHeight;
-      for (const row of section.table.rows.slice(0, 20)) {
-        x = 60;
-        for (const header of section.table.headers) {
-          doc.rect(x, y, columnWidth, rowHeight).stroke(COLORS.border);
-          doc
-            .fontSize(9)
-            .fillColor(COLORS.secondary)
-            .text(String(row[header] ?? ''), x + 5, y + 7, {
-              width: columnWidth - 10,
-              ellipsis: true,
-            });
-          x += columnWidth;
-        }
-        y += rowHeight;
-      }
-
-      doc.y = y + 10;
-      doc.moveDown(1);
+      doc.moveDown(0.5);
     }
 
     // Deal cards
     if (section.deal_cards && section.deal_cards.length > 0) {
-      doc.fontSize(14).fillColor(primaryColor).text('Deals');
-      doc.moveDown(0.5);
+      renderDealCards(doc, section.deal_cards, lMargin, contentW, accentColor);
+    }
 
-      for (const card of section.deal_cards.slice(0, 10)) {
-        const y = doc.y;
-        const cardHeight = 80;
-
-        // Card background
-        const bgColor =
-          card.signal_severity === 'critical' ? '#FEE2E2' : card.signal_severity === 'warning' ? '#FEF3C7' : '#DBEAFE';
-
-        doc.rect(60, y, 500, cardHeight).fillAndStroke(bgColor, COLORS.border);
-
-        // Deal name and amount
-        doc.fontSize(12).fillColor(COLORS.secondary).text(`${card.name} (${card.amount})`, 75, y + 10, { width: 470 });
-
-        // Owner and stage
-        doc
-          .fontSize(9)
-          .fillColor(COLORS.muted)
-          .text(`${card.owner} | ${card.stage} | ${card.signal}`, 75, y + 30, { width: 470 });
-
-        // Detail
-        doc.fontSize(9).fillColor(COLORS.secondary).text(card.detail, 75, y + 45, { width: 470 });
-
-        // Action
-        doc.fontSize(9).fillColor(primaryColor).text(`→ ${card.action}`, 75, y + 62, { width: 470 });
-
-        doc.y = y + cardHeight + 10;
-
-        // Page break if needed
-        if (doc.y > 700) {
-          doc.addPage();
-        }
-      }
-
-      doc.moveDown(1);
+    // Table
+    if (section.table && section.table.rows.length > 0) {
+      renderTable(doc, section.table, lMargin, contentW);
     }
 
     // Action items
     if (section.action_items && section.action_items.length > 0) {
-      doc.fontSize(14).fillColor(primaryColor).text('Action Items');
-      doc.moveDown(0.5);
-
-      section.action_items.slice(0, 15).forEach((action, idx) => {
-        const urgencyColor =
-          action.urgency === 'today' ? COLORS.critical : action.urgency === 'this_week' ? COLORS.warning : COLORS.success;
-
-        const urgencyLabel = action.urgency === 'today' ? '🔴' : action.urgency === 'this_week' ? '🟡' : '🟢';
-
-        doc
-          .fontSize(11)
-          .fillColor(COLORS.secondary)
-          .text(`${idx + 1}. ${urgencyLabel} ${action.action} (${action.owner})`, {
-            indent: 20,
-            lineGap: 3,
-          });
-
-        doc.moveDown(0.3);
-
-        // Page break if needed
-        if (doc.y > 700) {
-          doc.addPage();
-        }
-      });
+      renderActionItems(doc, section.action_items, lMargin, contentW);
     }
+
+    // Data freshness footer
+    doc.fontSize(7).fillColor(C.lightGray).text(
+      `Data as of ${new Date(section.data_freshness).toLocaleString('en-US')} | Confidence: ${Math.round(section.confidence * 100)}%`,
+      lMargin, 740, { width: contentW, align: 'right' },
+    );
   }
 
-  // Footer on last page
-  doc.fontSize(8).fillColor(COLORS.muted).text('Generated by Pandora', 60, 750, {
-    align: 'center',
-    width: 500,
-  });
+  // Page numbers
+  const totalPages = doc.bufferedPageRange().count;
+  for (let i = 0; i < totalPages; i++) {
+    doc.switchToPage(i);
+    doc.fontSize(8).fillColor(C.lightGray).text(
+      `${i + 1} / ${totalPages}`,
+      lMargin, 750, { width: contentW, align: 'center' },
+    );
+  }
 
   doc.end();
 
   return new Promise((resolve, reject) => {
-    stream.on('finish', () => {
-      const stats = fs.statSync(filepath);
+    doc.on('end', () => {
+      const buffer = Buffer.concat(chunks);
+      fs.writeFileSync(filepath, buffer);
       resolve({
         filepath,
-        size_bytes: stats.size,
+        size_bytes: buffer.length,
         download_url: `/api/workspaces/${workspace_id}/reports/${template.id}/download/pdf?file=${filename}`,
       });
     });
-    stream.on('error', reject);
+    doc.on('error', reject);
   });
+}
+
+function renderMetricGrid(doc: any, metrics: MetricCard[], lMargin: number, contentW: number): void {
+  const cols = Math.min(metrics.length, 3);
+  const cardW = (contentW - (cols - 1) * 10) / cols;
+  const cardH = 55;
+
+  for (let i = 0; i < metrics.length; i += cols) {
+    ensureSpace(doc, cardH + 15);
+    const rowY = doc.y;
+
+    for (let j = 0; j < cols && i + j < metrics.length; j++) {
+      const m = metrics[i + j];
+      const x = lMargin + j * (cardW + 10);
+      const { bg, fg } = severityColor(m.severity);
+
+      doc.rect(x, rowY, cardW, cardH).fill(bg);
+
+      const severityBar = m.severity === 'critical' ? C.red : m.severity === 'warning' ? C.amber : m.severity === 'good' ? C.green : C.border;
+      doc.rect(x, rowY, 4, cardH).fill(severityBar);
+
+      doc.fontSize(8).fillColor(C.midGray).text(m.label.toUpperCase(), x + 12, rowY + 8, { width: cardW - 20 });
+
+      const valueText = m.delta
+        ? `${m.value}  ${m.delta_direction === 'up' ? '▲' : m.delta_direction === 'down' ? '▼' : '—'} ${m.delta}`
+        : m.value;
+      doc.fontSize(16).fillColor(fg).text(valueText, x + 12, rowY + 24, { width: cardW - 20 });
+    }
+
+    doc.y = rowY + cardH + 10;
+  }
+  doc.moveDown(0.5);
+}
+
+function renderDealCards(doc: any, cards: DealCard[], lMargin: number, contentW: number, accent: string): void {
+  ensureSpace(doc, 30);
+  doc.fontSize(12).fillColor(C.darkSlate).text('Deals Requiring Attention', lMargin, doc.y);
+  doc.moveDown(0.4);
+
+  for (const card of cards.slice(0, 10)) {
+    const cardH = 52;
+    ensureSpace(doc, cardH + 8);
+
+    const y = doc.y;
+    const { bg, fg } = severityColor(card.signal_severity);
+
+    doc.rect(lMargin, y, contentW, cardH).fill(bg);
+
+    const barColor = card.signal_severity === 'critical' ? C.red : card.signal_severity === 'warning' ? C.amber : C.blue;
+    doc.rect(lMargin, y, 4, cardH).fill(barColor);
+
+    doc.fontSize(10).fillColor(C.darkSlate).text(card.name, lMargin + 12, y + 6, { width: contentW * 0.6 - 12, continued: false });
+    if (card.amount) {
+      doc.fontSize(11).fillColor(fg).text(card.amount, lMargin + contentW * 0.65, y + 6, { width: contentW * 0.35 - 12, align: 'right' });
+    }
+
+    const meta = [card.owner, card.stage, card.signal].filter(Boolean).join(' · ');
+    doc.fontSize(8).fillColor(C.midGray).text(meta, lMargin + 12, y + 22, { width: contentW - 24 });
+
+    if (card.action) {
+      doc.fontSize(8).fillColor(accent).text(`→ ${card.action}`, lMargin + 12, y + 36, { width: contentW - 24 });
+    }
+
+    doc.y = y + cardH + 6;
+  }
+  doc.moveDown(0.5);
+}
+
+function renderTable(doc: any, table: { headers: string[]; rows: Record<string, any>[] }, lMargin: number, contentW: number): void {
+  ensureSpace(doc, 30);
+  doc.fontSize(12).fillColor(C.darkSlate).text('Data', lMargin, doc.y);
+  doc.moveDown(0.4);
+
+  const colW = contentW / table.headers.length;
+  const rowH = 22;
+
+  ensureSpace(doc, rowH * 2);
+
+  let x = lMargin;
+  const headerY = doc.y;
+  doc.rect(lMargin, headerY, contentW, rowH).fill(C.navy);
+  for (const h of table.headers) {
+    doc.fontSize(8).fillColor('#FFFFFF').text(h, x + 4, headerY + 6, { width: colW - 8, ellipsis: true });
+    x += colW;
+  }
+
+  let y = headerY + rowH;
+  for (let r = 0; r < Math.min(table.rows.length, 20); r++) {
+    ensureSpace(doc, rowH);
+    y = doc.y;
+    const bgColor = r % 2 === 0 ? C.pageBg : C.sectionBg;
+    doc.rect(lMargin, y, contentW, rowH).fill(bgColor);
+    x = lMargin;
+    for (const h of table.headers) {
+      doc.fontSize(8).fillColor(C.darkSlate).text(String(table.rows[r][h] ?? ''), x + 4, y + 6, { width: colW - 8, ellipsis: true });
+      x += colW;
+    }
+    doc.y = y + rowH;
+  }
+  doc.moveDown(0.5);
+}
+
+function renderActionItems(doc: any, actions: ActionItem[], lMargin: number, contentW: number): void {
+  ensureSpace(doc, 30);
+  doc.fontSize(12).fillColor(C.darkSlate).text('Action Items', lMargin, doc.y);
+  doc.moveDown(0.4);
+
+  for (let i = 0; i < Math.min(actions.length, 15); i++) {
+    const a = actions[i];
+    ensureSpace(doc, 22);
+    const y = doc.y;
+
+    const dotColor = a.urgency === 'today' ? C.red : a.urgency === 'this_week' ? C.amber : C.green;
+    doc.circle(lMargin + 6, y + 6, 4).fill(dotColor);
+
+    doc.fontSize(9).fillColor(C.darkSlate).text(a.action, lMargin + 18, y, { width: contentW - 100 });
+
+    if (a.owner) {
+      doc.fontSize(8).fillColor(C.midGray).text(a.owner, lMargin + contentW - 80, y, { width: 80, align: 'right' });
+    }
+
+    doc.y = Math.max(doc.y, y + 18);
+    doc.moveDown(0.15);
+  }
+  doc.moveDown(0.5);
 }

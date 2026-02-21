@@ -1,15 +1,34 @@
-/**
- * DOCX Renderer
- *
- * Generates professional Word documents from report sections using docx library.
- * Supports cover pages, metrics, tables, deal cards, action items, and charts.
- */
-
-import { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, AlignmentType, BorderStyle, HeadingLevel, ImageRun } from 'docx';
-import { ReportGenerationContext } from '../reports/types.js';
+import {
+  Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
+  WidthType, AlignmentType, BorderStyle, HeadingLevel, ShadingType,
+  TableLayoutType,
+} from 'docx';
+import { ReportGenerationContext, SectionContent, MetricCard, DealCard, ActionItem } from '../reports/types.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+
+const C = {
+  navy: '0F172A',
+  darkSlate: '1E293B',
+  slate: '334155',
+  midGray: '64748B',
+  lightGray: '94A3B8',
+  border: 'CBD5E1',
+  softBg: 'F8FAFC',
+  white: 'FFFFFF',
+  blue: '2563EB',
+  blueLight: 'DBEAFE',
+  green: '16A34A',
+  greenBg: 'D1FAE5',
+  greenDark: '15803D',
+  amber: 'D97706',
+  amberBg: 'FEF3C7',
+  amberDark: 'B45309',
+  red: 'DC2626',
+  redBg: 'FEE2E2',
+  redDark: 'B91C1C',
+};
 
 export interface DOCXRenderResult {
   filepath: string;
@@ -17,297 +36,174 @@ export interface DOCXRenderResult {
   download_url: string;
 }
 
+function severityShading(severity?: string): { fill: string; color: string } {
+  switch (severity) {
+    case 'critical': return { fill: C.redBg, color: C.redDark };
+    case 'warning': return { fill: C.amberBg, color: C.amberDark };
+    case 'good': return { fill: C.greenBg, color: C.greenDark };
+    default: return { fill: C.softBg, color: C.slate };
+  }
+}
+
+function severityTag(severity: string): TextRun {
+  const label = severity === 'critical' ? 'CRITICAL' : severity === 'warning' ? 'WARNING' : severity === 'good' ? 'GOOD' : 'INFO';
+  const color = severity === 'critical' ? C.red : severity === 'warning' ? C.amber : severity === 'good' ? C.green : C.blue;
+  return new TextRun({
+    text: ` [${label}] `,
+    bold: true,
+    color,
+    size: 18,
+  });
+}
+
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/\*(.*?)\*/g, '$1')
+    .replace(/#{1,6}\s*/g, '')
+    .replace(/🚨|🔴|🟡|🟢|⚠️|📊|📈|📉|💡|🎯/g, '')
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .trim();
+}
+
 export async function renderDOCX(context: ReportGenerationContext): Promise<DOCXRenderResult> {
   const { workspace_id, template, sections_content, branding } = context;
 
-  const primaryColor = branding?.primary_color || '2563EB';
-  const accentColor = branding?.accent_color || '1E293B';
-
-  // Build document sections
+  const accentColor = branding?.primary_color?.replace('#', '') || C.blue;
   const docSections: any[] = [];
 
-  // Cover page
+  // ── COVER PAGE ──
   docSections.push({
     properties: {},
     children: [
+      new Paragraph({ spacing: { before: 4000 }, text: '' }),
       new Paragraph({
-        text: '',
-        spacing: { before: 3000 },
+        children: [new TextRun({ text: template.name, bold: true, size: 72, color: C.navy, font: 'Calibri' })],
+        alignment: AlignmentType.LEFT,
+        spacing: { after: 200 },
       }),
       new Paragraph({
-        text: template.name,
-        heading: HeadingLevel.TITLE,
-        alignment: AlignmentType.CENTER,
-        spacing: { after: 400 },
-        style: 'Title',
+        children: [new TextRun({ text: template.description || '', size: 28, color: C.midGray, font: 'Calibri' })],
+        spacing: { after: 600 },
       }),
       new Paragraph({
-        text: template.description || '',
-        alignment: AlignmentType.CENTER,
-        spacing: { after: 800 },
+        children: [new TextRun({
+          text: new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }),
+          size: 22, color: C.lightGray,
+        })],
+        spacing: { after: 200 },
       }),
       new Paragraph({
-        text: `Generated on ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`,
-        alignment: AlignmentType.CENTER,
-        spacing: { after: 400 },
-      }),
-      new Paragraph({
-        children: [
-          new TextRun({
-            text: branding?.prepared_by || 'Prepared by Pandora',
-            italics: true,
-          }),
-        ],
-        alignment: AlignmentType.CENTER,
+        children: [new TextRun({
+          text: branding?.prepared_by || 'Prepared by Pandora GTM Intelligence',
+          italics: true, size: 20, color: C.lightGray,
+        })],
       }),
     ],
   });
 
-  // Content sections
+  // ── CONTENT SECTIONS ──
   for (const section of sections_content) {
-    const sectionChildren: Paragraph[] = [];
+    const children: any[] = [];
 
-    // Section title
-    sectionChildren.push(
-      new Paragraph({
-        text: section.title,
-        heading: HeadingLevel.HEADING_1,
-        spacing: { before: 600, after: 300 },
-        pageBreakBefore: true,
-      })
-    );
+    children.push(new Paragraph({
+      children: [new TextRun({ text: section.title, bold: true, size: 36, color: C.navy, font: 'Calibri' })],
+      spacing: { before: 0, after: 300 },
+      pageBreakBefore: true,
+      border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: accentColor } },
+    }));
 
-    // Narrative
-    if (section.narrative) {
-      const narrativeParas = section.narrative.split('\n\n').map(para =>
-        new Paragraph({
-          text: para,
-          spacing: { after: 200 },
-        })
-      );
-      sectionChildren.push(...narrativeParas);
-    }
-
-    // Metrics
+    // Metrics table
     if (section.metrics && section.metrics.length > 0) {
-      sectionChildren.push(
-        new Paragraph({
-          text: 'Key Metrics',
-          heading: HeadingLevel.HEADING_2,
-          spacing: { before: 400, after: 200 },
-        })
-      );
-
-      const metricRows = section.metrics.map(metric => {
-        const valueText = metric.delta
-          ? `${metric.value} (${metric.delta_direction === 'up' ? '↑' : metric.delta_direction === 'down' ? '↓' : '→'} ${metric.delta})`
-          : metric.value;
-
-        return new TableRow({
-          children: [
-            new TableCell({
-              children: [new Paragraph(metric.label)],
-              width: { size: 40, type: WidthType.PERCENTAGE },
-            }),
-            new TableCell({
-              children: [
-                new Paragraph({
-                  children: [new TextRun({ text: valueText, bold: true })],
-                }),
-              ],
-              width: { size: 60, type: WidthType.PERCENTAGE },
-            }),
-          ],
-        });
-      });
-
-      sectionChildren.push(
-        new Paragraph({
-          children: [
-            new Table({
-              rows: metricRows,
-              width: { size: 100, type: WidthType.PERCENTAGE },
-              borders: {
-                top: { style: BorderStyle.SINGLE, size: 1 },
-                bottom: { style: BorderStyle.SINGLE, size: 1 },
-                left: { style: BorderStyle.SINGLE, size: 1 },
-                right: { style: BorderStyle.SINGLE, size: 1 },
-                insideHorizontal: { style: BorderStyle.SINGLE, size: 1 },
-                insideVertical: { style: BorderStyle.SINGLE, size: 1 },
-              },
-            }) as any,
-          ],
-          spacing: { after: 400 },
-        })
-      );
+      children.push(buildMetricsTable(section.metrics, accentColor));
+      children.push(new Paragraph({ spacing: { after: 200 }, text: '' }));
     }
 
-    // Table
-    if (section.table) {
-      sectionChildren.push(
-        new Paragraph({
-          text: 'Data',
-          heading: HeadingLevel.HEADING_2,
-          spacing: { before: 400, after: 200 },
-        })
-      );
-
-      const headerRow = new TableRow({
-        children: section.table.headers.map(
-          header =>
-            new TableCell({
-              children: [
-                new Paragraph({
-                  children: [new TextRun({ text: header, bold: true })],
-                }),
-              ],
-              shading: { fill: 'E5E7EB' },
-            })
-        ),
-        tableHeader: true,
-      });
-
-      const dataRows = section.table.rows.map(
-        row =>
-          new TableRow({
-            children: section.table!.headers.map(
-              header =>
-                new TableCell({
-                  children: [new Paragraph(String(row[header] ?? ''))],
-                })
-            ),
-          })
-      );
-
-      sectionChildren.push(
-        new Paragraph({
-          children: [
-            new Table({
-              rows: [headerRow, ...dataRows],
-              width: { size: 100, type: WidthType.PERCENTAGE },
-              borders: {
-                top: { style: BorderStyle.SINGLE, size: 1 },
-                bottom: { style: BorderStyle.SINGLE, size: 1 },
-                left: { style: BorderStyle.SINGLE, size: 1 },
-                right: { style: BorderStyle.SINGLE, size: 1 },
-                insideHorizontal: { style: BorderStyle.SINGLE, size: 1 },
-                insideVertical: { style: BorderStyle.SINGLE, size: 1 },
-              },
-            }) as any,
-          ],
-          spacing: { after: 400 },
-        })
-      );
-    }
-
-    // Deal cards
-    if (section.deal_cards && section.deal_cards.length > 0) {
-      sectionChildren.push(
-        new Paragraph({
-          text: 'Deals',
-          heading: HeadingLevel.HEADING_2,
-          spacing: { before: 400, after: 200 },
-        })
-      );
-
-      for (const card of section.deal_cards) {
-        sectionChildren.push(
-          new Paragraph({
-            children: [
-              new TextRun({ text: `${card.name} `, bold: true }),
-              new TextRun({ text: `(${card.amount})` }),
-            ],
-            spacing: { before: 200, after: 100 },
-          }),
-          new Paragraph({
-            text: `Owner: ${card.owner} | Stage: ${card.stage}`,
-            spacing: { after: 100 },
-          }),
-          new Paragraph({
-            children: [
-              new TextRun({ text: 'Signal: ', italics: true }),
-              new TextRun({ text: card.signal }),
-            ],
-            spacing: { after: 100 },
-          }),
-          new Paragraph({
-            text: card.detail,
-            spacing: { after: 100 },
-          }),
-          new Paragraph({
-            children: [
-              new TextRun({ text: 'Recommended: ', bold: true }),
-              new TextRun({ text: card.action }),
-            ],
-            spacing: { after: 300 },
-          })
-        );
+    // Narrative paragraphs
+    if (section.narrative && !section.narrative.startsWith('⚠')) {
+      const cleaned = stripMarkdown(section.narrative);
+      const paras = cleaned.split('\n\n').filter(p => p.trim());
+      for (const para of paras.slice(0, 12)) {
+        const lines = para.split('\n').map(l => l.trim()).filter(Boolean);
+        for (const line of lines) {
+          children.push(new Paragraph({
+            children: [new TextRun({ text: line, size: 20, color: C.darkSlate, font: 'Calibri' })],
+            spacing: { after: 120 },
+          }));
+        }
       }
+      children.push(new Paragraph({ spacing: { after: 200 }, text: '' }));
+    }
+
+    // Deal cards with colored signal tags
+    if (section.deal_cards && section.deal_cards.length > 0) {
+      children.push(new Paragraph({
+        children: [new TextRun({ text: 'Deals Requiring Attention', bold: true, size: 26, color: C.navy })],
+        spacing: { before: 300, after: 200 },
+      }));
+
+      children.push(buildDealTable(section.deal_cards, accentColor));
+      children.push(new Paragraph({ spacing: { after: 200 }, text: '' }));
+    }
+
+    // Data table
+    if (section.table && section.table.rows.length > 0) {
+      children.push(new Paragraph({
+        children: [new TextRun({ text: 'Data', bold: true, size: 26, color: C.navy })],
+        spacing: { before: 300, after: 200 },
+      }));
+      children.push(buildDataTable(section.table));
+      children.push(new Paragraph({ spacing: { after: 200 }, text: '' }));
     }
 
     // Action items
     if (section.action_items && section.action_items.length > 0) {
-      sectionChildren.push(
-        new Paragraph({
-          text: 'Action Items',
-          heading: HeadingLevel.HEADING_2,
-          spacing: { before: 400, after: 200 },
-        })
-      );
+      children.push(new Paragraph({
+        children: [new TextRun({ text: 'Action Items', bold: true, size: 26, color: C.navy })],
+        spacing: { before: 300, after: 200 },
+      }));
 
-      for (const action of section.action_items) {
-        const urgencyLabel =
-          action.urgency === 'today' ? '🔴 Today' : action.urgency === 'this_week' ? '🟡 This Week' : '🟢 This Month';
+      for (let i = 0; i < Math.min(section.action_items.length, 15); i++) {
+        const a = section.action_items[i];
+        const urgencyColor = a.urgency === 'today' ? C.red : a.urgency === 'this_week' ? C.amber : C.green;
+        const urgencyLabel = a.urgency === 'today' ? 'TODAY' : a.urgency === 'this_week' ? 'THIS WEEK' : 'THIS MONTH';
 
-        sectionChildren.push(
-          new Paragraph({
-            children: [
-              new TextRun({ text: `${urgencyLabel} `, bold: true }),
-              new TextRun({ text: action.action }),
-              new TextRun({ text: ` (${action.owner})`, italics: true }),
-            ],
-            spacing: { after: 200 },
-            numbering: {
-              reference: 'action-items',
-              level: 0,
-            },
-          })
-        );
+        children.push(new Paragraph({
+          children: [
+            new TextRun({ text: `${i + 1}. `, bold: true, size: 20, color: C.darkSlate }),
+            new TextRun({ text: `[${urgencyLabel}] `, bold: true, size: 18, color: urgencyColor }),
+            new TextRun({ text: a.action, size: 20, color: C.darkSlate }),
+            new TextRun({ text: a.owner ? `  — ${a.owner}` : '', italics: true, size: 18, color: C.midGray }),
+          ],
+          spacing: { after: 100 },
+        }));
       }
     }
 
-    docSections.push({
-      properties: {},
-      children: sectionChildren,
-    });
+    // Freshness footer
+    children.push(new Paragraph({
+      children: [new TextRun({
+        text: `Data as of ${new Date(section.data_freshness).toLocaleString('en-US')} · Confidence: ${Math.round(section.confidence * 100)}%`,
+        size: 14, color: C.lightGray, italics: true,
+      })],
+      spacing: { before: 400 },
+    }));
+
+    docSections.push({ properties: {}, children });
   }
 
-  // Create document
   const doc = new Document({
-    creator: 'Pandora',
+    creator: 'Pandora GTM Intelligence',
     title: template.name,
-    description: template.description || 'Generated report',
+    description: template.description || '',
     sections: docSections,
-    numbering: {
-      config: [
-        {
-          reference: 'action-items',
-          levels: [
-            {
-              level: 0,
-              format: 'decimal',
-              text: '%1.',
-              alignment: AlignmentType.LEFT,
-            },
-          ],
-        },
-      ],
-    },
   });
 
-  // Write to file
   const filename = `${template.name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-${Date.now()}.docx`;
-  const filepath = path.join(os.tmpdir(), filename);
+  const outDir = path.join(os.tmpdir(), 'pandora-reports');
+  if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+  const filepath = path.join(outDir, filename);
 
   const buffer = await Packer.toBuffer(doc);
   fs.writeFileSync(filepath, buffer);
@@ -317,4 +213,165 @@ export async function renderDOCX(context: ReportGenerationContext): Promise<DOCX
     size_bytes: buffer.length,
     download_url: `/api/workspaces/${workspace_id}/reports/${template.id}/download/docx?file=${filename}`,
   };
+}
+
+function buildMetricsTable(metrics: MetricCard[], accent: string): Table {
+  const rows: TableRow[] = [];
+
+  rows.push(new TableRow({
+    children: [
+      new TableCell({
+        children: [new Paragraph({ children: [new TextRun({ text: 'METRIC', bold: true, size: 16, color: 'FFFFFF', font: 'Calibri' })] })],
+        shading: { fill: accent, type: ShadingType.CLEAR, color: 'auto' },
+        width: { size: 40, type: WidthType.PERCENTAGE },
+      }),
+      new TableCell({
+        children: [new Paragraph({ children: [new TextRun({ text: 'VALUE', bold: true, size: 16, color: 'FFFFFF', font: 'Calibri' })] })],
+        shading: { fill: accent, type: ShadingType.CLEAR, color: 'auto' },
+        width: { size: 35, type: WidthType.PERCENTAGE },
+      }),
+      new TableCell({
+        children: [new Paragraph({ children: [new TextRun({ text: 'STATUS', bold: true, size: 16, color: 'FFFFFF', font: 'Calibri' })] })],
+        shading: { fill: accent, type: ShadingType.CLEAR, color: 'auto' },
+        width: { size: 25, type: WidthType.PERCENTAGE },
+      }),
+    ],
+    tableHeader: true,
+  }));
+
+  for (const m of metrics) {
+    const { fill, color } = severityShading(m.severity);
+    const valueText = m.delta
+      ? `${m.value} (${m.delta_direction === 'up' ? '▲' : m.delta_direction === 'down' ? '▼' : '—'} ${m.delta})`
+      : m.value;
+
+    rows.push(new TableRow({
+      children: [
+        new TableCell({
+          children: [new Paragraph({ children: [new TextRun({ text: m.label, size: 20, color: C.darkSlate })] })],
+          shading: { fill, type: ShadingType.CLEAR, color: 'auto' },
+        }),
+        new TableCell({
+          children: [new Paragraph({ children: [new TextRun({ text: valueText, bold: true, size: 22, color })] })],
+          shading: { fill, type: ShadingType.CLEAR, color: 'auto' },
+        }),
+        new TableCell({
+          children: [new Paragraph({ children: [severityTag(m.severity || 'info')] })],
+          shading: { fill, type: ShadingType.CLEAR, color: 'auto' },
+        }),
+      ],
+    }));
+  }
+
+  return new Table({
+    rows,
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    borders: {
+      top: { style: BorderStyle.SINGLE, size: 1, color: C.border },
+      bottom: { style: BorderStyle.SINGLE, size: 1, color: C.border },
+      left: { style: BorderStyle.SINGLE, size: 1, color: C.border },
+      right: { style: BorderStyle.SINGLE, size: 1, color: C.border },
+      insideHorizontal: { style: BorderStyle.SINGLE, size: 1, color: C.softBg },
+      insideVertical: { style: BorderStyle.NONE, size: 0, color: C.white },
+    },
+  });
+}
+
+function buildDealTable(deals: DealCard[], accent: string): Table {
+  const rows: TableRow[] = [];
+
+  rows.push(new TableRow({
+    children: ['Deal', 'Amount', 'Stage', 'Signal', 'Action'].map(h =>
+      new TableCell({
+        children: [new Paragraph({ children: [new TextRun({ text: h, bold: true, size: 16, color: 'FFFFFF' })] })],
+        shading: { fill: accent, type: ShadingType.CLEAR, color: 'auto' },
+      })
+    ),
+    tableHeader: true,
+  }));
+
+  for (const d of deals.slice(0, 15)) {
+    const { fill } = severityShading(d.signal_severity);
+
+    rows.push(new TableRow({
+      children: [
+        new TableCell({
+          children: [new Paragraph({ children: [new TextRun({ text: d.name, bold: true, size: 18, color: C.darkSlate })] })],
+          shading: { fill, type: ShadingType.CLEAR, color: 'auto' },
+        }),
+        new TableCell({
+          children: [new Paragraph({ children: [new TextRun({ text: d.amount || '—', size: 18, color: C.darkSlate })] })],
+          shading: { fill, type: ShadingType.CLEAR, color: 'auto' },
+        }),
+        new TableCell({
+          children: [new Paragraph({ children: [new TextRun({ text: d.stage || '—', size: 18, color: C.midGray })] })],
+          shading: { fill, type: ShadingType.CLEAR, color: 'auto' },
+        }),
+        new TableCell({
+          children: [new Paragraph({ children: [
+            severityTag(d.signal_severity || 'info'),
+            new TextRun({ text: d.signal || '', size: 16, color: C.midGray }),
+          ] })],
+          shading: { fill, type: ShadingType.CLEAR, color: 'auto' },
+        }),
+        new TableCell({
+          children: [new Paragraph({ children: [new TextRun({ text: d.action || '—', size: 16, color: accent, italics: true })] })],
+          shading: { fill, type: ShadingType.CLEAR, color: 'auto' },
+        }),
+      ],
+    }));
+  }
+
+  return new Table({
+    rows,
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    borders: {
+      top: { style: BorderStyle.SINGLE, size: 1, color: C.border },
+      bottom: { style: BorderStyle.SINGLE, size: 1, color: C.border },
+      left: { style: BorderStyle.SINGLE, size: 1, color: C.border },
+      right: { style: BorderStyle.SINGLE, size: 1, color: C.border },
+      insideHorizontal: { style: BorderStyle.SINGLE, size: 1, color: C.softBg },
+      insideVertical: { style: BorderStyle.SINGLE, size: 1, color: C.softBg },
+    },
+  });
+}
+
+function buildDataTable(table: { headers: string[]; rows: Record<string, any>[] }): Table {
+  const rows: TableRow[] = [];
+
+  rows.push(new TableRow({
+    children: table.headers.map(h =>
+      new TableCell({
+        children: [new Paragraph({ children: [new TextRun({ text: h, bold: true, size: 16, color: 'FFFFFF' })] })],
+        shading: { fill: C.navy, type: ShadingType.CLEAR, color: 'auto' },
+      })
+    ),
+    tableHeader: true,
+  }));
+
+  for (let i = 0; i < Math.min(table.rows.length, 25); i++) {
+    const row = table.rows[i];
+    const bg = i % 2 === 0 ? C.white : C.softBg;
+    rows.push(new TableRow({
+      children: table.headers.map(h =>
+        new TableCell({
+          children: [new Paragraph({ children: [new TextRun({ text: String(row[h] ?? ''), size: 18, color: C.darkSlate })] })],
+          shading: { fill: bg, type: ShadingType.CLEAR, color: 'auto' },
+        })
+      ),
+    }));
+  }
+
+  return new Table({
+    rows,
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    borders: {
+      top: { style: BorderStyle.SINGLE, size: 1, color: C.border },
+      bottom: { style: BorderStyle.SINGLE, size: 1, color: C.border },
+      left: { style: BorderStyle.SINGLE, size: 1, color: C.border },
+      right: { style: BorderStyle.SINGLE, size: 1, color: C.border },
+      insideHorizontal: { style: BorderStyle.SINGLE, size: 1, color: C.softBg },
+      insideVertical: { style: BorderStyle.SINGLE, size: 1, color: C.softBg },
+    },
+  });
 }
