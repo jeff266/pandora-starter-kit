@@ -1,0 +1,36 @@
+Pull latest from GitHub and test CRM property discovery  
+  endpoint:                                                
+                                                           
+  1. Run `git pull origin main` to get the route fixes     
+  (commits b0e4e2f and 669e381)                            
+                                                           
+  2. Restart the server to pick up the route changes       
+                                                           
+  3. Test the CRM property discovery endpoint:             
+     - Open the app in browser                             
+     - Navigate to Settings > CRM Sync tab                 
+     - Try to add a new mapping (this should trigger the   
+  property dropdown to load)                               
+     - Watch the server console for the PropertyDiscovery  
+  logs we added                                            
+                                                           
+  4. Verify in server logs:                                
+     - Look for `[PropertyDiscovery] Starting discovery`   
+     - Check `[PropertyDiscovery] Credential check` -      
+  should show has_hubspot: true or has_salesforce: true    
+     - Look for `[PropertyDiscovery] HubSpot fetch         
+  complete` or `[PropertyDiscovery] Salesforce fetch       
+  complete`                                                
+     - Confirm it shows count > 0 (number of properties    
+  returned)                                                
+                                                           
+  5. If the dropdown still doesn't populate:               
+     - Copy the exact error from server logs               
+     - Check browser DevTools Network tab for the API call 
+  to `/api/workspaces/:id/crm-writeback/crm-properties?obje
+  ctType=deal`                                             
+     - Confirm it returns 200 status (not 404 or 500)      
+     - Check the response body has a `properties` array    
+                                                           
+  Report back: Does the endpoint return 200? How many      
+  properties? Any errors in logs?   
