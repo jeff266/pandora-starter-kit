@@ -13,6 +13,9 @@ import {
 import { getRequiredSkills } from './section-library.js';
 import { generateSectionContent } from './section-generator.js';
 import { createLogger } from '../utils/logger.js';
+import { renderReportPDF } from '../renderers/report-pdf-renderer.js';
+import { renderDOCX } from '../renderers/docx-renderer.js';
+import { renderPPTX } from '../renderers/pptx-renderer-full.js';
 
 const logger = createLogger('ReportGenerator');
 
@@ -97,16 +100,50 @@ export async function generateReport(request: GenerateReportRequest): Promise<Re
 
   const formatsGenerated: Record<string, any> = {};
 
-  // For Phase 1, only support PDF
+  // Render all requested formats in parallel
+  const renderPromises: Promise<void>[] = [];
+
   if (template.formats.includes('pdf')) {
-    try {
-      const pdfResult = await renderPDF(context);
-      formatsGenerated.pdf = pdfResult;
-    } catch (err) {
-      logger.error('PDF rendering failed', err instanceof Error ? err : undefined);
-      throw new Error(`PDF rendering failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
-    }
+    renderPromises.push(
+      renderReportPDF(context)
+        .then(result => {
+          formatsGenerated.pdf = result;
+        })
+        .catch(err => {
+          logger.error('PDF rendering failed', err instanceof Error ? err : undefined);
+          throw new Error(`PDF rendering failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        })
+    );
   }
+
+  if (template.formats.includes('docx')) {
+    renderPromises.push(
+      renderDOCX(context)
+        .then(result => {
+          formatsGenerated.docx = result;
+        })
+        .catch(err => {
+          logger.error('DOCX rendering failed', err instanceof Error ? err : undefined);
+          throw new Error(`DOCX rendering failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        })
+    );
+  }
+
+  if (template.formats.includes('pptx')) {
+    renderPromises.push(
+      renderPPTX(context)
+        .then(result => {
+          formatsGenerated.pptx = result;
+        })
+        .catch(err => {
+          logger.error('PPTX rendering failed', err instanceof Error ? err : undefined);
+          throw new Error(`PPTX rendering failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        })
+    );
+  }
+
+  // Wait for all renderers to complete
+  await Promise.all(renderPromises);
 
   const renderDuration = Date.now() - renderStartTime;
 
@@ -175,23 +212,4 @@ export async function generateReport(request: GenerateReportRequest): Promise<Re
   };
 }
 
-// PDF Renderer Integration
-async function renderPDF(context: ReportGenerationContext): Promise<{
-  filepath: string;
-  size_bytes: number;
-  download_url: string;
-}> {
-  // For Phase 1, create a simple placeholder
-  // In Phase 2, this will use the actual PDF renderer
-  const { workspace_id, template } = context;
-  const filename = `${template.name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-${Date.now()}.pdf`;
-  const filepath = `/tmp/reports/${workspace_id}/${filename}`;
-
-  // TODO: Call actual PDF renderer in Phase 2
-  // For now, return placeholder structure
-  return {
-    filepath,
-    size_bytes: 0,
-    download_url: `/api/workspaces/${workspace_id}/reports/${template.id}/download/pdf?file=${filename}`,
-  };
-}
+// Renderers are now imported from separate modules
