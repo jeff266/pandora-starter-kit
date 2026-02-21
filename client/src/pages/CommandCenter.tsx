@@ -13,6 +13,8 @@ import MonteCarloPanel from '../components/MonteCarloPanel';
 import GapCard from '../components/GapCard';
 import { useDemoMode } from '../contexts/DemoModeContext';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { useVoiceInput } from '../hooks/useVoiceInput';
+import { MicButton } from '../components/MicButton';
 
 interface Finding {
   id: string;
@@ -1492,6 +1494,7 @@ function AskPandoraDrawer({ thread, loading, onClose, onSend }: {
 }) {
   const [input, setInput] = useState('');
   const threadRef = useRef<HTMLDivElement>(null);
+  const voice = useVoiceInput(4000);
 
   useEffect(() => {
     if (threadRef.current) {
@@ -1567,18 +1570,26 @@ function AskPandoraDrawer({ thread, loading, onClose, onSend }: {
         ))}
       </div>
 
-      <div style={{ padding: '10px 24px', borderTop: '1px solid #1E293B', display: 'flex', gap: 8 }}>
+      <div style={{ padding: '10px 24px', borderTop: '1px solid #1E293B', display: 'flex', gap: 8, alignItems: 'center' }}>
         <input
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-          placeholder="Ask a follow-up..."
+          placeholder={voice.listening ? 'Listening...' : 'Ask a follow-up...'}
           style={{
             flex: 1, padding: '10px 14px', fontSize: 13,
-            background: '#151D2E', border: '1px solid #1E293B', borderRadius: 8,
+            background: '#151D2E',
+            border: `1px solid ${voice.listening ? 'rgba(239,68,68,0.4)' : '#1E293B'}`,
+            borderRadius: 8,
             color: '#E2E8F0', outline: 'none',
             fontFamily: "'IBM Plex Sans', sans-serif",
           }}
+        />
+        <MicButton
+          listening={voice.listening}
+          supported={voice.supported}
+          onClick={() => voice.start(text => setInput(text))}
+          size={36}
         />
         <button
           onClick={handleSend}

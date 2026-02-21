@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { useVoiceInput } from '../hooks/useVoiceInput';
+import { MicButton } from './MicButton';
 import { api } from '../lib/api';
 
 interface ToolCall {
@@ -53,6 +55,7 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
   const isMobile = useIsMobile();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
+  const voice = useVoiceInput(4000);
   const [loading, setLoading] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -301,13 +304,22 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
         <div style={{ ...styles.inputContainer, ...(isMobile ? { padding: '10px 10px 14px' } : {}) }}>
           <textarea
             ref={inputRef}
-            style={styles.input}
+            style={{
+              ...styles.input,
+              ...(voice.listening ? { borderColor: 'rgba(239, 68, 68, 0.4)' } : {}),
+            }}
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask a question..."
+            placeholder={voice.listening ? 'Listening...' : 'Ask a question...'}
             rows={1}
             disabled={loading}
+          />
+          <MicButton
+            listening={voice.listening}
+            supported={voice.supported}
+            onClick={() => voice.start(text => setInput(text))}
+            size={30}
           />
           <button
             style={{

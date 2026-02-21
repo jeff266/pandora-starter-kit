@@ -5,6 +5,8 @@ import { colors, fonts } from '../styles/theme';
 import { formatCurrency, formatTimeAgo } from '../lib/format';
 import Skeleton from './Skeleton';
 import { useDemoMode } from '../contexts/DemoModeContext';
+import { useVoiceInput } from '../hooks/useVoiceInput';
+import { MicButton } from './MicButton';
 import { ComposedChart, Area, ReferenceLine, XAxis, YAxis, ResponsiveContainer } from 'recharts';
 
 interface TornadoAssumption {
@@ -153,6 +155,7 @@ export default function MonteCarloPanel({ wsId, activePipeline }: { wsId?: strin
 
   // Query section state
   const [question, setQuestion] = useState('');
+  const voice = useVoiceInput(4000);
   const [queryAnswer, setQueryAnswer] = useState<QueryResponse | null>(null);
   const [queryLoading, setQueryLoading] = useState(false);
   const [queryError, setQueryError] = useState<string | null>(null);
@@ -711,15 +714,21 @@ export default function MonteCarloPanel({ wsId, activePipeline }: { wsId?: strin
             value={question}
             onChange={e => setQuestion(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') submitQuestion(question); }}
-            placeholder={turns.length > 0 ? 'Ask a follow-up or what-if question...' : 'Ask a question or try a what-if scenario...'}
+            placeholder={voice.listening ? 'Listening...' : turns.length > 0 ? 'Ask a follow-up or what-if question...' : 'Ask a question or try a what-if scenario...'}
             disabled={queryLoading}
             style={{
               flex: 1, height: 36, padding: '0 12px', fontSize: 12,
               background: colors.surfaceRaised,
-              border: `1px solid ${queryError ? colors.red : colors.border}`,
+              border: `1px solid ${voice.listening ? 'rgba(239,68,68,0.4)' : queryError ? colors.red : colors.border}`,
               borderRadius: 6, color: colors.text, fontFamily: fonts.sans,
               outline: 'none',
             }}
+          />
+          <MicButton
+            listening={voice.listening}
+            supported={voice.supported}
+            onClick={() => voice.start(text => setQuestion(text))}
+            size={32}
           />
           <button
             onClick={() => submitQuestion(question)}
