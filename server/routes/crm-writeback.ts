@@ -15,10 +15,10 @@ const router = express.Router();
 const logger = createLogger('CRMWritebackRoutes');
 
 /**
- * GET /api/workspaces/:id/crm-writeback/fields
+ * GET /:workspaceId/crm-writeback/fields
  * Returns PANDORA_WRITABLE_FIELDS array (the Pandora side of the mapper)
  */
-router.get('/api/workspaces/:id/crm-writeback/fields', async (req, res) => {
+router.get('/:workspaceId/crm-writeback/fields', async (req, res) => {
   try {
     res.json({ fields: PANDORA_WRITABLE_FIELDS });
   } catch (err) {
@@ -28,13 +28,13 @@ router.get('/api/workspaces/:id/crm-writeback/fields', async (req, res) => {
 });
 
 /**
- * GET /api/workspaces/:id/crm-writeback/crm-properties
+ * GET /:workspaceId/crm-writeback/crm-properties
  * Query params: objectType ('deal' | 'account' | 'company' | 'contact')
  * Returns CRMProperty[]
  */
-router.get('/api/workspaces/:id/crm-writeback/crm-properties', async (req, res) => {
+router.get('/:workspaceId/crm-writeback/crm-properties', async (req, res) => {
   try {
-    const { id: workspaceId } = req.params;
+    const { workspaceId } = req.params;
     const { objectType } = req.query;
 
     if (!objectType || !['deal', 'account', 'company', 'contact'].includes(objectType as string)) {
@@ -56,12 +56,12 @@ router.get('/api/workspaces/:id/crm-writeback/crm-properties', async (req, res) 
 });
 
 /**
- * GET /api/workspaces/:id/crm-writeback/mappings
+ * GET /:workspaceId/crm-writeback/mappings
  * Returns all crm_property_mappings for workspace with recent write history
  */
-router.get('/api/workspaces/:id/crm-writeback/mappings', async (req, res) => {
+router.get('/:workspaceId/crm-writeback/mappings', async (req, res) => {
   try {
-    const { id: workspaceId } = req.params;
+    const { workspaceId } = req.params;
 
     const mappingsResult = await query(
       `SELECT * FROM crm_property_mappings
@@ -96,12 +96,12 @@ router.get('/api/workspaces/:id/crm-writeback/mappings', async (req, res) => {
 });
 
 /**
- * POST /api/workspaces/:id/crm-writeback/mappings
+ * POST /:workspaceId/crm-writeback/mappings
  * Create a new mapping
  */
-router.post('/api/workspaces/:id/crm-writeback/mappings', async (req, res) => {
+router.post('/:workspaceId/crm-writeback/mappings', async (req, res) => {
   try {
-    const { id: workspaceId } = req.params;
+    const { workspaceId } = req.params;
     const {
       crm_type,
       pandora_field,
@@ -181,12 +181,12 @@ router.post('/api/workspaces/:id/crm-writeback/mappings', async (req, res) => {
 });
 
 /**
- * PATCH /api/workspaces/:id/crm-writeback/mappings/:mappingId
+ * PATCH /:workspaceId/crm-writeback/mappings/:mappingId
  * Update a mapping
  */
-router.patch('/api/workspaces/:id/crm-writeback/mappings/:mappingId', async (req, res) => {
+router.patch('/:workspaceId/crm-writeback/mappings/:mappingId', async (req, res) => {
   try {
-    const { id: workspaceId, mappingId } = req.params;
+    const { workspaceId, mappingId } = req.params;
     const updates = req.body;
 
     // Build update query dynamically
@@ -241,12 +241,12 @@ router.patch('/api/workspaces/:id/crm-writeback/mappings/:mappingId', async (req
 });
 
 /**
- * DELETE /api/workspaces/:id/crm-writeback/mappings/:mappingId
+ * DELETE /:workspaceId/crm-writeback/mappings/:mappingId
  * Soft delete: set is_active = false
  */
-router.delete('/api/workspaces/:id/crm-writeback/mappings/:mappingId', async (req, res) => {
+router.delete('/:workspaceId/crm-writeback/mappings/:mappingId', async (req, res) => {
   try {
-    const { id: workspaceId, mappingId } = req.params;
+    const { workspaceId, mappingId } = req.params;
 
     const result = await query(
       `UPDATE crm_property_mappings
@@ -269,12 +269,12 @@ router.delete('/api/workspaces/:id/crm-writeback/mappings/:mappingId', async (re
 });
 
 /**
- * POST /api/workspaces/:id/crm-writeback/mappings/:mappingId/test
+ * POST /:workspaceId/crm-writeback/mappings/:mappingId/test
  * Execute a single write-back with trigger_source = 'test'
  */
-router.post('/api/workspaces/:id/crm-writeback/mappings/:mappingId/test', async (req, res) => {
+router.post('/:workspaceId/crm-writeback/mappings/:mappingId/test', async (req, res) => {
   try {
-    const { id: workspaceId, mappingId } = req.params;
+    const { workspaceId, mappingId } = req.params;
     const { crm_record_id } = req.body;
 
     if (!crm_record_id) {
@@ -308,12 +308,12 @@ router.post('/api/workspaces/:id/crm-writeback/mappings/:mappingId/test', async 
 });
 
 /**
- * GET /api/workspaces/:id/crm-writeback/log
+ * GET /:workspaceId/crm-writeback/log
  * Query params: mapping_id (optional), limit (default 50), offset (default 0)
  */
-router.get('/api/workspaces/:id/crm-writeback/log', async (req, res) => {
+router.get('/:workspaceId/crm-writeback/log', async (req, res) => {
   try {
-    const { id: workspaceId } = req.params;
+    const { workspaceId } = req.params;
     const { mapping_id, limit = '50', offset = '0' } = req.query;
 
     let queryText = `
@@ -342,12 +342,12 @@ router.get('/api/workspaces/:id/crm-writeback/log', async (req, res) => {
 });
 
 /**
- * POST /api/workspaces/:id/crm-writeback/sync-all
+ * POST /:workspaceId/crm-writeback/sync-all
  * Triggers manual sync of all active mappings for all eligible records
  */
-router.post('/api/workspaces/:id/crm-writeback/sync-all', async (req, res) => {
+router.post('/:workspaceId/crm-writeback/sync-all', async (req, res) => {
   try {
-    const { id: workspaceId } = req.params;
+    const { workspaceId } = req.params;
 
     // This would typically start a background job
     // For now, return a job started message
