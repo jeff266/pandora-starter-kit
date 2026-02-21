@@ -1032,6 +1032,7 @@ export default function CommandCenter() {
                     onSnooze={handleSnoozeFinding}
                     onResolve={handleResolveFinding}
                     onNavigate={navigate}
+                    isMobile={isMobile}
                   />
                 ))
               )}
@@ -1611,16 +1612,24 @@ function InlineSpinner() {
   );
 }
 
-function FindingRow({ finding, onSnooze, onResolve, onNavigate }: {
+function FindingRow({ finding, onSnooze, onResolve, onNavigate, isMobile }: {
   finding: Finding;
   onSnooze: (id: string, days: number) => void;
   onResolve: (id: string) => void;
   onNavigate: (path: string) => void;
+  isMobile?: boolean;
 }) {
   const { anon } = useDemoMode();
   const [showSnooze, setShowSnooze] = useState(false);
   const snoozeRef = useRef<HTMLDivElement>(null);
   const f = finding;
+
+  // Swipe state for mobile
+  const [swipeX, setSwipeX] = useState(0);
+  const [swiping, setSwiping] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+  const touchStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
+  const SWIPE_THRESHOLD = 100;
 
   useEffect(() => {
     if (!showSnooze) return;
@@ -1633,59 +1642,217 @@ function FindingRow({ finding, onSnooze, onResolve, onNavigate }: {
     return () => document.removeEventListener('mousedown', handler);
   }, [showSnooze]);
 
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    if (!isMobile) return;
+    const touch = e.touches[0];
+    touchStartRef.current = { x: touch.clientX, y: touch.clientY, time: Date.now() };
+    setSwiping(false);
+  }, [isMobile]);
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    if (!isMobile || !touchStartRef.current) return;
+    const touch = e.touches[0];
+    const dx = touch.clientX - touchStartRef.current.x;
+    const dy = touch.clientY - touchStartRef.current.y;
+    // Only activate horizontal swipe if mostly horizontal
+    if (!swiping && Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 10) {
+      touchStartRef.current = null;
+      return;
+    }
+    if (Math.abs(dx) > 10) {
+      setSwiping(true);
+    }
+    if (swiping) {
+      setSwipeX(dx);
+    }
+  }, [isMobile, swiping]);
+
+  const handleTouchEnd = useCallback(() => {
+    if (!isMobile || !touchStartRef.current) {
+      touchStartRef.current = null;
+      return;
+    }
+    touchStartRef.current = null;
+
+    if (Math.abs(swipeX) >= SWIPE_THRESHOLD) {
+      // Animate out
+      const direction = swipeX > 0 ? 1 : -1;
+      setSwipeX(direction * window.innerWidth);
+      setDismissed(true);
+      setTimeout(() => {
+        if (direction > 0) {
+          onResolve(f.id);
+        } else {
+          onSnooze(f.id, 3);
+        }
+      }, 250);
+    } else {
+      // Spring back
+      setSwipeX(0);
+    }
+    setSwiping(false);
+  }, [isMobile, swipeX, f.id, onResolve, onSnooze]);
+
+  if (dismissed) return null;
+
+  const swipeProgress = Math.min(Math.abs(swipeX) / SWIPE_THRESHOLD, 1);
+  const isResolveSwipe = swipeX > 0;
+  const revealBg = isResolveSwipe
+    ? `rgba(16, 185, 129, ${swipeProgress * 0.25})`
+    : `rgba(59, 130, 246, ${swipeProgress * 0.25})`;
+
   return (
     <div
       style={{
-        padding: '10px 0',
-        borderBottom: `1px solid ${colors.border}`,
-        cursor: f.deal_id ? 'pointer' : 'default',
         position: 'relative',
-      }}
-      className="finding-row"
-      onClick={() => f.deal_id && onNavigate(`/deals/${f.deal_id}`)}
-      onMouseEnter={e => {
-        e.currentTarget.style.background = colors.surfaceHover;
-        const btns = e.currentTarget.querySelector('.finding-actions') as HTMLElement;
-        if (btns) btns.style.opacity = '1';
-      }}
-      onMouseLeave={e => {
-        e.currentTarget.style.background = 'transparent';
-        const btns = e.currentTarget.querySelector('.finding-actions') as HTMLElement;
-        if (btns) btns.style.opacity = '0';
-        setShowSnooze(false);
+        overflow: 'hidden',
+        borderBottom: `1px solid ${colors.border}`,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-        <SeverityDot severity={f.severity as any} size={7} />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <p style={{ fontSize: 13, color: colors.text, lineHeight: 1.4, marginBottom: 4 }}>
-            {anon.text(f.message)}
-          </p>
-          <div style={{ display: 'flex', gap: 12, fontSize: 11, color: colors.textMuted, flexWrap: 'wrap' }}>
-            <span style={{ fontWeight: 500 }}>{f.skill_name || f.skill_id}</span>
-            {f.deal_name && <span style={{ color: colors.accent }}>{anon.deal(f.deal_name)}</span>}
-            {f.account_name && <span>{anon.company(f.account_name)}</span>}
-            {(f.owner_name || f.owner_email) && <span>{f.owner_name ? anon.person(f.owner_name) : anon.email(f.owner_email!)}</span>}
-            <span>{formatTimeAgo(f.found_at)}</span>
-          </div>
+      {/* Reveal layer behind the card */}
+      {isMobile && swipeX !== 0 && (
+        <div style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: revealBg,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: isResolveSwipe ? 'flex-start' : 'flex-end',
+          padding: '0 20px',
+        }}>
+          <span style={{
+            fontSize: 13,
+            fontWeight: 600,
+            color: isResolveSwipe ? colors.green : colors.accent,
+            opacity: swipeProgress,
+          }}>
+            {isResolveSwipe ? '✓ Resolve' : '💤 Snooze 3d'}
+          </span>
         </div>
+      )}
 
-        <div
-          className="finding-actions"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4,
-            opacity: 0,
-            transition: 'opacity 0.15s',
-            flexShrink: 0,
-          }}
-          onClick={e => e.stopPropagation()}
-        >
-          <div ref={snoozeRef} style={{ position: 'relative' }}>
+      <div
+        style={{
+          padding: '10px 0',
+          cursor: f.deal_id ? 'pointer' : 'default',
+          position: 'relative',
+          background: colors.surface,
+          transform: isMobile && swipeX !== 0 ? `translateX(${swipeX}px)` : undefined,
+          transition: swiping ? 'none' : 'transform 0.25s ease-out',
+        }}
+        className="finding-row"
+        onClick={() => !swiping && f.deal_id && onNavigate(`/deals/${f.deal_id}`)}
+        onMouseEnter={e => {
+          e.currentTarget.style.background = colors.surfaceHover;
+          const btns = e.currentTarget.querySelector('.finding-actions') as HTMLElement;
+          if (btns) btns.style.opacity = '1';
+        }}
+        onMouseLeave={e => {
+          e.currentTarget.style.background = colors.surface;
+          const btns = e.currentTarget.querySelector('.finding-actions') as HTMLElement;
+          if (btns) btns.style.opacity = '0';
+          setShowSnooze(false);
+        }}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+      >
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+          <SeverityDot severity={f.severity as any} size={7} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p style={{ fontSize: 13, color: colors.text, lineHeight: 1.4, marginBottom: 4 }}>
+              {anon.text(f.message)}
+            </p>
+            <div style={{ display: 'flex', gap: 12, fontSize: 11, color: colors.textMuted, flexWrap: 'wrap' }}>
+              <span style={{ fontWeight: 500 }}>{f.skill_name || f.skill_id}</span>
+              {f.deal_name && <span style={{ color: colors.accent }}>{anon.deal(f.deal_name)}</span>}
+              {f.account_name && <span>{anon.company(f.account_name)}</span>}
+              {(f.owner_name || f.owner_email) && <span>{f.owner_name ? anon.person(f.owner_name) : anon.email(f.owner_email!)}</span>}
+              <span>{formatTimeAgo(f.found_at)}</span>
+            </div>
+          </div>
+
+          <div
+            className="finding-actions"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              opacity: 0,
+              transition: 'opacity 0.15s',
+              flexShrink: 0,
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div ref={snoozeRef} style={{ position: 'relative' }}>
+              <button
+                onClick={() => setShowSnooze(!showSnooze)}
+                title="Snooze"
+                style={{
+                  background: 'none',
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: 4,
+                  padding: '3px 6px',
+                  cursor: 'pointer',
+                  fontSize: 11,
+                  color: colors.textSecondary,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 3,
+                }}
+              >
+                💤
+              </button>
+              {showSnooze && (
+                <div style={{
+                  position: 'absolute',
+                  right: 0,
+                  top: '100%',
+                  marginTop: 4,
+                  background: colors.surfaceRaised,
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: 6,
+                  padding: 4,
+                  zIndex: 100,
+                  minWidth: 100,
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                }}>
+                  {[
+                    { label: '1 day', days: 1 },
+                    { label: '3 days', days: 3 },
+                    { label: '1 week', days: 7 },
+                    { label: '2 weeks', days: 14 },
+                  ].map(opt => (
+                    <button
+                      key={opt.days}
+                      onClick={() => { onSnooze(f.id, opt.days); setShowSnooze(false); }}
+                      style={{
+                        display: 'block',
+                        width: '100%',
+                        textAlign: 'left',
+                        padding: '5px 8px',
+                        fontSize: 11,
+                        color: colors.text,
+                        background: 'none',
+                        border: 'none',
+                        borderRadius: 4,
+                        cursor: 'pointer',
+                      }}
+                      onMouseEnter={e => (e.currentTarget.style.background = colors.surfaceHover)}
+                      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <button
-              onClick={() => setShowSnooze(!showSnooze)}
-              title="Snooze"
+              onClick={() => onResolve(f.id)}
+              title="Resolve"
               style={{
                 background: 'none',
                 border: `1px solid ${colors.border}`,
@@ -1693,75 +1860,14 @@ function FindingRow({ finding, onSnooze, onResolve, onNavigate }: {
                 padding: '3px 6px',
                 cursor: 'pointer',
                 fontSize: 11,
-                color: colors.textSecondary,
+                color: colors.green,
                 display: 'flex',
                 alignItems: 'center',
-                gap: 3,
               }}
             >
-              💤
+              ✓
             </button>
-            {showSnooze && (
-              <div style={{
-                position: 'absolute',
-                right: 0,
-                top: '100%',
-                marginTop: 4,
-                background: colors.surfaceRaised,
-                border: `1px solid ${colors.border}`,
-                borderRadius: 6,
-                padding: 4,
-                zIndex: 100,
-                minWidth: 100,
-                boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-              }}>
-                {[
-                  { label: '1 day', days: 1 },
-                  { label: '3 days', days: 3 },
-                  { label: '1 week', days: 7 },
-                  { label: '2 weeks', days: 14 },
-                ].map(opt => (
-                  <button
-                    key={opt.days}
-                    onClick={() => { onSnooze(f.id, opt.days); setShowSnooze(false); }}
-                    style={{
-                      display: 'block',
-                      width: '100%',
-                      textAlign: 'left',
-                      padding: '5px 8px',
-                      fontSize: 11,
-                      color: colors.text,
-                      background: 'none',
-                      border: 'none',
-                      borderRadius: 4,
-                      cursor: 'pointer',
-                    }}
-                    onMouseEnter={e => (e.currentTarget.style.background = colors.surfaceHover)}
-                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
-          <button
-            onClick={() => onResolve(f.id)}
-            title="Resolve"
-            style={{
-              background: 'none',
-              border: `1px solid ${colors.border}`,
-              borderRadius: 4,
-              padding: '3px 6px',
-              cursor: 'pointer',
-              fontSize: 11,
-              color: colors.green,
-              display: 'flex',
-              alignItems: 'center',
-            }}
-          >
-            ✓
-          </button>
         </div>
       </div>
     </div>
