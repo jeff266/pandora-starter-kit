@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { Download, Share2, Settings, ChevronLeft, ChevronRight, Eye } from 'lucide-react';
 import type { SectionContent } from '../components/reports/types';
+import { api } from '../lib/api';
 
 interface ReportGeneration {
   id: string;
@@ -58,15 +59,13 @@ export default function ReportViewer() {
     try {
       setLoading(true);
       const endpoint = generationId
-        ? `/api/workspaces/${workspaceId}/reports/${reportId}/generations/${generationId}`
-        : `/api/workspaces/${workspaceId}/reports/${reportId}/generations/latest`;
+        ? `/reports/${reportId}/generations/${generationId}`
+        : `/reports/${reportId}/generations/latest`;
 
-      const genRes = await fetch(endpoint);
-      const genData = await genRes.json();
+      const genData = await api.get(endpoint);
       setGeneration(genData);
 
-      const templateRes = await fetch(`/api/workspaces/${workspaceId}/reports/${reportId}`);
-      const templateData = await templateRes.json();
+      const templateData = await api.get(`/reports/${reportId}`);
       setTemplate(templateData);
     } catch (err) {
       console.error('Failed to load report:', err);
@@ -77,8 +76,7 @@ export default function ReportViewer() {
 
   async function loadGenerations() {
     try {
-      const res = await fetch(`/api/workspaces/${workspaceId}/reports/${reportId}/generations?limit=20`);
-      const data = await res.json();
+      const data = await api.get(`/reports/${reportId}/generations?limit=20`);
       setGenerations(data.generations || []);
     } catch (err) {
       console.error('Failed to load generations:', err);
@@ -110,19 +108,14 @@ export default function ReportViewer() {
   async function shareReport() {
     if (!generation) return;
     try {
-      const res = await fetch(
-        `/api/workspaces/${workspaceId}/reports/${reportId}/generations/${generation.id}/share`,
+      const data = await api.post(
+        `/reports/${reportId}/generations/${generation.id}/share`,
         {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            access: 'public',
-            expires_in: '7d',
-            include_download: true,
-          }),
+          access: 'public',
+          expires_in: '7d',
+          include_download: true,
         }
       );
-      const data = await res.json();
       // Copy link to clipboard
       await navigator.clipboard.writeText(data.share_url);
       alert(`Share link copied to clipboard!\n${data.share_url}\nExpires in 7 days`);
