@@ -20,27 +20,35 @@ export async function getTuningPairs(
 ): Promise<TuningPair[]> {
   logger.info('[Tuning] Fetching tuning pairs', { agent_id: agentId, workspace_id: workspaceId });
 
-  const result = await query(
-    `SELECT key, value, metadata
-     FROM context_layer
-     WHERE workspace_id = $1
-       AND category = 'agent_tuning'
-       AND key LIKE $2
-     ORDER BY updated_at DESC`,
-    [workspaceId, `${agentId}:%`]
-  );
+  const pairs: TuningPair[] = [];
 
-  const pairs: TuningPair[] = result.rows.map(row => {
-    const value = typeof row.value === 'string' ? JSON.parse(row.value) : row.value;
-    const metadata = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
+  try {
+    const result = await query(
+      `SELECT key, value, metadata
+       FROM agent_tuning_pairs
+       WHERE workspace_id = $1
+         AND agent_id = $2
+       ORDER BY updated_at DESC`,
+      [workspaceId, agentId]
+    );
 
-    return {
-      key: row.key.replace(`${agentId}:`, ''),
-      value,
-      source: metadata?.source || 'system',
-      confidence: metadata?.confidence || 0.5,
-    };
-  });
+    for (const row of result.rows) {
+      const value = typeof row.value === 'string' ? JSON.parse(row.value) : row.value;
+      const metadata = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
+
+      pairs.push({
+        key: row.key,
+        value,
+        source: metadata?.source || 'system',
+        confidence: metadata?.confidence || 0.5,
+      });
+    }
+  } catch (err) {
+    logger.info('[Tuning] Tuning table not available, returning empty pairs', {
+      agent_id: agentId,
+      error: (err as Error).message,
+    });
+  }
 
   logger.info('[Tuning] Tuning pairs loaded', {
     agent_id: agentId,

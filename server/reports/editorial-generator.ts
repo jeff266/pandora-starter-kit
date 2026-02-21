@@ -269,6 +269,8 @@ export async function generateEditorialReport(
     delivery_status: {},
     sections_snapshot: enabledSections,
     sections_content: editorial.sections,
+    opening_narrative: editorial.opening_narrative,
+    editorial_decisions: editorial.editorial_decisions,
     skills_run: agent.skill_ids,
     total_tokens: editorial.tokens_used,
     generation_duration_ms: generationDuration,

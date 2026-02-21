@@ -197,15 +197,28 @@ function buildUserPrompt(input: EditorialInput): string {
 
 /**
  * Summarize skill evidence into key findings (keep under 500 tokens per skill)
+ * 
+ * Skill run output shape is either:
+ *   { narrative, evidence: { claims, evaluated_records, data_sources, parameters } }
+ * or directly SkillEvidence (if evidence gatherer already unwrapped it)
  */
-function summarizeEvidence(evidence: SkillEvidence): string {
+function summarizeEvidence(rawEvidence: any): string {
   const parts: string[] = [];
 
-  // Claims (limit to top 5 by severity)
-  if (evidence.claims && evidence.claims.length > 0) {
-    const sortedClaims = evidence.claims
+  const narrative = rawEvidence?.narrative;
+  const evidence: SkillEvidence | undefined = rawEvidence?.evidence || 
+    (rawEvidence?.claims ? rawEvidence : undefined);
+
+  if (narrative && typeof narrative === 'string') {
+    const trimmedNarrative = narrative.substring(0, 800);
+    parts.push('Narrative:');
+    parts.push(trimmedNarrative);
+  }
+
+  if (evidence?.claims && evidence.claims.length > 0) {
+    const sortedClaims = [...evidence.claims]
       .sort((a, b) => {
-        const severityOrder = { critical: 0, warning: 1, info: 2, good: 3 };
+        const severityOrder: Record<string, number> = { critical: 0, warning: 1, info: 2, good: 3 };
         return (severityOrder[a.severity || 'info'] || 99) - (severityOrder[b.severity || 'info'] || 99);
       })
       .slice(0, 5);
@@ -226,15 +239,17 @@ function summarizeEvidence(evidence: SkillEvidence): string {
     }
   }
 
-  // Evaluated records summary
-  if (evidence.evaluated_records && evidence.evaluated_records.length > 0) {
+  if (evidence?.evaluated_records && evidence.evaluated_records.length > 0) {
     parts.push(`Evaluated ${evidence.evaluated_records.length} records`);
   }
 
-  // Data sources
-  if (evidence.data_sources && evidence.data_sources.length > 0) {
-    const sources = evidence.data_sources.map(ds => ds.source).join(', ');
+  if (evidence?.data_sources && evidence.data_sources.length > 0) {
+    const sources = evidence.data_sources.map((ds: any) => ds.source).join(', ');
     parts.push(`Sources: ${sources}`);
+  }
+
+  if (parts.length === 0) {
+    parts.push('(No structured evidence available)');
   }
 
   return parts.join('\n');

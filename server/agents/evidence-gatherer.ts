@@ -7,7 +7,8 @@
 
 import { query } from '../db.js';
 import { createLogger } from '../utils/logger.js';
-import { executeSkill } from '../skills/runtime.js';
+import { getSkillRuntime } from '../skills/runtime.js';
+import { getSkillRegistry } from '../skills/registry.js';
 import type { SkillEvidence } from '../skills/types.js';
 
 const logger = createLogger('EvidenceGatherer');
@@ -167,15 +168,15 @@ async function runSkill(
   try {
     logger.info('[EvidenceGatherer] Executing skill', { skill_id: skillId, workspace_id: workspaceId });
 
-    const result = await executeSkill(
-      skillId,
-      workspaceId,
-      {}, // params
-      {
-        trigger: 'agent_prep',
-        triggerDetails: { source: 'evidence_gatherer' },
-      }
-    );
+    const registry = getSkillRegistry();
+    const skillDef = registry.get(skillId);
+    if (!skillDef) {
+      logger.error('[EvidenceGatherer] Skill not found in registry', { skill_id: skillId });
+      return null;
+    }
+
+    const runtime = getSkillRuntime();
+    const result = await runtime.executeSkill(skillDef, workspaceId, {});
 
     logger.info('[EvidenceGatherer] Skill execution complete', {
       skill_id: skillId,
