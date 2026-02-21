@@ -415,6 +415,11 @@ async function start(): Promise<void> {
   const dbPool = (await import('./db.js')).default;
   startActionExpiryScheduler(dbPool);
 
+  // Report scheduler - check every minute for due reports
+  const { checkScheduledReports, initializeScheduledReports } = await import('./reports/scheduler.js');
+  await initializeScheduledReports(); // Initialize next_due_at for existing reports
+  setInterval(checkScheduledReports, 60 * 1000); // Check every minute
+
   // Annotation cleanup - daily at 3 AM UTC
   const runAnnotationCleanup = () => {
     const now = new Date();
