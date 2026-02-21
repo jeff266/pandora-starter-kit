@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
+import { ExternalLink } from 'lucide-react';
 import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import { formatCurrency, formatDate, formatTimeAgo, severityColor } from '../lib/format';
@@ -8,6 +9,7 @@ import SectionErrorBoundary from '../components/SectionErrorBoundary';
 import { DossierNarrative, AnalysisModal } from '../components/shared';
 import { useDemoMode } from '../contexts/DemoModeContext';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { buildDealCrmUrl, buildConversationUrl, useCrmInfo } from '../lib/deeplinks';
 
 const SEVERITY_LABELS: Record<string, string> = {
   act: 'Critical', watch: 'Warning', notable: 'Notable', info: 'Info',
@@ -71,27 +73,6 @@ function gradeBg(grade: string): string {
   }
 }
 
-function buildCrmUrl(crm: string | null, portalId: number | null, instanceUrl: string | null, sourceId: string | null, dealSource: string | null): string | null {
-  if (!crm || !sourceId) return null;
-  if (crm === 'hubspot' && dealSource === 'hubspot' && portalId) {
-    return `https://app.hubspot.com/contacts/${portalId}/deal/${sourceId}`;
-  }
-  if (crm === 'salesforce' && dealSource === 'salesforce' && instanceUrl) {
-    const host = instanceUrl.replace(/^https?:\/\//, '');
-    return `https://${host}/lightning/r/Opportunity/${sourceId}/view`;
-  }
-  return null;
-}
-
-function ExternalLinkIcon({ size = 12, color = 'currentColor' }: { size?: number; color?: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-      <polyline points="15 3 21 3 21 9" />
-      <line x1="10" y1="14" x2="21" y2="3" />
-    </svg>
-  );
-}
 
 interface ActiveScore {
   score: number;
@@ -120,7 +101,7 @@ export default function DealDetail() {
   const [askAnswer, setAskAnswer] = useState<any>(null);
   const [askLoading, setAskLoading] = useState(false);
   const [askError, setAskError] = useState('');
-  const [crmInfo, setCrmInfo] = useState<{ crm: string | null; portalId?: number | null; instanceUrl?: string | null }>({ crm: null });
+  const { crmInfo } = useCrmInfo();
   const [analysisOpen, setAnalysisOpen] = useState(false);
   const [showScoreBreakdown, setShowScoreBreakdown] = useState(false);
   const [scoreHistory, setScoreHistory] = useState<any[]>([]);
@@ -144,7 +125,6 @@ export default function DealDetail() {
 
   useEffect(() => {
     fetchDossier();
-    api.get('/crm/link-info').then(setCrmInfo).catch(() => {});
     if (dealId) {
       api.get(`/deals/${dealId}/score-history`).then((res: any) => {
         setScoreHistory(res.snapshots || []);
@@ -386,7 +366,7 @@ export default function DealDetail() {
             </button>
 
             {(() => {
-              const crmUrl = buildCrmUrl(crmInfo.crm, crmInfo.portalId ?? null, crmInfo.instanceUrl ?? null, deal.source_id, deal.source);
+              const crmUrl = buildDealCrmUrl(crmInfo.crm, crmInfo.portalId ?? null, crmInfo.instanceUrl ?? null, deal.source_id, deal.source);
               if (!crmUrl) return null;
               const label = crmInfo.crm === 'hubspot' ? 'Open in HubSpot' : 'Open in Salesforce';
               return (
@@ -406,7 +386,7 @@ export default function DealDetail() {
                   onMouseLeave={e => { e.currentTarget.style.background = colors.accentSoft; }}
                 >
                   {label}
-                  <ExternalLinkIcon size={11} color={colors.accent} />
+                  <ExternalLink size={11} color={colors.accent} />
                 </a>
               );
             })()}
@@ -744,6 +724,25 @@ export default function DealDetail() {
                           {lm.label}
                         </span>
                       )}
+                      {(() => {
+                        const conversationUrl = buildConversationUrl(
+                          c.source,
+                          c.source_id,
+                          c.source_data,
+                          c.custom_fields
+                        );
+                        return conversationUrl ? (
+                          <a
+                            href={conversationUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={`Open in ${c.source}`}
+                            style={{ color: colors.accent, lineHeight: 0, marginLeft: 8 }}
+                          >
+                            <ExternalLink size={14} />
+                          </a>
+                        ) : null;
+                      })()}
                     </div>
                     <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>
                       {c.date ? formatDate(c.date) : ''}

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
+import { ExternalLink } from 'lucide-react';
 import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import { formatCurrency, formatDate, formatTimeAgo, severityColor } from '../lib/format';
@@ -8,6 +9,7 @@ import SectionErrorBoundary from '../components/SectionErrorBoundary';
 import { DossierNarrative, AnalysisModal } from '../components/shared';
 import { useDemoMode } from '../contexts/DemoModeContext';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { buildAccountCrmUrl, buildConversationUrl, useCrmInfo } from '../lib/deeplinks';
 
 const SEVERITY_LABELS: Record<string, string> = {
   act: 'Critical', watch: 'Warning', notable: 'Notable', info: 'Info',
@@ -69,27 +71,6 @@ function trendColor(trend?: string): string {
   }
 }
 
-function buildAccountCrmUrl(crm: string | null, portalId: number | null, instanceUrl: string | null, sourceId: string | null, accountSource: string | null): string | null {
-  if (!crm || !sourceId) return null;
-  if (crm === 'hubspot' && accountSource === 'hubspot' && portalId) {
-    return `https://app.hubspot.com/contacts/${portalId}/company/${sourceId}`;
-  }
-  if (crm === 'salesforce' && accountSource === 'salesforce' && instanceUrl) {
-    const host = instanceUrl.replace(/^https?:\/\//, '');
-    return `https://${host}/lightning/r/Account/${sourceId}/view`;
-  }
-  return null;
-}
-
-function ExternalLinkIcon({ size = 12, color = 'currentColor' }: { size?: number; color?: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-      <polyline points="15 3 21 3 21 9" />
-      <line x1="10" y1="14" x2="21" y2="3" />
-    </svg>
-  );
-}
 
 export default function AccountDetail() {
   const { accountId } = useParams<{ accountId: string }>();
@@ -107,7 +88,7 @@ export default function AccountDetail() {
   const [askAnswer, setAskAnswer] = useState<any>(null);
   const [askLoading, setAskLoading] = useState(false);
   const [askError, setAskError] = useState('');
-  const [crmInfo, setCrmInfo] = useState<{ crm: string | null; portalId?: number | null; instanceUrl?: string | null }>({ crm: null });
+  const { crmInfo } = useCrmInfo();
   const [analysisOpen, setAnalysisOpen] = useState(false);
 
   const fetchDossier = async (withNarrative = false) => {
@@ -129,7 +110,6 @@ export default function AccountDetail() {
 
   useEffect(() => {
     fetchDossier();
-    api.get('/crm/link-info').then(setCrmInfo).catch(() => {});
   }, [accountId]);
 
   const dismissFinding = async (findingId: string) => {
@@ -357,7 +337,7 @@ export default function AccountDetail() {
                 onMouseLeave={e => { e.currentTarget.style.background = colors.accentSoft; }}
               >
                 {crmLabel}
-                <ExternalLinkIcon size={11} color={colors.accent} />
+                <ExternalLink size={11} color={colors.accent} />
               </a>
             )}
           </div>
@@ -606,6 +586,12 @@ export default function AccountDetail() {
             ) : (
               conversations.map((c: any, i: number) => {
                 const lm = linkMethodPill(c.link_method);
+                const conversationUrl = buildConversationUrl(
+                  c.source,
+                  c.source_id,
+                  c.source_data,
+                  c.custom_fields
+                );
                 return (
                   <div key={i} style={{ padding: '10px 0', borderBottom: `1px solid ${colors.border}` }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -625,6 +611,17 @@ export default function AccountDetail() {
                         }}>
                           {lm.label}
                         </span>
+                      )}
+                      {conversationUrl && (
+                        <a
+                          href={conversationUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title={`Open in ${c.source}`}
+                          style={{ color: colors.accent, lineHeight: 0, marginLeft: 8 }}
+                        >
+                          <ExternalLink size={14} />
+                        </a>
                       )}
                     </div>
                     <div style={{ display: 'flex', gap: 12, fontSize: 11, color: colors.textMuted, marginTop: 4 }}>

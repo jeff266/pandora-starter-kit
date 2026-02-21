@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { ExternalLink } from 'lucide-react';
 import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import { formatCurrency, formatDate, formatTimeAgo, severityColor } from '../lib/format';
@@ -8,6 +9,7 @@ import QuotaBanner from '../components/QuotaBanner';
 import { useDemoMode } from '../contexts/DemoModeContext';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { buildDealCrmUrl, useCrmInfo } from '../lib/deeplinks';
 
 const PAGE_SIZE = 50;
 
@@ -47,18 +49,6 @@ interface DealRow {
   active_source: 'skill' | 'health' | undefined;
 }
 
-function buildCrmUrl(crm: string | null, portalId: number | null, instanceUrl: string | null, sourceId: string | null, dealSource: string | null): string | null {
-  if (!crm || !sourceId) return null;
-  if (crm === 'hubspot' && dealSource === 'hubspot' && portalId) {
-    return `https://app.hubspot.com/contacts/${portalId}/deal/${sourceId}`;
-  }
-  if (crm === 'salesforce' && dealSource === 'salesforce' && instanceUrl) {
-    const host = instanceUrl.replace(/^https?:\/\//, '');
-    return `https://${host}/lightning/r/Opportunity/${sourceId}/view`;
-  }
-  return null;
-}
-
 type SortField = 'name' | 'amount' | 'stage' | 'owner' | 'close_date' | 'health' | 'days_in_stage' | 'findings';
 type SortDir = 'asc' | 'desc';
 
@@ -89,7 +79,7 @@ export default function DealList() {
   const [sortField, setSortField] = useState<SortField>('amount');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [page, setPage] = useState(0);
-  const [crmInfo, setCrmInfo] = useState<{ crm: string | null; portalId?: number | null; instanceUrl?: string | null }>({ crm: null });
+  const { crmInfo } = useCrmInfo();
 
   const fetchDeals = useCallback(async () => {
     setLoading(true);
@@ -164,7 +154,6 @@ export default function DealList() {
 
   useEffect(() => {
     fetchDeals();
-    api.get('/crm/link-info').then(setCrmInfo).catch(() => {});
     // Fetch scopes
     api.get('/admin/scopes').then((data: any) => {
       const confirmedScopes = (data.scopes || []).filter((s: any) => s.confirmed);
@@ -432,6 +421,14 @@ export default function DealList() {
             const daysColor = (deal.days_in_stage || 0) > 45 ? colors.red : (deal.days_in_stage || 0) > 21 ? '#eab308' : colors.textMuted;
 
             if (isMobile) {
+              const dealUrl = buildDealCrmUrl(
+                crmInfo.crm,
+                crmInfo.portalId || null,
+                crmInfo.instanceUrl || null,
+                deal.source_id,
+                deal.source
+              );
+
               return (
                 <div
                   key={deal.id}
@@ -443,9 +440,25 @@ export default function DealList() {
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 6 }}>
-                    <span style={{ fontSize: 14, fontWeight: 500, color: colors.accent, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {anon.deal(deal.name || 'Unnamed')}
-                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 1, minWidth: 0 }}>
+                      <span style={{ fontSize: 14, fontWeight: 500, color: colors.accent, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {anon.deal(deal.name || 'Unnamed')}
+                      </span>
+                      {dealUrl && (
+                        <a
+                          href={dealUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title={crmInfo.crm === 'hubspot' ? 'Open in HubSpot' : 'Open in Salesforce'}
+                          onClick={e => e.stopPropagation()}
+                          style={{ display: 'inline-flex', flexShrink: 0, color: `${colors.accent}99`, transition: 'color 0.15s' }}
+                          onMouseEnter={e => { e.currentTarget.style.color = colors.accent; }}
+                          onMouseLeave={e => { e.currentTarget.style.color = `${colors.accent}99`; }}
+                        >
+                          <ExternalLink size={12} />
+                        </a>
+                      )}
+                    </div>
                     {deal.grade && deal.grade !== '—' && (
                       <span style={{
                         fontSize: 11, fontWeight: 700, fontFamily: fonts.mono,
@@ -494,11 +507,17 @@ export default function DealList() {
                     {anon.deal(deal.name || 'Unnamed')}
                   </span>
                   {(() => {
-                    const crmUrl = buildCrmUrl(crmInfo.crm, crmInfo.portalId ?? null, crmInfo.instanceUrl ?? null, deal.source_id, deal.source);
-                    if (!crmUrl) return null;
+                    const dealUrl = buildDealCrmUrl(
+                      crmInfo.crm,
+                      crmInfo.portalId || null,
+                      crmInfo.instanceUrl || null,
+                      deal.source_id,
+                      deal.source
+                    );
+                    if (!dealUrl) return null;
                     return (
                       <a
-                        href={crmUrl}
+                        href={dealUrl}
                         target="_blank"
                         rel="noopener noreferrer"
                         title={crmInfo.crm === 'hubspot' ? 'Open in HubSpot' : 'Open in Salesforce'}
@@ -507,11 +526,7 @@ export default function DealList() {
                         onMouseEnter={e => { e.currentTarget.style.color = colors.accent; }}
                         onMouseLeave={e => { e.currentTarget.style.color = `${colors.accent}99`; }}
                       >
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                          <polyline points="15 3 21 3 21 9" />
-                          <line x1="10" y1="14" x2="21" y2="3" />
-                        </svg>
+                        <ExternalLink size={12} />
                       </a>
                     );
                   })()}

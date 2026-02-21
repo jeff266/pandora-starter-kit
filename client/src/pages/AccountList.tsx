@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { ExternalLink } from 'lucide-react';
 import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import { formatCurrency, formatTimeAgo } from '../lib/format';
 import Skeleton from '../components/Skeleton';
 import { useDemoMode } from '../contexts/DemoModeContext';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { buildAccountCrmUrl, useCrmInfo } from '../lib/deeplinks';
 
 const PAGE_SIZE = 50;
 
@@ -225,6 +227,8 @@ interface Account {
   classification_confidence?: number;
   enriched_at?: string;  // from account_signals table
   icp_fit_score?: number;  // from score_breakdown if available
+  source?: string;
+  source_id?: string;
 }
 
 const GRADE_COLORS: Record<string, { bg: string; text: string }> = {
@@ -288,6 +292,7 @@ export default function AccountList() {
   const { anon } = useDemoMode();
   const isMobile = useIsMobile();
   const { scoringState, activating, activateScoring, refreshIcp } = useScoringState();
+  const { crmInfo } = useCrmInfo();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -335,6 +340,8 @@ export default function AccountList() {
         classification_confidence: a.classification_confidence ?? undefined,
         enriched_at: a.enriched_at ?? undefined,
         icp_fit_score: a.icp_fit_score ?? undefined,
+        source: a.source ?? undefined,
+        source_id: a.source_id ?? undefined,
       })));
       setError('');
     } catch (err: any) {
@@ -676,8 +683,29 @@ export default function AccountList() {
                 onMouseEnter={e => (e.currentTarget.style.background = colors.surfaceHover)}
                 onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
               >
-                <div style={{ fontSize: 13, fontWeight: 500, color: colors.accent, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingRight: 8 }}>
+                <div style={{ fontSize: 13, fontWeight: 500, color: colors.accent, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingRight: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
                   {anon.company(account.name || 'Unnamed')}
+                  {(() => {
+                    const crmUrl = buildAccountCrmUrl(
+                      crmInfo.crm,
+                      crmInfo.portalId || null,
+                      crmInfo.instanceUrl || null,
+                      account.source_id || null,
+                      account.source || null
+                    );
+                    return crmUrl ? (
+                      <a
+                        href={crmUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        title={`Open in ${crmInfo.crm}`}
+                        style={{ color: colors.textMuted, lineHeight: 0, flexShrink: 0 }}
+                      >
+                        <ExternalLink size={13} />
+                      </a>
+                    ) : null;
+                  })()}
                 </div>
                 <div style={{ fontSize: 12, color: colors.textSecondary, fontFamily: fonts.mono, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {account.domain || '—'}
