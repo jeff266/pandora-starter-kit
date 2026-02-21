@@ -23,23 +23,27 @@
 
 ---
 
-## ISSUE 2: CRM Sync UI Redesign - NOT STARTED
+## ISSUE 2: CRM Sync UI Redesign - IN PROGRESS
 
 This is a complete rewrite requiring ~11 steps per BUILD SEQUENCE:
 
 ### Required Components
 
-1. ✅ **Property Discovery Bug Fix** - Need to diagnose why CRM properties aren't loading
-2. ❌ **checkCompatibility() utility** - Type matching logic
-3. ❌ **Tab Layout** - Deals/Companies/Contacts tabs
-4. ❌ **Mapping List** - Visual arrow rows (Pandora → CRM)
-5. ❌ **Slide-Over Panel** - Proper slide-over for Add/Edit
-6. ❌ **Two-Box Visual Mapper** - Side-by-side field selectors with arrow
-7. ❌ **Type Compatibility Indicator** - Show match status below mapper
-8. ❌ **Append Options** - Conditional reveal for append modes
-9. ❌ **Value Transform + Preview** - Transform selector with live preview
-10. ❌ **Sync Issues Log** - Collapsible error log section
-11. ❌ **Retry/Edit Actions** - Wire up issue resolution buttons
+1. ✅ **Route Path Doubling Fix** - Fixed all CRM writeback routes (committed b0e4e2f)
+   - Changed all `/api/workspaces/:id/crm-writeback/...` to `/:workspaceId/crm-writeback/...`
+   - Updated all `req.params.id` to `req.params.workspaceId`
+   - All 9 routes now follow workspaceApiRouter mounting convention
+2. ⏳ **Property Discovery Test** - Need to verify CRM properties endpoint works now
+3. ❌ **checkCompatibility() utility** - Type matching logic
+4. ❌ **Tab Layout** - Deals/Companies/Contacts tabs
+5. ❌ **Mapping List** - Visual arrow rows (Pandora → CRM)
+6. ❌ **Slide-Over Panel** - Proper slide-over for Add/Edit
+7. ❌ **Two-Box Visual Mapper** - Side-by-side field selectors with arrow
+8. ❌ **Type Compatibility Indicator** - Show match status below mapper
+9. ❌ **Append Options** - Conditional reveal for append modes
+10. ❌ **Value Transform + Preview** - Transform selector with live preview
+11. ❌ **Sync Issues Log** - Collapsible error log section
+12. ❌ **Retry/Edit Actions** - Wire up issue resolution buttons
 
 ---
 
