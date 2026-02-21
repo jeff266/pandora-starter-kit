@@ -172,11 +172,13 @@ export async function discoverCRMProperties(
   objectType: CRMObjectType,
   db?: any
 ): Promise<CRMProperty[]> {
+  logger.info('[PropertyDiscovery] Starting discovery', { workspaceId, objectType });
+
   // Check cache first
   const cacheKey = `${workspaceId}:${objectType}`;
   const cached = propertyCache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
-    logger.info('Property cache hit', { workspaceId, objectType });
+    logger.info('[PropertyDiscovery] Cache hit', { workspaceId, objectType, count: cached.properties.length });
     return cached.properties;
   }
 
@@ -184,17 +186,25 @@ export async function discoverCRMProperties(
   const hubspotCreds = await getConnectorCredentials(workspaceId, 'hubspot');
   const salesforceCreds = await getConnectorCredentials(workspaceId, 'salesforce');
 
+  logger.info('[PropertyDiscovery] Credential check', {
+    workspace_id: workspaceId,
+    has_hubspot: !!hubspotCreds?.accessToken,
+    has_salesforce: !!(salesforceCreds?.accessToken && salesforceCreds?.instanceUrl),
+  });
+
   let properties: CRMProperty[] = [];
 
   if (hubspotCreds?.accessToken) {
-    logger.info('Fetching HubSpot properties', { workspaceId, objectType });
+    logger.info('[PropertyDiscovery] Fetching HubSpot properties', { workspaceId, objectType });
     const hsObjectType =
       objectType === 'deal' ? 'deals' :
       objectType === 'company' || objectType === 'account' ? 'companies' :
       'contacts';
+    logger.info('[PropertyDiscovery] HubSpot object type mapping', { input: objectType, output: hsObjectType });
     properties = await fetchHubSpotProperties(hubspotCreds.accessToken, hsObjectType);
+    logger.info('[PropertyDiscovery] HubSpot fetch complete', { count: properties.length });
   } else if (salesforceCreds?.accessToken && salesforceCreds?.instanceUrl) {
-    logger.info('Fetching Salesforce properties', { workspaceId, objectType });
+    logger.info('[PropertyDiscovery] Fetching Salesforce properties', { workspaceId, objectType });
     const sfObjectType =
       objectType === 'deal' ? 'Opportunity' :
       objectType === 'company' || objectType === 'account' ? 'Account' :
@@ -204,12 +214,15 @@ export async function discoverCRMProperties(
       salesforceCreds.instanceUrl,
       sfObjectType
     );
+    logger.info('[PropertyDiscovery] Salesforce fetch complete', { count: properties.length });
   } else {
+    logger.error('[PropertyDiscovery] No CRM connected', { workspaceId });
     throw new Error('No CRM connected for this workspace');
   }
 
   // Cache the result
   propertyCache.set(cacheKey, { properties, timestamp: Date.now() });
+  logger.info('[PropertyDiscovery] Cached result', { workspaceId, objectType, count: properties.length });
 
   return properties;
 }

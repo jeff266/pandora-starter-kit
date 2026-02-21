@@ -137,7 +137,7 @@ router.post('/:workspaceId/skills/:skillId/run', async (req, res) => {
   }
 });
 
-router.get('/:workspaceId/skills/:skillId/results', async (req, res) => {
+router.get('/:workspaceId/skills', async (req, res) => {
   try {
     const { workspaceId } = req.params;
 
