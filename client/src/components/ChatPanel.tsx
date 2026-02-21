@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { useIsMobile } from '../hooks/useIsMobile';
 import { api } from '../lib/api';
 
 interface ToolCall {
@@ -49,6 +50,7 @@ interface ChatPanelProps {
 }
 
 export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
+  const isMobile = useIsMobile();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -165,8 +167,8 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
 
   return (
     <div style={styles.overlay} onClick={onClose}>
-      <div style={styles.panel} onClick={e => e.stopPropagation()}>
-        <div style={styles.header}>
+      <div style={{ ...styles.panel, ...(isMobile ? { width: '100%' } : {}) }} onClick={e => e.stopPropagation()}>
+        <div style={{ ...styles.header, ...(isMobile ? { padding: '12px 14px' } : {}) }}>
           <div>
             <div style={styles.title}>Ask Pandora</div>
             <div style={styles.scopeLabel}>{scopeLabel}</div>
@@ -179,7 +181,7 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
           </div>
         </div>
 
-        <div style={styles.messagesContainer}>
+        <div style={{ ...styles.messagesContainer, ...(isMobile ? { padding: '12px 10px' } : {}) }}>
           {messages.length === 0 && !loading && (
             <div style={styles.emptyState}>
               <div style={styles.emptyIcon}>💬</div>
@@ -187,11 +189,11 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
               <div style={styles.emptyText}>
                 Ask about your pipeline, deals, reps, or any RevOps data.
               </div>
-              <div style={styles.suggestions}>
+              <div style={{ ...styles.suggestions, ...(isMobile ? { maxWidth: '100%' } : {}) }}>
                 {getSuggestions(scope).map((s, i) => (
                   <button
                     key={i}
-                    style={styles.suggestionBtn}
+                    style={{ ...styles.suggestionBtn, ...(isMobile ? { whiteSpace: 'normal', wordBreak: 'break-word' } : {}) }}
                     onClick={() => { setInput(s); inputRef.current?.focus(); }}
                   >
                     {s}
@@ -207,6 +209,8 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
               style={{
                 ...styles.messageBubble,
                 ...(msg.role === 'user' ? styles.userBubble : styles.assistantBubble),
+                ...(isMobile && msg.role === 'user' ? { marginLeft: 16 } : {}),
+                ...(isMobile && msg.role === 'assistant' ? { marginRight: 16 } : {}),
               }}
               onMouseEnter={() => setHoveredMsgIdx(idx)}
               onMouseLeave={() => setHoveredMsgIdx(null)}
@@ -294,7 +298,7 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
           <div ref={messagesEndRef} />
         </div>
 
-        <div style={styles.inputContainer}>
+        <div style={{ ...styles.inputContainer, ...(isMobile ? { padding: '10px 10px 14px' } : {}) }}>
           <textarea
             ref={inputRef}
             style={styles.input}

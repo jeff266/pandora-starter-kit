@@ -57,3 +57,10 @@ input, textarea, select {
 ::-webkit-scrollbar-thumb:hover {
   background: #242b3a;
 }
+
+/* Mobile responsive overrides */
+@media (max-width: 767px) {
+  body {
+    font-size: 14px;
+  }
+}

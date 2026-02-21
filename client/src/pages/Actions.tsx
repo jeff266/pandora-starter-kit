@@ -6,6 +6,7 @@ import { formatCurrency, formatTimeAgo } from '../lib/format';
 import Skeleton from '../components/Skeleton';
 import SectionErrorBoundary from '../components/SectionErrorBoundary';
 import { useDemoMode } from '../contexts/DemoModeContext';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 interface ActionsSummary {
   open_total: number;
@@ -92,6 +93,7 @@ const snoozeDurations = [
 export default function Actions() {
   const navigate = useNavigate();
   const { anon } = useDemoMode();
+  const isMobile = useIsMobile();
   const [summary, setSummary] = useState<ActionsSummary | null>(null);
   const [actions, setActions] = useState<Action[]>([]);
   const [loading, setLoading] = useState(true);
@@ -240,7 +242,7 @@ export default function Actions() {
   if (loading) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: 16 }}>
           {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} height={100} borderRadius={10} />)}
         </div>
         <Skeleton height={50} borderRadius={10} />
@@ -265,7 +267,7 @@ export default function Actions() {
       )}
 
       <SectionErrorBoundary fallbackMessage="Failed to load summary cards.">
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: 16 }}>
           <SummaryCard
             label="Open Actions"
             value={summary?.open_total || 0}
@@ -423,6 +425,7 @@ export default function Actions() {
         ) : (
           <div style={{
             background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, overflow: 'hidden',
+            ...(isMobile ? { overflowX: 'auto' as const } : {}),
           }}>
             <div style={{
               display: 'grid',
@@ -573,6 +576,7 @@ function ActionPanel({ action, onClose, onExecute, onReject, onSnooze, onReopen,
   navigate: (path: string) => void;
 }) {
   const { anon } = useDemoMode();
+  const isMobile = useIsMobile();
   const [rejectReason, setRejectReason] = useState('');
   const [showReject, setShowReject] = useState(false);
   const [showSnooze, setShowSnooze] = useState(false);
@@ -605,7 +609,7 @@ function ActionPanel({ action, onClose, onExecute, onReject, onSnooze, onReopen,
     }} onClick={onClose}>
       <div
         style={{
-          width: 480, height: '100%', overflowY: 'auto',
+          width: isMobile ? '100%' : 480, maxWidth: '100vw', height: '100%', overflowY: 'auto',
           background: colors.surface, borderLeft: `1px solid ${colors.border}`, padding: 24,
         }}
         onClick={e => e.stopPropagation()}

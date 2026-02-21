@@ -5,6 +5,7 @@ import { colors, fonts } from '../styles/theme';
 import { formatCurrency, formatTimeAgo } from '../lib/format';
 import Skeleton from '../components/Skeleton';
 import { useDemoMode } from '../contexts/DemoModeContext';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 interface Target {
   id: string;
@@ -95,6 +96,7 @@ const statusColors = {
 
 export default function Targets() {
   const { anon } = useDemoMode();
+  const isMobile = useIsMobile();
   const [loading, setLoading] = useState(true);
   const [revenueModel, setRevenueModel] = useState<RevenueModel | null>(null);
   const [targets, setTargets] = useState<Target[]>([]);
@@ -154,7 +156,7 @@ export default function Targets() {
   const hasTarget = !!activeTarget;
 
   return (
-    <div style={{ padding: '24px 32px', maxWidth: 1400 }}>
+    <div style={{ padding: isMobile ? '16px 12px' : '24px 32px', maxWidth: 1400 }}>
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <div style={{ fontSize: 24, fontWeight: 700, color: colors.text }}>Targets</div>
@@ -280,6 +282,7 @@ export default function Targets() {
 }
 
 function GapCard({ gap, anon, onEdit }: { gap: GapCalculation; anon: any; onEdit: () => void }) {
+  const isMobile = useIsMobile();
   const targetAmount = typeof gap.target_amount === 'string' ? parseFloat(gap.target_amount) : gap.target_amount;
   const statusStyle = statusColors[gap.gap_status];
   const deadlinePassed = gap.days_to_pipeline_deadline < 0;
@@ -333,7 +336,7 @@ function GapCard({ gap, anon, onEdit }: { gap: GapCalculation; anon: any; onEdit
       </div>
 
       {/* Stats Row */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20, marginBottom: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(3, 1fr)', gap: isMobile ? 12 : 20, marginBottom: 20 }}>
         <div>
           <div style={{ fontSize: 11, color: colors.textMuted, marginBottom: 4 }}>Closed to date</div>
           <div style={{ fontSize: 20, fontWeight: 700, fontFamily: fonts.mono, color: colors.text }}>
@@ -380,7 +383,7 @@ function GapCard({ gap, anon, onEdit }: { gap: GapCalculation; anon: any; onEdit
           Pipeline window has closed ({Math.abs(gap.days_to_pipeline_deadline)} days ago) — focus on late-stage acceleration
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, 1fr)', gap: 16 }}>
           <div>
             <div style={{ fontSize: 13, color: colors.textSecondary, marginBottom: 8 }}>
               <span style={{ fontWeight: 600, fontFamily: fonts.mono, color: colors.text }}>

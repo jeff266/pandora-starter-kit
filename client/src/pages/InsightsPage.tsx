@@ -6,6 +6,7 @@ import { formatDateTime, formatTimeAgo, severityColor, severityBg } from '../lib
 import Skeleton from '../components/Skeleton';
 import SectionErrorBoundary from '../components/SectionErrorBoundary';
 import { useDemoMode } from '../contexts/DemoModeContext';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 function buildCrmUrl(crm: string | null, portalId: number | null, instanceUrl: string | null, sourceId: string | null, dealSource: string | null): string | null {
   if (!crm || !sourceId) return null;
@@ -22,6 +23,7 @@ function buildCrmUrl(crm: string | null, portalId: number | null, instanceUrl: s
 export default function InsightsPage() {
   const navigate = useNavigate();
   const { anon } = useDemoMode();
+  const isMobile = useIsMobile();
   const [findings, setFindings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -234,7 +236,7 @@ export default function InsightsPage() {
                         <p style={{ fontSize: 13, color: colors.text, lineHeight: 1.4 }}>
                           {anon.text(f.message)}
                         </p>
-                        <div style={{ display: 'flex', gap: 12, marginTop: 3, fontSize: 11, color: colors.textMuted, alignItems: 'center' }}>
+                        <div style={{ display: 'flex', gap: 12, marginTop: 3, fontSize: 11, color: colors.textMuted, alignItems: 'center', flexWrap: 'wrap' }}>
                           <span>{f.skill_id}</span>
                           {f.deal_name && (
                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
@@ -366,7 +368,7 @@ export default function InsightsPage() {
 
                           {/* Metric info */}
                           {(f.metric_value !== null || f.metric_context) && (
-                            <div style={{ display: 'flex', gap: 16 }}>
+                            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
                               {f.metric_value !== null && (
                                 <div>
                                   <p style={{ fontSize: 10, fontWeight: 600, color: colors.textDim, marginBottom: 2, textTransform: 'uppercase' }}>Metric</p>
@@ -384,7 +386,7 @@ export default function InsightsPage() {
 
                           {/* Entity info */}
                           {(f.entity_type || f.entity_name) && (
-                            <div style={{ display: 'flex', gap: 16 }}>
+                            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
                               {f.entity_type && (
                                 <div>
                                   <p style={{ fontSize: 10, fontWeight: 600, color: colors.textDim, marginBottom: 2, textTransform: 'uppercase' }}>Entity Type</p>

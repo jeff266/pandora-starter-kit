@@ -10,6 +10,7 @@ interface TopBarProps {
   dateRange?: string;
   onDateRangeChange?: (range: string) => void;
   onRefresh?: () => void;
+  onMenuToggle?: () => void;
 }
 
 const timeRangeOptions = [
@@ -27,6 +28,7 @@ export default function TopBar({
   dateRange = 'today',
   onDateRangeChange,
   onRefresh,
+  onMenuToggle,
 }: TopBarProps) {
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -52,7 +54,7 @@ export default function TopBar({
       position: 'sticky',
       top: 0,
       zIndex: 50,
-      padding: '14px 28px',
+      padding: onMenuToggle ? '14px 12px' : '14px 28px',
       background: 'rgba(6,8,12,0.85)',
       backdropFilter: 'blur(12px)',
       borderBottom: `1px solid ${colors.border}`,
@@ -60,9 +62,24 @@ export default function TopBar({
       alignItems: 'center',
       justifyContent: 'space-between',
       fontFamily: fonts.sans,
+      gap: 12,
     }}>
-      <div>
-        <h1 style={{ fontSize: 17, fontWeight: 700, color: colors.text }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+        {onMenuToggle && (
+          <button
+            onClick={onMenuToggle}
+            style={{
+              background: 'none', border: 'none', color: colors.text,
+              fontSize: 20, cursor: 'pointer', padding: '4px',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0,
+            }}
+            aria-label="Open menu"
+          >
+            {'\u2630'}
+          </button>
+        )}
+        <h1 style={{ fontSize: onMenuToggle ? 15 : 17, fontWeight: 700, color: colors.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {title}
         </h1>
         {subtitle && (
@@ -72,9 +89,9 @@ export default function TopBar({
         )}
       </div>
       
-      <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
-        {/* Time Range Selector */}
-        {onDateRangeChange && (
+      <div style={{ display: 'flex', alignItems: 'center', gap: onMenuToggle ? 8 : 24, flexShrink: 0 }}>
+        {/* Time Range Selector — hidden on mobile */}
+        {onDateRangeChange && !onMenuToggle && (
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             {timeRangeOptions.map((option) => (
               <button

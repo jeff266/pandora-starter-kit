@@ -7,6 +7,7 @@ import Skeleton from '../components/Skeleton';
 import QuotaBanner from '../components/QuotaBanner';
 import { useDemoMode } from '../contexts/DemoModeContext';
 import { useWorkspace } from '../context/WorkspaceContext';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 const PAGE_SIZE = 50;
 
@@ -70,6 +71,7 @@ export default function DealList() {
   const navigate = useNavigate();
   const { anon } = useDemoMode();
   const { currentWorkspace } = useWorkspace();
+  const isMobile = useIsMobile();
   const wsId = currentWorkspace?.id || '';
   const [searchParams] = useSearchParams();
   const [allDeals, setAllDeals] = useState<DealRow[]>([]);
@@ -341,7 +343,7 @@ export default function DealList() {
           onChange={e => setSearch(e.target.value)}
           placeholder="Search deals..."
           style={{
-            fontSize: 12, padding: '6px 12px', width: 180,
+            fontSize: 12, padding: '6px 12px', width: isMobile ? '100%' : 180, minWidth: 0,
             background: colors.surfaceRaised, border: `1px solid ${colors.border}`,
             borderRadius: 6, color: colors.text, outline: 'none',
           }}
@@ -375,41 +377,43 @@ export default function DealList() {
       <div style={{
         background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, overflow: 'hidden',
       }}>
-        {/* Header row */}
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: '25% 12% 13% 13% 10% 8% 8% 11%',
-          padding: '10px 20px',
-          background: colors.surfaceRaised,
-          borderBottom: `1px solid ${colors.border}`,
-        }}>
-          {([
-            ['name', 'Deal Name'],
-            ['amount', 'Amount'],
-            ['stage', 'Stage'],
-            ['owner', 'Owner'],
-            ['close_date', 'Close Date'],
-            ['health', 'Health'],
-            ['days_in_stage', 'Days'],
-            ['findings', 'Findings'],
-          ] as [SortField, string][]).map(([field, label]) => (
-            <div
-              key={field}
-              onClick={() => handleSort(field)}
-              style={{
-                fontSize: 10, fontWeight: 600, color: sortField === field ? colors.accent : colors.textMuted,
-                textTransform: 'uppercase', letterSpacing: '0.05em',
-                cursor: 'pointer', userSelect: 'none',
-                display: 'flex', alignItems: 'center', gap: 4,
-              }}
-            >
-              {label}
-              {sortField === field && (
-                <span style={{ fontSize: 8 }}>{sortDir === 'asc' ? '\u25B2' : '\u25BC'}</span>
-              )}
-            </div>
-          ))}
-        </div>
+        {/* Header row — hidden on mobile */}
+        {!isMobile && (
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: '25% 12% 13% 13% 10% 8% 8% 11%',
+            padding: '10px 20px',
+            background: colors.surfaceRaised,
+            borderBottom: `1px solid ${colors.border}`,
+          }}>
+            {([
+              ['name', 'Deal Name'],
+              ['amount', 'Amount'],
+              ['stage', 'Stage'],
+              ['owner', 'Owner'],
+              ['close_date', 'Close Date'],
+              ['health', 'Health'],
+              ['days_in_stage', 'Days'],
+              ['findings', 'Findings'],
+            ] as [SortField, string][]).map(([field, label]) => (
+              <div
+                key={field}
+                onClick={() => handleSort(field)}
+                style={{
+                  fontSize: 10, fontWeight: 600, color: sortField === field ? colors.accent : colors.textMuted,
+                  textTransform: 'uppercase', letterSpacing: '0.05em',
+                  cursor: 'pointer', userSelect: 'none',
+                  display: 'flex', alignItems: 'center', gap: 4,
+                }}
+              >
+                {label}
+                {sortField === field && (
+                  <span style={{ fontSize: 8 }}>{sortDir === 'asc' ? '\u25B2' : '\u25BC'}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Data rows */}
         {pageDeals.length === 0 ? (
@@ -426,6 +430,48 @@ export default function DealList() {
             const totalFindings = deal.signal_counts.act + deal.signal_counts.watch + deal.signal_counts.notable + deal.signal_counts.info;
             const pastDue = isCloseDatePast(deal.close_date, deal.is_closed);
             const daysColor = (deal.days_in_stage || 0) > 45 ? colors.red : (deal.days_in_stage || 0) > 21 ? '#eab308' : colors.textMuted;
+
+            if (isMobile) {
+              return (
+                <div
+                  key={deal.id}
+                  onClick={() => navigate(`/deals/${deal.id}`)}
+                  style={{
+                    padding: '12px 14px',
+                    borderBottom: `1px solid ${colors.border}`,
+                    cursor: 'pointer',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 6 }}>
+                    <span style={{ fontSize: 14, fontWeight: 500, color: colors.accent, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {anon.deal(deal.name || 'Unnamed')}
+                    </span>
+                    {deal.grade && deal.grade !== '—' && (
+                      <span style={{
+                        fontSize: 11, fontWeight: 700, fontFamily: fonts.mono,
+                        padding: '2px 8px', borderRadius: 4, flexShrink: 0,
+                        background: `${GRADE_COLORS[deal.grade] || colors.textMuted}20`,
+                        color: GRADE_COLORS[deal.grade] || colors.textMuted,
+                      }}>
+                        {deal.grade}
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, fontSize: 12, color: colors.textSecondary }}>
+                    <span style={{ fontFamily: fonts.mono, color: colors.text }}>{deal.amount ? formatCurrency(anon.amount(deal.amount)) : '—'}</span>
+                    <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 4, background: colors.accentSoft, color: colors.accent, textTransform: 'capitalize' }}>{deal.stage?.replace(/_/g, ' ') || '—'}</span>
+                    <span>{anon.person(shortName(deal.owner)) || '—'}</span>
+                    <span style={{ color: pastDue ? colors.red : colors.textMuted }}>{deal.close_date ? formatDate(deal.close_date) : ''}</span>
+                    {totalFindings > 0 && (
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        {deal.signal_counts.act > 0 && <span style={{ width: 6, height: 6, borderRadius: '50%', background: severityColor('act'), display: 'inline-block' }} />}
+                        {deal.signal_counts.watch > 0 && <span style={{ width: 6, height: 6, borderRadius: '50%', background: severityColor('watch'), display: 'inline-block' }} />}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            }
 
             return (
               <div

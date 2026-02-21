@@ -4,6 +4,7 @@ import { useWorkspace, WorkspaceInfo } from '../context/WorkspaceContext';
 import { useDemoMode } from '../contexts/DemoModeContext';
 import { colors, fonts } from '../styles/theme';
 import NotificationBell from './notifications/NotificationBell';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 interface NavItem {
   label: string;
@@ -74,11 +75,14 @@ interface SidebarProps {
   showAllClients?: boolean;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
+  mobileOpen?: boolean;
+  onMobileClose?: () => void;
 }
 
-export default function Sidebar({ badges, showAllClients, collapsed = false, onToggleCollapse }: SidebarProps) {
+export default function Sidebar({ badges, showAllClients, collapsed = false, onToggleCollapse, mobileOpen = false, onMobileClose }: SidebarProps) {
   const location = useLocation();
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const { user, currentWorkspace, workspaces, selectWorkspace, logout, token } = useWorkspace();
   const { isDemoMode, toggleDemoMode, anon } = useDemoMode();
   const [showWsDropdown, setShowWsDropdown] = useState(false);
@@ -109,13 +113,35 @@ export default function Sidebar({ badges, showAllClients, collapsed = false, onT
 
   const displayWsName = (name: string) => anon.workspace(name);
 
+  const mobileNav = (path: string) => {
+    navigate(path);
+    if (isMobile && onMobileClose) onMobileClose();
+  };
+
+  // On mobile: hide completely when closed, show as full-width overlay when open
+  if (isMobile && !mobileOpen) return null;
+
   return (
-    <aside style={{
-      width: collapsed ? 56 : 220, height: '100vh', position: 'fixed', left: 0, top: 0,
-      background: colors.bgSidebar, borderRight: `1px solid ${colors.border}`,
-      display: 'flex', flexDirection: 'column', zIndex: 100, fontFamily: fonts.sans,
-      transition: 'width 0.2s ease', overflow: 'hidden',
-    }}>
+    <>
+      {/* Mobile backdrop */}
+      {isMobile && (
+        <div
+          onClick={onMobileClose}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
+            zIndex: 199, transition: 'opacity 0.2s',
+          }}
+        />
+      )}
+      <aside style={{
+        width: isMobile ? 260 : (collapsed ? 56 : 220),
+        height: '100vh', position: 'fixed', left: 0, top: 0,
+        background: colors.bgSidebar, borderRight: `1px solid ${colors.border}`,
+        display: 'flex', flexDirection: 'column',
+        zIndex: isMobile ? 200 : 100,
+        fontFamily: fonts.sans,
+        transition: 'width 0.2s ease', overflow: 'hidden',
+      }}>
       <div
         style={{
           padding: collapsed ? '16px 0' : '16px 14px', borderBottom: `1px solid ${colors.border}`,
@@ -180,7 +206,7 @@ export default function Sidebar({ badges, showAllClients, collapsed = false, onT
               </div>
             ))}
             <div
-              onClick={() => { setShowWsDropdown(false); navigate('/join'); }}
+              onClick={() => { setShowWsDropdown(false); mobileNav('/join'); }}
               style={{
                 padding: '10px 14px', fontSize: 12, color: colors.accent,
                 cursor: 'pointer', borderTop: `1px solid ${colors.border}`,
@@ -198,7 +224,7 @@ export default function Sidebar({ badges, showAllClients, collapsed = false, onT
         {showAllClients && workspaces.length > 1 && (
           <div style={{ marginBottom: 4 }}>
             <div
-              onClick={() => navigate('/portfolio')}
+              onClick={() => mobileNav('/portfolio')}
               title={collapsed ? 'All Clients' : undefined}
               style={{
                 display: 'flex', alignItems: 'center', gap: collapsed ? 0 : 8,
@@ -245,7 +271,7 @@ export default function Sidebar({ badges, showAllClients, collapsed = false, onT
               return (
                 <div
                   key={item.path}
-                  onClick={() => navigate(item.path)}
+                  onClick={() => mobileNav(item.path)}
                   title={collapsed ? item.label : undefined}
                   style={{
                     display: 'flex', alignItems: 'center', gap: collapsed ? 0 : 8,
@@ -318,20 +344,22 @@ export default function Sidebar({ badges, showAllClients, collapsed = false, onT
         </div>
       </div>
 
-      {/* Collapse toggle button */}
-      <div
-        onClick={onToggleCollapse}
-        style={{
-          borderTop: `1px solid ${colors.border}`, padding: '8px 0',
-          display: 'flex', justifyContent: 'center', cursor: 'pointer',
-        }}
-        onMouseEnter={e => (e.currentTarget.style.background = colors.surfaceHover)}
-        onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-      >
-        <span style={{ fontSize: 14, color: colors.textMuted, transition: 'transform 0.2s', transform: collapsed ? 'rotate(180deg)' : 'none' }}>
-          {'\u00AB'}
-        </span>
-      </div>
+      {/* Collapse toggle button — hide on mobile since sidebar is an overlay */}
+      {!isMobile && (
+        <div
+          onClick={onToggleCollapse}
+          style={{
+            borderTop: `1px solid ${colors.border}`, padding: '8px 0',
+            display: 'flex', justifyContent: 'center', cursor: 'pointer',
+          }}
+          onMouseEnter={e => (e.currentTarget.style.background = colors.surfaceHover)}
+          onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+        >
+          <span style={{ fontSize: 14, color: colors.textMuted, transition: 'transform 0.2s', transform: collapsed ? 'rotate(180deg)' : 'none' }}>
+            {'\u00AB'}
+          </span>
+        </div>
+      )}
 
       <div style={{
         padding: collapsed ? '12px 0' : '12px 14px', borderTop: `1px solid ${colors.border}`,
@@ -374,7 +402,7 @@ export default function Sidebar({ badges, showAllClients, collapsed = false, onT
             }}
           >
             <div
-              onClick={() => { setShowUserMenu(false); navigate('/members'); }}
+              onClick={() => { setShowUserMenu(false); mobileNav('/members'); }}
               style={{ padding: '10px 14px', fontSize: 13, color: colors.text, cursor: 'pointer', whiteSpace: 'nowrap' }}
               onMouseEnter={e => (e.currentTarget.style.background = colors.surfaceHover)}
               onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
@@ -393,5 +421,6 @@ export default function Sidebar({ badges, showAllClients, collapsed = false, onT
         )}
       </div>
     </aside>
+    </>
   );
 }

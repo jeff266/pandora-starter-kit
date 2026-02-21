@@ -12,6 +12,7 @@ import SectionErrorBoundary from '../components/SectionErrorBoundary';
 import MonteCarloPanel from '../components/MonteCarloPanel';
 import GapCard from '../components/GapCard';
 import { useDemoMode } from '../contexts/DemoModeContext';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 interface Finding {
   id: string;
@@ -147,6 +148,7 @@ export default function CommandCenter() {
   const navigate = useNavigate();
   const { isAuthenticated, isLoading: authLoading, currentWorkspace } = useWorkspace();
   const { anon } = useDemoMode();
+  const isMobile = useIsMobile();
   const wsId = currentWorkspace?.id || '';
   const [pipeline, setPipeline] = useState<any>(null);
   const [summary, setSummary] = useState<any>(null);
@@ -600,7 +602,7 @@ export default function CommandCenter() {
       </div>
 
       <SectionErrorBoundary fallbackMessage="Failed to load metrics.">
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16 }}>
           {authLoading || loading.pipeline || loading.summary ? (
             Array.from({ length: 5 }).map((_, i) => <SkeletonCard key={i} height={100} />)
           ) : (
@@ -691,7 +693,7 @@ export default function CommandCenter() {
                   <YAxis
                     type="category"
                     dataKey="stage"
-                    width={140}
+                    width={isMobile ? 80 : 140}
                     tick={{ fontSize: 12, fill: colors.text, fontFamily: fonts.sans }}
                     axisLine={false}
                     tickLine={false}
@@ -866,7 +868,7 @@ export default function CommandCenter() {
           <div
             onClick={() => { setSelectedStageData(null); setAskingAbout(null); }}
             style={{
-              position: 'fixed', top: 0, left: 0, right: 680, bottom: 0,
+              position: 'fixed', top: 0, left: 0, right: isMobile ? 0 : 680, bottom: 0,
               background: 'rgba(0,0,0,0.3)', zIndex: 99,
             }}
           />
@@ -874,6 +876,7 @@ export default function CommandCenter() {
             stage={selectedStageData}
             loading={stageDealsLoading}
             askingAbout={askingAbout}
+            isMobile={isMobile}
             onClose={() => { setSelectedStageData(null); setAskingAbout(null); }}
             onAskAboutStage={() => setAskingAbout(askingAbout === 'stage' ? null : 'stage')}
             onAskAboutDeal={(deal) => setAskingAbout(askingAbout === deal ? null : deal)}
@@ -901,7 +904,7 @@ export default function CommandCenter() {
             padding: 20,
           }}>
             <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text, marginBottom: 12 }}>Findings by Rep</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 0, overflowX: isMobile ? 'auto' : undefined }}>
               {ownerRows.map((row, i) => (
                 <div
                   key={i}
@@ -1128,11 +1131,12 @@ function fmtAmt(n: number) {
 }
 
 function StageDrillDownPanel({
-  stage, loading, askingAbout, onClose, onAskAboutStage, onAskAboutDeal, onAskPandora
+  stage, loading, askingAbout, isMobile, onClose, onAskAboutStage, onAskAboutDeal, onAskPandora
 }: {
   stage: SelectedStage;
   loading: boolean;
   askingAbout: 'stage' | DealSummaryFull | null;
+  isMobile: boolean;
   onClose: () => void;
   onAskAboutStage: () => void;
   onAskAboutDeal: (deal: DealSummaryFull) => void;
@@ -1161,7 +1165,7 @@ function StageDrillDownPanel({
     <div
       ref={panelRef}
       style={{
-        position: 'fixed', top: 0, right: 0, width: 680, height: '100vh',
+        position: 'fixed', top: 0, right: 0, width: isMobile ? '100%' : 680, maxWidth: '100vw', height: '100vh',
         background: '#111827', borderLeft: '1px solid #1E293B',
         zIndex: 100, display: 'flex', flexDirection: 'column',
         boxShadow: '-12px 0 40px rgba(0,0,0,0.5)',
@@ -1266,18 +1270,18 @@ function StageDrillDownPanel({
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {/* Column headers */}
         <div style={{
-          display: 'grid', gridTemplateColumns: '1fr 120px 80px 80px 80px 36px',
+          display: 'grid', gridTemplateColumns: isMobile ? '1fr auto' : '1fr 120px 80px 80px 80px 36px',
           padding: '8px 16px', borderBottom: '1px solid #1E293B',
           position: 'sticky', top: 0, background: '#111827', zIndex: 2,
         }}>
-          {[
+          {([
             { label: 'Deal', sortKey: null },
             { label: 'Category', sortKey: null },
             { label: 'Amount', sortKey: 'amount' as const },
             { label: 'Days', sortKey: 'days' as const },
             { label: 'Prob', sortKey: 'probability' as const },
             { label: '', sortKey: null },
-          ].map(h => (
+          ] as const).filter(h => isMobile ? (h.label === 'Deal' || h.label === 'Amount') : true).map(h => (
             <div
               key={h.label}
               onClick={() => h.sortKey && setSortBy(h.sortKey)}
@@ -1307,6 +1311,7 @@ function StageDrillDownPanel({
             deal={deal}
             isLast={i === sorted.length - 1}
             isAsking={askingAbout === deal}
+            isMobile={isMobile}
             onAsk={() => onAskAboutDeal(deal)}
           />
         )) : (
@@ -1341,10 +1346,11 @@ function StageDrillDownPanel({
   );
 }
 
-function DrilldownDealRow({ deal, isLast, isAsking, onAsk }: {
+function DrilldownDealRow({ deal, isLast, isAsking, isMobile, onAsk }: {
   deal: DealSummaryFull;
   isLast: boolean;
   isAsking: boolean;
+  isMobile: boolean;
   onAsk: () => void;
 }) {
   const { anon } = useDemoMode();
@@ -1362,7 +1368,7 @@ function DrilldownDealRow({ deal, isLast, isAsking, onAsk }: {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
-        display: 'grid', gridTemplateColumns: '1fr 120px 80px 80px 80px 36px',
+        display: 'grid', gridTemplateColumns: isMobile ? '1fr auto' : '1fr 120px 80px 80px 80px 36px',
         alignItems: 'center', padding: '12px 16px',
         borderBottom: isLast ? 'none' : '1px solid #1E293B',
         background: hovered ? 'rgba(59,130,246,0.04)' : 'transparent',
@@ -1409,46 +1415,54 @@ function DrilldownDealRow({ deal, isLast, isAsking, onAsk }: {
           {deal.owner_name ? anon.person(deal.owner_name) : deal.owner_email ? anon.email(deal.owner_email) : '--'} &#xB7; Close {deal.close_date ? deal.close_date.split('T')[0] : '\u2014'}
         </div>
       </div>
-      <div>
-        <span style={{
-          fontSize: 10, fontWeight: 600, fontFamily: 'IBM Plex Mono, monospace',
-          padding: '2px 8px', borderRadius: 4, color: fcColor, background: fcBg,
-          textTransform: 'uppercase', letterSpacing: '0.03em',
-        }}>{fcLabel}</span>
-      </div>
+      {!isMobile && (
+        <div>
+          <span style={{
+            fontSize: 10, fontWeight: 600, fontFamily: 'IBM Plex Mono, monospace',
+            padding: '2px 8px', borderRadius: 4, color: fcColor, background: fcBg,
+            textTransform: 'uppercase', letterSpacing: '0.03em',
+          }}>{fcLabel}</span>
+        </div>
+      )}
       <div style={{ fontSize: 13, fontWeight: 600, fontFamily: 'IBM Plex Mono, monospace', color: '#E2E8F0', textAlign: 'right' }}>
         {fmtAmt(anon.amount(deal.amount || 0))}
       </div>
-      <div style={{ fontSize: 13, fontFamily: 'IBM Plex Mono, monospace', color: daysColor, textAlign: 'right' }}>
-        {Math.round(deal.days_in_stage || 0)}d
-      </div>
-      <div style={{ textAlign: 'right' }}>
-        <div style={{
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          width: 36, height: 36, borderRadius: 18,
-          background: `conic-gradient(${probColor} ${prob * 3.6}deg, #1E293B 0deg)`,
-        }}>
-          <div style={{
-            width: 28, height: 28, borderRadius: 14, background: '#151D2E',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 10, fontWeight: 700, fontFamily: 'IBM Plex Mono, monospace', color: '#E2E8F0',
-          }}>{prob}</div>
+      {!isMobile && (
+        <div style={{ fontSize: 13, fontFamily: 'IBM Plex Mono, monospace', color: daysColor, textAlign: 'right' }}>
+          {Math.round(deal.days_in_stage || 0)}d
         </div>
-      </div>
-      <div style={{ textAlign: 'center' }}>
-        <button
-          onClick={(e) => { e.stopPropagation(); onAsk(); }}
-          style={{
-            width: 28, height: 28, borderRadius: 14,
-            background: (hovered || isAsking) ? 'rgba(59,130,246,0.12)' : 'transparent',
-            border: `1px solid ${(hovered || isAsking) ? '#3B82F6' : 'transparent'}`,
-            color: (hovered || isAsking) ? '#3B82F6' : 'transparent',
-            fontSize: 14, cursor: 'pointer', transition: 'all 0.15s',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}
-          title="Ask Pandora about this deal"
-        >&#x1F4AC;</button>
-      </div>
+      )}
+      {!isMobile && (
+        <div style={{ textAlign: 'right' }}>
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            width: 36, height: 36, borderRadius: 18,
+            background: `conic-gradient(${probColor} ${prob * 3.6}deg, #1E293B 0deg)`,
+          }}>
+            <div style={{
+              width: 28, height: 28, borderRadius: 14, background: '#151D2E',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 10, fontWeight: 700, fontFamily: 'IBM Plex Mono, monospace', color: '#E2E8F0',
+            }}>{prob}</div>
+          </div>
+        </div>
+      )}
+      {!isMobile && (
+        <div style={{ textAlign: 'center' }}>
+          <button
+            onClick={(e) => { e.stopPropagation(); onAsk(); }}
+            style={{
+              width: 28, height: 28, borderRadius: 14,
+              background: (hovered || isAsking) ? 'rgba(59,130,246,0.12)' : 'transparent',
+              border: `1px solid ${(hovered || isAsking) ? '#3B82F6' : 'transparent'}`,
+              color: (hovered || isAsking) ? '#3B82F6' : 'transparent',
+              fontSize: 14, cursor: 'pointer', transition: 'all 0.15s',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+            title="Ask Pandora about this deal"
+          >&#x1F4AC;</button>
+        </div>
+      )}
     </div>
   );
 }

@@ -7,6 +7,7 @@ import Skeleton from '../components/Skeleton';
 import SectionErrorBoundary from '../components/SectionErrorBoundary';
 import { DossierNarrative, AnalysisModal } from '../components/shared';
 import { useDemoMode } from '../contexts/DemoModeContext';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 const SEVERITY_LABELS: Record<string, string> = {
   act: 'Critical', watch: 'Warning', notable: 'Notable', info: 'Info',
@@ -94,6 +95,7 @@ export default function AccountDetail() {
   const { accountId } = useParams<{ accountId: string }>();
   const navigate = useNavigate();
   const { anon } = useDemoMode();
+  const isMobile = useIsMobile();
   const [dossier, setDossier] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -207,7 +209,7 @@ export default function AccountDetail() {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <Skeleton height={80} />
-        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr', gap: 16 }}>
           <Skeleton height={300} />
           <Skeleton height={300} />
         </div>
@@ -284,9 +286,9 @@ export default function AccountDetail() {
         borderRadius: 10,
         padding: 20,
       }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: isMobile ? 'stretch' : 'flex-start', gap: isMobile ? 12 : 0 }}>
           <div style={{ flex: 1 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
               <h2 style={{ fontSize: 17, fontWeight: 700, color: colors.text }}>
                 {anon.company(account.name || 'Unnamed Account')}
               </h2>
@@ -309,20 +311,20 @@ export default function AccountDetail() {
                 </span>
               )}
             </div>
-            <div style={{ display: 'flex', gap: 16, marginTop: 6, fontSize: 12, color: colors.textMuted }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: isMobile ? 8 : 16, marginTop: 6, fontSize: 12, color: colors.textMuted }}>
               {account.domain && <span>{account.domain}</span>}
               {account.employee_count && <span>{account.employee_count} employees</span>}
               {account.annual_revenue && <span>Rev: {formatCurrency(anon.amount(Number(account.annual_revenue)))}</span>}
               {(account.owner_email || account.owner) && <span>Owner: {account.owner_email ? anon.email(account.owner_email) : anon.person(account.owner)}</span>}
             </div>
-            <div style={{ display: 'flex', gap: 20, marginTop: 12 }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: isMobile ? 12 : 20, marginTop: 12 }}>
               <MiniStat label="Total Deals" value={String(rel.total_deals || deals.length)} />
               <MiniStat label="Open Value" value={formatCurrency(anon.amount(Number(rel.open_value) || 0))} />
               <MiniStat label="Won Value" value={formatCurrency(anon.amount(Number(rel.won_value) || 0))} />
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, flexWrap: 'wrap' }}>
             <button
               onClick={() => setAnalysisOpen(true)}
               style={{
@@ -461,7 +463,7 @@ export default function AccountDetail() {
       )}
       </SectionErrorBoundary>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1.8fr 1fr', gap: 16, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.8fr 1fr', gap: 16, alignItems: 'start' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <SectionErrorBoundary fallbackMessage="Unable to load deals.">
           <Card title="Deals" count={deals.length}>

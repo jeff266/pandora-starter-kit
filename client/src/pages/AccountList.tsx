@@ -5,6 +5,7 @@ import { colors, fonts } from '../styles/theme';
 import { formatCurrency, formatTimeAgo } from '../lib/format';
 import Skeleton from '../components/Skeleton';
 import { useDemoMode } from '../contexts/DemoModeContext';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 const PAGE_SIZE = 50;
 
@@ -283,6 +284,7 @@ type SortDir = 'asc' | 'desc';
 export default function AccountList() {
   const navigate = useNavigate();
   const { anon } = useDemoMode();
+  const isMobile = useIsMobile();
   const { scoringState, activating, activateScoring, refreshIcp } = useScoringState();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
@@ -516,7 +518,7 @@ export default function AccountList() {
           onChange={e => setSearch(e.target.value)}
           placeholder="Search accounts..."
           style={{
-            fontSize: 12, padding: '6px 12px', width: 200,
+            fontSize: 12, padding: '6px 12px', width: isMobile ? '100%' : 200, minWidth: 0,
             background: colors.surfaceRaised, border: `1px solid ${colors.border}`,
             borderRadius: 6, color: colors.text, outline: 'none',
           }}
@@ -557,31 +559,33 @@ export default function AccountList() {
       <div style={{
         background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, overflow: 'hidden',
       }}>
-        {/* Header row */}
-        <div style={{
-          display: 'grid', gridTemplateColumns: gridTemplate,
-          padding: '10px 20px', background: colors.surfaceRaised,
-          borderBottom: `1px solid ${colors.border}`,
-        }}>
-          {visibleColumns.map(col => (
-            <div
-              key={col.field}
-              onClick={() => handleSort(col.field)}
-              style={{
-                fontSize: 10, fontWeight: 600,
-                color: sortField === col.field ? colors.accent : colors.textMuted,
-                textTransform: 'uppercase', letterSpacing: '0.05em',
-                cursor: 'pointer', userSelect: 'none',
-                display: 'flex', alignItems: 'center', gap: 4,
-              }}
-            >
-              {col.label}
-              {sortField === col.field && (
-                <span style={{ fontSize: 8 }}>{sortDir === 'asc' ? '\u25B2' : '\u25BC'}</span>
-              )}
-            </div>
-          ))}
-        </div>
+        {/* Header row — hidden on mobile */}
+        {!isMobile && (
+          <div style={{
+            display: 'grid', gridTemplateColumns: gridTemplate,
+            padding: '10px 20px', background: colors.surfaceRaised,
+            borderBottom: `1px solid ${colors.border}`,
+          }}>
+            {visibleColumns.map(col => (
+              <div
+                key={col.field}
+                onClick={() => handleSort(col.field)}
+                style={{
+                  fontSize: 10, fontWeight: 600,
+                  color: sortField === col.field ? colors.accent : colors.textMuted,
+                  textTransform: 'uppercase', letterSpacing: '0.05em',
+                  cursor: 'pointer', userSelect: 'none',
+                  display: 'flex', alignItems: 'center', gap: 4,
+                }}
+              >
+                {col.label}
+                {sortField === col.field && (
+                  <span style={{ fontSize: 8 }}>{sortDir === 'asc' ? '\u25B2' : '\u25BC'}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Data rows */}
         {pageAccounts.length === 0 ? (
@@ -594,71 +598,113 @@ export default function AccountList() {
             </button>
           </div>
         ) : (
-          pageAccounts.map(account => (
-            <div
-              key={account.id}
-              onClick={() => {
-                if (!scoringActive) return;
-                setSelectedAccount(account);
-                setDrawerWhy(null);
-                setDrawerWhyLoading(true);
-                api.get(`/accounts/${account.id}/score/why`)
-                  .then((r: any) => setDrawerWhy(r.why || ''))
-                  .catch(() => setDrawerWhy('Unable to load analysis.'))
-                  .finally(() => setDrawerWhyLoading(false));
-              }}
-              style={{
-                display: 'grid', gridTemplateColumns: gridTemplate,
-                padding: '12px 20px',
-                borderBottom: `1px solid ${colors.border}`,
-                cursor: 'pointer', transition: 'background 0.12s',
-                alignItems: 'center',
-              }}
-              onMouseEnter={e => (e.currentTarget.style.background = colors.surfaceHover)}
-              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-            >
-              <div style={{ fontSize: 13, fontWeight: 500, color: colors.accent, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingRight: 8 }}>
-                {anon.company(account.name || 'Unnamed')}
-              </div>
-              <div style={{ fontSize: 12, color: colors.textSecondary, fontFamily: fonts.mono, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {account.domain || '—'}
-              </div>
-              {/* Score column — only shown when scoring is active */}
-              {scoringActive && (
-                <div>
-                  <ScoreBadge grade={account.grade} score={account.total_score} scoreDelta={account.score_delta} dataConfidence={account.data_confidence} />
-                  <div style={{ marginTop: 4 }}>
-                    <SignalBadges signals={account.signals} confidence={account.classification_confidence} />
+          pageAccounts.map(account => {
+            const openDrawer = () => {
+              if (!scoringActive) return;
+              setSelectedAccount(account);
+              setDrawerWhy(null);
+              setDrawerWhyLoading(true);
+              api.get(`/accounts/${account.id}/score/why`)
+                .then((r: any) => setDrawerWhy(r.why || ''))
+                .catch(() => setDrawerWhy('Unable to load analysis.'))
+                .finally(() => setDrawerWhyLoading(false));
+            };
+
+            if (isMobile) {
+              return (
+                <div
+                  key={account.id}
+                  onClick={openDrawer}
+                  style={{
+                    padding: '12px 14px',
+                    borderBottom: `1px solid ${colors.border}`,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {/* Row 1: Account name + score badge */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 6 }}>
+                    <span style={{ fontSize: 14, fontWeight: 500, color: colors.accent, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {anon.company(account.name || 'Unnamed')}
+                    </span>
+                    {scoringActive && account.grade && (
+                      <span style={{ flexShrink: 0 }}>
+                        <ScoreBadge grade={account.grade} score={account.total_score} scoreDelta={account.score_delta} dataConfidence={account.data_confidence} />
+                      </span>
+                    )}
+                  </div>
+                  {/* Row 2: domain, pipeline amount, last activity */}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, fontSize: 12, color: colors.textSecondary }}>
+                    {account.domain && (
+                      <span style={{ fontFamily: fonts.mono }}>{account.domain}</span>
+                    )}
+                    {account.total_pipeline > 0 && (
+                      <span style={{ fontFamily: fonts.mono, color: colors.text }}>{formatCurrency(anon.amount(account.total_pipeline))}</span>
+                    )}
+                    {account.last_activity && (
+                      <span style={{ color: colors.textMuted }}>{formatTimeAgo(account.last_activity)}</span>
+                    )}
                   </div>
                 </div>
-              )}
-              {hasIndustryData && (
-                <div style={{ fontSize: 12, color: colors.textMuted }}>
-                  {account.industry || '—'}
+              );
+            }
+
+            return (
+              <div
+                key={account.id}
+                onClick={openDrawer}
+                style={{
+                  display: 'grid', gridTemplateColumns: gridTemplate,
+                  padding: '12px 20px',
+                  borderBottom: `1px solid ${colors.border}`,
+                  cursor: 'pointer', transition: 'background 0.12s',
+                  alignItems: 'center',
+                }}
+                onMouseEnter={e => (e.currentTarget.style.background = colors.surfaceHover)}
+                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+              >
+                <div style={{ fontSize: 13, fontWeight: 500, color: colors.accent, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingRight: 8 }}>
+                  {anon.company(account.name || 'Unnamed')}
                 </div>
-              )}
-              {hasDealData && (
-                <div style={{ fontSize: 12, fontFamily: fonts.mono, color: colors.text }}>
-                  {account.open_deal_count || '—'}
+                <div style={{ fontSize: 12, color: colors.textSecondary, fontFamily: fonts.mono, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {account.domain || '—'}
                 </div>
-              )}
-              {hasPipelineData && (
-                <div style={{ fontSize: 12, fontFamily: fonts.mono, color: colors.text }}>
-                  {account.total_pipeline ? formatCurrency(anon.amount(account.total_pipeline)) : '—'}
-                </div>
-              )}
-              {hasContactData && (
-                <div style={{ fontSize: 12, fontFamily: fonts.mono, color: colors.textMuted }}>
-                  {account.contact_count || '—'}
-                </div>
-              )}
-              {hasActivityData && (
-                <div style={{ fontSize: 11, color: colors.textMuted }}>
-                  {account.last_activity ? formatTimeAgo(account.last_activity) : '—'}
-                </div>
-              )}
-            </div>
-          ))
+                {/* Score column — only shown when scoring is active */}
+                {scoringActive && (
+                  <div>
+                    <ScoreBadge grade={account.grade} score={account.total_score} scoreDelta={account.score_delta} dataConfidence={account.data_confidence} />
+                    <div style={{ marginTop: 4 }}>
+                      <SignalBadges signals={account.signals} confidence={account.classification_confidence} />
+                    </div>
+                  </div>
+                )}
+                {hasIndustryData && (
+                  <div style={{ fontSize: 12, color: colors.textMuted }}>
+                    {account.industry || '—'}
+                  </div>
+                )}
+                {hasDealData && (
+                  <div style={{ fontSize: 12, fontFamily: fonts.mono, color: colors.text }}>
+                    {account.open_deal_count || '—'}
+                  </div>
+                )}
+                {hasPipelineData && (
+                  <div style={{ fontSize: 12, fontFamily: fonts.mono, color: colors.text }}>
+                    {account.total_pipeline ? formatCurrency(anon.amount(account.total_pipeline)) : '—'}
+                  </div>
+                )}
+                {hasContactData && (
+                  <div style={{ fontSize: 12, fontFamily: fonts.mono, color: colors.textMuted }}>
+                    {account.contact_count || '—'}
+                  </div>
+                )}
+                {hasActivityData && (
+                  <div style={{ fontSize: 11, color: colors.textMuted }}>
+                    {account.last_activity ? formatTimeAgo(account.last_activity) : '—'}
+                  </div>
+                )}
+              </div>
+            );
+          })
         )}
       </div>
 
@@ -710,7 +756,7 @@ export default function AccountList() {
           />
           {/* Panel */}
           <div style={{
-            position: 'fixed', top: 0, right: 0, bottom: 0, width: 400,
+            position: 'fixed', top: 0, right: 0, bottom: 0, width: isMobile ? '100%' : 400, maxWidth: '100vw',
             background: colors.surface, borderLeft: `1px solid ${colors.border}`,
             zIndex: 101, overflowY: 'auto', padding: 24, display: 'flex', flexDirection: 'column', gap: 16,
           }}>

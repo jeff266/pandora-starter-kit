@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import Skeleton from '../components/Skeleton';
 import { useDemoMode } from '../contexts/DemoModeContext';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 interface Member {
   id: string;
@@ -22,6 +23,7 @@ const roleBadgeColors: Record<string, string> = {
 export default function MembersPage() {
   const { user, currentWorkspace } = useWorkspace();
   const { anon } = useDemoMode();
+  const isMobile = useIsMobile();
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -171,16 +173,28 @@ export default function MembersPage() {
       )}
 
       <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, overflow: 'hidden' }}>
-        <div style={{
-          display: 'grid', gridTemplateColumns: isAdmin ? '2fr 2fr 1fr 1fr 80px' : '2fr 2fr 1fr 1fr',
-          padding: '10px 16px', borderBottom: `1px solid ${colors.border}`,
-          fontSize: 11, fontWeight: 600, color: colors.textDim, textTransform: 'uppercase', letterSpacing: '0.05em',
-        }}>
-          <span>Name</span><span>Email</span><span>Role</span><span>Joined</span>
-          {isAdmin && <span></span>}
-        </div>
+        {!isMobile && (
+          <div style={{
+            display: 'grid', gridTemplateColumns: isAdmin ? '2fr 2fr 1fr 1fr 80px' : '2fr 2fr 1fr 1fr',
+            padding: '10px 16px', borderBottom: `1px solid ${colors.border}`,
+            fontSize: 11, fontWeight: 600, color: colors.textDim, textTransform: 'uppercase', letterSpacing: '0.05em',
+          }}>
+            <span>Name</span><span>Email</span><span>Role</span><span>Joined</span>
+            {isAdmin && <span></span>}
+          </div>
+        )}
 
-        {members.map(member => (
+        {members.map(member => isMobile ? (
+          <div key={member.id} style={{ padding: '12px 14px', borderBottom: `1px solid ${colors.border}` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <span style={{ fontSize: 14, fontWeight: 500, color: colors.text }}>{member.name ? anon.person(member.name) : '--'}</span>
+              <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 4, background: `${roleBadgeColors[member.role] || colors.textMuted}15`, color: roleBadgeColors[member.role] || colors.textMuted, textTransform: 'capitalize' }}>
+                {member.role}
+              </span>
+            </div>
+            <div style={{ fontSize: 12, color: colors.textSecondary }}>{anon.email(member.email)}</div>
+          </div>
+        ) : (
           <div key={member.id} style={{
             display: 'grid', gridTemplateColumns: isAdmin ? '2fr 2fr 1fr 1fr 80px' : '2fr 2fr 1fr 1fr',
             padding: '12px 16px', borderBottom: `1px solid ${colors.border}`, alignItems: 'center',

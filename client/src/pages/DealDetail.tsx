@@ -7,6 +7,7 @@ import Skeleton from '../components/Skeleton';
 import SectionErrorBoundary from '../components/SectionErrorBoundary';
 import { DossierNarrative, AnalysisModal } from '../components/shared';
 import { useDemoMode } from '../contexts/DemoModeContext';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 const SEVERITY_LABELS: Record<string, string> = {
   act: 'Critical', watch: 'Warning', notable: 'Notable', info: 'Info',
@@ -107,6 +108,7 @@ export default function DealDetail() {
   const { dealId } = useParams<{ dealId: string }>();
   const navigate = useNavigate();
   const { anon } = useDemoMode();
+  const isMobile = useIsMobile();
   const [dossier, setDossier] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -227,7 +229,7 @@ export default function DealDetail() {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <Skeleton height={80} />
-        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr', gap: 16 }}>
           <Skeleton height={300} />
           <Skeleton height={300} />
         </div>
@@ -324,7 +326,7 @@ export default function DealDetail() {
         borderRadius: 10,
         padding: 20,
       }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: isMobile ? 'stretch' : 'flex-start', gap: isMobile ? 12 : 0 }}>
           <div style={{ flex: 1 }}>
             <h2 style={{ fontSize: 17, fontWeight: 700, color: colors.text }}>
               {anon.deal(deal.name || 'Unnamed Deal')}
@@ -353,7 +355,7 @@ export default function DealDetail() {
                 </span>
               )}
             </div>
-            <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 12, color: colors.textMuted }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: isMobile ? 8 : 16, marginTop: 8, fontSize: 12, color: colors.textMuted }}>
               <span>Owner: {deal.owner_name ? anon.person(deal.owner_name) : deal.owner_email ? anon.email(deal.owner_email) : deal.owner ? anon.person(deal.owner) : '--'}</span>
               <span>Close: {deal.close_date ? formatDate(deal.close_date) : '--'}</span>
               {deal.account_name && (
@@ -367,7 +369,7 @@ export default function DealDetail() {
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <button
               onClick={() => setAnalysisOpen(true)}
               style={{
@@ -460,7 +462,7 @@ export default function DealDetail() {
         </div>
 
         {/* Health Signals */}
-        <div style={{ display: 'flex', gap: 16, marginTop: 16 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: isMobile ? 10 : 16, marginTop: 16 }}>
           {healthItems.map((h, i) => (
             <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style={{
@@ -557,7 +559,7 @@ export default function DealDetail() {
       </SectionErrorBoundary>
 
       {/* Two Column Layout */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.8fr 1fr', gap: 16, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.8fr 1fr', gap: 16, alignItems: 'start' }}>
         {/* Left Column */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {/* Active Findings */}
@@ -929,8 +931,8 @@ export default function DealDetail() {
             No score history yet — history builds weekly.
           </p>
         ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <div style={{ overflowX: 'auto', maxWidth: '100%', WebkitOverflowScrolling: 'touch' as any }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: isMobile ? 500 : undefined }}>
               <thead>
                 <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
                   {['Week', 'Score', 'Grade', 'Change', 'Notes'].map(h => (
@@ -986,7 +988,7 @@ export default function DealDetail() {
                       <td style={{ padding: '8px 10px', fontFamily: fonts.mono, fontWeight: 600 }}>
                         {deltaEl}
                       </td>
-                      <td style={{ padding: '8px 10px', color: colors.textMuted, fontStyle: 'italic', maxWidth: 320 }}>
+                      <td style={{ padding: '8px 10px', color: colors.textMuted, fontStyle: 'italic', maxWidth: isMobile ? '100%' : 320 }}>
                         {commentary}
                       </td>
                     </tr>

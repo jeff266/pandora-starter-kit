@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
+import { useIsMobile } from '../hooks/useIsMobile';
 import { colors, fonts } from '../styles/theme';
 import Skeleton from '../components/Skeleton';
 import SectionErrorBoundary from '../components/SectionErrorBoundary';
@@ -125,6 +126,7 @@ const dangerBtn: React.CSSProperties = {
 };
 
 export default function PushPage() {
+  const isMobile = useIsMobile();
   const [channels, setChannels] = useState<Channel[]>([]);
   const [rules, setRules] = useState<Rule[]>([]);
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
@@ -366,6 +368,7 @@ export default function PushPage() {
             onEdit={r => { setEditingRule(r); setRuleModalOpen(true); }}
             onDelete={id => setDeleteConfirm({ type: 'rule', id })}
             onAdd={() => { setEditingRule(null); setRuleModalOpen(true); }}
+            isMobile={isMobile}
           />
         )}
         {activeTab === 'log' && (
@@ -385,6 +388,7 @@ export default function PushPage() {
               }).catch(() => {});
             }}
             onRetrigger={handleRetrigger}
+            isMobile={isMobile}
           />
         )}
       </SectionErrorBoundary>
@@ -395,6 +399,7 @@ export default function PushPage() {
           onClose={() => { setDrawerOpen(false); setEditingChannel(null); }}
           onSaved={() => { setDrawerOpen(false); setEditingChannel(null); fetchChannels(); }}
           setToast={setToast}
+          isMobile={isMobile}
         />
       )}
 
@@ -405,6 +410,7 @@ export default function PushPage() {
           onClose={() => { setRuleModalOpen(false); setEditingRule(null); }}
           onSaved={() => { setRuleModalOpen(false); setEditingRule(null); fetchRules(); }}
           setToast={setToast}
+          isMobile={isMobile}
         />
       )}
 
@@ -416,7 +422,7 @@ export default function PushPage() {
             onClick={() => setDeleteConfirm(null)} />
           <div style={{
             position: 'relative', background: colors.bg, border: `1px solid ${colors.border}`,
-            borderRadius: 12, padding: 24, width: 400, zIndex: 1,
+            borderRadius: 12, padding: isMobile ? 20 : 24, width: isMobile ? '90%' : 400, maxWidth: '100vw', zIndex: 1,
           }}>
             <h3 style={{ fontSize: 16, fontWeight: 700, color: colors.text, margin: '0 0 8px' }}>
               Delete {deleteConfirm.type === 'channel' ? 'Channel' : 'Rule'}?
@@ -524,11 +530,12 @@ function ChannelsTab({ channels, onEdit, onDelete }: {
   );
 }
 
-function ChannelDrawer({ channel, onClose, onSaved, setToast }: {
+function ChannelDrawer({ channel, onClose, onSaved, setToast, isMobile }: {
   channel: Channel | null;
   onClose: () => void;
   onSaved: () => void;
   setToast: (t: ToastState) => void;
+  isMobile?: boolean;
 }) {
   const isEdit = !!channel;
   const [step, setStep] = useState(isEdit ? 2 : 1);
@@ -610,7 +617,7 @@ function ChannelDrawer({ channel, onClose, onSaved, setToast }: {
     <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', justifyContent: 'flex-end' }}>
       <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.4)' }} onClick={onClose} />
       <div style={{
-        position: 'relative', width: 480, height: '100vh', background: colors.bg,
+        position: 'relative', width: isMobile ? '100%' : 480, maxWidth: '100vw', height: '100vh', background: colors.bg,
         borderLeft: `1px solid ${colors.border}`, display: 'flex', flexDirection: 'column',
         overflowY: 'auto',
       }}>
@@ -835,7 +842,7 @@ function ChannelDrawer({ channel, onClose, onSaved, setToast }: {
   );
 }
 
-function RulesTab({ rules, verifiedChannels, onToggle, onTrigger, onEdit, onDelete, onAdd }: {
+function RulesTab({ rules, verifiedChannels, onToggle, onTrigger, onEdit, onDelete, onAdd, isMobile }: {
   rules: Rule[];
   verifiedChannels: Channel[];
   onToggle: (id: string) => void;
@@ -843,6 +850,7 @@ function RulesTab({ rules, verifiedChannels, onToggle, onTrigger, onEdit, onDele
   onEdit: (r: Rule) => void;
   onDelete: (id: string) => void;
   onAdd: () => void;
+  isMobile?: boolean;
 }) {
   if (rules.length === 0) {
     return (
@@ -865,6 +873,70 @@ function RulesTab({ rules, verifiedChannels, onToggle, onTrigger, onEdit, onDele
         >
           Add Rule
         </button>
+      </div>
+    );
+  }
+
+  if (isMobile) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {rules.map(rule => {
+          const autoDisabled = rule.consecutive_failures >= 5;
+          const failed = rule.consecutive_failures > 0;
+          let statusBg = colors.surfaceRaised;
+          let statusColor = colors.textMuted;
+          let statusLabel = 'Inactive';
+          if (autoDisabled) {
+            statusBg = colors.redSoft; statusColor = colors.red; statusLabel = 'Auto-disabled';
+          } else if (failed) {
+            statusBg = colors.redSoft; statusColor = colors.red; statusLabel = `Failed (${rule.consecutive_failures})`;
+          } else if (rule.is_active) {
+            statusBg = colors.greenSoft; statusColor = colors.green; statusLabel = 'Active';
+          }
+
+          return (
+            <div key={rule.id} style={{
+              background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 8,
+              padding: 14,
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>{rule.name}</span>
+                <span style={{
+                  fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 4,
+                  background: statusBg, color: statusColor,
+                }}>
+                  {statusLabel}
+                </span>
+              </div>
+              <div style={{ fontSize: 12, color: colors.textSecondary, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 14 }}>{channelTypeIcon[rule.channel_type] || '?'}</span>
+                {rule.channel_name}
+              </div>
+              <div style={{ fontSize: 11, color: colors.textMuted, marginBottom: 4 }}>{formatTrigger(rule)}</div>
+              <div style={{ fontSize: 11, color: colors.textMuted, marginBottom: 10 }}>Last delivered: {timeAgo(rule.last_delivery_at)}</div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <button onClick={() => onToggle(rule.id)} title={rule.is_active ? 'Disable' : 'Enable'}
+                  style={{
+                    width: 36, height: 20, borderRadius: 10, cursor: 'pointer', border: 'none',
+                    background: rule.is_active ? colors.green : colors.surfaceRaised,
+                    position: 'relative', transition: 'background 0.2s',
+                  }}>
+                  <span style={{
+                    position: 'absolute', top: 2, left: rule.is_active ? 18 : 2,
+                    width: 16, height: 16, borderRadius: '50%', background: '#fff',
+                    transition: 'left 0.2s',
+                  }} />
+                </button>
+                <button style={{ ...secondaryBtn, padding: '3px 8px', fontSize: 12 }}
+                  onClick={() => onTrigger(rule.id)} title="Trigger now">▶</button>
+                <button style={{ ...secondaryBtn, padding: '3px 8px', fontSize: 12 }}
+                  onClick={() => onEdit(rule)} title="Edit">✎</button>
+                <button style={{ ...secondaryBtn, padding: '3px 8px', fontSize: 12, color: colors.red }}
+                  onClick={() => onDelete(rule.id)} title="Delete">🗑</button>
+              </div>
+            </div>
+          );
+        })}
       </div>
     );
   }
@@ -946,12 +1018,13 @@ function RulesTab({ rules, verifiedChannels, onToggle, onTrigger, onEdit, onDele
   );
 }
 
-function RuleModal({ rule, channels, onClose, onSaved, setToast }: {
+function RuleModal({ rule, channels, onClose, onSaved, setToast, isMobile }: {
   rule: Rule | null;
   channels: Channel[];
   onClose: () => void;
   onSaved: () => void;
   setToast: (t: ToastState) => void;
+  isMobile?: boolean;
 }) {
   const isEdit = !!rule;
   const [step, setStep] = useState(1);
@@ -1051,7 +1124,8 @@ function RuleModal({ rule, channels, onClose, onSaved, setToast }: {
       <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)' }} onClick={onClose} />
       <div style={{
         position: 'relative', background: colors.bg, border: `1px solid ${colors.border}`,
-        borderRadius: 12, width: '90%', maxWidth: 680, maxHeight: '90vh', overflow: 'auto',
+        borderRadius: isMobile ? 0 : 12, width: isMobile ? '100%' : '90%', maxWidth: isMobile ? '100vw' : 680,
+        maxHeight: isMobile ? '100vh' : '90vh', overflow: 'auto',
         display: 'flex', flexDirection: 'column',
       }}>
         <div style={{
@@ -1433,7 +1507,7 @@ function RuleModal({ rule, channels, onClose, onSaved, setToast }: {
   );
 }
 
-function LogTab({ entries, rules, logFilter, setLogFilter, hasMore, onLoadMore, onRetrigger }: {
+function LogTab({ entries, rules, logFilter, setLogFilter, hasMore, onLoadMore, onRetrigger, isMobile }: {
   entries: LogEntry[];
   rules: Rule[];
   logFilter: { status: string; ruleId: string; timeRange: string; limit: number; offset: number };
@@ -1441,6 +1515,7 @@ function LogTab({ entries, rules, logFilter, setLogFilter, hasMore, onLoadMore, 
   hasMore: boolean;
   onLoadMore: () => void;
   onRetrigger: (ruleId: string) => void;
+  isMobile?: boolean;
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -1502,6 +1577,74 @@ function LogTab({ entries, rules, logFilter, setLogFilter, hasMore, onLoadMore, 
           <p style={{ fontSize: 12, color: colors.textMuted, marginTop: 6 }}>
             Logs will appear here after rules are triggered.
           </p>
+        </div>
+      ) : isMobile ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {entries.map(entry => {
+            const expanded = expandedId === entry.id;
+            return (
+              <div key={entry.id} style={{
+                background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 8,
+                overflow: 'hidden',
+              }}>
+                <div
+                  style={{ padding: 14, cursor: 'pointer' }}
+                  onClick={() => setExpandedId(expanded ? null : entry.id)}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <span style={{ fontSize: 13, fontWeight: 500, color: colors.text }}>{entry.rule_name}</span>
+                    {statusBadge(entry.status)}
+                  </div>
+                  <div style={{ display: 'flex', gap: 12, fontSize: 11, color: colors.textMuted, flexWrap: 'wrap' }}>
+                    <span>{channelTypeLabel[entry.channel_type] || entry.channel_type}</span>
+                    <span>{entry.triggered_by}</span>
+                    <span style={{ fontFamily: fonts.mono }}>{entry.findings_count} findings</span>
+                    <span>{timeAgo(entry.delivered_at)}</span>
+                  </div>
+                </div>
+
+                {expanded && (
+                  <div style={{
+                    padding: '12px 14px', borderTop: `1px solid ${colors.border}`,
+                    background: colors.surfaceRaised,
+                  }}>
+                    {entry.error_message && (
+                      <div style={{
+                        padding: '8px 12px', borderRadius: 6, marginBottom: 10,
+                        background: colors.redSoft, border: `1px solid ${colors.red}`,
+                        color: colors.red, fontSize: 12,
+                      }}>
+                        Error: {entry.error_message}
+                      </div>
+                    )}
+                    {entry.payload_preview && (
+                      <pre style={{
+                        background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 6,
+                        padding: 12, fontSize: 11, fontFamily: fonts.mono, color: colors.textSecondary,
+                        overflow: 'auto', maxHeight: 200, margin: 0,
+                        whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                      }}>
+                        {typeof entry.payload_preview === 'string'
+                          ? entry.payload_preview
+                          : JSON.stringify(entry.payload_preview, null, 2)}
+                      </pre>
+                    )}
+                    <div style={{ display: 'flex', gap: 8, marginTop: 10, justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: 11, color: colors.textMuted }}>
+                        {entry.findings_count} finding{entry.findings_count !== 1 ? 's' : ''} delivered
+                      </span>
+                      {entry.status === 'failed' && (
+                        <button style={{ ...primaryBtn, padding: '5px 12px', fontSize: 11 }}
+                          onClick={e => { e.stopPropagation(); onRetrigger(entry.rule_id); }}>
+                          Re-trigger
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       ) : (
         <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, overflow: 'hidden' }}>
