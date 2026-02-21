@@ -72,9 +72,11 @@ const sections: NavSection[] = [
 interface SidebarProps {
   badges: Record<string, number>;
   showAllClients?: boolean;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
-export default function Sidebar({ badges, showAllClients }: SidebarProps) {
+export default function Sidebar({ badges, showAllClients, collapsed = false, onToggleCollapse }: SidebarProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, currentWorkspace, workspaces, selectWorkspace, logout, token } = useWorkspace();
@@ -109,16 +111,18 @@ export default function Sidebar({ badges, showAllClients }: SidebarProps) {
 
   return (
     <aside style={{
-      width: 220, height: '100vh', position: 'fixed', left: 0, top: 0,
+      width: collapsed ? 56 : 220, height: '100vh', position: 'fixed', left: 0, top: 0,
       background: colors.bgSidebar, borderRight: `1px solid ${colors.border}`,
       display: 'flex', flexDirection: 'column', zIndex: 100, fontFamily: fonts.sans,
+      transition: 'width 0.2s ease', overflow: 'hidden',
     }}>
       <div
         style={{
-          padding: '16px 14px', borderBottom: `1px solid ${colors.border}`,
-          display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', position: 'relative',
+          padding: collapsed ? '16px 0' : '16px 14px', borderBottom: `1px solid ${colors.border}`,
+          display: 'flex', alignItems: 'center', gap: collapsed ? 0 : 10, cursor: 'pointer', position: 'relative',
+          justifyContent: collapsed ? 'center' : 'flex-start',
         }}
-        onClick={() => setShowWsDropdown(!showWsDropdown)}
+        onClick={() => { if (!collapsed) setShowWsDropdown(!showWsDropdown); }}
       >
         <div style={{
           width: 28, height: 28, borderRadius: 6, background: colors.accent,
@@ -127,18 +131,20 @@ export default function Sidebar({ badges, showAllClients }: SidebarProps) {
         }}>
           {(currentWorkspace?.name || 'P').charAt(0).toUpperCase()}
         </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{
-            fontSize: 13, fontWeight: 600, color: colors.text,
-            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-          }}>
-            {displayWsName(currentWorkspace?.name || 'Pandora')}
+        {!collapsed && (
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{
+              fontSize: 13, fontWeight: 600, color: colors.text,
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>
+              {displayWsName(currentWorkspace?.name || 'Pandora')}
+            </div>
+            <div style={{ fontSize: 11, color: colors.textMuted, textTransform: 'capitalize' }}>
+              {currentWorkspace?.role || 'Workspace'}
+            </div>
           </div>
-          <div style={{ fontSize: 11, color: colors.textMuted, textTransform: 'capitalize' }}>
-            {currentWorkspace?.role || 'Workspace'}
-          </div>
-        </div>
-        <span style={{ fontSize: 10, color: colors.textMuted }}>{showWsDropdown ? '\u25B2' : '\u25BC'}</span>
+        )}
+        {!collapsed && <span style={{ fontSize: 10, color: colors.textMuted }}>{showWsDropdown ? '\u25B2' : '\u25BC'}</span>}
 
         {showWsDropdown && workspaces.length > 1 && (
           <div
@@ -193,20 +199,23 @@ export default function Sidebar({ badges, showAllClients }: SidebarProps) {
           <div style={{ marginBottom: 4 }}>
             <div
               onClick={() => navigate('/portfolio')}
+              title={collapsed ? 'All Clients' : undefined}
               style={{
-                display: 'flex', alignItems: 'center', gap: 8, padding: '7px 14px', marginLeft: 2,
+                display: 'flex', alignItems: 'center', gap: collapsed ? 0 : 8,
+                padding: collapsed ? '7px 0' : '7px 14px', marginLeft: collapsed ? 0 : 2,
+                justifyContent: collapsed ? 'center' : 'flex-start',
                 cursor: 'pointer', fontSize: 13,
                 color: isActive('/portfolio') ? colors.accent : colors.textSecondary,
                 background: isActive('/portfolio') ? colors.accentSoft : 'transparent',
-                borderLeft: isActive('/portfolio') ? `2px solid ${colors.accent}` : '2px solid transparent',
+                borderLeft: collapsed ? 'none' : (isActive('/portfolio') ? `2px solid ${colors.accent}` : '2px solid transparent'),
                 transition: 'background 0.1s',
               }}
               onMouseEnter={e => { if (!isActive('/portfolio')) e.currentTarget.style.background = colors.surfaceHover; }}
               onMouseLeave={e => { if (!isActive('/portfolio')) e.currentTarget.style.background = 'transparent'; }}
             >
               <span style={{ fontSize: 14, width: 18, textAlign: 'center', opacity: 0.8 }}>{'\u25A3'}</span>
-              <span style={{ flex: 1, fontWeight: isActive('/portfolio') ? 600 : 400 }}>All Clients</span>
-              {unassignedCount > 0 && (
+              {!collapsed && <span style={{ flex: 1, fontWeight: isActive('/portfolio') ? 600 : 400 }}>All Clients</span>}
+              {!collapsed && unassignedCount > 0 && (
                 <span style={{
                   fontSize: 10, fontWeight: 600,
                   background: colors.redSoft, color: colors.red,
@@ -217,15 +226,18 @@ export default function Sidebar({ badges, showAllClients }: SidebarProps) {
                 </span>
               )}
             </div>
-            <div style={{ height: 1, background: colors.border, margin: '4px 14px' }} />
+            <div style={{ height: 1, background: colors.border, margin: collapsed ? '4px 8px' : '4px 14px' }} />
           </div>
         )}
         {sections.map((section, si) => (
           <div key={si} style={{ marginBottom: 4 }}>
-            {section.title && (
-              <div style={{ fontSize: 10, fontWeight: 600, color: colors.textDim, padding: '12px 16px 4px', letterSpacing: '0.08em' }}>
+            {section.title && !collapsed && (
+              <div style={{ fontSize: 10, fontWeight: 600, color: colors.textDim, padding: '12px 16px 4px', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}>
                 {section.title}
               </div>
+            )}
+            {collapsed && section.title && (
+              <div style={{ height: 1, background: colors.border, margin: '6px 10px' }} />
             )}
             {section.items.map(item => {
               const active = isActive(item.path);
@@ -234,20 +246,23 @@ export default function Sidebar({ badges, showAllClients }: SidebarProps) {
                 <div
                   key={item.path}
                   onClick={() => navigate(item.path)}
+                  title={collapsed ? item.label : undefined}
                   style={{
-                    display: 'flex', alignItems: 'center', gap: 8, padding: '7px 14px', marginLeft: 2,
+                    display: 'flex', alignItems: 'center', gap: collapsed ? 0 : 8,
+                    padding: collapsed ? '7px 0' : '7px 14px', marginLeft: collapsed ? 0 : 2,
+                    justifyContent: collapsed ? 'center' : 'flex-start',
                     cursor: 'pointer', fontSize: 13,
                     color: active ? colors.accent : colors.textSecondary,
                     background: active ? colors.accentSoft : 'transparent',
-                    borderLeft: active ? `2px solid ${colors.accent}` : '2px solid transparent',
+                    borderLeft: collapsed ? 'none' : (active ? `2px solid ${colors.accent}` : '2px solid transparent'),
                     transition: 'background 0.1s',
                   }}
                   onMouseEnter={e => { if (!active) e.currentTarget.style.background = colors.surfaceHover; }}
                   onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent'; }}
                 >
                   <span style={{ fontSize: 14, width: 18, textAlign: 'center', opacity: 0.8 }}>{item.icon}</span>
-                  <span style={{ flex: 1, fontWeight: active ? 600 : 400 }}>{item.label}</span>
-                  {item.label === 'Targets' && badgeCount !== undefined && badgeCount > 0 && (
+                  {!collapsed && <span style={{ flex: 1, fontWeight: active ? 600 : 400, whiteSpace: 'nowrap' }}>{item.label}</span>}
+                  {!collapsed && item.label === 'Targets' && badgeCount !== undefined && badgeCount > 0 && (
                     <span style={{
                       width: 6,
                       height: 6,
@@ -256,10 +271,10 @@ export default function Sidebar({ badges, showAllClients }: SidebarProps) {
                       flexShrink: 0,
                     }} />
                   )}
-                  {item.label !== 'Targets' && badgeCount !== undefined && badgeCount > 0 && (
+                  {!collapsed && item.label !== 'Targets' && badgeCount !== undefined && badgeCount > 0 && (
                     <span style={{ fontSize: 10, fontWeight: 600, background: colors.accentSoft, color: colors.accent, padding: '1px 6px', borderRadius: 8, fontFamily: fonts.mono }}>{badgeCount}</span>
                   )}
-                  {item.label === 'Marketplace' && (
+                  {!collapsed && item.label === 'Marketplace' && (
                     <span style={{ fontSize: 9, fontWeight: 600, background: colors.surfaceHover, color: colors.textMuted, padding: '1px 5px', borderRadius: 4, textTransform: 'uppercase' }}>beta</span>
                   )}
                 </div>
@@ -269,44 +284,64 @@ export default function Sidebar({ badges, showAllClients }: SidebarProps) {
         ))}
       </nav>
 
-      <div style={{ borderTop: `1px solid ${colors.border}`, padding: '10px 14px' }}>
+      <div style={{ borderTop: `1px solid ${colors.border}`, padding: collapsed ? '10px 0' : '10px 14px' }}>
         {/* Notification Bell */}
         {currentWorkspace?.id && (
-          <div style={{ padding: '6px 0', marginBottom: 8 }}>
+          <div style={{ padding: '6px 0', marginBottom: 8, display: 'flex', justifyContent: collapsed ? 'center' : 'flex-start' }}>
             <NotificationBell workspaceId={currentWorkspace.id} />
           </div>
         )}
 
         <div
           onClick={toggleDemoMode}
+          title={collapsed ? 'Demo Mode' : undefined}
           style={{
-            display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer',
-            padding: '6px 0',
+            display: 'flex', alignItems: 'center', gap: collapsed ? 0 : 8, cursor: 'pointer',
+            padding: '6px 0', justifyContent: collapsed ? 'center' : 'flex-start',
           }}
         >
           <span style={{ fontSize: 14 }}>{'\uD83C\uDFAD'}</span>
-          <span style={{ fontSize: 12, color: colors.textSecondary, flex: 1 }}>Demo Mode</span>
-          <div style={{
-            width: 32, height: 18, borderRadius: 9,
-            background: isDemoMode ? colors.purple : colors.surfaceHover,
-            position: 'relative', transition: 'background 0.2s',
-          }}>
+          {!collapsed && <span style={{ fontSize: 12, color: colors.textSecondary, flex: 1, whiteSpace: 'nowrap' }}>Demo Mode</span>}
+          {!collapsed && (
             <div style={{
-              width: 14, height: 14, borderRadius: '50%',
-              background: '#fff', position: 'absolute', top: 2,
-              left: isDemoMode ? 16 : 2, transition: 'left 0.2s',
-            }} />
-          </div>
+              width: 32, height: 18, borderRadius: 9,
+              background: isDemoMode ? colors.purple : colors.surfaceHover,
+              position: 'relative', transition: 'background 0.2s',
+            }}>
+              <div style={{
+                width: 14, height: 14, borderRadius: '50%',
+                background: '#fff', position: 'absolute', top: 2,
+                left: isDemoMode ? 16 : 2, transition: 'left 0.2s',
+              }} />
+            </div>
+          )}
         </div>
       </div>
 
+      {/* Collapse toggle button */}
+      <div
+        onClick={onToggleCollapse}
+        style={{
+          borderTop: `1px solid ${colors.border}`, padding: '8px 0',
+          display: 'flex', justifyContent: 'center', cursor: 'pointer',
+        }}
+        onMouseEnter={e => (e.currentTarget.style.background = colors.surfaceHover)}
+        onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+      >
+        <span style={{ fontSize: 14, color: colors.textMuted, transition: 'transform 0.2s', transform: collapsed ? 'rotate(180deg)' : 'none' }}>
+          {'\u00AB'}
+        </span>
+      </div>
+
       <div style={{
-        padding: '12px 14px', borderTop: `1px solid ${colors.border}`,
-        display: 'flex', alignItems: 'center', gap: 10, position: 'relative',
+        padding: collapsed ? '12px 0' : '12px 14px', borderTop: `1px solid ${colors.border}`,
+        display: 'flex', alignItems: 'center', gap: collapsed ? 0 : 10, position: 'relative',
+        justifyContent: collapsed ? 'center' : 'flex-start',
       }}>
         <div
           style={{
-            display: 'flex', alignItems: 'center', gap: 10, flex: 1, cursor: 'pointer', minWidth: 0,
+            display: 'flex', alignItems: 'center', gap: collapsed ? 0 : 10, flex: collapsed ? undefined : 1,
+            cursor: 'pointer', minWidth: 0,
           }}
           onClick={() => setShowUserMenu(!showUserMenu)}
         >
@@ -317,27 +352,30 @@ export default function Sidebar({ badges, showAllClients }: SidebarProps) {
           }}>
             {(user?.name || 'U').charAt(0).toUpperCase()}
           </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 12, fontWeight: 500, color: colors.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {user?.name || 'User'}
+          {!collapsed && (
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 500, color: colors.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {user?.name || 'User'}
+              </div>
+              <div style={{ fontSize: 11, color: colors.textMuted, textTransform: 'capitalize' }}>
+                {currentWorkspace?.role || ''}
+              </div>
             </div>
-            <div style={{ fontSize: 11, color: colors.textMuted, textTransform: 'capitalize' }}>
-              {currentWorkspace?.role || ''}
-            </div>
-          </div>
+          )}
         </div>
 
         {showUserMenu && (
           <div
             style={{
-              position: 'absolute', bottom: '100%', left: 0, right: 0, marginBottom: 4,
+              position: 'absolute', bottom: '100%', left: 0, right: collapsed ? 'auto' : 0,
+              minWidth: collapsed ? 160 : undefined, marginBottom: 4,
               background: colors.surface, border: `1px solid ${colors.border}`,
               borderRadius: 8, zIndex: 200, boxShadow: '0 8px 24px rgba(0,0,0,0.4)', overflow: 'hidden',
             }}
           >
             <div
               onClick={() => { setShowUserMenu(false); navigate('/members'); }}
-              style={{ padding: '10px 14px', fontSize: 13, color: colors.text, cursor: 'pointer' }}
+              style={{ padding: '10px 14px', fontSize: 13, color: colors.text, cursor: 'pointer', whiteSpace: 'nowrap' }}
               onMouseEnter={e => (e.currentTarget.style.background = colors.surfaceHover)}
               onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
             >
@@ -345,7 +383,7 @@ export default function Sidebar({ badges, showAllClients }: SidebarProps) {
             </div>
             <div
               onClick={() => { setShowUserMenu(false); logout(); }}
-              style={{ padding: '10px 14px', fontSize: 13, color: colors.red, cursor: 'pointer', borderTop: `1px solid ${colors.border}` }}
+              style={{ padding: '10px 14px', fontSize: 13, color: colors.red, cursor: 'pointer', borderTop: `1px solid ${colors.border}`, whiteSpace: 'nowrap' }}
               onMouseEnter={e => (e.currentTarget.style.background = colors.surfaceHover)}
               onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
             >

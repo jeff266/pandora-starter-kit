@@ -91,6 +91,17 @@ export default function App() {
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatScope, setChatScope] = useState<{ type: string; entity_id?: string; entity_name?: string; rep_email?: string } | undefined>(undefined);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try { return localStorage.getItem('sidebar_collapsed') === 'true'; } catch { return false; }
+  });
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed(prev => {
+      const next = !prev;
+      try { localStorage.setItem('sidebar_collapsed', String(next)); } catch {}
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     if (token && currentWorkspace) {
@@ -178,8 +189,8 @@ export default function App() {
 
   return (
     <div style={{ display: 'flex', height: '100vh', background: colors.bg }}>
-      <Sidebar badges={badges} showAllClients={hasMultipleWorkspaces} />
-      <main style={{ marginLeft: 220, flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <Sidebar badges={badges} showAllClients={hasMultipleWorkspaces} collapsed={sidebarCollapsed} onToggleCollapse={toggleSidebar} />
+      <main style={{ marginLeft: sidebarCollapsed ? 56 : 220, flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', transition: 'margin-left 0.2s ease' }}>
         <DemoModeBanner />
         <TopBar title={title} lastRefreshed={lastRefreshed} onRefresh={fetchBadges} />
         <div style={{ flex: 1, overflow: 'auto', padding: '24px 28px' }}>
