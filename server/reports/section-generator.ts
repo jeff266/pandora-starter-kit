@@ -41,12 +41,33 @@ async function fetchSkillEvidence(
 
   const evidenceMap = new Map<string, SkillEvidence>();
   for (const row of result.rows) {
-    const output = typeof row.output === 'string' ? JSON.parse(row.output) : row.output;
+    let output = row.output;
+    let narrative = '';
+    let evidence: any = {};
+
+    if (typeof output === 'string') {
+      narrative = output;
+    } else if (output && typeof output === 'object') {
+      if (output.narrative) {
+        narrative = output.narrative;
+      }
+      if (output.evidence) {
+        evidence = output.evidence;
+      }
+      if (!output.narrative && !output.evidence) {
+        narrative = row.output_text || JSON.stringify(output);
+      }
+    }
+
+    if (!narrative && row.output_text) {
+      narrative = row.output_text;
+    }
+
     evidenceMap.set(row.skill_id, {
       skill_id: row.skill_id,
-      output,
-      narrative: output?.narrative || row.output_text || '',
-      evidence: output?.evidence || {},
+      output: typeof output === 'string' ? { narrative: output } : output,
+      narrative,
+      evidence,
       created_at: row.created_at,
     });
   }
@@ -83,6 +104,18 @@ function extractActionsFromNarrative(narrative: string): ActionItem[] {
 
 function stripActionTags(narrative: string): string {
   return narrative.replace(/<actions>[\s\S]*?<\/actions>/g, '').trim();
+}
+
+function cleanNarrative(narrative: string): string {
+  let cleaned = stripActionTags(narrative);
+  cleaned = cleaned.replace(/```json\s*\[[\s\S]*?\]\s*```/g, '').trim();
+  if (cleaned.startsWith('[') || cleaned.startsWith('{')) {
+    try {
+      JSON.parse(cleaned);
+      return '';
+    } catch {}
+  }
+  return cleaned;
 }
 
 function parseMonteCarloMetrics(narrative: string): MetricCard[] {
@@ -294,13 +327,27 @@ function buildDealsNeedingAttention(content: SectionContent, evidenceMap: Map<st
   const narrativeParts: string[] = [];
 
   if (riskReview) {
-    narrativeParts.push(stripActionTags(riskReview.narrative));
-    allCards.push(...parseDealCards(riskReview.narrative, maxItems));
+    const cards = parseDealCards(riskReview.narrative, maxItems);
+    allCards.push(...cards);
     allActions.push(...extractActionsFromNarrative(riskReview.narrative));
+
+    const jsonDeals = parseJsonDeals(riskReview.narrative);
+    if (jsonDeals.length > 0) {
+      for (const d of jsonDeals) {
+        if (!allCards.find(c => c.name === d.name)) {
+          allCards.push(d);
+        }
+      }
+      const dealCount = jsonDeals.length;
+      const critical = jsonDeals.filter(d => d.signal_severity === 'critical').length;
+      narrativeParts.push(`**${dealCount} deals flagged for attention** — ${critical} critical risk, ${dealCount - critical} require monitoring.`);
+    } else {
+      const cleaned = cleanNarrative(riskReview.narrative);
+      if (cleaned) narrativeParts.push(cleaned);
+    }
   }
 
   if (singleThread) {
-    if (!riskReview) narrativeParts.push(stripActionTags(singleThread.narrative));
     const stCards = parseDealCards(singleThread.narrative, maxItems);
     for (const card of stCards) {
       if (!allCards.find(c => c.name === card.name)) {
@@ -308,11 +355,43 @@ function buildDealsNeedingAttention(content: SectionContent, evidenceMap: Map<st
       }
     }
     allActions.push(...extractActionsFromNarrative(singleThread.narrative));
+    if (!riskReview) {
+      const cleaned = cleanNarrative(singleThread.narrative);
+      if (cleaned) narrativeParts.push(cleaned);
+    }
   }
 
   content.deal_cards = allCards.slice(0, maxItems);
   content.action_items = allActions.slice(0, maxItems);
   content.narrative = narrativeParts.join('\n\n') || 'No risk-flagged deals found. Run deal-risk-review and single-thread-alert skills to populate this section.';
+}
+
+function parseJsonDeals(narrative: string): DealCard[] {
+  const deals: DealCard[] = [];
+  let jsonStr = narrative;
+  const codeBlock = narrative.match(/```json\s*([\s\S]*?)\s*```/);
+  if (codeBlock) jsonStr = codeBlock[1];
+
+  try {
+    const parsed = JSON.parse(jsonStr.trim());
+    const arr = Array.isArray(parsed) ? parsed : [parsed];
+    for (const d of arr) {
+      if (d.dealName || d.name) {
+        const severity = (d.overallRisk === 'critical' || d.riskLevel === 'critical') ? 'critical' :
+                         (d.overallRisk === 'medium' || d.riskLevel === 'medium') ? 'warning' : 'info';
+        deals.push({
+          name: d.dealName || d.name,
+          amount: d.amount ? `$${(d.amount / 1000).toFixed(0)}K` : '',
+          stage: d.currentStage || d.stage || '',
+          signal: d.topRisk || d.signal || '',
+          signal_severity: severity,
+          owner: d.owner || '',
+          days_in_stage: d.daysInStage || 0,
+        });
+      }
+    }
+  } catch {}
+  return deals;
 }
 
 function buildRepPerformance(content: SectionContent, evidenceMap: Map<string, SkillEvidence>): void {

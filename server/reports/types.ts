@@ -141,6 +141,7 @@ export interface ReportGeneration {
   }>;
   delivery_status: Record<string, string>;
   sections_snapshot: ReportSection[];
+  sections_content?: SectionContent[];
   skills_run?: string[];
   total_tokens: number;
   generation_duration_ms?: number;

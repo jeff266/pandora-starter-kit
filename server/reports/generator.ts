@@ -202,6 +202,7 @@ export async function generateReport(request: GenerateReportRequest): Promise<Re
     formats_generated: formatsGenerated,
     delivery_status: {},
     sections_snapshot: enabledSections,
+    sections_content: sectionsContent,
     skills_run: requiredSkills,
     total_tokens: 0,
     generation_duration_ms: generationDuration,
