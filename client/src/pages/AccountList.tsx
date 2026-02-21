@@ -198,6 +198,130 @@ function ScoringActiveBanner({ onRefresh, activating }: { onRefresh: () => void;
   );
 }
 
+function MultiSelectFilter({
+  label,
+  values,
+  onChange,
+  options,
+  anon,
+}: {
+  label: string;
+  values: string[];
+  onChange: (values: string[]) => void;
+  options: { value: string; label: string }[];
+  anon?: any;
+}) {
+  const [open, setOpen] = useState(false);
+  const displayText = values.length === 0
+    ? 'All'
+    : values.length === 1
+      ? (anon ? anon.company(values[0]) : values[0])
+      : `${values.length} selected`;
+
+  return (
+    <div style={{ position: 'relative', display: 'inline-block' }}>
+      <label style={{ fontSize: 11, color: colors.textMuted, marginRight: 6 }}>{label}:</label>
+      <button
+        onClick={() => setOpen(!open)}
+        style={{
+          fontSize: 12,
+          padding: '6px 24px 6px 12px',
+          background: colors.surfaceRaised,
+          border: `1px solid ${colors.border}`,
+          borderRadius: 6,
+          color: colors.text,
+          cursor: 'pointer',
+          position: 'relative',
+          minWidth: 120,
+          textAlign: 'left',
+        }}
+      >
+        {displayText}
+        <span style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)' }}>▼</span>
+      </button>
+      {open && (
+        <>
+          <div
+            style={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: 10,
+            }}
+            onClick={() => setOpen(false)}
+          />
+          <div
+            style={{
+              position: 'absolute',
+              top: '100%',
+              left: 0,
+              marginTop: 4,
+              background: colors.surface,
+              border: `1px solid ${colors.border}`,
+              borderRadius: 6,
+              boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+              zIndex: 20,
+              minWidth: 200,
+              maxHeight: 300,
+              overflowY: 'auto',
+            }}
+          >
+            <div
+              onClick={() => onChange([])}
+              style={{
+                padding: '8px 12px',
+                fontSize: 12,
+                cursor: 'pointer',
+                borderBottom: `1px solid ${colors.border}`,
+                color: values.length === 0 ? colors.accent : colors.text,
+                fontWeight: values.length === 0 ? 600 : 400,
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = colors.surfaceRaised)}
+              onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+            >
+              All
+            </div>
+            {options.map((opt) => {
+              const isSelected = values.includes(opt.value);
+              return (
+                <div
+                  key={opt.value}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (isSelected) {
+                      onChange(values.filter(v => v !== opt.value));
+                    } else {
+                      onChange([...values, opt.value]);
+                    }
+                  }}
+                  style={{
+                    padding: '8px 12px',
+                    fontSize: 12,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    color: colors.text,
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = colors.surfaceRaised)}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    readOnly
+                    style={{ cursor: 'pointer' }}
+                  />
+                  {anon ? anon.company(opt.label) : opt.label}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 interface Signal {
   type: string;
   signal: string;
@@ -298,10 +422,11 @@ export default function AccountList() {
   const [error, setError] = useState('');
 
   const [search, setSearch] = useState('');
-  const [industryFilter, setIndustryFilter] = useState('all');
+  const [industryFilter, setIndustryFilter] = useState<string[]>([]);
   const [ownerFilter, setOwnerFilter] = useState('all');
   const [domainFilter, setDomainFilter] = useState('all');
-  const [scoreFilter, setScoreFilter] = useState('all');
+  const [scoreFilter, setScoreFilter] = useState<string[]>([]);
+  const [signalsFilter, setSignalsFilter] = useState<string[]>([]);
 
   const [sortField, setSortField] = useState<SortField>('name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
@@ -318,7 +443,7 @@ export default function AccountList() {
   const fetchAccounts = async () => {
     setLoading(true);
     try {
-      const data = await api.get('/accounts?limit=500');
+      const data = await api.get('/accounts');
       const raw = Array.isArray(data) ? data : data.data || data.accounts || [];
       setAccounts(raw.map((a: any) => ({
         id: a.id,
@@ -363,6 +488,25 @@ export default function AccountList() {
     Array.from(new Set(accounts.map(a => a.domain).filter(Boolean))).sort(),
   [accounts]);
 
+  const uniqueSignalTypes = useMemo(() => {
+    const types = new Set<string>();
+    accounts.forEach(a => {
+      if (a.signals) {
+        a.signals.forEach(s => {
+          if (s.type) types.add(s.type);
+        });
+      }
+    });
+    return Array.from(types).sort();
+  }, [accounts]);
+
+  const SIGNAL_LABELS: Record<string, string> = {
+    hiring: 'Hiring',
+    funding: 'Funded',
+    expansion: 'Expanding',
+    layoff: 'Layoffs',
+  };
+
   const hasIndustryData = accounts.some(a => a.industry);
   const hasDealData = accounts.some(a => a.open_deal_count > 0);
   const hasPipelineData = accounts.some(a => a.total_pipeline > 0);
@@ -371,26 +515,43 @@ export default function AccountList() {
 
   const filtered = useMemo(() => {
     let result = accounts;
-    if (industryFilter !== 'all') {
-      result = result.filter(a => a.industry === industryFilter);
+
+    // Industry filter - array contains check
+    if (industryFilter.length > 0) {
+      result = result.filter(a => industryFilter.includes(a.industry));
     }
+
+    // Score filter - array contains check
+    if (scoreFilter.length > 0) {
+      result = result.filter(a => a.grade && scoreFilter.includes(a.grade));
+    }
+
+    // Signals filter - check if account has ANY of the selected signal types
+    if (signalsFilter.length > 0) {
+      result = result.filter(a => {
+        if (!a.signals || a.signals.length === 0) return false;
+        return a.signals.some(s => signalsFilter.includes(s.type));
+      });
+    }
+
+    // Owner and domain filters stay the same (single select)
     if (ownerFilter !== 'all') {
       result = result.filter(a => a.owner === ownerFilter);
     }
     if (domainFilter !== 'all') {
       result = result.filter(a => a.domain === domainFilter);
     }
-    if (scoreFilter !== 'all') {
-      result = result.filter(a => a.grade === scoreFilter);
-    }
+
+    // Search filter
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       result = result.filter(a =>
         a.name.toLowerCase().includes(q) || a.domain.toLowerCase().includes(q)
       );
     }
+
     return result;
-  }, [accounts, industryFilter, ownerFilter, domainFilter, scoreFilter, search]);
+  }, [accounts, industryFilter, scoreFilter, signalsFilter, ownerFilter, domainFilter, search]);
 
   const sorted = useMemo(() => {
     const arr = [...filtered];
@@ -422,7 +583,7 @@ export default function AccountList() {
   const totalPages = Math.ceil(sorted.length / PAGE_SIZE);
   const pageAccounts = sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
-  useEffect(() => { setPage(0); }, [search, industryFilter, ownerFilter, domainFilter, scoreFilter]);
+  useEffect(() => { setPage(0); }, [search, industryFilter, scoreFilter, signalsFilter, ownerFilter, domainFilter]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -433,13 +594,14 @@ export default function AccountList() {
     }
   };
 
-  const hasFilters = search || industryFilter !== 'all' || ownerFilter !== 'all' || domainFilter !== 'all' || scoreFilter !== 'all';
+  const hasFilters = search || industryFilter.length > 0 || scoreFilter.length > 0 || signalsFilter.length > 0 || ownerFilter !== 'all' || domainFilter !== 'all';
   const clearFilters = () => {
     setSearch('');
-    setIndustryFilter('all');
+    setIndustryFilter([]);
+    setScoreFilter([]);
+    setSignalsFilter([]);
     setOwnerFilter('all');
     setDomainFilter('all');
-    setScoreFilter('all');
   };
 
   type ColDef = { field: SortField; label: string; width: string; show: boolean };
@@ -539,8 +701,34 @@ export default function AccountList() {
           }}
         />
         {hasIndustryData && uniqueIndustries.length > 0 && (
-          <FilterSelect label="Industry" value={industryFilter} onChange={setIndustryFilter}
-            options={[{ value: 'all', label: 'All' }, ...uniqueIndustries.map(i => ({ value: i, label: i }))]} />
+          <MultiSelectFilter
+            label="Industry"
+            values={industryFilter}
+            onChange={setIndustryFilter}
+            options={uniqueIndustries.map(i => ({ value: i, label: i }))}
+          />
+        )}
+        {accounts.some(a => a.grade) && (
+          <MultiSelectFilter
+            label="Score"
+            values={scoreFilter}
+            onChange={setScoreFilter}
+            options={[
+              { value: 'A', label: 'A' },
+              { value: 'B', label: 'B' },
+              { value: 'C', label: 'C' },
+              { value: 'D', label: 'D' },
+              { value: 'F', label: 'F' },
+            ]}
+          />
+        )}
+        {uniqueSignalTypes.length > 0 && (
+          <MultiSelectFilter
+            label="Signals"
+            values={signalsFilter}
+            onChange={setSignalsFilter}
+            options={uniqueSignalTypes.map(t => ({ value: t, label: SIGNAL_LABELS[t] || t }))}
+          />
         )}
         {uniqueOwners.length > 0 && (
           <FilterSelect label="Owner" value={ownerFilter} onChange={setOwnerFilter}
@@ -549,17 +737,6 @@ export default function AccountList() {
         {uniqueDomains.length > 0 && (
           <FilterSelect label="Domain" value={domainFilter} onChange={setDomainFilter}
             options={[{ value: 'all', label: 'All' }, ...uniqueDomains.map(d => ({ value: d, label: d }))]} />
-        )}
-        {accounts.some(a => a.grade) && (
-          <FilterSelect label="Score" value={scoreFilter} onChange={setScoreFilter}
-            options={[
-              { value: 'all', label: 'All' },
-              { value: 'A', label: 'A' },
-              { value: 'B', label: 'B' },
-              { value: 'C', label: 'C' },
-              { value: 'D', label: 'D' },
-              { value: 'F', label: 'F' },
-            ]} />
         )}
         {hasFilters && (
           <button onClick={clearFilters} style={{
