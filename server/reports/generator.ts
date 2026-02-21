@@ -154,16 +154,17 @@ export async function generateReport(request: GenerateReportRequest): Promise<Re
     const genResult = await query<{ id: string }>(
       `INSERT INTO report_generations (
         report_template_id, workspace_id, formats_generated, delivery_status,
-        sections_snapshot, skills_run, total_tokens, generation_duration_ms,
+        sections_snapshot, sections_content, skills_run, total_tokens, generation_duration_ms,
         render_duration_ms, triggered_by, data_as_of
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
       RETURNING id`,
       [
         report_template_id,
         workspace_id,
         JSON.stringify(formatsGenerated),
-        JSON.stringify({}), // Delivery happens in Phase 3
+        JSON.stringify({}), // Delivery happens in Phase 4
         JSON.stringify(enabledSections),
+        JSON.stringify(sectionsContent),  // Store full content for viewer
         JSON.stringify(requiredSkills),
         0, // Token counting in Phase 1.5
         generationDuration,

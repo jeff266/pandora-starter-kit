@@ -32,6 +32,7 @@ import ConsultantDashboard from './pages/ConsultantDashboard';
 import IcpProfilePage from './pages/IcpProfilePage';
 import AdminScopesPage from './pages/AdminScopesPage';
 import Targets from './pages/Targets';
+import ReportViewer from './pages/ReportViewer';
 import { colors, fonts } from './styles/theme';
 import { useIsMobile } from './hooks/useIsMobile';
 
@@ -63,6 +64,7 @@ function getPageTitle(pathname: string): string {
   if (pathname.startsWith('/deals/')) return 'Deal Detail';
   if (pathname.startsWith('/accounts/')) return 'Account Detail';
   if (pathname.match(/^\/skills\/[^/]+\/runs/)) return 'Skill Run History';
+  if (pathname.match(/^\/workspace\/[^/]+\/reports\//)) return 'Report';
   return pageTitles[pathname] || 'Pandora';
 }
 
@@ -227,6 +229,8 @@ export default function App() {
             <Route path="/settings/:tab" element={<SettingsPage />} />
             <Route path="/icp-profile" element={<IcpProfilePage />} />
             <Route path="/admin/scopes" element={<AdminScopesPage />} />
+            <Route path="/workspace/:workspaceId/reports/:reportId" element={<ReportViewer />} />
+            <Route path="/workspace/:workspaceId/reports/:reportId/generations/:generationId" element={<ReportViewer />} />
           </Routes>
         </div>
       </main>

@@ -7,12 +7,25 @@ import { ReportTemplate, ReportSection, GenerateReportRequest } from '../reports
 import { generateReport } from '../reports/generator.js';
 import { SECTION_LIBRARY, createSectionFromDefinition } from '../reports/section-library.js';
 import { createLogger } from '../utils/logger.js';
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
 const router = Router();
 const logger = createLogger('ReportsAPI');
+
+// Helper to parse metric values like "$1.2M" -> 1200000
+function parseMetricValue(value: string): number {
+  const cleaned = value.replace(/[^0-9.KMB-]/g, '');
+  const num = parseFloat(cleaned);
+  if (isNaN(num)) return 0;
+
+  if (value.includes('K')) return num * 1000;
+  if (value.includes('M')) return num * 1000000;
+  if (value.includes('B')) return num * 1000000000;
+  return num;
+}
 
 // List all report templates for workspace
 router.get('/:workspaceId/reports', async (req: Request, res: Response) => {
@@ -277,24 +290,174 @@ router.post('/:workspaceId/reports/:reportId/generate', async (req: Request, res
   }
 });
 
-// List report generations (history)
+// List report generations (history) - summary only
 router.get('/:workspaceId/reports/:reportId/generations', async (req: Request, res: Response) => {
   try {
     const { workspaceId, reportId } = req.params;
     const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
+    const before = req.query.before as string;
 
-    const result = await query(
-      `SELECT * FROM report_generations
-       WHERE report_template_id = $1 AND workspace_id = $2
-       ORDER BY created_at DESC
-       LIMIT $3`,
-      [reportId, workspaceId, limit]
-    );
+    let sql = `SELECT
+        id, created_at, triggered_by,
+        delivery_status, formats_generated,
+        generation_duration_ms, render_duration_ms,
+        skills_run, data_as_of, error_message
+       FROM report_generations
+       WHERE report_template_id = $1 AND workspace_id = $2`;
+
+    const params: any[] = [reportId, workspaceId];
+
+    if (before) {
+      sql += ` AND created_at < $3`;
+      params.push(before);
+    }
+
+    sql += ` ORDER BY created_at DESC LIMIT $${params.length + 1}`;
+    params.push(limit);
+
+    const result = await query(sql, params);
 
     res.json({ generations: result.rows });
   } catch (err) {
     logger.error('Failed to list generations', err instanceof Error ? err : undefined);
     res.status(500).json({ error: 'Failed to list generations' });
+  }
+});
+
+// Get latest generation with full content
+router.get('/:workspaceId/reports/:reportId/generations/latest', async (req: Request, res: Response) => {
+  try {
+    const { workspaceId, reportId } = req.params;
+
+    const result = await query(
+      `SELECT * FROM report_generations
+       WHERE report_template_id = $1 AND workspace_id = $2
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [reportId, workspaceId]
+    );
+
+    if (result.rows.length === 0) {
+      res.status(404).json({ error: 'No generations found for this report' });
+      return;
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    logger.error('Failed to get latest generation', err instanceof Error ? err : undefined);
+    res.status(500).json({ error: 'Failed to get latest generation' });
+  }
+});
+
+// Get specific generation with full content
+router.get('/:workspaceId/reports/:reportId/generations/:generationId', async (req: Request, res: Response) => {
+  try {
+    const { workspaceId, reportId, generationId } = req.params;
+
+    const result = await query(
+      `SELECT * FROM report_generations
+       WHERE id = $1 AND report_template_id = $2 AND workspace_id = $3`,
+      [generationId, reportId, workspaceId]
+    );
+
+    if (result.rows.length === 0) {
+      res.status(404).json({ error: 'Generation not found' });
+      return;
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    logger.error('Failed to get generation', err instanceof Error ? err : undefined);
+    res.status(500).json({ error: 'Failed to get generation' });
+  }
+});
+
+// Compare two generations
+router.get('/:workspaceId/reports/:reportId/compare', async (req: Request, res: Response) => {
+  try {
+    const { workspaceId, reportId } = req.params;
+    const { left, right } = req.query;
+
+    if (!left || !right) {
+      res.status(400).json({ error: 'Missing left or right generation ID' });
+      return;
+    }
+
+    const result = await query(
+      `SELECT * FROM report_generations
+       WHERE id = ANY($1) AND report_template_id = $2 AND workspace_id = $3
+       ORDER BY created_at ASC`,
+      [[left, right], reportId, workspaceId]
+    );
+
+    if (result.rows.length !== 2) {
+      res.status(404).json({ error: 'One or both generations not found' });
+      return;
+    }
+
+    res.json({
+      left: result.rows[0],
+      right: result.rows[1],
+    });
+  } catch (err) {
+    logger.error('Failed to compare generations', err instanceof Error ? err : undefined);
+    res.status(500).json({ error: 'Failed to compare generations' });
+  }
+});
+
+// Get metric trends across generations
+router.get('/:workspaceId/reports/:reportId/trends', async (req: Request, res: Response) => {
+  try {
+    const { workspaceId, reportId } = req.params;
+    const metric = req.query.metric as string;
+    const periods = Math.min(parseInt(req.query.periods as string) || 8, 52);
+
+    if (!metric) {
+      res.status(400).json({ error: 'Missing metric parameter' });
+      return;
+    }
+
+    const result = await query(
+      `SELECT id, created_at, sections_content
+       FROM report_generations
+       WHERE report_template_id = $1 AND workspace_id = $2
+       ORDER BY created_at DESC
+       LIMIT $3`,
+      [reportId, workspaceId, periods]
+    );
+
+    // Extract metric value from each generation's sections_content
+    const dataPoints = result.rows
+      .map((gen: any) => {
+        const sections = gen.sections_content || [];
+        for (const section of sections) {
+          if (section.metrics) {
+            const metricCard = section.metrics.find((m: any) =>
+              m.label.toLowerCase().includes(metric.toLowerCase())
+            );
+            if (metricCard) {
+              // Parse value (e.g., "$1.2M" -> 1200000)
+              const numericValue = parseMetricValue(metricCard.value);
+              return {
+                date: gen.created_at,
+                value: numericValue,
+                label: metricCard.value,
+              };
+            }
+          }
+        }
+        return null;
+      })
+      .filter(Boolean)
+      .reverse(); // Oldest first for chart rendering
+
+    res.json({
+      metric,
+      data_points: dataPoints,
+    });
+  } catch (err) {
+    logger.error('Failed to get trends', err instanceof Error ? err : undefined);
+    res.status(500).json({ error: 'Failed to get trends' });
   }
 });
 
@@ -349,7 +512,8 @@ router.get('/:workspaceId/reports/:reportId/download/:format', async (req: Reque
       pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
     };
 
-    res.setHeader('Content-Type', mimeTypes[format] || 'application/octet-stream');
+    const mimeType = mimeTypes[format as string] || 'application/octet-stream';
+    res.setHeader('Content-Type', mimeType);
     res.setHeader('Content-Disposition', `attachment; filename="${sanitized}"`);
     res.setHeader('Cache-Control', 'no-cache');
 
@@ -367,6 +531,199 @@ router.get('/:workspaceId/reports/:reportId/download/:format', async (req: Reque
     res.status(500).json({ error: 'Failed to download report' });
   }
 });
+
+// Create share link for a generation
+router.post('/:workspaceId/reports/:reportId/generations/:generationId/share', async (req: Request, res: Response) => {
+  try {
+    const { workspaceId, reportId, generationId } = req.params;
+    const {
+      access = 'public',
+      expires_in,
+      allowed_emails = [],
+      include_download = true,
+      password,
+    } = req.body;
+
+    // Verify generation exists and belongs to workspace
+    const genCheck = await query(
+      `SELECT id FROM report_generations
+       WHERE id = $1 AND report_template_id = $2 AND workspace_id = $3`,
+      [generationId, reportId, workspaceId]
+    );
+
+    if (genCheck.rows.length === 0) {
+      res.status(404).json({ error: 'Generation not found' });
+      return;
+    }
+
+    // Generate random share token
+    const shareToken = crypto.randomBytes(16).toString('hex');
+
+    // Calculate expiry
+    let expiresAt = null;
+    if (expires_in) {
+      const duration = parseDuration(expires_in); // e.g., "7d" -> 7 days in ms
+      expiresAt = new Date(Date.now() + duration);
+    }
+
+    // Hash password if provided
+    let passwordHash = null;
+    if (password) {
+      passwordHash = crypto.createHash('sha256').update(password).digest('hex');
+    }
+
+    const result = await query(
+      `INSERT INTO report_share_links (
+        report_template_id, generation_id, workspace_id,
+        share_token, access_type, allowed_emails, password_hash,
+        include_download, expires_at, created_by
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      RETURNING *`,
+      [
+        reportId,
+        generationId,
+        workspaceId,
+        shareToken,
+        access,
+        JSON.stringify(allowed_emails),
+        passwordHash,
+        include_download,
+        expiresAt,
+        null, // TODO: Add user_id from auth middleware
+      ]
+    );
+
+    const shareUrl = `${process.env.APP_URL || 'http://localhost:3000'}/shared/${shareToken}`;
+
+    res.json({
+      share_url: shareUrl,
+      share_token: shareToken,
+      expires_at: expiresAt,
+      access_type: access,
+    });
+  } catch (err) {
+    logger.error('Failed to create share link', err instanceof Error ? err : undefined);
+    res.status(500).json({ error: 'Failed to create share link' });
+  }
+});
+
+// Access shared report (public route - no workspace auth required)
+router.get('/shared/:shareToken', async (req: Request, res: Response) => {
+  try {
+    const { shareToken } = req.params;
+    const { password } = req.query;
+
+    // Find share link
+    const linkResult = await query(
+      `SELECT * FROM report_share_links WHERE share_token = $1`,
+      [shareToken]
+    );
+
+    if (linkResult.rows.length === 0) {
+      res.status(404).json({ error: 'Share link not found' });
+      return;
+    }
+
+    const shareLink = linkResult.rows[0];
+
+    // Check expiry
+    if (shareLink.expires_at && new Date(shareLink.expires_at) < new Date()) {
+      res.status(410).json({ error: 'This share link has expired' });
+      return;
+    }
+
+    // Check password
+    if (shareLink.password_hash) {
+      if (!password) {
+        res.status(401).json({ error: 'Password required', requires_password: true });
+        return;
+      }
+      const providedHash = crypto.createHash('sha256').update(password as string).digest('hex');
+      if (providedHash !== shareLink.password_hash) {
+        res.status(401).json({ error: 'Incorrect password' });
+        return;
+      }
+    }
+
+    // Update access tracking
+    await query(
+      `UPDATE report_share_links
+       SET last_accessed_at = NOW(), access_count = access_count + 1
+       WHERE id = $1`,
+      [shareLink.id]
+    );
+
+    // Fetch generation
+    const genResult = await query(
+      `SELECT * FROM report_generations WHERE id = $1`,
+      [shareLink.generation_id]
+    );
+
+    if (genResult.rows.length === 0) {
+      res.status(404).json({ error: 'Report generation not found' });
+      return;
+    }
+
+    // Fetch template
+    const templateResult = await query(
+      `SELECT id, name, description FROM report_templates WHERE id = $1`,
+      [shareLink.report_template_id]
+    );
+
+    res.json({
+      generation: genResult.rows[0],
+      template: templateResult.rows[0],
+      share_config: {
+        include_download: shareLink.include_download,
+        access_type: shareLink.access_type,
+      },
+    });
+  } catch (err) {
+    logger.error('Failed to access shared report', err instanceof Error ? err : undefined);
+    res.status(500).json({ error: 'Failed to access shared report' });
+  }
+});
+
+// Delete share link
+router.delete('/:workspaceId/reports/:reportId/shares/:shareId', async (req: Request, res: Response) => {
+  try {
+    const { workspaceId, reportId, shareId } = req.params;
+
+    const result = await query(
+      `DELETE FROM report_share_links
+       WHERE id = $1 AND report_template_id = $2 AND workspace_id = $3
+       RETURNING id`,
+      [shareId, reportId, workspaceId]
+    );
+
+    if (result.rows.length === 0) {
+      res.status(404).json({ error: 'Share link not found' });
+      return;
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    logger.error('Failed to delete share link', err instanceof Error ? err : undefined);
+    res.status(500).json({ error: 'Failed to delete share link' });
+  }
+});
+
+// Helper to parse duration strings like "7d", "2w", "1m"
+function parseDuration(duration: string): number {
+  const match = duration.match(/^(\d+)([dhwm])$/);
+  if (!match) return 7 * 24 * 60 * 60 * 1000; // default 7 days
+
+  const value = parseInt(match[1]);
+  const unit = match[2];
+
+  switch (unit) {
+    case 'd': return value * 24 * 60 * 60 * 1000;
+    case 'h': return value * 60 * 60 * 1000;
+    case 'w': return value * 7 * 24 * 60 * 60 * 1000;
+    case 'm': return value * 30 * 24 * 60 * 60 * 1000;
+    default: return 7 * 24 * 60 * 60 * 1000;
+  }
+}
 
 const REPORT_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
