@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, FileText, Calendar, Clock, AlertCircle, CheckCircle, Play } from 'lucide-react';
+import { colors, fonts } from '../styles/theme';
 
 interface ReportTemplate {
   id: string;
@@ -67,8 +68,8 @@ export default function ReportsPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-slate-400">Loading reports...</div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
+        <div style={{ fontSize: 14, color: colors.textSecondary, fontFamily: fonts.sans }}>Loading reports...</div>
       </div>
     );
   }
@@ -87,28 +88,52 @@ export default function ReportsPage() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto">
+    <div style={{ maxWidth: 1280, margin: '0 auto' }}>
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Reports</h1>
-          <p className="text-sm text-slate-500 mt-1">
+          <h1 style={{ fontSize: 24, fontWeight: 700, color: colors.text, fontFamily: fonts.sans, margin: 0 }}>Reports</h1>
+          <p style={{ fontSize: 14, color: colors.textMuted, marginTop: 4, fontFamily: fonts.sans }}>
             Automated reports delivered on your schedule
           </p>
         </div>
-        <div className="flex gap-2">
+        <div style={{ display: 'flex', gap: 8 }}>
           <button
             onClick={() => setShowTemplateGallery(true)}
-            className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium flex items-center gap-2"
+            style={{
+              padding: '8px 16px',
+              background: colors.surfaceRaised,
+              color: colors.text,
+              border: `1px solid ${colors.border}`,
+              borderRadius: 6,
+              fontWeight: 500,
+              fontFamily: fonts.sans,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+            }}
           >
-            <FileText className="w-4 h-4" />
+            <FileText style={{ width: 16, height: 16 }} />
             Templates
           </button>
           <button
             onClick={() => navigate('/reports/new')}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium flex items-center gap-2"
+            style={{
+              padding: '8px 16px',
+              background: colors.accent,
+              color: '#fff',
+              border: 'none',
+              borderRadius: 6,
+              fontWeight: 500,
+              fontFamily: fonts.sans,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+            }}
           >
-            <Plus className="w-4 h-4" />
+            <Plus style={{ width: 16, height: 16 }} />
             New Report
           </button>
         </div>
@@ -116,21 +141,36 @@ export default function ReportsPage() {
 
       {/* Reports List */}
       {reports.length === 0 ? (
-        <div className="bg-white rounded-lg border border-slate-200 p-12 text-center">
-          <FileText className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-          <h3 className="text-lg font-semibold text-slate-900 mb-2">No reports yet</h3>
-          <p className="text-slate-500 mb-6">
+        <div style={{
+          background: colors.surface,
+          border: `1px solid ${colors.border}`,
+          borderRadius: 8,
+          padding: 48,
+          textAlign: 'center'
+        }}>
+          <FileText style={{ width: 48, height: 48, color: colors.textMuted, margin: '0 auto 16px' }} />
+          <h3 style={{ fontSize: 18, fontWeight: 600, color: colors.text, marginBottom: 8, fontFamily: fonts.sans }}>No reports yet</h3>
+          <p style={{ fontSize: 14, color: colors.textSecondary, marginBottom: 24, fontFamily: fonts.sans }}>
             Create your first automated report to get started
           </p>
           <button
             onClick={() => setShowTemplateGallery(true)}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium"
+            style={{
+              padding: '8px 16px',
+              background: colors.accent,
+              color: '#fff',
+              border: 'none',
+              borderRadius: 6,
+              fontWeight: 500,
+              fontFamily: fonts.sans,
+              cursor: 'pointer',
+            }}
           >
             Browse Templates
           </button>
         </div>
       ) : (
-        <div className="grid gap-4">
+        <div style={{ display: 'grid', gap: 16 }}>
           {reports.map((report) => (
             <ReportCard
               key={report.id}
@@ -157,17 +197,17 @@ interface ReportCardProps {
 
 function ReportCard({ report, workspaceId, onGenerate, onEdit, onView }: ReportCardProps) {
   const statusColors = {
-    success: 'bg-green-100 text-green-800',
-    failed: 'bg-red-100 text-red-800',
-    partial: 'bg-amber-100 text-amber-800',
-    running: 'bg-blue-100 text-blue-800',
+    success: { bg: '#22c55e', text: '#fff' },
+    failed: { bg: '#ef4444', text: '#fff' },
+    partial: { bg: '#f97316', text: '#fff' },
+    running: { bg: colors.accent, text: '#fff' },
   };
 
   const statusIcons = {
-    success: <CheckCircle className="w-4 h-4" />,
-    failed: <AlertCircle className="w-4 h-4" />,
-    partial: <AlertCircle className="w-4 h-4" />,
-    running: <Clock className="w-4 h-4" />,
+    success: <CheckCircle style={{ width: 16, height: 16 }} />,
+    failed: <AlertCircle style={{ width: 16, height: 16 }} />,
+    partial: <AlertCircle style={{ width: 16, height: 16 }} />,
+    running: <Clock style={{ width: 16, height: 16 }} />,
   };
 
   const cadenceLabels: Record<string, string> = {
@@ -180,22 +220,44 @@ function ReportCard({ report, workspaceId, onGenerate, onEdit, onView }: ReportC
   };
 
   return (
-    <div className="bg-white rounded-lg border border-slate-200 p-6 hover:border-slate-300 transition">
-      <div className="flex items-start justify-between">
-        <div className="flex-1">
-          <div className="flex items-center gap-3 mb-2">
-            <h3 className="text-lg font-semibold text-slate-900">{report.name}</h3>
+    <div style={{
+      background: colors.surface,
+      border: `1px solid ${colors.border}`,
+      borderRadius: 8,
+      padding: 24,
+      transition: 'border-color 0.2s'
+    }}>
+      <div style={{ display: 'flex', alignItems: 'start', justifyContent: 'space-between' }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+            <h3 style={{ fontSize: 18, fontWeight: 600, color: colors.text, margin: 0, fontFamily: fonts.sans }}>{report.name}</h3>
             {!report.is_active && (
-              <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs font-medium rounded">
+              <span style={{
+                padding: '2px 8px',
+                background: colors.surfaceRaised,
+                color: colors.textSecondary,
+                fontSize: 12,
+                fontWeight: 500,
+                borderRadius: 4,
+                fontFamily: fonts.sans
+              }}>
                 Paused
               </span>
             )}
             {report.last_generation_status && (
               <span
-                className={`px-2 py-0.5 text-xs font-medium rounded flex items-center gap-1 ${
-                  statusColors[report.last_generation_status as keyof typeof statusColors] ||
-                  'bg-slate-100 text-slate-600'
-                }`}
+                style={{
+                  padding: '2px 8px',
+                  fontSize: 12,
+                  fontWeight: 500,
+                  borderRadius: 4,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  fontFamily: fonts.sans,
+                  background: statusColors[report.last_generation_status as keyof typeof statusColors]?.bg || colors.surfaceRaised,
+                  color: statusColors[report.last_generation_status as keyof typeof statusColors]?.text || colors.textSecondary,
+                }}
               >
                 {statusIcons[report.last_generation_status as keyof typeof statusIcons]}
                 {report.last_generation_status}
@@ -204,12 +266,12 @@ function ReportCard({ report, workspaceId, onGenerate, onEdit, onView }: ReportC
           </div>
 
           {report.description && (
-            <p className="text-sm text-slate-600 mb-4">{report.description}</p>
+            <p style={{ fontSize: 14, color: colors.textSecondary, marginBottom: 16, fontFamily: fonts.sans }}>{report.description}</p>
           )}
 
-          <div className="flex items-center gap-6 text-sm text-slate-500">
-            <div className="flex items-center gap-1.5">
-              <Calendar className="w-4 h-4" />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 24, fontSize: 14, color: colors.textMuted, fontFamily: fonts.sans }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Calendar style={{ width: 16, height: 16 }} />
               <span>{cadenceLabels[report.cadence]}</span>
               {report.schedule_time && report.cadence !== 'manual' && (
                 <span>at {report.schedule_time}</span>
@@ -217,8 +279,8 @@ function ReportCard({ report, workspaceId, onGenerate, onEdit, onView }: ReportC
             </div>
 
             {report.last_generated_at && (
-              <div className="flex items-center gap-1.5">
-                <Clock className="w-4 h-4" />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Clock style={{ width: 16, height: 16 }} />
                 <span>
                   Last: {new Date(report.last_generated_at).toLocaleDateString('en-US', {
                     month: 'short',
@@ -229,8 +291,8 @@ function ReportCard({ report, workspaceId, onGenerate, onEdit, onView }: ReportC
             )}
 
             {report.next_due_at && report.is_active && (
-              <div className="flex items-center gap-1.5">
-                <Clock className="w-4 h-4" />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Clock style={{ width: 16, height: 16 }} />
                 <span>
                   Next: {new Date(report.next_due_at).toLocaleDateString('en-US', {
                     month: 'short',
@@ -242,37 +304,80 @@ function ReportCard({ report, workspaceId, onGenerate, onEdit, onView }: ReportC
               </div>
             )}
 
-            <div className="flex items-center gap-1.5">
-              <FileText className="w-4 h-4" />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <FileText style={{ width: 16, height: 16 }} />
               <span>{report.sections.length} sections</span>
             </div>
           </div>
 
           {report.last_generation_error && (
-            <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
-              <p className="text-sm text-red-800">{report.last_generation_error}</p>
+            <div style={{
+              marginTop: 12,
+              padding: 12,
+              background: '#ef444420',
+              border: `1px solid #ef4444`,
+              borderRadius: 8
+            }}>
+              <p style={{ fontSize: 14, color: colors.red, margin: 0, fontFamily: fonts.sans }}>{report.last_generation_error}</p>
             </div>
           )}
         </div>
 
-        <div className="flex items-center gap-2 ml-4">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 16 }}>
           <button
             onClick={onView}
-            className="px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 rounded-lg font-medium"
+            style={{
+              padding: '8px 12px',
+              fontSize: 14,
+              color: colors.text,
+              background: 'transparent',
+              border: 'none',
+              borderRadius: 6,
+              fontWeight: 500,
+              fontFamily: fonts.sans,
+              cursor: 'pointer',
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = colors.surfaceRaised)}
+            onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
           >
             View
           </button>
           <button
             onClick={onEdit}
-            className="px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 rounded-lg font-medium"
+            style={{
+              padding: '8px 12px',
+              fontSize: 14,
+              color: colors.text,
+              background: 'transparent',
+              border: 'none',
+              borderRadius: 6,
+              fontWeight: 500,
+              fontFamily: fonts.sans,
+              cursor: 'pointer',
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = colors.surfaceRaised)}
+            onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
           >
             Edit
           </button>
           <button
             onClick={onGenerate}
-            className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg font-medium flex items-center gap-2"
+            style={{
+              padding: '8px 12px',
+              background: colors.accent,
+              color: '#fff',
+              border: 'none',
+              fontSize: 14,
+              borderRadius: 6,
+              fontWeight: 500,
+              fontFamily: fonts.sans,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+            }}
           >
-            <Play className="w-4 h-4" />
+            <Play style={{ width: 16, height: 16 }} />
             Generate
           </button>
         </div>
@@ -288,6 +393,19 @@ interface TemplateGalleryProps {
 }
 
 function TemplateGallery({ workspaceId, onSelect, onClose }: TemplateGalleryProps) {
+  const sectionLibrary: Record<string, { label: string; description: string }> = {
+    'the-number': { label: 'The Number', description: 'Forecast landing zone with bear/base/bull scenarios and pacing bar' },
+    'what-moved': { label: 'What Moved This Week', description: 'Closed-won deals, stage changes, pushed deals, and net pipeline movement' },
+    'deals-needing-attention': { label: 'Deals Needing Attention', description: 'Risk-flagged deals with recommended actions and signal severity' },
+    'rep-performance': { label: 'Rep Performance', description: 'Performance table with pipeline coverage, win rates, and narrative takeaways' },
+    'pipeline-hygiene': { label: 'Pipeline Hygiene', description: 'Data quality issues with quantified pipeline impact and recommended fixes' },
+    'call-intelligence': { label: 'Call Intelligence', description: 'Competitor mentions, champion signals, objections, and coaching opportunities' },
+    'pipeline-coverage': { label: 'Pipeline Coverage', description: 'Coverage ratios by rep/segment with gap analysis and required new pipeline' },
+    'forecast-waterfall': { label: 'Forecast Waterfall', description: 'Pipeline flow visualization showing stage-to-stage conversion' },
+    'icp-fit-analysis': { label: 'ICP Fit Analysis', description: 'Account fit scores against ideal customer profile with signal breakdown' },
+    'actions-summary': { label: 'Actions Summary', description: 'Recommended actions from skills with urgency and impact priority' },
+  };
+
   const templates = [
     {
       id: 'monday-pipeline-briefing',
@@ -332,48 +450,90 @@ function TemplateGallery({ workspaceId, onSelect, onClose }: TemplateGalleryProp
   ];
 
   return (
-    <div className="max-w-5xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
+    <div style={{ maxWidth: 1024, margin: '0 auto' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Report Templates</h1>
-          <p className="text-sm text-slate-500 mt-1">
+          <h1 style={{ fontSize: 24, fontWeight: 700, color: colors.text, fontFamily: fonts.sans, margin: 0 }}>Report Templates</h1>
+          <p style={{ fontSize: 14, color: colors.textMuted, marginTop: 4, fontFamily: fonts.sans }}>
             Start with a pre-built template or create from scratch
           </p>
         </div>
         <button
           onClick={onClose}
-          className="px-4 py-2 text-slate-700 hover:bg-slate-100 rounded-lg font-medium"
+          style={{
+            padding: '8px 16px',
+            color: colors.text,
+            background: 'transparent',
+            border: 'none',
+            borderRadius: 6,
+            fontWeight: 500,
+            fontFamily: fonts.sans,
+            cursor: 'pointer',
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = colors.surfaceRaised)}
+          onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
         >
           Cancel
         </button>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 mb-6">
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16, marginBottom: 24 }}>
         {templates.map((template) => (
           <button
             key={template.id}
             onClick={() => onSelect(template.id)}
-            className="bg-white border border-slate-200 rounded-lg p-6 text-left hover:border-blue-500 hover:shadow-md transition"
+            style={{
+              background: colors.surface,
+              border: `1px solid ${colors.border}`,
+              borderRadius: 8,
+              padding: 24,
+              textAlign: 'left',
+              cursor: 'pointer',
+              transition: 'border-color 0.2s, box-shadow 0.2s',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = colors.accent;
+              e.currentTarget.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.3)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = colors.border;
+              e.currentTarget.style.boxShadow = 'none';
+            }}
           >
-            <div className="text-4xl mb-3">{template.icon}</div>
-            <h3 className="text-lg font-semibold text-slate-900 mb-2">{template.name}</h3>
-            <p className="text-sm text-slate-600 mb-4">{template.description}</p>
-            <div className="flex items-center gap-4 text-xs text-slate-500">
-              <span className="px-2 py-1 bg-slate-100 rounded">{template.cadence}</span>
+            <div style={{ fontSize: 32, marginBottom: 12 }}>{template.icon}</div>
+            <h3 style={{ fontSize: 18, fontWeight: 600, color: colors.text, marginBottom: 8, fontFamily: fonts.sans }}>{template.name}</h3>
+            <p style={{ fontSize: 14, color: colors.textSecondary, marginBottom: 16, fontFamily: fonts.sans }}>{template.description}</p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, fontSize: 12, color: colors.textMuted, fontFamily: fonts.sans }}>
+              <span style={{ padding: '4px 8px', background: colors.surfaceRaised, borderRadius: 4 }}>{template.cadence}</span>
               <span>{template.sections.length} sections</span>
             </div>
           </button>
         ))}
       </div>
 
-      <div className="bg-slate-50 border border-slate-200 rounded-lg p-6 text-center">
-        <h3 className="font-semibold text-slate-900 mb-2">Start from Scratch</h3>
-        <p className="text-sm text-slate-600 mb-4">
+      <div style={{
+        background: colors.surface,
+        border: `1px solid ${colors.border}`,
+        borderRadius: 8,
+        padding: 24,
+        textAlign: 'center'
+      }}>
+        <h3 style={{ fontWeight: 600, color: colors.text, marginBottom: 8, fontFamily: fonts.sans }}>Start from Scratch</h3>
+        <p style={{ fontSize: 14, color: colors.textSecondary, marginBottom: 16, fontFamily: fonts.sans }}>
           Build a custom report with your own sections and schedule
         </p>
         <button
           onClick={() => onSelect('blank')}
-          className="px-4 py-2 bg-white border border-slate-300 hover:border-slate-400 text-slate-700 rounded-lg font-medium"
+          style={{
+            padding: '8px 16px',
+            background: colors.surfaceRaised,
+            border: `1px solid ${colors.border}`,
+            color: colors.text,
+            borderRadius: 6,
+            fontWeight: 500,
+            fontFamily: fonts.sans,
+            cursor: 'pointer',
+          }}
         >
           Create Blank Report
         </button>

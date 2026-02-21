@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Download, X } from 'lucide-react';
 import ReportContent from './ReportContent';
+import { colors, fonts } from '../../styles/theme';
 import type { SectionContent } from './types';
 
 interface GenerationResponse {
@@ -80,44 +81,93 @@ export default function LivePreviewModal({
   const degradedSections = totalSections - sectionsWithData;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-      <div className="w-full h-full max-w-7xl max-h-screen bg-white flex flex-col m-4 rounded-lg shadow-2xl">
+    <div style={{
+      position: 'fixed',
+      inset: 0,
+      zIndex: 50,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: 'rgba(0, 0, 0, 0.7)'
+    }}>
+      <div style={{
+        width: '100%',
+        height: '100%',
+        maxWidth: 1280,
+        maxHeight: '100vh',
+        background: colors.surface,
+        display: 'flex',
+        flexDirection: 'column',
+        margin: 16,
+        borderRadius: 8,
+        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)'
+      }}>
         {/* Header */}
-        <div className="bg-white border-b border-slate-200 px-6 py-4 flex-shrink-0">
-          <div className="flex items-center justify-between">
+        <div style={{
+          background: colors.surface,
+          borderBottom: `1px solid ${colors.border}`,
+          padding: '16px 24px',
+          flexShrink: 0
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div>
-              <h2 className="text-2xl font-bold text-slate-900">Preview: {reportName}</h2>
-              <span className="text-sm text-slate-500">
+              <h2 style={{ fontSize: 24, fontWeight: 700, color: colors.text, margin: 0, fontFamily: fonts.sans }}>Preview: {reportName}</h2>
+              <span style={{ fontSize: 14, color: colors.textMuted, fontFamily: fonts.sans }}>
                 Using live data from workspace
                 {state === 'ready' && ` · Generated just now · ${previewData?.generation_duration_ms}ms`}
               </span>
             </div>
-            <div className="flex items-center gap-2">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               {state === 'ready' &&
                 previewData &&
                 Object.keys(previewData.formats_generated).map((format) => (
                   <button
                     key={format}
                     onClick={() => downloadFormat(format)}
-                    className="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-sm font-medium text-slate-700 flex items-center gap-2"
+                    style={{
+                      padding: '8px 12px',
+                      background: colors.surfaceRaised,
+                      borderRadius: 6,
+                      fontSize: 14,
+                      fontWeight: 500,
+                      color: colors.text,
+                      border: `1px solid ${colors.border}`,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      cursor: 'pointer',
+                      fontFamily: fonts.sans,
+                    }}
                   >
-                    <Download className="w-4 h-4" />
+                    <Download style={{ width: 16, height: 16 }} />
                     {format.toUpperCase()}
                   </button>
                 ))}
               <button
                 onClick={onClose}
-                className="px-3 py-2 text-slate-700 hover:bg-slate-100 rounded-lg flex items-center gap-2"
+                style={{
+                  padding: '8px 12px',
+                  color: colors.text,
+                  background: 'transparent',
+                  border: 'none',
+                  borderRadius: 6,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  cursor: 'pointer',
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = colors.surfaceRaised)}
+                onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
               >
-                <X className="w-5 h-5" />
+                <X style={{ width: 20, height: 20 }} />
               </button>
             </div>
           </div>
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6 bg-slate-50">
-          <div className="max-w-5xl mx-auto">
+        <div style={{ flex: 1, overflowY: 'auto', padding: 24, background: colors.bg }}>
+          <div style={{ maxWidth: 1024, margin: '0 auto' }}>
             {state === 'loading' && <PreviewLoadingState />}
             {state === 'error' && <PreviewErrorState error={error} onRetry={generatePreview} />}
             {state === 'ready' && previewData && (
@@ -133,9 +183,14 @@ export default function LivePreviewModal({
 
         {/* Footer */}
         {state === 'ready' && (
-          <div className="bg-white border-t border-slate-200 px-6 py-4 flex-shrink-0">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-6 text-sm text-slate-600">
+          <div style={{
+            background: colors.surface,
+            borderTop: `1px solid ${colors.border}`,
+            padding: '16px 24px',
+            flexShrink: 0
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 24, fontSize: 14, color: colors.textSecondary, fontFamily: fonts.sans }}>
                 <span>
                   {totalSections} sections · {sectionsWithData} with data
                   {degradedSections > 0 && ` · ${degradedSections} degraded`}
@@ -146,16 +201,34 @@ export default function LivePreviewModal({
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-2">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <button
                   onClick={onClose}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium"
+                  style={{
+                    padding: '8px 16px',
+                    background: colors.surfaceRaised,
+                    color: colors.text,
+                    border: `1px solid ${colors.border}`,
+                    borderRadius: 6,
+                    fontWeight: 500,
+                    fontFamily: fonts.sans,
+                    cursor: 'pointer',
+                  }}
                 >
                   Back to Editor
                 </button>
                 <button
                   onClick={onActivate}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium"
+                  style={{
+                    padding: '8px 16px',
+                    background: colors.accent,
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: 6,
+                    fontWeight: 500,
+                    fontFamily: fonts.sans,
+                    cursor: 'pointer',
+                  }}
                 >
                   Save & Activate
                 </button>
@@ -188,19 +261,31 @@ function PreviewLoadingState() {
   ];
 
   return (
-    <div className="flex items-center justify-center min-h-[400px]">
-      <div className="text-center">
-        <div className="w-16 h-16 border-4 border-slate-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-4" />
-        <h3 className="text-lg font-semibold text-slate-900 mb-2">Generating preview...</h3>
-        <p className="text-sm text-slate-600 mb-6">Pulling latest data from your connected sources</p>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 400 }}>
+      <div style={{ textAlign: 'center' }}>
+        <div style={{
+          width: 64,
+          height: 64,
+          border: `4px solid ${colors.border}`,
+          borderTopColor: colors.accent,
+          borderRadius: '50%',
+          animation: 'spin 1s linear infinite',
+          margin: '0 auto 16px'
+        }} />
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        <h3 style={{ fontSize: 18, fontWeight: 600, color: colors.text, marginBottom: 8, fontFamily: fonts.sans }}>Generating preview...</h3>
+        <p style={{ fontSize: 14, color: colors.textSecondary, marginBottom: 24, fontFamily: fonts.sans }}>Pulling latest data from your connected sources</p>
 
-        <div className="space-y-2">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {steps.map((step, idx) => (
             <div
               key={idx}
-              className={`text-sm ${
-                idx <= currentStep ? 'text-blue-600 font-medium' : 'text-slate-400'
-              }`}
+              style={{
+                fontSize: 14,
+                color: idx <= currentStep ? colors.accent : colors.textMuted,
+                fontWeight: idx <= currentStep ? 500 : 400,
+                fontFamily: fonts.sans,
+              }}
             >
               {idx <= currentStep ? '✓' : '○'} {step.label}
             </div>
@@ -213,14 +298,23 @@ function PreviewLoadingState() {
 
 function PreviewErrorState({ error, onRetry }: { error: string | null; onRetry: () => void }) {
   return (
-    <div className="flex items-center justify-center min-h-[400px]">
-      <div className="text-center max-w-md">
-        <div className="text-4xl mb-4">⚠️</div>
-        <h3 className="text-lg font-semibold text-slate-900 mb-2">Preview generation failed</h3>
-        <p className="text-sm text-slate-600 mb-6">{error || 'Unknown error occurred'}</p>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 400 }}>
+      <div style={{ textAlign: 'center', maxWidth: 448 }}>
+        <div style={{ fontSize: 48, marginBottom: 16 }}>⚠️</div>
+        <h3 style={{ fontSize: 18, fontWeight: 600, color: colors.text, marginBottom: 8, fontFamily: fonts.sans }}>Preview generation failed</h3>
+        <p style={{ fontSize: 14, color: colors.textSecondary, marginBottom: 24, fontFamily: fonts.sans }}>{error || 'Unknown error occurred'}</p>
         <button
           onClick={onRetry}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium"
+          style={{
+            padding: '8px 16px',
+            background: colors.accent,
+            color: '#fff',
+            border: 'none',
+            borderRadius: 6,
+            fontWeight: 500,
+            fontFamily: fonts.sans,
+            cursor: 'pointer',
+          }}
         >
           Retry
         </button>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import LivePreviewModal from '../components/reports/LivePreviewModal';
+import { colors, fonts } from '../styles/theme';
 import {
   GripVertical,
   Plus,
@@ -51,6 +52,19 @@ interface ReportTemplate {
   };
   is_active: boolean;
 }
+
+const sectionLibrary: Record<string, { label: string; description: string }> = {
+  'the-number': { label: 'The Number', description: 'Forecast landing zone with bear/base/bull scenarios and pacing bar' },
+  'what-moved': { label: 'What Moved This Week', description: 'Closed-won deals, stage changes, pushed deals, and net pipeline movement' },
+  'deals-needing-attention': { label: 'Deals Needing Attention', description: 'Risk-flagged deals with recommended actions and signal severity' },
+  'rep-performance': { label: 'Rep Performance', description: 'Performance table with pipeline coverage, win rates, and narrative takeaways' },
+  'pipeline-hygiene': { label: 'Pipeline Hygiene', description: 'Data quality issues with quantified pipeline impact and recommended fixes' },
+  'call-intelligence': { label: 'Call Intelligence', description: 'Competitor mentions, champion signals, objections, and coaching opportunities' },
+  'pipeline-coverage': { label: 'Pipeline Coverage', description: 'Coverage ratios by rep/segment with gap analysis and required new pipeline' },
+  'forecast-waterfall': { label: 'Forecast Waterfall', description: 'Pipeline flow visualization showing stage-to-stage conversion' },
+  'icp-fit-analysis': { label: 'ICP Fit Analysis', description: 'Account fit scores against ideal customer profile with signal breakdown' },
+  'actions-summary': { label: 'Actions Summary', description: 'Recommended actions from skills with urgency and impact priority' },
+};
 
 export default function ReportBuilder() {
   const { reportId } = useParams<{ reportId?: string }>();
@@ -142,7 +156,9 @@ export default function ReportBuilder() {
 
   function createSection(sectionId: string, order: number): ReportSection {
     const def = availableSections.find((s) => s.id === sectionId);
-    if (!def) {
+    const libDef = sectionLibrary[sectionId];
+
+    if (!def && !libDef) {
       return {
         id: sectionId,
         label: sectionId,
@@ -155,11 +171,11 @@ export default function ReportBuilder() {
     }
 
     return {
-      id: def.id,
-      label: def.label,
-      description: def.description,
-      skills: def.skills,
-      config: { detail_level: def.default_detail_level || 'manager' },
+      id: def?.id || sectionId,
+      label: libDef?.label || def?.label || sectionId,
+      description: libDef?.description || def?.description || '',
+      skills: def?.skills || [],
+      config: { detail_level: def?.default_detail_level || 'manager' },
       order,
       enabled: true,
     };
@@ -237,66 +253,123 @@ export default function ReportBuilder() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto">
+    <div style={{ maxWidth: 1024, margin: '0 auto' }}>
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">
+          <h1 style={{ fontSize: 24, fontWeight: 700, color: colors.text, fontFamily: fonts.sans, margin: 0 }}>
             {reportId && reportId !== 'new' ? 'Edit Report' : 'New Report'}
           </h1>
         </div>
-        <div className="flex gap-2">
+        <div style={{ display: 'flex', gap: 8 }}>
           <button
             onClick={() => navigate('/reports')}
-            className="px-4 py-2 text-slate-700 hover:bg-slate-100 rounded-lg font-medium"
+            style={{
+              padding: '8px 16px',
+              color: colors.text,
+              background: 'transparent',
+              border: 'none',
+              borderRadius: 6,
+              fontWeight: 500,
+              fontFamily: fonts.sans,
+              cursor: 'pointer',
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = colors.surfaceRaised)}
+            onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
           >
             Cancel
           </button>
           <button
             onClick={() => setShowLivePreview(true)}
-            className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium flex items-center gap-2"
+            style={{
+              padding: '8px 16px',
+              background: colors.surfaceRaised,
+              color: colors.text,
+              border: `1px solid ${colors.border}`,
+              borderRadius: 6,
+              fontWeight: 500,
+              fontFamily: fonts.sans,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+            }}
           >
-            <Eye className="w-4 h-4" />
+            <Eye style={{ width: 16, height: 16 }} />
             Preview
           </button>
           <button
             onClick={saveReport}
             disabled={saving}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium flex items-center gap-2 disabled:opacity-50"
+            style={{
+              padding: '8px 16px',
+              background: colors.accent,
+              color: '#fff',
+              border: 'none',
+              borderRadius: 6,
+              fontWeight: 500,
+              fontFamily: fonts.sans,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              opacity: saving ? 0.5 : 1,
+            }}
           >
-            <Save className="w-4 h-4" />
+            <Save style={{ width: 16, height: 16 }} />
             {saving ? 'Saving...' : 'Save Report'}
           </button>
         </div>
       </div>
 
-      <div className="space-y-6">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
         {/* Basic Info */}
-        <div className="bg-white rounded-lg border border-slate-200 p-6">
-          <h2 className="text-lg font-semibold text-slate-900 mb-4">Basic Information</h2>
+        <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 8, padding: 24 }}>
+          <h2 style={{ fontSize: 18, fontWeight: 600, color: colors.text, marginBottom: 16, fontFamily: fonts.sans }}>Basic Information</h2>
 
-          <div className="space-y-4">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
+              <label style={{ display: 'block', fontSize: 14, fontWeight: 500, color: colors.text, marginBottom: 4, fontFamily: fonts.sans }}>
                 Report Name
               </label>
               <input
                 type="text"
                 value={template.name}
                 onChange={(e) => setTemplate((prev) => ({ ...prev, name: e.target.value }))}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  background: colors.surfaceRaised,
+                  color: colors.text,
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: 6,
+                  fontFamily: fonts.sans,
+                  fontSize: 14,
+                  outline: 'none',
+                }}
                 placeholder="e.g., Monday Pipeline Briefing"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
+              <label style={{ display: 'block', fontSize: 14, fontWeight: 500, color: colors.text, marginBottom: 4, fontFamily: fonts.sans }}>
                 Description
               </label>
               <textarea
                 value={template.description}
                 onChange={(e) => setTemplate((prev) => ({ ...prev, description: e.target.value }))}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  background: colors.surfaceRaised,
+                  color: colors.text,
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: 6,
+                  fontFamily: fonts.sans,
+                  fontSize: 14,
+                  outline: 'none',
+                  resize: 'vertical',
+                }}
                 rows={2}
                 placeholder="Brief description of this report"
               />
@@ -305,72 +378,120 @@ export default function ReportBuilder() {
         </div>
 
         {/* Sections */}
-        <div className="bg-white rounded-lg border border-slate-200 p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-slate-900">Sections</h2>
+        <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 8, padding: 24 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+            <h2 style={{ fontSize: 18, fontWeight: 600, color: colors.text, margin: 0, fontFamily: fonts.sans }}>Sections</h2>
             <button
               onClick={() => setShowSectionPicker(true)}
-              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg font-medium flex items-center gap-2"
+              style={{
+                padding: '6px 12px',
+                background: colors.accent,
+                color: '#fff',
+                border: 'none',
+                fontSize: 14,
+                borderRadius: 6,
+                fontWeight: 500,
+                fontFamily: fonts.sans,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+              }}
             >
-              <Plus className="w-4 h-4" />
+              <Plus style={{ width: 16, height: 16 }} />
               Add Section
             </button>
           </div>
 
           {template.sections.length === 0 ? (
-            <div className="text-center py-8 text-slate-500">
-              <p className="mb-3">No sections added yet</p>
+            <div style={{ textAlign: 'center', padding: '32px 0', color: colors.textMuted }}>
+              <p style={{ marginBottom: 12, fontFamily: fonts.sans }}>No sections added yet</p>
               <button
                 onClick={() => setShowSectionPicker(true)}
-                className="text-blue-600 hover:text-blue-700 font-medium"
+                style={{
+                  color: colors.accent,
+                  background: 'transparent',
+                  border: 'none',
+                  fontWeight: 500,
+                  fontFamily: fonts.sans,
+                  cursor: 'pointer',
+                }}
               >
                 Add your first section
               </button>
             </div>
           ) : (
-            <div className="space-y-2">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {template.sections.map((section, idx) => (
                 <div
                   key={idx}
-                  className="flex items-center gap-3 p-4 border border-slate-200 rounded-lg hover:border-slate-300"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 12,
+                    padding: 16,
+                    border: `1px solid ${colors.border}`,
+                    borderRadius: 8,
+                  }}
                 >
-                  <button className="text-slate-400 hover:text-slate-600 cursor-move">
-                    <GripVertical className="w-5 h-5" />
+                  <button style={{ color: colors.textMuted, background: 'transparent', border: 'none', cursor: 'move', padding: 0 }}>
+                    <GripVertical style={{ width: 20, height: 20 }} />
                   </button>
 
-                  <div className="flex-1">
-                    <div className="font-medium text-slate-900">{section.label}</div>
-                    <div className="text-sm text-slate-500">{section.description}</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 500, color: colors.text, fontFamily: fonts.sans, marginBottom: 4 }}>{section.label}</div>
+                    <div style={{ fontSize: 14, color: colors.textMuted, fontFamily: fonts.sans }}>{section.description}</div>
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs px-2 py-1 bg-slate-100 text-slate-600 rounded">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{
+                      fontSize: 12,
+                      padding: '4px 8px',
+                      background: colors.surfaceRaised,
+                      color: colors.textSecondary,
+                      borderRadius: 4,
+                      fontFamily: fonts.sans
+                    }}>
                       {section.config.detail_level}
                     </span>
 
                     <button
                       onClick={() => moveSection(idx, 'up')}
                       disabled={idx === 0}
-                      className="p-1 text-slate-400 hover:text-slate-600 disabled:opacity-30"
+                      style={{
+                        padding: 4,
+                        color: colors.textMuted,
+                        background: 'transparent',
+                        border: 'none',
+                        cursor: idx === 0 ? 'not-allowed' : 'pointer',
+                        opacity: idx === 0 ? 0.3 : 1,
+                      }}
                     >
                       ↑
                     </button>
                     <button
                       onClick={() => moveSection(idx, 'down')}
                       disabled={idx === template.sections.length - 1}
-                      className="p-1 text-slate-400 hover:text-slate-600 disabled:opacity-30"
+                      style={{
+                        padding: 4,
+                        color: colors.textMuted,
+                        background: 'transparent',
+                        border: 'none',
+                        cursor: idx === template.sections.length - 1 ? 'not-allowed' : 'pointer',
+                        opacity: idx === template.sections.length - 1 ? 0.3 : 1,
+                      }}
                     >
                       ↓
                     </button>
 
-                    <button className="p-2 text-slate-400 hover:text-slate-600">
-                      <SettingsIcon className="w-4 h-4" />
+                    <button style={{ padding: 8, color: colors.textMuted, background: 'transparent', border: 'none', cursor: 'pointer' }}>
+                      <SettingsIcon style={{ width: 16, height: 16 }} />
                     </button>
                     <button
                       onClick={() => removeSection(idx)}
-                      className="p-2 text-red-400 hover:text-red-600"
+                      style={{ padding: 8, color: colors.red, background: 'transparent', border: 'none', cursor: 'pointer' }}
                     >
-                      <Trash2 className="w-4 h-4" />
+                      <Trash2 style={{ width: 16, height: 16 }} />
                     </button>
                   </div>
                 </div>
@@ -427,16 +548,26 @@ export default function ReportBuilder() {
 // Schedule Editor Component
 function ScheduleEditor({ template, setTemplate }: any) {
   return (
-    <div className="bg-white rounded-lg border border-slate-200 p-6">
-      <h2 className="text-lg font-semibold text-slate-900 mb-4">Schedule</h2>
+    <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 8, padding: 24 }}>
+      <h2 style={{ fontSize: 18, fontWeight: 600, color: colors.text, marginBottom: 16, fontFamily: fonts.sans }}>Schedule</h2>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16 }}>
         <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">Cadence</label>
+          <label style={{ display: 'block', fontSize: 14, fontWeight: 500, color: colors.text, marginBottom: 4, fontFamily: fonts.sans }}>Cadence</label>
           <select
             value={template.cadence}
             onChange={(e) => setTemplate((prev: any) => ({ ...prev, cadence: e.target.value }))}
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            style={{
+              width: '100%',
+              padding: '8px 12px',
+              background: colors.surfaceRaised,
+              color: colors.text,
+              border: `1px solid ${colors.border}`,
+              borderRadius: 6,
+              fontFamily: fonts.sans,
+              fontSize: 14,
+              outline: 'none',
+            }}
           >
             <option value="manual">Manual</option>
             <option value="daily">Daily</option>
@@ -449,13 +580,23 @@ function ScheduleEditor({ template, setTemplate }: any) {
 
         {template.cadence === 'weekly' || template.cadence === 'biweekly' ? (
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Day</label>
+            <label style={{ display: 'block', fontSize: 14, fontWeight: 500, color: colors.text, marginBottom: 4, fontFamily: fonts.sans }}>Day</label>
             <select
               value={template.schedule_day}
               onChange={(e) =>
                 setTemplate((prev: any) => ({ ...prev, schedule_day: parseInt(e.target.value) }))
               }
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                background: colors.surfaceRaised,
+                color: colors.text,
+                border: `1px solid ${colors.border}`,
+                borderRadius: 6,
+                fontFamily: fonts.sans,
+                fontSize: 14,
+                outline: 'none',
+              }}
             >
               <option value={1}>Monday</option>
               <option value={2}>Tuesday</option>
@@ -468,7 +609,7 @@ function ScheduleEditor({ template, setTemplate }: any) {
           </div>
         ) : template.cadence === 'monthly' ? (
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
+            <label style={{ display: 'block', fontSize: 14, fontWeight: 500, color: colors.text, marginBottom: 4, fontFamily: fonts.sans }}>
               Day of Month
             </label>
             <input
@@ -482,31 +623,61 @@ function ScheduleEditor({ template, setTemplate }: any) {
                   schedule_day_of_month: parseInt(e.target.value),
                 }))
               }
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                background: colors.surfaceRaised,
+                color: colors.text,
+                border: `1px solid ${colors.border}`,
+                borderRadius: 6,
+                fontFamily: fonts.sans,
+                fontSize: 14,
+                outline: 'none',
+              }}
             />
           </div>
         ) : null}
 
         {template.cadence !== 'manual' && (
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Time</label>
+            <label style={{ display: 'block', fontSize: 14, fontWeight: 500, color: colors.text, marginBottom: 4, fontFamily: fonts.sans }}>Time</label>
             <input
               type="time"
               value={template.schedule_time}
               onChange={(e) =>
                 setTemplate((prev: any) => ({ ...prev, schedule_time: e.target.value }))
               }
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                background: colors.surfaceRaised,
+                color: colors.text,
+                border: `1px solid ${colors.border}`,
+                borderRadius: 6,
+                fontFamily: fonts.sans,
+                fontSize: 14,
+                outline: 'none',
+              }}
             />
           </div>
         )}
 
         <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">Timezone</label>
+          <label style={{ display: 'block', fontSize: 14, fontWeight: 500, color: colors.text, marginBottom: 4, fontFamily: fonts.sans }}>Timezone</label>
           <select
             value={template.timezone}
             onChange={(e) => setTemplate((prev: any) => ({ ...prev, timezone: e.target.value }))}
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            style={{
+              width: '100%',
+              padding: '8px 12px',
+              background: colors.surfaceRaised,
+              color: colors.text,
+              border: `1px solid ${colors.border}`,
+              borderRadius: 6,
+              fontFamily: fonts.sans,
+              fontSize: 14,
+              outline: 'none',
+            }}
           >
             <option value="America/Los_Angeles">Pacific Time</option>
             <option value="America/Denver">Mountain Time</option>
@@ -523,15 +694,15 @@ function ScheduleEditor({ template, setTemplate }: any) {
 // Delivery Editor Component
 function DeliveryEditor({ template, setTemplate }: any) {
   return (
-    <div className="bg-white rounded-lg border border-slate-200 p-6">
-      <h2 className="text-lg font-semibold text-slate-900 mb-4">Format & Delivery</h2>
+    <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 8, padding: 24 }}>
+      <h2 style={{ fontSize: 18, fontWeight: 600, color: colors.text, marginBottom: 16, fontFamily: fonts.sans }}>Format & Delivery</h2>
 
-      <div className="space-y-4">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div>
-          <label className="block text-sm font-medium text-slate-700 mb-2">Formats</label>
-          <div className="flex gap-3">
+          <label style={{ display: 'block', fontSize: 14, fontWeight: 500, color: colors.text, marginBottom: 8, fontFamily: fonts.sans }}>Formats</label>
+          <div style={{ display: 'flex', gap: 12 }}>
             {['pdf', 'docx', 'pptx'].map((format) => (
-              <label key={format} className="flex items-center gap-2 cursor-pointer">
+              <label key={format} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
                 <input
                   type="checkbox"
                   checked={template.formats.includes(format)}
@@ -548,16 +719,16 @@ function DeliveryEditor({ template, setTemplate }: any) {
                       }));
                     }
                   }}
-                  className="w-4 h-4 text-blue-600 rounded"
+                  style={{ width: 16, height: 16, cursor: 'pointer' }}
                 />
-                <span className="text-sm uppercase font-medium">{format}</span>
+                <span style={{ fontSize: 14, textTransform: 'uppercase', fontWeight: 500, color: colors.text, fontFamily: fonts.sans }}>{format}</span>
               </label>
             ))}
           </div>
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-slate-700 mb-2">Email Recipients</label>
+          <label style={{ display: 'block', fontSize: 14, fontWeight: 500, color: colors.text, marginBottom: 8, fontFamily: fonts.sans }}>Email Recipients</label>
           <input
             type="text"
             value={template.recipients.join(', ')}
@@ -567,7 +738,17 @@ function DeliveryEditor({ template, setTemplate }: any) {
                 recipients: e.target.value.split(',').map((s: string) => s.trim()),
               }))
             }
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            style={{
+              width: '100%',
+              padding: '8px 12px',
+              background: colors.surfaceRaised,
+              color: colors.text,
+              border: `1px solid ${colors.border}`,
+              borderRadius: 6,
+              fontFamily: fonts.sans,
+              fontSize: 14,
+              outline: 'none',
+            }}
             placeholder="email1@company.com, email2@company.com"
           />
         </div>
@@ -579,21 +760,21 @@ function DeliveryEditor({ template, setTemplate }: any) {
 // Branding Editor Component
 function BrandingEditor({ template, setTemplate }: any) {
   return (
-    <div className="bg-white rounded-lg border border-slate-200 p-6">
-      <h2 className="text-lg font-semibold text-slate-900 mb-4">Branding</h2>
+    <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 8, padding: 24 }}>
+      <h2 style={{ fontSize: 18, fontWeight: 600, color: colors.text, marginBottom: 16, fontFamily: fonts.sans }}>Branding</h2>
 
-      <div className="flex items-center gap-3">
-        <label className="flex items-center gap-2 cursor-pointer">
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
           <input
             type="radio"
             checked={!template.branding_override}
             onChange={() => setTemplate((prev: any) => ({ ...prev, branding_override: null }))}
-            className="w-4 h-4 text-blue-600"
+            style={{ width: 16, height: 16, cursor: 'pointer' }}
           />
-          <span className="text-sm">Use workspace defaults</span>
+          <span style={{ fontSize: 14, color: colors.text, fontFamily: fonts.sans }}>Use workspace defaults</span>
         </label>
 
-        <label className="flex items-center gap-2 cursor-pointer">
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
           <input
             type="radio"
             checked={!!template.branding_override}
@@ -603,16 +784,16 @@ function BrandingEditor({ template, setTemplate }: any) {
                 branding_override: { primary_color: '#2563EB' },
               }))
             }
-            className="w-4 h-4 text-blue-600"
+            style={{ width: 16, height: 16, cursor: 'pointer' }}
           />
-          <span className="text-sm">Customize</span>
+          <span style={{ fontSize: 14, color: colors.text, fontFamily: fonts.sans }}>Customize</span>
         </label>
       </div>
 
       {template.branding_override && (
-        <div className="mt-4 space-y-4">
+        <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Primary Color</label>
+            <label style={{ display: 'block', fontSize: 14, fontWeight: 500, color: colors.text, marginBottom: 4, fontFamily: fonts.sans }}>Primary Color</label>
             <input
               type="color"
               value={template.branding_override.primary_color || '#2563EB'}
@@ -622,7 +803,13 @@ function BrandingEditor({ template, setTemplate }: any) {
                   branding_override: { ...prev.branding_override, primary_color: e.target.value },
                 }))
               }
-              className="w-full h-10 border border-slate-300 rounded-lg"
+              style={{
+                width: '100%',
+                height: 40,
+                border: `1px solid ${colors.border}`,
+                borderRadius: 6,
+                cursor: 'pointer',
+              }}
             />
           </div>
         </div>
@@ -634,34 +821,79 @@ function BrandingEditor({ template, setTemplate }: any) {
 // Section Picker Modal
 function SectionPickerModal({ availableSections, selectedSections, onSelect, onClose }: any) {
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[80vh] overflow-hidden">
-        <div className="flex items-center justify-between p-6 border-b border-slate-200">
-          <h2 className="text-lg font-semibold text-slate-900">Add Section</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
-            <X className="w-5 h-5" />
+    <div style={{
+      position: 'fixed',
+      inset: 0,
+      background: 'rgba(0, 0, 0, 0.7)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 50
+    }}>
+      <div style={{
+        background: colors.surface,
+        borderRadius: 8,
+        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5)',
+        maxWidth: 672,
+        width: '100%',
+        maxHeight: '80vh',
+        overflow: 'hidden'
+      }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: 24,
+          borderBottom: `1px solid ${colors.border}`
+        }}>
+          <h2 style={{ fontSize: 18, fontWeight: 600, color: colors.text, margin: 0, fontFamily: fonts.sans }}>Add Section</h2>
+          <button onClick={onClose} style={{ color: colors.textMuted, background: 'transparent', border: 'none', cursor: 'pointer' }}>
+            <X style={{ width: 20, height: 20 }} />
           </button>
         </div>
 
-        <div className="p-6 overflow-y-auto max-h-[60vh]">
-          <div className="grid gap-3">
+        <div style={{ padding: 24, overflowY: 'auto', maxHeight: '60vh' }}>
+          <div style={{ display: 'grid', gap: 12 }}>
             {availableSections.map((section: any) => {
               const isSelected = selectedSections.includes(section.id);
+              const libDef = sectionLibrary[section.id];
+
               return (
                 <button
                   key={section.id}
                   onClick={() => !isSelected && onSelect(section.id)}
                   disabled={isSelected}
-                  className={`text-left p-4 border rounded-lg transition ${
-                    isSelected
-                      ? 'border-slate-200 bg-slate-50 cursor-not-allowed opacity-50'
-                      : 'border-slate-200 hover:border-blue-500 hover:bg-blue-50'
-                  }`}
+                  style={{
+                    textAlign: 'left',
+                    padding: 16,
+                    border: `1px solid ${isSelected ? colors.border : colors.border}`,
+                    borderRadius: 8,
+                    transition: 'border-color 0.2s, background 0.2s',
+                    background: isSelected ? colors.surfaceRaised : colors.surface,
+                    cursor: isSelected ? 'not-allowed' : 'pointer',
+                    opacity: isSelected ? 0.5 : 1,
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isSelected) {
+                      e.currentTarget.style.borderColor = colors.accent;
+                      e.currentTarget.style.background = colors.surfaceRaised;
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isSelected) {
+                      e.currentTarget.style.borderColor = colors.border;
+                      e.currentTarget.style.background = colors.surface;
+                    }
+                  }}
                 >
-                  <div className="font-medium text-slate-900 mb-1">{section.label}</div>
-                  <div className="text-sm text-slate-600">{section.description}</div>
+                  <div style={{ fontWeight: 500, color: colors.text, marginBottom: 4, fontFamily: fonts.sans }}>
+                    {libDef?.label || section.label}
+                  </div>
+                  <div style={{ fontSize: 14, color: colors.textSecondary, fontFamily: fonts.sans }}>
+                    {libDef?.description || section.description}
+                  </div>
                   {isSelected && (
-                    <div className="text-xs text-slate-500 mt-2">Already added</div>
+                    <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 8, fontFamily: fonts.sans }}>Already added</div>
                   )}
                 </button>
               );
