@@ -223,6 +223,8 @@ interface Account {
   signals?: Signal[];
   signal_score?: number;
   classification_confidence?: number;
+  enriched_at?: string;  // from account_signals table
+  icp_fit_score?: number;  // from score_breakdown if available
 }
 
 const GRADE_COLORS: Record<string, { bg: string; text: string }> = {
@@ -278,7 +280,7 @@ function SignalBadges({ signals, confidence }: { signals?: Signal[]; confidence?
   );
 }
 
-type SortField = 'name' | 'domain' | 'industry' | 'open_deals' | 'pipeline' | 'contacts' | 'last_activity' | 'score';
+type SortField = 'name' | 'domain' | 'industry' | 'open_deals' | 'pipeline' | 'contacts' | 'last_activity' | 'score' | 'signals' | 'icp_fit';
 type SortDir = 'asc' | 'desc';
 
 export default function AccountList() {
@@ -331,6 +333,8 @@ export default function AccountList() {
         signals: Array.isArray(a.signals) ? a.signals : undefined,
         signal_score: a.signal_score ?? undefined,
         classification_confidence: a.classification_confidence ?? undefined,
+        enriched_at: a.enriched_at ?? undefined,
+        icp_fit_score: a.icp_fit_score ?? undefined,
       })));
       setError('');
     } catch (err: any) {
@@ -399,6 +403,8 @@ export default function AccountList() {
           break;
         }
         case 'score': cmp = (a.total_score ?? -1) - (b.total_score ?? -1); break;
+        case 'signals': cmp = (a.signals?.length ?? 0) - (b.signals?.length ?? 0); break;
+        case 'icp_fit': cmp = (a.icp_fit_score ?? -1) - (b.icp_fit_score ?? -1); break;
       }
       if (cmp === 0) cmp = a.name.localeCompare(b.name);
       return sortDir === 'desc' ? -cmp : cmp;
@@ -416,7 +422,7 @@ export default function AccountList() {
       setSortDir(d => d === 'asc' ? 'desc' : 'asc');
     } else {
       setSortField(field);
-      setSortDir(field === 'name' || field === 'domain' || field === 'industry' ? 'asc' : 'desc');
+      setSortDir(field === 'name' || field === 'domain' || field === 'industry' || field === 'signals' ? 'asc' : 'desc');
     }
   };
 
@@ -434,7 +440,9 @@ export default function AccountList() {
   const columns: ColDef[] = [
     { field: 'name', label: 'Account Name', width: '22%', show: true },
     { field: 'domain', label: 'Domain', width: '13%', show: true },
-    { field: 'score', label: 'Score', width: '10%', show: scoringActive },
+    { field: 'score', label: 'Score', width: '8%', show: scoringActive },
+    { field: 'signals', label: 'Signals', width: '12%', show: scoringActive },
+    { field: 'icp_fit', label: 'ICP Fit', width: '7%', show: scoringActive },
     { field: 'industry', label: 'Industry', width: '12%', show: hasIndustryData },
     { field: 'open_deals', label: 'Open Deals', width: '8%', show: hasDealData },
     { field: 'pipeline', label: 'Pipeline', width: '10%', show: hasPipelineData },
@@ -632,6 +640,12 @@ export default function AccountList() {
                       </span>
                     )}
                   </div>
+                  {/* Enrichment timestamp for mobile */}
+                  {scoringActive && account.enriched_at && (
+                    <div style={{ fontSize: 10, color: colors.textDim, marginBottom: 4 }}>
+                      Enriched {formatTimeAgo(account.enriched_at)}
+                    </div>
+                  )}
                   {/* Row 2: domain, pipeline amount, last activity */}
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, fontSize: 12, color: colors.textSecondary }}>
                     {account.domain && (
@@ -672,9 +686,18 @@ export default function AccountList() {
                 {scoringActive && (
                   <div>
                     <ScoreBadge grade={account.grade} score={account.total_score} scoreDelta={account.score_delta} dataConfidence={account.data_confidence} />
-                    <div style={{ marginTop: 4 }}>
-                      <SignalBadges signals={account.signals} confidence={account.classification_confidence} />
-                    </div>
+                  </div>
+                )}
+                {/* Signals column */}
+                {scoringActive && (
+                  <div>
+                    <SignalBadges signals={account.signals} confidence={account.classification_confidence} />
+                  </div>
+                )}
+                {/* ICP Fit column */}
+                {scoringActive && (
+                  <div style={{ fontSize: 12, fontFamily: fonts.mono, color: colors.text }}>
+                    {account.icp_fit_score !== undefined ? `${account.icp_fit_score}%` : '—'}
                   </div>
                 )}
                 {hasIndustryData && (
@@ -699,7 +722,16 @@ export default function AccountList() {
                 )}
                 {hasActivityData && (
                   <div style={{ fontSize: 11, color: colors.textMuted }}>
-                    {account.last_activity ? formatTimeAgo(account.last_activity) : '—'}
+                    {account.last_activity ? (
+                      <div>
+                        <div>{formatTimeAgo(account.last_activity)}</div>
+                        {account.enriched_at && (
+                          <div style={{ fontSize: 10, color: colors.textDim, marginTop: 2 }}>
+                            Enriched {formatTimeAgo(account.enriched_at)}
+                          </div>
+                        )}
+                      </div>
+                    ) : '—'}
                   </div>
                 )}
               </div>
