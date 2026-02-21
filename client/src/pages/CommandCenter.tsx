@@ -11,6 +11,7 @@ import { useWorkspace } from '../context/WorkspaceContext';
 import SectionErrorBoundary from '../components/SectionErrorBoundary';
 import MonteCarloPanel from '../components/MonteCarloPanel';
 import GapCard from '../components/GapCard';
+import { ConversationGaps } from '../components/ConversationGaps';
 import { useDemoMode } from '../contexts/DemoModeContext';
 import { useIsMobile } from '../hooks/useIsMobile';
 
@@ -647,6 +648,10 @@ export default function CommandCenter() {
 
       <SectionErrorBoundary fallbackMessage="Failed to load gap card.">
         <GapCard wsId={wsId} />
+      </SectionErrorBoundary>
+
+      <SectionErrorBoundary fallbackMessage="Failed to load conversation gaps.">
+        <ConversationGaps />
       </SectionErrorBoundary>
 
       <SectionErrorBoundary fallbackMessage="Failed to load forecast panel.">
