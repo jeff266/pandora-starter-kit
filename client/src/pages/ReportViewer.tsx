@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { Download, Share2, Settings, ChevronLeft, ChevronRight, Eye } from 'lucide-react';
-import type { SectionContent } from '../components/reports/types';
+import type { SectionContent, MetricCard, DealCard, ActionItem } from '../components/reports/types';
 import { api } from '../lib/api';
+import { colors, fonts } from '../styles/theme';
 
 interface ReportGeneration {
   id: string;
@@ -153,28 +154,28 @@ export default function ReportViewer() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-slate-400">Loading report...</div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: colors.bg }}>
+        <div style={{ color: colors.textMuted, fontFamily: fonts.sans }}>Loading report...</div>
       </div>
     );
   }
 
   if (!generation || !template) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-slate-400">Report not found</div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: colors.bg }}>
+        <div style={{ color: colors.textMuted, fontFamily: fonts.sans }}>Report not found</div>
       </div>
     );
   }
 
   return (
-    <div className="flex h-screen bg-slate-50">
+    <div style={{ display: 'flex', height: '100vh', background: colors.bg }}>
       {/* Timeline Sidebar */}
-      <div className="w-64 bg-white border-r border-slate-200 flex flex-col">
-        <div className="p-4 border-b border-slate-200">
-          <h3 className="font-semibold text-sm text-slate-700">Timeline</h3>
+      <div style={{ width: 256, background: colors.surface, borderRight: `1px solid ${colors.border}`, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ padding: 16, borderBottom: `1px solid ${colors.border}` }}>
+          <h3 style={{ fontWeight: 600, fontSize: 14, color: colors.text, fontFamily: fonts.sans, margin: 0 }}>Timeline</h3>
         </div>
-        <div className="flex-1 overflow-y-auto p-4 space-y-2">
+        <div style={{ flex: 1, overflowY: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
           {generations.map((gen) => {
             const isActive = gen.id === generation.id;
             const date = new Date(gen.created_at);
@@ -182,42 +183,75 @@ export default function ReportViewer() {
               <button
                 key={gen.id}
                 onClick={() => navigate(`/workspace/${workspaceId}/reports/${reportId}/generations/${gen.id}`)}
-                className={`w-full text-left px-3 py-2 rounded-lg text-sm transition ${
-                  isActive
-                    ? 'bg-blue-50 text-blue-900 font-semibold border border-blue-200'
-                    : 'text-slate-600 hover:bg-slate-50'
-                }`}
+                style={{
+                  width: '100%',
+                  textAlign: 'left',
+                  padding: '8px 12px',
+                  borderRadius: 8,
+                  fontSize: 14,
+                  transition: 'background 0.2s, border-color 0.2s',
+                  background: isActive ? colors.surfaceRaised : 'transparent',
+                  color: isActive ? colors.text : colors.textSecondary,
+                  fontWeight: isActive ? 600 : 400,
+                  border: isActive ? `1px solid ${colors.accent}` : '1px solid transparent',
+                  cursor: 'pointer',
+                  fontFamily: fonts.sans,
+                }}
+                onMouseEnter={(e) => {
+                  if (!isActive) e.currentTarget.style.background = colors.surfaceRaised;
+                }}
+                onMouseLeave={(e) => {
+                  if (!isActive) e.currentTarget.style.background = 'transparent';
+                }}
               >
-                <div className="flex items-center gap-2">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <div
-                    className={`w-2 h-2 rounded-full ${
-                      isActive ? 'bg-blue-500' : 'bg-slate-300'
-                    }`}
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: '50%',
+                      background: isActive ? colors.accent : colors.border,
+                    }}
                   />
                   <span>{date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
                 </div>
-                <div className="text-xs text-slate-500 ml-4 mt-0.5">
+                <div style={{ fontSize: 12, color: colors.textMuted, marginLeft: 16, marginTop: 2 }}>
                   {date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
                 </div>
               </button>
             );
           })}
         </div>
-        <div className="p-4 border-t border-slate-200">
-          <button className="w-full px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-sm font-medium text-slate-700">
+        <div style={{ padding: 16, borderTop: `1px solid ${colors.border}` }}>
+          <button
+            style={{
+              width: '100%',
+              padding: '8px 12px',
+              background: colors.surfaceRaised,
+              borderRadius: 8,
+              fontSize: 14,
+              fontWeight: 500,
+              color: colors.text,
+              border: 'none',
+              cursor: 'pointer',
+              fontFamily: fonts.sans,
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = colors.border)}
+            onMouseLeave={(e) => (e.currentTarget.style.background = colors.surfaceRaised)}
+          >
             Compare
           </button>
         </div>
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {/* Header Bar */}
-        <div className="bg-white border-b border-slate-200 px-6 py-4">
-          <div className="flex items-center justify-between">
+        <div style={{ background: colors.surface, borderBottom: `1px solid ${colors.border}`, padding: '16px 24px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div>
-              <h1 className="text-2xl font-bold text-slate-900">{template.name}</h1>
-              <div className="flex items-center gap-4 mt-1 text-sm text-slate-500">
+              <h1 style={{ fontSize: 24, fontWeight: 700, color: colors.text, fontFamily: fonts.sans, margin: 0 }}>{template.name}</h1>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 4, fontSize: 14, color: colors.textMuted, fontFamily: fonts.sans }}>
                 <span>
                   Generated {new Date(generation.created_at).toLocaleDateString('en-US', {
                     weekday: 'long',
@@ -234,40 +268,98 @@ export default function ReportViewer() {
                 <span>{generation.skills_run?.length || 0} skills</span>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <button
                 onClick={() => setAnonymizeMode(!anonymizeMode)}
-                className={`px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 ${
-                  anonymizeMode
-                    ? 'bg-amber-100 text-amber-900'
-                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                }`}
+                style={{
+                  padding: '8px 12px',
+                  borderRadius: 8,
+                  fontSize: 14,
+                  fontWeight: 500,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  background: anonymizeMode ? '#fef3c7' : colors.surfaceRaised,
+                  color: anonymizeMode ? '#78350f' : colors.text,
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontFamily: fonts.sans,
+                }}
+                onMouseEnter={(e) => {
+                  if (!anonymizeMode) e.currentTarget.style.background = colors.border;
+                }}
+                onMouseLeave={(e) => {
+                  if (!anonymizeMode) e.currentTarget.style.background = colors.surfaceRaised;
+                }}
               >
-                <Eye className="w-4 h-4" />
+                <Eye style={{ width: 16, height: 16 }} />
                 {anonymizeMode ? 'Anonymized' : 'Anonymize'}
               </button>
               {Object.keys(generation.formats_generated).map((format) => (
                 <button
                   key={format}
                   onClick={() => downloadFormat(format)}
-                  className="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-sm font-medium text-slate-700 flex items-center gap-2"
+                  style={{
+                    padding: '8px 12px',
+                    background: colors.surfaceRaised,
+                    borderRadius: 8,
+                    fontSize: 14,
+                    fontWeight: 500,
+                    color: colors.text,
+                    border: 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    cursor: 'pointer',
+                    fontFamily: fonts.sans,
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = colors.border)}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = colors.surfaceRaised)}
                 >
-                  <Download className="w-4 h-4" />
+                  <Download style={{ width: 16, height: 16 }} />
                   {format.toUpperCase()}
                 </button>
               ))}
               <button
                 onClick={shareReport}
-                className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium flex items-center gap-2"
+                style={{
+                  padding: '8px 12px',
+                  background: colors.accent,
+                  borderRadius: 8,
+                  fontSize: 14,
+                  fontWeight: 500,
+                  color: '#fff',
+                  border: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  cursor: 'pointer',
+                  fontFamily: fonts.sans,
+                }}
               >
-                <Share2 className="w-4 h-4" />
+                <Share2 style={{ width: 16, height: 16 }} />
                 Share
               </button>
               <Link
                 to={`/workspace/${workspaceId}/reports/${reportId}/edit`}
-                className="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-sm font-medium text-slate-700 flex items-center gap-2"
+                style={{
+                  padding: '8px 12px',
+                  background: colors.surfaceRaised,
+                  borderRadius: 8,
+                  fontSize: 14,
+                  fontWeight: 500,
+                  color: colors.text,
+                  textDecoration: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  cursor: 'pointer',
+                  fontFamily: fonts.sans,
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = colors.border)}
+                onMouseLeave={(e) => (e.currentTarget.style.background = colors.surfaceRaised)}
               >
-                <Settings className="w-4 h-4" />
+                <Settings style={{ width: 16, height: 16 }} />
                 Edit Report
               </Link>
             </div>
@@ -275,8 +367,8 @@ export default function ReportViewer() {
         </div>
 
         {/* Report Sections */}
-        <div className="flex-1 overflow-y-auto p-6">
-          <div className="max-w-5xl mx-auto space-y-6">
+        <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
+          <div style={{ maxWidth: 1024, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 24 }}>
             {generation.sections_content?.map((section) => {
               const isCollapsed = collapsedSections.has(section.section_id);
               return (
@@ -293,8 +385,8 @@ export default function ReportViewer() {
         </div>
 
         {/* Footer */}
-        <div className="bg-white border-t border-slate-200 px-6 py-3 text-xs text-slate-500">
-          <div className="flex items-center justify-between">
+        <div style={{ background: colors.surface, borderTop: `1px solid ${colors.border}`, padding: '12px 24px', fontSize: 12, color: colors.textMuted, fontFamily: fonts.sans }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <span>
               Skills: {generation.skills_run?.join(', ') || 'none'} • {generation.total_tokens} tokens
             </span>
@@ -317,26 +409,38 @@ interface ReportSectionProps {
 
 function ReportSection({ section, isCollapsed, onToggle, anonymizeMode }: ReportSectionProps) {
   return (
-    <div id={section.section_id} className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+    <div id={section.section_id} style={{ background: colors.surface, borderRadius: 8, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>
       {/* Section Header */}
       <button
         onClick={onToggle}
-        className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 transition"
+        style={{
+          width: '100%',
+          padding: '16px 24px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          transition: 'background 0.2s',
+          background: 'transparent',
+          border: 'none',
+          cursor: 'pointer',
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.background = colors.surfaceRaised)}
+        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
       >
-        <h2 className="text-xl font-bold text-slate-900">{section.title}</h2>
+        <h2 style={{ fontSize: 20, fontWeight: 700, color: colors.text, fontFamily: fonts.sans, margin: 0 }}>{section.title}</h2>
         {isCollapsed ? (
-          <ChevronRight className="w-5 h-5 text-slate-400" />
+          <ChevronRight style={{ width: 20, height: 20, color: colors.textMuted }} />
         ) : (
-          <ChevronLeft className="w-5 h-5 text-slate-400" />
+          <ChevronLeft style={{ width: 20, height: 20, color: colors.textMuted }} />
         )}
       </button>
 
       {/* Section Content */}
       {!isCollapsed && (
-        <div className="px-6 pb-6 space-y-6">
+        <div style={{ padding: '0 24px 24px', display: 'flex', flexDirection: 'column', gap: 24 }}>
           {/* Metrics */}
           {section.metrics && section.metrics.length > 0 && (
-            <div className="grid grid-cols-3 gap-4">
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
               {section.metrics.map((metric, idx) => (
                 <MetricCardComponent key={idx} metric={metric} />
               ))}
@@ -345,17 +449,17 @@ function ReportSection({ section, isCollapsed, onToggle, anonymizeMode }: Report
 
           {/* Narrative */}
           {section.narrative && (
-            <div className="prose prose-sm max-w-none text-slate-700 leading-relaxed">
+            <div style={{ maxWidth: 'none', color: colors.textSecondary, lineHeight: 1.6, fontFamily: fonts.sans }}>
               {section.narrative.split('\n\n').map((para, idx) => (
-                <p key={idx}>{para}</p>
+                <p key={idx} style={{ marginBottom: 16 }}>{para}</p>
               ))}
             </div>
           )}
 
           {/* Deal Cards */}
           {section.deal_cards && section.deal_cards.length > 0 && (
-            <div className="space-y-3">
-              <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">Deals</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text, textTransform: 'uppercase', letterSpacing: '0.05em', fontFamily: fonts.sans, margin: 0 }}>Deals</h3>
               {section.deal_cards.map((deal, idx) => (
                 <DealCardComponent key={idx} deal={deal} anonymizeMode={anonymizeMode} />
               ))}
@@ -364,22 +468,22 @@ function ReportSection({ section, isCollapsed, onToggle, anonymizeMode }: Report
 
           {/* Table */}
           {section.table && section.table.rows.length > 0 && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-900 text-white">
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', fontSize: 14 }}>
+                <thead style={{ background: colors.surfaceRaised, color: colors.text }}>
                   <tr>
                     {section.table.headers.map((header, idx) => (
-                      <th key={idx} className="px-4 py-2 text-left font-semibold">
+                      <th key={idx} style={{ padding: '8px 16px', textAlign: 'left', fontWeight: 600, fontFamily: fonts.sans }}>
                         {header}
                       </th>
                     ))}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-200">
+                <tbody style={{ borderTop: `1px solid ${colors.border}` }}>
                   {section.table.rows.slice(0, 20).map((row, idx) => (
-                    <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
+                    <tr key={idx} style={{ background: idx % 2 === 0 ? colors.surface : colors.surfaceRaised, borderBottom: `1px solid ${colors.border}` }}>
                       {section.table!.headers.map((header, cellIdx) => (
-                        <td key={cellIdx} className="px-4 py-2 text-slate-700">
+                        <td key={cellIdx} style={{ padding: '8px 16px', color: colors.textSecondary, fontFamily: fonts.sans }}>
                           {row[header]?.toString() || '—'}
                         </td>
                       ))}
@@ -392,8 +496,8 @@ function ReportSection({ section, isCollapsed, onToggle, anonymizeMode }: Report
 
           {/* Action Items */}
           {section.action_items && section.action_items.length > 0 && (
-            <div className="space-y-2">
-              <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">Action Items</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text, textTransform: 'uppercase', letterSpacing: '0.05em', fontFamily: fonts.sans, margin: 0 }}>Action Items</h3>
               {section.action_items.map((action, idx) => (
                 <ActionItemComponent key={idx} action={action} index={idx} />
               ))}
@@ -401,7 +505,7 @@ function ReportSection({ section, isCollapsed, onToggle, anonymizeMode }: Report
           )}
 
           {/* Metadata */}
-          <div className="text-xs text-slate-500 pt-4 border-t border-slate-100">
+          <div style={{ fontSize: 12, color: colors.textMuted, paddingTop: 16, borderTop: `1px solid ${colors.border}`, fontFamily: fonts.sans }}>
             Data as of {new Date(section.data_freshness).toLocaleString('en-US')} • Confidence:{' '}
             {Math.round(section.confidence * 100)}%
           </div>
@@ -413,27 +517,27 @@ function ReportSection({ section, isCollapsed, onToggle, anonymizeMode }: Report
 
 function MetricCardComponent({ metric }: { metric: MetricCard }) {
   const severityColors = {
-    critical: 'border-red-200 bg-red-50',
-    warning: 'border-amber-200 bg-amber-50',
-    good: 'border-green-200 bg-green-50',
+    critical: { bg: '#7f1d1d', border: '#991b1b', accent: '#dc2626' },
+    warning: { bg: '#78350f', border: '#92400e', accent: '#f59e0b' },
+    good: { bg: '#14532d', border: '#166534', accent: '#22c55e' },
   };
 
-  const severityAccents = {
-    critical: 'border-l-red-500',
-    warning: 'border-l-amber-500',
-    good: 'border-l-green-500',
-  };
-
-  const bgClass = metric.severity ? severityColors[metric.severity] : 'border-slate-200 bg-slate-50';
-  const accentClass = metric.severity ? severityAccents[metric.severity] : 'border-l-slate-400';
+  const defaultColors = { bg: colors.surfaceRaised, border: colors.border, accent: colors.border };
+  const colorScheme = metric.severity ? severityColors[metric.severity] : defaultColors;
 
   return (
-    <div className={`border ${bgClass} ${accentClass} border-l-4 rounded-lg p-4`}>
-      <div className="text-xs uppercase tracking-wide text-slate-600 font-semibold">{metric.label}</div>
-      <div className="mt-2 flex items-baseline gap-2">
-        <span className="text-2xl font-bold text-slate-900">{metric.value}</span>
+    <div style={{
+      border: `1px solid ${colorScheme.border}`,
+      background: colorScheme.bg,
+      borderLeft: `4px solid ${colorScheme.accent}`,
+      borderRadius: 8,
+      padding: 16,
+    }}>
+      <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em', color: colors.textSecondary, fontWeight: 600, fontFamily: fonts.sans }}>{metric.label}</div>
+      <div style={{ marginTop: 8, display: 'flex', alignItems: 'baseline', gap: 8 }}>
+        <span style={{ fontSize: 24, fontWeight: 700, color: colors.text, fontFamily: fonts.sans }}>{metric.value}</span>
         {metric.delta && (
-          <span className="text-sm text-slate-600">
+          <span style={{ fontSize: 14, color: colors.textSecondary, fontFamily: fonts.sans }}>
             {metric.delta_direction === 'up' ? '▲' : metric.delta_direction === 'down' ? '▼' : '—'} {metric.delta}
           </span>
         )}
@@ -444,27 +548,33 @@ function MetricCardComponent({ metric }: { metric: MetricCard }) {
 
 function DealCardComponent({ deal, anonymizeMode }: { deal: DealCard; anonymizeMode: boolean }) {
   const severityColors = {
-    critical: 'border-red-500 bg-red-50',
-    warning: 'border-amber-500 bg-amber-50',
-    info: 'border-blue-500 bg-blue-50',
+    critical: { border: '#dc2626', bg: '#7f1d1d' },
+    warning: { border: '#f59e0b', bg: '#78350f' },
+    info: { border: '#3b82f6', bg: '#1e3a8a' },
   };
 
+  const colorScheme = severityColors[deal.signal_severity];
   const displayName = anonymizeMode ? `Company ${deal.name.charAt(0)}` : deal.name;
   const displayOwner = anonymizeMode ? `Rep ${deal.owner.charAt(0)}` : deal.owner;
 
   return (
-    <div className={`border-l-4 ${severityColors[deal.signal_severity]} bg-white rounded-lg p-4`}>
-      <div className="flex items-start justify-between">
+    <div style={{
+      borderLeft: `4px solid ${colorScheme.border}`,
+      background: colorScheme.bg,
+      borderRadius: 8,
+      padding: 16,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
         <div>
-          <h4 className="font-semibold text-slate-900">{displayName}</h4>
-          <div className="text-sm text-slate-600 mt-1">
+          <h4 style={{ fontWeight: 600, color: colors.text, fontFamily: fonts.sans, margin: 0 }}>{displayName}</h4>
+          <div style={{ fontSize: 14, color: colors.textSecondary, marginTop: 4, fontFamily: fonts.sans }}>
             {displayOwner} • {deal.stage} • {deal.signal}
           </div>
         </div>
-        <div className="text-lg font-bold text-slate-900">{deal.amount}</div>
+        <div style={{ fontSize: 18, fontWeight: 700, color: colors.text, fontFamily: fonts.sans }}>{deal.amount}</div>
       </div>
       {deal.action && (
-        <div className="mt-3 text-sm text-blue-700 font-medium">→ {deal.action}</div>
+        <div style={{ marginTop: 12, fontSize: 14, color: colors.accent, fontWeight: 500, fontFamily: fonts.sans }}>→ {deal.action}</div>
       )}
     </div>
   );
@@ -472,9 +582,9 @@ function DealCardComponent({ deal, anonymizeMode }: { deal: DealCard; anonymizeM
 
 function ActionItemComponent({ action, index }: { action: ActionItem; index: number }) {
   const urgencyColors = {
-    today: 'text-red-600',
-    this_week: 'text-amber-600',
-    this_month: 'text-green-600',
+    today: '#dc2626',
+    this_week: '#f59e0b',
+    this_month: '#22c55e',
   };
 
   const urgencyLabels = {
@@ -484,17 +594,17 @@ function ActionItemComponent({ action, index }: { action: ActionItem; index: num
   };
 
   return (
-    <div className="flex items-start gap-3 p-3 bg-slate-50 rounded-lg">
-      <input type="checkbox" className="mt-1" />
-      <div className="flex-1">
-        <div className="flex items-center gap-2">
-          <span className={`text-xs font-bold ${urgencyColors[action.urgency]}`}>
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: 12, background: colors.surfaceRaised, borderRadius: 8 }}>
+      <input type="checkbox" style={{ marginTop: 4 }} />
+      <div style={{ flex: 1 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: urgencyColors[action.urgency], fontFamily: fonts.sans }}>
             {urgencyLabels[action.urgency]}
           </span>
-          <span className="text-sm text-slate-900">{action.action}</span>
+          <span style={{ fontSize: 14, color: colors.text, fontFamily: fonts.sans }}>{action.action}</span>
         </div>
         {action.owner && (
-          <div className="text-xs text-slate-500 mt-1">Owned by: {action.owner}</div>
+          <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 4, fontFamily: fonts.sans }}>Owned by: {action.owner}</div>
         )}
       </div>
     </div>
