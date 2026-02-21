@@ -1183,7 +1183,7 @@ function RuleModal({ rule, channels, onClose, onSaved, setToast, isMobile }: {
           {step === 2 && (
             <div>
               <p style={{ fontSize: 13, color: colors.textSecondary, marginBottom: 16 }}>When should this rule fire?</p>
-              <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
+              <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexDirection: isMobile ? 'column' : 'row' }}>
                 {([
                   { key: 'cron', label: 'Schedule', desc: 'Recurring on selected days/times' },
                   { key: 'skill_run', label: 'After Skill Run', desc: 'Fires after a specific skill completes' },
@@ -1540,9 +1540,9 @@ function LogTab({ entries, rules, logFilter, setLogFilter, hasMore, onLoadMore, 
   return (
     <div>
       <div style={{
-        display: 'flex', gap: 10, marginBottom: 12, alignItems: 'center', flexWrap: 'wrap',
+        display: 'flex', gap: isMobile ? 6 : 10, marginBottom: 12, alignItems: 'center', flexWrap: 'wrap',
       }}>
-        <select style={{ ...selectStyle, width: 'auto' }}
+        <select style={{ ...selectStyle, width: isMobile ? '100%' : 'auto' }}
           value={logFilter.status}
           onChange={e => setLogFilter(prev => ({ ...prev, status: e.target.value, offset: 0 }))}>
           <option value="">All Statuses</option>
@@ -1551,14 +1551,14 @@ function LogTab({ entries, rules, logFilter, setLogFilter, hasMore, onLoadMore, 
           <option value="empty">Empty</option>
         </select>
 
-        <select style={{ ...selectStyle, width: 'auto' }}
+        <select style={{ ...selectStyle, width: isMobile ? '100%' : 'auto' }}
           value={logFilter.ruleId}
           onChange={e => setLogFilter(prev => ({ ...prev, ruleId: e.target.value, offset: 0 }))}>
           <option value="">All Rules</option>
           {rules.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
         </select>
 
-        <select style={{ ...selectStyle, width: 'auto' }}
+        <select style={{ ...selectStyle, width: isMobile ? '100%' : 'auto' }}
           value={logFilter.timeRange}
           onChange={e => setLogFilter(prev => ({ ...prev, timeRange: e.target.value, offset: 0 }))}>
           <option value="24h">Last 24 hours</option>
