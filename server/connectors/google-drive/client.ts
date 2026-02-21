@@ -76,7 +76,7 @@ export class GoogleDriveClient {
       throw new Error(`Google OAuth error: ${response.status} ${response.statusText}`);
     }
 
-    const data = await response.json();
+    const data = await response.json() as { access_token?: string; expires_in?: number };
 
     if (!data.access_token) {
       throw new Error('Google OAuth: No access token returned');
@@ -177,7 +177,7 @@ export class GoogleDriveClient {
       throw new Error(`Google Drive API error: ${response.status} ${response.statusText}`);
     }
 
-    return response.json();
+    return response.json() as Promise<ListFilesResponse>;
   }
 
   /**
@@ -200,7 +200,7 @@ export class GoogleDriveClient {
       throw new Error(`Google Drive API error: ${response.status} ${response.statusText}`);
     }
 
-    return response.json();
+    return response.json() as Promise<DriveFile>;
   }
 
   /**
@@ -301,11 +301,116 @@ export class GoogleDriveClient {
         return null;
       }
 
-      const data = await response.json();
+      const data = await response.json() as { storageQuota?: { limit: string; usage: string; usageInDrive: string } };
       return data.storageQuota || null;
     } catch (error) {
       console.error('[Google Drive] Error fetching storage quota:', error);
       return null;
     }
+  }
+
+  /**
+   * Upload a file to Drive (multipart upload)
+   */
+  async uploadFile(
+    credentials: GoogleDriveCredentials,
+    folderId: string,
+    filename: string,
+    buffer: Buffer,
+    mimeType: string
+  ): Promise<{ id: string }> {
+    const accessToken = await this.ensureFreshToken(credentials);
+
+    const boundary = '-------314159265358979323846';
+    const delimiter = `\r\n--${boundary}\r\n`;
+    const closeDelimiter = `\r\n--${boundary}--`;
+
+    const metadata = {
+      name: filename,
+      mimeType,
+      parents: [folderId],
+    };
+
+    const multipartBody =
+      delimiter +
+      'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+      JSON.stringify(metadata) +
+      delimiter +
+      `Content-Type: ${mimeType}\r\n` +
+      'Content-Transfer-Encoding: base64\r\n\r\n' +
+      buffer.toString('base64') +
+      closeDelimiter;
+
+    const response = await fetch(`https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': `multipart/related; boundary=${boundary}`,
+      },
+      body: multipartBody,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Google Drive upload error: ${response.status} ${response.statusText}`);
+    }
+
+    const result = await response.json() as { id: string };
+    return { id: result.id };
+  }
+
+  /**
+   * Update file content (replaces existing file content)
+   */
+  async updateFileContent(
+    credentials: GoogleDriveCredentials,
+    fileId: string,
+    buffer: Buffer,
+    mimeType: string
+  ): Promise<void> {
+    const accessToken = await this.ensureFreshToken(credentials);
+
+    const response = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': mimeType,
+      },
+      body: buffer,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Google Drive update error: ${response.status} ${response.statusText}`);
+    }
+  }
+
+  /**
+   * Find file in folder by name
+   */
+  async findFileInFolder(
+    credentials: GoogleDriveCredentials,
+    folderId: string,
+    filename: string
+  ): Promise<{ id: string; name: string } | null> {
+    const accessToken = await this.ensureFreshToken(credentials);
+
+    const query = `name='${filename.replace(/'/g, "\\'")}' and '${folderId}' in parents and trashed=false`;
+    const params = new URLSearchParams({
+      q: query,
+      fields: 'files(id, name)',
+      pageSize: '1',
+    });
+
+    const response = await fetch(`${this.apiUrl}/files?${params}`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Google Drive search error: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json() as { files?: Array<{ id: string; name: string }> };
+    return data.files && data.files.length > 0 ? data.files[0] : null;
   }
 }

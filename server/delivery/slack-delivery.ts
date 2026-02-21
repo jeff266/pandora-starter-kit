@@ -239,38 +239,39 @@ function extractExecutiveSummary(sections: SectionContent[]): string | null {
 
 /**
  * Get Slack client from workspace connectors
- * This is a placeholder - actual implementation depends on your connector system
  */
-async function getSlackClient(workspaceId: string): Promise<SlackClient | null> {
-  // TODO: Implement based on your existing connector infrastructure
-  // Should retrieve OAuth token and create Slack WebClient
+async function getSlackClient(workspaceId: string): Promise<any | null> {
+  const { query } = await import('../db.js');
+  const { WebClient } = await import('@slack/web-api');
 
-  // For now, return null to indicate Slack is not connected
-  logger.warn('Slack client not implemented', { workspaceId });
-  return null;
-}
+  // Get connector config from database
+  const result = await query(
+    `SELECT id, credentials, config
+     FROM connector_configs
+     WHERE workspace_id = $1 AND connector_type = 'slack' AND status = 'active'
+     LIMIT 1`,
+    [workspaceId]
+  );
 
-/**
- * Slack client interface
- * Implement this based on your existing connector system
- */
-interface SlackClient {
-  chat: {
-    postMessage(options: {
-      channel: string;
-      blocks: any[];
-      text: string;
-      unfurl_links?: boolean;
-      unfurl_media?: boolean;
-    }): Promise<{ ts: string }>;
-  };
-  files: {
-    uploadV2(options: {
-      channel_id: string;
-      thread_ts: string;
-      file: string;
-      filename: string;
-      title: string;
-    }): Promise<void>;
-  };
+  if (result.rows.length === 0) {
+    logger.info('No active Slack connector found', { workspaceId });
+    return null;
+  }
+
+  const config = result.rows[0];
+
+  // Extract bot token from credentials
+  // Slack OAuth stores the token as either 'botToken' or 'accessToken'
+  const token = config.credentials.botToken || config.credentials.bot_token || config.credentials.accessToken || config.credentials.access_token;
+
+  if (!token) {
+    logger.warn('Slack connector has no bot token', { workspaceId, connector_id: config.id });
+    return null;
+  }
+
+  // Create Slack WebClient
+  const client = new WebClient(token);
+
+  logger.info('Created Slack client', { workspaceId, connector_id: config.id });
+  return client;
 }

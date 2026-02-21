@@ -128,23 +128,84 @@ function buildFilename(
 
 /**
  * Get Google Drive client from workspace connectors
- * This is a placeholder - actual implementation depends on your connector system
  */
-async function getGoogleDriveClient(workspaceId: string): Promise<GoogleDriveClient | null> {
-  // TODO: Implement based on your existing connector infrastructure
-  // Should retrieve OAuth token and create Google Drive API client
+async function getGoogleDriveClient(workspaceId: string): Promise<GoogleDriveClientAdapter | null> {
+  const { query } = await import('../db.js');
+  const { GoogleDriveClient } = await import('../connectors/google-drive/client.js');
+  type GoogleDriveCredentials = {
+    accessToken: string;
+    refreshToken?: string;
+    clientId?: string;
+    clientSecret?: string;
+    expiresAt?: number;
+  };
 
-  // For now, return null to indicate Drive is not connected
-  logger.warn('Google Drive client not implemented', { workspaceId });
-  return null;
+  // Get connector config from database
+  const result = await query(
+    `SELECT id, credentials, config, client_id, client_secret
+     FROM connector_configs
+     WHERE workspace_id = $1 AND connector_type = 'google_drive' AND status = 'active'
+     LIMIT 1`,
+    [workspaceId]
+  );
+
+  if (result.rows.length === 0) {
+    logger.info('No active Google Drive connector found', { workspaceId });
+    return null;
+  }
+
+  const config = result.rows[0];
+  const credentials: GoogleDriveCredentials = {
+    accessToken: config.credentials.access_token || config.credentials.accessToken,
+    refreshToken: config.credentials.refresh_token || config.credentials.refreshToken,
+    clientId: config.client_id,
+    clientSecret: config.client_secret,
+    expiresAt: config.credentials.expires_at,
+  };
+
+  const client = new GoogleDriveClient();
+
+  // Token refresh callback to update database
+  const onTokenRefresh = async (newAccessToken: string, newExpiresAt: number) => {
+    try {
+      await query(
+        `UPDATE connector_configs
+         SET credentials = jsonb_set(
+           jsonb_set(credentials, '{access_token}', to_jsonb($1::text)),
+           '{expires_at}', to_jsonb($2::bigint)
+         ),
+         last_sync_at = NOW()
+         WHERE id = $3`,
+        [newAccessToken, newExpiresAt, config.id]
+      );
+      logger.info('Refreshed Google Drive token', { workspaceId, connector_id: config.id });
+    } catch (error) {
+      logger.error('Failed to update refreshed token', error instanceof Error ? error : undefined);
+    }
+  };
+
+  return new GoogleDriveClientAdapter(client, credentials, onTokenRefresh);
 }
 
 /**
- * Google Drive client interface
- * Implement this based on your existing connector system
+ * Adapter class to wrap GoogleDriveClient with token refresh handling
  */
-interface GoogleDriveClient {
-  findFileInFolder(folderId: string, filename: string): Promise<{ id: string; name: string } | null>;
-  uploadFile(folderId: string, filename: string, buffer: Buffer, mimeType: string): Promise<{ id: string }>;
-  updateFileContent(fileId: string, buffer: Buffer, mimeType: string): Promise<void>;
+class GoogleDriveClientAdapter {
+  constructor(
+    private client: any,
+    private credentials: any,
+    private onTokenRefresh?: (accessToken: string, expiresAt: number) => Promise<void>
+  ) {}
+
+  async findFileInFolder(folderId: string, filename: string): Promise<{ id: string; name: string } | null> {
+    return await this.client.findFileInFolder(this.credentials, folderId, filename);
+  }
+
+  async uploadFile(folderId: string, filename: string, buffer: Buffer, mimeType: string): Promise<{ id: string }> {
+    return await this.client.uploadFile(this.credentials, folderId, filename, buffer, mimeType);
+  }
+
+  async updateFileContent(fileId: string, buffer: Buffer, mimeType: string): Promise<void> {
+    return await this.client.updateFileContent(this.credentials, fileId, buffer, mimeType);
+  }
 }
