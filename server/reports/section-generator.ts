@@ -2,38 +2,157 @@
 // Converts ReportSection → SectionContent by pulling from skill evidence
 
 import { query } from '../db.js';
-import { ReportSection, SectionContent, VoiceConfig, MetricCard, DealCard, ActionItem, TableRow } from './types.js';
+import { ReportSection, SectionContent, VoiceConfig, MetricCard, DealCard, ActionItem } from './types.js';
 import { createLogger } from '../utils/logger.js';
 
 const logger = createLogger('SectionGenerator');
 
-interface SkillRunResult {
+interface SkillRunRow {
   skill_id: string;
-  completed_at: string;
   output: any;
-  output_text: string;
+  output_text: string | null;
+  created_at: string;
+  status: string;
 }
 
-interface FindingClaim {
-  severity: string;
-  category: string;
-  message: string;
-  entity_type: string | null;
-  entity_id: string | null;
-  entity_name: string | null;
-  metric_value: any;
+interface SkillEvidence {
+  skill_id: string;
+  output: any;
+  narrative: string;
+  evidence: any;
+  created_at: string;
 }
 
-interface ActionRecord {
-  id: string;
-  title: string;
-  summary: string;
-  severity: string;
-  urgency_label: string;
-  target_entity_type: string;
-  target_entity_name: string;
-  owner_email: string;
-  recommended_steps: string[];
+const FRESHNESS_THRESHOLD_HOURS = 72;
+
+async function fetchSkillEvidence(
+  workspaceId: string,
+  skillIds: string[]
+): Promise<Map<string, SkillEvidence>> {
+  if (skillIds.length === 0) return new Map();
+
+  const result = await query<SkillRunRow>(
+    `SELECT DISTINCT ON (skill_id) skill_id, output, output_text, created_at, status
+     FROM skill_runs
+     WHERE workspace_id = $1 AND skill_id = ANY($2) AND status = 'completed' AND output IS NOT NULL
+     ORDER BY skill_id, created_at DESC`,
+    [workspaceId, skillIds]
+  );
+
+  const evidenceMap = new Map<string, SkillEvidence>();
+  for (const row of result.rows) {
+    const output = typeof row.output === 'string' ? JSON.parse(row.output) : row.output;
+    evidenceMap.set(row.skill_id, {
+      skill_id: row.skill_id,
+      output,
+      narrative: output?.narrative || row.output_text || '',
+      evidence: output?.evidence || {},
+      created_at: row.created_at,
+    });
+  }
+
+  return evidenceMap;
+}
+
+function checkFreshness(evidence: SkillEvidence): { fresh: boolean; ageHours: number } {
+  const ageMs = Date.now() - new Date(evidence.created_at).getTime();
+  const ageHours = ageMs / (1000 * 60 * 60);
+  return { fresh: ageHours <= FRESHNESS_THRESHOLD_HOURS, ageHours: Math.round(ageHours) };
+}
+
+function extractActionsFromNarrative(narrative: string): ActionItem[] {
+  const actions: ActionItem[] = [];
+  const actionsMatch = narrative.match(/<actions>\s*([\s\S]*?)\s*<\/actions>/);
+  if (actionsMatch) {
+    try {
+      const parsed = JSON.parse(actionsMatch[1]);
+      if (Array.isArray(parsed)) {
+        for (const a of parsed.slice(0, 5)) {
+          actions.push({
+            owner: a.target_rep || a.owner || 'Team',
+            action: a.title || a.summary || a.action || '',
+            urgency: a.severity === 'critical' ? 'today' : a.severity === 'warning' ? 'this_week' : 'this_month',
+            related_deal: a.target_deal_name || undefined,
+          });
+        }
+      }
+    } catch {}
+  }
+  return actions;
+}
+
+function stripActionTags(narrative: string): string {
+  return narrative.replace(/<actions>[\s\S]*?<\/actions>/g, '').trim();
+}
+
+function parseMonteCarloMetrics(narrative: string): MetricCard[] {
+  const metrics: MetricCard[] = [];
+  const p50Match = narrative.match(/most likely outcome is \*\*\$([\d,.]+[KMB]?)\*\*/i);
+  if (p50Match) {
+    metrics.push({ label: 'Monte Carlo P50', value: `$${p50Match[1]}`, severity: 'good' });
+  }
+  const p25Match = narrative.match(/P25[^$]*\$([\d,.]+[KMB]?)/i);
+  if (p25Match) {
+    metrics.push({ label: 'P25 (Conservative)', value: `$${p25Match[1]}`, severity: 'warning' });
+  }
+  const p75Match = narrative.match(/P75[^$]*\$([\d,.]+[KMB]?)/i) || narrative.match(/optimistic[^$]*\$([\d,.]+[KMB]?)/i);
+  if (p75Match) {
+    metrics.push({ label: 'P75 (Optimistic)', value: `$${p75Match[1]}`, severity: 'good' });
+  }
+  return metrics;
+}
+
+function parseForecastMetrics(narrative: string): MetricCard[] {
+  const metrics: MetricCard[] = [];
+  const closedMatch = narrative.match(/[Cc]losed[- ]won[: ]*\$([\d,.]+[KMB]?)/);
+  if (closedMatch) {
+    metrics.push({ label: 'Closed Won', value: `$${closedMatch[1]}`, severity: 'good' });
+  }
+  const pipelineMatch = narrative.match(/[Pp]ipeline[: ]*\$([\d,.]+[KMB]?)/);
+  if (pipelineMatch) {
+    metrics.push({ label: 'Pipeline', value: `$${pipelineMatch[1]}`, severity: 'good' });
+  }
+  const attainmentMatch = narrative.match(/(\d+)%\s*attainment/i);
+  if (attainmentMatch) {
+    const pct = parseInt(attainmentMatch[1]);
+    metrics.push({
+      label: 'Attainment',
+      value: `${pct}%`,
+      severity: pct >= 80 ? 'good' : pct >= 50 ? 'warning' : 'critical',
+    });
+  }
+  const weightedMatch = narrative.match(/[Ww]eighted forecast[^$]*\$([\d,.]+[KMB]?)/);
+  if (weightedMatch) {
+    metrics.push({ label: 'Weighted Forecast', value: `$${weightedMatch[1]}`, severity: 'good' });
+  }
+  return metrics;
+}
+
+function parseDealCards(narrative: string, maxItems: number): DealCard[] {
+  const cards: DealCard[] = [];
+  const actionsMatch = narrative.match(/<actions>\s*([\s\S]*?)\s*<\/actions>/);
+  if (actionsMatch) {
+    try {
+      const parsed = JSON.parse(actionsMatch[1]);
+      if (Array.isArray(parsed)) {
+        for (const a of parsed.slice(0, maxItems)) {
+          if (a.target_deal_name) {
+            cards.push({
+              name: a.target_deal_name,
+              amount: a.target_deal_amount || '',
+              owner: a.target_rep || '',
+              stage: a.target_deal_stage || '',
+              signal: a.title || '',
+              signal_severity: a.severity === 'critical' ? 'critical' : a.severity === 'warning' ? 'warning' : 'info',
+              detail: a.summary || '',
+              action: Array.isArray(a.recommended_steps) ? a.recommended_steps[0] || '' : a.action || '',
+            });
+          }
+        }
+      }
+    } catch {}
+  }
+  return cards;
 }
 
 export async function generateSectionContent(
@@ -43,499 +162,362 @@ export async function generateSectionContent(
 ): Promise<SectionContent> {
   logger.info('Generating section content', { section_id: section.id, skills: section.skills });
 
-  // Pull skill evidence from most recent runs
-  const skillData = await loadSkillEvidence(workspaceId, section.skills);
+  const evidenceMap = await fetchSkillEvidence(workspaceId, section.skills);
+  const maxItems = section.config.max_items || 10;
 
-  // Pull actions for this section's skills
-  const actions = await loadActions(workspaceId, section.skills);
+  const freshnessNotes: string[] = [];
+  for (const [skillId, ev] of evidenceMap) {
+    const { fresh, ageHours } = checkFreshness(ev);
+    if (!fresh) {
+      freshnessNotes.push(`${skillId} data is ${ageHours}h old`);
+    }
+  }
 
   const content: SectionContent = {
     section_id: section.id,
     title: section.label,
-    narrative: await generateNarrative(section, skillData, voiceConfig),
+    narrative: '',
     source_skills: section.skills,
-    data_freshness: new Date().toISOString(),
-    confidence: calculateConfidence(skillData),
+    data_freshness: getBestFreshness(evidenceMap),
+    confidence: evidenceMap.size > 0 ? Math.min(0.95, 0.5 + (evidenceMap.size / section.skills.length) * 0.45) : 0.3,
+    metrics: [],
+    deal_cards: [],
+    action_items: [],
   };
 
-  // Populate structured elements based on section type
+  if (freshnessNotes.length > 0) {
+    content.confidence = Math.max(0.3, content.confidence - 0.2);
+  }
+
   switch (section.id) {
     case 'the-number':
-      content.metrics = extractForecastMetrics(skillData);
+      buildTheNumber(content, evidenceMap);
       break;
-
     case 'what-moved':
-      content.deal_cards = extractMovementCards(skillData, section.config.max_items || 10);
+      buildWhatMoved(content, evidenceMap, maxItems);
       break;
-
     case 'deals-needing-attention':
-      content.deal_cards = extractRiskDeals(skillData, section.config.max_items || 15);
-      content.action_items = extractActionItems(actions, section.config.max_items || 10);
+      buildDealsNeedingAttention(content, evidenceMap, maxItems);
       break;
-
     case 'rep-performance':
-      content.table = extractRepPerformanceTable(skillData);
+      buildRepPerformance(content, evidenceMap);
       break;
-
     case 'pipeline-hygiene':
-      content.deal_cards = extractHygieneIssues(skillData, section.config.max_items || 20);
-      content.action_items = extractActionItems(actions, section.config.max_items || 10);
+      buildPipelineHygiene(content, evidenceMap, maxItems);
       break;
-
     case 'call-intelligence':
-      content.metrics = extractCallMetrics(skillData);
+      buildCallIntelligence(content, evidenceMap, maxItems);
       break;
-
     case 'pipeline-coverage':
-      content.metrics = extractCoverageMetrics(skillData);
-      if (section.config.include_chart) {
-        content.chart_data = extractCoverageChart(skillData);
-      }
+      buildPipelineCoverage(content, evidenceMap);
       break;
-
     case 'icp-fit-analysis':
-      content.metrics = extractICPMetrics(skillData);
-      content.table = extractICPTable(skillData, section.config.max_items || 15);
+      buildIcpFitAnalysis(content, evidenceMap, maxItems);
       break;
-
     case 'forecast-waterfall':
-      content.metrics = extractWaterfallMetrics(skillData);
-      if (section.config.include_chart) {
-        content.chart_data = extractWaterfallChart(skillData);
-      }
+      buildForecastWaterfall(content, evidenceMap);
       break;
-
     case 'actions-summary':
-      // Aggregate all actions from all skills in the workspace
-      content.action_items = extractActionItems(actions, section.config.max_items || 5);
+      await buildActionsSummary(content, workspaceId);
       break;
+    default:
+      content.narrative = `Content for "${section.label}" section — no generator configured.`;
+  }
+
+  if (freshnessNotes.length > 0) {
+    content.narrative += `\n\n_Note: ${freshnessNotes.join('; ')}._`;
   }
 
   return content;
 }
 
-// Load skill evidence from most recent successful runs
-async function loadSkillEvidence(workspaceId: string, skillIds: string[]): Promise<Map<string, SkillRunResult>> {
-  if (skillIds.length === 0) return new Map();
-
-  const result = await query<SkillRunResult>(
-    `SELECT DISTINCT ON (skill_id)
-       skill_id, completed_at, output, output_text
-     FROM skill_runs
-     WHERE workspace_id = $1
-       AND skill_id = ANY($2)
-       AND status = 'completed'
-       AND completed_at >= NOW() - INTERVAL '7 days'
-     ORDER BY skill_id, completed_at DESC`,
-    [workspaceId, skillIds]
-  );
-
-  const evidenceMap = new Map<string, SkillRunResult>();
-  for (const row of result.rows) {
-    evidenceMap.set(row.skill_id, row);
+function getBestFreshness(evidenceMap: Map<string, SkillEvidence>): string {
+  let newest = '';
+  for (const ev of evidenceMap.values()) {
+    if (!newest || ev.created_at > newest) newest = ev.created_at;
   }
-
-  return evidenceMap;
+  return newest || new Date().toISOString();
 }
 
-// Load actions from these skills
-async function loadActions(workspaceId: string, skillIds: string[]): Promise<ActionRecord[]> {
-  if (skillIds.length === 0) {
-    // For actions-summary, load from ALL skills
-    const result = await query<ActionRecord>(
-      `SELECT id, title, summary, severity, urgency_label,
-              target_entity_type, target_entity_name, owner_email, recommended_steps
-       FROM actions
-       WHERE workspace_id = $1
-         AND execution_status = 'open'
-         AND (expires_at IS NULL OR expires_at > NOW())
-       ORDER BY
-         CASE severity WHEN 'critical' THEN 1 WHEN 'warning' THEN 2 ELSE 3 END,
-         created_at DESC
-       LIMIT 100`,
-      [workspaceId]
-    );
-    return result.rows;
+function buildTheNumber(content: SectionContent, evidenceMap: Map<string, SkillEvidence>): void {
+  const forecast = evidenceMap.get('forecast-rollup');
+  const monteCarlo = evidenceMap.get('monte-carlo-forecast');
+
+  const narrativeParts: string[] = [];
+
+  if (forecast) {
+    content.metrics = parseForecastMetrics(forecast.narrative);
+    narrativeParts.push(stripActionTags(forecast.narrative));
+    content.action_items = extractActionsFromNarrative(forecast.narrative);
   }
 
-  const result = await query<ActionRecord>(
-    `SELECT id, title, summary, severity, urgency_label,
-            target_entity_type, target_entity_name, owner_email, recommended_steps
-     FROM actions
-     WHERE workspace_id = $1
-       AND source_skill = ANY($2)
-       AND execution_status = 'open'
-       AND (expires_at IS NULL OR expires_at > NOW())
-     ORDER BY
-       CASE severity WHEN 'critical' THEN 1 WHEN 'warning' THEN 2 ELSE 3 END,
-       created_at DESC
-     LIMIT 50`,
-    [workspaceId, skillIds]
-  );
+  if (monteCarlo) {
+    const mcMetrics = parseMonteCarloMetrics(monteCarlo.narrative);
+    content.metrics = [...(content.metrics || []), ...mcMetrics];
+    if (!forecast) {
+      narrativeParts.push(stripActionTags(monteCarlo.narrative));
+    }
+  }
 
-  return result.rows;
+  content.narrative = narrativeParts.join('\n\n') || 'No forecast data available. Run forecast-rollup and monte-carlo-forecast skills to populate this section.';
 }
 
-// Generate narrative from skill data
-async function generateNarrative(
-  section: ReportSection,
-  skillData: Map<string, SkillRunResult>,
-  voiceConfig: VoiceConfig
-): Promise<string> {
-  // Extract summary text from skill outputs
-  const summaries: string[] = [];
-  for (const [skillId, data] of skillData.entries()) {
-    if (data.output_text) {
-      summaries.push(data.output_text);
-    } else if (data.output?.narrative) {
-      summaries.push(data.output.narrative);
-    } else if (data.output?.summary) {
-      summaries.push(data.output.summary);
+function buildWhatMoved(content: SectionContent, evidenceMap: Map<string, SkillEvidence>, maxItems: number): void {
+  const forecast = evidenceMap.get('forecast-rollup');
+  const waterfall = evidenceMap.get('pipeline-waterfall');
+
+  const narrativeParts: string[] = [];
+
+  if (waterfall) {
+    narrativeParts.push(stripActionTags(waterfall.narrative));
+    content.deal_cards = parseDealCards(waterfall.narrative, maxItems);
+    content.action_items = extractActionsFromNarrative(waterfall.narrative);
+  }
+
+  if (forecast) {
+    const fMetrics = parseForecastMetrics(forecast.narrative);
+    content.metrics = fMetrics;
+    if (!waterfall) {
+      narrativeParts.push(stripActionTags(forecast.narrative));
     }
   }
 
-  if (summaries.length === 0) {
-    return `No recent data available for "${section.label}". Run the required skills: ${section.skills.join(', ')}.`;
-  }
-
-  // Combine summaries with basic deduplication
-  return summaries.join(' ').slice(0, 2000);
+  content.narrative = narrativeParts.join('\n\n') || 'No pipeline movement data available. Run pipeline-waterfall skill to populate this section.';
 }
 
-// Calculate confidence based on data freshness
-function calculateConfidence(skillData: Map<string, SkillRunResult>): number {
-  if (skillData.size === 0) return 0;
+function buildDealsNeedingAttention(content: SectionContent, evidenceMap: Map<string, SkillEvidence>, maxItems: number): void {
+  const riskReview = evidenceMap.get('deal-risk-review');
+  const singleThread = evidenceMap.get('single-thread-alert');
 
-  const now = Date.now();
-  let totalFreshness = 0;
+  const allCards: DealCard[] = [];
+  const allActions: ActionItem[] = [];
+  const narrativeParts: string[] = [];
 
-  for (const data of skillData.values()) {
-    const age = now - new Date(data.completed_at).getTime();
-    const hoursOld = age / (1000 * 60 * 60);
-    // Confidence decays from 1.0 (fresh) to 0.5 (7 days old)
-    const freshness = Math.max(0.5, 1.0 - (hoursOld / 168) * 0.5);
-    totalFreshness += freshness;
+  if (riskReview) {
+    narrativeParts.push(stripActionTags(riskReview.narrative));
+    allCards.push(...parseDealCards(riskReview.narrative, maxItems));
+    allActions.push(...extractActionsFromNarrative(riskReview.narrative));
   }
 
-  return totalFreshness / skillData.size;
-}
-
-// Extract forecast metrics from forecast-rollup and monte-carlo skills
-function extractForecastMetrics(skillData: Map<string, SkillRunResult>): MetricCard[] {
-  const metrics: MetricCard[] = [];
-
-  const forecastRun = skillData.get('forecast-rollup');
-  const monteCarloRun = skillData.get('monte-carlo');
-
-  if (forecastRun?.output?.metrics) {
-    const m = forecastRun.output.metrics;
-    if (m.forecast_amount) {
-      metrics.push({
-        label: 'Forecast',
-        value: formatCurrency(m.forecast_amount),
-        severity: m.pacing_pct >= 0.9 ? 'good' : m.pacing_pct >= 0.7 ? 'warning' : 'critical',
-      });
-    }
-    if (m.pacing_pct !== undefined) {
-      metrics.push({
-        label: 'Pacing',
-        value: `${Math.round(m.pacing_pct * 100)}%`,
-        delta: m.pacing_delta ? `${m.pacing_delta > 0 ? '+' : ''}${Math.round(m.pacing_delta * 100)}%` : undefined,
-        delta_direction: m.pacing_delta > 0 ? 'up' : m.pacing_delta < 0 ? 'down' : 'flat',
-        severity: m.pacing_pct >= 0.9 ? 'good' : m.pacing_pct >= 0.7 ? 'warning' : 'critical',
-      });
-    }
-  }
-
-  if (monteCarloRun?.output?.p50) {
-    metrics.push({
-      label: 'Monte Carlo P50',
-      value: formatCurrency(monteCarloRun.output.p50),
-      severity: 'warning',
-    });
-  }
-
-  return metrics;
-}
-
-// Extract pipeline coverage metrics
-function extractCoverageMetrics(skillData: Map<string, SkillRunResult>): MetricCard[] {
-  const metrics: MetricCard[] = [];
-  const coverageRun = skillData.get('pipeline-coverage');
-
-  if (coverageRun?.output?.metrics) {
-    const m = coverageRun.output.metrics;
-    if (m.coverage_ratio) {
-      metrics.push({
-        label: 'Coverage Ratio',
-        value: `${m.coverage_ratio.toFixed(1)}x`,
-        severity: m.coverage_ratio >= 3.0 ? 'good' : m.coverage_ratio >= 2.0 ? 'warning' : 'critical',
-      });
-    }
-    if (m.gap_to_target) {
-      metrics.push({
-        label: 'Gap to Target',
-        value: formatCurrency(m.gap_to_target),
-        severity: m.gap_to_target < 100000 ? 'good' : m.gap_to_target < 500000 ? 'warning' : 'critical',
-      });
-    }
-  }
-
-  return metrics;
-}
-
-// Extract call intelligence metrics
-function extractCallMetrics(skillData: Map<string, SkillRunResult>): MetricCard[] {
-  const metrics: MetricCard[] = [];
-  const callRun = skillData.get('conversation-intelligence');
-
-  if (callRun?.output?.metrics) {
-    const m = callRun.output.metrics;
-    if (m.total_calls !== undefined) {
-      metrics.push({ label: 'Total Calls', value: String(m.total_calls) });
-    }
-    if (m.competitor_mentions !== undefined) {
-      metrics.push({ label: 'Competitor Mentions', value: String(m.competitor_mentions) });
-    }
-    if (m.champion_signals !== undefined) {
-      metrics.push({ label: 'Champion Signals', value: String(m.champion_signals) });
-    }
-  }
-
-  return metrics;
-}
-
-// Extract ICP metrics
-function extractICPMetrics(skillData: Map<string, SkillRunResult>): MetricCard[] {
-  const metrics: MetricCard[] = [];
-  const icpRun = skillData.get('icp-discovery');
-
-  if (icpRun?.output?.metrics) {
-    const m = icpRun.output.metrics;
-    if (m.icp_match_rate !== undefined) {
-      metrics.push({
-        label: 'ICP Match Rate',
-        value: `${Math.round(m.icp_match_rate * 100)}%`,
-        severity: m.icp_match_rate >= 0.6 ? 'good' : m.icp_match_rate >= 0.4 ? 'warning' : 'critical',
-      });
-    }
-    if (m.avg_fit_score !== undefined) {
-      metrics.push({ label: 'Avg Fit Score', value: String(Math.round(m.avg_fit_score)) });
-    }
-  }
-
-  return metrics;
-}
-
-// Extract waterfall metrics
-function extractWaterfallMetrics(skillData: Map<string, SkillRunResult>): MetricCard[] {
-  const metrics: MetricCard[] = [];
-  const waterfallRun = skillData.get('pipeline-waterfall');
-
-  if (waterfallRun?.output?.metrics) {
-    const m = waterfallRun.output.metrics;
-    if (m.net_change !== undefined) {
-      metrics.push({
-        label: 'Net Change',
-        value: formatCurrency(m.net_change),
-        delta_direction: m.net_change > 0 ? 'up' : m.net_change < 0 ? 'down' : 'flat',
-        severity: m.net_change > 0 ? 'good' : 'warning',
-      });
-    }
-    if (m.closed_won !== undefined) {
-      metrics.push({ label: 'Closed Won', value: formatCurrency(m.closed_won), severity: 'good' });
-    }
-    if (m.closed_lost !== undefined) {
-      metrics.push({ label: 'Closed Lost', value: formatCurrency(m.closed_lost), severity: 'critical' });
-    }
-  }
-
-  return metrics;
-}
-
-// Extract risk deals from findings
-function extractRiskDeals(skillData: Map<string, SkillRunResult>, maxItems: number): DealCard[] {
-  const cards: DealCard[] = [];
-
-  // Get evaluated_records from deal-risk-review, single-thread-alert, etc.
-  for (const [skillId, data] of skillData.entries()) {
-    const records = data.output?.evidence?.evaluated_records || data.output?.evaluated_records || [];
-
-    for (const record of records.slice(0, maxItems)) {
-      if (record.risk_score && record.risk_score >= 70) {
-        cards.push({
-          name: record.deal_name || record.name || 'Unknown Deal',
-          amount: formatCurrency(record.amount || 0),
-          owner: record.owner_name || record.owner || 'Unknown',
-          stage: record.stage || 'Unknown',
-          signal: record.risk_reason || record.signal || 'High risk score',
-          signal_severity: record.risk_score >= 85 ? 'critical' : record.risk_score >= 70 ? 'warning' : 'info',
-          detail: record.detail || record.risk_detail || '',
-          action: record.recommended_action || 'Review and take action',
-        });
+  if (singleThread) {
+    if (!riskReview) narrativeParts.push(stripActionTags(singleThread.narrative));
+    const stCards = parseDealCards(singleThread.narrative, maxItems);
+    for (const card of stCards) {
+      if (!allCards.find(c => c.name === card.name)) {
+        allCards.push(card);
       }
     }
+    allActions.push(...extractActionsFromNarrative(singleThread.narrative));
   }
 
-  return cards.slice(0, maxItems);
+  content.deal_cards = allCards.slice(0, maxItems);
+  content.action_items = allActions.slice(0, maxItems);
+  content.narrative = narrativeParts.join('\n\n') || 'No risk-flagged deals found. Run deal-risk-review and single-thread-alert skills to populate this section.';
 }
 
-// Extract hygiene issues
-function extractHygieneIssues(skillData: Map<string, SkillRunResult>, maxItems: number): DealCard[] {
-  const cards: DealCard[] = [];
-  const hygieneRun = skillData.get('pipeline-hygiene');
+function buildRepPerformance(content: SectionContent, evidenceMap: Map<string, SkillEvidence>): void {
+  const scorecard = evidenceMap.get('rep-scorecard');
+  const coverage = evidenceMap.get('pipeline-coverage');
 
-  if (hygieneRun?.output?.evaluated_records) {
-    for (const record of hygieneRun.output.evaluated_records.slice(0, maxItems)) {
-      cards.push({
-        name: record.deal_name || record.name || 'Unknown Deal',
-        amount: formatCurrency(record.amount || 0),
-        owner: record.owner_name || record.owner || 'Unknown',
-        stage: record.stage || 'Unknown',
-        signal: record.issue_type || 'Data quality issue',
-        signal_severity: record.severity === 'critical' ? 'critical' : 'warning',
-        detail: record.issue_detail || record.detail || '',
-        action: record.recommended_fix || 'Update missing data',
+  if (scorecard) {
+    content.narrative = stripActionTags(scorecard.narrative);
+    content.action_items = extractActionsFromNarrative(scorecard.narrative);
+
+    const repData = scorecard.evidence?.evaluated_records || [];
+    if (repData.length > 0) {
+      content.table = {
+        headers: ['Rep', 'Pipeline', 'Deals', 'Win Rate'],
+        rows: repData.slice(0, 10).map((r: any) => ({
+          Rep: r.rep_name || r.name || 'Unknown',
+          Pipeline: r.pipeline ? `$${(r.pipeline / 1000).toFixed(0)}K` : '-',
+          Deals: r.deal_count || r.deals || '-',
+          'Win Rate': r.win_rate ? `${Math.round(r.win_rate * 100)}%` : '-',
+        })),
+      };
+    }
+  } else if (coverage) {
+    content.narrative = stripActionTags(coverage.narrative);
+  } else {
+    content.narrative = 'No rep performance data available. Run rep-scorecard skill to populate this section.';
+  }
+}
+
+function buildPipelineHygiene(content: SectionContent, evidenceMap: Map<string, SkillEvidence>, maxItems: number): void {
+  const hygiene = evidenceMap.get('pipeline-hygiene');
+  const dataQuality = evidenceMap.get('data-quality-audit');
+  const singleThread = evidenceMap.get('single-thread-alert');
+
+  const narrativeParts: string[] = [];
+  const allCards: DealCard[] = [];
+  const allActions: ActionItem[] = [];
+
+  if (hygiene) {
+    narrativeParts.push(stripActionTags(hygiene.narrative));
+    allCards.push(...parseDealCards(hygiene.narrative, maxItems));
+    allActions.push(...extractActionsFromNarrative(hygiene.narrative));
+  }
+
+  if (dataQuality) {
+    if (!hygiene) narrativeParts.push(stripActionTags(dataQuality.narrative));
+    allActions.push(...extractActionsFromNarrative(dataQuality.narrative));
+  }
+
+  if (singleThread && !hygiene) {
+    narrativeParts.push(stripActionTags(singleThread.narrative));
+    allCards.push(...parseDealCards(singleThread.narrative, maxItems));
+  }
+
+  content.deal_cards = allCards.slice(0, maxItems);
+  content.action_items = allActions.slice(0, maxItems);
+  content.narrative = narrativeParts.join('\n\n') || 'No pipeline hygiene data available. Run pipeline-hygiene skill to populate this section.';
+}
+
+function buildCallIntelligence(content: SectionContent, evidenceMap: Map<string, SkillEvidence>, maxItems: number): void {
+  const recap = evidenceMap.get('weekly-recap');
+
+  if (recap) {
+    content.narrative = stripActionTags(recap.narrative);
+    content.action_items = extractActionsFromNarrative(recap.narrative);
+    content.metrics = [];
+
+    const callCountMatch = recap.narrative.match(/(\d+)\s*calls?/i);
+    if (callCountMatch) {
+      content.metrics.push({ label: 'Calls Analyzed', value: callCountMatch[1], severity: 'good' });
+    }
+  } else {
+    content.narrative = 'No call intelligence data available. Connect a conversation intelligence source (Gong/Fireflies) and run weekly-recap skill.';
+    content.metrics = [];
+  }
+}
+
+function buildPipelineCoverage(content: SectionContent, evidenceMap: Map<string, SkillEvidence>): void {
+  const coverage = evidenceMap.get('pipeline-coverage');
+  const forecast = evidenceMap.get('forecast-rollup');
+
+  if (coverage) {
+    content.narrative = stripActionTags(coverage.narrative);
+    content.action_items = extractActionsFromNarrative(coverage.narrative);
+    content.metrics = [];
+
+    const coverageMatch = coverage.narrative.match(/coverage[^0-9]*(\d+\.?\d*)x/i);
+    if (coverageMatch) {
+      const ratio = parseFloat(coverageMatch[1]);
+      content.metrics.push({
+        label: 'Coverage Ratio',
+        value: `${ratio}x`,
+        severity: ratio >= 3.0 ? 'good' : ratio >= 2.0 ? 'warning' : 'critical',
       });
     }
-  }
 
-  return cards;
-}
-
-// Extract movement cards (what moved this week)
-function extractMovementCards(skillData: Map<string, SkillRunResult>, maxItems: number): DealCard[] {
-  const cards: DealCard[] = [];
-  const waterfallRun = skillData.get('pipeline-waterfall');
-
-  if (waterfallRun?.output?.movements) {
-    for (const movement of waterfallRun.output.movements.slice(0, maxItems)) {
-      cards.push({
-        name: movement.deal_name || 'Unknown Deal',
-        amount: formatCurrency(movement.amount || 0),
-        owner: movement.owner_name || 'Unknown',
-        stage: movement.to_stage || movement.stage || 'Unknown',
-        signal: movement.movement_type || 'Stage change',
-        signal_severity: movement.movement_type === 'closed_won' ? 'info' : movement.movement_type === 'closed_lost' ? 'critical' : 'warning',
-        detail: movement.detail || `Moved from ${movement.from_stage} to ${movement.to_stage}`,
-        action: movement.action || 'Monitor progress',
-      });
+    const gapMatch = coverage.narrative.match(/gap[^$]*\$([\d,.]+[KMB]?)/i) || coverage.narrative.match(/need[^$]*\$([\d,.]+[KMB]?)\s*(?:in\s*)?new/i);
+    if (gapMatch) {
+      content.metrics.push({ label: 'New Pipeline Needed', value: `$${gapMatch[1]}`, severity: 'warning' });
     }
+  } else if (forecast) {
+    content.narrative = stripActionTags(forecast.narrative);
+    content.metrics = parseForecastMetrics(forecast.narrative);
+  } else {
+    content.narrative = 'No pipeline coverage data available. Run pipeline-coverage skill to populate this section.';
+    content.metrics = [];
   }
-
-  return cards;
 }
 
-// Extract rep performance table
-function extractRepPerformanceTable(skillData: Map<string, SkillRunResult>): { headers: string[]; rows: TableRow[] } | undefined {
-  const repRun = skillData.get('rep-scorecard');
-  if (!repRun?.output?.reps) return undefined;
+function buildIcpFitAnalysis(content: SectionContent, evidenceMap: Map<string, SkillEvidence>, maxItems: number): void {
+  const icp = evidenceMap.get('icp-discovery');
+  const scoring = evidenceMap.get('lead-scoring');
 
-  const headers = ['Rep', 'Pipeline', 'Coverage', 'Win Rate', 'Deals'];
-  const rows: TableRow[] = [];
+  if (icp) {
+    content.narrative = stripActionTags(icp.narrative);
+    content.action_items = extractActionsFromNarrative(icp.narrative);
+    content.metrics = [];
 
-  for (const rep of repRun.output.reps) {
-    rows.push({
-      Rep: rep.name || rep.email || 'Unknown',
-      Pipeline: formatCurrency(rep.pipeline || 0),
-      Coverage: rep.coverage_ratio ? `${rep.coverage_ratio.toFixed(1)}x` : 'N/A',
-      'Win Rate': rep.win_rate ? `${Math.round(rep.win_rate * 100)}%` : 'N/A',
-      Deals: rep.deal_count || 0,
-    });
+    const matchMatch = icp.narrative.match(/(\d+)%\s*(?:of\s*)?(?:new\s*)?leads?\s*match/i);
+    if (matchMatch) {
+      content.metrics.push({ label: 'ICP Match Rate', value: `${matchMatch[1]}%`, severity: 'good' });
+    }
+
+    const scoreMatch = icp.narrative.match(/(?:avg|average)\s*fit\s*score\s*(?:of\s*)?(\d+)/i);
+    if (scoreMatch) {
+      content.metrics.push({ label: 'Avg Fit Score', value: scoreMatch[1], severity: 'good' });
+    }
+  } else {
+    content.narrative = 'No ICP analysis data available. Run icp-discovery skill to populate this section.';
+    content.metrics = [];
   }
 
-  return { headers, rows };
+  if (scoring && !icp) {
+    content.narrative = stripActionTags(scoring.narrative);
+  }
 }
 
-// Extract ICP fit table
-function extractICPTable(skillData: Map<string, SkillRunResult>, maxItems: number): { headers: string[]; rows: TableRow[] } | undefined {
-  const icpRun = skillData.get('icp-discovery');
-  if (!icpRun?.output?.accounts) return undefined;
+function buildForecastWaterfall(content: SectionContent, evidenceMap: Map<string, SkillEvidence>): void {
+  const waterfall = evidenceMap.get('pipeline-waterfall');
+  const velocity = evidenceMap.get('stage-velocity-benchmarks');
 
-  const headers = ['Account', 'Fit Score', 'Tier', 'Industry', 'Employees'];
-  const rows: TableRow[] = [];
+  if (waterfall) {
+    content.narrative = stripActionTags(waterfall.narrative);
+    content.action_items = extractActionsFromNarrative(waterfall.narrative);
+    content.metrics = [];
 
-  for (const account of icpRun.output.accounts.slice(0, maxItems)) {
-    rows.push({
-      Account: account.name || 'Unknown',
-      'Fit Score': account.fit_score || 0,
-      Tier: account.tier || 'N/A',
-      Industry: account.industry || 'Unknown',
-      Employees: account.employee_count || 0,
-    });
+    const netMatch = waterfall.narrative.match(/[Nn]et[^$]*\$?([\d,.]+[KMB]?)/);
+    if (netMatch) {
+      content.metrics.push({ label: 'Net Change', value: `$${netMatch[1]}` });
+    }
+    const wonMatch = waterfall.narrative.match(/[Cc]losed[- ]?won[^$]*\$([\d,.]+[KMB]?)/);
+    if (wonMatch) {
+      content.metrics.push({ label: 'Closed Won', value: `$${wonMatch[1]}`, severity: 'good' });
+    }
+    const lostMatch = waterfall.narrative.match(/[Cc]losed[- ]?lost[^$]*\$([\d,.]+[KMB]?)/);
+    if (lostMatch) {
+      content.metrics.push({ label: 'Closed Lost', value: `$${lostMatch[1]}`, severity: 'critical' });
+    }
+    const newMatch = waterfall.narrative.match(/[Nn]ew[^$]*\$([\d,.]+[KMB]?)/);
+    if (newMatch) {
+      content.metrics.push({ label: 'New Created', value: `$${newMatch[1]}`, severity: 'good' });
+    }
+  } else {
+    content.narrative = 'No pipeline waterfall data available. Run pipeline-waterfall skill to populate this section.';
+    content.metrics = [];
   }
 
-  return { headers, rows };
-}
-
-// Extract coverage chart
-function extractCoverageChart(skillData: Map<string, SkillRunResult>) {
-  const coverageRun = skillData.get('pipeline-coverage');
-  if (!coverageRun?.output?.by_territory) return undefined;
-
-  return {
-    type: 'bar' as const,
-    labels: coverageRun.output.by_territory.map((t: any) => t.territory_name),
-    datasets: [{
-      label: 'Coverage Ratio',
-      data: coverageRun.output.by_territory.map((t: any) => t.coverage_ratio || 0),
-      color: '#3b82f6',
-    }],
-  };
-}
-
-// Extract waterfall chart
-function extractWaterfallChart(skillData: Map<string, SkillRunResult>) {
-  const waterfallRun = skillData.get('pipeline-waterfall');
-  if (!waterfallRun?.output?.waterfall_data) return undefined;
-
-  const data = waterfallRun.output.waterfall_data;
-  return {
-    type: 'waterfall' as const,
-    labels: ['Start', 'New', 'Won', 'Lost', 'Moved', 'End'],
-    datasets: [{
-      label: 'Pipeline Movement',
-      data: [
-        data.start_amount || 0,
-        data.new_created || 0,
-        -(data.closed_won || 0),
-        -(data.closed_lost || 0),
-        data.stage_changes || 0,
-        data.end_amount || 0,
-      ],
-      color: '#3b82f6',
-    }],
-  };
-}
-
-// Extract action items
-function extractActionItems(actions: ActionRecord[], maxItems: number): ActionItem[] {
-  return actions.slice(0, maxItems).map(action => ({
-    owner: action.owner_email || action.target_entity_name || 'Team',
-    action: action.title,
-    urgency: mapUrgency(action.severity, action.urgency_label),
-    related_deal: action.target_entity_type === 'deal' ? action.target_entity_name : undefined,
-  }));
-}
-
-// Map action severity to urgency
-function mapUrgency(severity: string, urgencyLabel: string): 'today' | 'this_week' | 'this_month' {
-  if (severity === 'critical' || urgencyLabel?.includes('days') && parseInt(urgencyLabel) < 3) {
-    return 'today';
+  if (velocity && !waterfall) {
+    content.narrative = stripActionTags(velocity.narrative);
   }
-  if (severity === 'warning' || urgencyLabel?.includes('week')) {
-    return 'this_week';
-  }
-  return 'this_month';
 }
 
-// Format currency
-function formatCurrency(amount: number): string {
-  if (amount >= 1000000) {
-    return `$${(amount / 1000000).toFixed(1)}M`;
+async function buildActionsSummary(content: SectionContent, workspaceId: string): Promise<void> {
+  const topSkills = [
+    'forecast-rollup', 'deal-risk-review', 'single-thread-alert',
+    'pipeline-hygiene', 'pipeline-coverage', 'rep-scorecard',
+  ];
+
+  const evidenceMap = await fetchSkillEvidence(workspaceId, topSkills);
+  const allActions: ActionItem[] = [];
+
+  for (const ev of evidenceMap.values()) {
+    allActions.push(...extractActionsFromNarrative(ev.narrative));
   }
-  if (amount >= 1000) {
-    return `$${Math.round(amount / 1000)}K`;
-  }
-  return `$${Math.round(amount)}`;
+
+  const deduped = deduplicateActions(allActions);
+  const prioritized = deduped
+    .sort((a, b) => {
+      const urgencyOrder = { today: 0, this_week: 1, this_month: 2 };
+      return (urgencyOrder[a.urgency] || 2) - (urgencyOrder[b.urgency] || 2);
+    })
+    .slice(0, content.title === 'Actions Summary' ? 5 : 10);
+
+  content.action_items = prioritized;
+  content.narrative = prioritized.length > 0
+    ? `${prioritized.length} priority actions identified across all analysis. ${prioritized.filter(a => a.urgency === 'today').length} require immediate attention today.`
+    : 'No actions identified. Run analysis skills to generate recommended actions.';
+}
+
+function deduplicateActions(actions: ActionItem[]): ActionItem[] {
+  const seen = new Set<string>();
+  return actions.filter(a => {
+    const key = `${a.related_deal || ''}_${a.action.slice(0, 50)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }

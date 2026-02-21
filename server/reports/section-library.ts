@@ -17,7 +17,7 @@ export const SECTION_LIBRARY: SectionDefinition[] = [
     id: 'the-number',
     label: 'The Number',
     description: 'Forecast landing zone with bear/base/bull scenarios and pacing bar',
-    skills: ['forecast-rollup', 'monte-carlo'],
+    skills: ['forecast-rollup', 'monte-carlo-forecast'],
     default_config: {
       detail_level: 'executive',
       include_chart: true,
@@ -41,13 +41,13 @@ export const SECTION_LIBRARY: SectionDefinition[] = [
     id: 'deals-needing-attention',
     label: 'Deals Needing Attention',
     description: 'Risk-flagged deals with recommended actions and signal severity',
-    skills: ['deal-risk-review', 'single-thread-alert', 'conversation-intelligence'],
+    skills: ['deal-risk-review', 'single-thread-alert'],
     default_config: {
       detail_level: 'manager',
       include_deal_list: true,
       max_items: 15,
       threshold_overrides: {
-        risk_threshold: 70, // Show deals with risk >= 70
+        risk_threshold: 70,
       },
     },
     category: 'pipeline',
@@ -80,7 +80,7 @@ export const SECTION_LIBRARY: SectionDefinition[] = [
     id: 'call-intelligence',
     label: 'Call Intelligence',
     description: 'Competitor mentions, champion signals, objections, and coaching opportunities',
-    skills: ['conversation-intelligence'],
+    skills: ['weekly-recap'],
     default_config: {
       detail_level: 'manager',
       max_items: 10,
@@ -119,7 +119,7 @@ export const SECTION_LIBRARY: SectionDefinition[] = [
     id: 'forecast-waterfall',
     label: 'Forecast Waterfall',
     description: 'Net pipeline movement bridge chart showing adds, stage changes, and exits',
-    skills: ['pipeline-waterfall', 'deal-stage-history'],
+    skills: ['pipeline-waterfall', 'stage-velocity-benchmarks'],
     default_config: {
       detail_level: 'executive',
       include_chart: true,
@@ -131,7 +131,7 @@ export const SECTION_LIBRARY: SectionDefinition[] = [
     id: 'actions-summary',
     label: 'Actions Summary',
     description: 'Top 5 recommended actions distilled from all report sections',
-    skills: [], // Auto-generated from other sections
+    skills: [],
     default_config: {
       detail_level: 'executive',
       max_items: 5,
@@ -140,12 +140,10 @@ export const SECTION_LIBRARY: SectionDefinition[] = [
   },
 ];
 
-// Helper to get section definition by ID
 export function getSectionDefinition(sectionId: string): SectionDefinition | undefined {
   return SECTION_LIBRARY.find(s => s.id === sectionId);
 }
 
-// Helper to create a section from definition
 export function createSectionFromDefinition(
   sectionId: string,
   order: number,
@@ -168,12 +166,10 @@ export function createSectionFromDefinition(
   };
 }
 
-// Get all sections by category
 export function getSectionsByCategory(category: SectionDefinition['category']): SectionDefinition[] {
   return SECTION_LIBRARY.filter(s => s.category === category);
 }
 
-// Get required skills for a list of sections
 export function getRequiredSkills(sections: ReportSection[]): string[] {
   const skillSet = new Set<string>();
   for (const section of sections) {
