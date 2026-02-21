@@ -91,6 +91,8 @@ export default function ReportBuilder() {
   const [showSectionPicker, setShowSectionPicker] = useState(false);
   const [showLivePreview, setShowLivePreview] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [editingSectionIndex, setEditingSectionIndex] = useState<number | null>(null);
+  const [sectionsLoading, setSectionsLoading] = useState(false);
 
   useEffect(() => {
     loadAvailableSections();
@@ -108,11 +110,14 @@ export default function ReportBuilder() {
 
   async function loadAvailableSections() {
     try {
+      setSectionsLoading(true);
       const res = await fetch(`/api/workspaces/${workspaceId}/report-sections`);
       const data = await res.json();
       setAvailableSections(data.sections || []);
     } catch (err) {
       console.error('Failed to load sections:', err);
+    } finally {
+      setSectionsLoading(false);
     }
   }
 
@@ -240,13 +245,15 @@ export default function ReportBuilder() {
 
       if (res.ok) {
         const saved = await res.json();
-        navigate(`/reports`);
+        navigate(`/workspace/${workspaceId}/reports`);
       } else {
-        alert('Failed to save report');
+        const error = await res.text();
+        console.error('Failed to save report:', error);
+        alert(`Failed to save report: ${error}`);
       }
     } catch (err) {
       console.error('Failed to save report:', err);
-      alert('Failed to save report');
+      alert(`Failed to save report: ${err}`);
     } finally {
       setSaving(false);
     }
@@ -263,7 +270,7 @@ export default function ReportBuilder() {
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button
-            onClick={() => navigate('/reports')}
+            onClick={() => navigate(`/workspace/${workspaceId}/reports`)}
             style={{
               padding: '8px 16px',
               color: colors.text,
@@ -484,7 +491,10 @@ export default function ReportBuilder() {
                       ↓
                     </button>
 
-                    <button style={{ padding: 8, color: colors.textMuted, background: 'transparent', border: 'none', cursor: 'pointer' }}>
+                    <button
+                      onClick={() => setEditingSectionIndex(idx)}
+                      style={{ padding: 8, color: colors.textMuted, background: 'transparent', border: 'none', cursor: 'pointer' }}
+                    >
                       <SettingsIcon style={{ width: 16, height: 16 }} />
                     </button>
                     <button
@@ -517,11 +527,29 @@ export default function ReportBuilder() {
           selectedSections={template.sections.map((s) => s.id)}
           onSelect={addSection}
           onClose={() => setShowSectionPicker(false)}
+          loading={sectionsLoading}
+        />
+      )}
+
+      {/* Section Settings Modal */}
+      {editingSectionIndex !== null && (
+        <SectionSettingsModal
+          section={template.sections[editingSectionIndex]}
+          onSave={(updatedConfig) => {
+            setTemplate((prev) => ({
+              ...prev,
+              sections: prev.sections.map((s, i) =>
+                i === editingSectionIndex ? { ...s, config: { ...s.config, ...updatedConfig } } : s
+              ),
+            }));
+            setEditingSectionIndex(null);
+          }}
+          onClose={() => setEditingSectionIndex(null)}
         />
       )}
 
       {/* Live Preview Modal */}
-      {showLivePreview && template.id && (
+      {showLivePreview && (
         <LivePreviewModal
           reportId={template.id}
           workspaceId={workspaceId!}
@@ -818,8 +846,13 @@ function BrandingEditor({ template, setTemplate }: any) {
   );
 }
 
-// Section Picker Modal
-function SectionPickerModal({ availableSections, selectedSections, onSelect, onClose }: any) {
+// Section Settings Modal
+function SectionSettingsModal({ section, onSave, onClose }: any) {
+  const [detailLevel, setDetailLevel] = React.useState(section.config.detail_level || 'manager');
+  const [maxItems, setMaxItems] = React.useState(section.config.max_items || 10);
+  const [includeDealList, setIncludeDealList] = React.useState(section.config.include_deal_list ?? true);
+  const [includeChart, setIncludeChart] = React.useState(section.config.include_chart ?? true);
+
   return (
     <div style={{
       position: 'fixed',
@@ -832,12 +865,181 @@ function SectionPickerModal({ availableSections, selectedSections, onSelect, onC
     }}>
       <div style={{
         background: colors.surface,
+        border: `1px solid ${colors.border}`,
+        borderRadius: 8,
+        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5)',
+        maxWidth: 480,
+        width: '100%',
+        margin: '0 16px'
+      }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: 24,
+          borderBottom: `1px solid ${colors.border}`
+        }}>
+          <h2 style={{ fontSize: 18, fontWeight: 600, color: colors.text, margin: 0, fontFamily: fonts.sans }}>
+            Section Settings
+          </h2>
+          <button onClick={onClose} style={{ color: colors.textMuted, background: 'transparent', border: 'none', cursor: 'pointer' }}>
+            <X style={{ width: 20, height: 20 }} />
+          </button>
+        </div>
+
+        <div style={{ padding: 24 }}>
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontWeight: 500, color: colors.text, marginBottom: 8, fontFamily: fonts.sans }}>{section.label}</div>
+            <div style={{ fontSize: 14, color: colors.textMuted, marginBottom: 24, fontFamily: fonts.sans }}>{section.description}</div>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div>
+              <label style={{ display: 'block', fontSize: 14, fontWeight: 500, color: colors.text, marginBottom: 8, fontFamily: fonts.sans }}>
+                Detail Level
+              </label>
+              <select
+                value={detailLevel}
+                onChange={(e) => setDetailLevel(e.target.value as any)}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  background: colors.surfaceRaised,
+                  color: colors.text,
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: 6,
+                  fontFamily: fonts.sans,
+                  fontSize: 14,
+                  outline: 'none',
+                }}
+              >
+                <option value="executive">Executive - High-level summary</option>
+                <option value="manager">Manager - Balanced detail</option>
+                <option value="analyst">Analyst - Comprehensive detail</option>
+              </select>
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: 14, fontWeight: 500, color: colors.text, marginBottom: 8, fontFamily: fonts.sans }}>
+                Max Items
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={50}
+                value={maxItems}
+                onChange={(e) => setMaxItems(parseInt(e.target.value) || 10)}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  background: colors.surfaceRaised,
+                  color: colors.text,
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: 6,
+                  fontFamily: fonts.sans,
+                  fontSize: 14,
+                  outline: 'none',
+                }}
+              />
+            </div>
+
+            <div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={includeDealList}
+                  onChange={(e) => setIncludeDealList(e.target.checked)}
+                  style={{ width: 16, height: 16, cursor: 'pointer' }}
+                />
+                <span style={{ fontSize: 14, color: colors.text, fontFamily: fonts.sans }}>Include deal list</span>
+              </label>
+            </div>
+
+            <div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={includeChart}
+                  onChange={(e) => setIncludeChart(e.target.checked)}
+                  style={{ width: 16, height: 16, cursor: 'pointer' }}
+                />
+                <span style={{ fontSize: 14, color: colors.text, fontFamily: fonts.sans }}>Include chart</span>
+              </label>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, marginTop: 24, justifyContent: 'flex-end' }}>
+            <button
+              onClick={onClose}
+              style={{
+                padding: '8px 16px',
+                color: colors.text,
+                background: 'transparent',
+                border: `1px solid ${colors.border}`,
+                borderRadius: 6,
+                fontWeight: 500,
+                fontFamily: fonts.sans,
+                cursor: 'pointer',
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                onSave({
+                  detail_level: detailLevel,
+                  max_items: maxItems,
+                  include_deal_list: includeDealList,
+                  include_chart: includeChart,
+                });
+              }}
+              style={{
+                padding: '8px 16px',
+                background: colors.accent,
+                color: '#fff',
+                border: 'none',
+                borderRadius: 6,
+                fontWeight: 500,
+                fontFamily: fonts.sans,
+                cursor: 'pointer',
+              }}
+            >
+              Save
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Section Picker Modal
+function SectionPickerModal({ availableSections, selectedSections, onSelect, onClose, loading }: any) {
+  // If no sections from API, use section library as fallback
+  const sectionsToShow = availableSections.length > 0
+    ? availableSections
+    : Object.entries(sectionLibrary).map(([id, def]) => ({ id, ...def }));
+
+  return (
+    <div style={{
+      position: 'fixed',
+      inset: 0,
+      background: 'rgba(0, 0, 0, 0.7)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 50
+    }}>
+      <div style={{
+        background: colors.surface,
+        border: `1px solid ${colors.border}`,
         borderRadius: 8,
         boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5)',
         maxWidth: 672,
         width: '100%',
         maxHeight: '80vh',
-        overflow: 'hidden'
+        overflow: 'hidden',
+        margin: '0 16px'
       }}>
         <div style={{
           display: 'flex',
@@ -853,52 +1055,62 @@ function SectionPickerModal({ availableSections, selectedSections, onSelect, onC
         </div>
 
         <div style={{ padding: 24, overflowY: 'auto', maxHeight: '60vh' }}>
-          <div style={{ display: 'grid', gap: 12 }}>
-            {availableSections.map((section: any) => {
-              const isSelected = selectedSections.includes(section.id);
-              const libDef = sectionLibrary[section.id];
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: '32px 0', color: colors.textMuted }}>
+              <p style={{ fontFamily: fonts.sans }}>Loading sections...</p>
+            </div>
+          ) : sectionsToShow.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '32px 0', color: colors.textMuted }}>
+              <p style={{ fontFamily: fonts.sans }}>No sections available</p>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gap: 12 }}>
+              {sectionsToShow.map((section: any) => {
+                const isSelected = selectedSections.includes(section.id);
+                const libDef = sectionLibrary[section.id];
 
-              return (
-                <button
-                  key={section.id}
-                  onClick={() => !isSelected && onSelect(section.id)}
-                  disabled={isSelected}
-                  style={{
-                    textAlign: 'left',
-                    padding: 16,
-                    border: `1px solid ${isSelected ? colors.border : colors.border}`,
-                    borderRadius: 8,
-                    transition: 'border-color 0.2s, background 0.2s',
-                    background: isSelected ? colors.surfaceRaised : colors.surface,
-                    cursor: isSelected ? 'not-allowed' : 'pointer',
-                    opacity: isSelected ? 0.5 : 1,
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!isSelected) {
-                      e.currentTarget.style.borderColor = colors.accent;
-                      e.currentTarget.style.background = colors.surfaceRaised;
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!isSelected) {
-                      e.currentTarget.style.borderColor = colors.border;
-                      e.currentTarget.style.background = colors.surface;
-                    }
-                  }}
-                >
-                  <div style={{ fontWeight: 500, color: colors.text, marginBottom: 4, fontFamily: fonts.sans }}>
-                    {libDef?.label || section.label}
-                  </div>
-                  <div style={{ fontSize: 14, color: colors.textSecondary, fontFamily: fonts.sans }}>
-                    {libDef?.description || section.description}
-                  </div>
-                  {isSelected && (
-                    <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 8, fontFamily: fonts.sans }}>Already added</div>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+                return (
+                  <button
+                    key={section.id}
+                    onClick={() => !isSelected && onSelect(section.id)}
+                    disabled={isSelected}
+                    style={{
+                      textAlign: 'left',
+                      padding: 16,
+                      border: `1px solid ${isSelected ? colors.border : colors.border}`,
+                      borderRadius: 8,
+                      transition: 'border-color 0.2s, background 0.2s',
+                      background: isSelected ? colors.surfaceRaised : colors.surface,
+                      cursor: isSelected ? 'not-allowed' : 'pointer',
+                      opacity: isSelected ? 0.5 : 1,
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isSelected) {
+                        e.currentTarget.style.borderColor = colors.accent;
+                        e.currentTarget.style.background = colors.surfaceRaised;
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isSelected) {
+                        e.currentTarget.style.borderColor = colors.border;
+                        e.currentTarget.style.background = colors.surface;
+                      }
+                    }}
+                  >
+                    <div style={{ fontWeight: 500, color: colors.text, marginBottom: 4, fontFamily: fonts.sans }}>
+                      {libDef?.label || section.label}
+                    </div>
+                    <div style={{ fontSize: 14, color: colors.textSecondary, fontFamily: fonts.sans }}>
+                      {libDef?.description || section.description}
+                    </div>
+                    {isSelected && (
+                      <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 8, fontFamily: fonts.sans }}>Already added</div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
     </div>
