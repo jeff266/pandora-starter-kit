@@ -308,7 +308,7 @@ router.get('/:workspaceId/report-sections', async (_req: Request, res: Response)
   }
 });
 
-// Download generated report file
+// Download generated report file (with workspace ownership validation)
 router.get('/:workspaceId/reports/:reportId/download/:format', async (req: Request, res: Response) => {
   try {
     const { workspaceId, reportId, format } = req.params;
@@ -320,6 +320,21 @@ router.get('/:workspaceId/reports/:reportId/download/:format', async (req: Reque
     }
 
     const sanitized = path.basename(filename);
+
+    const ownershipCheck = await query(
+      `SELECT id FROM report_generations
+       WHERE report_template_id = $1
+         AND workspace_id = $2
+         AND formats_generated->$3->>'filepath' LIKE '%/' || $4
+       LIMIT 1`,
+      [reportId, workspaceId, format, sanitized]
+    );
+
+    if (ownershipCheck.rows.length === 0) {
+      res.status(403).json({ error: 'Access denied — this file does not belong to your workspace' });
+      return;
+    }
+
     const outDir = path.join(os.tmpdir(), 'pandora-reports');
     const filepath = path.join(outDir, sanitized);
 
@@ -352,5 +367,36 @@ router.get('/:workspaceId/reports/:reportId/download/:format', async (req: Reque
     res.status(500).json({ error: 'Failed to download report' });
   }
 });
+
+const REPORT_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+export function cleanupReportFiles() {
+  const outDir = path.join(os.tmpdir(), 'pandora-reports');
+  if (!fs.existsSync(outDir)) return;
+
+  const now = Date.now();
+  let cleaned = 0;
+
+  try {
+    const files = fs.readdirSync(outDir);
+    for (const file of files) {
+      const filepath = path.join(outDir, file);
+      try {
+        const stat = fs.statSync(filepath);
+        if (now - stat.mtimeMs > REPORT_TTL_MS) {
+          fs.unlinkSync(filepath);
+          cleaned++;
+        }
+      } catch {
+        // skip files that can't be stat'd
+      }
+    }
+    if (cleaned > 0) {
+      logger.info(`Report TTL cleanup: removed ${cleaned} expired file(s)`);
+    }
+  } catch (err) {
+    logger.error('Report TTL cleanup failed', err instanceof Error ? err : undefined);
+  }
+}
 
 export default router;

@@ -89,7 +89,7 @@ import adminScopesRouter from './routes/admin-scopes.js';
 import targetsRouter from './routes/targets.js';
 import { workspaceNotificationsRouter, userNotificationsRouter } from './routes/notifications.js';
 import skillRunRequestsRouter from './routes/skill-run-requests.js';
-import reportsRouter from './routes/reports.js';
+import reportsRouter, { cleanupReportFiles } from './routes/reports.js';
 import { startPushTriggers, stopPushTriggers } from './push/trigger-manager.js';
 import { initRenderers } from './renderers/index.js';
 import { cleanupExpiredAnnotations } from './feedback/cleanup.js';
@@ -407,6 +407,9 @@ async function start(): Promise<void> {
 
   cleanupTempFiles();
   setInterval(cleanupTempFiles, 60 * 60 * 1000);
+
+  cleanupReportFiles();
+  setInterval(cleanupReportFiles, 60 * 60 * 1000);
 
   const { startActionExpiryScheduler } = await import('./actions/scheduler.js');
   const dbPool = (await import('./db.js')).default;
