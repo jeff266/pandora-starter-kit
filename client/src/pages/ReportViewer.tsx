@@ -100,8 +100,34 @@ export default function ReportViewer() {
   async function downloadFormat(format: string) {
     if (!generation) return;
     const fileInfo = generation.formats_generated[format];
-    if (fileInfo?.download_url) {
-      window.location.href = fileInfo.download_url;
+    if (!fileInfo?.download_url) return;
+
+    try {
+      // Use authenticated fetch to download the file
+      const token = localStorage.getItem('pandora_token');
+      const response = await fetch(fileInfo.download_url, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Download failed: ${response.statusText}`);
+      }
+
+      // Convert response to blob and trigger download
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${template?.name || 'report'}.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Download failed:', err);
+      alert(`Failed to download ${format.toUpperCase()} file`);
     }
   }
 
