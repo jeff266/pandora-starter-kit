@@ -1,52 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { Download, Share2, Settings, ChevronLeft, ChevronRight, Eye } from 'lucide-react';
-
-interface MetricCard {
-  label: string;
-  value: string;
-  delta?: string;
-  delta_direction?: 'up' | 'down' | 'flat';
-  severity?: 'good' | 'warning' | 'critical';
-}
-
-interface DealCard {
-  name: string;
-  amount: string;
-  owner: string;
-  stage: string;
-  signal: string;
-  signal_severity: 'critical' | 'warning' | 'info';
-  detail: string;
-  action: string;
-}
-
-interface ActionItem {
-  owner: string;
-  action: string;
-  urgency: 'today' | 'this_week' | 'this_month';
-  related_deal?: string;
-}
-
-interface TableRow {
-  [key: string]: string | number | null;
-}
-
-interface SectionContent {
-  section_id: string;
-  title: string;
-  narrative: string;
-  metrics?: MetricCard[];
-  table?: {
-    headers: string[];
-    rows: TableRow[];
-  };
-  deal_cards?: DealCard[];
-  action_items?: ActionItem[];
-  source_skills: string[];
-  data_freshness: string;
-  confidence: number;
-}
+import type { SectionContent } from '../components/reports/types';
 
 interface ReportGeneration {
   id: string;
@@ -303,15 +258,18 @@ export default function ReportViewer() {
         {/* Report Sections */}
         <div className="flex-1 overflow-y-auto p-6">
           <div className="max-w-5xl mx-auto space-y-6">
-            {generation.sections_content?.map((section) => (
-              <ReportSection
-                key={section.section_id}
-                section={section}
-                isCollapsed={collapsedSections.has(section.section_id)}
-                onToggle={() => toggleSection(section.section_id)}
-                anonymizeMode={anonymizeMode}
-              />
-            ))}
+            {generation.sections_content?.map((section) => {
+              const isCollapsed = collapsedSections.has(section.section_id);
+              return (
+                <ReportSection
+                  key={section.section_id}
+                  section={section}
+                  isCollapsed={isCollapsed}
+                  onToggle={() => toggleSection(section.section_id)}
+                  anonymizeMode={anonymizeMode}
+                />
+              );
+            })}
           </div>
         </div>
 

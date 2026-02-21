@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import LivePreviewModal from '../components/reports/LivePreviewModal';
 import {
   GripVertical,
   Plus,
@@ -399,11 +400,24 @@ export default function ReportBuilder() {
       )}
 
       {/* Live Preview Modal */}
-      {showLivePreview && (
+      {showLivePreview && template.id && (
         <LivePreviewModal
-          template={template}
-          workspaceId={workspaceId}
+          reportId={template.id}
+          workspaceId={workspaceId!}
+          reportName={template.name}
           onClose={() => setShowLivePreview(false)}
+          onRemoveSection={(sectionId) => {
+            setTemplate((prev: any) => ({
+              ...prev,
+              sections: prev.sections.map((s: any) =>
+                s.section_id === sectionId ? { ...s, enabled: false } : s
+              ),
+            }));
+          }}
+          onActivate={() => {
+            setShowLivePreview(false);
+            saveReport();
+          }}
         />
       )}
     </div>
@@ -653,75 +667,6 @@ function SectionPickerModal({ availableSections, selectedSections, onSelect, onC
               );
             })}
           </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Live Preview Modal
-function LivePreviewModal({ template, workspaceId, onClose }: any) {
-  const [previewing, setPreviewing] = useState(false);
-  const [generation, setGeneration] = useState<any>(null);
-
-  async function generatePreview() {
-    if (!template.id) {
-      alert('Please save the report first');
-      return;
-    }
-
-    try {
-      setPreviewing(true);
-      const res = await fetch(`/api/workspaces/${workspaceId}/reports/${template.id}/generate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ preview: true }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        setGeneration(data);
-      } else {
-        alert('Failed to generate preview');
-      }
-    } catch (err) {
-      console.error('Failed to generate preview:', err);
-      alert('Failed to generate preview');
-    } finally {
-      setPreviewing(false);
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
-        <div className="flex items-center justify-between p-6 border-b border-slate-200">
-          <h2 className="text-lg font-semibold text-slate-900">Live Preview</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <div className="p-6">
-          {!generation ? (
-            <div className="text-center py-12">
-              <p className="text-slate-600 mb-4">Generate a preview with current data</p>
-              <button
-                onClick={generatePreview}
-                disabled={previewing}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium disabled:opacity-50"
-              >
-                {previewing ? 'Generating...' : 'Generate Preview'}
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <p className="text-sm text-slate-600">
-                Preview generated successfully! This is how your report will look.
-              </p>
-              {/* TODO: Render preview sections here */}
-            </div>
-          )}
         </div>
       </div>
     </div>

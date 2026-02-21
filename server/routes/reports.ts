@@ -270,7 +270,8 @@ router.delete('/:workspaceId/reports/:reportId', async (req: Request, res: Respo
 router.post('/:workspaceId/reports/:reportId/generate', async (req: Request, res: Response) => {
   try {
     const { workspaceId, reportId } = req.params as { workspaceId: string; reportId: string };
-    const { preview = false } = req.body;
+    // Accept preview flag from query param or request body
+    const preview = req.query.preview === 'true' || req.body.preview === true;
 
     logger.info('Manual report generation requested', { workspace_id: workspaceId, report_id: reportId, preview });
 
