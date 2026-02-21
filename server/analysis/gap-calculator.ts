@@ -13,6 +13,7 @@ export interface GapCalculation {
   period_start: string;
   period_end: string;
   days_remaining: number;
+  pipeline_name: string | null;
 
   // Actuals
   closed_amount: number;
@@ -68,6 +69,8 @@ interface Target {
   period_end: string;
   period_label: string;
   amount: number;
+  pipeline_id: string | null;
+  pipeline_name: string | null;
   set_by: string | null;
   set_at: string;
   notes: string | null;
@@ -85,7 +88,12 @@ export async function computeGap(
   const now = new Date();
   const daysRemaining = Math.max(0, Math.ceil((periodEnd.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
 
-  // 1. Closed deals for the period
+  // 1. Closed deals for the period (filtered by pipeline if target is pipeline-specific)
+  const pipelineFilter = target.pipeline_id ? 'AND pipeline = $4' : '';
+  const closedParams = target.pipeline_id
+    ? [workspaceId, target.period_start, target.period_end, target.pipeline_id]
+    : [workspaceId, target.period_start, target.period_end];
+
   const closedResult = await query<{ closed_amount: string; closed_deal_count: string }>(
     `SELECT
       COALESCE(SUM(amount), 0) AS closed_amount,
@@ -94,8 +102,9 @@ export async function computeGap(
     WHERE workspace_id = $1
       AND stage_normalized = 'closed_won'
       AND close_date >= $2
-      AND close_date <= LEAST($3::DATE, CURRENT_DATE)`,
-    [workspaceId, target.period_start, target.period_end]
+      AND close_date <= LEAST($3::DATE, CURRENT_DATE)
+      ${pipelineFilter}`,
+    closedParams
   );
   const closedAmount = Number(closedResult.rows[0]?.closed_amount || 0);
   const closedDealCount = Number(closedResult.rows[0]?.closed_deal_count || 0);
@@ -133,7 +142,10 @@ export async function computeGap(
     gapStatus = 'critical';
   }
 
-  // 4. Workspace metrics (trailing 90 days)
+  // 4. Workspace metrics (trailing 90 days, filtered by pipeline if target is pipeline-specific)
+  const metricsParams = target.pipeline_id ? [workspaceId, target.pipeline_id] : [workspaceId];
+  const metricsPipelineFilter = target.pipeline_id ? 'AND pipeline = $2' : '';
+
   const metricsResult = await query<{
     total_deals: string;
     closed_won: string;
@@ -148,8 +160,9 @@ export async function computeGap(
         FILTER (WHERE stage_normalized = 'closed_won') AS avg_cycle_days
     FROM deals
     WHERE workspace_id = $1
-      AND created_at >= NOW() - INTERVAL '90 days'`,
-    [workspaceId]
+      AND created_at >= NOW() - INTERVAL '90 days'
+      ${metricsPipelineFilter}`,
+    metricsParams
   );
   const totalDeals = Number(metricsResult.rows[0]?.total_deals || 0);
   const closedWon = Number(metricsResult.rows[0]?.closed_won || 0);
@@ -170,27 +183,35 @@ export async function computeGap(
     Math.ceil((pipelineDeadlineDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
   );
 
-  // 6. Current open pipeline
+  // 6. Current open pipeline (filtered by pipeline if target is pipeline-specific)
+  const openParams = target.pipeline_id ? [workspaceId, target.pipeline_id] : [workspaceId];
+  const openPipelineFilter = target.pipeline_id ? 'AND pipeline = $2' : '';
+
   const openResult = await query<{ open_pipeline: string; open_deal_count: string }>(
     `SELECT
       COALESCE(SUM(amount), 0) AS open_pipeline,
       COUNT(*) AS open_deal_count
     FROM deals
     WHERE workspace_id = $1
-      AND stage_normalized = 'open'`,
-    [workspaceId]
+      AND stage_normalized = 'open'
+      ${openPipelineFilter}`,
+    openParams
   );
   const currentOpenPipeline = Number(openResult.rows[0]?.open_pipeline || 0);
   const currentOpenDealCount = Number(openResult.rows[0]?.open_deal_count || 0);
   const pipelineVsRequired = currentOpenPipeline - requiredPipeline;
 
-  // 7. Velocity (trailing 4 weeks)
+  // 7. Velocity (trailing 4 weeks, filtered by pipeline if target is pipeline-specific)
+  const velocityParams = target.pipeline_id ? [workspaceId, target.pipeline_id] : [workspaceId];
+  const velocityPipelineFilter = target.pipeline_id ? 'AND pipeline = $2' : '';
+
   const velocityResult = await query<{ deals_created: string }>(
     `SELECT COUNT(*) AS deals_created
     FROM deals
     WHERE workspace_id = $1
-      AND created_at >= NOW() - INTERVAL '28 days'`,
-    [workspaceId]
+      AND created_at >= NOW() - INTERVAL '28 days'
+      ${velocityPipelineFilter}`,
+    velocityParams
   );
   const dealsCreated4Weeks = Number(velocityResult.rows[0]?.deals_created || 0);
   const currentDealsPerWeek = dealsCreated4Weeks / 4;
@@ -259,6 +280,7 @@ export async function computeGap(
     period_start: target.period_start,
     period_end: target.period_end,
     days_remaining: daysRemaining,
+    pipeline_name: target.pipeline_name,
 
     closed_amount: closedAmount,
     closed_deal_count: closedDealCount,

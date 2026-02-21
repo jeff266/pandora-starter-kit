@@ -16,6 +16,8 @@ interface Target {
   period_end: string;
   period_label: string;
   amount: number;
+  pipeline_id: string | null;
+  pipeline_name: string | null;
   set_by: string | null;
   set_at: string;
   notes: string | null;
@@ -31,6 +33,7 @@ interface GapCalculation {
   period_start: string;
   period_end: string;
   days_remaining: number;
+  pipeline_name?: string | null;
   closed_amount: number;
   closed_deal_count: number;
   attainment_pct: number;
@@ -299,6 +302,11 @@ function GapCard({ gap, anon, onEdit }: { gap: GapCalculation; anon: any; onEdit
         <div>
           <div style={{ fontSize: 18, fontWeight: 700, color: colors.text, marginBottom: 4 }}>
             {gap.period_label} Target
+            {gap.pipeline_name && (
+              <span style={{ fontSize: 14, fontWeight: 500, color: colors.textMuted, marginLeft: 8 }}>
+                • {gap.pipeline_name}
+              </span>
+            )}
           </div>
           <div style={{ fontSize: 28, fontWeight: 700, fontFamily: fonts.mono, color: colors.text, marginBottom: 12 }}>
             {formatCurrency(anon.amount(targetAmount))}
@@ -471,6 +479,7 @@ function QuarterlyBreakdown({ targets, anon }: { targets: Target[]; anon: any })
         <thead>
           <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
             <th style={{ padding: '12px 0', textAlign: 'left', fontSize: 12, fontWeight: 600, color: colors.textMuted }}>Period</th>
+            <th style={{ padding: '12px 0', textAlign: 'left', fontSize: 12, fontWeight: 600, color: colors.textMuted }}>Pipeline</th>
             <th style={{ padding: '12px 0', textAlign: 'right', fontSize: 12, fontWeight: 600, color: colors.textMuted }}>Target</th>
             <th style={{ padding: '12px 0', textAlign: 'right', fontSize: 12, fontWeight: 600, color: colors.textMuted }}>Status</th>
           </tr>
@@ -479,6 +488,9 @@ function QuarterlyBreakdown({ targets, anon }: { targets: Target[]; anon: any })
           {targets.map((target, i) => (
             <tr key={target.id} style={{ borderBottom: i < targets.length - 1 ? `1px solid ${colors.border}` : 'none' }}>
               <td style={{ padding: '12px 0', fontSize: 14, color: colors.text }}>{target.period_label}</td>
+              <td style={{ padding: '12px 0', fontSize: 14, color: colors.textSecondary }}>
+                {target.pipeline_name || <span style={{ fontStyle: 'italic', color: colors.textMuted }}>All pipelines</span>}
+              </td>
               <td style={{ padding: '12px 0', textAlign: 'right', fontSize: 14, fontFamily: fonts.mono, color: colors.text }}>
                 {formatCurrency(anon.amount(target.amount))}
               </td>
@@ -600,7 +612,33 @@ function SetTargetModal({ existingTarget, revenueModel, onClose, onSave }: {
   const [periodStart, setPeriodStart] = useState(existingTarget?.period_start || '2026-01-01');
   const [periodEnd, setPeriodEnd] = useState(existingTarget?.period_end || '2026-03-31');
   const [notes, setNotes] = useState(existingTarget?.notes || '');
+  const [pipelineId, setPipelineId] = useState<string>(existingTarget?.pipeline_id || '');
+  const [pipelineName, setPipelineName] = useState<string>(existingTarget?.pipeline_name || '');
+  const [pipelines, setPipelines] = useState<{ id: string; name: string }[]>([]);
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    fetchPipelines();
+  }, []);
+
+  const fetchPipelines = async () => {
+    try {
+      const res = await api.get('/deals/pipelines');
+      setPipelines(res.pipelines || []);
+    } catch (err) {
+      console.error('Failed to fetch pipelines:', err);
+    }
+  };
+
+  const handlePipelineChange = (value: string) => {
+    setPipelineId(value);
+    if (value === '') {
+      setPipelineName('');
+    } else {
+      const selected = pipelines.find(p => p.id === value);
+      setPipelineName(selected?.name || '');
+    }
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -612,6 +650,8 @@ function SetTargetModal({ existingTarget, revenueModel, onClose, onSave }: {
         period_end: periodEnd,
         period_label: periodLabel,
         amount: parseFloat(amount),
+        pipeline_id: pipelineId || null,
+        pipeline_name: pipelineName || null,
         notes,
         set_by: 'user@example.com', // TODO: get from auth context
       });
@@ -667,6 +707,34 @@ function SetTargetModal({ existingTarget, revenueModel, onClose, onSave }: {
               fontFamily: fonts.sans,
             }}
           />
+        </div>
+
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: colors.textMuted, marginBottom: 6 }}>
+            Pipeline (optional)
+          </label>
+          <select
+            value={pipelineId}
+            onChange={(e) => handlePipelineChange(e.target.value)}
+            style={{
+              width: '100%',
+              padding: '8px 12px',
+              fontSize: 14,
+              background: colors.surfaceRaised,
+              border: `1px solid ${colors.border}`,
+              borderRadius: 6,
+              color: colors.text,
+              fontFamily: fonts.sans,
+            }}
+          >
+            <option value="">All pipelines (workspace-wide)</option>
+            {pipelines.map(p => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+          <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 4 }}>
+            Leave blank for a workspace-wide target across all pipelines
+          </div>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>

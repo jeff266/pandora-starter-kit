@@ -48,7 +48,7 @@ router.get('/:workspaceId/targets', async (req: Request, res: Response): Promise
 
 router.post('/:workspaceId/targets', async (req: Request, res: Response): Promise<void> => {
   const { workspaceId } = req.params;
-  const { metric, period_type, period_start, period_end, period_label, amount, notes, set_by } = req.body as {
+  const { metric, period_type, period_start, period_end, period_label, amount, notes, set_by, pipeline_id, pipeline_name } = req.body as {
     metric: string;
     period_type: string;
     period_start: string;
@@ -57,6 +57,8 @@ router.post('/:workspaceId/targets', async (req: Request, res: Response): Promis
     amount: number;
     notes?: string;
     set_by?: string;
+    pipeline_id?: string;
+    pipeline_name?: string;
   };
 
   if (!metric || !period_type || !period_start || !period_end || !period_label || amount == null) {
@@ -65,14 +67,24 @@ router.post('/:workspaceId/targets', async (req: Request, res: Response): Promis
   }
 
   try {
-    // Check for existing active target for this period
+    // Check for existing active target for this period and pipeline
+    // If pipeline_id is null, match workspace-wide targets (pipeline_id IS NULL)
+    // If pipeline_id is set, match only that specific pipeline
+    const pipelineCheck = pipeline_id
+      ? 'AND pipeline_id = $4'
+      : 'AND pipeline_id IS NULL';
+    const existingParams = pipeline_id
+      ? [workspaceId, period_start, period_end, pipeline_id]
+      : [workspaceId, period_start, period_end];
+
     const existing = await query(
       `SELECT id FROM targets
        WHERE workspace_id = $1
          AND period_start = $2
          AND period_end = $3
+         ${pipelineCheck}
          AND is_active = true`,
-      [workspaceId, period_start, period_end]
+      existingParams
     );
 
     const existingTargetId = existing.rows[0]?.id || null;
@@ -91,8 +103,8 @@ router.post('/:workspaceId/targets', async (req: Request, res: Response): Promis
     const result = await query(
       `INSERT INTO targets (
         workspace_id, metric, period_type, period_start, period_end,
-        period_label, amount, set_by, notes, is_active, supersedes_id
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true, $10)
+        period_label, amount, pipeline_id, pipeline_name, set_by, notes, is_active, supersedes_id
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, true, $12)
       RETURNING *`,
       [
         workspaceId,
@@ -102,6 +114,8 @@ router.post('/:workspaceId/targets', async (req: Request, res: Response): Promis
         period_end,
         period_label,
         amount,
+        pipeline_id || null,
+        pipeline_name || null,
         set_by || null,
         notes || null,
         existingTargetId,
@@ -154,8 +168,8 @@ router.patch('/:workspaceId/targets/:targetId', async (req: Request, res: Respon
     const result = await query(
       `INSERT INTO targets (
         workspace_id, metric, period_type, period_start, period_end, period_label,
-        amount, set_by, notes, is_active, supersedes_id
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true, $10)
+        amount, pipeline_id, pipeline_name, set_by, notes, is_active, supersedes_id
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, true, $12)
       RETURNING *`,
       [
         workspaceId,
@@ -165,6 +179,8 @@ router.patch('/:workspaceId/targets/:targetId', async (req: Request, res: Respon
         currentTarget.period_end,
         currentTarget.period_label,
         amount ?? currentTarget.amount,
+        currentTarget.pipeline_id,
+        currentTarget.pipeline_name,
         set_by || null,
         notes ?? currentTarget.notes,
         targetId,
