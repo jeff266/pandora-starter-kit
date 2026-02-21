@@ -75,7 +75,7 @@ function handleAuthorize(req: Request, res: Response): void {
     client_id: clientId,
     redirect_uri: callbackUrl,
     response_type: "code",
-    scope: "https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.metadata.readonly",
+    scope: "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email",
     access_type: "offline",
     prompt: "consent",
     state: signedState,

@@ -86,6 +86,19 @@ export async function deliverReportToGDrive(
           url: `https://drive.google.com/file/d/${fileId}/view`,
         });
       } catch (error) {
+        // Check for insufficient permissions (403)
+        if (error instanceof Error && error.message.includes('403') &&
+            (error.message.toLowerCase().includes('insufficient') ||
+             error.message.toLowerCase().includes('permission'))) {
+          logger.warn('Google Drive upload failed: insufficient permissions', { format });
+          await markConnectorNeedsReauth(workspaceId);
+          return {
+            success: false,
+            file_links: [],
+            error: 'Google Drive needs re-authorization for upload permissions. Please reconnect in Settings → Connectors.',
+          };
+        }
+
         logger.error(`Google Drive upload failed for ${format}`, error instanceof Error ? error : undefined);
         // Don't fail the whole delivery if one format fails
       }
@@ -97,12 +110,45 @@ export async function deliverReportToGDrive(
 
     return { success: true, file_links: fileLinks };
   } catch (error) {
+    // Check for insufficient permissions (403)
+    if (error instanceof Error && error.message.includes('403') &&
+        (error.message.toLowerCase().includes('insufficient') ||
+         error.message.toLowerCase().includes('permission'))) {
+      logger.warn('Google Drive delivery failed: insufficient permissions');
+      await markConnectorNeedsReauth(workspaceId);
+      return {
+        success: false,
+        file_links: [],
+        error: 'Google Drive needs re-authorization for upload permissions. Please reconnect in Settings → Connectors.',
+      };
+    }
+
     logger.error('Google Drive delivery failed', error instanceof Error ? error : undefined);
     return {
       success: false,
       file_links: [],
       error: error instanceof Error ? error.message : 'Unknown error',
     };
+  }
+}
+
+/**
+ * Mark Google Drive connector as needing re-authorization
+ */
+async function markConnectorNeedsReauth(workspaceId: string): Promise<void> {
+  try {
+    const { query } = await import('../db.js');
+    await query(
+      `UPDATE connector_configs
+       SET status = 'needs_reauth',
+           last_error = 'Google Drive needs additional permissions to upload reports. Please reconnect.',
+           updated_at = NOW()
+       WHERE workspace_id = $1 AND connector_type = 'google_drive'`,
+      [workspaceId]
+    );
+    logger.info('Marked Google Drive connector as needs_reauth', { workspaceId });
+  } catch (err) {
+    logger.error('Failed to update connector status', err instanceof Error ? err : undefined);
   }
 }
 
