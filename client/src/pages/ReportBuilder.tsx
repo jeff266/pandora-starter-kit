@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import LivePreviewModal from '../components/reports/LivePreviewModal';
 import { colors, fonts } from '../styles/theme';
+import { api } from '../lib/api';
 import {
   GripVertical,
   Plus,
@@ -111,8 +112,7 @@ export default function ReportBuilder() {
   async function loadAvailableSections() {
     try {
       setSectionsLoading(true);
-      const res = await fetch(`/api/workspaces/${workspaceId}/report-sections`);
-      const data = await res.json();
+      const data = await api.get('/report-sections');
       setAvailableSections(data.sections || []);
     } catch (err) {
       console.error('Failed to load sections:', err);
@@ -123,8 +123,7 @@ export default function ReportBuilder() {
 
   async function loadReport(id: string) {
     try {
-      const res = await fetch(`/api/workspaces/${workspaceId}/reports/${id}`);
-      const data = await res.json();
+      const data = await api.get(`/reports/${id}`);
       setTemplate(data);
     } catch (err) {
       console.error('Failed to load report:', err);
@@ -232,25 +231,13 @@ export default function ReportBuilder() {
     try {
       setSaving(true);
 
-      const method = reportId && reportId !== 'new' ? 'PUT' : 'POST';
-      const url = reportId && reportId !== 'new'
-        ? `/api/workspaces/${workspaceId}/reports/${reportId}`
-        : `/api/workspaces/${workspaceId}/reports`;
-
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(template),
-      });
-
-      if (res.ok) {
-        const saved = await res.json();
-        navigate(`/workspace/${workspaceId}/reports`);
+      if (reportId && reportId !== 'new') {
+        await api.put(`/reports/${reportId}`, template);
       } else {
-        const error = await res.text();
-        console.error('Failed to save report:', error);
-        alert(`Failed to save report: ${error}`);
+        await api.post('/reports', template);
       }
+
+      navigate(`/workspace/${workspaceId}/reports`);
     } catch (err) {
       console.error('Failed to save report:', err);
       alert(`Failed to save report: ${err}`);
