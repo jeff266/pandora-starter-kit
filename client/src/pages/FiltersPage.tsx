@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import { useIsMobile } from '../hooks/useIsMobile';
@@ -453,6 +453,25 @@ function FilterModal({ filter, onClose, onSave }: {
       setPreviewLoading(false);
     }
   };
+
+  const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    setPreview(null);
+    const noValueOps = ['is_null', 'is_not_null', 'is_true', 'is_false'];
+    const ready = conditions.filter(c => c.field && c.operator && (noValueOps.includes(c.operator) || (c.value !== '' && c.value !== undefined)));
+    if (ready.length === 0) return;
+    if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
+    previewTimerRef.current = setTimeout(() => {
+      setPreviewLoading(true);
+      api.post('/filters/preview-inline', {
+        object,
+        conditions: { operator: groupOp, conditions: ready },
+      }).then(res => setPreview(res))
+        .catch(() => {})
+        .finally(() => setPreviewLoading(false));
+    }, 500);
+    return () => { if (previewTimerRef.current) clearTimeout(previewTimerRef.current); };
+  }, [conditions, groupOp, object]);
 
   const handleSubmit = async () => {
     if (!id || !label || conditions.filter(c => c.field).length === 0) {
