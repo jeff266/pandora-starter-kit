@@ -4,11 +4,14 @@ import { Download, Share2, Settings, ChevronLeft, ChevronRight, Eye } from 'luci
 import type { SectionContent, MetricCard, DealCard, ActionItem } from '../components/reports/types';
 import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
+import SectionFeedback from '../components/reports/SectionFeedback';
+import OverallBriefingFeedback from '../components/reports/OverallBriefingFeedback';
 
 interface ReportGeneration {
   id: string;
   report_template_id: string;
   workspace_id: string;
+  agent_id?: string;
   formats_generated: Record<string, { filepath: string; size_bytes: number; download_url: string }>;
   delivery_status: Record<string, string>;
   sections_snapshot: any[];
@@ -50,6 +53,7 @@ export default function ReportViewer() {
   const [generations, setGenerations] = useState<GenerationSummary[]>([]);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const [anonymizeMode, setAnonymizeMode] = useState(false);
+  const [feedbackSummary, setFeedbackSummary] = useState<any>(null);
 
   useEffect(() => {
     loadReport();
@@ -68,10 +72,24 @@ export default function ReportViewer() {
 
       const templateData = await api.get(`/reports/${reportId}`);
       setTemplate(templateData);
+
+      // Load feedback summary if this is an agent-generated briefing
+      if (genData.agent_id) {
+        loadFeedbackSummary(genData.id, genData.agent_id);
+      }
     } catch (err) {
       console.error('Failed to load report:', err);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadFeedbackSummary(generationId: string, agentId: string) {
+    try {
+      const data = await api.get(`/agents/${agentId}/feedback-summary?generation_id=${generationId}`);
+      setFeedbackSummary(data);
+    } catch (err) {
+      console.error('Failed to load feedback summary:', err);
     }
   }
 
@@ -392,9 +410,24 @@ export default function ReportViewer() {
                   isCollapsed={isCollapsed}
                   onToggle={() => toggleSection(section.section_id)}
                   anonymizeMode={anonymizeMode}
+                  workspaceId={workspaceId}
+                  agentId={generation.agent_id}
+                  generationId={generation.id}
+                  existingSignal={feedbackSummary?.sections?.[section.section_id]?.signals?.[0] || null}
                 />
               );
             })}
+
+            {/* Overall Briefing Feedback (only for agent-generated briefings) */}
+            {generation.agent_id && workspaceId && (
+              <OverallBriefingFeedback
+                workspaceId={workspaceId}
+                agentId={generation.agent_id}
+                generationId={generation.id}
+                existingRating={feedbackSummary?.overall?.rating || null}
+                existingSignal={feedbackSummary?.overall?.signals?.[0] || null}
+              />
+            )}
           </div>
         </div>
 
@@ -419,9 +452,13 @@ interface ReportSectionProps {
   isCollapsed: boolean;
   onToggle: () => void;
   anonymizeMode: boolean;
+  workspaceId?: string;
+  agentId?: string;
+  generationId?: string;
+  existingSignal?: string | null;
 }
 
-function ReportSection({ section, isCollapsed, onToggle, anonymizeMode }: ReportSectionProps) {
+function ReportSection({ section, isCollapsed, onToggle, anonymizeMode, workspaceId, agentId, generationId, existingSignal }: ReportSectionProps) {
   return (
     <div id={section.section_id} style={{ background: colors.surface, borderRadius: 8, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>
       {/* Section Header */}
@@ -523,6 +560,17 @@ function ReportSection({ section, isCollapsed, onToggle, anonymizeMode }: Report
             Data as of {new Date(section.data_freshness).toLocaleString('en-US')} • Confidence:{' '}
             {Math.round(section.confidence * 100)}%
           </div>
+
+          {/* Section Feedback (only for agent-generated briefings) */}
+          {workspaceId && agentId && generationId && (
+            <SectionFeedback
+              workspaceId={workspaceId}
+              agentId={agentId}
+              generationId={generationId}
+              sectionId={section.section_id}
+              existingSignal={existingSignal}
+            />
+          )}
         </div>
       )}
     </div>

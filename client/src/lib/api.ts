@@ -6,6 +6,10 @@ export function setApiCredentials(workspaceId: string, token: string) {
   _token = token;
 }
 
+export function getWorkspaceId(): string {
+  return _workspaceId;
+}
+
 async function request(method: string, path: string, body?: any) {
   const url = `/api/workspaces/${_workspaceId}${path}`;
   const headers: Record<string, string> = {

@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { api } from '../lib/api';
+import { api, getWorkspaceId } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import Skeleton from '../components/Skeleton';
 import { ChevronLeft, Plus, X, GripVertical, Save, Zap } from 'lucide-react';
+import LearnedPreferences from '../components/agents/LearnedPreferences';
 
 interface AudienceConfig {
   role: string;
@@ -703,6 +704,14 @@ export default function AgentBuilder() {
           {saving ? 'Saving...' : <><Save size={14} /> {editingAgentId ? 'Update Agent' : 'Create Agent'}</>}
         </button>
       </div>
+
+      {/* Learned Preferences (only for existing agents) */}
+      {editingAgentId && (
+        <LearnedPreferences
+          workspaceId={getWorkspaceId()}
+          agentId={editingAgentId}
+        />
+      )}
     </div>
   );
 }
