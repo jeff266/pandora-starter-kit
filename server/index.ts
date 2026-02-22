@@ -1,4 +1,6 @@
 import express from "express";
+import path from "path";
+import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
@@ -183,13 +185,15 @@ app.use(express.json({
 app.use(express.urlencoded({ extended: true, verify: (req: any, _res, buf) => { req.rawBody = buf.toString(); } }));
 app.use(cookieParser());
 
-app.get("/", (_req, res) => {
-  res.json({
-    name: "Pandora",
-    version: "0.1.0",
-    description: "Multi-tenant GTM Intelligence Platform",
+if (process.env.NODE_ENV !== 'production') {
+  app.get("/", (_req, res) => {
+    res.json({
+      name: "Pandora",
+      version: "0.1.0",
+      description: "Multi-tenant GTM Intelligence Platform",
+    });
   });
-});
+}
 
 app.use("/health", healthRouter);
 
@@ -295,6 +299,22 @@ app.use("/api", agentBuilderRouter);
 app.use("/api/downloads", downloadsRouter);
 
 app.use(dealInsightsRouter);
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const clientDistPath = path.resolve(__dirname, '..', 'client');
+
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static(clientDistPath, {
+    setHeaders: (res) => {
+      res.setHeader('Cache-Control', 'no-cache');
+    },
+  }));
+
+  app.get('*', (_req, res) => {
+    res.sendFile(path.join(clientDistPath, 'index.html'));
+  });
+}
 
 function registerAdapters(): void {
   const registry = getAdapterRegistry();
