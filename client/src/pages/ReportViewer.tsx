@@ -653,7 +653,7 @@ function MetricCardComponent({ metric }: { metric: MetricCard }) {
   };
 
   const defaultColors = { bg: colors.surfaceRaised, border: colors.border, accent: colors.border };
-  const colorScheme = metric.severity ? severityColors[metric.severity] : defaultColors;
+  const colorScheme = (metric.severity && severityColors[metric.severity]) || defaultColors;
 
   return (
     <div style={{
@@ -683,9 +683,10 @@ function DealCardComponent({ deal, anonymizeMode }: { deal: DealCard; anonymizeM
     info: { border: '#3b82f6', bg: '#1e3a8a' },
   };
 
-  const colorScheme = severityColors[deal.signal_severity];
-  const displayName = anonymizeMode ? `Company ${deal.name.charAt(0)}` : deal.name;
-  const displayOwner = anonymizeMode ? `Rep ${deal.owner.charAt(0)}` : deal.owner;
+  const defaultDealColors = { border: colors.border, bg: colors.surfaceRaised };
+  const colorScheme = (deal.signal_severity && severityColors[deal.signal_severity]) || defaultDealColors;
+  const displayName = anonymizeMode ? `Company ${deal.name?.charAt(0) || '?'}` : (deal.name || 'Unknown');
+  const displayOwner = anonymizeMode ? `Rep ${deal.owner?.charAt(0) || '?'}` : (deal.owner || 'Unknown');
 
   return (
     <div style={{
@@ -728,8 +729,8 @@ function ActionItemComponent({ action, index }: { action: ActionItem; index: num
       <input type="checkbox" style={{ marginTop: 4 }} />
       <div style={{ flex: 1 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 12, fontWeight: 700, color: urgencyColors[action.urgency], fontFamily: fonts.sans }}>
-            {urgencyLabels[action.urgency]}
+          <span style={{ fontSize: 12, fontWeight: 700, color: urgencyColors[action.urgency] || colors.textSecondary, fontFamily: fonts.sans }}>
+            {urgencyLabels[action.urgency] || 'ACTION'}
           </span>
           <span style={{ fontSize: 14, color: colors.text, fontFamily: fonts.sans }}>{action.action}</span>
         </div>
