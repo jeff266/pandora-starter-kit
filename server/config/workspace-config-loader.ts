@@ -41,8 +41,12 @@ export class WorkspaceConfigLoader {
       [workspaceId]
     );
 
-    const config =
-      result.rows[0]?.workspace_config || this.getDefaults(workspaceId);
+    const stored = result.rows[0]?.workspace_config;
+    const config = stored || this.getDefaults(workspaceId);
+
+    if (stored && !config.named_filters) {
+      config.named_filters = WorkspaceConfigLoader.getDefaultNamedFilters();
+    }
 
     this.cache.set(workspaceId, config);
     return config;
