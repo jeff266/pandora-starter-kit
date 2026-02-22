@@ -216,35 +216,72 @@ Functions:
 
 ---
 
-## Phase 4: Feedback UI + Tuning Pipeline ❌ NOT STARTED
+## Phase 4: Feedback UI + Tuning Pipeline ✅ BACKEND COMPLETE
 
 **Goal:** Structured feedback on agent outputs converts to tuning pairs.
 
-**Duration:** ~5 hours
+**Status:** Backend complete (Tasks 4A, 4C, 4E). Frontend UI (Task 4B) pending.
 
-### Task 4A: Feedback Data Model
-`migrations/077_agent_feedback.sql`
-- `agent_feedback` table with feedback_type, signal, comment, rating
-- Signals: useful, not_useful, wrong_emphasis, too_detailed, too_brief, wrong_data, good_insight
+### Task 4A: Feedback Data Model ✅
+**File:** `migrations/079_agent_feedback.sql`
 
-### Task 4B: Feedback UI in Report Viewer
-- Per-section feedback controls (thumbs up/down, comment)
-- Overall briefing feedback (rating, editorial preferences)
-- Quick signals: "too detailed", "led with wrong thing", etc.
+- `agent_feedback` table with workspace/agent/generation scoping
+- Feedback types: section, editorial, overall
+- **13 signal types:**
+  - **Section:** useful, not_useful, too_detailed, too_brief, wrong_emphasis, good_insight, wrong_data, missing_context
+  - **Editorial:** wrong_lead, wrong_order, wrong_tone, good_structure
+  - **Overall:** keep_doing_this
+- Processing state: processed flag + tuning_key reference
+- Indexes: agent lookups, processing queue, generation summary
 
-### Task 4C: Feedback → Tuning Pipeline
-- Background processor converts feedback to tuning pairs
-- Maps signals to instructions (e.g., "too_detailed" → "Keep {section} brief — 1-2 points only")
-- Upserts to context_layer with confidence scores
+### Task 4B: Feedback UI in Report Viewer ⏳ PENDING
+**File:** `PHASE4_UI_COMPONENTS_TODO.md` (implementation guide)
 
-### Task 4D: Tuning Pair Injection
-Already done in Phase 1 (getTuningPairs + formatTuningForPrompt)
+**Components needed:**
+1. **SectionFeedback** - Per-section feedback bar with 👍👎💬 + expanded panel
+2. **OverallBriefingFeedback** - Star rating + editorial chips at bottom
+3. **LearnedPreferences** - Tuning pair viewer in Agent Builder
 
-### Task 4E: Feedback API Endpoints
-- POST `/api/workspaces/:id/agents/:agentId/feedback`
-- GET `/api/workspaces/:id/agents/:agentId/feedback`
-- GET `/api/workspaces/:id/agents/:agentId/tuning`
-- DELETE `/api/workspaces/:id/agents/:agentId/tuning/:key`
+**Integration points:**
+- Report Viewer: Add SectionFeedback to each section + OverallBriefingFeedback at bottom
+- Agent Builder: Add LearnedPreferences section
+
+Total frontend work: ~300-400 lines React/TypeScript
+
+### Task 4C: Feedback → Tuning Pipeline ✅
+**File:** `server/agents/feedback-processor.ts` (402 lines)
+
+**Core logic:**
+- `processFeedback()` - Main entry point, calls conversion + cap enforcement
+- `convertFeedbackToTuning()` - Maps signals to actionable instructions
+  - too_detailed → "Keep {section} brief — 1-2 key points maximum"
+  - wrong_lead → "Reader prefers leading with: {comment}"
+  - good_insight → "Continue this type of analysis — valuable"
+- `enforceTuningCap()` - Max 15 pairs per agent, evicts lowest confidence + oldest
+- `getFeedbackSummary()` - Returns feedback state for viewer UI
+
+**Signal handling:**
+- Actionable signals (12 types) → Create tuning pairs with confidence 0.5-0.9
+- Informational signals (wrong_data) → Log only, no tuning pair
+- Binary signals without comment (useful/not_useful) → Analytics only
+
+### Task 4D: Tuning Pair Injection ✅
+Already complete from Phase 1:
+- `getTuningPairs()` reads from context_layer
+- `formatTuningForPrompt()` injects into synthesis prompt
+- Editorial synthesizer loads tuning on every run
+
+### Task 4E: Feedback API Endpoints ✅
+**File:** `server/routes/agent-feedback.ts` (187 lines)
+
+**Endpoints:**
+- **POST** `/:workspaceId/agents/:agentId/feedback` - Submit feedback + immediate processing
+- **GET** `/:workspaceId/agents/:agentId/feedback` - List feedback history (paginated)
+- **GET** `/:workspaceId/agents/:agentId/tuning` - List tuning pairs (shows X/15 count)
+- **DELETE** `/:workspaceId/agents/:agentId/tuning/:key` - Remove tuning pair
+- **GET** `/:workspaceId/generations/:generationId/feedback-summary` - Feedback state for viewer
+
+All routes registered on `workspaceApiRouter` in `server/index.ts`
 
 ---
 
@@ -285,11 +322,11 @@ Already done in Phase 1 (getTuningPairs + formatTuningForPrompt)
 | 1: Editorial Synthesis | ~6 hrs | ✅ COMPLETE (5/5 tasks) | Agent that thinks, not assembles |
 | 2: Templates + Builder | ~4 hrs | ✅ COMPLETE (4/4 tasks) | User-configurable agent parameters |
 | 3: Self-Reference | ~4 hrs | ✅ COMPLETE (6/6 tasks) | Two-tier bounded memory |
-| 4: Feedback + Tuning | ~5 hrs | ⏳ NEXT | Learning loop |
-| 5: Dogfood | 1 week | ⏳ PENDING | Real-world validation |
+| 4: Feedback + Tuning | ~5 hrs | ✅ BACKEND COMPLETE (4/5 tasks) | Learning loop (UI pending) |
+| 5: Dogfood | 1 week | ⏳ NEXT | Real-world validation |
 
-**Total time invested:** ~14 hours (Phases 1-3)
-**Remaining:** ~5 hours (Phase 4) + 1 week dogfooding (Phase 5)
+**Total time invested:** ~17 hours (Phases 1-3 + Phase 4 backend)
+**Remaining:** ~2 hours (Phase 4 UI) + 1 week dogfooding (Phase 5)
 
 ---
 
@@ -305,14 +342,17 @@ Already done in Phase 1 (getTuningPairs + formatTuningForPrompt)
 
 ## Next Steps
 
-### Immediate (Phase 4)
-1. **Feedback Data Model** (Task 4A) - Create `agent_feedback` table
-2. **Feedback UI** (Task 4B) - Add feedback controls to Report Viewer
-3. **Feedback → Tuning Pipeline** (Task 4C) - Convert feedback to tuning pairs
-4. **Feedback API Endpoints** (Task 4E) - POST/GET/DELETE endpoints
-   - Tuning injection (Task 4D) already complete from Phase 1
+### Immediate (Phase 4 Frontend)
+1. **SectionFeedback Component** (~100 lines) - Per-section feedback bar with 👍👎💬 + expanded panel
+2. **OverallBriefingFeedback Component** (~100 lines) - Star rating + editorial chips
+3. **LearnedPreferences Component** (~100 lines) - Tuning pair viewer/manager in Agent Builder
+4. **Report Viewer Integration** - Add SectionFeedback to sections + OverallBriefingFeedback at bottom
+5. **Agent Builder Integration** - Add LearnedPreferences section
 
-### After Phase 4
-5. **Run migrations:** Execute all 3 migrations (075, 077, 078) in production
-6. **Phase 5 (Dogfood):** Set up 4 agents, run for 1 week, test feedback loop
-7. **Polish:** Fix issues discovered during dogfooding
+**Reference:** See `PHASE4_UI_COMPONENTS_TODO.md` for complete implementation guide
+
+### After Phase 4 Complete
+6. **Run migrations:** Execute all 4 migrations (075, 077, 078, 079) in production
+7. **Test complete loop:** Generate → Submit feedback → Verify tuning → Generate again
+8. **Phase 5 (Dogfood):** Set up 4 agents, run for 1 week, test all features
+9. **Polish:** Fix issues discovered during dogfooding
