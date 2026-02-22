@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { ExternalLink } from 'lucide-react';
+import { ExternalLink, ChevronDown, Check } from 'lucide-react';
 import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import { formatCurrency, formatDate, formatTimeAgo, severityColor } from '../lib/format';
@@ -10,6 +10,7 @@ import { DossierNarrative, AnalysisModal } from '../components/shared';
 import { useDemoMode } from '../contexts/DemoModeContext';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { buildDealCrmUrl, buildConversationUrl, useCrmInfo } from '../lib/deeplinks';
+import { useWorkspace } from '../context/WorkspaceContext';
 
 const SEVERITY_LABELS: Record<string, string> = {
   act: 'Critical', watch: 'Warning', notable: 'Notable', info: 'Info',
@@ -102,9 +103,25 @@ export default function DealDetail() {
   const [askLoading, setAskLoading] = useState(false);
   const [askError, setAskError] = useState('');
   const { crmInfo } = useCrmInfo();
+  const { user, currentWorkspace } = useWorkspace();
   const [analysisOpen, setAnalysisOpen] = useState(false);
   const [showScoreBreakdown, setShowScoreBreakdown] = useState(false);
   const [scoreHistory, setScoreHistory] = useState<any[]>([]);
+  const [pipelines, setPipelines] = useState<string[]>([]);
+  const [pipelineEditing, setPipelineEditing] = useState(false);
+  const [pipelineSaving, setPipelineSaving] = useState(false);
+  const pipelineDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!pipelineEditing) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (pipelineDropdownRef.current && !pipelineDropdownRef.current.contains(e.target as Node)) {
+        setPipelineEditing(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [pipelineEditing]);
 
   const fetchDossier = async (withNarrative = false) => {
     if (!dealId) return;
@@ -130,7 +147,36 @@ export default function DealDetail() {
         setScoreHistory(res.snapshots || []);
       }).catch(() => {});
     }
+    api.get('/deals/pipelines').then((res: any) => {
+      setPipelines(res.data || []);
+    }).catch(() => {});
   }, [dealId]);
+
+  const canEditPipeline = (() => {
+    if (!user || !dossier?.deal) return false;
+    const role = currentWorkspace?.role;
+    if (role === 'admin') return true;
+    const dealOwner = (dossier.deal.owner || '').toLowerCase();
+    return dealOwner === user.email.toLowerCase() || dealOwner === (user.name || '').toLowerCase();
+  })();
+
+  const handlePipelineChange = async (newPipeline: string) => {
+    if (!dealId || !dossier?.deal) return;
+    setPipelineSaving(true);
+    try {
+      await api.patch(`/deals/${dealId}/pipeline`, { pipeline: newPipeline });
+      setDossier((prev: any) => ({
+        ...prev,
+        deal: { ...prev.deal, pipeline: newPipeline },
+      }));
+      setToast({ message: 'Pipeline updated', type: 'success' });
+    } catch (err: any) {
+      setToast({ message: err.message || 'Failed to update pipeline', type: 'error' });
+    } finally {
+      setPipelineSaving(false);
+      setPipelineEditing(false);
+    }
+  };
 
   const dismissFinding = async (findingId: string) => {
     setDismissingId(findingId);
@@ -834,7 +880,58 @@ export default function DealDetail() {
           {/* Deal Details */}
           <Card title="Deal Details">
             <DetailRow label="Source" value={deal.source} />
-            <DetailRow label="Pipeline" value={deal.pipeline_name || deal.pipeline} />
+            {canEditPipeline ? (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: `1px solid ${colors.border}` }}>
+                <span style={{ fontSize: 12, color: colors.textMuted, minWidth: 110 }}>Pipeline</span>
+                <div ref={pipelineDropdownRef} style={{ position: 'relative' }}>
+                  {pipelineEditing ? (
+                    <div style={{
+                      position: 'absolute', right: 0, top: -4, zIndex: 20,
+                      background: colors.surface, border: `1px solid ${colors.border}`,
+                      borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
+                      minWidth: 200, maxHeight: 240, overflowY: 'auto',
+                    }}>
+                      {pipelines.map(p => (
+                        <button
+                          key={p}
+                          onClick={() => handlePipelineChange(p)}
+                          disabled={pipelineSaving}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 8,
+                            width: '100%', padding: '8px 12px', border: 'none',
+                            background: p === deal.pipeline ? `${colors.accent}15` : 'transparent',
+                            color: colors.text, fontSize: 13, cursor: 'pointer',
+                            textAlign: 'left',
+                          }}
+                          onMouseEnter={e => { (e.target as HTMLElement).style.background = `${colors.accent}15`; }}
+                          onMouseLeave={e => { (e.target as HTMLElement).style.background = p === deal.pipeline ? `${colors.accent}15` : 'transparent'; }}
+                        >
+                          {p === deal.pipeline && <Check size={14} color={colors.accent} />}
+                          <span style={{ marginLeft: p === deal.pipeline ? 0 : 22 }}>{p}</span>
+                        </button>
+                      ))}
+                      {pipelines.length === 0 && (
+                        <div style={{ padding: '8px 12px', color: colors.textMuted, fontSize: 12 }}>No pipelines found</div>
+                      )}
+                    </div>
+                  ) : null}
+                  <button
+                    onClick={() => setPipelineEditing(!pipelineEditing)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 4,
+                      background: 'transparent', border: `1px solid ${colors.border}`,
+                      borderRadius: 6, padding: '4px 10px', cursor: 'pointer',
+                      color: colors.text, fontSize: 13,
+                    }}
+                  >
+                    {pipelineSaving ? 'Saving...' : (deal.pipeline_name || deal.pipeline || '—')}
+                    <ChevronDown size={14} color={colors.textMuted} />
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <DetailRow label="Pipeline" value={deal.pipeline_name || deal.pipeline} />
+            )}
             <DetailRow label="Probability" value={deal.probability ? `${deal.probability}%` : undefined} />
             <DetailRow label="Forecast" value={deal.forecast_category} />
             <DetailRow label="Created" value={deal.created_at ? formatDate(deal.created_at) : undefined} />
