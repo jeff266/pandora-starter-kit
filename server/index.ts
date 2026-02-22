@@ -1,6 +1,5 @@
 import express from "express";
 import path from "path";
-import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
@@ -197,9 +196,7 @@ if (process.env.NODE_ENV !== 'production') {
 
 app.use("/health", healthRouter);
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const clientDistPath = path.resolve(__dirname, '..', 'client');
+const clientDistPath = path.resolve(process.cwd(), 'dist', 'client');
 
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(clientDistPath, {
