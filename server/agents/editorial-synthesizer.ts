@@ -100,8 +100,53 @@ function buildSystemPrompt(input: EditorialInput): string {
   // Role and goal
   parts.push(`You are the ${input.agent.name} for ${input.agent.workspaceId || 'this workspace'}.`);
   parts.push(`Your goal: ${input.agent.description}`);
-  parts.push(`Your audience: ${input.audience.role} (detail level: ${input.audience.detail_preference})`);
   parts.push('');
+
+  // Audience
+  parts.push('AUDIENCE:');
+  parts.push(`Role: ${input.audience.role}`);
+  parts.push(`Detail level: ${input.audience.detail_preference}`);
+  parts.push('');
+
+  // Vocabulary preferences
+  if (input.audience.vocabulary_avoid?.length || input.audience.vocabulary_prefer?.length) {
+    parts.push('VOCABULARY:');
+    if (input.audience.vocabulary_avoid?.length) {
+      parts.push(`- Avoid these terms: ${input.audience.vocabulary_avoid.join(', ')}`);
+    }
+    if (input.audience.vocabulary_prefer?.length) {
+      parts.push(`- Prefer these terms: ${input.audience.vocabulary_prefer.join(', ')}`);
+    }
+    parts.push('');
+  }
+
+  // Focus questions
+  if (input.focusQuestions && input.focusQuestions.length > 0) {
+    parts.push('FOCUS QUESTIONS (the reader wants these answered):');
+    input.focusQuestions.forEach((q, i) => {
+      parts.push(`${i + 1}. ${q}`);
+    });
+    parts.push('');
+  }
+
+  // Data window
+  if (input.dataWindow) {
+    const windowLabels: Record<string, string> = {
+      current_week: 'This Week',
+      current_month: 'This Month',
+      current_quarter: 'This Quarter',
+      trailing_30d: 'Trailing 30 Days',
+      trailing_90d: 'Trailing 90 Days',
+      fiscal_year: 'Fiscal Year',
+    };
+    const compLabels: Record<string, string> = {
+      previous_period: 'Previous Period',
+      same_period_last_year: 'Same Period Last Year',
+      none: 'No Comparison',
+    };
+    parts.push(`DATA WINDOW: ${windowLabels[input.dataWindow.primary] || input.dataWindow.primary} compared to ${compLabels[input.dataWindow.comparison] || input.dataWindow.comparison}`);
+    parts.push('');
+  }
 
   // Tuning from feedback
   if (input.tuningPairs.length > 0) {
@@ -119,24 +164,12 @@ function buildSystemPrompt(input: EditorialInput): string {
 
   // Core instructions
   parts.push('INSTRUCTIONS:');
-  parts.push('1. Read all evidence. Identify the 2-3 most important things this week.');
-  parts.push('2. Decide which sections to include, which to drop, and what order.');
-  parts.push('3. For each included section, write the content with appropriate depth.');
-  parts.push('4. Write an opening narrative (2-3 sentences) that frames the briefing.');
+  parts.push('1. Read all evidence. Your primary job is answering the focus questions.');
+  parts.push('2. Decide which sections to include based on what the evidence supports.');
+  parts.push('3. Adjust depth and vocabulary for the audience.');
+  parts.push(`4. Write an opening narrative (2-3 sentences) that frames the briefing for a ${input.audience.role}.`);
   parts.push('5. Output your editorial decisions and section content as structured JSON.');
   parts.push('');
-
-  // Vocabulary preferences
-  if (input.audience.vocabulary_avoid || input.audience.vocabulary_prefer) {
-    parts.push('VOCABULARY:');
-    if (input.audience.vocabulary_avoid) {
-      parts.push(`- Avoid: ${input.audience.vocabulary_avoid.join(', ')}`);
-    }
-    if (input.audience.vocabulary_prefer) {
-      parts.push(`- Prefer: ${input.audience.vocabulary_prefer.join(', ')}`);
-    }
-    parts.push('');
-  }
 
   return parts.join('\n');
 }

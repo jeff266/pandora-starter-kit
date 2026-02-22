@@ -9,6 +9,8 @@
  * PATCH  /:workspaceId/agents-v2/:id/toggle                Toggle active
  * POST   /:workspaceId/agents-v2/:id/trigger               Manual trigger
  * GET    /agents-v2/templates                              List templates (global)
+ * GET    /:workspaceId/agent-templates                     List briefing templates
+ * POST   /:workspaceId/agents/from-template                Create agent from template
  * POST   /:workspaceId/agents-v2/templates/:templateId/deploy  Deploy template
  * GET    /:workspaceId/agents-v2/:id/performance           Performance stats
  * POST   /:workspaceId/agents-v2/tradeoffs/estimate        Estimate tradeoffs
@@ -19,6 +21,7 @@ import { requirePermission, requireAnyPermission } from '../middleware/permissio
 import { requireUserSession } from '../middleware/auth.js';
 import {
   createAgent,
+  createAgentFromTemplate,
   updateAgent,
   deleteAgent,
   toggleAgent,
@@ -30,6 +33,7 @@ import {
 import { estimateTradeoffs } from '../agents/tradeoffs.js';
 import { detectConflicts } from '../agents/conflicts.js';
 import { AGENT_TEMPLATES } from '../agents/templates.js';
+import { getAgentTemplates } from '../agents/agent-templates.js';
 import { query } from '../db.js';
 import { assembleFindingsForRule, type DeliveryRuleRow } from '../push/finding-assembler.js';
 
@@ -82,6 +86,32 @@ router.post('/:workspaceId/agents-v2/tradeoffs/estimate', async (req, res) => {
     return res.json({ ...tradeoffs, conflicts });
   } catch (err: any) {
     return res.status(500).json({ error: err.message || String(err) });
+  }
+});
+
+// ─── GET /:workspaceId/agent-templates ────────────────────────────────────────
+router.get('/:workspaceId/agent-templates', async (req, res) => {
+  try {
+    const { workspaceId } = req.params;
+    const templates = await getAgentTemplates(workspaceId);
+    return res.json({ templates });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || String(err) });
+  }
+});
+
+// ─── POST /:workspaceId/agents/from-template ─────────────────────────────────
+router.post('/:workspaceId/agents/from-template', async (req, res) => {
+  try {
+    const { workspaceId } = req.params;
+    const { template_id, overrides } = req.body;
+    if (!template_id) {
+      return res.status(400).json({ error: 'template_id is required' });
+    }
+    const agent = await createAgentFromTemplate(workspaceId, template_id, overrides);
+    return res.status(201).json({ agent });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message || String(err) });
   }
 });
 

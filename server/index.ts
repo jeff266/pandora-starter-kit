@@ -348,6 +348,14 @@ async function initWorkflowEngine(): Promise<ActivePiecesClient | undefined> {
     console.warn('[server] Template seeding failed (non-fatal):', err instanceof Error ? err.message : err);
   }
 
+  try {
+    const { seedAgentTemplates } = await import('./agents/agent-templates.js');
+    await seedAgentTemplates();
+    console.log('[server] Agent briefing templates seeded');
+  } catch (err) {
+    console.warn('[server] Agent template seeding failed (non-fatal):', err instanceof Error ? err.message : err);
+  }
+
   if (apClient) {
     const client = apClient;
     setAPHealthChecker(() => client.healthCheck());

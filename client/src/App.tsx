@@ -35,6 +35,7 @@ import Targets from './pages/Targets';
 import ReportViewer from './pages/ReportViewer';
 import ReportsPage from './pages/ReportsPage';
 import ReportBuilder from './pages/ReportBuilder';
+import AgentBuilder from './pages/AgentBuilder';
 import { colors, fonts } from './styles/theme';
 import { useIsMobile } from './hooks/useIsMobile';
 
@@ -221,8 +222,8 @@ export default function App() {
             <Route path="/insights" element={<InsightsPage />} />
             <Route path="/members" element={<MembersPage />} />
             <Route path="/join" element={<JoinWorkspace />} />
-            <Route path="/agents" element={<Placeholder title="Agents" />} />
-            <Route path="/agent-builder" element={<Placeholder title="Agent Builder" />} />
+            <Route path="/agents" element={<AgentBuilder />} />
+            <Route path="/agent-builder" element={<AgentBuilder />} />
             <Route path="/tools" element={<ToolsPage />} />
             <Route path="/playbooks" element={<Playbooks />} />
             <Route path="/push" element={<PushPage />} />

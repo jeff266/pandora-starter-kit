@@ -2,6 +2,7 @@ import { query } from '../db.js';
 import { AGENT_TEMPLATES, type AgentTemplate } from './templates.js';
 import { estimateTradeoffs, type AgentConfig, type TriggerConfig, type FilterConfig } from './tradeoffs.js';
 import { detectConflicts } from './conflicts.js';
+import { getAgentTemplate, type AgentBriefingConfig } from './agent-templates.js';
 
 export interface CreateAgentInput {
   name: string;
@@ -14,6 +15,11 @@ export interface CreateAgentInput {
   channel_id?: string;
   is_active?: boolean;
   template_id?: string;
+  audience?: Record<string, any>;
+  focus_questions?: string[];
+  data_window?: Record<string, any>;
+  output_formats?: string[];
+  event_config?: Record<string, any> | null;
 }
 
 export interface Agent {
@@ -38,6 +44,11 @@ export interface Agent {
   total_findings_delivered: number;
   created_at: string;
   updated_at: string;
+  audience: Record<string, any>;
+  focus_questions: string[];
+  data_window: Record<string, any>;
+  output_formats: string[];
+  event_config: Record<string, any> | null;
 }
 
 export interface AgentPerformance {
@@ -109,8 +120,9 @@ export async function createAgent(workspaceId: string, input: CreateAgentInput):
     `INSERT INTO agents
        (workspace_id, name, description, icon, template_id, skill_ids, delivery_rule_id,
         estimated_tokens_per_week, estimated_deliveries_per_week, estimated_findings_per_delivery,
-        fatigue_score, focus_score, is_active)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+        fatigue_score, focus_score, is_active,
+        audience, focus_questions, data_window, output_formats, event_config)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
      RETURNING *`,
     [
       workspaceId,
@@ -126,6 +138,11 @@ export async function createAgent(workspaceId: string, input: CreateAgentInput):
       tradeoffs.fatigue_score,
       tradeoffs.focus_score,
       input.is_active ?? false,
+      JSON.stringify(input.audience ?? {}),
+      JSON.stringify(input.focus_questions ?? []),
+      JSON.stringify(input.data_window ?? { primary: 'current_week', comparison: 'previous_period' }),
+      JSON.stringify(input.output_formats ?? ['slack']),
+      input.event_config ? JSON.stringify(input.event_config) : null,
     ]
   );
   return agentResult.rows[0];
@@ -183,7 +200,12 @@ export async function updateAgent(
        name=$1, description=$2, icon=$3, skill_ids=$4,
        estimated_tokens_per_week=$5, estimated_deliveries_per_week=$6,
        estimated_findings_per_delivery=$7, fatigue_score=$8, focus_score=$9,
-       is_active=$10, updated_at=NOW()
+       is_active=$10, updated_at=NOW(),
+       audience=COALESCE($13, audience),
+       focus_questions=COALESCE($14, focus_questions),
+       data_window=COALESCE($15, data_window),
+       output_formats=COALESCE($16, output_formats),
+       event_config=CASE WHEN $17::boolean THEN $18 ELSE event_config END
      WHERE id=$11 AND workspace_id=$12
      RETURNING *`,
     [
@@ -191,9 +213,72 @@ export async function updateAgent(
       tradeoffs.tokens_per_week, tradeoffs.deliveries_per_week,
       tradeoffs.findings_per_delivery, tradeoffs.fatigue_score, tradeoffs.focus_score,
       merged.is_active, agentId, workspaceId,
+      input.audience ? JSON.stringify(input.audience) : null,
+      input.focus_questions ? JSON.stringify(input.focus_questions) : null,
+      input.data_window ? JSON.stringify(input.data_window) : null,
+      input.output_formats ? JSON.stringify(input.output_formats) : null,
+      input.event_config !== undefined,
+      input.event_config !== undefined ? (input.event_config ? JSON.stringify(input.event_config) : null) : null,
     ]
   );
   return result.rows[0];
+}
+
+export async function createAgentFromTemplate(
+  workspaceId: string,
+  templateId: string,
+  overrides?: {
+    name?: string;
+    audience?: Partial<AgentBriefingConfig['audience']>;
+    focus_questions?: string[];
+    data_window?: AgentBriefingConfig['data_window'];
+    output_formats?: string[];
+    schedule?: AgentBriefingConfig['schedule'];
+    skills?: string[];
+  }
+): Promise<Agent> {
+  const template = await getAgentTemplate(templateId);
+  if (!template) throw new Error(`Template not found: ${templateId}`);
+
+  const defaults = template.defaults as AgentBriefingConfig;
+
+  const audience = overrides?.audience
+    ? { ...defaults.audience, ...overrides.audience }
+    : defaults.audience;
+  const focusQuestions = overrides?.focus_questions ?? defaults.focus_questions;
+  const dataWindow = overrides?.data_window ?? defaults.data_window;
+  const outputFormats = overrides?.output_formats ?? defaults.output_formats;
+  const skills = overrides?.skills ?? defaults.skills;
+  const schedule = overrides?.schedule ?? defaults.schedule;
+
+  const triggerConfig: TriggerConfig = {
+    type: schedule.type === 'event_prep' ? 'cron' : (schedule.type as any),
+    schedule: schedule.cron,
+  } as any;
+
+  const eventConfig = schedule.type === 'event_prep' ? {
+    event_name: schedule.event_name,
+    prep_days_before: schedule.prep_days_before,
+    event_dates: schedule.event_dates,
+  } : null;
+
+  const input: CreateAgentInput = {
+    name: overrides?.name ?? template.name,
+    description: template.description,
+    icon: template.icon,
+    skill_ids: skills,
+    trigger_config: triggerConfig,
+    filter_config: { severities: ['critical', 'warning'], max_findings: 20 },
+    is_active: false,
+    template_id: template.id,
+    audience,
+    focus_questions: focusQuestions,
+    data_window: dataWindow,
+    output_formats: outputFormats,
+    event_config: eventConfig,
+  };
+
+  return createAgent(workspaceId, input);
 }
 
 export async function deleteAgent(agentId: string, workspaceId: string): Promise<void> {

@@ -24,7 +24,7 @@ import { editorialSynthesize } from '../agents/editorial-synthesizer.js';
 import { gatherFreshEvidence } from '../agents/evidence-gatherer.js';
 import { getTuningPairs } from '../agents/tuning.js';
 import type { AgentDefinition } from '../agents/types.js';
-import type { EditorialInput, AudienceConfig } from '../agents/editorial-types.js';
+import type { EditorialInput, AudienceConfig, DataWindowConfig } from '../agents/editorial-types.js';
 
 const logger = createLogger('EditorialGenerator');
 
@@ -102,16 +102,33 @@ export async function generateEditorialReport(
   // 6. Load tuning pairs
   const tuningPairs = await getTuningPairs(agent.id, workspace_id);
 
-  // 7. Build audience config from agent metadata
-  const audience: AudienceConfig = {
-    role: (agent.focus_config as any)?.audience_role || 'Sales Leadership',
-    detail_preference: template.voice_config?.detail_level || 'manager',
-    vocabulary_avoid: (agent.focus_config as any)?.vocabulary_avoid,
-    vocabulary_prefer: (agent.focus_config as any)?.vocabulary_prefer,
-  };
+  // 7. Build audience config from agent metadata (new columns > focus_config > template defaults)
+  const agentAudience = (agent as any).audience;
+  const hasAudienceConfig = agentAudience && agentAudience.role;
+  const audience: AudienceConfig = hasAudienceConfig
+    ? {
+        role: agentAudience.role,
+        detail_preference: agentAudience.detail_preference || 'manager',
+        vocabulary_avoid: agentAudience.vocabulary_avoid,
+        vocabulary_prefer: agentAudience.vocabulary_prefer,
+      }
+    : {
+        role: (agent.focus_config as any)?.audience_role || 'Revenue Operations',
+        detail_preference: template.voice_config?.detail_level || 'analyst',
+        vocabulary_avoid: (agent.focus_config as any)?.vocabulary_avoid,
+        vocabulary_prefer: (agent.focus_config as any)?.vocabulary_prefer,
+      };
+
+  // Read focus questions and data window from agent
+  const focusQuestions: string[] = (agent as any).focus_questions ?? [];
+  const dataWindow = (agent as any).data_window ?? { primary: 'current_week', comparison: 'previous_period' };
 
   // 8. Call editorial synthesizer
-  logger.info('[EditorialGenerator] Running editorial synthesis');
+  logger.info('[EditorialGenerator] Running editorial synthesis', {
+    audience_role: audience.role,
+    focus_questions_count: focusQuestions.length,
+    data_window: dataWindow.primary,
+  });
 
   const editorialInput: EditorialInput = {
     agent,
@@ -122,7 +139,8 @@ export async function generateEditorialReport(
     tuningPairs,
     voiceConfig: template.voice_config,
     audience,
-    // memoryContext will be added in Phase 3
+    focusQuestions: focusQuestions.length > 0 ? focusQuestions : undefined,
+    dataWindow: dataWindow,
   };
 
   const editorial = await editorialSynthesize(editorialInput);

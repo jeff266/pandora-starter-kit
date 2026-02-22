@@ -14,6 +14,11 @@ import type { AgentDefinition } from './types.js';
 // Editorial Input
 // ============================================================================
 
+export interface DataWindowConfig {
+  primary: 'current_week' | 'current_month' | 'current_quarter' | 'trailing_30d' | 'trailing_90d' | 'fiscal_year';
+  comparison: 'previous_period' | 'same_period_last_year' | 'none';
+}
+
 export interface EditorialInput {
   /** The agent configuration */
   agent: AgentDefinition;
@@ -37,6 +42,12 @@ export interface EditorialInput {
   /** Voice and audience config */
   voiceConfig: VoiceConfig;
   audience: AudienceConfig;
+
+  /** Focus questions the reader wants answered */
+  focusQuestions?: string[];
+
+  /** Data window for temporal context */
+  dataWindow?: DataWindowConfig;
 
   /** Memory context from previous runs (Phase 3) */
   memoryContext?: string;

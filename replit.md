@@ -45,6 +45,8 @@ Pandora is built on Node.js 20 with TypeScript 5+, utilizing Express.js and Post
 -   **Voice & Tone System:** Per-workspace voice configuration (detail_level, framing, alert_threshold) dynamically injected into skill synthesis prompts.
 -   **WorkbookGenerator:** Provides multi-tab `.xlsx` export services for skill and agent runs.
 -   **Monte Carlo Forecast (Pipeline-Aware):** 10,000-iteration probabilistic revenue forecast skill with P10–P90 ranges, quota probability, and variance driver ranking, adaptable per pipeline type.
+-   **Editorial Synthesis Engine (Phase 1):** Single Claude call produces holistic briefings with editorial decisions (lead_with, promote_finding, merge_sections, drop_section). Routes via `agent_id` on report templates — with agent → editorial path, without → static section-generator path.
+-   **Agent Templates + Builder (Phase 2):** 5 pre-built briefing templates (Monday Pipeline, Forecast Call Prep, Friday Recap, Board Meeting Prep, QBR) with `AgentBriefingConfig` defining audience, focus_questions, data_window, output_formats, and schedule. Agent Builder UI with template gallery, audience/vocabulary/focus questions/data window/schedule/formats tabs. Editorial synthesizer injects audience role, detail level, vocabulary preferences, focus questions, and data window into Claude prompt.
 
 ## External Dependencies
 -   **PostgreSQL (Neon):** Primary database.
