@@ -82,19 +82,19 @@ export function getStepOptions(step: CopilotStep): QuickOption[] {
   switch (step) {
     case 'welcome':
       return [
-        { label: 'Pipeline review', value: 'pipeline-review', icon: '\u{1F4CA}', description: 'Weekly pipeline health check' },
-        { label: 'Deal risk alerts', value: 'deal-risk', icon: '\u{1F3AF}', description: 'Flag at-risk and stalled deals' },
-        { label: 'Forecast check', value: 'forecast', icon: '📈', description: 'Forecast accuracy and gap analysis' },
-        { label: 'Data quality audit', value: 'data-quality', icon: '\u{1F50D}', description: 'Find missing and stale CRM data' },
-        { label: 'Lead scoring digest', value: 'lead-scoring', icon: '🏆', description: 'Top leads and scoring updates' },
-        { label: 'Rep performance', value: 'rep-scorecard', icon: '\u{1F4CB}', description: 'Rep activity and pipeline scorecard' },
+        { label: 'Pipeline review', value: 'pipeline-review', icon: 'BarChart3', description: 'Weekly pipeline health check' },
+        { label: 'Deal risk alerts', value: 'deal-risk', icon: 'ShieldAlert', description: 'Flag at-risk and stalled deals' },
+        { label: 'Forecast check', value: 'forecast', icon: 'TrendingUp', description: 'Forecast accuracy and gap analysis' },
+        { label: 'Data quality audit', value: 'data-quality', icon: 'SearchCheck', description: 'Find missing and stale CRM data' },
+        { label: 'Lead scoring digest', value: 'lead-scoring', icon: 'Trophy', description: 'Top leads and scoring updates' },
+        { label: 'Rep performance', value: 'rep-scorecard', icon: 'Users', description: 'Rep activity and pipeline scorecard' },
       ];
     case 'audience':
       return [
-        { label: 'VP / CRO', value: 'vp-cro', icon: '👔' },
-        { label: 'Sales Manager', value: 'sales-manager', icon: '\u{1F4CB}' },
-        { label: 'RevOps / Ops', value: 'revops', icon: '\u2699\uFE0F' },
-        { label: 'CEO / Founder', value: 'ceo', icon: '🏢' },
+        { label: 'VP / CRO', value: 'vp-cro', icon: 'Crown' },
+        { label: 'Sales Manager', value: 'sales-manager', icon: 'ClipboardList' },
+        { label: 'RevOps / Ops', value: 'revops', icon: 'Settings' },
+        { label: 'CEO / Founder', value: 'ceo', icon: 'Building2' },
       ];
     case 'focus':
       return [
@@ -107,17 +107,17 @@ export function getStepOptions(step: CopilotStep): QuickOption[] {
       ];
     case 'schedule':
       return [
-        { label: 'Every Monday at 8 AM', value: 'monday-8am', icon: '🌅' },
-        { label: 'Every weekday morning', value: 'weekday-8am', icon: '\u{1F4C5}' },
-        { label: 'Twice a week (Mon + Thu)', value: 'mon-thu', icon: '\u{1F551}' },
-        { label: 'Only when I trigger it', value: 'manual', icon: '🔔' },
+        { label: 'Every Monday at 8 AM', value: 'monday-8am', icon: 'Sunrise' },
+        { label: 'Every weekday morning', value: 'weekday-8am', icon: 'CalendarDays' },
+        { label: 'Twice a week (Mon + Thu)', value: 'mon-thu', icon: 'Clock' },
+        { label: 'Only when I trigger it', value: 'manual', icon: 'MousePointerClick' },
       ];
     case 'delivery':
       return [
-        { label: 'Slack channel', value: 'slack', icon: '💬' },
-        { label: 'In Pandora (view in app)', value: 'in_app', icon: '📱' },
-        { label: 'Email', value: 'email', icon: '\u{1F4E7}' },
-        { label: 'Slack + In App', value: 'slack_and_app', icon: '\u{1F4CB}' },
+        { label: 'Slack channel', value: 'slack', icon: 'MessageSquare' },
+        { label: 'In Pandora (view in app)', value: 'in_app', icon: 'Monitor' },
+        { label: 'Email', value: 'email', icon: 'Mail' },
+        { label: 'Slack + In App', value: 'slack_and_app', icon: 'LayoutDashboard' },
       ];
     default:
       return [];

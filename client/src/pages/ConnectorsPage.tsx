@@ -6,16 +6,7 @@ import { formatTimeAgo } from '../lib/format';
 import Skeleton from '../components/Skeleton';
 import Toast from '../components/Toast';
 import { useWorkspace } from '../context/WorkspaceContext';
-
-const sourceIcons: Record<string, { color: string; letter: string }> = {
-  hubspot: { color: '#ff7a59', letter: 'H' },
-  salesforce: { color: '#00a1e0', letter: 'S' },
-  gong: { color: '#7c3aed', letter: 'G' },
-  fireflies: { color: '#f59e0b', letter: 'F' },
-  monday: { color: '#6161ff', letter: 'M' },
-  'google-drive': { color: '#4285f4', letter: 'D' },
-  'file-import': { color: '#64748b', letter: 'I' },
-};
+import ConnectorLogo from '../components/ConnectorLogo';
 
 const CONNECTORS_WITH_TRACKED_USERS = ['gong'];
 
@@ -229,13 +220,7 @@ function ConsultantConnectorSection({ addToast }: { addToast: (message: string, 
           }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{
-                  width: 32, height: 32, borderRadius: 6, background: 'rgba(245,158,11,0.15)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 14, fontWeight: 700, color: '#f59e0b', flexShrink: 0,
-                }}>
-                  F
-                </div>
+                <ConnectorLogo type="fireflies" size={32} />
                 <div>
                   <span style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>
                     Fireflies (Personal)
@@ -709,8 +694,6 @@ export default function ConnectorsPage() {
         </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }}>
         {connectors.map((connector) => {
-          const icon = sourceIcons[connector.type] || { color: colors.textMuted, letter: connector.type.charAt(0).toUpperCase() };
-
           const healthColor = {
             green: colors.green,
             yellow: colors.yellow,
@@ -735,13 +718,7 @@ export default function ConnectorsPage() {
               padding: 20,
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-                <div style={{
-                  width: 36, height: 36, borderRadius: 8, background: `${icon.color}20`,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 16, fontWeight: 700, color: icon.color, flexShrink: 0,
-                }}>
-                  {icon.letter}
-                </div>
+                <ConnectorLogo type={connector.type} size={36} />
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 14, fontWeight: 600, color: colors.text, textTransform: 'capitalize' }}>
                     {connector.type.replace('-', ' ')}

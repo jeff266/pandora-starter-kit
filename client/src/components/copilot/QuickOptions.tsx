@@ -1,6 +1,20 @@
 import React from 'react';
 import { colors, fonts } from '../../styles/theme';
 import type { QuickOption } from './copilot-steps';
+import {
+  BarChart3, ShieldAlert, TrendingUp, SearchCheck, Trophy, Users,
+  Crown, ClipboardList, Settings, Building2,
+  Sunrise, CalendarDays, Clock, MousePointerClick,
+  MessageSquare, Monitor, Mail, LayoutDashboard,
+  type LucideIcon,
+} from 'lucide-react';
+
+const iconMap: Record<string, LucideIcon> = {
+  BarChart3, ShieldAlert, TrendingUp, SearchCheck, Trophy, Users,
+  Crown, ClipboardList, Settings, Building2,
+  Sunrise, CalendarDays, Clock, MousePointerClick,
+  MessageSquare, Monitor, Mail, LayoutDashboard,
+};
 
 interface Props {
   options: QuickOption[];
@@ -19,6 +33,7 @@ export default function QuickOptions({ options, onSelect, multiSelect, selected 
     }}>
       {options.map(option => {
         const isSelected = selected.includes(option.value);
+        const IconComponent = option.icon ? iconMap[option.icon] : null;
         return (
           <button
             key={option.value}
@@ -38,7 +53,7 @@ export default function QuickOptions({ options, onSelect, multiSelect, selected 
               gap: 6,
             }}
           >
-            {option.icon && <span style={{ fontSize: 16 }}>{option.icon}</span>}
+            {IconComponent && <IconComponent size={16} style={{ flexShrink: 0, opacity: 0.85 }} />}
             <span>
               <span style={{ fontWeight: 500 }}>{option.label}</span>
               {option.description && (
