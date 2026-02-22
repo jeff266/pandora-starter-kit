@@ -96,10 +96,7 @@ export default function AgentCopilot({ workspaceId, onAgentCreated, onSwitchToMa
   }
 
   function handleWelcomePreset(option: QuickOption) {
-    addMessage({ role: 'user', content: option.label, selected_option: option.value });
     const updates = getPresetUpdates('welcome', option.value);
-    applyUpdates(updates);
-
     const templateName = updates.name || option.label;
     const skillCount = updates.skills?.length || 0;
 
@@ -120,16 +117,19 @@ export default function AgentCopilot({ workspaceId, onAgentCreated, onSwitchToMa
 
   function handleAudiencePreset(option: QuickOption) {
     const updates = getPresetUpdates('audience', option.value);
-    setState(prev => ({
-      ...prev,
-      step: 'focus',
-      draft_config: { ...prev.draft_config, ...updates },
-      messages: [
-        ...prev.messages,
-        { role: 'user' as const, content: option.label, selected_option: option.value },
-        { role: 'assistant' as const, content: getStepMessage('focus', prev.draft_config) },
-      ],
-    }));
+    setState(prev => {
+      const newDraft = { ...prev.draft_config, ...updates };
+      return {
+        ...prev,
+        step: 'focus',
+        draft_config: newDraft,
+        messages: [
+          ...prev.messages,
+          { role: 'user' as const, content: option.label, selected_option: option.value },
+          { role: 'assistant' as const, content: getStepMessage('focus', newDraft) },
+        ],
+      };
+    });
   }
 
   function handleFocusPreset(option: QuickOption) {
@@ -144,20 +144,20 @@ export default function AgentCopilot({ workspaceId, onAgentCreated, onSwitchToMa
     if (selectedFocusQuestions.length === 0) return;
     const updates: Partial<DraftConfig> = { focus_questions: selectedFocusQuestions };
     const summary = selectedFocusQuestions.map((q, i) => `${i + 1}. ${q}`).join('\n');
+    const suggested = suggestSkills(selectedFocusQuestions);
+    setSelectedSkills(suggested);
+    setSkillsConfirmed(false);
 
     setState(prev => {
-      const suggested = suggestSkills(selectedFocusQuestions);
-      setSelectedSkills(suggested);
-      setSkillsConfirmed(false);
-
+      const newDraft = { ...prev.draft_config, ...updates };
       return {
         ...prev,
         step: 'skills',
-        draft_config: { ...prev.draft_config, ...updates },
+        draft_config: newDraft,
         messages: [
           ...prev.messages,
           { role: 'user' as const, content: `Selected questions:\n${summary}` },
-          { role: 'assistant' as const, content: getStepMessage('skills', prev.draft_config) },
+          { role: 'assistant' as const, content: getStepMessage('skills', newDraft) },
         ],
       };
     });
@@ -165,16 +165,19 @@ export default function AgentCopilot({ workspaceId, onAgentCreated, onSwitchToMa
 
   function handleSchedulePreset(option: QuickOption) {
     const updates = getPresetUpdates('schedule', option.value);
-    setState(prev => ({
-      ...prev,
-      step: 'delivery',
-      draft_config: { ...prev.draft_config, ...updates },
-      messages: [
-        ...prev.messages,
-        { role: 'user' as const, content: option.label, selected_option: option.value },
-        { role: 'assistant' as const, content: getStepMessage('delivery', prev.draft_config) },
-      ],
-    }));
+    setState(prev => {
+      const newDraft = { ...prev.draft_config, ...updates };
+      return {
+        ...prev,
+        step: 'delivery',
+        draft_config: newDraft,
+        messages: [
+          ...prev.messages,
+          { role: 'user' as const, content: option.label, selected_option: option.value },
+          { role: 'assistant' as const, content: getStepMessage('delivery', newDraft) },
+        ],
+      };
+    });
   }
 
   function handleDeliveryPreset(option: QuickOption) {
@@ -267,9 +270,24 @@ export default function AgentCopilot({ workspaceId, onAgentCreated, onSwitchToMa
   }
 
   async function handleCreateAgent() {
+    const config = state.draft_config;
+    const missing: string[] = [];
+    if (!config.skills?.length) missing.push('skills');
+    if (!config.schedule) missing.push('schedule');
+    if (!config.output_formats?.length) missing.push('delivery channel');
+
+    if (missing.length > 0) {
+      addMessage({
+        role: 'assistant',
+        content: `Missing required config: ${missing.join(', ')}. Let me take you back to fill those in.`,
+      });
+      const firstMissing = missing[0] === 'delivery channel' ? 'delivery' : missing[0] as CopilotStep;
+      setState(prev => ({ ...prev, step: firstMissing }));
+      return;
+    }
+
     setIsCreating(true);
     try {
-      const config = state.draft_config;
       const payload = {
         name: config.name || 'New Agent',
         description: config.focus_questions?.slice(0, 2).join('; ') || '',
