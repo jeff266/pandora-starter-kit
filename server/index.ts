@@ -197,6 +197,18 @@ if (process.env.NODE_ENV !== 'production') {
 
 app.use("/health", healthRouter);
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const clientDistPath = path.resolve(__dirname, '..', 'client');
+
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static(clientDistPath, {
+    setHeaders: (res) => {
+      res.setHeader('Cache-Control', 'no-cache');
+    },
+  }));
+}
+
 app.use("/api/slack/events", slackEventsRouter);
 app.use("/api/slack/interactions", slackInteractionsRouter);
 
@@ -300,17 +312,7 @@ app.use("/api/downloads", downloadsRouter);
 
 app.use(dealInsightsRouter);
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const clientDistPath = path.resolve(__dirname, '..', 'client');
-
 if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(clientDistPath, {
-    setHeaders: (res) => {
-      res.setHeader('Cache-Control', 'no-cache');
-    },
-  }));
-
   app.get('/{*splat}', (_req, res) => {
     res.sendFile(path.join(clientDistPath, 'index.html'));
   });
