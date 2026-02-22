@@ -17,11 +17,13 @@ export default function LensDropdown() {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  const activeFilter = filters.find(f => f.id === activeLens);
-  const hasLens = !!activeLens && !!activeFilter;
+  const safeFilters = Array.isArray(filters) ? filters : [];
 
-  if (loading && filters.length === 0) return null;
-  if (filters.length === 0) return null;
+  if (loading && safeFilters.length === 0) return null;
+  if (safeFilters.length === 0) return null;
+
+  const activeFilter = safeFilters.find(f => f.id === activeLens);
+  const hasLens = !!activeLens && !!activeFilter;
 
   return (
     <div ref={ref} style={{ position: 'relative' }}>
@@ -36,7 +38,7 @@ export default function LensDropdown() {
           border: hasLens ? `1px solid ${colors.accent}` : `1px solid ${colors.border}`,
           background: hasLens ? 'rgba(99,102,241,0.12)' : 'rgba(255,255,255,0.04)',
           color: hasLens ? colors.accent : colors.textSecondary,
-          fontSize: fonts.sizes.sm,
+          fontSize: 13,
           fontFamily: fonts.mono,
           cursor: 'pointer',
           transition: 'all 0.15s',
@@ -71,7 +73,7 @@ export default function LensDropdown() {
         }}>
           <div style={{
             padding: '8px 12px 6px',
-            fontSize: fonts.sizes.xs,
+            fontSize: 11,
             color: colors.textMuted,
             fontFamily: fonts.mono,
             textTransform: 'uppercase',
@@ -87,11 +89,11 @@ export default function LensDropdown() {
             onClick={() => { setLens(null); setOpen(false); }}
           />
 
-          {filters.map(f => (
+          {safeFilters.map(f => (
             <LensOption
               key={f.id}
-              label={f.label}
-              description={f.description || f.entity_type}
+              label={f.label || f.id}
+              description={f.description || f.entity_type || ''}
               selected={activeLens === f.id}
               onClick={() => { setLens(f.id); setOpen(false); }}
             />
@@ -125,8 +127,8 @@ function LensOption({ label, description, selected, onClick }: {
         border: 'none',
         background: selected ? 'rgba(99,102,241,0.12)' : hovered ? 'rgba(255,255,255,0.04)' : 'transparent',
         color: selected ? colors.accent : colors.text,
-        fontSize: fonts.sizes.sm,
-        fontFamily: fonts.body,
+        fontSize: 13,
+        fontFamily: fonts.sans,
         cursor: 'pointer',
         textAlign: 'left',
         transition: 'all 0.1s',
@@ -155,7 +157,7 @@ function LensOption({ label, description, selected, onClick }: {
         <div style={{ fontWeight: selected ? 600 : 400 }}>{label}</div>
         {description && (
           <div style={{
-            fontSize: fonts.sizes.xs,
+            fontSize: 11,
             color: colors.textMuted,
             marginTop: 1,
             overflow: 'hidden',

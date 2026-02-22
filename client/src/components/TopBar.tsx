@@ -1,7 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, Component, type ReactNode, type ErrorInfo } from 'react';
 import { colors, fonts } from '../styles/theme';
 import { formatTimeAgo } from '../lib/format';
 import LensDropdown from './LensDropdown';
+
+class LensBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
+  state = { hasError: false };
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch(err: Error, info: ErrorInfo) { console.warn('[LensBoundary]', err.message); }
+  render() { return this.state.hasError ? null : this.props.children; }
+}
 
 interface TopBarProps {
   title: string;
@@ -133,7 +140,7 @@ export default function TopBar({
           </div>
         )}
 
-        <LensDropdown />
+        <LensBoundary><LensDropdown /></LensBoundary>
 
         {/* Refresh Button and Last Refreshed */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

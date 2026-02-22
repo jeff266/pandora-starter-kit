@@ -6,6 +6,7 @@ interface NamedFilter {
   label: string;
   description?: string;
   entity_type: string;
+  object?: string;
   source?: string;
 }
 
@@ -45,8 +46,12 @@ export function LensProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     try {
       const res = await api.get('/filters');
-      const list = res.filters || res.data || res || [];
-      setFilters(Array.isArray(list) ? list : []);
+      const raw = res.filters || res.data || res || [];
+      const list = Array.isArray(raw) ? raw : [];
+      setFilters(list.map((f: any) => ({
+        ...f,
+        entity_type: f.entity_type || f.object || 'deals',
+      })));
     } catch {
       setFilters([]);
     } finally {

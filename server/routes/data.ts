@@ -23,15 +23,24 @@ import {
   queryDocuments, getDocument, getDocumentsForDeal,
 } from '../tools/document-query.js';
 import { FilterResolver } from '../tools/filter-resolver.js';
+import { configLoader } from '../config/workspace-config-loader.js';
 
 const router = Router();
 const filterResolver = new FilterResolver();
 
-async function resolveLens(req: Request): Promise<{ additionalWhere?: string; additionalParams?: any[] }> {
+async function resolveLens(
+  req: Request,
+  entityType: 'deals' | 'contacts' | 'accounts' | 'conversations'
+): Promise<{ additionalWhere?: string; additionalParams?: any[] }> {
   const lensId = req.activeLens;
   if (!lensId) return {};
   try {
     const workspaceId = req.params.id;
+    const config = await configLoader.getConfig(workspaceId);
+    const filters = config.named_filters || [];
+    const filter = filters.find(f => f.id === lensId);
+    if (!filter) return {};
+    if (filter.object !== entityType) return {};
     const resolution = await filterResolver.resolve(workspaceId, lensId, { parameter_offset: 1 });
     const sql = resolution.sql.replace(/^ AND /, '');
     if (!sql) return {};
@@ -123,7 +132,7 @@ router.get('/:id/deals/:dealId', async (req: Request, res: Response): Promise<vo
 router.get('/:id/deals', async (req: Request, res: Response): Promise<void> => {
   try {
     const q = req.query;
-    const lens = await resolveLens(req);
+    const lens = await resolveLens(req, 'deals');
     const result = await queryDeals(req.params.id, {
       stage: q.stage as string | string[] | undefined,
       stageNormalized: q.stageNormalized as string | string[] | undefined,
@@ -192,7 +201,7 @@ router.get('/:id/contacts/:contactId', async (req: Request, res: Response): Prom
 router.get('/:id/contacts', async (req: Request, res: Response): Promise<void> => {
   try {
     const q = req.query;
-    const lens = await resolveLens(req);
+    const lens = await resolveLens(req, 'contacts');
     const result = await queryContacts(req.params.id, {
       email: q.email as string | undefined,
       accountId: q.accountId as string | undefined,
@@ -244,7 +253,7 @@ router.get('/:id/accounts/:accountId', async (req: Request, res: Response): Prom
 router.get('/:id/accounts', async (req: Request, res: Response): Promise<void> => {
   try {
     const q = req.query;
-    const lens = await resolveLens(req);
+    const lens = await resolveLens(req, 'accounts');
     const result = await queryAccounts(req.params.id, {
       domain: q.domain as string | undefined,
       industry: q.industry as string | undefined,
@@ -360,7 +369,7 @@ router.get('/:id/conversations/:conversationId', async (req: Request, res: Respo
 router.get('/:id/conversations', async (req: Request, res: Response): Promise<void> => {
   try {
     const q = req.query;
-    const lens = await resolveLens(req);
+    const lens = await resolveLens(req, 'conversations');
     const result = await queryConversations(req.params.id, {
       dealId: q.dealId as string | undefined,
       accountId: q.accountId as string | undefined,
