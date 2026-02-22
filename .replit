@@ -53,4 +53,5 @@ HUBSPOT_CALLBACK_URL = "https://2249ba4a-228b-47b6-989b-1bd765452af0-00-zmr8y6ng
 
 [deployment]
 deploymentTarget = "autoscale"
-run = ["sh", "-c", "bash -c printf \"%s\\n\\n%s\" \"$0\" \"$1\" Please use the \u001B[1;93mConfiguration\u001B[0m pane to configure your run command. For more info, see: https://docs.replit.com/replit-workspace/configuring-repl#run"]
+run = ["bash", "-c", "NODE_ENV=production PORT=5000 npx tsx server/index.ts"]
+build = ["bash", "-c", "npx vite build --config client/vite.config.ts"]
