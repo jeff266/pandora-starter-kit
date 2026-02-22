@@ -291,7 +291,7 @@ export default function AgentCopilot({ workspaceId, onAgentCreated, onSwitchToMa
       const payload = {
         name: config.name || 'New Agent',
         description: config.focus_questions?.slice(0, 2).join('; ') || '',
-        icon: config.icon || '\u{1F916}',
+        icon: config.icon || '/avatars/char-01.png',
         skill_ids: config.skills?.length ? config.skills : ['pipeline-hygiene'],
         trigger_config: {
           type: config.schedule?.type || 'manual',

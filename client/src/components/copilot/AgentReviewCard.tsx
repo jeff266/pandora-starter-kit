@@ -2,6 +2,7 @@ import React from 'react';
 import { colors, fonts } from '../../styles/theme';
 import { Check, Edit3, RotateCcw } from 'lucide-react';
 import type { DraftConfig } from './copilot-steps';
+import AvatarDisplay from '../avatars/AvatarDisplay';
 
 interface Props {
   config: DraftConfig;
@@ -45,7 +46,7 @@ export default function AgentReviewCard({ config, onConfirm, onEdit, onStartOver
         alignItems: 'center',
         gap: 10,
       }}>
-        <span style={{ fontSize: 24 }}>{config.icon || '\u{1F916}'}</span>
+        <AvatarDisplay value={config.icon} size={32} fallbackEmoji={'\u{1F916}'} borderRadius={8} />
         <span style={{ font: `600 16px ${fonts.sans}`, color: colors.text }}>
           {config.name || 'New Agent'}
         </span>

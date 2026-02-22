@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Plus, FileText, Calendar, Clock, AlertCircle, CheckCircle, Play } from 'lucide-react';
 import { colors, fonts } from '../styles/theme';
 import { api } from '../lib/api';
+import AvatarDisplay from '../components/avatars/AvatarDisplay';
 
 interface ReportTemplate {
   id: string;
@@ -490,7 +491,9 @@ function TemplateGallery({ workspaceId, onSelect, onClose }: TemplateGalleryProp
               e.currentTarget.style.boxShadow = 'none';
             }}
           >
-            <div style={{ fontSize: 32, marginBottom: 12 }}>{template.icon}</div>
+            <div style={{ marginBottom: 12 }}>
+              <AvatarDisplay value={template.icon} size={40} fallbackEmoji={template.icon} borderRadius={8} />
+            </div>
             <h3 style={{ fontSize: 18, fontWeight: 600, color: colors.text, marginBottom: 8, fontFamily: fonts.sans }}>{template.name}</h3>
             <p style={{ fontSize: 14, color: colors.textSecondary, marginBottom: 16, fontFamily: fonts.sans }}>{template.description}</p>
             <div style={{ display: 'flex', alignItems: 'center', gap: 16, fontSize: 12, color: colors.textMuted, fontFamily: fonts.sans }}>

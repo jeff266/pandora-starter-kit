@@ -5,6 +5,9 @@ import Skeleton from '../components/Skeleton';
 import { ChevronLeft, Plus, X, GripVertical, Save, Zap, Play, Loader2, FileText } from 'lucide-react';
 import LearnedPreferences from '../components/agents/LearnedPreferences';
 import AgentCopilot from '../components/copilot/AgentCopilot';
+import AvatarPicker from '../components/avatars/AvatarPicker';
+import AvatarDisplay from '../components/avatars/AvatarDisplay';
+import { AVATAR_GALLERY } from '../components/avatars/avatar-data';
 
 interface AudienceConfig {
   role: string;
@@ -104,7 +107,8 @@ export default function AgentBuilder() {
 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [icon, setIcon] = useState('🤖');
+  const [icon, setIcon] = useState(AVATAR_GALLERY[0].src);
+  const [showIconPicker, setShowIconPicker] = useState(false);
   const [audience, setAudience] = useState<AudienceConfig>({ role: 'VP Sales', detail_preference: 'manager' });
   const [focusQuestions, setFocusQuestions] = useState<string[]>([]);
   const [dataWindow, setDataWindow] = useState<DataWindowConfig>({ primary: 'current_week', comparison: 'previous_period' });
@@ -378,7 +382,7 @@ export default function AgentBuilder() {
             {agents.map(a => (
               <div key={a.id} onClick={() => populateFromAgent(a)} style={{ ...card, cursor: 'pointer' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-                  <span style={{ fontSize: 28 }}>{a.icon}</span>
+                  <AvatarDisplay value={a.icon} size={36} fallbackEmoji={a.icon} borderRadius={8} />
                   <div style={{ flex: 1 }}>
                     <div style={{ font: `500 15px ${fonts.sans}`, color: colors.text }}>{a.name}</div>
                     {a.template_id && (
@@ -453,7 +457,9 @@ export default function AgentBuilder() {
               onMouseEnter={e => (e.currentTarget.style.borderColor = colors.accent)}
               onMouseLeave={e => (e.currentTarget.style.borderColor = colors.border)}
             >
-              <div style={{ fontSize: 32, marginBottom: 12 }}>{t.icon}</div>
+              <div style={{ marginBottom: 12 }}>
+                <AvatarDisplay value={t.icon} size={40} fallbackEmoji={t.icon} borderRadius={8} />
+              </div>
               <h3 style={{ font: `500 16px ${fonts.sans}`, color: colors.text, margin: '0 0 6px' }}>{t.name}</h3>
               <p style={{ font: `400 13px ${fonts.sans}`, color: colors.textSecondary, margin: '0 0 14px', lineHeight: 1.5 }}>
                 {t.description}
@@ -506,7 +512,22 @@ export default function AgentBuilder() {
       )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '16px 0 24px' }}>
-        <span style={{ fontSize: 32 }}>{icon}</span>
+        <button
+          onClick={() => setShowIconPicker(true)}
+          style={{
+            background: 'none',
+            border: `2px dashed ${colors.border}`,
+            borderRadius: 10,
+            padding: 2,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+          title="Change avatar"
+        >
+          <AvatarDisplay value={icon} size={40} fallbackEmoji={icon} borderRadius={8} />
+        </button>
         <input
           value={name}
           onChange={e => setName(e.target.value)}
@@ -831,6 +852,14 @@ export default function AgentBuilder() {
         <LearnedPreferences
           workspaceId={getWorkspaceId()}
           agentId={editingAgentId}
+        />
+      )}
+
+      {showIconPicker && (
+        <AvatarPicker
+          currentValue={icon}
+          onSelect={setIcon}
+          onClose={() => setShowIconPicker(false)}
         />
       )}
     </div>

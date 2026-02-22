@@ -215,7 +215,7 @@ function getWelcomePresetConfig(value: string): Partial<DraftConfig> {
     case 'pipeline-review':
       return {
         name: 'Pipeline Review',
-        icon: '\u{1F4CA}',
+        icon: '/avatars/char-01.png',
         skills: ['pipeline-hygiene', 'pipeline-coverage', 'single-thread-alert'],
         focus_questions: ['Which deals are most at risk?', 'Is pipeline coverage on track?', 'Are there stalled deals?'],
         audience: { role: 'Sales Manager', detail_preference: 'manager' },
@@ -223,7 +223,7 @@ function getWelcomePresetConfig(value: string): Partial<DraftConfig> {
     case 'deal-risk':
       return {
         name: 'Deal Risk Alerts',
-        icon: '\u{1F3AF}',
+        icon: '/avatars/char-06.png',
         skills: ['pipeline-hygiene', 'single-thread-alert', 'deal-risk-review'],
         focus_questions: ['Which deals are at risk of slipping?', 'Any single-threaded deals?'],
         audience: { role: 'Sales Manager', detail_preference: 'manager' },
@@ -231,7 +231,7 @@ function getWelcomePresetConfig(value: string): Partial<DraftConfig> {
     case 'forecast':
       return {
         name: 'Forecast Check',
-        icon: '\u{1F4C8}',
+        icon: '/avatars/char-15.png',
         skills: ['forecast-rollup', 'monte-carlo-forecast', 'pipeline-coverage'],
         focus_questions: ['How accurate is the current forecast?', 'What is the gap to quota?'],
         audience: { role: 'VP Sales', detail_preference: 'executive' },
@@ -239,7 +239,7 @@ function getWelcomePresetConfig(value: string): Partial<DraftConfig> {
     case 'data-quality':
       return {
         name: 'Data Quality Audit',
-        icon: '\u{1F50D}',
+        icon: '/avatars/char-19.png',
         skills: ['data-quality-audit', 'pipeline-hygiene'],
         focus_questions: ['Which CRM fields are missing or stale?', 'What is overall data hygiene score?'],
         audience: { role: 'RevOps Manager', detail_preference: 'analyst' },
@@ -247,7 +247,7 @@ function getWelcomePresetConfig(value: string): Partial<DraftConfig> {
     case 'lead-scoring':
       return {
         name: 'Lead Scoring Digest',
-        icon: '\u{1F3C6}',
+        icon: '/avatars/char-05.png',
         skills: ['lead-scoring', 'icp-discovery'],
         focus_questions: ['Which leads have the highest ICP fit?', 'Any new high-fit accounts?'],
         audience: { role: 'Sales Manager', detail_preference: 'manager' },
@@ -255,7 +255,7 @@ function getWelcomePresetConfig(value: string): Partial<DraftConfig> {
     case 'rep-scorecard':
       return {
         name: 'Rep Performance',
-        icon: '\u{1F4CB}',
+        icon: '/avatars/char-08.png',
         skills: ['rep-scorecard', 'pipeline-coverage'],
         focus_questions: ['Which reps are behind on activity?', 'How does pipeline coverage look per rep?'],
         audience: { role: 'Sales Manager', detail_preference: 'manager' },

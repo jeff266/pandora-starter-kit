@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { colors, fonts } from '../../styles/theme';
 import Toast from '../Toast';
+import AvatarPicker from '../avatars/AvatarPicker';
+import AvatarDisplay from '../avatars/AvatarDisplay';
+import { isPixelAvatar } from '../avatars/avatar-data';
 
 interface UserProfile {
   id: string;
@@ -39,6 +42,7 @@ export default function ProfileTab() {
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState('');
   const [saving, setSaving] = useState(false);
+  const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
 
   useEffect(() => {
@@ -96,8 +100,30 @@ export default function ProfileTab() {
     }
   };
 
-  const handleChangePhoto = () => {
-    setToast({ message: 'Photo upload coming soon', type: 'info' });
+  const handleAvatarSelect = async (avatarSrc: string) => {
+    try {
+      setSaving(true);
+      const token = localStorage.getItem('pandora_session');
+      const res = await fetch('/api/auth/profile', {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ avatar_url: avatarSrc }),
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || 'Failed to update avatar');
+      }
+      const data = await res.json();
+      setUser(data.user);
+      setToast({ message: 'Avatar updated', type: 'success' });
+    } catch (err) {
+      setToast({ message: err instanceof Error ? err.message : 'Failed to update avatar', type: 'error' });
+    } finally {
+      setSaving(false);
+    }
   };
 
   if (loading) {
@@ -150,30 +176,37 @@ export default function ProfileTab() {
           Profile Information
         </h2>
 
-        {/* Avatar */}
         <div style={{ display: 'flex', alignItems: 'center', marginBottom: 32 }}>
-          <div
-            style={{
-              width: 64,
-              height: 64,
-              borderRadius: '50%',
-              background: user.avatar_url ? `url(${user.avatar_url})` : getAvatarGradient(user.name),
-              backgroundSize: 'cover',
-              backgroundPosition: 'center',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: 22,
-              fontWeight: 600,
-              color: '#fff',
-              flexShrink: 0,
-            }}
-          >
-            {!user.avatar_url && getInitials(user.name)}
-          </div>
+          {isPixelAvatar(user.avatar_url) ? (
+            <AvatarDisplay value={user.avatar_url} size={64} borderRadius={12} />
+          ) : user.avatar_url ? (
+            <img
+              src={user.avatar_url}
+              alt="avatar"
+              style={{ width: 64, height: 64, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }}
+            />
+          ) : (
+            <div
+              style={{
+                width: 64,
+                height: 64,
+                borderRadius: '50%',
+                background: getAvatarGradient(user.name),
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 22,
+                fontWeight: 600,
+                color: '#fff',
+                flexShrink: 0,
+              }}
+            >
+              {getInitials(user.name)}
+            </div>
+          )}
           <div style={{ marginLeft: 20 }}>
             <button
-              onClick={handleChangePhoto}
+              onClick={() => setShowAvatarPicker(true)}
               style={{
                 background: 'transparent',
                 border: 'none',
@@ -185,7 +218,7 @@ export default function ProfileTab() {
                 textDecoration: 'underline',
               }}
             >
-              Change photo
+              Choose avatar
             </button>
           </div>
         </div>
@@ -321,6 +354,14 @@ export default function ProfileTab() {
             : 'Access to a single workspace.'}
         </p>
       </div>
+
+      {showAvatarPicker && (
+        <AvatarPicker
+          currentValue={user.avatar_url}
+          onSelect={handleAvatarSelect}
+          onClose={() => setShowAvatarPicker(false)}
+        />
+      )}
 
       {toast && (
         <Toast

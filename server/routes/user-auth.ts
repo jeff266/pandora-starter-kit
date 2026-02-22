@@ -454,18 +454,19 @@ router.patch('/profile', requireAuth, async (req: Request, res: Response) => {
       }
     }
 
-    // Validate avatar_url if provided
     if (avatar_url !== undefined && avatar_url !== null) {
       if (typeof avatar_url !== 'string') {
         res.status(400).json({ error: 'Avatar URL must be a string' });
         return;
       }
-      // Basic URL validation
-      try {
-        new URL(avatar_url);
-      } catch {
-        res.status(400).json({ error: 'Avatar URL must be a valid URL' });
-        return;
+      const isRelativeAvatarPath = avatar_url.startsWith('/avatars/');
+      if (!isRelativeAvatarPath) {
+        try {
+          new URL(avatar_url);
+        } catch {
+          res.status(400).json({ error: 'Avatar URL must be a valid URL or a local avatar path' });
+          return;
+        }
       }
     }
 
