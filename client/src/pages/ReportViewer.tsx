@@ -9,21 +9,23 @@ import OverallBriefingFeedback from '../components/reports/OverallBriefingFeedba
 
 interface ReportGeneration {
   id: string;
-  report_template_id: string;
+  report_template_id?: string;
   workspace_id: string;
   agent_id?: string;
+  agent_name?: string;
   opening_narrative?: string;
   editorial_decisions?: any;
-  formats_generated: Record<string, { filepath: string; size_bytes: number; download_url: string }>;
-  delivery_status: Record<string, string>;
-  sections_snapshot: any[];
-  sections_content: SectionContent[];
-  skills_run: string[];
-  total_tokens: number;
-  generation_duration_ms: number;
-  render_duration_ms: number;
-  triggered_by: 'schedule' | 'manual' | 'api';
-  data_as_of: string;
+  run_digest?: any;
+  formats_generated?: Record<string, { filepath: string; size_bytes: number; download_url: string }>;
+  delivery_status?: Record<string, string>;
+  sections_snapshot?: any[];
+  sections_content?: SectionContent[];
+  skills_run?: string[];
+  total_tokens?: number;
+  generation_duration_ms?: number;
+  render_duration_ms?: number;
+  triggered_by?: 'schedule' | 'manual' | 'api';
+  data_as_of?: string;
   created_at: string;
 }
 
@@ -237,7 +239,7 @@ export default function ReportViewer() {
     );
   }
 
-  const displayName = template?.name || (generation as any).agent_name || 'Agent Briefing';
+  const displayName = template?.name || generation.agent_name || 'Agent Briefing';
   const sections = generation.sections_content || generation.sections_snapshot || [];
 
   return (
@@ -341,9 +343,9 @@ export default function ReportViewer() {
                   })}
                 </span>
                 <span>•</span>
-                <span>{generation.generation_duration_ms}ms</span>
+                <span>{generation.generation_duration_ms ?? '—'}ms</span>
                 <span>•</span>
-                <span>{generation.skills_run?.length || 0} skills</span>
+                <span>{generation.skills_run?.length ?? 0} skills</span>
               </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -469,14 +471,15 @@ export default function ReportViewer() {
               </div>
             )}
 
-            {sections?.map((section: any) => {
-              const isCollapsed = collapsedSections.has(section.section_id);
+            {sections?.map((section: any, idx: number) => {
+              const sectionId = section.section_id || `section-${idx}`;
+              const isCollapsed = collapsedSections.has(sectionId);
               return (
                 <ReportSection
-                  key={section.section_id}
-                  section={section}
+                  key={sectionId}
+                  section={{ ...section, section_id: sectionId }}
                   isCollapsed={isCollapsed}
-                  onToggle={() => toggleSection(section.section_id)}
+                  onToggle={() => toggleSection(sectionId)}
                   anonymizeMode={anonymizeMode}
                   workspaceId={workspaceId}
                   agentId={generation.agent_id}
@@ -503,10 +506,10 @@ export default function ReportViewer() {
         <div style={{ background: colors.surface, borderTop: `1px solid ${colors.border}`, padding: '12px 24px', fontSize: 12, color: colors.textMuted, fontFamily: fonts.sans }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <span>
-              Skills: {generation.skills_run?.join(', ') || 'none'} • {generation.total_tokens} tokens
+              Skills: {generation.skills_run?.join(', ') || 'none'} • {generation.total_tokens ?? 0} tokens
             </span>
             <span>
-              Data as of {new Date(generation.data_as_of).toLocaleString('en-US')} • Powered by Pandora
+              {generation.data_as_of ? `Data as of ${new Date(generation.data_as_of).toLocaleString('en-US')} • ` : ''}Powered by Pandora
             </span>
           </div>
         </div>
@@ -586,7 +589,7 @@ function ReportSection({ section, isCollapsed, onToggle, anonymizeMode, workspac
           )}
 
           {/* Table */}
-          {section.table && section.table.rows.length > 0 && (
+          {section.table && section.table.rows?.length > 0 && (
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', fontSize: 14 }}>
                 <thead style={{ background: colors.surfaceRaised, color: colors.text }}>
@@ -624,10 +627,13 @@ function ReportSection({ section, isCollapsed, onToggle, anonymizeMode, workspac
           )}
 
           {/* Metadata */}
-          <div style={{ fontSize: 12, color: colors.textMuted, paddingTop: 16, borderTop: `1px solid ${colors.border}`, fontFamily: fonts.sans }}>
-            Data as of {new Date(section.data_freshness).toLocaleString('en-US')} • Confidence:{' '}
-            {Math.round(section.confidence * 100)}%
-          </div>
+          {(section.data_freshness || section.confidence != null) && (
+            <div style={{ fontSize: 12, color: colors.textMuted, paddingTop: 16, borderTop: `1px solid ${colors.border}`, fontFamily: fonts.sans }}>
+              {section.data_freshness && `Data as of ${new Date(section.data_freshness).toLocaleString('en-US')}`}
+              {section.data_freshness && section.confidence != null && ' • '}
+              {section.confidence != null && `Confidence: ${Math.round(section.confidence * 100)}%`}
+            </div>
+          )}
 
           {/* Section Feedback (only for agent-generated briefings) */}
           {workspaceId && agentId && generationId && (
