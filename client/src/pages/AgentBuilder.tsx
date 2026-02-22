@@ -4,6 +4,7 @@ import { colors, fonts } from '../styles/theme';
 import Skeleton from '../components/Skeleton';
 import { ChevronLeft, Plus, X, GripVertical, Save, Zap, Play, Loader2, FileText } from 'lucide-react';
 import LearnedPreferences from '../components/agents/LearnedPreferences';
+import AgentCopilot from '../components/copilot/AgentCopilot';
 
 interface AudienceConfig {
   role: string;
@@ -89,7 +90,7 @@ const SCHEDULE_PRESETS: { label: string; cron: string }[] = [
   { label: 'Daily 6pm', cron: '0 18 * * *' },
 ];
 
-type ViewState = 'gallery' | 'builder' | 'list';
+type ViewState = 'gallery' | 'builder' | 'list' | 'copilot';
 type BuilderTab = 'audience' | 'focus' | 'skills' | 'data_window' | 'schedule' | 'formats';
 
 export default function AgentBuilder() {
@@ -356,7 +357,7 @@ export default function AgentBuilder() {
               Configure AI agents that produce editorial briefings for your team
             </p>
           </div>
-          <button onClick={() => setView('gallery')} style={btnPrimary}>
+          <button onClick={() => setView('copilot')} style={btnPrimary}>
             <Plus size={16} /> New Agent
           </button>
         </div>
@@ -368,7 +369,7 @@ export default function AgentBuilder() {
             <p style={{ font: `400 14px ${fonts.sans}`, color: colors.textSecondary, margin: '0 0 20px' }}>
               Create your first agent from a template or start from scratch
             </p>
-            <button onClick={() => setView('gallery')} style={btnPrimary}>
+            <button onClick={() => setView('copilot')} style={btnPrimary}>
               <Plus size={16} /> Create Agent
             </button>
           </div>
@@ -408,6 +409,28 @@ export default function AgentBuilder() {
             ))}
           </div>
         )}
+      </div>
+    );
+  }
+
+  // ─── Copilot View ───────────────────────────────────────────────
+  if (view === 'copilot') {
+    const wsId = getWorkspaceId();
+    return (
+      <div style={{ padding: 32, maxWidth: 1200, margin: '0 auto' }}>
+        <button onClick={() => setView('list')} style={btnBack}>
+          <ChevronLeft size={16} /> Back to Agents
+        </button>
+        <div style={{ marginTop: 16 }}>
+          <AgentCopilot
+            workspaceId={wsId}
+            onAgentCreated={() => {
+              loadData();
+              setView('list');
+            }}
+            onSwitchToManual={() => setView('gallery')}
+          />
+        </div>
       </div>
     );
   }

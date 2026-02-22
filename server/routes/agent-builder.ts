@@ -36,6 +36,7 @@ import { AGENT_TEMPLATES } from '../agents/templates.js';
 import { getAgentTemplates } from '../agents/agent-templates.js';
 import { query } from '../db.js';
 import { assembleFindingsForRule, type DeliveryRuleRow } from '../push/finding-assembler.js';
+import { interpretFreeText, getWorkspaceCopilotContext } from '../copilot/agent-copilot-interpreter.js';
 
 const router = Router();
 
@@ -301,6 +302,47 @@ router.get('/:workspaceId/agents/:agentId/generations', async (req, res) => {
   } catch (err: any) {
     console.error('[agent generations] error:', err);
     res.status(500).json({ error: err.message || 'Failed to fetch generations' });
+  }
+});
+
+// ─── Copilot: workspace context ──────────────────────────────────────────────
+router.get('/:workspaceId/agents-v2/copilot/context', async (req, res) => {
+  try {
+    const { workspaceId } = req.params;
+    const context = await getWorkspaceCopilotContext(workspaceId);
+    res.json(context);
+  } catch (err: any) {
+    console.error('[Copilot] context error:', err);
+    res.status(500).json({ error: err.message || 'Failed to load copilot context' });
+  }
+});
+
+// ─── Copilot: interpret free text ────────────────────────────────────────────
+router.post('/:workspaceId/agents-v2/copilot/interpret', async (req, res) => {
+  try {
+    const { workspaceId } = req.params;
+    const { step, user_input, current_draft } = req.body;
+
+    if (!step || !user_input) {
+      return res.status(400).json({ error: 'step and user_input are required' });
+    }
+
+    const context = await getWorkspaceCopilotContext(workspaceId);
+    const result = await interpretFreeText(workspaceId, {
+      step,
+      user_input,
+      current_draft: current_draft || {},
+      workspace_context: {
+        available_skills: context.skills.map(s => s.id),
+        crm_type: context.crm_type,
+        has_conversation_intel: context.has_conversation_intel,
+      },
+    });
+
+    res.json(result);
+  } catch (err: any) {
+    console.error('[Copilot] interpret error:', err);
+    res.status(500).json({ error: err.message || 'Interpretation failed' });
   }
 });
 
