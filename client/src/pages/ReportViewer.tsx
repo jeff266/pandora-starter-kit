@@ -44,10 +44,12 @@ interface GenerationSummary {
 export default function ReportViewer() {
   const { workspaceId, reportId, generationId } = useParams<{
     workspaceId: string;
-    reportId: string;
+    reportId?: string;
     generationId?: string;
   }>();
   const navigate = useNavigate();
+
+  const isDirectBriefing = !reportId && !!generationId;
 
   const [loading, setLoading] = useState(true);
   const [generation, setGeneration] = useState<ReportGeneration | null>(null);
@@ -58,9 +60,43 @@ export default function ReportViewer() {
   const [feedbackSummary, setFeedbackSummary] = useState<any>(null);
 
   useEffect(() => {
-    loadReport();
-    loadGenerations();
+    if (isDirectBriefing) {
+      loadDirectGeneration();
+    } else {
+      loadReport();
+      loadGenerations();
+    }
   }, [workspaceId, reportId, generationId]);
+
+  async function loadDirectGeneration() {
+    try {
+      setLoading(true);
+      const genData = await api.get(`/generations/${generationId}`);
+      setGeneration(genData);
+
+      if (genData.agent_name) {
+        setTemplate({ id: '', name: genData.agent_name, description: '', workspace_id: workspaceId || '' });
+      }
+
+      if (genData.agent_id) {
+        loadFeedbackSummary(genData.id, genData.agent_id);
+        loadAgentGenerations(genData.agent_id);
+      }
+    } catch (err) {
+      console.error('Failed to load briefing:', err);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loadAgentGenerations(agentId: string) {
+    try {
+      const data = await api.get(`/generations-by-agent/${agentId}?limit=20`);
+      setGenerations(data.generations || []);
+    } catch (err) {
+      console.error('Failed to load agent generations:', err);
+    }
+  }
 
   async function loadReport() {
     try {
@@ -75,7 +111,6 @@ export default function ReportViewer() {
       const templateData = await api.get(`/reports/${reportId}`);
       setTemplate(templateData);
 
-      // Load feedback summary if this is an agent-generated briefing
       if (genData.agent_id) {
         loadFeedbackSummary(genData.id, genData.agent_id);
       }
@@ -194,13 +229,16 @@ export default function ReportViewer() {
     );
   }
 
-  if (!generation || !template) {
+  if (!generation) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: colors.bg }}>
         <div style={{ color: colors.textMuted, fontFamily: fonts.sans }}>Report not found</div>
       </div>
     );
   }
+
+  const displayName = template?.name || (generation as any).agent_name || 'Agent Briefing';
+  const sections = generation.sections_content || generation.sections_snapshot || [];
 
   return (
     <div style={{ display: 'flex', height: '100vh', background: colors.bg }}>
@@ -216,7 +254,13 @@ export default function ReportViewer() {
             return (
               <button
                 key={gen.id}
-                onClick={() => navigate(`/workspace/${workspaceId}/reports/${reportId}/generations/${gen.id}`)}
+                onClick={() => {
+                  if (isDirectBriefing) {
+                    navigate(`/workspace/${workspaceId}/briefing/${gen.id}`);
+                  } else {
+                    navigate(`/workspace/${workspaceId}/reports/${reportId}/generations/${gen.id}`);
+                  }
+                }}
                 style={{
                   width: '100%',
                   textAlign: 'left',
@@ -284,7 +328,7 @@ export default function ReportViewer() {
         <div style={{ background: colors.surface, borderBottom: `1px solid ${colors.border}`, padding: '16px 24px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div>
-              <h1 style={{ fontSize: 24, fontWeight: 700, color: colors.text, fontFamily: fonts.sans, margin: 0 }}>{template.name}</h1>
+              <h1 style={{ fontSize: 24, fontWeight: 700, color: colors.text, fontFamily: fonts.sans, margin: 0 }}>{displayName}</h1>
               <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 4, fontSize: 14, color: colors.textMuted, fontFamily: fonts.sans }}>
                 <span>
                   Generated {new Date(generation.created_at).toLocaleDateString('en-US', {
@@ -329,7 +373,7 @@ export default function ReportViewer() {
                 <Eye style={{ width: 16, height: 16 }} />
                 {anonymizeMode ? 'Anonymized' : 'Anonymize'}
               </button>
-              {Object.keys(generation.formats_generated).map((format) => (
+              {Object.keys(generation.formats_generated || {}).map((format) => (
                 <button
                   key={format}
                   onClick={() => downloadFormat(format)}
@@ -374,28 +418,30 @@ export default function ReportViewer() {
                 <Share2 style={{ width: 16, height: 16 }} />
                 Share
               </button>
-              <Link
-                to={`/workspace/${workspaceId}/reports/${reportId}/edit`}
-                style={{
-                  padding: '8px 12px',
-                  background: colors.surfaceRaised,
-                  borderRadius: 8,
-                  fontSize: 14,
-                  fontWeight: 500,
-                  color: colors.text,
-                  textDecoration: 'none',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  cursor: 'pointer',
-                  fontFamily: fonts.sans,
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = colors.border)}
-                onMouseLeave={(e) => (e.currentTarget.style.background = colors.surfaceRaised)}
-              >
-                <Settings style={{ width: 16, height: 16 }} />
-                Edit Report
-              </Link>
+              {reportId && (
+                <Link
+                  to={`/workspace/${workspaceId}/reports/${reportId}/edit`}
+                  style={{
+                    padding: '8px 12px',
+                    background: colors.surfaceRaised,
+                    borderRadius: 8,
+                    fontSize: 14,
+                    fontWeight: 500,
+                    color: colors.text,
+                    textDecoration: 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    cursor: 'pointer',
+                    fontFamily: fonts.sans,
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = colors.border)}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = colors.surfaceRaised)}
+                >
+                  <Settings style={{ width: 16, height: 16 }} />
+                  Edit Report
+                </Link>
+              )}
             </div>
           </div>
         </div>
@@ -423,7 +469,7 @@ export default function ReportViewer() {
               </div>
             )}
 
-            {generation.sections_content?.map((section) => {
+            {sections?.map((section: any) => {
               const isCollapsed = collapsedSections.has(section.section_id);
               return (
                 <ReportSection

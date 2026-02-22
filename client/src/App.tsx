@@ -240,6 +240,7 @@ export default function App() {
             <Route path="/reports/:reportId/edit" element={<ReportBuilder />} />
             <Route path="/workspace/:workspaceId/reports/:reportId" element={<ReportViewer />} />
             <Route path="/workspace/:workspaceId/reports/:reportId/generations/:generationId" element={<ReportViewer />} />
+            <Route path="/workspace/:workspaceId/briefing/:generationId" element={<ReportViewer />} />
           </Routes>
         </div>
       </main>

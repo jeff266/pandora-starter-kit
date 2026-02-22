@@ -545,7 +545,7 @@ export default function AgentBuilder() {
             </div>
           </div>
           <button
-            onClick={() => window.open(`/workspace/${getWorkspaceId()}/reports/${latestGeneration.report_template_id || 'unknown'}/generations/${latestGeneration.id}`, '_blank')}
+            onClick={() => window.open(`/workspace/${getWorkspaceId()}/briefing/${latestGeneration.id}`, '_blank')}
             style={{
               ...btnSecondary,
               padding: '6px 12px',

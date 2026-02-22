@@ -373,6 +373,52 @@ router.get('/:workspaceId/reports/:reportId/generations/:generationId', async (r
   }
 });
 
+router.get('/:workspaceId/generations/:generationId', async (req: Request, res: Response) => {
+  try {
+    const { workspaceId, generationId } = req.params;
+
+    const result = await query(
+      `SELECT rg.*,
+              a.name as agent_name
+       FROM report_generations rg
+       LEFT JOIN agents a ON a.id = rg.agent_id
+       WHERE rg.id = $1 AND rg.workspace_id = $2`,
+      [generationId, workspaceId]
+    );
+
+    if (result.rows.length === 0) {
+      res.status(404).json({ error: 'Generation not found' });
+      return;
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    logger.error('Failed to get generation by ID', err instanceof Error ? err : undefined);
+    res.status(500).json({ error: 'Failed to get generation' });
+  }
+});
+
+router.get('/:workspaceId/generations-by-agent/:agentId', async (req: Request, res: Response) => {
+  try {
+    const { workspaceId, agentId } = req.params;
+    const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
+
+    const result = await query(
+      `SELECT id, created_at, triggered_by, generation_duration_ms, total_tokens, opening_narrative
+       FROM report_generations
+       WHERE agent_id = $1 AND workspace_id = $2
+       ORDER BY created_at DESC
+       LIMIT $3`,
+      [agentId, workspaceId, limit]
+    );
+
+    res.json({ generations: result.rows });
+  } catch (err) {
+    logger.error('Failed to list agent generations', err instanceof Error ? err : undefined);
+    res.status(500).json({ error: 'Failed to list generations' });
+  }
+});
+
 // Compare two generations
 router.get('/:workspaceId/reports/:reportId/compare', async (req: Request, res: Response) => {
   try {
