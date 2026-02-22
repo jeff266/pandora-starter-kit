@@ -56,6 +56,7 @@ const sections: NavSection[] = [
     items: [
       { label: 'Connectors', path: '/connectors', icon: '\u229E' },
       { label: 'Connector Health', path: '/connectors/health', icon: '\u2661' },
+      { label: 'Filters', path: '/filters', icon: '\u25A7' },
       { label: 'Data Dictionary', path: '/data-dictionary', icon: '\u2261' },
     ],
   },

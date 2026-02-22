@@ -794,7 +794,8 @@ export default function AgentBuilder() {
           </p>
           {availableFilters.length === 0 ? (
             <div style={{ padding: 20, textAlign: 'center', color: colors.textSecondary, font: `400 13px ${fonts.sans}` }}>
-              No named filters defined yet. Create filters in workspace settings to scope agent analysis.
+              No named filters defined yet.{' '}
+              <a href="/filters" style={{ color: colors.accent, textDecoration: 'none' }}>Manage Filters &rarr;</a>
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -858,6 +859,11 @@ export default function AgentBuilder() {
               {scopeFilters.length} filter{scopeFilters.length > 1 ? 's' : ''} selected — all skill queries will be scoped to these definitions
             </div>
           )}
+          <div style={{ marginTop: 12 }}>
+            <a href="/filters" style={{ font: `400 12px ${fonts.sans}`, color: colors.accent, textDecoration: 'none' }}>
+              Manage Filters &rarr;
+            </a>
+          </div>
         </div>
       )}
 

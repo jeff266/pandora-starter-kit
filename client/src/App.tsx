@@ -36,6 +36,7 @@ import ReportViewer from './pages/ReportViewer';
 import ReportsPage from './pages/ReportsPage';
 import ReportBuilder from './pages/ReportBuilder';
 import AgentBuilder from './pages/AgentBuilder';
+import FiltersPage from './pages/FiltersPage';
 import { colors, fonts } from './styles/theme';
 import { useIsMobile } from './hooks/useIsMobile';
 
@@ -56,6 +57,7 @@ const pageTitles: Record<string, string> = {
   '/reports': 'Reports',
   '/connectors': 'Connectors',
   '/connectors/health': 'Connector Health',
+  '/filters': 'Named Filters',
   '/data-dictionary': 'Data Dictionary',
   '/members': 'Members',
   '/marketplace': 'Marketplace',
@@ -229,6 +231,7 @@ export default function App() {
             <Route path="/push" element={<PushPage />} />
             <Route path="/actions" element={<Actions />} />
             <Route path="/connectors/health" element={<ConnectorHealth />} />
+            <Route path="/filters" element={<FiltersPage />} />
             <Route path="/data-dictionary" element={<Placeholder title="Data Dictionary" />} />
             <Route path="/marketplace" element={<MarketplacePage />} />
             <Route path="/settings" element={<SettingsPage />} />

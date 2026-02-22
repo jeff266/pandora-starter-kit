@@ -1,9 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useLens } from '../contexts/LensContext';
 import { colors, fonts } from '../styles/theme';
 
 export default function LensDropdown() {
   const { activeLens, setLens, filters, loading } = useLens();
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -98,6 +100,33 @@ export default function LensDropdown() {
               onClick={() => { setLens(f.id); setOpen(false); }}
             />
           ))}
+
+          <div style={{
+            borderTop: `1px solid ${colors.border}`,
+            marginTop: 4,
+            padding: '8px 12px',
+          }}>
+            <a
+              href="/filters"
+              onClick={(e) => {
+                e.preventDefault();
+                setOpen(false);
+                navigate('/filters');
+              }}
+              style={{
+                fontSize: 12,
+                color: colors.accent,
+                textDecoration: 'none',
+                fontFamily: fonts.sans,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                cursor: 'pointer',
+              }}
+            >
+              Manage Filters &rarr;
+            </a>
+          </div>
         </div>
       )}
     </div>
