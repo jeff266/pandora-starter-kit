@@ -23,6 +23,14 @@ import { renderPPTX } from '../renderers/pptx-renderer-full.js';
 import { editorialSynthesize } from '../agents/editorial-synthesizer.js';
 import { gatherFreshEvidence } from '../agents/evidence-gatherer.js';
 import { getTuningPairs } from '../agents/tuning.js';
+import {
+  extractDigest,
+  saveDigest,
+  getLatestDigest,
+  getAgentMemory,
+  updateAgentMemory,
+  formatMemoryForPrompt,
+} from '../agents/agent-memory.js';
 import type { AgentDefinition } from '../agents/types.js';
 import type { EditorialInput, AudienceConfig, DataWindowConfig } from '../agents/editorial-types.js';
 
@@ -123,7 +131,20 @@ export async function generateEditorialReport(
   const focusQuestions: string[] = (agent as any).focus_questions ?? [];
   const dataWindow = (agent as any).data_window ?? { primary: 'current_week', comparison: 'previous_period' };
 
-  // 8. Call editorial synthesizer
+  // 8. Load memory (Phase 3) — previous digest + rolling memory
+  const [previousDigest, agentMemory] = await Promise.all([
+    getLatestDigest(agent.id, workspace_id),
+    getAgentMemory(agent.id, workspace_id),
+  ]);
+  const memoryBlock = formatMemoryForPrompt(previousDigest, agentMemory);
+
+  logger.info('[EditorialGenerator] Memory loaded', {
+    has_previous_digest: !!previousDigest,
+    has_rolling_memory: !!agentMemory,
+    memory_block_chars: memoryBlock.length,
+  });
+
+  // 9. Call editorial synthesizer
   logger.info('[EditorialGenerator] Running editorial synthesis', {
     audience_role: audience.role,
     focus_questions_count: focusQuestions.length,
@@ -141,6 +162,7 @@ export async function generateEditorialReport(
     audience,
     focusQuestions: focusQuestions.length > 0 ? focusQuestions : undefined,
     dataWindow: dataWindow,
+    memoryContext: memoryBlock,
   };
 
   const editorial = await editorialSynthesize(editorialInput);
@@ -223,18 +245,17 @@ export async function generateEditorialReport(
     const genResult = await query<{ id: string }>(
       `INSERT INTO report_generations (
         report_template_id, workspace_id, agent_id, formats_generated, delivery_status,
-        sections_snapshot, sections_content, editorial_decisions, opening_narrative,
+        sections_snapshot, editorial_decisions, opening_narrative,
         skills_run, total_tokens, generation_duration_ms,
         render_duration_ms, triggered_by, data_as_of
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
       RETURNING id`,
       [
         report_template_id,
         workspace_id,
         agent.id,
         JSON.stringify(formatsGenerated),
-        JSON.stringify({}), // Delivery happens later
-        JSON.stringify(enabledSections),
+        JSON.stringify({}),
         JSON.stringify(editorial.sections),
         JSON.stringify(editorial.editorial_decisions),
         editorial.opening_narrative,
@@ -268,6 +289,24 @@ export async function generateEditorialReport(
        WHERE id = $1`,
       [agent.id]
     );
+
+    // Phase 3: Save digest and update rolling memory
+    try {
+      const newDigest = extractDigest(editorial);
+      await saveDigest(generationId, newDigest);
+      await updateAgentMemory(
+        agent.id,
+        workspace_id,
+        newDigest,
+        agentMemory,
+        skillEvidence
+      );
+      logger.info('[EditorialGenerator] Memory updated after generation', {
+        generation_id: generationId,
+      });
+    } catch (memErr) {
+      logger.error('[EditorialGenerator] Failed to update memory (non-fatal)', memErr instanceof Error ? memErr : undefined);
+    }
 
     logger.info('[EditorialGenerator] Report generation complete', {
       generation_id: generationId,
