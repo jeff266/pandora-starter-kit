@@ -130,16 +130,29 @@ export class FilterResolver {
     return { sql: parts.join(joiner), params };
   }
 
+  private validateField(fieldRef: string): void {
+    const SAFE_COLUMN = /^[a-z_][a-z0-9_]*$/;
+    const SAFE_CUSTOM_FIELDS = /^custom_fields->>'[a-zA-Z0-9_ ]+?'$/;
+    const SAFE_SOURCE_DATA = /^source_data->'properties'->>'[a-zA-Z0-9_ ]+?'$/;
+
+    if (SAFE_COLUMN.test(fieldRef)) return;
+    if (SAFE_CUSTOM_FIELDS.test(fieldRef)) return;
+    if (SAFE_SOURCE_DATA.test(fieldRef)) return;
+
+    throw new Error(`Unsafe field reference rejected: ${fieldRef}`);
+  }
+
   private compileCondition(
     condition: FilterCondition,
     alias: string,
     paramIndex: number
   ): { sql: string; leafParams: any[] } {
-    const field = `${alias}${condition.field}`;
-
     if (condition.cross_object) {
       return this.compileCrossObjectCondition(condition, alias, paramIndex);
     }
+
+    this.validateField(condition.field);
+    const field = `${alias}${condition.field}`;
 
     if (this.isRelativeDate(condition.value)) {
       return this.compileRelativeDate(condition, field, paramIndex);

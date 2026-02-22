@@ -56,16 +56,14 @@ const FIELD_SCHEMAS: Record<string, { field: string; label: string; type: string
   deals: [
     { field: 'amount', label: 'Amount', type: 'number' },
     { field: 'stage_normalized', label: 'Stage', type: 'text', values_query: 'SELECT DISTINCT stage_normalized as val FROM deals WHERE workspace_id = $1 AND stage_normalized IS NOT NULL ORDER BY stage_normalized LIMIT 50' },
-    { field: 'pipeline_name', label: 'Pipeline', type: 'text', values_query: 'SELECT DISTINCT pipeline_name as val FROM deals WHERE workspace_id = $1 AND pipeline_name IS NOT NULL ORDER BY pipeline_name LIMIT 50' },
-    { field: 'owner_name', label: 'Owner', type: 'text', values_query: 'SELECT DISTINCT owner_name as val FROM deals WHERE workspace_id = $1 AND owner_name IS NOT NULL ORDER BY owner_name LIMIT 50' },
-    { field: 'owner_email', label: 'Owner Email', type: 'text', values_query: 'SELECT DISTINCT owner_email as val FROM deals WHERE workspace_id = $1 AND owner_email IS NOT NULL ORDER BY owner_email LIMIT 50' },
+    { field: 'pipeline', label: 'Pipeline', type: 'text', values_query: 'SELECT DISTINCT pipeline as val FROM deals WHERE workspace_id = $1 AND pipeline IS NOT NULL ORDER BY pipeline LIMIT 50' },
+    { field: 'owner', label: 'Owner', type: 'text', values_query: 'SELECT DISTINCT owner as val FROM deals WHERE workspace_id = $1 AND owner IS NOT NULL ORDER BY owner LIMIT 50' },
     { field: 'close_date', label: 'Close Date', type: 'date' },
     { field: 'created_at', label: 'Created At', type: 'date' },
     { field: 'probability', label: 'Probability', type: 'number' },
-    { field: 'days_in_current_stage', label: 'Days in Current Stage', type: 'number' },
-    { field: 'days_since_last_activity', label: 'Days Since Last Activity', type: 'number' },
-    { field: 'is_open', label: 'Is Open', type: 'boolean' },
-    { field: 'contact_count', label: 'Contact Count', type: 'number' },
+    { field: 'days_in_stage', label: 'Days in Stage', type: 'number' },
+    { field: 'lead_source', label: 'Lead Source', type: 'text', values_query: 'SELECT DISTINCT lead_source as val FROM deals WHERE workspace_id = $1 AND lead_source IS NOT NULL ORDER BY lead_source LIMIT 50' },
+    { field: 'forecast_category', label: 'Forecast Category', type: 'text', values_query: 'SELECT DISTINCT forecast_category as val FROM deals WHERE workspace_id = $1 AND forecast_category IS NOT NULL ORDER BY forecast_category LIMIT 50' },
     { field: 'source', label: 'Source', type: 'text', values_query: 'SELECT DISTINCT source as val FROM deals WHERE workspace_id = $1 AND source IS NOT NULL ORDER BY source LIMIT 50' },
   ],
   contacts: [
@@ -81,7 +79,7 @@ const FIELD_SCHEMAS: Record<string, { field: string; label: string; type: string
     { field: 'name', label: 'Name', type: 'text' },
     { field: 'domain', label: 'Domain', type: 'text' },
     { field: 'industry', label: 'Industry', type: 'text', values_query: 'SELECT DISTINCT industry as val FROM accounts WHERE workspace_id = $1 AND industry IS NOT NULL ORDER BY industry LIMIT 50' },
-    { field: 'owner_name', label: 'Owner', type: 'text', values_query: 'SELECT DISTINCT owner_name as val FROM accounts WHERE workspace_id = $1 AND owner_name IS NOT NULL ORDER BY owner_name LIMIT 50' },
+    { field: 'owner', label: 'Owner', type: 'text', values_query: 'SELECT DISTINCT owner as val FROM accounts WHERE workspace_id = $1 AND owner IS NOT NULL ORDER BY owner LIMIT 50' },
     { field: 'created_at', label: 'Created At', type: 'date' },
   ],
   conversations: [
@@ -131,6 +129,12 @@ router.get('/:workspaceId/filters/field-options', async (req: Request<WorkspaceP
       'hs_v2_date_entered_*', 'hs_v2_date_exited_*',
     ]);
 
+    const SOURCE_DATA_STANDARD_KEYS: Record<string, Set<string>> = {
+      deals: new Set(['amount', 'dealname', 'dealstage', 'closedate', 'createdate', 'pipeline', 'hubspot_owner_id', 'hs_object_id', 'hs_lastmodifieddate', 'hs_deal_stage_probability', 'notes_last_updated', 'num_associated_contacts']),
+      contacts: new Set(['email', 'firstname', 'lastname', 'createdate', 'hs_object_id', 'hs_lastmodifieddate', 'hubspot_owner_id', 'jobtitle', 'lifecyclestage', 'hs_lead_status']),
+      accounts: new Set(['name', 'domain', 'industry', 'createdate', 'hs_object_id', 'hs_lastmodifieddate', 'hubspot_owner_id', 'numberofemployees', 'annualrevenue']),
+    };
+
     function isExcludedKey(key: string): boolean {
       if (EXCLUDED_CUSTOM_KEYS.has(key)) return true;
       if (key.startsWith('hs_v2_date_entered_') || key.startsWith('hs_v2_date_exited_')) return true;
@@ -145,7 +149,13 @@ router.get('/:workspaceId/filters/field-options', async (req: Request<WorkspaceP
       return values.length > 5 && values.every(v => /^\d{5,}$/.test(v));
     }
 
+    function formatLabel(key: string): string {
+      return key.replace(/^hs_/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    }
+
     let customFields: any[] = [];
+    const seenFields = new Set<string>();
+
     if (object === 'deals' || object === 'contacts' || object === 'accounts') {
       try {
         const keysResult = await query<{ key: string }>(
@@ -163,16 +173,49 @@ router.get('/:workspaceId/filters/field-options', async (req: Request<WorkspaceP
 
           if (looksLikeIds(values)) continue;
 
+          const fieldRef = `custom_fields->>'${row.key}'`;
+          seenFields.add(row.key);
           customFields.push({
-            field: `custom_fields->>'${row.key}'`,
-            label: row.key.replace(/^hs_/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+            field: fieldRef,
+            label: formatLabel(row.key),
             type: 'text',
             values,
           });
         }
       } catch (err) {
-        console.error('[FieldOptions] Error fetching custom fields:', err);
-        customFields = [];
+        console.error('[FieldOptions] Error fetching custom_fields:', err);
+      }
+
+      try {
+        const standardKeys = SOURCE_DATA_STANDARD_KEYS[object] || new Set();
+        const sdKeysResult = await query<{ key: string }>(
+          `SELECT DISTINCT k as key FROM ${object}, jsonb_object_keys(COALESCE(source_data->'properties', '{}'::jsonb)) k WHERE workspace_id = $1 LIMIT 80`,
+          [workspaceId]
+        );
+        for (const row of sdKeysResult.rows) {
+          if (standardKeys.has(row.key)) continue;
+          if (isExcludedKey(row.key)) continue;
+          if (seenFields.has(row.key)) continue;
+
+          const valuesResult = await query<{ val: string }>(
+            `SELECT DISTINCT source_data->'properties'->>$2 as val FROM ${object} WHERE workspace_id = $1 AND source_data->'properties'->>$2 IS NOT NULL ORDER BY 1 LIMIT 20`,
+            [workspaceId, row.key]
+          );
+          const values = valuesResult.rows.map(r => r.val).filter(Boolean);
+
+          if (looksLikeIds(values)) continue;
+
+          const fieldRef = `source_data->'properties'->>'${row.key}'`;
+          seenFields.add(row.key);
+          customFields.push({
+            field: fieldRef,
+            label: formatLabel(row.key),
+            type: 'text',
+            values,
+          });
+        }
+      } catch (err) {
+        console.error('[FieldOptions] Error fetching source_data properties:', err);
       }
     }
 
@@ -495,7 +538,7 @@ router.post('/:workspaceId/filters/preview-inline', async (req: Request<Workspac
     );
 
     const sampleColumns: Record<string, string> = {
-      deals: 'name, amount, stage_normalized, owner_name, close_date',
+      deals: 'name, amount, stage_normalized, owner, close_date',
       contacts: 'email, first_name, last_name, title',
       accounts: 'name, domain, industry',
       conversations: 'title, call_date, source',
