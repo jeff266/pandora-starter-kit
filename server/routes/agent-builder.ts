@@ -285,9 +285,11 @@ router.get('/:workspaceId/agents/:agentId/generations', async (req, res) => {
     const limit = Math.min(parseInt(req.query.limit as string) || 10, 100);
 
     const result = await query(
-      `SELECT id, status, created_at, opening_narrative,
+      `SELECT id, created_at, opening_narrative,
               editorial_decisions, generation_duration_ms,
-              render_duration_ms, skills_run
+              render_duration_ms, skills_run, total_tokens,
+              run_digest, sections_snapshot,
+              formats_generated
        FROM report_generations
        WHERE workspace_id = $1 AND agent_id = $2
        ORDER BY created_at DESC
