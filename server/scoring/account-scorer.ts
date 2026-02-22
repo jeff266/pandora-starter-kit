@@ -1,6 +1,6 @@
 import { query as dbQuery } from '../db.js';
 import { createLogger } from '../utils/logger.js';
-import { getSlackWebhook, postBlocks } from '../connectors/slack/client.js';
+import { sendNotification } from '../notifications/notification-gateway.js';
 
 const logger = createLogger('AccountScorer');
 
@@ -395,22 +395,33 @@ async function triggerAccountScoreAlert(
   topSignal: string | null
 ): Promise<void> {
   try {
-    const webhookUrl = await getSlackWebhook(workspaceId);
-    if (!webhookUrl) return;
-
     const body = topSignal
       ? `${accountName}'s ICP fit score rose to ${totalScore} (${grade}) — ${topSignal}`
       : `${accountName}'s ICP fit score rose to ${totalScore} (${grade})`;
 
-    await postBlocks(webhookUrl, [
-      {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: `*📈 Account Score Jump: ${accountName}*\n${body}\n_Score: +${scoreDelta} points_`,
-        },
+    await sendNotification({
+      workspace_id: workspaceId,
+      category: 'icp_score_jump',
+      severity: 'info',
+      title: `Account Score Jump: ${accountName}`,
+      body,
+      metadata: {
+        entity_type: 'account',
+        entity_id: accountId,
+        entity_name: accountName,
+        score_change: scoreDelta,
+        score_tier: grade,
       },
-    ]);
+      slack_blocks: [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: `*\u{1F4C8} Account Score Jump: ${accountName}*\n${body}\n_Score: +${scoreDelta} points_`,
+          },
+        },
+      ],
+    });
   } catch (err) {
     logger.warn('Failed to send account score alert', { accountId, error: err instanceof Error ? err.message : String(err) });
   }

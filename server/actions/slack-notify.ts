@@ -1,11 +1,12 @@
 /**
  * Slack Notification for Actions
  *
- * Sends action cards to Slack as Block Kit messages.
+ * Sends action cards to Slack as Block Kit messages via the notification gateway.
  * Supports posting to workspace channel or DM to rep (if bot token available).
  */
 
 import type { Pool } from 'pg';
+import { sendNotification } from '../notifications/notification-gateway.js';
 
 export async function notifyActionViaSlack(
   db: Pool,
@@ -13,37 +14,28 @@ export async function notifyActionViaSlack(
   action: any,
   target: 'channel' | 'rep' | string
 ): Promise<{ delivered: boolean; error?: string }> {
-
-  // Get workspace Slack config
-  const wsResult = await db.query(
-    `SELECT slack_webhook_url, slack_bot_token FROM workspaces WHERE id = $1`,
-    [workspaceId]
-  );
-
-  const workspace = wsResult.rows[0];
-  if (!workspace) return { delivered: false, error: 'Workspace not found' };
-
   const blocks = buildActionSlackBlocks(action);
 
-  // Try channel webhook first (most reliable)
-  const webhookUrl = workspace.slack_webhook_url;
-  if (!webhookUrl) {
-    return { delivered: false, error: 'No Slack webhook configured' };
-  }
-
   try {
-    const response = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ blocks }),
+    const result = await sendNotification({
+      workspace_id: workspaceId,
+      category: 'action_created',
+      severity: action.severity || 'info',
+      title: action.title || 'New Action',
+      body: action.summary || '',
+      metadata: {
+        entity_type: action.target_entity_type,
+        entity_id: action.target_entity_id,
+        entity_name: action.target_entity_name,
+        deal_amount: action.impact_amount ? Number(action.impact_amount) : undefined,
+      },
+      slack_blocks: blocks,
     });
 
-    if (!response.ok) {
-      const text = await response.text();
-      return { delivered: false, error: `Slack API error: ${response.status} ${text}` };
-    }
-
-    return { delivered: true };
+    return {
+      delivered: result.status === 'sent',
+      error: result.status === 'failed' ? result.reason : undefined,
+    };
   } catch (err) {
     return { delivered: false, error: (err as Error).message };
   }
@@ -163,13 +155,12 @@ export async function sendActionDigest(
     return { delivered: true, action_count: 0 };
   }
 
-  // Build digest blocks
   const blocks: any[] = [
     {
       type: 'header',
       text: {
         type: 'plain_text',
-        text: `⚡ ${result.rows.length} ${severity} actions need attention`,
+        text: `\u26A1 ${result.rows.length} ${severity} actions need attention`,
       },
     },
   ];
@@ -178,23 +169,21 @@ export async function sendActionDigest(
     blocks.push(...buildActionSlackBlocks(action));
   }
 
-  // Send via webhook
-  const wsResult = await db.query(
-    `SELECT slack_webhook_url FROM workspaces WHERE id = $1`,
-    [workspaceId]
-  );
-  const webhookUrl = wsResult.rows[0]?.slack_webhook_url;
-  if (!webhookUrl) {
-    return { delivered: false, action_count: result.rows.length, error: 'No Slack webhook' };
-  }
-
   try {
-    await fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ blocks }),
+    const sendResult = await sendNotification({
+      workspace_id: workspaceId,
+      category: 'action_created',
+      severity: (severity as 'critical' | 'warning' | 'info') || 'critical',
+      title: `${result.rows.length} ${severity} actions need attention`,
+      body: `${result.rows.length} open ${severity} actions require your attention`,
+      slack_blocks: blocks,
     });
-    return { delivered: true, action_count: result.rows.length };
+
+    return {
+      delivered: sendResult.status === 'sent',
+      action_count: result.rows.length,
+      error: sendResult.status === 'failed' ? sendResult.reason : undefined,
+    };
   } catch (err) {
     return { delivered: false, action_count: result.rows.length, error: (err as Error).message };
   }

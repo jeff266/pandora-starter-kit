@@ -88,6 +88,7 @@ import scoringStateRouter from './routes/scoring-state.js';
 import adminScopesRouter from './routes/admin-scopes.js';
 import targetsRouter from './routes/targets.js';
 import { workspaceNotificationsRouter, userNotificationsRouter } from './routes/notifications.js';
+import notificationPreferencesRouter from './routes/notification-preferences.js';
 import skillRunRequestsRouter from './routes/skill-run-requests.js';
 import reportsRouter, { cleanupReportFiles } from './routes/reports.js';
 import { startPushTriggers, stopPushTriggers } from './push/trigger-manager.js';
@@ -267,6 +268,7 @@ workspaceApiRouter.use('/:workspaceId/flags', flagsRouter);
 workspaceApiRouter.use('/:workspaceId/agents', agentLifecycleRouter);
 workspaceApiRouter.use('/:workspaceId/skill-run-requests', skillRunRequestsRouter);
 workspaceApiRouter.use(workspaceNotificationsRouter);
+workspaceApiRouter.use(notificationPreferencesRouter);
 workspaceApiRouter.use(dealIntelligenceRouter);
 workspaceApiRouter.use(toolsRouter);
 workspaceApiRouter.use(chatRouter);
@@ -431,6 +433,11 @@ async function start(): Promise<void> {
   const { checkScheduledReports, initializeScheduledReports } = await import('./reports/scheduler.js');
   await initializeScheduledReports(); // Initialize next_due_at for existing reports
   setInterval(checkScheduledReports, 60 * 1000); // Check every minute
+
+  // Notification digest flush - check every 15 minutes
+  const { flushDigests } = await import('./notifications/digest.js');
+  setInterval(flushDigests, 15 * 60 * 1000);
+  console.log('[NotificationDigest] Digest flush scheduler started (every 15 min)');
 
   // Annotation cleanup - daily at 3 AM UTC
   const runAnnotationCleanup = () => {

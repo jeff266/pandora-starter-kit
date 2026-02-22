@@ -216,6 +216,20 @@ async function deliverToSlack(
   rendererInput: RendererInput,
   slackChannel?: string
 ): Promise<DeliveryResult> {
+  const { getNotificationPreferences, getCategoryRule } = await import('../notifications/preferences.js');
+  try {
+    const prefs = await getNotificationPreferences(workspaceId);
+    if (!prefs.enabled) {
+      return { channel: 'slack', status: 'skipped', metadata: { error: 'notifications_disabled' } };
+    }
+    const rule = getCategoryRule(prefs, 'agent_briefing_ready');
+    if (!rule.enabled) {
+      return { channel: 'slack', status: 'skipped', metadata: { error: 'category_disabled' } };
+    }
+  } catch (err) {
+    console.warn('[channels] Error checking notification prefs, proceeding with send:', err);
+  }
+
   // Render to Slack blocks
   const renderOutput = await renderDeliverable('slack_blocks', rendererInput);
 

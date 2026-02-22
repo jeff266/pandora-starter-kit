@@ -18,9 +18,6 @@ import {
   type TrackingContext,
 } from '../utils/llm-router.js';
 import {
-  postBlocks,
-  postText,
-  getSlackWebhook,
   formatHeader,
   formatSection,
   formatDivider,
@@ -352,34 +349,43 @@ export class AgentRuntime {
   ): Promise<void> {
     switch (delivery.channel) {
       case 'slack': {
-        const slackAppClient = getSlackAppClient();
-        const botToken = await slackAppClient.getBotToken(workspaceId);
+        const { sendNotification } = await import('../notifications/notification-gateway.js');
 
         if (delivery.format === 'slack') {
           const blocks = evidence && Object.keys(evidence).length > 0
             ? formatAgentWithEvidence(output, evidence, agentName, 0)
             : this.formatSlackBlocks(output, agentName);
 
-          if (botToken) {
-            const channel = await slackAppClient.getDefaultChannel(workspaceId);
-            if (channel) {
-              await slackAppClient.postMessage(workspaceId, channel, blocks);
-            } else {
-              const webhookUrl = delivery.slackWebhookUrl || await getSlackWebhook(workspaceId);
-              if (webhookUrl) await postBlocks(webhookUrl, blocks);
-            }
-          } else {
-            const webhookUrl = delivery.slackWebhookUrl || await getSlackWebhook(workspaceId);
-            if (!webhookUrl) {
-              console.warn(`[Agent] No Slack webhook or bot token for workspace ${workspaceId}`);
-              return;
-            }
-            await postBlocks(webhookUrl, blocks);
+          const slackAppClient = getSlackAppClient();
+          const botToken = await slackAppClient.getBotToken(workspaceId);
+          const channel = botToken ? await slackAppClient.getDefaultChannel(workspaceId) : null;
+
+          const result = await sendNotification({
+            workspace_id: workspaceId,
+            category: 'agent_briefing_ready',
+            severity: 'info',
+            title: `${agentName} briefing ready`,
+            body: output.slice(0, 200),
+            slack_blocks: blocks,
+            use_bot: !!botToken && !!channel,
+            target_channel: channel || undefined,
+          });
+
+          if (result.status === 'suppressed' || result.status === 'queued') {
+            console.log(`[Agent] Notification ${result.status} (${result.reason}) for workspace ${workspaceId}`);
           }
         } else {
-          const webhookUrl = delivery.slackWebhookUrl || await getSlackWebhook(workspaceId);
-          if (webhookUrl) {
-            await postText(webhookUrl, `*${agentName}*\n\n${output}`);
+          const result = await sendNotification({
+            workspace_id: workspaceId,
+            category: 'agent_briefing_ready',
+            severity: 'info',
+            title: `${agentName} briefing ready`,
+            body: output.slice(0, 200),
+            slack_text: `*${agentName}*\n\n${output}`,
+          });
+
+          if (result.status === 'suppressed' || result.status === 'queued') {
+            console.log(`[Agent] Notification ${result.status} (${result.reason}) for workspace ${workspaceId}`);
           }
         }
         console.log(`[Agent] Delivered to Slack for workspace ${workspaceId}`);

@@ -462,6 +462,22 @@ async function checkSnooze(workspaceId: string, skillId: string): Promise<boolea
 }
 
 async function postSkillToSlack(workspaceId: string, skillId: string, result: SkillResult): Promise<void> {
+  const { getNotificationPreferences, getCategoryRule } = await import('../notifications/preferences.js');
+  try {
+    const prefs = await getNotificationPreferences(workspaceId);
+    if (!prefs.enabled) {
+      console.log(`[skills] Notifications disabled for workspace ${workspaceId}, skipping Slack post`);
+      return;
+    }
+    const rule = getCategoryRule(prefs, 'skill_run_complete');
+    if (!rule.enabled) {
+      console.log(`[skills] Skill run notifications disabled for workspace ${workspaceId}`);
+      return;
+    }
+  } catch (err) {
+    console.warn('[skills] Error checking notification prefs, proceeding with send:', err);
+  }
+
   const slackAppClient = getSlackAppClient();
   const botToken = await slackAppClient.getBotToken(workspaceId);
   const registry = getSkillRegistry();

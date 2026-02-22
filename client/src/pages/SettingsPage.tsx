@@ -12,10 +12,11 @@ import RolesTab from '../components/settings/RolesTab';
 import FeaturesTab from '../components/settings/FeaturesTab';
 import BillingTab from '../components/settings/BillingTab';
 import { CRMSyncTab } from '../components/settings/CRMSyncTab';
+import NotificationsTab from '../components/settings/NotificationsTab';
 
-type SettingsTab = 'profile' | 'security' | 'preferences' | 'workspaces' | 'members' | 'roles' | 'features' | 'crm-sync' | 'billing';
+type SettingsTab = 'profile' | 'security' | 'preferences' | 'workspaces' | 'members' | 'roles' | 'notifications' | 'features' | 'crm-sync' | 'billing';
 
-const adminTabs: SettingsTab[] = ['members', 'roles', 'features', 'crm-sync', 'billing'];
+const adminTabs: SettingsTab[] = ['members', 'roles', 'notifications', 'features', 'crm-sync', 'billing'];
 
 export default function SettingsPage() {
   const { tab } = useParams<{ tab?: string }>();
@@ -42,7 +43,7 @@ export default function SettingsPage() {
   }, [tab, navigate]);
 
   const isValidTab = (tabKey: string): boolean => {
-    const validTabs: SettingsTab[] = ['profile', 'security', 'preferences', 'workspaces', 'members', 'roles', 'features', 'crm-sync', 'billing'];
+    const validTabs: SettingsTab[] = ['profile', 'security', 'preferences', 'workspaces', 'members', 'roles', 'notifications', 'features', 'crm-sync', 'billing'];
     return validTabs.includes(tabKey as SettingsTab);
   };
 
@@ -69,6 +70,8 @@ export default function SettingsPage() {
         return isAdmin ? <MembersTab /> : null;
       case 'roles':
         return isAdmin ? <RolesTab /> : null;
+      case 'notifications':
+        return isAdmin ? <NotificationsTab /> : null;
       case 'features':
         return isAdmin ? <FeaturesTab /> : null;
       case 'crm-sync':
