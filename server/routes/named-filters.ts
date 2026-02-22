@@ -155,7 +155,6 @@ router.get('/:workspaceId/filters/field-options', async (req: Request<WorkspaceP
         for (const row of keysResult.rows) {
           if (isExcludedKey(row.key)) continue;
 
-          const safeKey = row.key.replace(/'/g, "''");
           const valuesResult = await query<{ val: string }>(
             `SELECT DISTINCT custom_fields->>$2 as val FROM ${object} WHERE workspace_id = $1 AND custom_fields->>$2 IS NOT NULL ORDER BY 1 LIMIT 20`,
             [workspaceId, row.key]
@@ -165,13 +164,14 @@ router.get('/:workspaceId/filters/field-options', async (req: Request<WorkspaceP
           if (looksLikeIds(values)) continue;
 
           customFields.push({
-            field: `custom_fields->>'${safeKey}'`,
+            field: `custom_fields->>'${row.key}'`,
             label: row.key.replace(/^hs_/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
             type: 'text',
             values,
           });
         }
-      } catch {
+      } catch (err) {
+        console.error('[FieldOptions] Error fetching custom fields:', err);
         customFields = [];
       }
     }
