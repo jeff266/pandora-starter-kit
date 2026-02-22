@@ -13,6 +13,7 @@ import MonteCarloPanel from '../components/MonteCarloPanel';
 import GapCard from '../components/GapCard';
 import { ConversationGaps } from '../components/ConversationGaps';
 import { useDemoMode } from '../contexts/DemoModeContext';
+import { useLens } from '../contexts/LensContext';
 import { useIsMobile } from '../hooks/useIsMobile';
 
 interface Finding {
@@ -150,6 +151,7 @@ export default function CommandCenter() {
   const { isAuthenticated, isLoading: authLoading, currentWorkspace } = useWorkspace();
   const { anon } = useDemoMode();
   const isMobile = useIsMobile();
+  const { activeLens } = useLens();
   const wsId = currentWorkspace?.id || '';
   const [pipeline, setPipeline] = useState<any>(null);
   const [summary, setSummary] = useState<any>(null);
@@ -293,7 +295,7 @@ export default function CommandCenter() {
       }
     }, 300000);
     return () => clearInterval(interval);
-  }, [isAuthenticated, authLoading, fetchPipelines, fetchData, wsId]);
+  }, [isAuthenticated, authLoading, fetchPipelines, fetchData, wsId, activeLens]);
 
   const stageData: PipelineStage[] = pipeline?.by_stage || [];
   const totalPipeline = Number(pipeline?.total_pipeline) || 0;

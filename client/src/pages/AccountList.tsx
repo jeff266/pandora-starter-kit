@@ -8,6 +8,7 @@ import Skeleton from '../components/Skeleton';
 import { useDemoMode } from '../contexts/DemoModeContext';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { buildAccountCrmUrl, useCrmInfo } from '../lib/deeplinks';
+import { useLens } from '../contexts/LensContext';
 
 const PAGE_SIZE = 50;
 
@@ -415,6 +416,7 @@ export default function AccountList() {
   const navigate = useNavigate();
   const { anon } = useDemoMode();
   const isMobile = useIsMobile();
+  const { activeLens } = useLens();
   const { scoringState, activating, activateScoring, refreshIcp } = useScoringState();
   const { crmInfo } = useCrmInfo();
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -438,7 +440,7 @@ export default function AccountList() {
 
   useEffect(() => {
     fetchAccounts();
-  }, []);
+  }, [activeLens]);
 
   const fetchAccounts = async () => {
     setLoading(true);

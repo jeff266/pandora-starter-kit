@@ -33,6 +33,7 @@ import scoresRouter from './routes/scores.js';
 import icpRouter from './routes/icp.js';
 import configRouter from './routes/config.js';
 import namedFiltersRouter from './routes/named-filters.js';
+import { lensMiddleware } from './middleware/lens.js';
 import importRouter, { cleanupTempFiles } from './routes/import.js';
 import dealInsightsRouter from './routes/deal-insights.js';
 import enrichmentRouter from './routes/enrichment.js';
@@ -210,6 +211,7 @@ app.use("/api/workspaces", workspacesRouter);
 const workspaceApiRouter = express.Router();
 workspaceApiRouter.use(requireWorkspaceAccess);
 workspaceApiRouter.use(attachWorkspaceContext);
+workspaceApiRouter.use(lensMiddleware);
 
 workspaceApiRouter.use((req, _res, next) => {
   const path = req.path;

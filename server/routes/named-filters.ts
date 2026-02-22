@@ -337,4 +337,153 @@ router.post('/:workspaceId/filters/resolve', async (req: Request<WorkspaceParams
   }
 });
 
+router.post('/:workspaceId/filters/preview-inline', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    const { workspaceId } = req.params;
+    const { object, conditions } = req.body;
+
+    if (!object || !conditions) {
+      res.status(400).json({ error: 'object and conditions are required' });
+      return;
+    }
+
+    const validObjects = ['deals', 'contacts', 'accounts', 'conversations'];
+    if (!validObjects.includes(object)) {
+      res.status(400).json({ error: `object must be one of: ${validObjects.join(', ')}` });
+      return;
+    }
+
+    const resolution = await filterResolver.resolve(workspaceId, conditions, {
+      parameter_offset: 2,
+    });
+
+    const table = object;
+    const countResult = await query<{ count: string }>(
+      `SELECT COUNT(*)::text as count FROM ${table} WHERE workspace_id = $1 AND ${resolution.sql}`,
+      [workspaceId, ...resolution.params]
+    );
+
+    const sampleColumns: Record<string, string> = {
+      deals: 'name, amount, stage_normalized, owner_name, close_date',
+      contacts: 'email, first_name, last_name, title',
+      accounts: 'name, domain, industry',
+      conversations: 'title, call_date, source',
+    };
+
+    const sampleResult = await query(
+      `SELECT id, ${sampleColumns[table] || 'id'}
+       FROM ${table} WHERE workspace_id = $1 AND ${resolution.sql}
+       ORDER BY created_at DESC NULLS LAST
+       LIMIT 5`,
+      [workspaceId, ...resolution.params]
+    );
+
+    res.json({
+      success: true,
+      record_count: parseInt(countResult.rows[0]?.count || '0', 10),
+      sample_records: sampleResult.rows,
+      sql_preview: resolution.sql,
+    });
+  } catch (error) {
+    console.error('[NamedFilters] Error previewing inline filter:', error);
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to preview filter' });
+  }
+});
+
+const FIELD_SCHEMAS: Record<string, { field: string; label: string; type: string; values_query?: string }[]> = {
+  deals: [
+    { field: 'amount', label: 'Amount', type: 'number' },
+    { field: 'stage_normalized', label: 'Stage', type: 'text', values_query: 'SELECT DISTINCT stage_normalized as val FROM deals WHERE workspace_id = $1 AND stage_normalized IS NOT NULL ORDER BY stage_normalized' },
+    { field: 'pipeline_name', label: 'Pipeline', type: 'text', values_query: 'SELECT DISTINCT pipeline_name as val FROM deals WHERE workspace_id = $1 AND pipeline_name IS NOT NULL ORDER BY pipeline_name' },
+    { field: 'owner_name', label: 'Owner', type: 'text', values_query: 'SELECT DISTINCT owner_name as val FROM deals WHERE workspace_id = $1 AND owner_name IS NOT NULL ORDER BY owner_name' },
+    { field: 'close_date', label: 'Close Date', type: 'date' },
+    { field: 'created_at', label: 'Created At', type: 'date' },
+    { field: 'probability', label: 'Probability', type: 'number' },
+    { field: 'days_in_current_stage', label: 'Days in Current Stage', type: 'number' },
+    { field: 'days_since_last_activity', label: 'Days Since Last Activity', type: 'number' },
+    { field: 'source', label: 'Source', type: 'text', values_query: 'SELECT DISTINCT source as val FROM deals WHERE workspace_id = $1 AND source IS NOT NULL ORDER BY source LIMIT 50' },
+  ],
+  contacts: [
+    { field: 'email', label: 'Email', type: 'text' },
+    { field: 'first_name', label: 'First Name', type: 'text' },
+    { field: 'last_name', label: 'Last Name', type: 'text' },
+    { field: 'title', label: 'Title', type: 'text', values_query: 'SELECT DISTINCT title as val FROM contacts WHERE workspace_id = $1 AND title IS NOT NULL ORDER BY title LIMIT 50' },
+    { field: 'lifecycle_stage', label: 'Lifecycle Stage', type: 'text', values_query: 'SELECT DISTINCT lifecycle_stage as val FROM contacts WHERE workspace_id = $1 AND lifecycle_stage IS NOT NULL ORDER BY lifecycle_stage' },
+    { field: 'lead_status', label: 'Lead Status', type: 'text', values_query: 'SELECT DISTINCT lead_status as val FROM contacts WHERE workspace_id = $1 AND lead_status IS NOT NULL ORDER BY lead_status' },
+    { field: 'created_at', label: 'Created At', type: 'date' },
+  ],
+  accounts: [
+    { field: 'name', label: 'Name', type: 'text' },
+    { field: 'domain', label: 'Domain', type: 'text' },
+    { field: 'industry', label: 'Industry', type: 'text', values_query: 'SELECT DISTINCT industry as val FROM accounts WHERE workspace_id = $1 AND industry IS NOT NULL ORDER BY industry LIMIT 50' },
+    { field: 'owner_name', label: 'Owner', type: 'text', values_query: 'SELECT DISTINCT owner_name as val FROM accounts WHERE workspace_id = $1 AND owner_name IS NOT NULL ORDER BY owner_name' },
+    { field: 'created_at', label: 'Created At', type: 'date' },
+  ],
+  conversations: [
+    { field: 'title', label: 'Title', type: 'text' },
+    { field: 'call_date', label: 'Call Date', type: 'date' },
+    { field: 'source', label: 'Source', type: 'text', values_query: 'SELECT DISTINCT source as val FROM conversations WHERE workspace_id = $1 AND source IS NOT NULL ORDER BY source' },
+    { field: 'duration_minutes', label: 'Duration (min)', type: 'number' },
+    { field: 'created_at', label: 'Created At', type: 'date' },
+  ],
+};
+
+router.get('/:workspaceId/filters/field-options', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    const { workspaceId } = req.params;
+    const object = req.query.object as string || 'deals';
+
+    const validObjects = ['deals', 'contacts', 'accounts', 'conversations'];
+    if (!validObjects.includes(object)) {
+      res.status(400).json({ error: `object must be one of: ${validObjects.join(', ')}` });
+      return;
+    }
+
+    const schema = FIELD_SCHEMAS[object] || [];
+    const standardFields: any[] = [];
+
+    for (const field of schema) {
+      const entry: any = { field: field.field, label: field.label, type: field.type };
+      if (field.values_query) {
+        try {
+          const result = await query<{ val: string }>(field.values_query, [workspaceId]);
+          entry.values = result.rows.map(r => r.val).filter(Boolean);
+        } catch {
+          entry.values = [];
+        }
+      }
+      standardFields.push(entry);
+    }
+
+    let customFields: any[] = [];
+    if (object === 'deals' || object === 'contacts' || object === 'accounts') {
+      try {
+        const keysResult = await query<{ key: string }>(
+          `SELECT DISTINCT k as key FROM ${object}, jsonb_object_keys(COALESCE(custom_fields, '{}'::jsonb)) k WHERE workspace_id = $1 LIMIT 30`,
+          [workspaceId]
+        );
+        for (const row of keysResult.rows) {
+          const valuesResult = await query<{ val: string }>(
+            `SELECT DISTINCT custom_fields->>'${row.key.replace(/'/g, "''")}' as val FROM ${object} WHERE workspace_id = $1 AND custom_fields->>'${row.key.replace(/'/g, "''")}' IS NOT NULL LIMIT 20`,
+            [workspaceId]
+          );
+          customFields.push({
+            field: `custom_fields->>'${row.key}'`,
+            label: row.key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+            type: 'text',
+            values: valuesResult.rows.map(r => r.val).filter(Boolean),
+          });
+        }
+      } catch {
+        customFields = [];
+      }
+    }
+
+    res.json({ success: true, standard_fields: standardFields, custom_fields: customFields });
+  } catch (error) {
+    console.error('[NamedFilters] Error fetching field options:', error);
+    res.status(500).json({ error: 'Failed to fetch field options' });
+  }
+});
+
 export default router;

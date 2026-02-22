@@ -20,6 +20,7 @@ export interface CreateAgentInput {
   data_window?: Record<string, any>;
   output_formats?: string[];
   event_config?: Record<string, any> | null;
+  scope_filters?: string[];
 }
 
 export interface Agent {
@@ -116,13 +117,17 @@ export async function createAgent(workspaceId: string, input: CreateAgentInput):
     deliveryRuleId = ruleResult.rows[0].id;
   }
 
+  const focusConfig = {
+    ...(input.scope_filters?.length ? { scope_filters: input.scope_filters } : {}),
+  };
+
   const agentResult = await query<Agent>(
     `INSERT INTO agents
        (workspace_id, name, description, icon, template_id, skill_ids, delivery_rule_id,
         estimated_tokens_per_week, estimated_deliveries_per_week, estimated_findings_per_delivery,
         fatigue_score, focus_score, is_active,
-        audience, focus_questions, data_window, output_formats, event_config)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+        audience, focus_questions, data_window, output_formats, event_config, focus_config)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
      RETURNING *`,
     [
       workspaceId,
@@ -143,6 +148,7 @@ export async function createAgent(workspaceId: string, input: CreateAgentInput):
       JSON.stringify(input.data_window ?? { primary: 'current_week', comparison: 'previous_period' }),
       JSON.stringify(input.output_formats ?? ['slack']),
       input.event_config ? JSON.stringify(input.event_config) : null,
+      JSON.stringify(focusConfig),
     ]
   );
   return agentResult.rows[0];
@@ -195,6 +201,10 @@ export async function updateAgent(
     );
   }
 
+  const updatedFocusConfig = input.scope_filters !== undefined
+    ? JSON.stringify({ ...(existing.focus_config || {}), scope_filters: input.scope_filters })
+    : null;
+
   const result = await query<Agent>(
     `UPDATE agents SET
        name=$1, description=$2, icon=$3, skill_ids=$4,
@@ -205,7 +215,8 @@ export async function updateAgent(
        focus_questions=COALESCE($14, focus_questions),
        data_window=COALESCE($15, data_window),
        output_formats=COALESCE($16, output_formats),
-       event_config=CASE WHEN $17::boolean THEN $18 ELSE event_config END
+       event_config=CASE WHEN $17::boolean THEN $18 ELSE event_config END,
+       focus_config=COALESCE($19, focus_config)
      WHERE id=$11 AND workspace_id=$12
      RETURNING *`,
     [
@@ -219,6 +230,7 @@ export async function updateAgent(
       input.output_formats ? JSON.stringify(input.output_formats) : null,
       input.event_config !== undefined,
       input.event_config !== undefined ? (input.event_config ? JSON.stringify(input.event_config) : null) : null,
+      updatedFocusConfig,
     ]
   );
   return result.rows[0];

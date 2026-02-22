@@ -10,6 +10,7 @@ import { useDemoMode } from '../contexts/DemoModeContext';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { buildDealCrmUrl, useCrmInfo } from '../lib/deeplinks';
+import { useLens } from '../contexts/LensContext';
 
 const PAGE_SIZE = 50;
 
@@ -62,6 +63,7 @@ export default function DealList() {
   const { anon } = useDemoMode();
   const { currentWorkspace } = useWorkspace();
   const isMobile = useIsMobile();
+  const { activeLens } = useLens();
   const wsId = currentWorkspace?.id || '';
   const [searchParams] = useSearchParams();
   const [allDeals, setAllDeals] = useState<DealRow[]>([]);
@@ -154,7 +156,6 @@ export default function DealList() {
 
   useEffect(() => {
     fetchDeals();
-    // Fetch scopes
     api.get('/admin/scopes').then((data: any) => {
       const confirmedScopes = (data.scopes || []).filter((s: any) => s.confirmed);
       setScopes(confirmedScopes.map((s: any) => ({
@@ -163,7 +164,7 @@ export default function DealList() {
         deal_count: s.deal_count,
       })));
     }).catch(() => {});
-  }, [fetchDeals]);
+  }, [fetchDeals, activeLens]);
 
   const uniqueStages = useMemo(() =>
     Array.from(new Set(allDeals.map(d => d.stage).filter(Boolean))).sort(),

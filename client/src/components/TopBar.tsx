@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { colors, fonts } from '../styles/theme';
 import { formatTimeAgo } from '../lib/format';
+import LensDropdown from './LensDropdown';
 
 interface TopBarProps {
   title: string;
@@ -131,6 +132,8 @@ export default function TopBar({
             ))}
           </div>
         )}
+
+        <LensDropdown />
 
         {/* Refresh Button and Last Refreshed */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

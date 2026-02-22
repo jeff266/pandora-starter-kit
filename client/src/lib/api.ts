@@ -1,5 +1,6 @@
 let _workspaceId = '';
 let _token = '';
+let _activeLens: string | null = null;
 
 export function setApiCredentials(workspaceId: string, token: string) {
   _workspaceId = workspaceId;
@@ -10,11 +11,22 @@ export function getWorkspaceId(): string {
   return _workspaceId;
 }
 
+export function setActiveLens(lensId: string | null) {
+  _activeLens = lensId;
+}
+
+export function getActiveLens(): string | null {
+  return _activeLens;
+}
+
 async function request(method: string, path: string, body?: any) {
   const url = `/api/workspaces/${_workspaceId}${path}`;
   const headers: Record<string, string> = {
     'Authorization': `Bearer ${_token}`,
   };
+  if (_activeLens) {
+    headers['X-Pandora-Lens'] = _activeLens;
+  }
   if (body) {
     headers['Content-Type'] = 'application/json';
   }
@@ -38,9 +50,11 @@ export const api = {
   delete: (path: string) => request('DELETE', path),
   upload: (path: string, formData: FormData) => {
     const url = `/api/workspaces/${_workspaceId}${path}`;
+    const uploadHeaders: Record<string, string> = { 'Authorization': `Bearer ${_token}` };
+    if (_activeLens) uploadHeaders['X-Pandora-Lens'] = _activeLens;
     return fetch(url, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${_token}` },
+      headers: uploadHeaders,
       body: formData,
     }).then(res => {
       if (!res.ok) return res.text().then(t => { throw new Error(t || `HTTP ${res.status}`); });

@@ -72,6 +72,15 @@ Handlebars.registerHelper('lt', (a: any, b: any) => Number(a) < Number(b));
 Handlebars.registerHelper('eq', (a: any, b: any) => a === b || String(a) === String(b));
 Handlebars.registerHelper('gt', (a: any, b: any) => Number(a) > Number(b));
 
+const QUERY_TOOLS = new Set([
+  'query_deals', 'query_contacts', 'query_accounts',
+  'query_conversations', 'compute_metric',
+]);
+
+function isQueryTool(toolName: string): boolean {
+  return QUERY_TOOLS.has(toolName);
+}
+
 export class SkillRuntime {
   constructor() {}
 
@@ -126,6 +135,8 @@ export class SkillRuntime {
       consultantContext: consultantContextBlock,
     };
 
+    const scopeFilters = params?.scope_filters || [];
+
     const context: SkillExecutionContext = {
       workspaceId,
       skillId: skill.id,
@@ -133,6 +144,7 @@ export class SkillRuntime {
       businessContext,
       stepResults: {},
       params: params || {},
+      scopeFilters,
       metadata: {
         startedAt: new Date(),
         tokenUsage: {
@@ -605,7 +617,14 @@ export class SkillRuntime {
           }
 
           try {
-            const result = await tool.execute(toolCall.input, context);
+            const toolInput = { ...toolCall.input };
+            if (context.scopeFilters && context.scopeFilters.length > 0 && isQueryTool(toolCall.name)) {
+              const existing = toolInput.named_filters ||
+                (toolInput.named_filter ? [toolInput.named_filter] : []);
+              toolInput.named_filters = [...new Set([...context.scopeFilters, ...existing])];
+              delete toolInput.named_filter;
+            }
+            const result = await tool.execute(toolInput, context);
             messages.push(toolResultMessage(toolCall.id, JSON.stringify(result)));
           } catch (error) {
             const errorMsg = error instanceof Error ? error.message : String(error);

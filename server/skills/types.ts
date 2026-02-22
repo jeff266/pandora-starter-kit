@@ -160,6 +160,7 @@ export interface SkillExecutionContext {
   businessContext: Record<string, any>;
   stepResults: Record<string, any>;
   params?: Record<string, any>;
+  scopeFilters?: string[];
 
   /** Execution metadata */
   metadata: {
