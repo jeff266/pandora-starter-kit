@@ -511,7 +511,7 @@ export function transformOpportunity(
     probability: sanitizeNumber(opp.Probability), // FIX: empty string would crash PostgreSQL
     forecast_category: forecastCategory,
     forecast_category_source: forecastCategory ? 'native' : null, // Salesforce uses native ForecastCategoryName
-    pipeline: null,
+    pipeline: sanitizeText((opp as any).Type, 255) || null,
     last_activity_date: null,
     custom_fields: customFields,
     account_source_id: opp.AccountId,

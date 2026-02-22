@@ -910,9 +910,29 @@ export default function DealDetail() {
                           <span style={{ marginLeft: p === deal.pipeline ? 0 : 22 }}>{p}</span>
                         </button>
                       ))}
-                      {pipelines.length === 0 && (
-                        <div style={{ padding: '8px 12px', color: colors.textMuted, fontSize: 12 }}>No pipelines found</div>
-                      )}
+                      <div style={{ borderTop: pipelines.length > 0 ? `1px solid ${colors.border}` : 'none', padding: '6px 8px' }}>
+                        <form onSubmit={e => {
+                          e.preventDefault();
+                          const input = (e.target as HTMLFormElement).elements.namedItem('customPipeline') as HTMLInputElement;
+                          const val = input?.value?.trim();
+                          if (val) handlePipelineChange(val);
+                        }}>
+                          <input
+                            name="customPipeline"
+                            placeholder="Type custom pipeline..."
+                            autoFocus={pipelines.length === 0}
+                            disabled={pipelineSaving}
+                            style={{
+                              width: '100%', padding: '6px 8px', fontSize: 12,
+                              background: colors.background, border: `1px solid ${colors.border}`,
+                              borderRadius: 4, color: colors.text, outline: 'none',
+                              boxSizing: 'border-box',
+                            }}
+                            onFocus={e => { e.target.style.borderColor = colors.accent; }}
+                            onBlur={e => { e.target.style.borderColor = colors.border; }}
+                          />
+                        </form>
+                      </div>
                     </div>
                   ) : null}
                   <button
