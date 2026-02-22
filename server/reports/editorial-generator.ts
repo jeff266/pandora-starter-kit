@@ -43,7 +43,7 @@ export async function generateEditorialReport(
   request: GenerateReportRequest
 ): Promise<ReportGeneration> {
   const startTime = Date.now();
-  const { workspace_id, report_template_id, triggered_by, preview_only = false } = request;
+  const { workspace_id, report_template_id, triggered_by, preview_only = false, skip_delivery = false } = request;
 
   logger.info('[EditorialGenerator] Starting editorial report generation', {
     workspace_id,

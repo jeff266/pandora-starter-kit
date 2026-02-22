@@ -228,4 +228,78 @@ router.get('/:workspaceId/agents-v2/:id/performance', async (req, res) => {
   }
 });
 
+// ─── POST /:workspaceId/agents/:agentId/generate ────────────────────────────
+router.post('/:workspaceId/agents/:agentId/generate', async (req, res) => {
+  try {
+    const { workspaceId, agentId } = req.params;
+    const { triggered_by = 'manual', skip_delivery = false } = req.body;
+
+    // Get agent to find its linked report template
+    const agentResult = await query(
+      'SELECT * FROM agents WHERE id = $1 AND workspace_id = $2',
+      [agentId, workspaceId]
+    );
+
+    if (agentResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Agent not found' });
+    }
+
+    // Find report template linked to this agent
+    const templateResult = await query(
+      'SELECT id FROM report_templates WHERE agent_id = $1 AND workspace_id = $2',
+      [agentId, workspaceId]
+    );
+
+    if (templateResult.rows.length === 0) {
+      return res.status(404).json({ error: 'No report template linked to this agent' });
+    }
+
+    const reportTemplateId = templateResult.rows[0].id;
+
+    // Import and call the editorial generator
+    const { generateEditorialReport } = await import('../reports/editorial-generator.js');
+
+    const generation = await generateEditorialReport({
+      workspace_id: workspaceId,
+      report_template_id: reportTemplateId,
+      triggered_by,
+      preview_only: false,
+      skip_delivery,
+    });
+
+    res.json({
+      success: true,
+      generation_id: generation.id,
+      generation,
+    });
+  } catch (err: any) {
+    console.error('[agent generate] error:', err);
+    res.status(500).json({ error: err.message || 'Generation failed' });
+  }
+});
+
+// ─── GET /:workspaceId/agents/:agentId/generations ──────────────────────────
+router.get('/:workspaceId/agents/:agentId/generations', async (req, res) => {
+  try {
+    const { workspaceId, agentId } = req.params;
+    const limit = Math.min(parseInt(req.query.limit as string) || 10, 100);
+
+    const result = await query(
+      `SELECT id, status, created_at, opening_narrative,
+              editorial_decisions, generation_duration_ms,
+              render_duration_ms, skills_run
+       FROM report_generations
+       WHERE workspace_id = $1 AND agent_id = $2
+       ORDER BY created_at DESC
+       LIMIT $3`,
+      [workspaceId, agentId, limit]
+    );
+
+    res.json({ generations: result.rows });
+  } catch (err: any) {
+    console.error('[agent generations] error:', err);
+    res.status(500).json({ error: err.message || 'Failed to fetch generations' });
+  }
+});
+
 export default router;

@@ -12,6 +12,8 @@ interface ReportGeneration {
   report_template_id: string;
   workspace_id: string;
   agent_id?: string;
+  opening_narrative?: string;
+  editorial_decisions?: any;
   formats_generated: Record<string, { filepath: string; size_bytes: number; download_url: string }>;
   delivery_status: Record<string, string>;
   sections_snapshot: any[];
@@ -401,6 +403,26 @@ export default function ReportViewer() {
         {/* Report Sections */}
         <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
           <div style={{ maxWidth: 1024, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 24 }}>
+            {/* Opening Narrative (for editorial briefings) */}
+            {generation.opening_narrative && (
+              <div style={{
+                background: colors.surface,
+                borderRadius: 8,
+                border: `1px solid ${colors.border}`,
+                padding: 24,
+              }}>
+                <p style={{
+                  fontSize: 16,
+                  lineHeight: 1.6,
+                  color: colors.text,
+                  fontFamily: fonts.sans,
+                  margin: 0,
+                }}>
+                  {generation.opening_narrative}
+                </p>
+              </div>
+            )}
+
             {generation.sections_content?.map((section) => {
               const isCollapsed = collapsedSections.has(section.section_id);
               return (

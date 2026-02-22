@@ -160,6 +160,7 @@ export interface GenerateReportRequest {
   report_template_id: string;
   triggered_by: GenerationTrigger;
   preview_only?: boolean;              // Don't save to history or deliver
+  skip_delivery?: boolean;             // Skip Slack/email delivery (for testing)
 }
 
 // Report Generation Context (internal)

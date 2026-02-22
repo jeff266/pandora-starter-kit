@@ -36,7 +36,6 @@ const sections: NavSection[] = [
     items: [
       { label: 'ICP Profile', path: '/icp-profile', icon: '\u2605' },
       { label: 'Agents', path: '/agents', icon: '\u25C8' },
-      { label: 'Agent Builder', path: '/agent-builder', icon: '\u25C7' },
       { label: 'Skills', path: '/skills', icon: '\u2699' },
       { label: 'Tools', path: '/tools', icon: '\u29EB' },
     ],

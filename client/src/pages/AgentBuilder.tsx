@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { api, getWorkspaceId } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import Skeleton from '../components/Skeleton';
-import { ChevronLeft, Plus, X, GripVertical, Save, Zap } from 'lucide-react';
+import { ChevronLeft, Plus, X, GripVertical, Save, Zap, Play, Loader2, FileText } from 'lucide-react';
 import LearnedPreferences from '../components/agents/LearnedPreferences';
 
 interface AudienceConfig {
@@ -115,6 +115,9 @@ export default function AgentBuilder() {
   const [newQuestion, setNewQuestion] = useState('');
   const [customRole, setCustomRole] = useState('');
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [lastRunStatus, setLastRunStatus] = useState<string | null>(null);
+  const [latestGeneration, setLatestGeneration] = useState<any>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -133,6 +136,14 @@ export default function AgentBuilder() {
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  useEffect(() => {
+    if (editingAgentId) {
+      loadLatestGeneration();
+    } else {
+      setLatestGeneration(null);
+    }
+  }, [editingAgentId]);
 
   function populateFromTemplate(t: AgentTemplate) {
     setSelectedTemplate(t);
@@ -246,6 +257,35 @@ export default function AgentBuilder() {
       alert(err.message || 'Failed to save agent');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleRunNow() {
+    if (!editingAgentId) return;
+    setIsGenerating(true);
+    setLastRunStatus(null);
+    try {
+      const res = await api.post(`/agents/${editingAgentId}/generate`, {
+        triggered_by: 'manual',
+      });
+      setLastRunStatus(`Generation started (ID: ${res.generation_id || res.id})`);
+      // Reload latest generation after successful trigger
+      setTimeout(() => loadLatestGeneration(), 2000);
+    } catch (err: any) {
+      setLastRunStatus(`Error: ${err.message || 'Generation failed'}`);
+    } finally {
+      setIsGenerating(false);
+    }
+  }
+
+  async function loadLatestGeneration() {
+    if (!editingAgentId) return;
+    try {
+      const data = await api.get(`/agents/${editingAgentId}/generations?limit=1`);
+      const gen = data.generations?.[0] || data[0];
+      if (gen) setLatestGeneration(gen);
+    } catch (err) {
+      console.error('Failed to load latest generation:', err);
     }
   }
 
@@ -450,7 +490,32 @@ export default function AgentBuilder() {
           placeholder="Agent name"
           style={{ ...input, flex: 1, font: `600 20px ${fonts.sans}`, background: 'transparent', border: 'none', padding: 0, color: colors.text }}
         />
+        {editingAgentId && (
+          <button onClick={handleRunNow} disabled={isGenerating} style={{
+            ...btnPrimary,
+            opacity: isGenerating ? 0.6 : 1,
+            cursor: isGenerating ? 'not-allowed' : 'pointer',
+          }}>
+            {isGenerating ? (
+              <>
+                <Loader2 style={{ width: 16, height: 16, animation: 'spin 1s linear infinite' }} />
+                Generating...
+              </>
+            ) : (
+              <>
+                <Play style={{ width: 16, height: 16 }} />
+                Run Now
+              </>
+            )}
+          </button>
+        )}
       </div>
+
+      {lastRunStatus && (
+        <div style={{ fontSize: 13, color: colors.textMuted, marginBottom: 12, fontFamily: fonts.sans }}>
+          {lastRunStatus}
+        </div>
+      )}
 
       <input
         value={description}
@@ -458,6 +523,39 @@ export default function AgentBuilder() {
         placeholder="Description..."
         style={{ ...input, width: '100%', marginBottom: 24 }}
       />
+
+      {/* Latest Briefing Card */}
+      {latestGeneration && editingAgentId && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          padding: 12,
+          background: colors.surfaceRaised,
+          borderRadius: 8,
+          marginBottom: 24,
+        }}>
+          <FileText style={{ width: 20, height: 20, color: colors.textMuted, flexShrink: 0 }} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 14, fontWeight: 500, color: colors.text, fontFamily: fonts.sans }}>
+              Latest Briefing
+            </div>
+            <div style={{ fontSize: 12, color: colors.textMuted, fontFamily: fonts.sans }}>
+              {latestGeneration.status || 'Completed'} · {new Date(latestGeneration.created_at).toLocaleString()}
+            </div>
+          </div>
+          <button
+            onClick={() => window.open(`/workspace/${getWorkspaceId()}/reports/${latestGeneration.report_template_id || 'unknown'}/generations/${latestGeneration.id}`, '_blank')}
+            style={{
+              ...btnSecondary,
+              padding: '6px 12px',
+              fontSize: 13,
+            }}
+          >
+            View Briefing
+          </button>
+        </div>
+      )}
 
       {/* Tab bar */}
       <div style={{ display: 'flex', gap: 0, borderBottom: `1px solid ${colors.border}`, marginBottom: 24 }}>
