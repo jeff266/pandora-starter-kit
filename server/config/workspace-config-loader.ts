@@ -12,6 +12,7 @@ import type {
   WinRateResult,
   QuotaPeriodResult,
   VoiceConfig,
+  NamedFilter,
 } from '../types/workspace-config.js';
 import { buildVoicePromptBlock } from './voice-prompt-block.js';
 
@@ -460,9 +461,120 @@ export class WorkspaceConfigLoader {
         framing: 'balanced',
         alert_threshold: 'watch_and_act',
       },
+      named_filters: WorkspaceConfigLoader.getDefaultNamedFilters(),
       updated_at: new Date(),
       confirmed: false,
     };
+  }
+
+  static getDefaultNamedFilters(): NamedFilter[] {
+    const now = new Date().toISOString();
+    return [
+      {
+        id: 'open_pipeline',
+        label: 'Open Pipeline',
+        description: 'All currently open deals not in terminal stages',
+        object: 'deals',
+        conditions: {
+          operator: 'AND',
+          conditions: [
+            { field: 'is_open', operator: 'is_true', value: true },
+            { field: 'stage_normalized', operator: 'not_in', value: ['closed_won', 'closed_lost'] },
+          ],
+        },
+        source: 'default',
+        confidence: 1.0,
+        confirmed: true,
+        created_at: now,
+        updated_at: now,
+        created_by: 'system',
+      },
+      {
+        id: 'new_logo',
+        label: 'New Logo Deal',
+        description: 'Deals at accounts with no prior closed-won deals',
+        object: 'deals',
+        conditions: {
+          operator: 'AND',
+          conditions: [
+            { field: 'is_open', operator: 'is_true', value: true },
+            {
+              field: '*',
+              operator: 'eq',
+              value: 0,
+              cross_object: {
+                target_object: 'deals',
+                join_field: 'account_id',
+                aggregate: 'count',
+              },
+            },
+          ],
+        },
+        source: 'default',
+        confidence: 0.8,
+        confirmed: false,
+        created_at: now,
+        updated_at: now,
+        created_by: 'system',
+      },
+      {
+        id: 'stale_deal',
+        label: 'Stale Deal',
+        description: 'Deals with no activity beyond the workspace stale threshold',
+        object: 'deals',
+        conditions: {
+          operator: 'AND',
+          conditions: [
+            { field: 'is_open', operator: 'is_true', value: true },
+            { field: 'days_in_stage', operator: 'gte', value: 14 },
+          ],
+        },
+        source: 'default',
+        confidence: 0.8,
+        confirmed: false,
+        created_at: now,
+        updated_at: now,
+        created_by: 'system',
+      },
+      {
+        id: 'closing_this_quarter',
+        label: 'Closing This Quarter',
+        description: 'Open deals with close dates in the current quarter',
+        object: 'deals',
+        conditions: {
+          operator: 'AND',
+          conditions: [
+            { field: 'is_open', operator: 'is_true', value: true },
+            { field: 'close_date', operator: 'relative_date', value: { type: 'relative', unit: 'quarters', offset: 0, anchor: 'period_end' } },
+          ],
+        },
+        source: 'default',
+        confidence: 0.9,
+        confirmed: true,
+        created_at: now,
+        updated_at: now,
+        created_by: 'system',
+      },
+      {
+        id: 'at_risk',
+        label: 'At-Risk Deal',
+        description: 'Deals flagged with high risk scores or stale activity',
+        object: 'deals',
+        conditions: {
+          operator: 'AND',
+          conditions: [
+            { field: 'is_open', operator: 'is_true', value: true },
+            { field: 'deal_risk', operator: 'gte', value: 70 },
+          ],
+        },
+        source: 'default',
+        confidence: 0.85,
+        confirmed: false,
+        created_at: now,
+        updated_at: now,
+        created_by: 'system',
+      },
+    ];
   }
 
   async getVoiceConfig(workspaceId: string): Promise<{

@@ -94,6 +94,8 @@ import {
 } from './tools/audit-conversation-deal-coverage.js';
 import { getDealRiskScore } from '../tools/deal-risk-score.js';
 import { getPipelineRiskSummary } from '../tools/pipeline-risk-summary.js';
+import { filterResolver } from '../tools/filter-resolver.js';
+import type { FilterResolutionMetadata } from '../types/workspace-config.js';
 
 // ============================================================================
 // Helper: Safe Tool Execution
@@ -116,13 +118,43 @@ async function safeExecute<T>(
   }
 }
 
+async function resolveNamedFilters(
+  workspaceId: string,
+  params: any,
+  paramOffset: number,
+): Promise<{
+  additionalWhere: string;
+  additionalParams: unknown[];
+  _applied_filters: FilterResolutionMetadata[];
+}> {
+  const filterIds: string[] = params.named_filters || (params.named_filter ? [params.named_filter] : []);
+  if (filterIds.length === 0) {
+    return { additionalWhere: '', additionalParams: [], _applied_filters: [] };
+  }
+
+  const result = await filterResolver.resolveMultiple(workspaceId, filterIds, {
+    parameter_offset: paramOffset,
+  });
+
+  return {
+    additionalWhere: result.sql.replace(/^ AND /, ''),
+    additionalParams: result.params,
+    _applied_filters: result.filter_metadata,
+  };
+}
+
+const NAMED_FILTER_PARAMS = {
+  named_filter: { type: 'string' as const, description: 'Named filter ID from workspace config (e.g., "open_pipeline", "stale_deal", "at_risk"). Resolves to workspace-specific filter criteria.' },
+  named_filters: { type: 'array' as const, items: { type: 'string' as const }, description: 'Multiple named filter IDs to combine with AND. Use when scoping requires multiple concepts (e.g., ["open_pipeline", "at_risk"]).' },
+};
+
 // ============================================================================
 // Deal Tools
 // ============================================================================
 
 const queryDeals: ToolDefinition = {
   name: 'queryDeals',
-  description: 'Search deals with filters. Returns list of deals matching criteria. Use this to find deals by stage, owner, amount, risk, or staleness.',
+  description: 'Search deals with filters. Returns list of deals matching criteria. Supports named filters for business concept scoping (e.g., "open_pipeline", "at_risk", "stale_deal").',
   tier: 'compute',
   parameters: {
     type: 'object',
@@ -140,12 +172,27 @@ const queryDeals: ToolDefinition = {
       sortBy: { type: 'string', enum: ['amount', 'close_date', 'deal_risk', 'health_score', 'days_in_stage'], description: 'Sort field' },
       sortDir: { type: 'string', enum: ['asc', 'desc'], description: 'Sort direction' },
       limit: { type: 'number', description: 'Max results to return' },
+      ...NAMED_FILTER_PARAMS,
     },
     required: [],
   },
   execute: async (params, context) => {
-    return safeExecute('queryDeals', () =>
-      dealTools.queryDeals(context.workspaceId, params), params);
+    const { named_filter, named_filters, ...queryParams } = params;
+    const filterResult = await resolveNamedFilters(context.workspaceId, params, 20);
+
+    if (filterResult.additionalWhere) {
+      queryParams.additionalWhere = filterResult.additionalWhere;
+      queryParams.additionalParams = filterResult.additionalParams;
+    }
+
+    const result = await safeExecute('queryDeals', () =>
+      dealTools.queryDeals(context.workspaceId, queryParams), params);
+
+    if (filterResult._applied_filters.length > 0 && result && typeof result === 'object' && !('error' in result)) {
+      (result as any)._applied_filters = filterResult._applied_filters;
+    }
+
+    return result;
   },
 };
 
@@ -237,7 +284,7 @@ const getPipelineSummary: ToolDefinition = {
 
 const queryContacts: ToolDefinition = {
   name: 'queryContacts',
-  description: 'Search contacts with filters. Returns list of contacts.',
+  description: 'Search contacts with filters. Returns list of contacts. Supports named filters for business concept scoping.',
   tier: 'compute',
   parameters: {
     type: 'object',
@@ -248,12 +295,27 @@ const queryContacts: ToolDefinition = {
       department: { type: 'string', description: 'Filter by department' },
       search: { type: 'string', description: 'Text search in name or email' },
       limit: { type: 'number', description: 'Max results' },
+      ...NAMED_FILTER_PARAMS,
     },
     required: [],
   },
   execute: async (params, context) => {
-    return safeExecute('queryContacts', () =>
-      contactTools.queryContacts(context.workspaceId, params), params);
+    const { named_filter, named_filters, ...queryParams } = params;
+    const filterResult = await resolveNamedFilters(context.workspaceId, params, 20);
+
+    if (filterResult.additionalWhere) {
+      queryParams.additionalWhere = filterResult.additionalWhere;
+      queryParams.additionalParams = filterResult.additionalParams;
+    }
+
+    const result = await safeExecute('queryContacts', () =>
+      contactTools.queryContacts(context.workspaceId, queryParams), params);
+
+    if (filterResult._applied_filters.length > 0 && result && typeof result === 'object' && !('error' in result)) {
+      (result as any)._applied_filters = filterResult._applied_filters;
+    }
+
+    return result;
   },
 };
 
@@ -314,7 +376,7 @@ const getStakeholderMap: ToolDefinition = {
 
 const queryAccounts: ToolDefinition = {
   name: 'queryAccounts',
-  description: 'Search accounts/companies with filters.',
+  description: 'Search accounts/companies with filters. Supports named filters for business concept scoping.',
   tier: 'compute',
   parameters: {
     type: 'object',
@@ -323,12 +385,27 @@ const queryAccounts: ToolDefinition = {
       industry: { type: 'string', description: 'Filter by industry' },
       search: { type: 'string', description: 'Text search in name' },
       limit: { type: 'number', description: 'Max results' },
+      ...NAMED_FILTER_PARAMS,
     },
     required: [],
   },
   execute: async (params, context) => {
-    return safeExecute('queryAccounts', () =>
-      accountTools.queryAccounts(context.workspaceId, params), params);
+    const { named_filter, named_filters, ...queryParams } = params;
+    const filterResult = await resolveNamedFilters(context.workspaceId, params, 20);
+
+    if (filterResult.additionalWhere) {
+      queryParams.additionalWhere = filterResult.additionalWhere;
+      queryParams.additionalParams = filterResult.additionalParams;
+    }
+
+    const result = await safeExecute('queryAccounts', () =>
+      accountTools.queryAccounts(context.workspaceId, queryParams), params);
+
+    if (filterResult._applied_filters.length > 0 && result && typeof result === 'object' && !('error' in result)) {
+      (result as any)._applied_filters = filterResult._applied_filters;
+    }
+
+    return result;
   },
 };
 
@@ -438,7 +515,7 @@ const getActivitySummary: ToolDefinition = {
 
 const queryConversations: ToolDefinition = {
   name: 'queryConversations',
-  description: 'Search call/meeting recordings and transcripts with filters.',
+  description: 'Search call/meeting recordings and transcripts with filters. Supports named filters for business concept scoping.',
   tier: 'compute',
   parameters: {
     type: 'object',
@@ -448,15 +525,31 @@ const queryConversations: ToolDefinition = {
       endDate: { type: 'string', description: 'Filter conversations before this date' },
       hasTranscript: { type: 'boolean', description: 'Only conversations with transcripts' },
       limit: { type: 'number', description: 'Max results' },
+      ...NAMED_FILTER_PARAMS,
     },
     required: [],
   },
   execute: async (params, context) => {
-    const filters = { ...params };
+    const { named_filter, named_filters, ...queryParams } = params;
+    const filterResult = await resolveNamedFilters(context.workspaceId, params, 20);
+
+    const filters = { ...queryParams };
     if (filters.startDate) filters.startDate = new Date(filters.startDate);
     if (filters.endDate) filters.endDate = new Date(filters.endDate);
-    return safeExecute('queryConversations', () =>
+
+    if (filterResult.additionalWhere) {
+      filters.additionalWhere = filterResult.additionalWhere;
+      filters.additionalParams = filterResult.additionalParams;
+    }
+
+    const result = await safeExecute('queryConversations', () =>
       conversationTools.queryConversations(context.workspaceId, filters), params);
+
+    if (filterResult._applied_filters.length > 0 && result && typeof result === 'object' && !('error' in result)) {
+      (result as any)._applied_filters = filterResult._applied_filters;
+    }
+
+    return result;
   },
 };
 

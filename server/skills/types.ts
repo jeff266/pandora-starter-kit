@@ -187,6 +187,15 @@ export interface SkillExecutionContext {
  * - Command Center drill-through from insight → specific records
  * - Downloadable spreadsheets where every metric is a formula
  */
+export interface AppliedFilterEvidence {
+  filter_id: string;
+  filter_label: string;
+  conditions_summary: string;
+  source: string;
+  confidence: number;
+  confirmed: boolean;
+}
+
 export interface SkillEvidence {
   /** Each claim the narrative makes gets an evidence entry */
   claims: EvidenceClaim[];
@@ -199,6 +208,9 @@ export interface SkillEvidence {
 
   /** The thresholds/parameters used (so users can see the assumptions) */
   parameters: SkillParameter[];
+
+  /** Named filters applied to scope this analysis */
+  applied_filters?: AppliedFilterEvidence[];
 }
 
 export interface EvidenceClaim {

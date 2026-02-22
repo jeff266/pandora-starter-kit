@@ -14,6 +14,77 @@ export interface ConfigMeta {
   last_validated?: string;
 }
 
+// ===== NAMED FILTERS =====
+
+export type FilterOperator =
+  | 'eq' | 'neq'
+  | 'gt' | 'gte' | 'lt' | 'lte'
+  | 'in' | 'not_in'
+  | 'contains' | 'not_contains'
+  | 'is_null' | 'is_not_null'
+  | 'is_true' | 'is_false'
+  | 'between'
+  | 'relative_date';
+
+export interface RelativeDateValue {
+  type: 'relative';
+  unit: 'days' | 'weeks' | 'months' | 'quarters' | 'years';
+  offset: number;
+  anchor?: 'now' | 'period_start' | 'period_end';
+}
+
+export type FilterValue = string | number | boolean | string[] | number[] | [number, number] | RelativeDateValue;
+
+export interface FilterCondition {
+  field: string;
+  operator: FilterOperator;
+  value: FilterValue;
+  cross_object?: {
+    target_object: 'deals' | 'contacts' | 'accounts';
+    join_field: string;
+    aggregate?: 'count' | 'sum' | 'max' | 'min';
+  };
+}
+
+export interface FilterConditionGroup {
+  operator: 'AND' | 'OR';
+  conditions: (FilterCondition | FilterConditionGroup)[];
+}
+
+export type NamedFilterSource = 'default' | 'inferred' | 'user_defined' | 'marketplace';
+
+export interface NamedFilter {
+  id: string;
+  label: string;
+  description?: string;
+  object: 'deals' | 'contacts' | 'accounts' | 'conversations';
+  conditions: FilterConditionGroup;
+  source: NamedFilterSource;
+  confidence: number;
+  inferred_from?: string;
+  confirmed: boolean;
+  created_at: string;
+  updated_at: string;
+  created_by?: string;
+  last_used_at?: string;
+  usage_count?: number;
+}
+
+export interface FilterResolutionMetadata {
+  filter_id: string;
+  filter_label: string;
+  filter_source: string;
+  confidence: number;
+  confirmed: boolean;
+  conditions_summary: string;
+}
+
+export interface FilterResolution {
+  sql: string;
+  params: any[];
+  filter_metadata: FilterResolutionMetadata;
+}
+
 // ===== TOOL FILTERS CONFIG =====
 
 export interface FilterRule {
@@ -84,6 +155,9 @@ export interface WorkspaceConfig {
 
   /** Tool filter configuration for excluding deals from metrics */
   tool_filters?: ToolFiltersConfig;
+
+  /** Named filters — workspace-scoped business concept definitions */
+  named_filters?: NamedFilter[];
 
   /** Has user reviewed and confirmed this config? */
   confirmed: boolean;

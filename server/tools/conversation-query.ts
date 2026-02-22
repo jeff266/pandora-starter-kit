@@ -36,6 +36,8 @@ export interface ConversationFilters {
   sortDir?: 'asc' | 'desc';
   limit?: number;
   offset?: number;
+  additionalWhere?: string;
+  additionalParams?: unknown[];
 }
 
 const LIST_COLUMNS = [
@@ -88,6 +90,14 @@ function buildWhereClause(workspaceId: string, filters: ConversationFilters) {
     conditions.push(`(title ILIKE $${idx} OR summary ILIKE $${idx} OR transcript_text ILIKE $${idx})`);
     params.push(`%${filters.search}%`);
     idx++;
+  }
+
+  if (filters.additionalWhere) {
+    conditions.push(filters.additionalWhere);
+    if (filters.additionalParams) {
+      params.push(...filters.additionalParams);
+      idx += filters.additionalParams.length;
+    }
   }
 
   return { where: conditions.join(' AND '), params, idx };

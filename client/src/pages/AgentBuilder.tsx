@@ -61,6 +61,7 @@ interface Agent {
   focus_questions: string[];
   data_window: DataWindowConfig;
   output_formats: string[];
+  scope_filters?: string[];
   event_config: any;
   created_at: string;
 }
@@ -94,7 +95,15 @@ const SCHEDULE_PRESETS: { label: string; cron: string }[] = [
 ];
 
 type ViewState = 'gallery' | 'builder' | 'list' | 'copilot';
-type BuilderTab = 'audience' | 'focus' | 'skills' | 'data_window' | 'schedule' | 'formats';
+type BuilderTab = 'audience' | 'focus' | 'skills' | 'data_window' | 'scope' | 'schedule' | 'formats';
+
+interface NamedFilterOption {
+  id: string;
+  label: string;
+  description?: string;
+  entity_types: string[];
+  confirmed: boolean;
+}
 
 export default function AgentBuilder() {
   const [view, setView] = useState<ViewState>('list');
@@ -120,6 +129,8 @@ export default function AgentBuilder() {
   const [newQuestion, setNewQuestion] = useState('');
   const [customRole, setCustomRole] = useState('');
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
+  const [scopeFilters, setScopeFilters] = useState<string[]>([]);
+  const [availableFilters, setAvailableFilters] = useState<NamedFilterOption[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [lastRunStatus, setLastRunStatus] = useState<string | null>(null);
   const [latestGeneration, setLatestGeneration] = useState<any>(null);
@@ -127,12 +138,20 @@ export default function AgentBuilder() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [templatesRes, agentsRes] = await Promise.all([
+      const [templatesRes, agentsRes, filtersRes] = await Promise.all([
         api.get('/agent-templates'),
         api.get('/agents-v2'),
+        api.get('/filters').catch(() => ({ filters: [] })),
       ]);
       setTemplates(templatesRes.templates || []);
       setAgents(agentsRes || []);
+      setAvailableFilters((filtersRes.filters || []).map((f: any) => ({
+        id: f.id,
+        label: f.label,
+        description: f.description,
+        entity_types: f.entity_types || [],
+        confirmed: f.confirmed ?? false,
+      })));
     } catch (err) {
       console.error('Failed to load agent data:', err);
     } finally {
@@ -161,6 +180,7 @@ export default function AgentBuilder() {
     setOutputFormats([...t.defaults.output_formats]);
     setSkills([...t.defaults.skills]);
     setSchedule(t.defaults.schedule);
+    setScopeFilters((t.defaults as any).scope_filters || []);
     setEditingAgentId(null);
     setView('builder');
     setActiveTab('audience');
@@ -176,6 +196,7 @@ export default function AgentBuilder() {
     setDataWindow(a.data_window?.primary ? a.data_window : { primary: 'current_week', comparison: 'previous_period' });
     setOutputFormats(a.output_formats || ['slack']);
     setSkills(a.skill_ids || []);
+    setScopeFilters(a.scope_filters || []);
     setSchedule({ type: 'manual' });
     setEditingAgentId(a.id);
     setView('builder');
@@ -192,6 +213,7 @@ export default function AgentBuilder() {
     setDataWindow({ primary: 'current_week', comparison: 'previous_period' });
     setOutputFormats(['slack']);
     setSkills([]);
+    setScopeFilters([]);
     setSchedule({ type: 'manual' });
     setEditingAgentId(null);
     setView('builder');
@@ -217,6 +239,7 @@ export default function AgentBuilder() {
           focus_questions: focusQuestions,
           data_window: dataWindow,
           output_formats: outputFormats,
+          scope_filters: scopeFilters,
           event_config: schedule.type === 'event_prep' ? {
             event_name: schedule.event_name,
             prep_days_before: schedule.prep_days_before,
@@ -232,6 +255,7 @@ export default function AgentBuilder() {
             focus_questions: focusQuestions,
             data_window: dataWindow,
             output_formats: outputFormats,
+            scope_filters: scopeFilters,
             skills,
             schedule,
           },
@@ -248,6 +272,7 @@ export default function AgentBuilder() {
           focus_questions: focusQuestions,
           data_window: dataWindow,
           output_formats: outputFormats,
+          scope_filters: scopeFilters,
           event_config: schedule.type === 'event_prep' ? {
             event_name: schedule.event_name,
             prep_days_before: schedule.prep_days_before,
@@ -495,6 +520,7 @@ export default function AgentBuilder() {
     { key: 'focus', label: 'Focus Questions' },
     { key: 'skills', label: 'Skills' },
     { key: 'data_window', label: 'Data Window' },
+    { key: 'scope', label: 'Scope Filters' },
     { key: 'schedule', label: 'Schedule' },
     { key: 'formats', label: 'Output Formats' },
   ];
@@ -760,6 +786,81 @@ export default function AgentBuilder() {
       )}
 
       {/* ─── Schedule Tab ────────────────────────────── */}
+      {activeTab === 'scope' && (
+        <div>
+          <SectionLabel>Named Filters</SectionLabel>
+          <p style={{ font: `400 13px ${fonts.sans}`, color: colors.textSecondary, marginBottom: 16 }}>
+            Scope this agent's analysis using workspace-defined business concepts. When applied, every skill query will be filtered to match these definitions.
+          </p>
+          {availableFilters.length === 0 ? (
+            <div style={{ padding: 20, textAlign: 'center', color: colors.textSecondary, font: `400 13px ${fonts.sans}` }}>
+              No named filters defined yet. Create filters in workspace settings to scope agent analysis.
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {availableFilters.map(f => {
+                const isSelected = scopeFilters.includes(f.id);
+                return (
+                  <button
+                    key={f.id}
+                    onClick={() => setScopeFilters(prev => isSelected ? prev.filter(x => x !== f.id) : [...prev, f.id])}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: 12,
+                      padding: '12px 16px',
+                      background: isSelected ? colors.accentSoft : colors.surfaceRaised,
+                      border: `1px solid ${isSelected ? colors.accent : colors.border}`,
+                      borderRadius: 8,
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    <div style={{
+                      width: 18, height: 18, borderRadius: 4, flexShrink: 0, marginTop: 1,
+                      border: `2px solid ${isSelected ? colors.accent : colors.border}`,
+                      background: isSelected ? colors.accent : 'transparent',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      color: '#fff', fontSize: 11, fontWeight: 700,
+                    }}>
+                      {isSelected ? '\u2713' : ''}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ font: `500 13px ${fonts.sans}`, color: colors.text, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        {f.label}
+                        {!f.confirmed && (
+                          <span style={{ font: `400 10px ${fonts.sans}`, color: colors.warning, background: `${colors.warning}15`, padding: '1px 6px', borderRadius: 4 }}>
+                            unconfirmed
+                          </span>
+                        )}
+                      </div>
+                      {f.description && (
+                        <div style={{ font: `400 12px ${fonts.sans}`, color: colors.textSecondary, marginTop: 2 }}>
+                          {f.description}
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
+                        {f.entity_types.map(et => (
+                          <span key={et} style={{ font: `400 10px ${fonts.sans}`, color: colors.textSecondary, background: colors.surface, padding: '1px 6px', borderRadius: 3 }}>
+                            {et}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {scopeFilters.length > 0 && (
+            <div style={{ marginTop: 12, padding: '8px 12px', background: colors.accentSoft, borderRadius: 6, font: `400 12px ${fonts.sans}`, color: colors.accent }}>
+              {scopeFilters.length} filter{scopeFilters.length > 1 ? 's' : ''} selected — all skill queries will be scoped to these definitions
+            </div>
+          )}
+        </div>
+      )}
+
       {activeTab === 'schedule' && (
         <div>
           <SectionLabel>Trigger Type</SectionLabel>

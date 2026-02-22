@@ -659,6 +659,8 @@ export class SkillRuntime {
 
     const consultantBlock = consultantContext ? `\n\n${consultantContext}` : '';
 
+    const scopeBlock = this.buildScopeNotice(context);
+
     return `You are analyzing GTM data for a workspace.
 
 Business Context:
@@ -666,7 +668,7 @@ Business Context:
 - Avg Deal Size: $${(business_model as any).acv_range?.avg || 'unknown'}
 - Sales Cycle: ${(business_model as any).sales_cycle_days || 'unknown'} days
 - Revenue Target: $${(goals_and_targets as any).revenue_target || 'unknown'}
-- Pipeline Coverage Target: ${(goals_and_targets as any).pipeline_coverage_target || 'unknown'}x${consultantBlock}
+- Pipeline Coverage Target: ${(goals_and_targets as any).pipeline_coverage_target || 'unknown'}x${consultantBlock}${scopeBlock}
 
 Your task: ${step.name}
 
@@ -675,6 +677,34 @@ Important:
 - Don't generalize - use actual data
 - Focus on actionable insights
 - Format your response clearly`;
+  }
+
+  private buildScopeNotice(context: SkillExecutionContext): string {
+    const appliedFilters: any[] = [];
+    for (const value of Object.values(context.stepResults || {})) {
+      if (value && typeof value === 'object' && '_applied_filters' in (value as any)) {
+        const filters = (value as any)._applied_filters;
+        if (Array.isArray(filters)) {
+          appliedFilters.push(...filters);
+        }
+      }
+    }
+
+    if (appliedFilters.length === 0) return '';
+
+    const seen = new Set<string>();
+    const unique = appliedFilters.filter(f => {
+      if (seen.has(f.filter_id)) return false;
+      seen.add(f.filter_id);
+      return true;
+    });
+
+    const lines = unique.map(f => {
+      const confidence = f.confirmed ? 'confirmed by admin' : `confidence: ${(f.confidence * 100).toFixed(0)}%, NOT YET CONFIRMED by admin`;
+      return `- "${f.filter_label}" — defined as: ${f.conditions_summary}\n  Source: ${f.filter_source} (${confidence})`;
+    });
+
+    return `\n\nSCOPE NOTICE:\nThis analysis is scoped using the following named filters:\n${lines.join('\n')}\n\nIf any filter definition seems wrong for the analysis, flag it in your synthesis.`;
   }
 
   private renderTemplate(template: string, context: SkillExecutionContext): string {

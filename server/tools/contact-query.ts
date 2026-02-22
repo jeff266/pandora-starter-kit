@@ -34,6 +34,8 @@ export interface ContactFilters {
   sortDir?: 'asc' | 'desc';
   limit?: number;
   offset?: number;
+  additionalWhere?: string;
+  additionalParams?: unknown[];
 }
 
 function buildWhereClause(workspaceId: string, filters: ContactFilters) {
@@ -75,6 +77,14 @@ function buildWhereClause(workspaceId: string, filters: ContactFilters) {
     conditions.push(`(first_name ILIKE $${idx} OR last_name ILIKE $${idx} OR email ILIKE $${idx})`);
     params.push(`%${filters.search}%`);
     idx++;
+  }
+
+  if (filters.additionalWhere) {
+    conditions.push(filters.additionalWhere);
+    if (filters.additionalParams) {
+      params.push(...filters.additionalParams);
+      idx += filters.additionalParams.length;
+    }
   }
 
   return { where: conditions.join(' AND '), params, idx };
