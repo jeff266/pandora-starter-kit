@@ -52,7 +52,7 @@ const ENTITY_TYPES = [
 ];
 
 const OPERATORS: Record<string, { label: string; types: string[] }> = {
-  eq: { label: 'equals', types: ['text', 'number', 'date'] },
+  eq: { label: 'equals', types: ['text', 'number', 'date', 'boolean'] },
   neq: { label: 'not equals', types: ['text', 'number', 'date'] },
   gt: { label: 'greater than', types: ['number', 'date'] },
   gte: { label: 'at least', types: ['number', 'date'] },
@@ -63,6 +63,8 @@ const OPERATORS: Record<string, { label: string; types: string[] }> = {
   is_null: { label: 'is empty', types: ['text', 'number', 'date'] },
   is_not_null: { label: 'is not empty', types: ['text', 'number', 'date'] },
   in: { label: 'is one of', types: ['text'] },
+  is_true: { label: 'is true', types: ['boolean'] },
+  is_false: { label: 'is false', types: ['boolean'] },
 };
 
 function getOperatorsForType(type: string) {
@@ -399,20 +401,27 @@ function FilterModal({ filter, onClose, onSave }: {
     filter?.conditions?.conditions || [{ field: '', operator: 'eq', value: '' }]
   );
   const [groupOp, setGroupOp] = useState<'AND' | 'OR'>(filter?.conditions?.operator || 'AND');
+  const [standardFields, setStandardFields] = useState<FieldOption[]>([]);
+  const [customFields, setCustomFields] = useState<FieldOption[]>([]);
   const [fieldOptions, setFieldOptions] = useState<FieldOption[]>([]);
+  const [fieldLoading, setFieldLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
   useEffect(() => {
+    setFieldLoading(true);
     api.get(`/filters/field-options?object=${object}`)
       .then(res => {
         const std = res.standard_fields || [];
         const cust = res.custom_fields || [];
+        setStandardFields(std);
+        setCustomFields(cust);
         setFieldOptions([...std, ...cust]);
       })
-      .catch(() => setFieldOptions([]));
+      .catch(() => { setStandardFields([]); setCustomFields([]); setFieldOptions([]); })
+      .finally(() => setFieldLoading(false));
   }, [object]);
 
   const autoId = (lbl: string) => lbl.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40);
@@ -586,7 +595,7 @@ function FilterModal({ filter, onClose, onSave }: {
                 const fType = getFieldType(cond.field);
                 const fValues = getFieldValues(cond.field);
                 const operators = getOperatorsForType(fType);
-                const needsValue = cond.operator !== 'is_null' && cond.operator !== 'is_not_null';
+                const needsValue = !['is_null', 'is_not_null', 'is_true', 'is_false'].includes(cond.operator);
 
                 return (
                   <div key={idx} style={{
@@ -596,11 +605,25 @@ function FilterModal({ filter, onClose, onSave }: {
                   }}>
                     <select
                       value={cond.field}
-                      onChange={e => updateCondition(idx, { field: e.target.value, operator: 'eq', value: '' })}
+                      onChange={e => {
+                        const newField = e.target.value;
+                        const newType = fieldOptions.find(fo => fo.field === newField)?.type || 'text';
+                        const defaultOp = newType === 'boolean' ? 'is_true' : 'eq';
+                        updateCondition(idx, { field: newField, operator: defaultOp, value: '' });
+                      }}
                       style={selectStyle}
                     >
-                      <option value="">Field...</option>
-                      {fieldOptions.map(f => <option key={f.field} value={f.field}>{f.label}</option>)}
+                      <option value="">{fieldLoading ? 'Loading...' : 'Field...'}</option>
+                      {standardFields.length > 0 && (
+                        <optgroup label="Standard Fields">
+                          {standardFields.map(f => <option key={f.field} value={f.field}>{f.label}</option>)}
+                        </optgroup>
+                      )}
+                      {customFields.length > 0 && (
+                        <optgroup label="Custom Fields">
+                          {customFields.map(f => <option key={f.field} value={f.field}>{f.label}</option>)}
+                        </optgroup>
+                      )}
                     </select>
 
                     <select
@@ -612,7 +635,16 @@ function FilterModal({ filter, onClose, onSave }: {
                     </select>
 
                     {needsValue && (
-                      fValues.length > 0 ? (
+                      fType === 'boolean' ? (
+                        <select
+                          value={cond.value ?? ''}
+                          onChange={e => updateCondition(idx, { value: e.target.value })}
+                          style={selectStyle}
+                        >
+                          <option value="true">true</option>
+                          <option value="false">false</option>
+                        </select>
+                      ) : fValues.length > 0 ? (
                         <select
                           value={cond.value}
                           onChange={e => updateCondition(idx, { value: e.target.value })}
