@@ -178,7 +178,7 @@ const queryDeals: ToolDefinition = {
   },
   execute: async (params, context) => {
     const { named_filter, named_filters, ...queryParams } = params;
-    const filterResult = await resolveNamedFilters(context.workspaceId, params, 20);
+    const filterResult = await resolveNamedFilters(context.workspaceId, params, 1);
 
     if (filterResult.additionalWhere) {
       queryParams.additionalWhere = filterResult.additionalWhere;
@@ -301,7 +301,7 @@ const queryContacts: ToolDefinition = {
   },
   execute: async (params, context) => {
     const { named_filter, named_filters, ...queryParams } = params;
-    const filterResult = await resolveNamedFilters(context.workspaceId, params, 20);
+    const filterResult = await resolveNamedFilters(context.workspaceId, params, 1);
 
     if (filterResult.additionalWhere) {
       queryParams.additionalWhere = filterResult.additionalWhere;
@@ -391,7 +391,7 @@ const queryAccounts: ToolDefinition = {
   },
   execute: async (params, context) => {
     const { named_filter, named_filters, ...queryParams } = params;
-    const filterResult = await resolveNamedFilters(context.workspaceId, params, 20);
+    const filterResult = await resolveNamedFilters(context.workspaceId, params, 1);
 
     if (filterResult.additionalWhere) {
       queryParams.additionalWhere = filterResult.additionalWhere;
@@ -531,7 +531,7 @@ const queryConversations: ToolDefinition = {
   },
   execute: async (params, context) => {
     const { named_filter, named_filters, ...queryParams } = params;
-    const filterResult = await resolveNamedFilters(context.workspaceId, params, 20);
+    const filterResult = await resolveNamedFilters(context.workspaceId, params, 1);
 
     const filters = { ...queryParams };
     if (filters.startDate) filters.startDate = new Date(filters.startDate);

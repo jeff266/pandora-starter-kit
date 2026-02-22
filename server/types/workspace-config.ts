@@ -43,6 +43,7 @@ export interface FilterCondition {
     target_object: 'deals' | 'contacts' | 'accounts';
     join_field: string;
     aggregate?: 'count' | 'sum' | 'max' | 'min';
+    where?: string;
   };
 }
 

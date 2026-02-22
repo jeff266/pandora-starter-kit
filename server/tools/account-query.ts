@@ -110,11 +110,13 @@ function buildWhereClause(workspaceId: string, filters: AccountFilters) {
   }
 
   if (filters.additionalWhere) {
-    conditions.push(filters.additionalWhere);
-    if (filters.additionalParams) {
+    let renumbered = filters.additionalWhere;
+    if (filters.additionalParams && filters.additionalParams.length > 0) {
+      renumbered = renumbered.replace(/\$(\d+)/g, (_match, num) => `$${parseInt(num, 10) - 1 + idx}`);
       params.push(...filters.additionalParams);
       idx += filters.additionalParams.length;
     }
+    conditions.push(renumbered);
   }
 
   return { where: conditions.join(' AND '), params, idx };

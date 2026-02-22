@@ -18,7 +18,11 @@ async function saveWorkspaceFilters(workspaceId: string, filters: NamedFilter[])
   await query(
     `UPDATE context_layer
      SET definitions = jsonb_set(
-       COALESCE(definitions, '{}'::jsonb),
+       jsonb_set(
+         COALESCE(definitions, '{}'::jsonb),
+         '{workspace_config}',
+         COALESCE(definitions->'workspace_config', '{}'::jsonb)
+       ),
        '{workspace_config,named_filters}',
        $2::jsonb
      ),

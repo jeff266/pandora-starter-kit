@@ -478,7 +478,6 @@ export class WorkspaceConfigLoader {
         conditions: {
           operator: 'AND',
           conditions: [
-            { field: 'is_open', operator: 'is_true', value: true },
             { field: 'stage_normalized', operator: 'not_in', value: ['closed_won', 'closed_lost'] },
           ],
         },
@@ -492,12 +491,12 @@ export class WorkspaceConfigLoader {
       {
         id: 'new_logo',
         label: 'New Logo Deal',
-        description: 'Deals at accounts with no prior closed-won deals',
+        description: 'Open deals at accounts with no prior closed-won deals',
         object: 'deals',
         conditions: {
           operator: 'AND',
           conditions: [
-            { field: 'is_open', operator: 'is_true', value: true },
+            { field: 'stage_normalized', operator: 'not_in', value: ['closed_won', 'closed_lost'] },
             {
               field: '*',
               operator: 'eq',
@@ -506,6 +505,7 @@ export class WorkspaceConfigLoader {
                 target_object: 'deals',
                 join_field: 'account_id',
                 aggregate: 'count',
+                where: "stage_normalized = 'closed_won'",
               },
             },
           ],
@@ -520,12 +520,12 @@ export class WorkspaceConfigLoader {
       {
         id: 'stale_deal',
         label: 'Stale Deal',
-        description: 'Deals with no activity beyond the workspace stale threshold',
+        description: 'Open deals with no activity beyond the workspace stale threshold',
         object: 'deals',
         conditions: {
           operator: 'AND',
           conditions: [
-            { field: 'is_open', operator: 'is_true', value: true },
+            { field: 'stage_normalized', operator: 'not_in', value: ['closed_won', 'closed_lost'] },
             { field: 'days_in_stage', operator: 'gte', value: 14 },
           ],
         },
@@ -544,7 +544,7 @@ export class WorkspaceConfigLoader {
         conditions: {
           operator: 'AND',
           conditions: [
-            { field: 'is_open', operator: 'is_true', value: true },
+            { field: 'stage_normalized', operator: 'not_in', value: ['closed_won', 'closed_lost'] },
             { field: 'close_date', operator: 'relative_date', value: { type: 'relative', unit: 'quarters', offset: 0, anchor: 'period_end' } },
           ],
         },
@@ -563,7 +563,7 @@ export class WorkspaceConfigLoader {
         conditions: {
           operator: 'AND',
           conditions: [
-            { field: 'is_open', operator: 'is_true', value: true },
+            { field: 'stage_normalized', operator: 'not_in', value: ['closed_won', 'closed_lost'] },
             { field: 'deal_risk', operator: 'gte', value: 70 },
           ],
         },

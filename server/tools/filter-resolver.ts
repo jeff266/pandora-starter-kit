@@ -199,9 +199,11 @@ export class FilterResolver {
     const co = condition.cross_object!;
     const subAlias = `_sub_${co.target_object}`;
 
+    const extraWhere = co.where ? ` AND ${subAlias}.${co.where}` : '';
+
     if (co.aggregate === 'count' && condition.operator === 'eq' && condition.value === 0) {
       return {
-        sql: `NOT EXISTS (SELECT 1 FROM ${co.target_object} ${subAlias} WHERE ${subAlias}.${co.join_field} = ${alias}id AND ${subAlias}.workspace_id = ${alias}workspace_id)`,
+        sql: `NOT EXISTS (SELECT 1 FROM ${co.target_object} ${subAlias} WHERE ${subAlias}.${co.join_field} = ${alias}id AND ${subAlias}.workspace_id = ${alias}workspace_id${extraWhere})`,
         leafParams: [],
       };
     }
@@ -211,7 +213,7 @@ export class FilterResolver {
     const aggExpr = aggFn === 'count' ? 'COUNT(*)' : `${aggFn.toUpperCase()}(${aggField})`;
 
     return {
-      sql: `(SELECT ${aggExpr} FROM ${co.target_object} ${subAlias} WHERE ${subAlias}.${co.join_field} = ${alias}id AND ${subAlias}.workspace_id = ${alias}workspace_id) ${this.operatorToSQL(condition.operator)} $${paramIndex}`,
+      sql: `(SELECT ${aggExpr} FROM ${co.target_object} ${subAlias} WHERE ${subAlias}.${co.join_field} = ${alias}id AND ${subAlias}.workspace_id = ${alias}workspace_id${extraWhere}) ${this.operatorToSQL(condition.operator)} $${paramIndex}`,
       leafParams: [condition.value],
     };
   }
