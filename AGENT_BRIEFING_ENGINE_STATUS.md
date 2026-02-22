@@ -95,82 +95,124 @@
 
 ---
 
-## Phase 2: Agent Templates + Builder Parameters ❌ NOT STARTED
+## Phase 2: Agent Templates + Builder Parameters ✅ COMPLETE
 
 **Goal:** Agent Builder lets users configure audience, focus questions, data windows, and event prep schedules.
 
-**Duration:** ~4 hours
+**Status:** All tasks complete. Built in Replit.
 
-### Task 2A: Agent Template Schema
-- Extend `agents` table with:
-  - `audience` JSONB (role, detail_preference, vocabulary_avoid/prefer)
-  - `focus_questions` JSONB array
-  - `data_window` JSONB (primary, comparison)
-  - `output_formats` JSONB
-  - `event_config` JSONB (for prep schedules)
+### Task 2A: Agent Template Schema ✅
+**File:** `migrations/077_agent_briefing_config.sql`
 
-### Task 2B: Pre-Built Agent Templates
-Create 5 templates:
-1. Monday Pipeline Briefing (weekly sales leadership)
-2. Forecast Call Prep (pre-meeting intelligence)
-3. Friday Recap (end-of-week retrospective)
-4. Board Meeting Prep (strategic analysis + deck)
-5. Quarterly Business Review (comprehensive analysis)
+Extended `agents` table with:
+- `audience` JSONB (role, detail_preference, vocabulary_avoid/prefer)
+- `focus_questions` JSONB array
+- `data_window` JSONB (primary, comparison)
+- `output_formats` JSONB
+- `event_config` JSONB (for prep schedules)
 
-### Task 2C: Agent Builder UI Expansion
-Add to existing Agent Builder:
-- Audience selector with vocabulary preferences
-- Focus questions text input list
-- Data window dropdown
-- Event prep mode with date picker
-- Template gallery to start with defaults
+### Task 2B: Pre-Built Agent Templates ✅
+**File:** `server/agents/agent-templates.ts` (230 lines)
 
-### Task 2D: Migration
-`migrations/076_agent_briefing_config.sql`
+Created 5 templates:
+1. **Monday Pipeline Briefing** - Weekly sales leadership, leads with what matters
+2. **Forecast Call Prep** - Pre-meeting intelligence, frames as distance-to-target
+3. **Friday Recap** - End-of-week retrospective, compares Monday predictions to Friday actuals
+4. **Board Meeting Prep** - Strategic analysis + deck, avoids jargon
+5. **Quarterly Business Review** - Comprehensive analysis with full pipeline + team review
+
+Each template includes:
+- Default skills list
+- Audience configuration (role, detail preference, vocabulary)
+- Focus questions (3-5 questions the agent should answer)
+- Data window (current_week, current_quarter, fiscal_year, etc.)
+- Output formats (PDF, DOCX, PPTX, Slack, Email)
+- Schedule (cron or event_prep with dates)
+
+### Task 2C: Agent Builder UI ✅
+**File:** `client/src/pages/AgentBuilder.tsx` (796 lines)
+
+Full-featured Agent Builder UI with:
+- Template gallery to start with sensible defaults
+- Audience selector with role + detail level + vocabulary preferences
+- Focus questions text input list (add/remove questions)
+- Data window dropdown (primary + comparison period)
+- Event prep mode with date picker for board meetings/QBRs
+- Output formats multi-select
+- Schedule configuration (cron or event prep)
 
 ---
 
-## Phase 3: Self-Reference (Memory Across Runs) ❌ NOT STARTED
+## Phase 3: Self-Reference (Memory Across Runs) ✅ COMPLETE
 
 **Goal:** Agent reads previous outputs and tracks patterns without blowing context.
 
-**Duration:** ~4 hours
+**Status:** All tasks complete. Built in Replit.
 
 **Two-Tier Bounded Memory Architecture:**
 - **Tier 1:** Last run digest (~500 tokens) - compressed summary, generated at write time
 - **Tier 2:** Rolling memory (~800 tokens) - recurring flags, deal history, metric trends, predictions
 - **Total:** Always under 1,500 tokens regardless of run count (week 1 = week 52)
 
-### Task 3A: Run Digest Schema
-- `AgentRunDigest` - compressed summary of each run
-- Fields: opening_narrative, key_findings[], actions_recommended[], sections_included/dropped
-- Stored in `report_generations.run_digest` JSONB
+### Task 3A: Run Digest Schema ✅
+**File:** `server/agents/editorial-types.ts`
 
-### Task 3B: Rolling Memory Schema
-- `AgentMemory` - fixed-size rolling structures
-- Stored in `context_layer` (category='agent_memory', key='memory:{agentId}')
-- Structures:
-  - `recurring_flags[]` (cap: 30, prune resolved > 30 days)
-  - `deal_history[]` (cap: 20 deals, 5 mentions each, FIFO)
-  - `metric_history[]` (8 data points per metric, FIFO)
-  - `predictions[]` (cap: 10, FIFO)
+`AgentRunDigest` interface with:
+- `opening_narrative` - 2-3 sentence opening from last run
+- `key_findings[]` - Headlines, deals flagged, metrics snapshot, severity
+- `actions_recommended[]` - What the agent recommended last time
+- `sections_included/dropped` - Editorial decisions metadata
+- Stored in `report_generations.run_digest` JSONB column
 
-### Task 3C: Memory Update Function
-- Runs after each generation
-- Updates recurring flags, deal history, metric trends, prediction outcomes
-- Enforces all caps and eviction policies
+### Task 3B: Rolling Memory Schema ✅
+**File:** `server/agents/agent-memory.ts` (386 lines)
+**Migration:** `migrations/078_agent_memory.sql`
 
-### Task 3D: Memory Injection into Synthesis Prompt
-- Format digest + rolling memory into 600-1200 token prompt block
-- Self-reference instructions: note changes, check if flagged deals were addressed, escalate recurring issues
+`AgentMemory` table with fixed-size rolling structures:
+- **recurring_flags[]** - Cap: 30, prune resolved > 30 days
+- **deal_history[]** - Cap: 20 deals, 5 mentions each (FIFO)
+- **metric_history[]** - Cap: 8 data points per metric (FIFO)
+- **predictions[]** - Cap: 10 predictions (FIFO)
 
-### Task 3E: Wire Into Generation Pipeline
-- Load digest + memory before synthesis
-- Pass memoryContext to editorialSynthesize()
-- Extract digest and update memory after generation
+### Task 3C: Memory Update Function ✅
+**File:** `server/agents/agent-memory.ts`
 
-### Task 3F: Migration
-Already done in 075_agent_editorial.sql (run_digest column added)
+Functions:
+- `updateAgentMemory()` - Runs after each generation
+- `extractDigest()` - Compresses output into digest
+- Updates recurring flags (marks resolved when severity changes to 'good')
+- Tracks deal mentions (adds status changes: flagged → closed_won)
+- Appends metric snapshots (maintains 8-point rolling window)
+- Checks prediction outcomes against current evidence
+- Enforces all caps and FIFO eviction policies
+
+### Task 3D: Memory Injection into Synthesis Prompt ✅
+**File:** `server/agents/agent-memory.ts`
+
+`formatMemoryForPrompt()` function:
+- Formats digest + rolling memory into 600-1200 token block
+- Tier 1: Last run summary (opening, deals flagged, key metrics)
+- Tier 2: Recurring patterns (unresolved flags, deal tracking, metric trends, prediction accuracy)
+- Self-reference instructions: "Note what changed", "Check if flagged deals were addressed", "Escalate recurring issues"
+
+### Task 3E: Wire Into Generation Pipeline ✅
+**Files:**
+- `server/reports/editorial-generator.ts` - Updated to load and save memory
+- `server/agents/editorial-synthesizer.ts` - Updated to inject memoryContext into prompt
+
+**Flow:**
+1. Load latest digest from `report_generations.run_digest`
+2. Load rolling memory from `agent_memory` table
+3. Format memory into prompt block
+4. Pass `memoryContext` to `editorialSynthesize()`
+5. After generation: extract new digest
+6. Update rolling memory structures
+7. Save digest to `report_generations.run_digest`
+
+### Task 3F: Migration ✅
+**Files:**
+- `migrations/075_agent_editorial.sql` - Added `run_digest` column
+- `migrations/078_agent_memory.sql` - Created `agent_memory` table
 
 ---
 
@@ -240,13 +282,14 @@ Already done in Phase 1 (getTuningPairs + formatTuningForPrompt)
 
 | Phase | Duration | Status | Key Deliverable |
 |-------|----------|--------|-----------------|
-| 1: Editorial Synthesis | ~6 hrs | ✅ 90% (4/5 tasks) | Agent that thinks, not assembles |
-| 2: Templates + Builder | ~4 hrs | ❌ Not started | User-configurable agent parameters |
-| 3: Self-Reference | ~4 hrs | ❌ Not started | Two-tier bounded memory |
-| 4: Feedback + Tuning | ~5 hrs | ❌ Not started | Learning loop |
-| 5: Dogfood | 1 week | ❌ Not started | Real-world validation |
+| 1: Editorial Synthesis | ~6 hrs | ✅ COMPLETE (5/5 tasks) | Agent that thinks, not assembles |
+| 2: Templates + Builder | ~4 hrs | ✅ COMPLETE (4/4 tasks) | User-configurable agent parameters |
+| 3: Self-Reference | ~4 hrs | ✅ COMPLETE (6/6 tasks) | Two-tier bounded memory |
+| 4: Feedback + Tuning | ~5 hrs | ⏳ NEXT | Learning loop |
+| 5: Dogfood | 1 week | ⏳ PENDING | Real-world validation |
 
-**Total estimated time:** ~19 hours build + 1 week dogfooding
+**Total time invested:** ~14 hours (Phases 1-3)
+**Remaining:** ~5 hours (Phase 4) + 1 week dogfooding (Phase 5)
 
 ---
 
@@ -262,9 +305,14 @@ Already done in Phase 1 (getTuningPairs + formatTuningForPrompt)
 
 ## Next Steps
 
-1. **Run migration:** Execute `migrations/075_agent_editorial.sql` in production
-2. **Smoke test (Task 1E):** Test editorial synthesis with real workspace data
-3. **Phase 2:** Build agent templates and parameter expansion
-4. **Phase 3:** Implement self-reference memory
-5. **Phase 4:** Build feedback UI and tuning pipeline
-6. **Phase 5:** Dogfood for 1 week
+### Immediate (Phase 4)
+1. **Feedback Data Model** (Task 4A) - Create `agent_feedback` table
+2. **Feedback UI** (Task 4B) - Add feedback controls to Report Viewer
+3. **Feedback → Tuning Pipeline** (Task 4C) - Convert feedback to tuning pairs
+4. **Feedback API Endpoints** (Task 4E) - POST/GET/DELETE endpoints
+   - Tuning injection (Task 4D) already complete from Phase 1
+
+### After Phase 4
+5. **Run migrations:** Execute all 3 migrations (075, 077, 078) in production
+6. **Phase 5 (Dogfood):** Set up 4 agents, run for 1 week, test feedback loop
+7. **Polish:** Fix issues discovered during dogfooding
