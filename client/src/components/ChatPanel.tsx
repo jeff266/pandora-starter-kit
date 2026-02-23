@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { api } from '../lib/api';
+import { useDemoMode } from '../contexts/DemoModeContext';
 
 interface ToolCall {
   tool: string;
@@ -51,6 +52,7 @@ interface ChatPanelProps {
 
 export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
   const isMobile = useIsMobile();
+  const { anon } = useDemoMode();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -219,7 +221,7 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
                 {msg.role === 'user' ? 'You' : 'Pandora'}
               </div>
               <div style={styles.messageContent}>
-                {formatMarkdown(msg.content)}
+                {formatMarkdown(anon.text(msg.content))}
               </div>
               {msg.role === 'assistant' && (
                 <ChainOfThoughtPanel

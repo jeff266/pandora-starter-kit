@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useState, useMemo } from 'react';
+import React, { createContext, useContext, useState, useMemo, useEffect } from 'react';
 import { anonymizer } from '../lib/anonymize';
+import { api } from '../lib/api';
 
 interface DemoModeContextType {
   isDemoMode: boolean;
@@ -36,12 +37,34 @@ export function DemoModeProvider({ children }: { children: React.ReactNode }) {
     return localStorage.getItem('pandora_demo_mode') === 'true';
   });
 
+  const seedAnonymizer = async () => {
+    try {
+      const data = await api.get('/demo/entity-names');
+      // Pre-seed mappings by calling anonymize methods
+      data.companies?.forEach((name: string) => anonymizer.anonymizeCompany(name));
+      data.deals?.forEach((name: string) => anonymizer.anonymizeDeal(name));
+      data.persons?.forEach((name: string) => anonymizer.anonymizePerson(name));
+    } catch (err) {
+      console.error('[DemoMode] Failed to seed anonymizer:', err);
+    }
+  };
+
   const toggleDemoMode = () => {
     const next = !isDemoMode;
     setIsDemoMode(next);
     localStorage.setItem('pandora_demo_mode', next ? 'true' : 'false');
-    if (next) anonymizer.reset();
+    if (next) {
+      anonymizer.reset();
+      seedAnonymizer();
+    }
   };
+
+  // Pre-seed on mount if demo mode is already on
+  useEffect(() => {
+    if (isDemoMode) {
+      seedAnonymizer();
+    }
+  }, []);
 
   const anon = useMemo(() => {
     if (!isDemoMode) return passthrough;

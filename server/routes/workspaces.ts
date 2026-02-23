@@ -254,4 +254,51 @@ router.post('/:id/schema/refresh', requireWorkspaceAccess, async (req, res) => {
   }
 });
 
+// GET /api/workspaces/:id/demo/entity-names
+// Returns entity names for Demo Mode pre-seeding
+router.get('/:id/demo/entity-names', requireWorkspaceAccess, async (req, res) => {
+  try {
+    const { id: workspaceId } = req.params;
+
+    // Query company names
+    const companiesResult = await query(
+      `SELECT DISTINCT name FROM accounts
+       WHERE workspace_id = $1 AND name IS NOT NULL
+       ORDER BY name LIMIT 200`,
+      [workspaceId]
+    );
+
+    // Query deal names
+    const dealsResult = await query(
+      `SELECT DISTINCT name FROM deals
+       WHERE workspace_id = $1 AND name IS NOT NULL
+       ORDER BY name LIMIT 200`,
+      [workspaceId]
+    );
+
+    // Query contact names (first_name and last_name)
+    const contactsResult = await query(
+      `SELECT DISTINCT first_name, last_name FROM contacts
+       WHERE workspace_id = $1
+       AND (first_name IS NOT NULL OR last_name IS NOT NULL)
+       ORDER BY first_name, last_name LIMIT 200`,
+      [workspaceId]
+    );
+
+    const companies = companiesResult.rows.map((row: any) => row.name);
+    const deals = dealsResult.rows.map((row: any) => row.name);
+    const persons = contactsResult.rows
+      .map((row: any) => {
+        const parts = [row.first_name, row.last_name].filter(Boolean);
+        return parts.join(' ');
+      })
+      .filter(name => name.length > 0);
+
+    res.json({ companies, deals, persons });
+  } catch (err) {
+    console.error('[workspaces] Error fetching demo entity names:', err instanceof Error ? err.message : err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 export default router;
