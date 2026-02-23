@@ -5,8 +5,8 @@
 -- Webhook Tokens (Inbound Authentication)
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS webhook_tokens (
-  id TEXT PRIMARY KEY DEFAULT ('wht_' || gen_random_uuid()),
-  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   token TEXT NOT NULL UNIQUE,
   is_active BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -27,8 +27,8 @@ COMMENT ON COLUMN webhook_tokens.is_active IS 'Only one active token per workspa
 -- Outbound Webhook Configuration
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS webhook_outbound_configs (
-  id TEXT PRIMARY KEY DEFAULT ('who_' || gen_random_uuid()),
-  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   endpoint_url TEXT NOT NULL,
   is_active BOOLEAN NOT NULL DEFAULT true,
   last_test_at TIMESTAMPTZ,
@@ -48,8 +48,8 @@ COMMENT ON COLUMN webhook_outbound_configs.endpoint_url IS 'Clay, Zapier, Make, 
 -- Outbound Delivery Log
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS webhook_delivery_log (
-  id TEXT PRIMARY KEY DEFAULT ('wdl_' || gen_random_uuid()),
-  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   batch_id TEXT NOT NULL,
   endpoint_url TEXT NOT NULL,
   payload JSONB NOT NULL,
@@ -76,8 +76,8 @@ COMMENT ON COLUMN webhook_delivery_log.retry_at IS 'Scheduled time for next retr
 -- Dead Letter Queue
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS webhook_dead_letter_queue (
-  id TEXT PRIMARY KEY DEFAULT ('dlq_' || gen_random_uuid()),
-  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   batch_id TEXT NOT NULL,
   endpoint_url TEXT NOT NULL,
   payload JSONB NOT NULL,
@@ -100,8 +100,8 @@ COMMENT ON COLUMN webhook_dead_letter_queue.replayed IS 'Whether admin has manua
 -- Inbound Processing Log (for deduplication)
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS webhook_inbound_log (
-  id TEXT PRIMARY KEY DEFAULT ('wil_' || gen_random_uuid()),
-  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   batch_id TEXT NOT NULL,
   records_received INTEGER NOT NULL,
   records_processed INTEGER NOT NULL,

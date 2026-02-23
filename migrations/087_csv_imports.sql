@@ -5,8 +5,8 @@
 -- CSV Imports
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS csv_imports (
-  id TEXT PRIMARY KEY DEFAULT ('csvi_' || gen_random_uuid()),
-  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   filename TEXT NOT NULL,
   file_size INTEGER NOT NULL,
   row_count INTEGER NOT NULL,

@@ -3,8 +3,8 @@
 -- Used by: ICP Discovery skill for pattern detection
 
 CREATE TABLE IF NOT EXISTS enriched_accounts (
-  id TEXT PRIMARY KEY DEFAULT ('enr_' || gen_random_uuid()),
-  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
 
   -- Account matching fields (at least one required)
   domain TEXT,
