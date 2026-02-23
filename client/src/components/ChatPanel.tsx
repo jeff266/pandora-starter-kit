@@ -638,12 +638,21 @@ function formatMarkdown(text: string): JSX.Element[] {
   lines.forEach((line, i) => {
     let content: JSX.Element;
 
-    if (line.startsWith('**') && line.endsWith('**')) {
+    // Handle headers
+    if (line.startsWith('#### ')) {
+      content = <div key={i} style={{ fontSize: 14, fontWeight: 600, color: '#cbd5e1', marginTop: 8, marginBottom: 4 }}>{formatInlineMarkdown(line.slice(5))}</div>;
+    } else if (line.startsWith('### ')) {
+      content = <div key={i} style={{ fontSize: 15, fontWeight: 600, color: '#e2e8f0', marginTop: 10, marginBottom: 4 }}>{formatInlineMarkdown(line.slice(4))}</div>;
+    } else if (line.startsWith('## ')) {
+      content = <div key={i} style={{ fontSize: 16, fontWeight: 600, color: '#e2e8f0', marginTop: 12, marginBottom: 6 }}>{formatInlineMarkdown(line.slice(3))}</div>;
+    } else if (line.startsWith('# ')) {
+      content = <div key={i} style={{ fontSize: 18, fontWeight: 700, color: '#f1f5f9', marginTop: 14, marginBottom: 8 }}>{formatInlineMarkdown(line.slice(2))}</div>;
+    } else if (line.startsWith('**') && line.endsWith('**')) {
       content = <strong key={i}>{line.slice(2, -2)}</strong>;
     } else if (line.startsWith('• ') || line.startsWith('- ') || line.startsWith('* ')) {
-      content = <div key={i} style={{ paddingLeft: 12 }}>• {formatInlineMarkdown(line.slice(2))}</div>;
+      content = <div key={i} style={{ paddingLeft: 12, marginBottom: 2 }}>• {formatInlineMarkdown(line.slice(2))}</div>;
     } else if (/^\d+\.\s/.test(line)) {
-      content = <div key={i} style={{ paddingLeft: 12 }}>{formatInlineMarkdown(line)}</div>;
+      content = <div key={i} style={{ paddingLeft: 12, marginBottom: 2 }}>{formatInlineMarkdown(line)}</div>;
     } else if (line.trim() === '') {
       content = <div key={i} style={{ height: 8 }} />;
     } else {

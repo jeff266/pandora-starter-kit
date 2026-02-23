@@ -391,6 +391,76 @@ const PANDORA_TOOLS: ToolDef[] = [
       required: ['object_type'],
     },
   },
+  {
+    name: 'query_conversation_signals',
+    description:
+      'Query pre-extracted signals from sales calls. Use this instead of search_transcripts when the user asks about patterns across multiple calls — competitor mentions, objections, buying signals, risk flags, pricing discussions, next steps, champion indicators, decision criteria, timelines, or budgets. Faster and more structured than transcript search. Each signal includes confidence score, source quote, and sentiment.',
+    parameters: {
+      type: 'object',
+      properties: {
+        signal_type: {
+          type: 'string',
+          enum: [
+            'competitor_mention',
+            'pricing_discussed',
+            'objection',
+            'buying_signal',
+            'next_steps',
+            'risk_flag',
+            'champion_signal',
+            'decision_criteria',
+            'timeline_mentioned',
+            'budget_mentioned',
+          ],
+          description: 'Filter to a specific signal type. Omit to return all types.',
+        },
+        signal_value: {
+          type: 'string',
+          description: 'Filter by signal value, e.g. "Gong" for competitor or "pricing" for objections. Partial match.',
+        },
+        deal_id: {
+          type: 'string',
+          description: 'Filter signals to a specific deal',
+        },
+        account_id: {
+          type: 'string',
+          description: 'Filter signals to a specific account',
+        },
+        rep_email: {
+          type: 'string',
+          description: 'Filter signals to calls with a specific rep',
+        },
+        from_date: {
+          type: 'string',
+          format: 'date',
+          description: 'Filter signals extracted after this date (ISO format)',
+        },
+        to_date: {
+          type: 'string',
+          format: 'date',
+          description: 'Filter signals extracted before this date (ISO format)',
+        },
+        min_confidence: {
+          type: 'number',
+          description: 'Minimum confidence threshold (0.0-1.0, default 0.65)',
+        },
+        sentiment: {
+          type: 'string',
+          enum: ['positive', 'neutral', 'negative'],
+          description: 'Filter by signal sentiment',
+        },
+        limit: {
+          type: 'number',
+          description: 'Max results to return (default 50, max 200)',
+        },
+        offset: {
+          type: 'number',
+          description: 'Offset for pagination',
+        },
+      },
+      required: [],
+    },
+  },
 ];
 
 // ─── System prompt ────────────────────────────────────────────────────────────
