@@ -51,7 +51,7 @@ export async function fetchAndCacheOwners(workspaceId: string): Promise<OwnerMap
   }
 
   try {
-    const client = new HubSpotClient(accessToken);
+    const client = new HubSpotClient(accessToken, workspaceId);
     const owners = await client.getOwners();
 
     const ownerMap: OwnerMap = {};

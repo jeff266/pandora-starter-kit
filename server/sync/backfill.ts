@@ -36,7 +36,7 @@ export async function backfillHubSpotAssociations(
     return { dealsProcessed: 0, contactLinksCreated: 0, accountLinksCreated: 0, errors: ['HubSpot credentials not found'], duration: 0 };
   }
 
-  const client = new HubSpotClient(creds.accessToken);
+  const client = new HubSpotClient(creds.accessToken, workspaceId);
 
   const dealsResult = await query<{ id: string; source_id: string; source_data: any }>(
     `SELECT id, source_id, source_data FROM deals

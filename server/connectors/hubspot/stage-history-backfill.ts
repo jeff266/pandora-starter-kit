@@ -21,7 +21,7 @@ export async function backfillStageHistory(
   workspaceId: string,
   accessToken: string
 ): Promise<BackfillResult> {
-  const hubspotClient = new HubSpotClient(accessToken);
+  const hubspotClient = new HubSpotClient(accessToken, workspaceId);
   console.log(`[Stage History Backfill] Starting for workspace ${workspaceId}`);
 
   // Get all deals that need backfill

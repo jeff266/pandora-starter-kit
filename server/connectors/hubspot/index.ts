@@ -17,17 +17,17 @@ export class HubSpotConnector implements PandoraConnector {
   readonly category = 'crm' as const;
   readonly authMethod = 'oauth' as const;
 
-  async testConnection(credentials: ConnectorCredentials): Promise<{ success: boolean; error?: string; accountInfo?: any }> {
+  async testConnection(credentials: ConnectorCredentials, workspaceId?: string): Promise<{ success: boolean; error?: string; accountInfo?: any }> {
     if (!credentials.accessToken) {
       return { success: false, error: 'Access token is required' };
     }
 
-    const client = new HubSpotClient(credentials.accessToken);
+    const client = new HubSpotClient(credentials.accessToken, workspaceId);
     return client.testConnection();
   }
 
   async connect(credentials: ConnectorCredentials, workspaceId: string): Promise<Connection> {
-    const testResult = await this.testConnection(credentials);
+    const testResult = await this.testConnection(credentials, workspaceId);
     if (!testResult.success) {
       throw new Error(`Connection test failed: ${testResult.error}`);
     }
@@ -82,7 +82,7 @@ export class HubSpotConnector implements PandoraConnector {
   }
 
   async discoverSchema(connection: Connection): Promise<SourceSchema> {
-    const client = new HubSpotClient(connection.credentials.accessToken!);
+    const client = new HubSpotClient(connection.credentials.accessToken!, connection.workspaceId);
     const schema = await runSchemaDiscovery(client);
     const pipelines = await discoverPipelines(client);
     await storeSchemaMetadata(connection.workspaceId, schema, pipelines);
@@ -90,17 +90,17 @@ export class HubSpotConnector implements PandoraConnector {
   }
 
   async initialSync(connection: Connection, workspaceId: string): Promise<SyncResult> {
-    const client = new HubSpotClient(connection.credentials.accessToken!);
+    const client = new HubSpotClient(connection.credentials.accessToken!, workspaceId);
     return initialSync(client, workspaceId);
   }
 
   async incrementalSync(connection: Connection, workspaceId: string, since: Date): Promise<SyncResult> {
-    const client = new HubSpotClient(connection.credentials.accessToken!);
+    const client = new HubSpotClient(connection.credentials.accessToken!, workspaceId);
     return incrementalSync(client, workspaceId, since);
   }
 
   async backfillSync(connection: Connection, workspaceId: string): Promise<SyncResult> {
-    const client = new HubSpotClient(connection.credentials.accessToken!);
+    const client = new HubSpotClient(connection.credentials.accessToken!, workspaceId);
     return backfillAssociations(client, workspaceId);
   }
 

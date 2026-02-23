@@ -413,7 +413,7 @@ async function getCRMClient(db: Pool, workspaceId: string, crmSource: string): P
   }
 
   if (crmSource === 'hubspot') {
-    return new HubSpotClient(credentials.access_token || credentials.accessToken);
+    return new HubSpotClient(credentials.access_token || credentials.accessToken, workspaceId);
   } else if (crmSource === 'salesforce') {
     return new SalesforceClient({
       accessToken: credentials.access_token || credentials.accessToken,

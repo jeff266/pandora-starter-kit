@@ -220,7 +220,7 @@ router.post('/:workspaceId/connectors/hubspot/resolve-contact-roles', async (req
     const { HubSpotClient } = await import('../connectors/hubspot/client.js');
     const { resolveHubSpotContactRoles } = await import('../connectors/hubspot/contact-role-resolution.js');
 
-    const client = new HubSpotClient(credentials.accessToken);
+    const client = new HubSpotClient(credentials.accessToken, workspaceId);
     const result = await resolveHubSpotContactRoles(client, workspaceId);
 
     res.json({

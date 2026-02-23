@@ -14,19 +14,87 @@ import { hubspotFetch, hubspotSearchFetch } from '../../utils/throttle.js';
 export class HubSpotClient {
   private baseUrl = "https://api.hubapi.com";
   private accessToken: string;
+  private workspaceId?: string;
+  private refreshPromise: Promise<boolean> | null = null;
 
-  constructor(accessToken: string) {
+  constructor(accessToken: string, workspaceId?: string) {
     this.accessToken = accessToken;
+    this.workspaceId = workspaceId;
   }
 
   getAccessToken(): string {
     return this.accessToken;
   }
 
+  private async refreshAccessToken(): Promise<boolean> {
+    if (!this.workspaceId) return false;
+
+    if (this.refreshPromise) {
+      return this.refreshPromise;
+    }
+
+    this.refreshPromise = this.doRefresh();
+    try {
+      return await this.refreshPromise;
+    } finally {
+      this.refreshPromise = null;
+    }
+  }
+
+  private async doRefresh(): Promise<boolean> {
+    try {
+      const { getConnectorCredentials, updateCredentialFields } = await import('../../lib/credential-store.js');
+      const creds = await getConnectorCredentials(this.workspaceId!, 'hubspot');
+      const refreshToken = creds?.refreshToken || creds?.refresh_token;
+      if (!refreshToken) {
+        console.warn('[HubSpot Client] No refresh token available');
+        return false;
+      }
+
+      const clientId = process.env.HUBSPOT_CLIENT_ID;
+      const clientSecret = process.env.HUBSPOT_CLIENT_SECRET;
+      if (!clientId || !clientSecret) {
+        console.warn('[HubSpot Client] HUBSPOT_CLIENT_ID/SECRET not set, cannot refresh');
+        return false;
+      }
+
+      const params = new URLSearchParams({
+        grant_type: 'refresh_token',
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: refreshToken,
+      });
+
+      const response = await fetch('https://api.hubapi.com/oauth/v1/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params.toString(),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[HubSpot Client] Token refresh failed:', errorText);
+        return false;
+      }
+
+      const data = await response.json() as { access_token: string; refresh_token: string };
+      this.accessToken = data.access_token;
+
+      await updateCredentialFields(this.workspaceId!, 'hubspot', {
+        accessToken: data.access_token,
+        refreshToken: data.refresh_token,
+      });
+
+      console.log('[HubSpot Client] Token refreshed successfully');
+      return true;
+    } catch (err) {
+      console.error('[HubSpot Client] Token refresh error:', err instanceof Error ? err.message : err);
+      return false;
+    }
+  }
+
   private async request<T>(endpoint: string, options: RequestInit = {}, useSearchApi: boolean = false): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`;
-
-    // Choose throttled fetcher based on API type
     const throttledFetch = useSearchApi ? hubspotSearchFetch : hubspotFetch;
 
     const response = await throttledFetch(url, {
@@ -37,6 +105,27 @@ export class HubSpotClient {
         ...options.headers,
       },
     });
+
+    if (response.status === 401 && this.workspaceId) {
+      const refreshed = await this.refreshAccessToken();
+      if (refreshed) {
+        const retryResponse = await throttledFetch(url, {
+          ...options,
+          headers: {
+            "Authorization": `Bearer ${this.accessToken}`,
+            "Content-Type": "application/json",
+            ...options.headers,
+          },
+        });
+
+        if (!retryResponse.ok) {
+          const errorText = await retryResponse.text();
+          throw new Error(`HubSpot API error: ${retryResponse.status} - ${errorText}`);
+        }
+
+        return retryResponse.json() as Promise<T>;
+      }
+    }
 
     if (!response.ok) {
       const errorText = await response.text();

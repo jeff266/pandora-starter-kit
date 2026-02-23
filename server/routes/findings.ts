@@ -35,7 +35,7 @@ router.get('/:workspaceId/crm/link-info', async (req: Request, res: Response): P
         try {
           const creds = await getConnectorCredentials(workspaceId, 'hubspot');
           if (creds?.access_token) {
-            const client = new HubSpotClient(creds.access_token);
+            const client = new HubSpotClient(creds.access_token, workspaceId);
             const testResult = await client.testConnection();
             if (testResult.success && testResult.accountInfo?.portalId) {
               portalId = testResult.accountInfo.portalId;
