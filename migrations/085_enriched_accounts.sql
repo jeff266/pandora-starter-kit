@@ -64,12 +64,6 @@ CREATE INDEX idx_enriched_accounts_batch ON enriched_accounts(pandora_batch_id) 
 CREATE INDEX idx_enriched_accounts_icp ON enriched_accounts(workspace_id, confidence_score)
   WHERE confidence_score >= 0.5;
 
--- Updated_at trigger
-CREATE TRIGGER enriched_accounts_updated_at
-  BEFORE UPDATE ON enriched_accounts
-  FOR EACH ROW
-  EXECUTE FUNCTION update_updated_at_column();
-
 COMMENT ON TABLE enriched_accounts IS 'Normalized firmographic enrichment data from Apollo, Webhook, CSV sources';
 COMMENT ON COLUMN enriched_accounts.domain IS 'Primary match key - preferred for unambiguous account linking';
 COMMENT ON COLUMN enriched_accounts.company_name IS 'Fallback match key - fuzzy matching with manual review if confidence < 0.7';
