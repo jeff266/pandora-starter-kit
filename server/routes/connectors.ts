@@ -510,4 +510,29 @@ router.get('/:workspaceId/connectors/status', async (req: Request<WorkspaceParam
   }
 });
 
+router.delete('/:workspaceId/connectors/:connectorType', requirePermission('admin'), async (req: Request<{ workspaceId: string; connectorType: string }>, res: Response) => {
+  try {
+    const { workspaceId, connectorType } = req.params;
+
+    const existing = await dbQuery(
+      `SELECT id FROM connections WHERE workspace_id = $1 AND connector_name = $2`,
+      [workspaceId, connectorType]
+    );
+
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Connector not found' });
+    }
+
+    await dbQuery(
+      `DELETE FROM connections WHERE workspace_id = $1 AND connector_name = $2`,
+      [workspaceId, connectorType]
+    );
+
+    res.json({ success: true, message: `${connectorType} connector disconnected` });
+  } catch (err: any) {
+    console.error('[connectors] Disconnect error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;

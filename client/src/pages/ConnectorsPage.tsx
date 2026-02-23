@@ -413,6 +413,7 @@ export default function ConnectorsPage() {
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [savingUsers, setSavingUsers] = useState(false);
   const [savingInterval, setSavingInterval] = useState<string | null>(null);
+  const [disconnectingConnector, setDisconnectingConnector] = useState<string | null>(null);
 
   const handleSyncIntervalChange = async (connectorType: string, minutes: number) => {
     setSavingInterval(connectorType);
@@ -434,6 +435,17 @@ export default function ConnectorsPage() {
       addToast('Failed to update sync interval', 'error');
     } finally {
       setSavingInterval(null);
+    }
+  };
+
+  const handleDisconnect = async (connectorType: string) => {
+    try {
+      await api.delete(`/connectors/${connectorType}`);
+      addToast(`${connectorType} disconnected successfully`, 'success');
+      setDisconnectingConnector(null);
+      fetchConnectors();
+    } catch (err: any) {
+      addToast(`Failed to disconnect: ${err.message}`, 'error');
     }
   };
 
@@ -901,6 +913,25 @@ export default function ConnectorsPage() {
                     Manage Users
                   </button>
                 )}
+                <button
+                  onClick={() => setDisconnectingConnector(connector.type)}
+                  disabled={!!syncingConnector}
+                  style={{
+                    padding: '10px 12px',
+                    border: `1px solid ${colors.red}40`,
+                    background: 'transparent',
+                    color: colors.red,
+                    borderRadius: 6,
+                    fontSize: 12,
+                    fontWeight: 500,
+                    cursor: syncingConnector ? 'not-allowed' : 'pointer',
+                    opacity: syncingConnector ? 0.6 : 1,
+                    transition: 'all 0.2s',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  Disconnect
+                </button>
               </div>
             </div>
           );
@@ -1001,6 +1032,45 @@ export default function ConnectorsPage() {
                 }}
               >
                 {savingUsers ? 'Saving...' : `Save (${trackedUserIds.size} selected)`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {disconnectingConnector && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex',
+          alignItems: 'center', justifyContent: 'center', zIndex: 10000,
+        }} onClick={() => setDisconnectingConnector(null)}>
+          <div style={{
+            background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 12,
+            padding: 28, width: 420, maxWidth: '90vw',
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 16, fontWeight: 600, color: colors.text, marginBottom: 8 }}>
+              Disconnect {disconnectingConnector.replace('-', ' ')}?
+            </div>
+            <div style={{ fontSize: 13, color: colors.textSecondary, lineHeight: 1.6, marginBottom: 20 }}>
+              This will remove the connection credentials. Previously synced data will remain in your workspace. You can reconnect at any time.
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button
+                onClick={() => setDisconnectingConnector(null)}
+                style={{
+                  padding: '9px 16px', border: `1px solid ${colors.border}`, background: 'transparent',
+                  color: colors.textSecondary, borderRadius: 6, fontSize: 13, cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleDisconnect(disconnectingConnector)}
+                style={{
+                  padding: '9px 20px', border: 'none', background: colors.red,
+                  color: '#fff', borderRadius: 6, fontSize: 13, fontWeight: 500, cursor: 'pointer',
+                }}
+              >
+                Disconnect
               </button>
             </div>
           </div>
