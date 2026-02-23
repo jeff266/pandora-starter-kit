@@ -215,6 +215,7 @@ export function startSkillScheduler(): void {
            FROM workspaces w
            INNER JOIN connections c ON c.workspace_id = w.id
            WHERE c.status IN ('connected', 'synced', 'error')
+             AND w.status = 'active'
            ORDER BY w.name`
         );
 
@@ -275,6 +276,7 @@ export function startSkillScheduler(): void {
            FROM workspaces w
            INNER JOIN connections c ON c.workspace_id = w.id
            WHERE c.status IN ('connected', 'synced', 'error')
+             AND w.status = 'active'
            ORDER BY w.name`
         );
 
@@ -330,6 +332,7 @@ export function startSkillScheduler(): void {
          FROM workspaces w
          INNER JOIN connections c ON c.workspace_id = w.id
          WHERE c.status IN ('connected', 'synced', 'error')
+           AND w.status = 'active'
          ORDER BY w.name`
       );
 
@@ -360,6 +363,7 @@ export function startSkillScheduler(): void {
          FROM workspaces w
          INNER JOIN connections c ON c.workspace_id = w.id
          WHERE c.status IN ('connected', 'synced', 'error')
+           AND w.status = 'active'
          ORDER BY w.name`
       );
 
@@ -399,7 +403,8 @@ cron.schedule('0 2 * * 0', async () => {
     const workspacesResult = await query<{ id: string }>(
       `SELECT DISTINCT w.id FROM workspaces w
        INNER JOIN connections c ON c.workspace_id = w.id
-       WHERE c.status IN ('connected', 'synced', 'error')`
+       WHERE c.status IN ('connected', 'synced', 'error')
+         AND w.status = 'active'`
     );
     for (const ws of workspacesResult.rows) {
       const { runAccountEnrichmentBatch } = await import('../enrichment/account-enrichment-batch.js');
@@ -419,7 +424,8 @@ cron.schedule('0 3 * * *', async () => {
     const workspacesResult = await query<{ id: string }>(
       `SELECT DISTINCT w.id FROM workspaces w
        INNER JOIN connections c ON c.workspace_id = w.id
-       WHERE c.status IN ('connected', 'synced', 'error')`
+       WHERE c.status IN ('connected', 'synced', 'error')
+         AND w.status = 'active'`
     );
     for (const ws of workspacesResult.rows) {
       const { runAccountScoringBatch } = await import('../enrichment/account-enrichment-batch.js');
@@ -438,7 +444,9 @@ const snapshotJob = cron.schedule('0 23 * * 0', async () => {
   const workspaces = await query<{ id: string; name: string }>(
     `SELECT DISTINCT w.id, w.name FROM workspaces w
      INNER JOIN connections c ON c.workspace_id = w.id
-     WHERE c.status IN ('connected','synced','error') ORDER BY w.name`
+     WHERE c.status IN ('connected','synced','error')
+       AND w.status = 'active'
+     ORDER BY w.name`
   );
   for (const ws of workspaces.rows) {
     try {

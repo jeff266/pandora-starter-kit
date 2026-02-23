@@ -301,4 +301,97 @@ router.get('/:id/demo/entity-names', requireWorkspaceAccess, async (req, res) =>
   }
 });
 
+/**
+ * DELETE /api/workspaces/:workspaceId
+ * Admin-only workspace deletion with two-phase process:
+ * 1. Mark as 'deleting' (immediately excludes from scheduled operations)
+ * 2. CASCADE delete all associated data
+ */
+router.delete('/:workspaceId', requireAdmin, async (req, res) => {
+  const { workspaceId } = req.params;
+
+  try {
+    console.log(`[workspaces] Starting deletion for workspace ${workspaceId}`);
+
+    // Verify workspace exists
+    const wsResult = await query<{ id: string; name: string; status: string }>(
+      'SELECT id, name, status FROM workspaces WHERE id = $1',
+      [workspaceId]
+    );
+
+    if (wsResult.rows.length === 0) {
+      res.status(404).json({ error: 'Workspace not found' });
+      return;
+    }
+
+    const workspace = wsResult.rows[0];
+    console.log(`[workspaces] Workspace found: ${workspace.name} (status: ${workspace.status})`);
+
+    // Phase 1: Mark as 'deleting' to exclude from scheduler
+    await query(
+      'UPDATE workspaces SET status = $1, updated_at = NOW() WHERE id = $2',
+      ['deleting', workspaceId]
+    );
+    console.log(`[workspaces] Marked workspace ${workspaceId} as 'deleting'`);
+
+    // Pause briefly to allow any in-flight cron jobs to see the status change
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // Count records before deletion (for logging/confirmation)
+    const countQueries = [
+      { table: 'connections', query: 'SELECT COUNT(*) as count FROM connections WHERE workspace_id = $1' },
+      { table: 'accounts', query: 'SELECT COUNT(*) as count FROM accounts WHERE workspace_id = $1' },
+      { table: 'deals', query: 'SELECT COUNT(*) as count FROM deals WHERE workspace_id = $1' },
+      { table: 'contacts', query: 'SELECT COUNT(*) as count FROM contacts WHERE workspace_id = $1' },
+      { table: 'activities', query: 'SELECT COUNT(*) as count FROM activities WHERE workspace_id = $1' },
+      { table: 'signals', query: 'SELECT COUNT(*) as count FROM signals WHERE workspace_id = $1' },
+      { table: 'skill_runs', query: 'SELECT COUNT(*) as count FROM skill_runs WHERE workspace_id = $1' },
+      { table: 'chat_sessions', query: 'SELECT COUNT(*) as count FROM chat_sessions WHERE workspace_id = $1' },
+    ];
+
+    const counts: Record<string, number> = {};
+    for (const { table, query: countQuery } of countQueries) {
+      try {
+        const result = await query<{ count: string }>(countQuery, [workspaceId]);
+        counts[table] = parseInt(result.rows[0]?.count || '0', 10);
+      } catch (err) {
+        // Table might not exist yet (e.g., in development)
+        counts[table] = 0;
+      }
+    }
+
+    console.log(`[workspaces] Record counts before deletion:`, counts);
+
+    // Phase 2: CASCADE delete
+    await query('DELETE FROM workspaces WHERE id = $1', [workspaceId]);
+    console.log(`[workspaces] ✓ Workspace ${workspaceId} deleted successfully`);
+
+    res.json({
+      success: true,
+      workspace_id: workspaceId,
+      workspace_name: workspace.name,
+      deleted_records: counts,
+      message: 'Workspace and all associated data deleted successfully',
+    });
+  } catch (err) {
+    console.error(`[workspaces] ✗ Error deleting workspace ${workspaceId}:`, err instanceof Error ? err.stack : err);
+
+    // Error recovery: restore 'active' status if deletion failed
+    try {
+      await query(
+        'UPDATE workspaces SET status = $1, updated_at = NOW() WHERE id = $2',
+        ['active', workspaceId]
+      );
+      console.log(`[workspaces] Restored workspace ${workspaceId} to 'active' status after deletion failure`);
+    } catch (restoreErr) {
+      console.error(`[workspaces] Failed to restore status for workspace ${workspaceId}:`, restoreErr);
+    }
+
+    res.status(500).json({
+      error: 'Failed to delete workspace',
+      details: err instanceof Error ? err.message : 'Unknown error',
+    });
+  }
+});
+
 export default router;
