@@ -11,6 +11,10 @@ import { callLLM, type ToolDef, type LLMCallOptions } from '../utils/llm-router.
 import { executeDataTool } from './data-tools.js';
 import type { ConversationMessage } from './conversation-state.js';
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const MAX_TOOL_ITERATIONS = 10;
+
 // ─── Tool definitions ──────────────────────────────────────────────────────────
 // Using ToolDef format (parameters) — the router converts to input_schema for Anthropic.
 
@@ -628,7 +632,6 @@ export async function runPandoraAgent(
   const startTime = Date.now();
   const toolTrace: PandoraToolCall[] = [];
   let totalTokens = 0;
-  const MAX_ITERATIONS = 8;
 
   const classification = await classifyQuestion(workspaceId, message);
   console.log(`[PandoraAgent] classification:`, JSON.stringify(classification));
@@ -646,7 +649,12 @@ export async function runPandoraAgent(
     { role: 'user', content: message + toolHint },
   ];
 
-  for (let i = 0; i < MAX_ITERATIONS; i++) {
+  for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
+    // Guard: if we've reached max iterations, break and synthesize
+    if (i >= MAX_TOOL_ITERATIONS) {
+      console.log(`[PandoraAgent] Hit MAX_TOOL_ITERATIONS (${MAX_TOOL_ITERATIONS}), forcing synthesis`);
+      break;
+    }
     console.log(`[PandoraAgent] iter=${i} calling LLM with ${PANDORA_TOOLS.length} tools, history=${messages.length} msgs, maxTokens=${dynamicMaxTokens}`);
     console.log(`[PandoraAgent] tools:`, PANDORA_TOOLS.map(t => t.name).join(', '));
 

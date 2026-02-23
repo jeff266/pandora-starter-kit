@@ -11,6 +11,8 @@ import { callLLM } from '../utils/llm-router.js';
 import { querySchema, type ObjectType, type FilterMode } from '../tools/schema-query.js';
 import { queryConversationSignals, type SignalQueryFilters } from '../signals/query-conversation-signals.js';
 import { getWorkspaceContext } from './workspace-context.js';
+import { getCachedResult, setCachedResult } from './tool-result-cache.js';
+import { shouldCompress, compressToolResult } from './tool-result-compressor.js';
 
 // ─── Tool result types ───────────────────────────────────────────────────────
 
@@ -168,6 +170,12 @@ export async function executeDataTool(
   let result: any;
   let errorMsg: string | undefined;
 
+  // Check cache before executing tool
+  const cached = getCachedResult(workspaceId, toolName, params);
+  if (cached !== null) {
+    return cached;
+  }
+
   try {
     switch (toolName) {
       case 'query_deals':
@@ -258,6 +266,15 @@ export async function executeDataTool(
       default:
         throw new Error(`Unknown tool: ${toolName}`);
     }
+
+    // Cache the raw result (before compression)
+    setCachedResult(workspaceId, toolName, params, result);
+
+    // Compress if needed (DeepSeek-based compression for large results)
+    if (shouldCompress(toolName, result)) {
+      result = await compressToolResult(workspaceId, toolName, result);
+    }
+
     return result;
   } catch (err: any) {
     errorMsg = err.message || String(err);
