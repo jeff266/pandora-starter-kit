@@ -315,8 +315,8 @@ async function queryDeals(workspaceId: string, params: Record<string, any>): Pro
   }
 
   if (params.stage) {
-    conditions.push(`(d.stage ILIKE ${addParam(`%${params.stage}%`)} OR d.stage_normalized ILIKE ${values[values.length - 1]})`);
-    descParts.push(`stage~"${params.stage}"`);
+    conditions.push(`(d.stage = ${addParam(params.stage)} OR d.stage_normalized = ${values[values.length - 1]})`);
+    descParts.push(`stage="${params.stage}"`);
   }
 
   if (params.owner_email) {
@@ -391,7 +391,8 @@ async function queryDeals(workspaceId: string, params: Record<string, any>): Pro
   const where = conditions.join(' AND ');
 
   const countResult = await query<{ cnt: string; total_amt: string }>(
-    `SELECT COUNT(*)::text as cnt, COALESCE(SUM(d.amount), 0)::text as total_amt
+    `SELECT COUNT(*)::text as cnt,
+            COALESCE(SUM(COALESCE(d.amount, 0)::numeric), 0)::text as total_amt
      FROM deals d
      LEFT JOIN accounts a ON a.id = d.account_id AND a.workspace_id = d.workspace_id
      WHERE ${where}`,
@@ -877,8 +878,10 @@ async function computeTotalPipeline(workspaceId: string, params: Record<string, 
   );
 
   const rows = result.rows;
-  const total = rows.reduce((s: number, r: any) => s + (r.amount || 0), 0);
-  const formatted = total >= 1_000_000
+  const total = rows.reduce((s: number, r: any) => s + (Number(r.amount) || 0), 0);
+  const formatted = !isFinite(total) || isNaN(total) || total === 0
+    ? '$0'
+    : total >= 1_000_000
     ? `$${(total / 1_000_000).toFixed(2)}M`
     : `$${(total / 1_000).toFixed(0)}K`;
 
@@ -1010,8 +1013,13 @@ async function computeAvgDealSize(workspaceId: string, params: Record<string, an
   );
 
   const rows = result.rows;
-  const avg = rows.length > 0 ? rows.reduce((s: number, r: any) => s + (r.amount || 0), 0) / rows.length : 0;
-  const formatted = avg >= 1_000_000 ? `$${(avg / 1_000_000).toFixed(2)}M` : `$${(avg / 1_000).toFixed(0)}K`;
+  const sum = rows.reduce((s: number, r: any) => s + (Number(r.amount) || 0), 0);
+  const avg = rows.length > 0 ? sum / rows.length : 0;
+  const formatted = !isFinite(avg) || isNaN(avg) || avg === 0
+    ? '$0'
+    : avg >= 1_000_000
+    ? `$${(avg / 1_000_000).toFixed(2)}M`
+    : `$${(avg / 1_000).toFixed(0)}K`;
 
   return {
     metric: 'avg_deal_size',
@@ -1042,7 +1050,7 @@ async function computeAvgSalesCycle(workspaceId: string, params: Record<string, 
   }
   const result = await query<any>(
     `SELECT id, name, amount,
-            EXTRACT(DAY FROM (close_date::date - created_at::date))::int as cycle_days
+            EXTRACT(EPOCH FROM (close_date::timestamp - created_at::timestamp))::numeric / 86400 as cycle_days
      FROM deals
      WHERE ${conditions.join(' AND ')}
      ORDER BY close_date DESC NULLS LAST
@@ -1142,8 +1150,12 @@ async function computePipelineCreated(workspaceId: string, params: Record<string
   );
 
   const rows = result.rows;
-  const total = rows.reduce((s: number, r: any) => s + (r.amount || 0), 0);
-  const formatted = total >= 1_000_000 ? `$${(total / 1_000_000).toFixed(2)}M` : `$${(total / 1_000).toFixed(0)}K`;
+  const total = rows.reduce((s: number, r: any) => s + (Number(r.amount) || 0), 0);
+  const formatted = !isFinite(total) || isNaN(total) || total === 0
+    ? '$0'
+    : total >= 1_000_000
+    ? `$${(total / 1_000_000).toFixed(2)}M`
+    : `$${(total / 1_000).toFixed(0)}K`;
 
   return {
     metric: 'pipeline_created',
