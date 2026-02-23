@@ -32,6 +32,7 @@ import PushPage from './pages/PushPage';
 import ConsultantDashboard from './pages/ConsultantDashboard';
 import IcpProfilePage from './pages/IcpProfilePage';
 import AdminScopesPage from './pages/AdminScopesPage';
+import TokenUsagePage from './pages/admin/TokenUsagePage';
 import Targets from './pages/Targets';
 import ReportViewer from './pages/ReportViewer';
 import ReportsPage from './pages/ReportsPage';
@@ -66,6 +67,7 @@ const pageTitles: Record<string, string> = {
   '/settings': 'Settings',
   '/icp-profile': 'ICP Profile',
   '/admin/scopes': 'Workspace Scopes',
+  '/admin/token-usage': 'Token Usage',
 };
 
 function getPageTitle(pathname: string): string {
@@ -241,6 +243,7 @@ export default function App() {
             <Route path="/settings/:tab" element={<SettingsPage />} />
             <Route path="/icp-profile" element={<IcpProfilePage />} />
             <Route path="/admin/scopes" element={<AdminScopesPage />} />
+            <Route path="/admin/token-usage" element={<TokenUsagePage />} />
             <Route path="/reports" element={<ReportsPage />} />
             <Route path="/reports/new" element={<ReportBuilder />} />
             <Route path="/reports/:reportId/edit" element={<ReportBuilder />} />

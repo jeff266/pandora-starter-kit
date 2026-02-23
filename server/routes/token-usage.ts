@@ -321,4 +321,232 @@ router.get('/:workspaceId/token-usage/anomalies', async (req, res) => {
   }
 });
 
+// ============================================================================
+// Dashboard Endpoints (Admin UI)
+// ============================================================================
+
+function mapPhaseToFeature(phase: string | null, stepName: string | null, skillId: string | null): string {
+  // Intent classifier
+  if (stepName?.includes('intent') || phase === 'intent_classify') {
+    return 'intent_classify';
+  }
+
+  // Compression
+  if (stepName?.includes('compress') || phase === 'compress') {
+    return 'compress';
+  }
+
+  // Ask Pandora (main chat interface)
+  if (phase === 'chat' || stepName?.includes('pandora-agent')) {
+    return 'ask_pandora';
+  }
+
+  // Skills - map to feature names
+  if (skillId) {
+    if (skillId.includes('pipeline-hygiene') || skillId.includes('pipeline_hygiene')) {
+      return 'pipeline_hygiene';
+    }
+    if (skillId.includes('deal-risk') || skillId.includes('deal_risk')) {
+      return 'deal_risk_review';
+    }
+    if (skillId.includes('rep-scorecard') || skillId.includes('rep_scorecard')) {
+      return 'rep_scorecard';
+    }
+    if (skillId.includes('forecast') || skillId.includes('rollup')) {
+      return 'forecast_rollup';
+    }
+    if (skillId.includes('conversation-intelligence') || skillId.includes('conversation_intelligence')) {
+      return 'conversation_intelligence';
+    }
+  }
+
+  // ICP Discovery
+  if (stepName?.includes('icp') || phase === 'icp_discovery') {
+    return 'icp_discovery';
+  }
+
+  // Lead Scoring
+  if (stepName?.includes('lead-scor') || stepName?.includes('lead_scor')) {
+    return 'lead_scoring';
+  }
+
+  // Default: use phase if available, otherwise 'other'
+  return phase || 'other';
+}
+
+router.get('/:workspaceId/token-usage/dashboard', async (req, res) => {
+  try {
+    const { workspaceId } = req.params;
+    const period = (req.query.period as string) || 'MTD';
+
+    // Calculate date cutoff
+    const now = new Date();
+    let fromDate: Date;
+
+    switch (period.toLowerCase()) {
+      case '7d':
+        fromDate = new Date(now);
+        fromDate.setDate(now.getDate() - 7);
+        break;
+      case '30d':
+        fromDate = new Date(now);
+        fromDate.setDate(now.getDate() - 30);
+        break;
+      case 'mtd':
+      default:
+        fromDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        break;
+    }
+
+    const fromDateStr = fromDate.toISOString().split('T')[0];
+
+    // Query token_usage grouped by date and phase
+    const result = await query<{
+      date: string;
+      phase: string | null;
+      step_name: string | null;
+      skill_id: string | null;
+      input_tokens: string;
+      output_tokens: string;
+      estimated_cost_usd: string;
+      calls: string;
+    }>(
+      `SELECT
+        DATE(created_at) as date,
+        phase,
+        step_name,
+        skill_id,
+        SUM(input_tokens) as input_tokens,
+        SUM(output_tokens) as output_tokens,
+        SUM(estimated_cost_usd) as estimated_cost_usd,
+        COUNT(*) as calls
+       FROM token_usage
+       WHERE workspace_id = $1
+         AND created_at >= $2::date
+       GROUP BY DATE(created_at), phase, step_name, skill_id
+       ORDER BY date ASC`,
+      [workspaceId, fromDateStr]
+    );
+
+    // Transform to dashboard format
+    const rows: Array<{
+      date: string;
+      feature: string;
+      pandora_input_tokens: number;
+      pandora_output_tokens: number;
+      pandora_cost_usd: number;
+      byok_input_tokens: number;
+      byok_output_tokens: number;
+      byok_cost_usd: number;
+      calls: number;
+    }> = [];
+
+    for (const row of result.rows) {
+      const feature = mapPhaseToFeature(row.phase, row.step_name, row.skill_id);
+      const inputTokens = parseInt(row.input_tokens, 10);
+      const outputTokens = parseInt(row.output_tokens, 10);
+      const cost = parseFloat(row.estimated_cost_usd);
+      const calls = parseInt(row.calls, 10);
+
+      rows.push({
+        date: row.date,
+        feature,
+        pandora_input_tokens: inputTokens,
+        pandora_output_tokens: outputTokens,
+        pandora_cost_usd: cost,
+        byok_input_tokens: 0, // TODO: Add api_key_source column to distinguish BYOK
+        byok_output_tokens: 0,
+        byok_cost_usd: 0,
+        calls,
+      });
+    }
+
+    // Get budget
+    let budgetUsd = 120.0; // Default
+    try {
+      const budgetResult = await query<{ budget_usd: string | null }>(
+        `SELECT budget_usd FROM workspaces WHERE id = $1`,
+        [workspaceId]
+      );
+      if (budgetResult.rows.length > 0 && budgetResult.rows[0].budget_usd) {
+        budgetUsd = parseFloat(budgetResult.rows[0].budget_usd);
+      }
+    } catch (budgetErr) {
+      // budget_usd column doesn't exist yet, use default
+    }
+
+    res.json({ rows, budget_usd: budgetUsd });
+  } catch (err) {
+    console.error('[Token Usage] Dashboard error:', err);
+    res.status(500).json({ error: 'Failed to load dashboard data' });
+  }
+});
+
+router.get('/:workspaceId/token-usage/budget', async (req, res) => {
+  try {
+    const { workspaceId } = req.params;
+
+    const result = await query<{ budget_usd: string | null }>(
+      `SELECT budget_usd FROM workspaces WHERE id = $1`,
+      [workspaceId]
+    );
+
+    if (result.rows.length === 0) {
+      res.status(404).json({ error: 'Workspace not found' });
+      return;
+    }
+
+    const budgetUsd = result.rows[0].budget_usd
+      ? parseFloat(result.rows[0].budget_usd)
+      : 120.0;
+
+    res.json({ budget_usd: budgetUsd });
+  } catch (err: any) {
+    // If budget_usd column doesn't exist yet, return default
+    if (err.message?.includes('column') && err.message?.includes('budget_usd')) {
+      res.json({ budget_usd: 120.0 });
+      return;
+    }
+
+    console.error('[Token Usage] Budget query error:', err);
+    res.status(500).json({ error: 'Failed to load budget' });
+  }
+});
+
+router.put('/:workspaceId/token-usage/budget', async (req, res) => {
+  try {
+    const { workspaceId } = req.params;
+    const { budget_usd } = req.body;
+
+    if (typeof budget_usd !== 'number' || budget_usd <= 0) {
+      res.status(400).json({ error: 'budget_usd must be a positive number' });
+      return;
+    }
+
+    // Try to update - if column doesn't exist, create it first
+    try {
+      await query(
+        `UPDATE workspaces SET budget_usd = $1 WHERE id = $2`,
+        [budget_usd, workspaceId]
+      );
+    } catch (updateErr: any) {
+      if (updateErr.message?.includes('column') && updateErr.message?.includes('budget_usd')) {
+        // Column doesn't exist - add it
+        await query(`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS budget_usd NUMERIC DEFAULT 120.0`);
+        await query(
+          `UPDATE workspaces SET budget_usd = $1 WHERE id = $2`,
+          [budget_usd, workspaceId]
+        );
+      } else {
+        throw updateErr;
+      }
+    }
+
+    res.json({ budget_usd });
+  } catch (err) {
+    console.error('[Token Usage] Budget update error:', err);
+    res.status(500).json({ error: 'Failed to save budget' });
+  }
+});
+
 export default router;
