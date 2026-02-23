@@ -6,6 +6,7 @@ import { extractInsightsFromConversations } from '../analysis/deal-insights-extr
 import { enrichClosedDeal } from '../enrichment/closed-deal-enrichment.js';
 import { getEnrichmentConfig } from '../enrichment/config.js';
 import { extractConversationSignals } from '../conversations/signal-extractor.js';
+import { extractConversationSignals as extractStructuredSignals } from '../signals/extract-conversation-signals.js';
 import { query } from '../db.js';
 import { captureCurrentSchema, detectNewFields, insertNewFieldsFinding } from './field-detector.js';
 
@@ -57,12 +58,22 @@ export async function emitSyncCompleted(
     // Signal extraction runs 5s after sync to let the linker finish first
     // (signals benefit from deal/account links being present)
     setTimeout(() => {
+      // JSONB signal extraction (existing)
       extractConversationSignals(workspaceId)
         .then(result => {
           console.log(`[SignalExtractor] Post-sync ${workspaceId}: ${result.extracted} extracted, ${result.skipped} skipped (${result.duration_ms}ms)`);
         })
         .catch(err => {
           console.error(`[SignalExtractor] Post-sync ${workspaceId} failed:`, err instanceof Error ? err.message : err);
+        });
+
+      // Structured signal extraction (new - conversation_signals table)
+      extractStructuredSignals(workspaceId)
+        .then(result => {
+          console.log(`[ConversationSignals] Post-sync ${workspaceId}: ${result.extracted} signals extracted from ${result.processed - result.skipped} conversations, ${result.skipped} skipped (${result.duration_ms}ms)`);
+        })
+        .catch(err => {
+          console.error(`[ConversationSignals] Post-sync ${workspaceId} failed:`, err instanceof Error ? err.message : err);
         });
     }, 5000);
   }

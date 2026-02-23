@@ -9,6 +9,8 @@
 import { Router, type Request, type Response } from 'express';
 import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { extractConversationSignals } from '../conversations/signal-extractor.js';
+import { extractConversationSignals as extractStructuredSignals } from '../signals/extract-conversation-signals.js';
+import { queryConversationSignals } from '../signals/query-conversation-signals.js';
 import { query } from '../db.js';
 
 const router = Router({ mergeParams: true });
@@ -109,6 +111,131 @@ router.get('/:id/conversations/signal-status', async (req: Request, res: Respons
     });
   } catch (err) {
     console.error('[ConversationSignalStatus]', err);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ============================================================================
+// Structured Signals Endpoints (conversation_signals table)
+// ============================================================================
+
+/**
+ * POST /api/workspaces/:id/signals/extract
+ * On-demand extraction of structured signals
+ */
+router.post('/:id/signals/extract', async (req: Request, res: Response) => {
+  try {
+    const workspaceId = req.params.id;
+    const force = req.body.force === true;
+    const limit = typeof req.body.limit === 'number' ? req.body.limit : 50;
+
+    const result = await extractStructuredSignals(workspaceId, { force, limit });
+
+    res.json({
+      ...result,
+      message: `${result.extracted} signals extracted from ${result.processed - result.skipped} conversations, ${result.skipped} skipped`,
+    });
+  } catch (err) {
+    console.error('[ConversationSignals Extract]', err);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+/**
+ * GET /api/workspaces/:id/signals
+ * Query structured signals with filters
+ */
+router.get('/:id/signals', async (req: Request, res: Response) => {
+  try {
+    const workspaceId = req.params.id;
+    const {
+      signal_type,
+      signal_value,
+      deal_id,
+      account_id,
+      rep_email,
+      from_date,
+      to_date,
+      min_confidence,
+      sentiment,
+      limit,
+      offset,
+    } = req.query;
+
+    const result = await queryConversationSignals(workspaceId, {
+      signal_type: signal_type as any,
+      signal_value: signal_value as string,
+      deal_id: deal_id as string,
+      account_id: account_id as string,
+      rep_email: rep_email as string,
+      from_date: from_date as string,
+      to_date: to_date as string,
+      min_confidence: min_confidence ? parseFloat(min_confidence as string) : undefined,
+      sentiment: sentiment as any,
+      limit: limit ? parseInt(limit as string, 10) : undefined,
+      offset: offset ? parseInt(offset as string, 10) : undefined,
+    });
+
+    res.json(result);
+  } catch (err) {
+    console.error('[ConversationSignals Query]', err);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+/**
+ * GET /api/workspaces/:id/signals/status
+ * Get status of structured signal extraction
+ */
+router.get('/:id/signals/status', async (req: Request, res: Response) => {
+  try {
+    const workspaceId = req.params.id;
+
+    const [runsResult, signalsResult] = await Promise.all([
+      query<{ status: string; count: string }>(
+        `SELECT status, COUNT(*) as count
+         FROM conversation_signal_runs
+         WHERE workspace_id = $1
+         GROUP BY status`,
+        [workspaceId]
+      ),
+      query<{ signal_type: string; count: string; avg_confidence: string }>(
+        `SELECT signal_type, COUNT(*) as count, AVG(confidence) as avg_confidence
+         FROM conversation_signals
+         WHERE workspace_id = $1
+         GROUP BY signal_type
+         ORDER BY count DESC`,
+        [workspaceId]
+      ),
+    ]);
+
+    const statusCounts: Record<string, number> = {};
+    for (const row of runsResult.rows) {
+      statusCounts[row.status] = parseInt(row.count, 10);
+    }
+
+    const signalBreakdown = signalsResult.rows.map(row => ({
+      signal_type: row.signal_type,
+      count: parseInt(row.count, 10),
+      avg_confidence: parseFloat(row.avg_confidence),
+    }));
+
+    const totalSignals = signalBreakdown.reduce((sum, s) => sum + s.count, 0);
+
+    res.json({
+      runs: {
+        success: statusCounts.success || 0,
+        skipped: statusCounts.skipped || 0,
+        error: statusCounts.error || 0,
+        total: Object.values(statusCounts).reduce((sum, n) => sum + n, 0),
+      },
+      signals: {
+        total: totalSignals,
+        by_type: signalBreakdown,
+      },
+    });
+  } catch (err) {
+    console.error('[ConversationSignals Status]', err);
     res.status(500).json({ error: (err as Error).message });
   }
 });

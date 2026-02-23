@@ -9,6 +9,7 @@ import { query } from '../db.js';
 import { getToolFilters } from '../config/tool-filter-injector.js';
 import { callLLM } from '../utils/llm-router.js';
 import { querySchema, type ObjectType, type FilterMode } from '../tools/schema-query.js';
+import { queryConversationSignals, type SignalQueryFilters } from '../signals/query-conversation-signals.js';
 
 // ─── Tool result types ───────────────────────────────────────────────────────
 
@@ -213,6 +214,11 @@ export async function executeDataTool(
           workspaceId,
           params.object_type as ObjectType,
           (params.filter as FilterMode) || 'populated'
+        ); break;
+      case 'query_conversation_signals':
+        result = await queryConversationSignals(
+          workspaceId,
+          params as SignalQueryFilters
         ); break;
       default:
         throw new Error(`Unknown tool: ${toolName}`);
