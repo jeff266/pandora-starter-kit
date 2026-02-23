@@ -54,6 +54,7 @@ export interface AccountFilters {
   offset?: number;
   additionalWhere?: string;
   additionalParams?: unknown[];
+  properties?: string[]; // Additional custom field internal_names to extract from custom_fields JSONB
 }
 
 function buildWhereClause(workspaceId: string, filters: AccountFilters) {
@@ -124,6 +125,29 @@ function buildWhereClause(workspaceId: string, filters: AccountFilters) {
 
 const VALID_SORT_COLUMNS = new Set(['name', 'annual_revenue', 'employee_count', 'health_score', 'created_at', 'total_score']);
 
+/**
+ * Extract requested custom fields from the custom_fields JSONB column
+ * and add them as top-level properties on the account object
+ */
+function extractCustomFields<T extends { custom_fields?: Record<string, unknown> }>(
+  record: T,
+  properties?: string[]
+): T & Record<string, unknown> {
+  if (!properties || properties.length === 0 || !record.custom_fields) {
+    return record;
+  }
+
+  const extracted: Record<string, unknown> = { ...record };
+
+  for (const prop of properties) {
+    if (prop in record.custom_fields) {
+      extracted[prop] = record.custom_fields[prop];
+    }
+  }
+
+  return extracted;
+}
+
 export async function queryAccounts(workspaceId: string, filters: AccountFilters): Promise<{ accounts: Account[]; total: number; limit: number; offset: number }> {
   const { where, params, idx } = buildWhereClause(workspaceId, filters);
 
@@ -157,7 +181,10 @@ export async function queryAccounts(workspaceId: string, filters: AccountFilters
     dataParams,
   );
 
-  return { accounts: dataResult.rows, total, limit, offset };
+  // Extract custom fields if properties parameter provided
+  const accounts = dataResult.rows.map(account => extractCustomFields(account, filters.properties));
+
+  return { accounts, total, limit, offset };
 }
 
 export async function getAccount(workspaceId: string, accountId: string): Promise<(Account & { openDealCount: number; openDealValue: number; contactCount: number; recentActivityCount: number }) | null> {

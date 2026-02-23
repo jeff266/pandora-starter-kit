@@ -48,6 +48,7 @@ export interface DealFilters {
   offset?: number;
   additionalWhere?: string;
   additionalParams?: unknown[];
+  properties?: string[]; // Additional custom field internal_names to extract from custom_fields JSONB
 }
 
 function buildWhereClause(workspaceId: string, filters: DealFilters) {
@@ -160,6 +161,29 @@ function buildWhereClause(workspaceId: string, filters: DealFilters) {
 
 const VALID_SORT_COLUMNS = new Set(['amount', 'close_date', 'deal_risk', 'health_score', 'days_in_stage', 'created_at']);
 
+/**
+ * Extract requested custom fields from the custom_fields JSONB column
+ * and add them as top-level properties on the deal object
+ */
+function extractCustomFields<T extends { custom_fields?: Record<string, unknown> }>(
+  record: T,
+  properties?: string[]
+): T & Record<string, unknown> {
+  if (!properties || properties.length === 0 || !record.custom_fields) {
+    return record;
+  }
+
+  const extracted: Record<string, unknown> = { ...record };
+
+  for (const prop of properties) {
+    if (prop in record.custom_fields) {
+      extracted[prop] = record.custom_fields[prop];
+    }
+  }
+
+  return extracted;
+}
+
 export async function queryDeals(workspaceId: string, filters: DealFilters): Promise<{ deals: Deal[]; total: number; limit: number; offset: number }> {
   const { where, params, idx } = buildWhereClause(workspaceId, filters);
 
@@ -180,7 +204,10 @@ export async function queryDeals(workspaceId: string, filters: DealFilters): Pro
     dataParams,
   );
 
-  return { deals: dataResult.rows, total, limit, offset };
+  // Extract custom fields if properties parameter provided
+  const deals = dataResult.rows.map(deal => extractCustomFields(deal, filters.properties));
+
+  return { deals, total, limit, offset };
 }
 
 export async function getDeal(workspaceId: string, dealId: string): Promise<Deal | null> {

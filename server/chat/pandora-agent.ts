@@ -40,6 +40,11 @@ const PANDORA_TOOLS: ToolDef[] = [
         limit: { type: 'number', description: 'Max records to return (default 50, max 200)' },
         order_by: { type: 'string', description: 'Sort by: amount, close_date, created_date, days_in_stage' },
         order_dir: { type: 'string', enum: ['asc', 'desc'], description: 'Sort direction' },
+        properties: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Additional custom field internal_names to include in results (extracted from custom_fields JSONB). Use query_schema first to discover available fields, then pass their internal_names here.',
+        },
       },
       required: [],
     },
@@ -58,6 +63,11 @@ const PANDORA_TOOLS: ToolDef[] = [
         has_open_deals: { type: 'boolean', description: 'Only accounts with open pipeline' },
         min_pipeline_value: { type: 'number', description: 'Minimum total open pipeline' },
         limit: { type: 'number', description: 'Max records (default 50)' },
+        properties: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Additional custom field internal_names to include in results (extracted from custom_fields JSONB). Use query_schema first to discover available fields.',
+        },
         order_by: { type: 'string', description: 'Sort by: name, pipeline_value, deal_count, last_activity' },
       },
       required: [],
@@ -147,6 +157,11 @@ const PANDORA_TOOLS: ToolDef[] = [
         role: { type: 'string', description: 'Filter by role: champion, economic_buyer, technical_evaluator, coach, blocker' },
         has_conversation: { type: 'boolean', description: 'Only contacts who appeared on calls' },
         limit: { type: 'number', description: 'Max records (default 50)' },
+        properties: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Additional custom field internal_names to include in results (extracted from custom_fields JSONB). Use query_schema first to discover available fields.',
+        },
       },
       required: [],
     },
@@ -355,6 +370,27 @@ const PANDORA_TOOLS: ToolDef[] = [
       required: ['contact_id'],
     },
   },
+  {
+    name: 'query_schema',
+    description:
+      'Discover available fields on a CRM object for this workspace. Returns field internal_names, labels, data types, enum options (if applicable), population rates, and whether the field is custom or standard. Call this BEFORE query_deals, query_accounts, or query_contacts when the user asks about custom fields (loss reasons, close notes, lifecycle stages, custom scores, etc.), or any field you are uncertain exists. Use the returned internal_name values in subsequent data queries.',
+    parameters: {
+      type: 'object',
+      properties: {
+        object_type: {
+          type: 'string',
+          enum: ['deals', 'companies', 'contacts'],
+          description: 'The CRM object type to discover fields for',
+        },
+        filter: {
+          type: 'string',
+          enum: ['all', 'populated', 'custom_only'],
+          description: 'Filter mode: "populated" (default) returns only fields with >10% fill rate, "custom_only" returns only workspace-added fields, "all" returns everything. Use "populated" unless the user specifically asks for all fields.',
+        },
+      },
+      required: ['object_type'],
+    },
+  },
 ];
 
 // ─── System prompt ────────────────────────────────────────────────────────────
@@ -396,6 +432,26 @@ You have tools that query the company's live data. When someone asks a question,
 10. VELOCITY QUESTIONS: Check get_skill_evidence('stage-velocity-benchmarks') first. If stale or unavailable, call compute_stage_benchmarks directly. Always compare a specific deal's time-in-stage to the benchmark — never say a deal is "slow" without the data to prove it.
 
 11. DEAL INVESTIGATION: When investigating why a deal is at risk, call MULTIPLE tools: query_field_history (stage regressions), query_stage_history (full stage log), query_conversations (recent call activity), query_contacts (stakeholder coverage). Build the full picture before diagnosing.
+
+12. SCHEMA-FIRST REASONING: Before querying deals, companies, or contacts for questions that involve:
+    - Custom fields (loss reasons, close notes, lifecycle stage, custom scores, lead sources, etc.)
+    - Fields you are uncertain exist in this specific workspace
+    - Any question where the answer depends on a field you haven't verified
+
+    You MUST call query_schema first for the relevant object type with filter='populated'.
+
+    Workflow:
+    a. Call query_schema(object_type='deals', filter='populated')
+    b. Scan the returned fields list for internal_names relevant to the question
+    c. Include those internal_names in subsequent queries (note: query tools don't support custom properties parameter yet - use the schema to understand what data exists and guide your analysis)
+    d. If a field the user mentioned does not appear in schema results, tell the user the field was not found or has low data population
+
+    DO NOT assume field internal names. HubSpot internal names often differ from display labels (e.g., 'hs_closed_lost_reason' vs 'Close Lost Reason', 'lifecyclestage' vs 'Lifecycle Stage'). Always verify with query_schema first.
+
+    For churn analysis specifically:
+    - Call query_schema(object_type='companies', filter='populated') to find lifecycle stage field
+    - Call query_schema(object_type='deals', filter='populated') to find loss reason fields
+    - Then query with proper field understanding
 
 12. FORECAST QUESTIONS REQUIRE PROBABILITY WEIGHTING: For any forecast question, call compute_close_probability to score deals, then reference get_skill_evidence('forecast-model') for the full probability-weighted forecast with rep haircuts and in-quarter creation projections. Never present unweighted pipeline totals as a "forecast." Raw pipeline ≠ forecast.
 
