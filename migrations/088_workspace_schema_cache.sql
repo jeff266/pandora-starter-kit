@@ -20,10 +20,6 @@ CREATE INDEX idx_workspace_schema_cache_workspace
 CREATE INDEX idx_workspace_schema_cache_lookup
   ON workspace_schema_cache(workspace_id, object_type, crm_source);
 
-CREATE INDEX idx_workspace_schema_cache_freshness
-  ON workspace_schema_cache(fetched_at)
-  WHERE fetched_at > NOW() - INTERVAL '24 hours';
-
 COMMENT ON TABLE workspace_schema_cache IS 'Caches discovered CRM field schemas to enable dynamic property queries without repeated API calls';
 COMMENT ON COLUMN workspace_schema_cache.schema_json IS 'Array of SchemaField objects with internal_name, label, type, options, population_rate, is_custom';
 COMMENT ON COLUMN workspace_schema_cache.ttl_hours IS 'Cache validity window - refreshes when fetched_at + ttl_hours < now';
