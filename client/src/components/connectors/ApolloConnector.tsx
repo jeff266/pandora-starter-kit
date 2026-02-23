@@ -32,8 +32,7 @@ export default function ApolloConnector({ onToast }: ApolloConnectorProps) {
 
   async function loadStats() {
     try {
-      const workspaceId = getWorkspaceId();
-      const data = await api.get<ApolloStats>(`/workspaces/${workspaceId}/enrichment/apollo/stats`);
+      const data = await api.get<ApolloStats>(`/enrichment/apollo/stats`);
       setStats(data);
       setConnected(data.apollo_connected);
     } catch (error) {
@@ -51,8 +50,7 @@ export default function ApolloConnector({ onToast }: ApolloConnectorProps) {
 
     setConnecting(true);
     try {
-      const workspaceId = getWorkspaceId();
-      await api.post(`/workspaces/${workspaceId}/enrichment/apollo/connect`, { api_key: apiKey });
+      await api.post(`/enrichment/apollo/connect`, { api_key: apiKey });
       onToast({ message: 'Apollo connected successfully', type: 'success' });
       setApiKey('');
       setConnected(true);
@@ -68,8 +66,7 @@ export default function ApolloConnector({ onToast }: ApolloConnectorProps) {
     if (!confirm('Disconnect Apollo? Your enriched data will remain.')) return;
 
     try {
-      const workspaceId = getWorkspaceId();
-      await api.post(`/workspaces/${workspaceId}/enrichment/apollo/disconnect`);
+      await api.post(`/enrichment/apollo/disconnect`);
       onToast({ message: 'Apollo disconnected', type: 'success' });
       setConnected(false);
       await loadStats();
@@ -81,14 +78,13 @@ export default function ApolloConnector({ onToast }: ApolloConnectorProps) {
   async function handleRunEnrichment() {
     setRunning(true);
     try {
-      const workspaceId = getWorkspaceId();
       const result = await api.post<{
         success: boolean;
         total_accounts: number;
         enriched_count: number;
         failed_count: number;
         average_confidence: number;
-      }>(`/workspaces/${workspaceId}/enrichment/apollo/run`);
+      }>(`/enrichment/apollo/run`);
 
       if (result.success) {
         onToast({

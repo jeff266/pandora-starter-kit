@@ -52,12 +52,11 @@ export default function WebhookConnector({ onToast }: WebhookConnectorProps) {
 
   async function loadData() {
     try {
-      const workspaceId = getWorkspaceId();
       const [outbound, inbound, history, dlq] = await Promise.all([
-        api.get<OutboundConfig>(`/workspaces/${workspaceId}/enrichment/webhook/outbound/config`),
-        api.get<InboundUrl>(`/workspaces/${workspaceId}/enrichment/webhook/inbound/url`),
-        api.get<{ history: InboundHistory[] }>(`/workspaces/${workspaceId}/enrichment/webhook/inbound/history?limit=5`),
-        api.get<{ items: DLQItem[] }>(`/workspaces/${workspaceId}/enrichment/webhook/dlq`),
+        api.get<OutboundConfig>(`/enrichment/webhook/outbound/config`),
+        api.get<InboundUrl>(`/enrichment/webhook/inbound/url`),
+        api.get<{ history: InboundHistory[] }>(`/enrichment/webhook/inbound/history?limit=5`),
+        api.get<{ items: DLQItem[] }>(`/enrichment/webhook/dlq`),
       ]);
 
       setOutboundConfig(outbound);
@@ -82,8 +81,7 @@ export default function WebhookConnector({ onToast }: WebhookConnectorProps) {
 
     setSaving(true);
     try {
-      const workspaceId = getWorkspaceId();
-      await api.post(`/workspaces/${workspaceId}/enrichment/webhook/outbound/config`, {
+      await api.post(`/enrichment/webhook/outbound/config`, {
         endpoint_url: outboundUrl,
       });
       onToast({ message: 'Outbound webhook saved', type: 'success' });
@@ -98,8 +96,7 @@ export default function WebhookConnector({ onToast }: WebhookConnectorProps) {
   async function handleTestConnection() {
     setTesting(true);
     try {
-      const workspaceId = getWorkspaceId();
-      await api.post(`/workspaces/${workspaceId}/enrichment/webhook/outbound/test`);
+      await api.post(`/enrichment/webhook/outbound/test`);
       onToast({ message: 'Connection test successful', type: 'success' });
       await loadData();
     } catch (error: any) {
@@ -111,8 +108,7 @@ export default function WebhookConnector({ onToast }: WebhookConnectorProps) {
 
   async function handleTriggerOutbound() {
     try {
-      const workspaceId = getWorkspaceId();
-      await api.post(`/workspaces/${workspaceId}/enrichment/webhook/outbound/trigger`);
+      await api.post(`/enrichment/webhook/outbound/trigger`);
       onToast({ message: 'Enrichment triggered', type: 'success' });
     } catch (error: any) {
       onToast({ message: error.message || 'Failed to trigger', type: 'error' });
@@ -124,8 +120,7 @@ export default function WebhookConnector({ onToast }: WebhookConnectorProps) {
 
     setRotating(true);
     try {
-      const workspaceId = getWorkspaceId();
-      const result = await api.post<InboundUrl>(`/workspaces/${workspaceId}/enrichment/webhook/inbound/rotate`);
+      const result = await api.post<InboundUrl>(`/enrichment/webhook/inbound/rotate`);
       setInboundUrl(result);
       onToast({ message: 'Token rotated. Update your workflow!', type: 'success' });
     } catch (error: any) {
