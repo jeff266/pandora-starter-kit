@@ -6,3 +6,7 @@ dist/
 !tsconfig.json
 .cache/
 .local/
+
+# Replit cache and state files
+.cache/
+.local/
