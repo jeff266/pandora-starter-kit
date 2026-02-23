@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { createLogger } from "../utils/logger.js";
 import { query } from "../db.js";
 import { encryptCredentials } from "../lib/encryption.js";
+import { prefetchSchemas } from "../tools/schema-query.js";
 
 const logger = createLogger("HubSpotAuth");
 const router = Router();
@@ -187,6 +188,9 @@ router.get("/callback", async (req: Request, res: Response) => {
     );
 
     logger.info("Stored HubSpot connection", { workspaceId });
+
+    // Prefetch schema cache in background (fire and forget)
+    prefetchSchemas(workspaceId);
 
     // Redirect back to connectors page
     res.redirect(`/workspaces/${workspaceId}/connectors`);

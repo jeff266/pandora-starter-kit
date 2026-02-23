@@ -2,6 +2,7 @@ import { Router } from 'express';
 import crypto from 'crypto';
 import { query } from '../db.js';
 import { requireAdmin, requireWorkspaceAccess, invalidateApiKeyCache } from '../middleware/auth.js';
+import { invalidateSchemaCache, type ObjectType } from '../tools/schema-query.js';
 
 const router = Router();
 
@@ -222,6 +223,33 @@ router.delete('/:workspaceId/branding', requireWorkspaceAccess, async (req, res)
     res.json({ success: true });
   } catch (err) {
     console.error('[workspaces] Error removing branding:', err instanceof Error ? err.message : err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/workspaces/:id/schema/refresh
+// Clear schema cache for workspace (optionally scoped to object_type)
+router.post('/:id/schema/refresh', requireWorkspaceAccess, async (req, res) => {
+  try {
+    const { id: workspaceId } = req.params;
+    const { object_type } = req.body;
+
+    const objectType = object_type as ObjectType | undefined;
+
+    if (objectType && !['deals', 'companies', 'contacts'].includes(objectType)) {
+      res.status(400).json({ error: 'object_type must be: deals, companies, or contacts' });
+      return;
+    }
+
+    await invalidateSchemaCache(workspaceId, objectType);
+
+    const message = objectType
+      ? `Schema cache cleared for ${objectType}. Will refresh on next query.`
+      : 'Schema cache cleared for all object types. Will refresh on next query.';
+
+    res.json({ success: true, message });
+  } catch (err) {
+    console.error('[workspaces] Error refreshing schema:', err instanceof Error ? err.message : err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

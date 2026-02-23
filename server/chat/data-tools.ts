@@ -8,6 +8,7 @@
 import { query } from '../db.js';
 import { getToolFilters } from '../config/tool-filter-injector.js';
 import { callLLM } from '../utils/llm-router.js';
+import { querySchema, type ObjectType, type FilterMode } from '../tools/schema-query.js';
 
 // ─── Tool result types ───────────────────────────────────────────────────────
 
@@ -207,6 +208,12 @@ export async function executeDataTool(
         result = await computeShrinkRate(workspaceId, params); break;
       case 'infer_contact_role':
         result = await inferContactRole(workspaceId, params); break;
+      case 'query_schema':
+        result = await querySchema(
+          workspaceId,
+          params.object_type as ObjectType,
+          (params.filter as FilterMode) || 'populated'
+        ); break;
       default:
         throw new Error(`Unknown tool: ${toolName}`);
     }
