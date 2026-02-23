@@ -1,4 +1,6 @@
 import { callLLM } from '../utils/llm-router.js';
+import { estimateTokens, TOKEN_THRESHOLDS, type TokenEstimate } from './token-estimator.js';
+import { query } from '../db.js';
 
 export interface ThreadReplyIntent {
   type: 'drill_down' | 'scope_filter' | 'add_context' | 'question' | 'action' | 'unknown';
@@ -125,5 +127,256 @@ function safeParseIntent<T>(content: string, fallback: T): T {
     return JSON.parse(jsonMatch[0]) as T;
   } catch {
     return fallback;
+  }
+}
+
+// ============================================================================
+// Intent Classifier + Model Router (NEW - Ask Pandora optimization)
+// ============================================================================
+
+export type IntentCategory =
+  | 'data_query'                // Needs tools — "how many deals in pipeline?", "show me stalled deals"
+  | 'advisory_stateless'        // No tools needed — "what's the difference between MEDDIC and MEDDPICC?"
+  | 'advisory_with_data_option' // Better with data, but answerable without — "what closed-lost reasons should I use?"
+  | 'ambiguous';                // Unclear — fall through to existing path
+
+export interface IntentClassification {
+  category: IntentCategory;
+  confidence: number;           // 0-1
+  reasoning: string;            // Why this category was selected
+  gating_question?: string;     // Only set for advisory_with_data_option
+  fast_path: boolean;           // true if determined by regex (no LLM used)
+  tokens_used: number;          // 0 for fast path
+}
+
+// Fast-path pattern matchers (no LLM, ~0ms)
+const DATA_QUERY_PATTERNS = [
+  /^(how many|what is (the|our)|show me|list|count|total|give me)\b/i,
+  /^(what('s| is) (my|our|the) (pipeline|forecast|win rate|quota|attainment))/i,
+  /\b(which deals|what deals|which accounts|what accounts)\b/i,
+  /\b(last (week|month|quarter|year)|this (week|month|quarter))\b/i,
+  /\b(show|pull|get|find|search|look up)\b.*(deal|account|contact|opportunity)/i,
+];
+
+const ADVISORY_STATELESS_PATTERNS = [
+  /^what (is|are|does) (meddic|meddpicc|bant|spin|challenger|gap selling|bowtie|funnel)/i,
+  /\b(difference between|compare|vs\.?|versus)\b.*(methodology|framework|model|approach)/i,
+  /^(explain|define|what does .+ mean|how does .+ work)\b/i,
+  /\b(best practice|industry standard|benchmark|typical|average company|most companies)\b/i,
+];
+
+const ADVISORY_WITH_DATA_PATTERNS = [
+  /\b(what|which) (values?|options?|reasons?|categories|fields?|picklist|dropdown) should (i|we|my team)/i,
+  /how should (i|we) (set up|structure|configure|design|organize)\b/i,
+  /what (closed.lost|close.lost|won|loss|churn) reasons?/i,
+  /\b(design|build|create|define) (my|our|a|the) (icp|ideal customer|pipeline|process|playbook|stages?)\b/i,
+  /^why (do|are|is|did|does) (we|our|my|the team|customers?|deals?)/i,
+  /what should (i|we) (do|focus on|prioritize|change|fix|improve)\b/i,
+];
+
+const GATING_QUESTIONS: Record<string, string> = {
+  'closed_lost_reasons':
+    "I can answer this two ways — would you like general RevOps best practice, or should I first mine your actual closed-lost data and open-text reason fields to recommend values based on what your team is actually experiencing?",
+  'churn_analysis':
+    "I can draw on general SaaS churn patterns, or I can dig into your closed-lost deals and any call transcripts first to ground the answer in your actual data. Which would be more useful?",
+  'process_design':
+    "I can suggest a framework based on general best practice, or I can first look at how your current deals actually move through stages to base the recommendation on your team's real motion. Which approach?",
+  'default':
+    "I can answer this from general RevOps best practice, or I can first look at your actual data to give you a recommendation grounded in what's happening in your pipeline. Which would be more useful?",
+};
+
+function generateGatingQuestion(message: string): string {
+  const lower = message.toLowerCase();
+  if (/closed.lost|close.lost|loss reason|churn reason/.test(lower)) {
+    return GATING_QUESTIONS['closed_lost_reasons'];
+  }
+  if (/churn|why.+customer|why.+lose/.test(lower)) {
+    return GATING_QUESTIONS['churn_analysis'];
+  }
+  if (/stage|process|pipeline|structure/.test(lower)) {
+    return GATING_QUESTIONS['process_design'];
+  }
+  return GATING_QUESTIONS['default'];
+}
+
+const INTENT_CLASSIFIER_SYSTEM_PROMPT = `You are classifying sales operations questions into categories.
+
+Categories:
+- data_query: Requires pulling data from CRM or conversation tools to answer. Examples: "how many deals in pipeline?", "which deals are stalled?", "what's our win rate?"
+- advisory_stateless: Answerable from general RevOps knowledge, no data needed. Examples: "what's MEDDIC?", "what's a good sales process?", "how does bowtie attribution work?"
+- advisory_with_data_option: Could be answered generically, but would be MUCH better if we first mined the user's actual CRM data or call transcripts. Examples: "what closed-lost reason values should I use?", "how should I structure my pipeline stages?", "why do our customers churn?"
+
+Respond with ONLY valid JSON, no other text:
+{
+  "category": "data_query" | "advisory_stateless" | "advisory_with_data_option",
+  "confidence": 0.0-1.0,
+  "reasoning": "one sentence"
+}`;
+
+async function classifyWithLLM(
+  message: string,
+  workspaceId: string,
+  tokenEstimate: TokenEstimate,
+): Promise<IntentClassification> {
+  const capability = tokenEstimate.totalInputTokens < TOKEN_THRESHOLDS.DEEPSEEK_MAX_INPUT
+    ? 'classify'
+    : 'reason';
+
+  try {
+    const result = await Promise.race([
+      callIntentClassifier(capability, message, workspaceId),
+      timeoutPromise(3000),
+    ]);
+
+    return {
+      ...result,
+      fast_path: false,
+      tokens_used: Math.ceil((INTENT_CLASSIFIER_SYSTEM_PROMPT.length + message.length) / 4),
+    };
+  } catch (err: any) {
+    console.warn('[IntentClassifier] Classification failed, falling through:', err?.message || err);
+    return {
+      category: 'ambiguous',
+      confidence: 0,
+      reasoning: 'Classification failed or timed out',
+      fast_path: false,
+      tokens_used: 0,
+    };
+  }
+}
+
+async function callIntentClassifier(
+  capability: 'classify' | 'reason',
+  message: string,
+  workspaceId: string,
+): Promise<Pick<IntentClassification, 'category' | 'confidence' | 'reasoning'>> {
+  const response = await callLLM(workspaceId, capability, {
+    systemPrompt: INTENT_CLASSIFIER_SYSTEM_PROMPT,
+    messages: [{ role: 'user', content: message }],
+    maxTokens: 256,
+    temperature: 0,
+    _tracking: { workspaceId, phase: 'chat', stepName: 'intent-classifier', questionText: message },
+  });
+
+  const text = (response.content || '').trim();
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[0]);
+      return {
+        category: parsed.category || 'ambiguous',
+        confidence: parsed.confidence || 0,
+        reasoning: parsed.reasoning || 'No reasoning provided',
+      };
+    } catch (parseErr) {
+      console.error('[IntentClassifier] JSON parse failed:', text);
+    }
+  }
+
+  return {
+    category: 'ambiguous',
+    confidence: 0,
+    reasoning: 'Failed to parse classifier response',
+  };
+}
+
+function timeoutPromise(ms: number): Promise<never> {
+  return new Promise((_, reject) => {
+    setTimeout(() => reject(new Error('classifier_timeout')), ms);
+  });
+}
+
+export async function classifyIntent(
+  message: string,
+  conversationHistory: Array<{ role: string; content: string }>,
+  workspaceId: string,
+): Promise<IntentClassification> {
+  // Fast path — data query patterns
+  for (const pattern of DATA_QUERY_PATTERNS) {
+    if (pattern.test(message)) {
+      return {
+        category: 'data_query',
+        confidence: 0.85,
+        reasoning: 'Data query pattern match',
+        fast_path: true,
+        tokens_used: 0,
+      };
+    }
+  }
+
+  // Fast path — advisory stateless patterns
+  for (const pattern of ADVISORY_STATELESS_PATTERNS) {
+    if (pattern.test(message)) {
+      return {
+        category: 'advisory_stateless',
+        confidence: 0.85,
+        reasoning: 'Advisory pattern match',
+        fast_path: true,
+        tokens_used: 0,
+      };
+    }
+  }
+
+  // Fast path — advisory with data option patterns
+  for (const pattern of ADVISORY_WITH_DATA_PATTERNS) {
+    if (pattern.test(message)) {
+      return {
+        category: 'advisory_with_data_option',
+        confidence: 0.80,
+        reasoning: 'Advisory-with-data pattern match',
+        gating_question: generateGatingQuestion(message),
+        fast_path: true,
+        tokens_used: 0,
+      };
+    }
+  }
+
+  // LLM classification for ambiguous cases
+  const tokenEstimate = estimateTokens(message, conversationHistory);
+  const result = await classifyWithLLM(message, workspaceId, tokenEstimate);
+
+  if (result.category === 'advisory_with_data_option') {
+    result.gating_question = generateGatingQuestion(message);
+  }
+
+  return result;
+}
+
+// ============================================================================
+// Intent Classification Logging
+// ============================================================================
+
+export async function logIntentClassification(
+  workspaceId: string,
+  message: string,
+  result: IntentClassification,
+  tokenEstimate?: TokenEstimate,
+): Promise<void> {
+  try {
+    const estimate = tokenEstimate || estimateTokens(message, []);
+    const classifierModel = result.fast_path
+      ? 'regex'
+      : (result.tokens_used < 500 ? 'deepseek' : 'claude');
+
+    await query(
+      `INSERT INTO intent_classifications
+       (workspace_id, question_text, question_length_tokens, context_length_tokens,
+        category, confidence, fast_path, tokens_used, classifier_model)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [
+        workspaceId,
+        message.slice(0, 500),
+        estimate.messageTokens,
+        estimate.contextTokens,
+        result.category,
+        result.confidence,
+        result.fast_path,
+        result.tokens_used,
+        classifierModel,
+      ]
+    );
+  } catch (err) {
+    console.error('[IntentClassifier] Failed to log classification:', err instanceof Error ? err.message : err);
   }
 }
