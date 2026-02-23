@@ -720,7 +720,7 @@ const DEEPSEEK_PRICING = {
   output: 0.28,           // $0.28 per MTok
 };
 
-export function estimateCost(usage: {
+export function estimateAggregateCost(usage: {
   claude?: number;
   deepseek?: number;
   claudeCacheCreation?: number;
