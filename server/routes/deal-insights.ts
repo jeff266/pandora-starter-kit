@@ -14,14 +14,13 @@ import { createLogger } from '../utils/logger.js';
 import { requireWorkspaceAccess } from '../middleware/auth.js';
 
 const router = express.Router();
-router.use(requireWorkspaceAccess);
 const logger = createLogger('DealInsightsAPI');
 
 // ============================================================================
 // Get Insight Configuration
 // ============================================================================
 
-router.get('/api/workspaces/:workspaceId/insights/config', async (req, res) => {
+router.get('/api/workspaces/:workspaceId/insights/config', requireWorkspaceAccess, async (req, res) => {
   try {
     const { workspaceId } = req.params;
 
@@ -64,7 +63,7 @@ router.get('/api/workspaces/:workspaceId/insights/config', async (req, res) => {
 // Update Insight Configuration
 // ============================================================================
 
-router.put('/api/workspaces/:workspaceId/insights/config', async (req, res) => {
+router.put('/api/workspaces/:workspaceId/insights/config', requireWorkspaceAccess, async (req, res) => {
   try {
     const { workspaceId } = req.params;
     const config = req.body;
@@ -136,7 +135,7 @@ router.put('/api/workspaces/:workspaceId/insights/config', async (req, res) => {
 // Auto-Detect Framework
 // ============================================================================
 
-router.post('/api/workspaces/:workspaceId/insights/config/auto-detect', async (req, res) => {
+router.post('/api/workspaces/:workspaceId/insights/config/auto-detect', requireWorkspaceAccess, async (req, res) => {
   try {
     const { workspaceId } = req.params;
 
@@ -206,7 +205,7 @@ router.post('/api/workspaces/:workspaceId/insights/config/auto-detect', async (r
 // Get Available Fields for Mapping
 // ============================================================================
 
-router.get('/api/workspaces/:workspaceId/insights/config/available-fields', async (req, res) => {
+router.get('/api/workspaces/:workspaceId/insights/config/available-fields', requireWorkspaceAccess, async (req, res) => {
   try {
     const { workspaceId } = req.params;
 
@@ -249,7 +248,7 @@ router.get('/api/workspaces/:workspaceId/insights/config/available-fields', asyn
 // Trigger Manual Extraction
 // ============================================================================
 
-router.post('/api/workspaces/:workspaceId/insights/extract', async (req, res) => {
+router.post('/api/workspaces/:workspaceId/insights/extract', requireWorkspaceAccess, async (req, res) => {
   try {
     const { workspaceId } = req.params;
     const { conversation_ids, batch_size } = req.body;
@@ -270,7 +269,7 @@ router.post('/api/workspaces/:workspaceId/insights/extract', async (req, res) =>
 // Get Insight Extraction Status
 // ============================================================================
 
-router.get('/api/workspaces/:workspaceId/insights/status', async (req, res) => {
+router.get('/api/workspaces/:workspaceId/insights/status', requireWorkspaceAccess, async (req, res) => {
   try {
     const { workspaceId } = req.params;
 
@@ -357,7 +356,7 @@ router.get('/api/workspaces/:workspaceId/insights/status', async (req, res) => {
 // Get Current Insights for a Deal
 // ============================================================================
 
-router.get('/api/workspaces/:workspaceId/deals/:dealId/insights', async (req, res) => {
+router.get('/api/workspaces/:workspaceId/deals/:dealId/insights', requireWorkspaceAccess, async (req, res) => {
   try {
     const { workspaceId, dealId } = req.params;
 
@@ -389,7 +388,7 @@ router.get('/api/workspaces/:workspaceId/deals/:dealId/insights', async (req, re
 // Get Full Insight History for a Deal
 // ============================================================================
 
-router.get('/api/workspaces/:workspaceId/deals/:dealId/insights/history', async (req, res) => {
+router.get('/api/workspaces/:workspaceId/deals/:dealId/insights/history', requireWorkspaceAccess, async (req, res) => {
   try {
     const { workspaceId, dealId } = req.params;
 
