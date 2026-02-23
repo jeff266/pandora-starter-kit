@@ -81,7 +81,7 @@ export async function appendChatMessage(
 ): Promise<void> {
   // Insert message
   await query(
-    `INSERT INTO chat_messages (session_id, workspace_id, user_id, role, content, metadata, created_at)
+    `INSERT INTO chat_session_messages (session_id, workspace_id, user_id, role, content, metadata, created_at)
      VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
     [sessionId, workspaceId, userId, role, content, JSON.stringify(metadata || {})]
   );
@@ -265,7 +265,7 @@ export async function getChatSessionWithMessages(
   // Fetch messages
   const messagesResult = await query(
     `SELECT id, role, content, created_at, metadata
-     FROM chat_messages
+     FROM chat_session_messages
      WHERE session_id = $1
      ORDER BY created_at ASC`,
     [sessionId]

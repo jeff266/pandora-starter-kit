@@ -1,5 +1,6 @@
 -- Migration: Chat Sessions for Ask Pandora
 -- Persisted conversation history with role-based access
+-- Note: Using chat_session_messages to avoid conflict with existing chat_messages table (migration 051)
 
 -- Chat sessions: one row per conversation thread
 CREATE TABLE IF NOT EXISTS chat_sessions (
@@ -13,8 +14,9 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
   message_count INTEGER DEFAULT 0
 );
 
--- Chat messages: individual turns within a session
-CREATE TABLE IF NOT EXISTS chat_messages (
+-- Chat session messages: individual turns within a session
+-- Renamed from chat_messages to avoid conflict with logging table in migration 051
+CREATE TABLE IF NOT EXISTS chat_session_messages (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   session_id UUID NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
   workspace_id UUID NOT NULL,  -- Denormalized for query efficiency
@@ -25,13 +27,13 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Indexes for efficient querying
+-- Indexes
 CREATE INDEX IF NOT EXISTS idx_chat_sessions_workspace_user
   ON chat_sessions(workspace_id, user_id, last_message_at DESC);
 CREATE INDEX IF NOT EXISTS idx_chat_sessions_workspace
   ON chat_sessions(workspace_id, last_message_at DESC);
-CREATE INDEX IF NOT EXISTS idx_chat_messages_session
-  ON chat_messages(session_id, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_chat_session_messages_session
+  ON chat_session_messages(session_id, created_at ASC);
 
 -- Manager reporting: who reports to whom
 -- Stub table for future Manager role (Phase 2)
@@ -48,7 +50,7 @@ CREATE INDEX IF NOT EXISTS idx_user_reporting_lines_manager
   ON user_reporting_lines(workspace_id, manager_id);
 
 COMMENT ON TABLE chat_sessions IS 'Ask Pandora conversation sessions';
-COMMENT ON TABLE chat_messages IS 'Individual messages within Ask Pandora sessions';
+COMMENT ON TABLE chat_session_messages IS 'Individual messages within Ask Pandora sessions';
 COMMENT ON TABLE user_reporting_lines IS 'Manager-report relationships for access control';
 COMMENT ON COLUMN chat_sessions.title IS 'Auto-generated from first message (max 80 chars)';
-COMMENT ON COLUMN chat_messages.metadata IS 'AI response metadata: router_decision, tokens, tool_calls, etc.';
+COMMENT ON COLUMN chat_session_messages.metadata IS 'AI response metadata: router_decision, tokens, tool_calls, etc.';
