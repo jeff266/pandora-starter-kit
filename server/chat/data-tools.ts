@@ -10,6 +10,7 @@ import { getToolFilters } from '../config/tool-filter-injector.js';
 import { callLLM } from '../utils/llm-router.js';
 import { querySchema, type ObjectType, type FilterMode } from '../tools/schema-query.js';
 import { queryConversationSignals, type SignalQueryFilters } from '../signals/query-conversation-signals.js';
+import { getWorkspaceContext } from './workspace-context.js';
 
 // ─── Tool result types ───────────────────────────────────────────────────────
 
@@ -236,6 +237,21 @@ export async function executeDataTool(
           result = {
             ...signalResult,
             query_description: `Found ${signalResult.total} signal(s) matching the filters`,
+          };
+        }
+        break;
+      case 'get_workspace_context':
+        const workspaceContext = await getWorkspaceContext(workspaceId);
+
+        if (!workspaceContext) {
+          result = {
+            error: 'Unable to load workspace context. This could indicate a database issue or missing workspace configuration.',
+            query_description: 'Attempted to load workspace context',
+          };
+        } else {
+          result = {
+            ...workspaceContext,
+            query_description: 'Retrieved workspace context including business model, deal metrics, ICP profile, and conversation signals',
           };
         }
         break;

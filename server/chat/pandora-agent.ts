@@ -461,6 +461,16 @@ const PANDORA_TOOLS: ToolDef[] = [
       required: [],
     },
   },
+  {
+    name: 'get_workspace_context',
+    description:
+      'Get company-specific context for this workspace. Returns business model (GTM motion, segment, industry), deal metrics (ACV range, avg deal size, sales cycle, win rate, open deals), ICP profile (top industries and personas), and conversation signals (top competitors and objections mentioned). Use this to understand the company profile before giving strategic advice or when the user asks about their business context.',
+    parameters: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+  },
 ];
 
 // ─── System prompt ────────────────────────────────────────────────────────────
