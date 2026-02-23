@@ -141,9 +141,6 @@ export function generateRecommendations(
 
 export async function trackTokenUsage(record: TokenRecord): Promise<void> {
   try {
-    if (record.questionText) {
-      console.log(`[Token Tracker] questionText present: "${record.questionText.substring(0, 80)}"`);
-    }
     const totalTokens = record.inputTokens + record.outputTokens;
 
     if (totalTokens > THRESHOLDS.singleCallCritical) {
