@@ -414,6 +414,13 @@ async function start(): Promise<void> {
   }
 
   try {
+    const { seedProductionData } = await import('./seed-production.js');
+    await seedProductionData();
+  } catch (err) {
+    console.warn("[server] Production seed failed (non-fatal):", err instanceof Error ? err.message : err);
+  }
+
+  try {
     const { migrateAllBowtiesToFunnel } = await import('./funnel/migration.js');
     await migrateAllBowtiesToFunnel();
   } catch (err) {
