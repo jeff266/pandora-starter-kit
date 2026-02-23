@@ -36,6 +36,7 @@ export interface ContactFilters {
   offset?: number;
   additionalWhere?: string;
   additionalParams?: unknown[];
+  properties?: string[]; // Additional custom field internal_names to extract from custom_fields JSONB
 }
 
 function buildWhereClause(workspaceId: string, filters: ContactFilters) {
@@ -100,6 +101,29 @@ const VALID_SORT_COLUMNS: Record<string, string> = {
   created_at: 'created_at',
 };
 
+/**
+ * Extract requested custom fields from the custom_fields JSONB column
+ * and add them as top-level properties on the contact object
+ */
+function extractCustomFields<T extends { custom_fields?: Record<string, unknown> }>(
+  record: T,
+  properties?: string[]
+): T & Record<string, unknown> {
+  if (!properties || properties.length === 0 || !record.custom_fields) {
+    return record;
+  }
+
+  const extracted: Record<string, unknown> = { ...record };
+
+  for (const prop of properties) {
+    if (prop in record.custom_fields) {
+      extracted[prop] = record.custom_fields[prop];
+    }
+  }
+
+  return extracted;
+}
+
 export async function queryContacts(workspaceId: string, filters: ContactFilters): Promise<{ contacts: Contact[]; total: number; limit: number; offset: number }> {
   const { where, params, idx } = buildWhereClause(workspaceId, filters);
 
@@ -120,7 +144,10 @@ export async function queryContacts(workspaceId: string, filters: ContactFilters
     dataParams,
   );
 
-  return { contacts: dataResult.rows, total, limit, offset };
+  // Extract custom fields if properties parameter provided
+  const contacts = dataResult.rows.map(contact => extractCustomFields(contact, filters.properties));
+
+  return { contacts, total, limit, offset };
 }
 
 export async function getContact(workspaceId: string, contactId: string): Promise<Contact | null> {
