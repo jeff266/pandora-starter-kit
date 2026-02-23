@@ -644,18 +644,24 @@ export async function initialSync(
     });
 
     // Detect stage changes BEFORE upserting deals (must capture previous stage)
-    const stageChanges = await detectStageChanges(
-      workspaceId,
-      normalizedDeals.map(d => ({
-        sourceId: d.source_id,
-        stage: d.stage,
-        stage_normalized: d.stage_normalized,
-      }))
-    );
+    let stageChanges: Awaited<ReturnType<typeof detectStageChanges>> = [];
+    try {
+      stageChanges = await detectStageChanges(
+        workspaceId,
+        normalizedDeals.map(d => ({
+          sourceId: d.source_id,
+          stage: d.stage,
+          stage_normalized: d.stage_normalized,
+        }))
+      );
 
-    if (stageChanges.length > 0) {
-      const recorded = await recordStageChanges(stageChanges, 'sync_detection');
-      console.log(`[Stage Tracker] Recorded ${recorded} stage changes for workspace ${workspaceId}`);
+      if (stageChanges.length > 0) {
+        const recorded = await recordStageChanges(stageChanges, 'sync_detection');
+        console.log(`[Stage Tracker] Recorded ${recorded} stage changes for workspace ${workspaceId}`);
+      }
+    } catch (err: any) {
+      console.error(`[HubSpot Sync] Stage change detection failed:`, err.message);
+      errors.push(`Stage change detection failed: ${err.message}`);
     }
 
     const [dealsStored, contactsStored] = await Promise.all([
@@ -672,32 +678,42 @@ export async function initialSync(
     ]);
 
     // Update cached stage columns AFTER upsert
-    if (stageChanges.length > 0) {
-      await updateDealStageCache(stageChanges);
+    try {
+      if (stageChanges.length > 0) {
+        await updateDealStageCache(stageChanges);
+      }
+    } catch (err: any) {
+      console.error(`[HubSpot Sync] Stage cache update failed:`, err.message);
+      errors.push(`Stage cache update failed: ${err.message}`);
     }
 
     // Resolve account_source_id → account_id UUIDs and update FK columns
-    const allAccountSourceIds = new Set<string>();
-    const allContactSourceIds = new Set<string>();
-    for (const d of normalizedDeals) {
-      if (d.account_source_id) allAccountSourceIds.add(d.account_source_id);
-      for (const cId of d.contact_source_ids) allContactSourceIds.add(cId);
+    try {
+      const allAccountSourceIds = new Set<string>();
+      const allContactSourceIds = new Set<string>();
+      for (const d of normalizedDeals) {
+        if (d.account_source_id) allAccountSourceIds.add(d.account_source_id);
+        for (const cId of d.contact_source_ids) allContactSourceIds.add(cId);
+      }
+      for (const c of normalizedContacts) {
+        if (c.account_source_id) allAccountSourceIds.add(c.account_source_id);
+      }
+
+      const [accountIdMap, contactIdMap] = await Promise.all([
+        resolveAccountIds(workspaceId, allAccountSourceIds),
+        resolveContactIds(workspaceId, allContactSourceIds),
+      ]);
+
+      await Promise.all([
+        updateDealForeignKeys(workspaceId, normalizedDeals, accountIdMap, contactIdMap),
+        updateContactAccountIds(workspaceId, normalizedContacts, accountIdMap),
+      ]);
+
+      console.log(`[HubSpot Sync] Resolved FKs: ${accountIdMap.size} accounts, ${contactIdMap.size} contacts`);
+    } catch (err: any) {
+      console.error(`[HubSpot Sync] FK resolution failed:`, err.message);
+      errors.push(`FK resolution failed: ${err.message}`);
     }
-    for (const c of normalizedContacts) {
-      if (c.account_source_id) allAccountSourceIds.add(c.account_source_id);
-    }
-
-    const [accountIdMap, contactIdMap] = await Promise.all([
-      resolveAccountIds(workspaceId, allAccountSourceIds),
-      resolveContactIds(workspaceId, allContactSourceIds),
-    ]);
-
-    await Promise.all([
-      updateDealForeignKeys(workspaceId, normalizedDeals, accountIdMap, contactIdMap),
-      updateContactAccountIds(workspaceId, normalizedContacts, accountIdMap),
-    ]);
-
-    console.log(`[HubSpot Sync] Resolved FKs: ${accountIdMap.size} accounts, ${contactIdMap.size} contacts`);
 
     // Fetch and transform activities (must be after contacts and deals for FK resolution)
     let rawEngagements: any[] = [];
@@ -732,8 +748,6 @@ export async function initialSync(
     totalStored = dealsStored + contactsStored + accountsStored + activitiesStored;
     console.log(`[HubSpot Sync] Stored ${dealsStored} deals, ${contactsStored} contacts, ${accountsStored} accounts, ${activitiesStored} activities`);
 
-    await updateConnectionSyncStatus(workspaceId, 'hubspot', totalStored, errors.length > 0 ? errors[0] : null);
-
     // Scope inference + stamping — run after deals are written
     // Non-blocking: don't delay sync completion on inference errors
     if (dealsStored > 0) {
@@ -750,56 +764,61 @@ export async function initialSync(
 
     // Trigger stage history backfill if this is initial sync and deals have stale stage_changed_at
     if (dealsStored > 0) {
-      const staleStageTimestamps = await query<{ count: string }>(
-        `SELECT COUNT(*) as count FROM deals
-         WHERE workspace_id = $1 AND source = 'hubspot'
-           AND (stage_changed_at IS NULL OR stage_changed_at = created_at)`,
-        [workspaceId]
-      );
-      const staleCount = parseInt(staleStageTimestamps.rows[0]?.count || '0', 10);
+      try {
+        const staleStageTimestamps = await query<{ count: string }>(
+          `SELECT COUNT(*) as count FROM deals
+           WHERE workspace_id = $1 AND source = 'hubspot'
+             AND (stage_changed_at IS NULL OR stage_changed_at = created_at)`,
+          [workspaceId]
+        );
+        const staleCount = parseInt(staleStageTimestamps.rows[0]?.count || '0', 10);
 
-      if (staleCount > 0) {
-        console.log(`[HubSpot Sync] ${staleCount} deals have stale stage_changed_at. Triggering stage history backfill...`);
-        const { backfillStageHistory } = await import('./stage-history-backfill.js');
+        if (staleCount > 0) {
+          console.log(`[HubSpot Sync] ${staleCount} deals have stale stage_changed_at. Triggering stage history backfill...`);
+          const { backfillStageHistory } = await import('./stage-history-backfill.js');
 
-        // Run backfill async (don't block sync completion)
-        backfillStageHistory(workspaceId, client.getAccessToken())
-          .then(result => {
-            console.log(`[HubSpot Sync] Stage history backfill complete:`, result);
-          })
-          .catch(err => {
-            console.error(`[HubSpot Sync] Stage history backfill failed:`, err.message);
-          });
+          backfillStageHistory(workspaceId, client.getAccessToken())
+            .then(result => {
+              console.log(`[HubSpot Sync] Stage history backfill complete:`, result);
+            })
+            .catch(err => {
+              console.error(`[HubSpot Sync] Stage history backfill failed:`, err.message);
+            });
+        }
+      } catch (err: any) {
+        console.error(`[HubSpot Sync] Stage history backfill check failed:`, err.message);
       }
     }
 
     // Trigger contact role resolution if deal_contacts is empty or has missing roles
     if (dealsStored > 0 && contactsStored > 0) {
-      const dealContactsCheck = await query<{ total: string; with_roles: string }>(
-        `SELECT
-          COUNT(*) as total,
-          COUNT(*) FILTER (WHERE buying_role IS NOT NULL) as with_roles
-         FROM deal_contacts
-         WHERE workspace_id = $1`,
-        [workspaceId]
-      );
-      const totalDealContacts = parseInt(dealContactsCheck.rows[0]?.total || '0', 10);
-      const dealContactsWithRoles = parseInt(dealContactsCheck.rows[0]?.with_roles || '0', 10);
-      const missingRoles = totalDealContacts - dealContactsWithRoles;
+      try {
+        const dealContactsCheck = await query<{ total: string; with_roles: string }>(
+          `SELECT
+            COUNT(*) as total,
+            COUNT(*) FILTER (WHERE buying_role IS NOT NULL) as with_roles
+           FROM deal_contacts
+           WHERE workspace_id = $1`,
+          [workspaceId]
+        );
+        const totalDealContacts = parseInt(dealContactsCheck.rows[0]?.total || '0', 10);
+        const dealContactsWithRoles = parseInt(dealContactsCheck.rows[0]?.with_roles || '0', 10);
+        const missingRoles = totalDealContacts - dealContactsWithRoles;
 
-      // Trigger if empty OR if >50% are missing roles
-      if (totalDealContacts === 0 || (totalDealContacts > 0 && missingRoles / totalDealContacts > 0.5)) {
-        console.log(`[HubSpot Sync] ${missingRoles}/${totalDealContacts} deal_contacts missing roles. Triggering contact role resolution...`);
-        const { resolveHubSpotContactRoles } = await import('./contact-role-resolution.js');
+        if (totalDealContacts === 0 || (totalDealContacts > 0 && missingRoles / totalDealContacts > 0.5)) {
+          console.log(`[HubSpot Sync] ${missingRoles}/${totalDealContacts} deal_contacts missing roles. Triggering contact role resolution...`);
+          const { resolveHubSpotContactRoles } = await import('./contact-role-resolution.js');
 
-        // Run async (don't block sync completion)
-        resolveHubSpotContactRoles(client, workspaceId)
-          .then(result => {
-            console.log(`[HubSpot Sync] Contact role resolution complete:`, result);
-          })
-          .catch(err => {
-            console.error(`[HubSpot Sync] Contact role resolution failed:`, err.message);
-          });
+          resolveHubSpotContactRoles(client, workspaceId)
+            .then(result => {
+              console.log(`[HubSpot Sync] Contact role resolution complete:`, result);
+            })
+            .catch(err => {
+              console.error(`[HubSpot Sync] Contact role resolution failed:`, err.message);
+            });
+        }
+      } catch (err: any) {
+        console.error(`[HubSpot Sync] Contact role resolution check failed:`, err.message);
       }
     }
 
@@ -807,6 +826,13 @@ export async function initialSync(
     const msg = error instanceof Error ? error.message : 'Unknown sync error';
     errors.push(msg);
     console.error(`[HubSpot Sync] Fatal error during initial sync:`, msg);
+  }
+
+  // Always update connection status — even if sync had errors, record last_sync_at
+  try {
+    await updateConnectionSyncStatus(workspaceId, 'hubspot', totalStored, errors.length > 0 ? errors[0] : null);
+  } catch (statusErr) {
+    console.error(`[HubSpot Sync] Failed to update connection sync status:`, statusErr instanceof Error ? statusErr.message : statusErr);
   }
 
   return {
@@ -940,27 +966,32 @@ export async function incrementalSync(
     ]);
 
     // Resolve FK associations
-    const allAccountSourceIds = new Set<string>();
-    const allContactSourceIds = new Set<string>();
-    for (const d of normalizedDeals) {
-      if (d.account_source_id) allAccountSourceIds.add(d.account_source_id);
-      for (const cId of d.contact_source_ids) allContactSourceIds.add(cId);
+    try {
+      const allAccountSourceIds = new Set<string>();
+      const allContactSourceIds = new Set<string>();
+      for (const d of normalizedDeals) {
+        if (d.account_source_id) allAccountSourceIds.add(d.account_source_id);
+        for (const cId of d.contact_source_ids) allContactSourceIds.add(cId);
+      }
+      for (const c of normalizedContacts) {
+        if (c.account_source_id) allAccountSourceIds.add(c.account_source_id);
+      }
+
+      const [accountIdMap, contactIdMap] = await Promise.all([
+        resolveAccountIds(workspaceId, allAccountSourceIds),
+        resolveContactIds(workspaceId, allContactSourceIds),
+      ]);
+
+      await Promise.all([
+        updateDealForeignKeys(workspaceId, normalizedDeals, accountIdMap, contactIdMap),
+        updateContactAccountIds(workspaceId, normalizedContacts, accountIdMap),
+      ]);
+
+      await populateDealContactsFromAssociations(workspaceId, normalizedDeals, contactIdMap);
+    } catch (err: any) {
+      console.error(`[HubSpot Incremental Sync] FK resolution failed:`, err.message);
+      errors.push(`FK resolution failed: ${err.message}`);
     }
-    for (const c of normalizedContacts) {
-      if (c.account_source_id) allAccountSourceIds.add(c.account_source_id);
-    }
-
-    const [accountIdMap, contactIdMap] = await Promise.all([
-      resolveAccountIds(workspaceId, allAccountSourceIds),
-      resolveContactIds(workspaceId, allContactSourceIds),
-    ]);
-
-    await Promise.all([
-      updateDealForeignKeys(workspaceId, normalizedDeals, accountIdMap, contactIdMap),
-      updateContactAccountIds(workspaceId, normalizedContacts, accountIdMap),
-    ]);
-
-    await populateDealContactsFromAssociations(workspaceId, normalizedDeals, contactIdMap);
 
     // Fetch activities updated since last sync
     const lastSyncTimestamp = Math.floor(since.getTime());
@@ -994,7 +1025,6 @@ export async function incrementalSync(
     console.log(`[HubSpot Incremental Sync] Stored ${activitiesStored} activities`);
 
     totalStored = dealsStored + contactsStored + accountsStored + activitiesStored;
-    await updateConnectionSyncStatus(workspaceId, 'hubspot', totalStored, errors.length > 0 ? errors[0] : null);
 
     // Scope stamping — re-stamp only the deals touched in this incremental sync
     // Do NOT re-run inference on incremental (scopes are already configured)
@@ -1014,6 +1044,14 @@ export async function incrementalSync(
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Unknown sync error';
     errors.push(msg);
+    console.error(`[HubSpot Sync] Fatal error during incremental sync:`, msg);
+  }
+
+  // Always update connection status — even if sync had errors, record last_sync_at
+  try {
+    await updateConnectionSyncStatus(workspaceId, 'hubspot', totalStored, errors.length > 0 ? errors[0] : null);
+  } catch (statusErr) {
+    console.error(`[HubSpot Sync] Failed to update connection sync status:`, statusErr instanceof Error ? statusErr.message : statusErr);
   }
 
   return {

@@ -469,8 +469,10 @@ router.get('/:workspaceId/connectors/status', async (req: Request<WorkspaceParam
       const hoursSinceSync = lastSync ? (now - lastSync) / (1000 * 60 * 60) : Infinity;
 
       let health: 'green' | 'yellow' | 'red';
-      if (conn.status === 'error' || !lastSync) {
+      if (conn.status === 'error' || conn.status === 'disconnected') {
         health = 'red';
+      } else if (conn.status === 'degraded' || !lastSync) {
+        health = 'yellow';
       } else if (hoursSinceSync > 24 || (conn.error_message && conn.status !== 'error')) {
         health = 'yellow';
       } else {
