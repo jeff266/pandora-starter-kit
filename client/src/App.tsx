@@ -20,6 +20,7 @@ import AccountList from './pages/AccountList';
 import SkillsPage from './pages/SkillsPage';
 import SkillRunsPage from './pages/SkillRunsPage';
 import ConnectorsPage from './pages/ConnectorsPage';
+import EnrichmentConnectorsPage from './pages/EnrichmentConnectorsPage';
 import MarketplacePage from './pages/MarketplacePage';
 import InsightsPage from './pages/InsightsPage';
 import Actions from './pages/Actions';
@@ -57,6 +58,7 @@ const pageTitles: Record<string, string> = {
   '/reports': 'Reports',
   '/connectors': 'Connectors',
   '/connectors/health': 'Connector Health',
+  '/enrichment': 'Enrichment Connectors',
   '/filters': 'Named Filters',
   '/data-dictionary': 'Data Dictionary',
   '/members': 'Members',
@@ -221,6 +223,7 @@ export default function App() {
             <Route path="/skills" element={<SkillsPage />} />
             <Route path="/skills/:skillId/runs" element={<SkillRunsPage />} />
             <Route path="/connectors" element={<ConnectorsPage />} />
+            <Route path="/enrichment" element={<EnrichmentConnectorsPage />} />
             <Route path="/insights" element={<InsightsPage />} />
             <Route path="/members" element={<MembersPage />} />
             <Route path="/join" element={<JoinWorkspace />} />
