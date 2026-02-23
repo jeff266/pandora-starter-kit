@@ -1,7 +1,7 @@
 -- Manual migration script for enrichment setup
 -- Run this if npm run migrate fails
 
--- 080: workspace_settings table
+-- 084: workspace_settings table
 CREATE TABLE IF NOT EXISTS workspace_settings (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS workspace_settings (
 CREATE INDEX IF NOT EXISTS idx_workspace_settings_workspace ON workspace_settings(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_workspace_settings_key ON workspace_settings(workspace_id, key);
 
--- 081: enriched_accounts table
+-- 085: enriched_accounts table
 CREATE TABLE IF NOT EXISTS enriched_accounts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -57,7 +57,7 @@ CREATE INDEX IF NOT EXISTS idx_enriched_accounts_company ON enriched_accounts(wo
 CREATE INDEX IF NOT EXISTS idx_enriched_accounts_source ON enriched_accounts(workspace_id, enrichment_source);
 CREATE INDEX IF NOT EXISTS idx_enriched_accounts_batch ON enriched_accounts(workspace_id, pandora_batch_id);
 
--- 082: webhook connector tables
+-- 086: webhook connector tables
 CREATE TABLE IF NOT EXISTS webhook_tokens (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -126,7 +126,7 @@ CREATE TABLE IF NOT EXISTS webhook_inbound_log (
 CREATE INDEX IF NOT EXISTS idx_webhook_inbound_workspace ON webhook_inbound_log(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_webhook_inbound_batch ON webhook_inbound_log(workspace_id, batch_id);
 
--- 083: csv_imports table
+-- 087: csv_imports table
 CREATE TABLE IF NOT EXISTS csv_imports (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -151,10 +151,10 @@ CREATE INDEX IF NOT EXISTS idx_csv_imports_status ON csv_imports(workspace_id, s
 -- Record migrations as completed
 INSERT INTO migrations (name, applied_at)
 VALUES
-  ('080_workspace_settings.sql', NOW()),
-  ('081_enriched_accounts.sql', NOW()),
-  ('082_webhook_connector.sql', NOW()),
-  ('083_csv_imports.sql', NOW())
+  ('084_workspace_settings.sql', NOW()),
+  ('085_enriched_accounts.sql', NOW()),
+  ('086_webhook_connector.sql', NOW()),
+  ('087_csv_imports.sql', NOW())
 ON CONFLICT (name) DO NOTHING;
 
 -- Verify
