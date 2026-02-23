@@ -1,7 +1,7 @@
 import { query } from '../db.js';
 import { runScopedAnalysis } from '../analysis/scoped-analysis.js';
 import { tryHeuristic } from './heuristic-router.js';
-import { classifyDirectQuestion } from './intent-classifier.js';
+import { classifyDirectQuestion, classifyIntent, logIntentClassification } from './intent-classifier.js';
 import {
   getConversationState,
   createConversationState,
@@ -18,6 +18,8 @@ import { createAnnotation, getActiveAnnotations } from '../feedback/annotations.
 import { randomUUID } from 'crypto';
 import { runPandoraAgent, buildConversationHistory } from './pandora-agent.js';
 import { logChatMessage } from '../lib/chat-logger.js';
+import { estimateTokens } from './token-estimator.js';
+import { callLLM } from '../utils/llm-router.js';
 
 export interface ConversationTurnInput {
   surface: 'slack_thread' | 'slack_dm' | 'in_app';
@@ -241,6 +243,99 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
           rate_limited: true,
         };
       }
+    }
+  }
+
+  // ── Step 4.0: Intent Classification (in_app only) ────────────────────────────
+  // Pre-dispatch routing to catch advisory questions before expensive tool calls.
+  // Falls through to Pandora Agent for data_query or ambiguous categories.
+  if (!answer && surface === 'in_app') {
+    try {
+      const conversationHistory = buildConversationHistory(state.messages || [] as any);
+      const intentClassification = await classifyIntent(message, conversationHistory, workspaceId);
+
+      await logIntentClassification(workspaceId, message, intentClassification);
+
+      // Handle advisory_with_data_option: ask gating question
+      if (
+        intentClassification.category === 'advisory_with_data_option' &&
+        intentClassification.confidence >= 0.75 &&
+        !isGatingResponse(message, conversationHistory)
+      ) {
+        const gatingAnswer = intentClassification.gating_question!;
+
+        await appendMessage(workspaceId, channelId, threadId, {
+          role: 'assistant',
+          content: gatingAnswer,
+          timestamp: new Date().toISOString(),
+        });
+
+        await logChatMessage({
+          workspaceId,
+          sessionId: threadId,
+          surface: 'ask_pandora',
+          role: 'assistant',
+          content: gatingAnswer,
+          scope: {
+            type: scopeType,
+            entity_id: entityId,
+            rep_email: repEmail,
+          },
+        });
+
+        await updateContext(workspaceId, channelId, threadId, {
+          last_scope: { type: scopeType, entity_id: entityId, rep_email: repEmail },
+        });
+
+        return {
+          answer: gatingAnswer,
+          thread_id: threadId,
+          scope: { type: scopeType, entity_id: entityId, rep_email: repEmail },
+          router_decision: 'gating_question',
+          data_strategy: 'advisory_with_data_option',
+          tokens_used: intentClassification.tokens_used,
+          response_id: randomUUID(),
+          feedback_enabled: false,
+        };
+      }
+
+      // Handle advisory_stateless: skip tools, use Claude for advisory answer
+      if (
+        intentClassification.category === 'advisory_stateless' &&
+        intentClassification.confidence >= 0.75
+      ) {
+        const conversationHistory = buildConversationHistory(state.messages || [] as any);
+        return await handleAdvisoryResponse(
+          message,
+          workspaceId,
+          threadId,
+          channelId,
+          scopeType,
+          entityId,
+          repEmail,
+          conversationHistory
+        );
+      }
+
+      // Handle user responding "best practice" to a gating question
+      if (isGatingResponse(message, conversationHistory) && prefersBestPractice(message)) {
+        const conversationHistory = buildConversationHistory(state.messages || [] as any);
+        return await handleAdvisoryResponse(
+          message,
+          workspaceId,
+          threadId,
+          channelId,
+          scopeType,
+          entityId,
+          repEmail,
+          conversationHistory
+        );
+      }
+
+      // Fall through to Pandora Agent for data_query, ambiguous, or "mine data" choice
+    } catch (err) {
+      // Any error in intent classification → fall through silently to Pandora Agent
+      console.warn('[orchestrator] Intent classification failed, falling through to Pandora Agent:', err);
     }
   }
 
@@ -587,4 +682,145 @@ async function updateTurnMetrics(
   } catch (err) {
     console.warn('[orchestrator] Failed to update turn metrics:', err);
   }
+}
+
+// ============================================================================
+// Advisory Response Helpers (Intent Classifier - Step 4.0)
+// ============================================================================
+
+function isGatingResponse(
+  message: string,
+  history: Array<{ role: string; content: string }>,
+): boolean {
+  // Check if the previous assistant message was a gating question
+  const lastAssistant = [...history].reverse().find(m => m.role === 'assistant');
+  if (!lastAssistant) return false;
+
+  const gatingPhrases = [
+    'general revops best practice',
+    'mine your actual',
+    'which would be more useful',
+    'two ways',
+    'two approaches',
+  ];
+
+  return gatingPhrases.some(phrase =>
+    lastAssistant.content.toLowerCase().includes(phrase)
+  );
+}
+
+function prefersBestPractice(message: string): boolean {
+  const lower = message.toLowerCase();
+  return (
+    /\b(best practice|general|framework|generic|just|without data|don't need data)\b/.test(lower) ||
+    /^(best practice|general|just the framework|no data)/i.test(lower)
+  );
+}
+
+interface WorkspaceContext {
+  gtm_motion?: string;
+  segment?: string;
+  acv_range?: string;
+  avg_sales_cycle_days?: number;
+  industry?: string;
+}
+
+function buildAdvisorySystemPrompt(workspaceContext: WorkspaceContext | null): string {
+  const base = `You are Pandora, an AI RevOps advisor for B2B SaaS companies.
+You have deep expertise in pipeline management, forecasting, ICP development,
+sales process design, and RevOps tooling.
+
+Answer the user's question with specific, practical guidance.
+Avoid generic advice — be opinionated and direct.
+When recommending frameworks or structures, explain the reasoning behind each choice.`;
+
+  if (!workspaceContext) return base;
+
+  // Workspace context injection (populated by Spec 2 - stubbed for now)
+  return `${base}
+
+Company context:
+- GTM motion: ${workspaceContext.gtm_motion || 'unknown'}
+- Segment: ${workspaceContext.segment || 'unknown'}
+- ACV range: ${workspaceContext.acv_range || 'unknown'}
+- Sales cycle: ${workspaceContext.avg_sales_cycle_days ? `${workspaceContext.avg_sales_cycle_days} days avg` : 'unknown'}
+- Industry: ${workspaceContext.industry || 'unknown'}
+
+Tailor your recommendations to this company's specific profile.
+For example, closed-lost reasons for a $150K ACV enterprise product look very different
+from those for a $10K SMB product.`;
+}
+
+async function handleAdvisoryResponse(
+  message: string,
+  workspaceId: string,
+  threadId: string,
+  channelId: string,
+  scopeType: string,
+  entityId: string | undefined,
+  repEmail: string | undefined,
+  conversationHistory: Array<{ role: string; content: string }>,
+): Promise<ConversationTurnResult> {
+  // Step 1: Get workspace context (Spec 2 — stub for now, returns null)
+  const workspaceContext = null;
+
+  // Step 2: Build advisory prompt with workspace context
+  const systemPrompt = buildAdvisorySystemPrompt(workspaceContext);
+
+  // Step 3: Call Claude (always Claude for final user-facing advisory answers)
+  const response = await callLLM(workspaceId, 'reason', {
+    systemPrompt,
+    messages: [
+      ...conversationHistory.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+      { role: 'user', content: message },
+    ],
+    maxTokens: 1500,
+    temperature: 0.3,
+    _tracking: {
+      workspaceId,
+      phase: 'chat',
+      stepName: 'advisory-response',
+      questionText: message.slice(0, 500),
+    },
+  });
+
+  const answer = response.content;
+  const tokensUsed = response.usage.input + response.usage.output;
+
+  await appendMessage(workspaceId, channelId, threadId, {
+    role: 'assistant',
+    content: answer,
+    timestamp: new Date().toISOString(),
+  });
+
+  await logChatMessage({
+    workspaceId,
+    sessionId: threadId,
+    surface: 'ask_pandora',
+    role: 'assistant',
+    content: answer,
+    scope: {
+      type: scopeType,
+      entity_id: entityId,
+      rep_email: repEmail,
+    },
+    tokenCost: tokensUsed,
+  });
+
+  await updateContext(workspaceId, channelId, threadId, {
+    last_scope: { type: scopeType, entity_id: entityId, rep_email: repEmail },
+  });
+
+  await updateTurnMetrics(workspaceId, channelId, threadId, tokensUsed);
+
+  return {
+    answer,
+    thread_id: threadId,
+    scope: { type: scopeType, entity_id: entityId, rep_email: repEmail },
+    router_decision: 'advisory_stateless',
+    data_strategy: 'advisory_stateless',
+    tokens_used: tokensUsed,
+    response_id: randomUUID(),
+    feedback_enabled: true,
+  };
 }

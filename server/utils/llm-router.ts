@@ -8,8 +8,9 @@ import {
   type TrackingContext,
 } from '../lib/token-tracker.js';
 import { logTrainingPair } from '../training/index.js';
+import { TOKEN_THRESHOLDS } from '../chat/token-estimator.js';
 
-export type LLMCapability = 'extract' | 'reason' | 'generate' | 'classify';
+export type LLMCapability = 'extract' | 'reason' | 'generate' | 'classify' | 'intent_classify' | 'compress';
 
 export interface ToolDef {
   name: string;
@@ -105,6 +106,8 @@ async function loadConfig(workspaceId: string): Promise<LLMConfig> {
         reason: { primary: 'anthropic/claude-sonnet-4-20250514', fallback: null },
         generate: { primary: 'anthropic/claude-sonnet-4-20250514', fallback: null },
         classify: { primary: 'fireworks/deepseek-v3p1', fallback: null },
+        intent_classify: { primary: 'fireworks/deepseek-v3p1', fallback: null },
+        compress: { primary: 'fireworks/deepseek-v3p1', fallback: null },
       },
       default_token_budget: 50000,
       tokens_used_this_month: 0,
@@ -548,10 +551,8 @@ export async function callLLM(
   options: LLMCallOptions
 ): Promise<LLMResponse> {
   const config = await loadConfig(workspaceId);
-  const resolved = resolveProvider(config, capability);
-  const { provider, model, fallbackProvider, fallbackModel } = resolved;
-
-  console.log(`[LLM Router] ${capability} → ${provider}/${model}${fallbackProvider ? ` (fallback: ${fallbackProvider}/${fallbackModel})` : ''}`);
+  let resolved = resolveProvider(config, capability);
+  let { provider, model, fallbackProvider, fallbackModel } = resolved;
 
   const allMessages: Array<{ role: string; content: any }> = [];
   if (options.systemPrompt) {
@@ -562,6 +563,17 @@ export async function callLLM(
   }
   const payloadSummary = analyzePayload(allMessages);
   const promptChars = payloadSummary.totalChars;
+  const inputTokenEstimate = Math.ceil(promptChars / 4);
+
+  // Size guardrail: force Claude for large contexts
+  if (inputTokenEstimate > TOKEN_THRESHOLDS.LARGE_CONTEXT) {
+    console.warn(`[LLMRouter] Input ${inputTokenEstimate} tokens exceeds threshold, forcing Claude`);
+    provider = 'anthropic';
+    model = 'claude-sonnet-4-20250514';
+  }
+
+  console.log(`[LLM Router] ${capability} → ${provider}/${model}${fallbackProvider ? ` (fallback: ${fallbackProvider}/${fallbackModel})` : ''}`);
+
 
   const startTime = Date.now();
 
