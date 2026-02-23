@@ -110,6 +110,41 @@ async function buildOwnerMap(client: HubSpotClient): Promise<Map<string, string>
   return ownerMap;
 }
 
+async function backfillOwnerNames(workspaceId: string, ownerMap: Map<string, string>): Promise<number> {
+  if (ownerMap.size === 0) return 0;
+
+  let updated = 0;
+
+  const ownerIds = Array.from(ownerMap.keys());
+  const ownerNames = ownerIds.map(id => ownerMap.get(id)!);
+
+  const caseClauses = ownerIds.map((_, i) => `WHEN owner = $${i + 2} THEN $${i + 2 + ownerIds.length}`).join(' ');
+  const ownerIdPattern = ownerIds.map((_, i) => `$${i + 2}`).join(', ');
+  const params: string[] = [workspaceId, ...ownerIds, ...ownerNames];
+
+  for (const table of ['deals', 'contacts', 'accounts'] as const) {
+    try {
+      const result = await query(
+        `UPDATE ${table}
+         SET owner = CASE ${caseClauses} ELSE owner END,
+             updated_at = NOW()
+         WHERE workspace_id = $1
+           AND owner IN (${ownerIdPattern})`,
+        params
+      );
+      const count = result.rowCount || 0;
+      if (count > 0) {
+        console.log(`[HubSpot Sync] Backfilled ${count} owner names in ${table}`);
+        updated += count;
+      }
+    } catch (err: any) {
+      console.warn(`[HubSpot Sync] Owner backfill failed for ${table}:`, err.message);
+    }
+  }
+
+  return updated;
+}
+
 async function resolveAccountIds(
   workspaceId: string,
   sourceIds: Set<string>
@@ -687,6 +722,18 @@ export async function initialSync(
       errors.push(`Stage cache update failed: ${err.message}`);
     }
 
+    // Backfill owner names for any records still showing numeric HubSpot owner IDs
+    try {
+      if (ownerMap.size > 0) {
+        const backfilled = await backfillOwnerNames(workspaceId, ownerMap);
+        if (backfilled > 0) {
+          console.log(`[HubSpot Sync] Owner name backfill complete: ${backfilled} records updated`);
+        }
+      }
+    } catch (err: any) {
+      console.warn(`[HubSpot Sync] Owner name backfill failed:`, err.message);
+    }
+
     // Resolve account_source_id → account_id UUIDs and update FK columns
     try {
       const allAccountSourceIds = new Set<string>();
@@ -964,6 +1011,18 @@ export async function incrementalSync(
       upsertDeals(normalizedDeals).catch(err => { errors.push(`Failed to store deals: ${err.message}`); return 0; }),
       upsertContacts(normalizedContacts).catch(err => { errors.push(`Failed to store contacts: ${err.message}`); return 0; }),
     ]);
+
+    // Backfill owner names for any records still showing numeric HubSpot owner IDs
+    try {
+      if (ownerMap.size > 0) {
+        const backfilled = await backfillOwnerNames(workspaceId, ownerMap);
+        if (backfilled > 0) {
+          console.log(`[HubSpot Incremental Sync] Owner name backfill complete: ${backfilled} records updated`);
+        }
+      }
+    } catch (err: any) {
+      console.warn(`[HubSpot Incremental Sync] Owner name backfill failed:`, err.message);
+    }
 
     // Resolve FK associations
     try {
