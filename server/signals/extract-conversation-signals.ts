@@ -60,7 +60,7 @@ export type SignalType =
 interface ConversationRecord {
   id: string;
   title: string | null;
-  started_at: string | null;
+  call_date: string | null;
   duration_seconds: number | null;
   transcript_text: string | null;
   summary: string | null;
@@ -177,14 +177,14 @@ async function findUnprocessedConversations(
        )`;
 
   const result = await query<ConversationRecord>(
-    `SELECT c.id, c.title, c.started_at, c.duration_seconds,
+    `SELECT c.id, c.title, c.call_date, c.duration_seconds,
             c.transcript_text, c.summary, c.participants,
             c.source_data, c.deal_id, c.account_id,
-            d.owner_email as rep_email
+            d.owner as rep_email
      FROM conversations c
      LEFT JOIN deals d ON d.id = c.deal_id
      WHERE ${whereClause}
-     ORDER BY c.started_at DESC
+     ORDER BY c.call_date DESC
      LIMIT $2`,
     [workspaceId, limit]
   );
@@ -308,8 +308,8 @@ function buildCallInfo(convo: ConversationRecord, content: string): string {
     parts.push(`Title: ${convo.title}`);
   }
 
-  if (convo.started_at) {
-    const date = new Date(convo.started_at).toLocaleDateString();
+  if (convo.call_date) {
+    const date = new Date(convo.call_date).toLocaleDateString();
     parts.push(`Date: ${date}`);
   }
 
