@@ -10,14 +10,12 @@ CREATE TABLE IF NOT EXISTS webhook_tokens (
   token TEXT NOT NULL UNIQUE,
   is_active BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  rotated_at TIMESTAMPTZ,
-  CONSTRAINT webhook_tokens_unique_active_per_workspace
-    UNIQUE (workspace_id, is_active)
-    WHERE is_active = true
+  rotated_at TIMESTAMPTZ
 );
 
 CREATE INDEX IF NOT EXISTS idx_webhook_tokens_workspace ON webhook_tokens(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_webhook_tokens_token ON webhook_tokens(token) WHERE is_active = true;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_webhook_tokens_unique_active ON webhook_tokens(workspace_id) WHERE is_active = true;
 
 COMMENT ON TABLE webhook_tokens IS 'Rotatable authentication tokens for inbound webhook endpoints';
 COMMENT ON COLUMN webhook_tokens.token IS 'URL-safe random token embedded in webhook path';
