@@ -75,7 +75,7 @@ export async function queryConversationSignals(
   const dataResult = await query<ConversationSignal>(
     `SELECT cs.*,
             c.title as conversation_title,
-            c.started_at as conversation_date,
+            c.call_date as conversation_date,
             d.name as deal_name,
             a.name as account_name
      FROM conversation_signals cs

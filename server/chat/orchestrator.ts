@@ -20,6 +20,7 @@ import { runPandoraAgent, buildConversationHistory } from './pandora-agent.js';
 import { logChatMessage } from '../lib/chat-logger.js';
 import { estimateTokens } from './token-estimator.js';
 import { callLLM } from '../utils/llm-router.js';
+import { getWorkspaceContext, type WorkspaceContext } from './workspace-context.js';
 
 export interface ConversationTurnInput {
   surface: 'slack_thread' | 'slack_dm' | 'in_app';
@@ -717,14 +718,6 @@ function prefersBestPractice(message: string): boolean {
   );
 }
 
-interface WorkspaceContext {
-  gtm_motion?: string;
-  segment?: string;
-  acv_range?: string;
-  avg_sales_cycle_days?: number;
-  industry?: string;
-}
-
 function buildAdvisorySystemPrompt(workspaceContext: WorkspaceContext | null): string {
   const base = `You are Pandora, an AI RevOps advisor for B2B SaaS companies.
 You have deep expertise in pipeline management, forecasting, ICP development,
@@ -736,19 +729,75 @@ When recommending frameworks or structures, explain the reasoning behind each ch
 
   if (!workspaceContext) return base;
 
-  // Workspace context injection (populated by Spec 2 - stubbed for now)
-  return `${base}
+  // Build context bullets - only show non-null fields
+  const contextBullets: string[] = [];
 
-Company context:
-- GTM motion: ${workspaceContext.gtm_motion || 'unknown'}
-- Segment: ${workspaceContext.segment || 'unknown'}
-- ACV range: ${workspaceContext.acv_range || 'unknown'}
-- Sales cycle: ${workspaceContext.avg_sales_cycle_days ? `${workspaceContext.avg_sales_cycle_days} days avg` : 'unknown'}
-- Industry: ${workspaceContext.industry || 'unknown'}
+  if (workspaceContext.workspace_name) {
+    contextBullets.push(`Company: ${workspaceContext.workspace_name}`);
+  }
+  if (workspaceContext.gtm_motion) {
+    contextBullets.push(`GTM motion: ${workspaceContext.gtm_motion}`);
+  }
+  if (workspaceContext.segment) {
+    contextBullets.push(`Segment: ${workspaceContext.segment}`);
+  }
+  if (workspaceContext.industry) {
+    contextBullets.push(`Industry: ${workspaceContext.industry}`);
+  }
+  if (workspaceContext.acv_range) {
+    contextBullets.push(`ACV range: ${workspaceContext.acv_range}`);
+  }
+  if (workspaceContext.avg_deal_size !== null && workspaceContext.avg_deal_size !== undefined) {
+    const formatted = workspaceContext.avg_deal_size >= 1000
+      ? `$${Math.round(workspaceContext.avg_deal_size / 1000)}K`
+      : `$${Math.round(workspaceContext.avg_deal_size)}`;
+    contextBullets.push(`Avg deal size: ${formatted}`);
+  }
+  if (workspaceContext.avg_sales_cycle_days !== null && workspaceContext.avg_sales_cycle_days !== undefined) {
+    contextBullets.push(`Avg sales cycle: ${Math.round(workspaceContext.avg_sales_cycle_days)} days`);
+  }
+  if (workspaceContext.win_rate !== null && workspaceContext.win_rate !== undefined) {
+    contextBullets.push(`Win rate: ${Math.round(workspaceContext.win_rate * 100)}%`);
+  }
+  if (workspaceContext.open_deals_count !== null && workspaceContext.open_deals_count !== undefined) {
+    contextBullets.push(`Open deals: ${workspaceContext.open_deals_count}`);
+  }
+  if (workspaceContext.top_industries && workspaceContext.top_industries.length > 0) {
+    contextBullets.push(`Top industries: ${workspaceContext.top_industries.slice(0, 3).join(', ')}`);
+  }
+  if (workspaceContext.top_personas && workspaceContext.top_personas.length > 0) {
+    contextBullets.push(`Top personas: ${workspaceContext.top_personas.slice(0, 3).join(', ')}`);
+  }
+  if (workspaceContext.top_competitors && workspaceContext.top_competitors.length > 0) {
+    contextBullets.push(`Top competitors mentioned: ${workspaceContext.top_competitors.slice(0, 3).join(', ')}`);
+  }
+  if (workspaceContext.top_objections && workspaceContext.top_objections.length > 0) {
+    contextBullets.push(`Common objections: ${workspaceContext.top_objections.slice(0, 3).join(', ')}`);
+  }
+
+  if (contextBullets.length === 0) {
+    return base;
+  }
+
+  // Build data coverage caveats
+  const caveats: string[] = [];
+  if (!workspaceContext.has_icp_profile) {
+    caveats.push('ICP profile analysis has not been run yet - persona and industry data may be incomplete.');
+  }
+  if (!workspaceContext.has_conversation_signals) {
+    caveats.push('Conversation signal extraction has not been run yet - competitor and objection data may be incomplete.');
+  }
+
+  const contextSection = `\nCompany context:\n${contextBullets.map(b => `- ${b}`).join('\n')}`;
+  const caveatSection = caveats.length > 0
+    ? `\n\nData coverage notes:\n${caveats.map(c => `- ${c}`).join('\n')}`
+    : '';
+
+  return `${base}${contextSection}${caveatSection}
 
 Tailor your recommendations to this company's specific profile.
-For example, closed-lost reasons for a $150K ACV enterprise product look very different
-from those for a $10K SMB product.`;
+For example, objection handling for a $150K ACV enterprise product looks very different
+from objection handling for a $10K SMB product.`;
 }
 
 async function handleAdvisoryResponse(
@@ -761,8 +810,8 @@ async function handleAdvisoryResponse(
   repEmail: string | undefined,
   conversationHistory: Array<{ role: string; content: string }>,
 ): Promise<ConversationTurnResult> {
-  // Step 1: Get workspace context (Spec 2 — stub for now, returns null)
-  const workspaceContext = null;
+  // Step 1: Get workspace context
+  const workspaceContext = await getWorkspaceContext(workspaceId);
 
   // Step 2: Build advisory prompt with workspace context
   const systemPrompt = buildAdvisorySystemPrompt(workspaceContext);
