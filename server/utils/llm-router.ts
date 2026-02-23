@@ -607,6 +607,7 @@ export async function callLLM(
     payloadSummary,
     latencyMs,
     recommendations,
+    questionText: tracking?.questionText,
   }).catch(err => console.warn('[Token Tracker] Fire-and-forget failed:', err.message));
 
   // Fire-and-forget training pair capture

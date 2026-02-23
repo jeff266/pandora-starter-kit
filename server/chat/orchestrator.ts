@@ -17,6 +17,7 @@ import { recordFeedbackSignal } from '../feedback/signals.js';
 import { createAnnotation, getActiveAnnotations } from '../feedback/annotations.js';
 import { randomUUID } from 'crypto';
 import { runPandoraAgent, buildConversationHistory } from './pandora-agent.js';
+import { logChatMessage } from '../lib/chat-logger.js';
 
 export interface ConversationTurnInput {
   surface: 'slack_thread' | 'slack_dm' | 'in_app';
@@ -100,6 +101,22 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
     content: message,
     timestamp: new Date().toISOString(),
   });
+
+  // Log user message to chat_messages for in_app surface
+  if (surface === 'in_app') {
+    await logChatMessage({
+      workspaceId,
+      sessionId: threadId,
+      surface: 'ask_pandora',
+      role: 'user',
+      content: message,
+      scope: {
+        type: inputScope?.type || 'workspace',
+        entity_id: inputScope?.entity_id,
+        rep_email: inputScope?.rep_email,
+      },
+    });
+  }
 
   const isFollowUpConversation = isFollowUp && (state.messages || []).length > 1;
   const feedback = detectFeedback(message, isFollowUpConversation);
@@ -264,6 +281,21 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
           cited_records: pandoraResult.evidence.cited_records,
         } : {}),
       } as any);
+
+      // Log assistant message to chat_messages
+      await logChatMessage({
+        workspaceId,
+        sessionId: threadId,
+        surface: 'ask_pandora',
+        role: 'assistant',
+        content: answer,
+        scope: {
+          type: scopeType,
+          entity_id: entityId,
+          rep_email: repEmail,
+        },
+        tokenCost: tokensUsed,
+      });
 
       await updateContext(workspaceId, channelId, threadId, {
         last_scope: { type: scopeType, entity_id: entityId, rep_email: repEmail },

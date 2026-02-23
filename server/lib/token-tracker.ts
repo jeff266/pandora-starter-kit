@@ -6,6 +6,7 @@ export interface TrackingContext {
   skillRunId?: string;
   phase?: string;
   stepName?: string;
+  questionText?: string;
 }
 
 export interface PayloadSummary {
@@ -39,6 +40,7 @@ export interface TokenRecord {
   payloadSummary: PayloadSummary;
   latencyMs: number;
   recommendations?: string[];
+  questionText?: string;
 }
 
 const RATES: Record<string, { input: number; output: number }> = {
@@ -164,8 +166,8 @@ export async function trackTokenUsage(record: TokenRecord): Promise<void> {
         workspace_id, skill_id, skill_run_id, phase, step_name,
         provider, model, input_tokens, output_tokens,
         estimated_cost_usd, prompt_chars, response_chars,
-        truncated, payload_summary, latency_ms
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+        truncated, payload_summary, latency_ms, question_text
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
       [
         record.workspaceId,
         record.skillId || null,
@@ -185,6 +187,7 @@ export async function trackTokenUsage(record: TokenRecord): Promise<void> {
           recommendations: record.recommendations || [],
         }),
         record.latencyMs,
+        record.questionText ? record.questionText.substring(0, 500) : null,
       ]
     );
   } catch (err) {

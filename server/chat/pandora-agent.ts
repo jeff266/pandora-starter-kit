@@ -586,7 +586,7 @@ async function classifyQuestion(workspaceId: string, question: string): Promise<
       messages: [{ role: 'user', content: question }],
       maxTokens: 256,
       temperature: 0,
-      _tracking: { workspaceId, phase: 'chat', stepName: 'question-classifier' },
+      _tracking: { workspaceId, phase: 'chat', stepName: 'question-classifier', questionText: question },
     });
 
     const text = (response.content || '').trim();
@@ -650,6 +650,7 @@ export async function runPandoraAgent(
         workspaceId,
         phase: 'chat',
         stepName: `pandora-agent-iter-${i}`,
+        questionText: message,
       },
     });
 
@@ -763,6 +764,7 @@ export async function runPandoraAgent(
     _tracking: {
       workspaceId,
       phase: 'chat',
+      questionText: message,
       stepName: 'pandora-agent-final-synthesis',
     },
   });
