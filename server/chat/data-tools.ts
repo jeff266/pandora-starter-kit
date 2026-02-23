@@ -216,10 +216,29 @@ export async function executeDataTool(
           (params.filter as FilterMode) || 'populated'
         ); break;
       case 'query_conversation_signals':
-        result = await queryConversationSignals(
+        const signalResult = await queryConversationSignals(
           workspaceId,
           params as SignalQueryFilters
-        ); break;
+        );
+
+        // Add user-friendly message for empty results
+        if (signalResult.total === 0) {
+          const signalTypeLabel = params.signal_type
+            ? params.signal_type.replace(/_/g, ' ')
+            : 'conversation';
+
+          result = {
+            ...signalResult,
+            message: `No ${signalTypeLabel} signals found. This could mean signal extraction hasn't run yet for this workspace, or no matching signals exist in the selected filters. To trigger extraction manually: POST /api/workspaces/${workspaceId}/signals/extract`,
+            query_description: `Searched for ${signalTypeLabel} signals with filters: ${JSON.stringify(params)}`,
+          };
+        } else {
+          result = {
+            ...signalResult,
+            query_description: `Found ${signalResult.total} signal(s) matching the filters`,
+          };
+        }
+        break;
       default:
         throw new Error(`Unknown tool: ${toolName}`);
     }
