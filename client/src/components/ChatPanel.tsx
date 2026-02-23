@@ -50,6 +50,16 @@ interface ChatPanelProps {
   scope?: ChatScope;
 }
 
+interface ChatSessionPreview {
+  id: string;
+  title: string;
+  created_at: string;
+  last_message_at: string;
+  message_count: number;
+  user_name?: string;
+  user_email?: string;
+}
+
 export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
   const isMobile = useIsMobile();
   const { anon } = useDemoMode();
@@ -57,9 +67,13 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [feedbackMap, setFeedbackMap] = useState<Record<string, 'thumbs_up' | 'thumbs_down'>>({});
   const [hoveredMsgIdx, setHoveredMsgIdx] = useState<number | null>(null);
+  const [isHistoryView, setIsHistoryView] = useState(false);
+  const [sessions, setSessions] = useState<ChatSessionPreview[]>([]);
+  const [loadingSessions, setLoadingSessions] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -87,12 +101,54 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
     }
   };
 
+  const loadSessions = async () => {
+    setLoadingSessions(true);
+    try {
+      const data = await api.get('/chat/sessions?limit=50');
+      setSessions(data.sessions || []);
+    } catch (err) {
+      console.error('Failed to load sessions:', err);
+    } finally {
+      setLoadingSessions(false);
+    }
+  };
+
+  const loadSession = async (id: string) => {
+    try {
+      const data = await api.get(`/chat/sessions/${id}`);
+      setMessages(data.messages.map((msg: any) => ({
+        role: msg.role,
+        content: msg.content,
+        timestamp: msg.created_at,
+        responseId: msg.metadata?.response_id,
+        feedbackEnabled: msg.metadata?.feedback_enabled,
+        evidence: msg.metadata?.evidence,
+        tool_call_count: msg.metadata?.tool_call_count,
+        latency_ms: msg.metadata?.latency_ms,
+      })));
+      setSessionId(id);
+      setIsHistoryView(false);
+    } catch (err) {
+      console.error('Failed to load session:', err);
+      setError('Failed to load conversation');
+    }
+  };
+
   const startNewChat = useCallback(() => {
     setMessages([]);
     setThreadId(null);
+    setSessionId(null);
     setError(null);
     setInput('');
+    setIsHistoryView(false);
   }, []);
+
+  const toggleHistoryView = () => {
+    if (!isHistoryView) {
+      loadSessions();
+    }
+    setIsHistoryView(!isHistoryView);
+  };
 
   useEffect(() => {
     startNewChat();
@@ -116,12 +172,17 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
     try {
       const body: any = { message: text };
       if (threadId) body.thread_id = threadId;
+      if (sessionId) body.session_id = sessionId;
       if (scope && !threadId) body.scope = scope;
 
       const result: any = await api.post('/chat', body);
 
       if (result.thread_id && !threadId) {
         setThreadId(result.thread_id);
+      }
+
+      if (result.session_id && !sessionId) {
+        setSessionId(result.session_id);
       }
 
       const assistantMsg: ChatMessage = {
@@ -172,38 +233,85 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
       <div style={{ ...styles.panel, ...(isMobile ? { width: '100%' } : {}) }} onClick={e => e.stopPropagation()}>
         <div style={{ ...styles.header, ...(isMobile ? { padding: '12px 14px' } : {}) }}>
           <div>
-            <div style={styles.title}>Ask Pandora</div>
-            <div style={styles.scopeLabel}>{scopeLabel}</div>
+            <div style={styles.title}>{isHistoryView ? 'Past Conversations' : 'Ask Pandora'}</div>
+            <div style={styles.scopeLabel}>{isHistoryView ? '' : scopeLabel}</div>
           </div>
           <div style={styles.headerActions}>
-            {messages.length > 0 && (
+            {!isHistoryView && messages.length > 0 && (
               <button style={styles.newChatBtn} onClick={startNewChat}>New Chat</button>
+            )}
+            {!isHistoryView && (
+              <button style={styles.historyBtn} onClick={toggleHistoryView} title="History">
+                🕐
+              </button>
+            )}
+            {isHistoryView && (
+              <button style={styles.backBtn} onClick={() => setIsHistoryView(false)}>
+                ← Back
+              </button>
             )}
             <button style={styles.closeBtn} onClick={onClose}>×</button>
           </div>
         </div>
 
         <div style={{ ...styles.messagesContainer, ...(isMobile ? { padding: '12px 10px' } : {}) }}>
-          {messages.length === 0 && !loading && (
-            <div style={styles.emptyState}>
-              <div style={styles.emptyIcon}>💬</div>
-              <div style={styles.emptyTitle}>Ask Pandora</div>
-              <div style={styles.emptyText}>
-                Ask about your pipeline, deals, reps, or any RevOps data.
-              </div>
-              <div style={{ ...styles.suggestions, ...(isMobile ? { maxWidth: '100%' } : {}) }}>
-                {getSuggestions(scope).map((s, i) => (
-                  <button
-                    key={i}
-                    style={{ ...styles.suggestionBtn, ...(isMobile ? { whiteSpace: 'normal', wordBreak: 'break-word' } : {}) }}
-                    onClick={() => { setInput(s); inputRef.current?.focus(); }}
-                  >
-                    {s}
-                  </button>
-                ))}
+          {isHistoryView ? (
+            <div style={styles.historyView}>
+              {loadingSessions ? (
+                <div style={styles.historyLoading}>Loading conversations...</div>
+              ) : sessions.length === 0 ? (
+                <div style={styles.historyEmpty}>
+                  <div style={styles.emptyIcon}>💬</div>
+                  <div style={styles.emptyTitle}>No conversations yet</div>
+                  <div style={styles.emptyText}>Your chat history will appear here</div>
+                </div>
+              ) : (
+                <>
+                  {sessions.map((session) => (
+                    <div
+                      key={session.id}
+                      style={styles.sessionRow}
+                      onClick={() => loadSession(session.id)}
+                    >
+                      <div style={styles.sessionTitle}>{session.title}</div>
+                      <div style={styles.sessionMeta}>
+                        {session.user_name && (
+                          <span style={styles.sessionUser}>{session.user_name} · </span>
+                        )}
+                        <span style={styles.sessionDate}>{formatSessionDate(session.last_message_at || session.created_at)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
+              <div style={styles.historyActions}>
+                <button style={styles.newConversationBtn} onClick={startNewChat}>
+                  + New Conversation
+                </button>
               </div>
             </div>
-          )}
+          ) : (
+            <>
+              {messages.length === 0 && !loading && (
+                <div style={styles.emptyState}>
+                  <div style={styles.emptyIcon}>💬</div>
+                  <div style={styles.emptyTitle}>Ask Pandora</div>
+                  <div style={styles.emptyText}>
+                    Ask about your pipeline, deals, reps, or any RevOps data.
+                  </div>
+                  <div style={{ ...styles.suggestions, ...(isMobile ? { maxWidth: '100%' } : {}) }}>
+                    {getSuggestions(scope).map((s, i) => (
+                      <button
+                        key={i}
+                        style={{ ...styles.suggestionBtn, ...(isMobile ? { whiteSpace: 'normal', wordBreak: 'break-word' } : {}) }}
+                        onClick={() => { setInput(s); inputRef.current?.focus(); }}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
           {messages.map((msg, idx) => (
             <div
@@ -293,35 +401,39 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
             </div>
           )}
 
-          {error && (
-            <div style={styles.errorMsg}>{error}</div>
+              {error && (
+                <div style={styles.errorMsg}>{error}</div>
+              )}
+
+              <div ref={messagesEndRef} />
+            </>
           )}
-
-          <div ref={messagesEndRef} />
         </div>
 
-        <div style={{ ...styles.inputContainer, ...(isMobile ? { padding: '10px 10px 14px' } : {}) }}>
-          <textarea
-            ref={inputRef}
-            style={styles.input}
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Ask a question..."
-            rows={1}
-            disabled={loading}
-          />
-          <button
-            style={{
-              ...styles.sendBtn,
-              ...((!input.trim() || loading) ? styles.sendBtnDisabled : {}),
-            }}
-            onClick={sendMessage}
-            disabled={!input.trim() || loading}
-          >
-            →
-          </button>
-        </div>
+        {!isHistoryView && (
+          <div style={{ ...styles.inputContainer, ...(isMobile ? { padding: '10px 10px 14px' } : {}) }}>
+            <textarea
+              ref={inputRef}
+              style={styles.input}
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Ask a question..."
+              rows={1}
+              disabled={loading}
+            />
+            <button
+              style={{
+                ...styles.sendBtn,
+                ...((!input.trim() || loading) ? styles.sendBtnDisabled : {}),
+              }}
+              onClick={sendMessage}
+              disabled={!input.trim() || loading}
+            >
+              →
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -633,6 +745,24 @@ function getSuggestions(scope?: ChatScope): string[] {
   ];
 }
 
+function formatSessionDate(dateStr: string): string {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays < 7) return `${diffDays} days ago`;
+
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
 function formatMarkdown(text: string): JSX.Element[] {
   const lines = text.split('\n');
   const elements: JSX.Element[] = [];
@@ -896,5 +1026,88 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: '#2a3150',
     color: '#475569',
     cursor: 'not-allowed',
+  },
+  historyBtn: {
+    width: 28,
+    height: 28,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: 16,
+    backgroundColor: 'transparent',
+    color: '#94a3b8',
+    border: '1px solid #2a3150',
+    borderRadius: 4,
+    cursor: 'pointer',
+  },
+  backBtn: {
+    padding: '4px 10px',
+    fontSize: 12,
+    backgroundColor: 'transparent',
+    color: '#6488ea',
+    border: '1px solid #2a3150',
+    borderRadius: 4,
+    cursor: 'pointer',
+  },
+  historyView: {
+    display: 'flex',
+    flexDirection: 'column' as const,
+    height: '100%',
+  },
+  historyLoading: {
+    flex: 1,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: '#64748b',
+    fontSize: 14,
+  },
+  historyEmpty: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column' as const,
+    alignItems: 'center',
+    justifyContent: 'center',
+    textAlign: 'center' as const,
+  },
+  sessionRow: {
+    padding: '12px 14px',
+    borderBottom: '1px solid #1e2230',
+    cursor: 'pointer',
+    transition: 'background-color 0.15s',
+  },
+  sessionTitle: {
+    fontSize: 14,
+    color: '#e2e8f0',
+    marginBottom: 4,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap' as const,
+  },
+  sessionMeta: {
+    fontSize: 12,
+    color: '#64748b',
+  },
+  sessionUser: {
+    color: '#94a3b8',
+  },
+  sessionDate: {
+    color: '#64748b',
+  },
+  historyActions: {
+    padding: '16px',
+    borderTop: '1px solid #1e2230',
+    marginTop: 'auto',
+  },
+  newConversationBtn: {
+    width: '100%',
+    padding: '10px',
+    fontSize: 14,
+    fontWeight: 600,
+    backgroundColor: '#6488ea',
+    color: '#fff',
+    border: 'none',
+    borderRadius: 8,
+    cursor: 'pointer',
   },
 };

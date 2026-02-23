@@ -2,16 +2,46 @@ import { Router, type Request, type Response } from 'express';
 import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { handleConversationTurn } from '../chat/orchestrator.js';
 import { getConversationState } from '../chat/conversation-state.js';
+import {
+  createChatSession,
+  appendChatMessage,
+  getChatSessions,
+  getChatSessionWithMessages,
+  deleteChatSession,
+  getOrCreateSession,
+} from '../chat/session-service.js';
+import { query } from '../db.js';
 
 const router = Router();
+
+/**
+ * Helper to get user's workspace role
+ */
+async function getUserRole(workspaceId: string, userId: string): Promise<string> {
+  const result = await query(
+    `SELECT wr.system_type
+     FROM workspace_members wm
+     JOIN workspace_roles wr ON wm.role_id = wr.id
+     WHERE wm.workspace_id = $1 AND wm.user_id = $2 AND wm.status = 'active'
+     LIMIT 1`,
+    [workspaceId, userId]
+  );
+  return result.rows[0]?.system_type || 'rep';
+}
 
 router.post('/:workspaceId/chat', async (req: Request, res: Response): Promise<void> => {
   try {
     const { workspaceId } = req.params;
-    const { message, thread_id, scope } = req.body;
+    const { message, thread_id, scope, session_id } = req.body;
 
     if (!message || typeof message !== 'string' || message.trim().length === 0) {
       res.status(400).json({ error: 'message is required' });
+      return;
+    }
+
+    const userId = req.user?.user_id;
+    if (!userId) {
+      res.status(401).json({ error: 'Unauthorized' });
       return;
     }
 
@@ -36,9 +66,64 @@ router.post('/:workspaceId/chat', async (req: Request, res: Response): Promise<v
       return;
     }
 
+    // Persist to session (fire-and-forget to not slow response)
+    let finalSessionId = session_id;
+    if (!finalSessionId) {
+      // Auto-create session from first message
+      getOrCreateSession(workspaceId, userId, null, message.trim())
+        .then((newSessionId) => {
+          finalSessionId = newSessionId;
+          // Save user message
+          return appendChatMessage(
+            finalSessionId,
+            workspaceId,
+            userId,
+            'user',
+            message.trim()
+          );
+        })
+        .then(() => {
+          // Save assistant response
+          return appendChatMessage(
+            finalSessionId!,
+            workspaceId,
+            userId,
+            'assistant',
+            result.answer,
+            {
+              router_decision: result.router_decision,
+              data_strategy: result.data_strategy,
+              tokens_used: result.tokens_used,
+              tool_call_count: result.tool_call_count,
+              latency_ms: result.latency_ms,
+            }
+          );
+        })
+        .catch((err) => {
+          console.error('[chat] Failed to persist session:', err);
+        });
+    } else {
+      // Append to existing session
+      Promise.resolve()
+        .then(() => appendChatMessage(finalSessionId!, workspaceId, userId, 'user', message.trim()))
+        .then(() =>
+          appendChatMessage(finalSessionId!, workspaceId, userId, 'assistant', result.answer, {
+            router_decision: result.router_decision,
+            data_strategy: result.data_strategy,
+            tokens_used: result.tokens_used,
+            tool_call_count: result.tool_call_count,
+            latency_ms: result.latency_ms,
+          })
+        )
+        .catch((err) => {
+          console.error('[chat] Failed to append to session:', err);
+        });
+    }
+
     res.json({
       answer: result.answer,
       thread_id: result.thread_id,
+      session_id: finalSessionId,
       scope: result.scope,
       router_decision: result.router_decision,
       data_strategy: result.data_strategy,
@@ -76,6 +161,150 @@ router.get('/:workspaceId/chat/:threadId/history', async (req: Request, res: Res
   } catch (err) {
     console.error('[chat] History error:', err);
     res.status(500).json({ error: 'Failed to load conversation history' });
+  }
+});
+
+// ─── Session Management Endpoints ─────────────────────────────────────────────
+
+/**
+ * GET /api/workspaces/:workspaceId/chat/sessions
+ * List chat sessions with role-based visibility
+ */
+router.get('/:workspaceId/chat/sessions', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { workspaceId } = req.params;
+    const userId = req.user?.user_id;
+
+    if (!userId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const limit = parseInt(req.query.limit as string) || 20;
+    const offset = parseInt(req.query.offset as string) || 0;
+
+    const userRole = await getUserRole(workspaceId, userId);
+    const sessions = await getChatSessions(workspaceId, userId, userRole, { limit, offset });
+
+    // Get total count for pagination
+    let countQuery: string;
+    let countParams: any[];
+
+    if (userRole === 'admin') {
+      countQuery = 'SELECT COUNT(*) FROM chat_sessions WHERE workspace_id = $1';
+      countParams = [workspaceId];
+    } else if (userRole === 'manager') {
+      countQuery = `
+        SELECT COUNT(*) FROM chat_sessions
+        WHERE workspace_id = $1
+          AND (user_id = $2 OR user_id IN (
+            SELECT report_id FROM user_reporting_lines
+            WHERE workspace_id = $1 AND manager_id = $2
+          ))
+      `;
+      countParams = [workspaceId, userId];
+    } else {
+      countQuery = 'SELECT COUNT(*) FROM chat_sessions WHERE workspace_id = $1 AND user_id = $2';
+      countParams = [workspaceId, userId];
+    }
+
+    const countResult = await query(countQuery, countParams);
+    const total = parseInt(countResult.rows[0].count);
+
+    res.json({ sessions, total });
+  } catch (err) {
+    console.error('[chat] List sessions error:', err);
+    res.status(500).json({ error: 'Failed to load chat sessions' });
+  }
+});
+
+/**
+ * GET /api/workspaces/:workspaceId/chat/sessions/:sessionId
+ * Get full session with messages
+ */
+router.get('/:workspaceId/chat/sessions/:sessionId', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { workspaceId, sessionId } = req.params;
+    const userId = req.user?.user_id;
+
+    if (!userId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const userRole = await getUserRole(workspaceId, userId);
+    const session = await getChatSessionWithMessages(sessionId, workspaceId, userId, userRole);
+
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+
+    res.json(session);
+  } catch (err) {
+    console.error('[chat] Get session error:', err);
+    res.status(500).json({ error: 'Failed to load session' });
+  }
+});
+
+/**
+ * POST /api/workspaces/:workspaceId/chat/sessions
+ * Create a new chat session
+ */
+router.post('/:workspaceId/chat/sessions', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { workspaceId } = req.params;
+    const { first_message } = req.body;
+    const userId = req.user?.user_id;
+
+    if (!userId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    if (!first_message || typeof first_message !== 'string') {
+      res.status(400).json({ error: 'first_message is required' });
+      return;
+    }
+
+    const session = await createChatSession(workspaceId, userId, first_message);
+
+    res.json({
+      session_id: session.id,
+      title: session.title,
+    });
+  } catch (err) {
+    console.error('[chat] Create session error:', err);
+    res.status(500).json({ error: 'Failed to create session' });
+  }
+});
+
+/**
+ * DELETE /api/workspaces/:workspaceId/chat/sessions/:sessionId
+ * Delete a chat session (owner or admin only)
+ */
+router.delete('/:workspaceId/chat/sessions/:sessionId', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { workspaceId, sessionId } = req.params;
+    const userId = req.user?.user_id;
+
+    if (!userId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const userRole = await getUserRole(workspaceId, userId);
+    const deleted = await deleteChatSession(sessionId, workspaceId, userId, userRole);
+
+    if (!deleted) {
+      res.status(404).json({ error: 'Session not found or insufficient permissions' });
+      return;
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[chat] Delete session error:', err);
+    res.status(500).json({ error: 'Failed to delete session' });
   }
 });
 
