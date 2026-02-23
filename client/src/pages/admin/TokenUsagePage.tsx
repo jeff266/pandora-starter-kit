@@ -99,7 +99,7 @@ export default function TokenUsagePage() {
 
     try {
       const response = await api.get(
-        `/workspaces/${currentWorkspace.id}/token-usage/dashboard?period=${period}`
+        `/token-usage/dashboard?period=${period}`
       ) as DashboardResponse;
 
       setData(response.rows || []);
@@ -120,7 +120,7 @@ export default function TokenUsagePage() {
     if (isNaN(newBudget) || newBudget <= 0) return;
 
     try {
-      await api.put(`/workspaces/${currentWorkspace.id}/token-usage/budget`, {
+      await api.put(`/token-usage/budget`, {
         budget_usd: newBudget,
       });
       setBudget(newBudget);
