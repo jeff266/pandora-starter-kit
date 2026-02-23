@@ -38,6 +38,8 @@ import { lensMiddleware } from './middleware/lens.js';
 import importRouter, { cleanupTempFiles } from './routes/import.js';
 import dealInsightsRouter from './routes/deal-insights.js';
 import enrichmentRouter from './routes/enrichment.js';
+import webhookEnrichmentRouter from './routes/webhook-enrichment.js';
+import publicWebhooksRouter from './routes/public-webhooks.js';
 import tokenUsageRouter from './routes/token-usage.js';
 import workflowsRouter, { setWorkflowService } from './routes/workflows.js';
 import projectUpdatesRouter from './routes/project-updates.js';
@@ -209,6 +211,9 @@ if (process.env.NODE_ENV === 'production') {
 app.use("/api/slack/events", slackEventsRouter);
 app.use("/api/slack/interactions", slackInteractionsRouter);
 
+// Public webhook endpoints - token-based auth in URL path
+app.use("/api", publicWebhooksRouter);
+
 // OAuth routes - PUBLIC (no auth required for browser redirects)
 app.use("/api/auth/hubspot", hubspotAuthRouter);
 app.use("/api/auth/salesforce", salesforceAuthRouter);
@@ -260,6 +265,7 @@ workspaceApiRouter.use(configRouter);
 workspaceApiRouter.use(namedFiltersRouter);
 workspaceApiRouter.use(importRouter);
 workspaceApiRouter.use(enrichmentRouter);
+workspaceApiRouter.use(webhookEnrichmentRouter);
 workspaceApiRouter.use(tokenUsageRouter);
 workspaceApiRouter.use(workflowsRouter);
 workspaceApiRouter.use(projectUpdatesRouter);
