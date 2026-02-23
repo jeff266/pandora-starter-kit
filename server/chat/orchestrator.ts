@@ -21,6 +21,7 @@ import { logChatMessage } from '../lib/chat-logger.js';
 import { estimateTokens } from './token-estimator.js';
 import { callLLM } from '../utils/llm-router.js';
 import { getWorkspaceContext, type WorkspaceContext } from './workspace-context.js';
+import { synthesizeDocuments, formatDocumentResponse } from './document-synthesizer.js';
 
 export interface ConversationTurnInput {
   surface: 'slack_thread' | 'slack_dm' | 'in_app';
@@ -56,6 +57,15 @@ export interface ConversationTurnResult {
     deals: { id: string; name: string }[];
     accounts: { id: string; name: string }[];
     reps: { id: string; name: string }[];
+  };
+  evidence?: any;
+  tool_call_count?: number;
+  latency_ms?: number;
+  documents?: {
+    docxPath: string;
+    xlsxPath: string;
+    docxFilename: string;
+    xlsxFilename: string;
   };
 }
 
@@ -331,6 +341,98 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
           repEmail,
           conversationHistory
         );
+      }
+
+      // Handle document_request: mine data then synthesize documents
+      if (
+        intentClassification.category === 'document_request' &&
+        intentClassification.confidence >= 0.75
+      ) {
+        try {
+          const history = buildConversationHistory(state.messages || [] as any);
+
+          // Step 1: Run data mining through Pandora Agent
+          let agentMessage = message;
+          if (entityId && scopeType && !['workspace', 'pipeline', 'conversations'].includes(scopeType)) {
+            agentMessage = `[Context: viewing ${scopeType} id=${entityId}] ${message}`;
+          }
+
+          const pandoraResult = await runPandoraAgent(workspaceId, agentMessage, history);
+
+          // Step 2: Get workspace context
+          const workspaceContext = await getWorkspaceContext(workspaceId);
+
+          // Step 3: Synthesize documents
+          const synthOutput = await synthesizeDocuments({
+            userMessage: message,
+            miningResult: {
+              chatResponse: pandoraResult.answer,
+              toolResults: pandoraResult.evidence.tool_calls.map((tc: any) => ({
+                tool: tc.tool,
+                result: tc.result,
+                error: tc.error,
+              })),
+              toolCalls: pandoraResult.evidence.tool_calls,
+            },
+            workspaceContext,
+            workspaceId,
+          });
+
+          // Step 4: Format response with download links
+          const formattedAnswer = formatDocumentResponse(synthOutput, workspaceId, pandoraResult.answer);
+
+          tokensUsed = pandoraResult.tokens_used;
+          answer = formattedAnswer;
+          routerDecision = 'document_request';
+          dataStrategy = 'document_synthesis';
+
+          await appendMessage(workspaceId, channelId, threadId, {
+            role: 'assistant',
+            content: formattedAnswer,
+            timestamp: new Date().toISOString(),
+            ...(pandoraResult.evidence.tool_calls.length > 0 ? {
+              tool_trace: pandoraResult.evidence.tool_calls,
+              cited_records: pandoraResult.evidence.cited_records,
+            } : {}),
+          } as any);
+
+          await logChatMessage({
+            workspaceId,
+            sessionId: threadId,
+            surface: 'ask_pandora',
+            role: 'assistant',
+            content: formattedAnswer,
+            scope: {
+              type: scopeType,
+              entity_id: entityId,
+              rep_email: repEmail,
+            },
+            tokenCost: tokensUsed,
+          });
+
+          await updateContext(workspaceId, channelId, threadId, {
+            last_scope: { type: scopeType, entity_id: entityId, rep_email: repEmail },
+          });
+          await updateTurnMetrics(workspaceId, channelId, threadId, tokensUsed);
+
+          return {
+            answer: formattedAnswer,
+            thread_id: threadId,
+            scope: { type: scopeType, entity_id: entityId, rep_email: repEmail },
+            router_decision: 'document_request',
+            data_strategy: 'document_synthesis',
+            tokens_used: tokensUsed,
+            response_id: randomUUID(),
+            feedback_enabled: true,
+            evidence: pandoraResult.evidence,
+            tool_call_count: pandoraResult.evidence.tool_calls.length,
+            latency_ms: pandoraResult.latency_ms,
+            documents: synthOutput,
+          };
+        } catch (err) {
+          console.error('[orchestrator] Document synthesis failed:', err);
+          // Fall through to regular Pandora Agent on error
+        }
       }
 
       // Fall through to Pandora Agent for data_query, ambiguous, or "mine data" choice

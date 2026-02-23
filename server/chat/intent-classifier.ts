@@ -138,6 +138,7 @@ export type IntentCategory =
   | 'data_query'                // Needs tools — "how many deals in pipeline?", "show me stalled deals"
   | 'advisory_stateless'        // No tools needed — "what's the difference between MEDDIC and MEDDPICC?"
   | 'advisory_with_data_option' // Better with data, but answerable without — "what closed-lost reasons should I use?"
+  | 'document_request'          // User wants a downloadable document — "create a framework", "build a report"
   | 'ambiguous';                // Unclear — fall through to existing path
 
 export interface IntentClassification {
@@ -174,6 +175,13 @@ const ADVISORY_WITH_DATA_PATTERNS = [
   /what should (i|we) (do|focus on|prioritize|change|fix|improve)\b/i,
 ];
 
+const DOCUMENT_REQUEST_PATTERNS = [
+  /\b(create|build|generate|put together|draft|write|prepare)\b.*\b(framework|report|document|doc|briefing|analysis|plan|summary|deck)\b/i,
+  /\b(framework|report|document|briefing)\b.*\b(for|on|about)\b/i,
+  /\bcapacity plan(ning)?\b/i,
+  /\bstrategic (plan|analysis|brief|review)\b/i,
+];
+
 const GATING_QUESTIONS: Record<string, string> = {
   'closed_lost_reasons':
     "I can answer this two ways — would you like general RevOps best practice, or should I first mine your actual closed-lost data and open-text reason fields to recommend values based on what your team is actually experiencing?",
@@ -205,10 +213,11 @@ Categories:
 - data_query: Requires pulling data from CRM or conversation tools to answer. Examples: "how many deals in pipeline?", "which deals are stalled?", "what's our win rate?"
 - advisory_stateless: Answerable from general RevOps knowledge, no data needed. Examples: "what's MEDDIC?", "what's a good sales process?", "how does bowtie attribution work?"
 - advisory_with_data_option: Could be answered generically, but would be MUCH better if we first mined the user's actual CRM data or call transcripts. Examples: "what closed-lost reason values should I use?", "how should I structure my pipeline stages?", "why do our customers churn?"
+- document_request: User wants a formatted deliverable — a framework, report, briefing, or strategic document. Keywords: "create a framework", "build a report", "put together a briefing", "draft a plan for", "generate a capacity plan". This category always requires data mining first, then document synthesis. Different from data_query (which returns a chat answer) because the user explicitly wants a downloadable document.
 
 Respond with ONLY valid JSON, no other text:
 {
-  "category": "data_query" | "advisory_stateless" | "advisory_with_data_option",
+  "category": "data_query" | "advisory_stateless" | "advisory_with_data_option" | "document_request",
   "confidence": 0.0-1.0,
   "reasoning": "one sentence"
 }`;
@@ -292,6 +301,19 @@ export async function classifyIntent(
   conversationHistory: Array<{ role: string; content: string }>,
   workspaceId: string,
 ): Promise<IntentClassification> {
+  // Fast path — document request patterns (check first as most specific)
+  for (const pattern of DOCUMENT_REQUEST_PATTERNS) {
+    if (pattern.test(message)) {
+      return {
+        category: 'document_request',
+        confidence: 0.85,
+        reasoning: 'Document request pattern match',
+        fast_path: true,
+        tokens_used: 0,
+      };
+    }
+  }
+
   // Fast path — data query patterns
   for (const pattern of DATA_QUERY_PATTERNS) {
     if (pattern.test(message)) {

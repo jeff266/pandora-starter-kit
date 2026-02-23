@@ -97,6 +97,7 @@ import { workspaceNotificationsRouter, userNotificationsRouter } from './routes/
 import notificationPreferencesRouter from './routes/notification-preferences.js';
 import skillRunRequestsRouter from './routes/skill-run-requests.js';
 import reportsRouter, { cleanupReportFiles } from './routes/reports.js';
+import documentsRouter from './routes/documents.js';
 import { startPushTriggers, stopPushTriggers } from './push/trigger-manager.js';
 import { initRenderers } from './renderers/index.js';
 import { cleanupExpiredAnnotations } from './feedback/cleanup.js';
@@ -297,6 +298,7 @@ workspaceApiRouter.use(notificationPreferencesRouter);
 workspaceApiRouter.use(dealIntelligenceRouter);
 workspaceApiRouter.use(toolsRouter);
 workspaceApiRouter.use(chatRouter);
+workspaceApiRouter.use(documentsRouter);
 workspaceApiRouter.use(feedbackRouter);
 workspaceApiRouter.use(pushRouter);
 workspaceApiRouter.use(accountScoringRouter);
@@ -462,6 +464,27 @@ async function start(): Promise<void> {
 
   cleanupReportFiles();
   setInterval(cleanupReportFiles, 60 * 60 * 1000);
+
+  // Cleanup old document files every 30 minutes
+  const fs = await import('fs');
+  setInterval(() => {
+    const dir = '/tmp/pandora-docs';
+    if (!fs.existsSync(dir)) return;
+    const files = fs.readdirSync(dir);
+    const cutoff = Date.now() - 60 * 60 * 1000; // 1 hour
+    for (const f of files) {
+      try {
+        const filePath = path.join(dir, f);
+        const stat = fs.statSync(filePath);
+        if (stat.mtimeMs < cutoff) {
+          fs.unlinkSync(filePath);
+          console.log(`[cleanup] Removed expired document: ${f}`);
+        }
+      } catch (err) {
+        console.error(`[cleanup] Failed to clean document ${f}:`, err);
+      }
+    }
+  }, 30 * 60 * 1000);
 
   const { startActionExpiryScheduler } = await import('./actions/scheduler.js');
   const dbPool = (await import('./db.js')).default;
