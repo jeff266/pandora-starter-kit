@@ -4,14 +4,11 @@
  */
 
 import { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, AlignmentType, HeadingLevel, BorderStyle, ShadingType } from 'docx';
+import ExcelJS from 'exceljs';
 import * as fs from 'fs';
 import * as path from 'path';
 import { callLLM } from '../utils/llm-router.js';
 import { getWorkspaceContext, type WorkspaceContext } from './workspace-context.js';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-
-const execAsync = promisify(exec);
 
 export interface ToolCall {
   tool: string;
@@ -652,7 +649,6 @@ async function generateXlsx(
   extractedData: ExtractedData,
   workspaceId: string
 ): Promise<string> {
-  const timestamp = Date.now();
   const slug = outline.title
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, '')
@@ -668,94 +664,72 @@ async function generateXlsx(
 
   const outputPath = path.join(outputDir, filename);
 
-  // Generate Python script to create Excel file with openpyxl
-  const pythonScript = `
-import openpyxl
-from openpyxl.styles import Font, PatternFill, Alignment
-from openpyxl.utils import get_column_letter
-import json
+  const workbook = new ExcelJS.Workbook();
 
-# Create workbook
-wb = openpyxl.Workbook()
+  const headerFill: ExcelJS.FillPattern = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: 'FFDEEAF1' },
+  };
+  const headerFont: Partial<ExcelJS.Font> = { bold: true };
 
-# Tab 1: Pipeline Data
-ws1 = wb.active
-ws1.title = "Pipeline Data"
+  const ws1 = workbook.addWorksheet('Pipeline Data');
+  const pipelineHeaders = ['Deal Name', 'Amount ($)', 'Stage', 'Forecast Category', 'Close Date', 'Probability', 'Weighted Value ($)'];
+  const headerRow = ws1.addRow(pipelineHeaders);
+  headerRow.eachCell((cell) => {
+    cell.fill = headerFill;
+    cell.font = headerFont;
+  });
 
-# Headers
-headers = ["Deal Name", "Amount ($)", "Stage", "Forecast Category", "Close Date", "Probability", "Weighted Value ($)"]
-for col, header in enumerate(headers, 1):
-    cell = ws1.cell(1, col, header)
-    cell.font = Font(bold=True)
-    cell.fill = PatternFill(start_color="DEEAF1", end_color="DEEAF1", fill_type="solid")
-
-# Deal data
-deals = ${JSON.stringify(extractedData.deals)}
-for row_idx, deal in enumerate(deals, 2):
-    ws1.cell(row_idx, 1, deal.get('name', ''))
-    ws1.cell(row_idx, 2, deal.get('amount', 0))
-    ws1.cell(row_idx, 3, deal.get('stage', ''))
-    ws1.cell(row_idx, 4, deal.get('forecast_category', ''))
-    ws1.cell(row_idx, 5, deal.get('close_date', ''))
-    prob = deal.get('probability', 0)
-    ws1.cell(row_idx, 6, prob)
-    # Weighted value formula
-    ws1.cell(row_idx, 7, f"=B{row_idx}*F{row_idx}")
-
-# Freeze top row
-ws1.freeze_panes = 'A2'
-
-# Auto-filter
-if len(deals) > 0:
-    ws1.auto_filter.ref = f'A1:G{len(deals)+1}'
-
-# Tab 2: Calculations
-ws2 = wb.create_sheet("Calculations")
-
-# Assumptions section
-ws2['A1'] = 'ASSUMPTIONS (Blue cells are editable)'
-ws2['A1'].font = Font(bold=True, size=14)
-
-calculations = ${JSON.stringify(outline.appendix.calculations || [])}
-
-# Add calculations
-row = 3
-ws2.cell(row, 1, "Calculation")
-ws2.cell(row, 2, "Formula")
-ws2.cell(row, 3, "Result")
-ws2.row_dimensions[row].font = Font(bold=True)
-
-for calc in calculations:
-    row += 1
-    ws2.cell(row, 1, calc.get('label', ''))
-    ws2.cell(row, 2, calc.get('formula', ''))
-    ws2.cell(row, 3, calc.get('result', ''))
-
-# Tab 3: Summary
-ws3 = wb.create_sheet("Summary")
-ws3['A1'] = "Document Summary"
-ws3['A1'].font = Font(bold=True, size=14)
-ws3['A3'] = "Total Deals:"
-ws3['B3'] = ${outline.appendix.raw_deal_count}
-ws3['A4'] = "Total Pipeline Value:"
-ws3['B4'] = ${outline.appendix.raw_pipeline_value}
-
-# Save
-wb.save("${outputPath}")
-print(json.dumps({"status": "success", "path": "${outputPath}"}))
-`;
-
-  const scriptPath = path.join(outputDir, `generate-${timestamp}.py`);
-  fs.writeFileSync(scriptPath, pythonScript);
-
-  try {
-    await execAsync(`python3 ${scriptPath}`);
-    fs.unlinkSync(scriptPath); // Clean up script
-    return outputPath;
-  } catch (err) {
-    console.error('[DocumentSynthesizer] Excel generation failed:', err);
-    throw new Error('Failed to generate Excel file');
+  for (let i = 0; i < extractedData.deals.length; i++) {
+    const d = extractedData.deals[i];
+    const rowNum = i + 2;
+    ws1.addRow([
+      d.name || '',
+      d.amount || 0,
+      d.stage || '',
+      d.forecast_category || '',
+      d.close_date || '',
+      d.probability || 0,
+      { formula: `B${rowNum}*F${rowNum}` },
+    ]);
   }
+
+  ws1.views = [{ state: 'frozen', ySplit: 1 }];
+  if (extractedData.deals.length > 0) {
+    ws1.autoFilter = { from: 'A1', to: `G${extractedData.deals.length + 1}` };
+  }
+
+  ws1.columns = [
+    { width: 30 }, { width: 15 }, { width: 18 }, { width: 18 }, { width: 14 }, { width: 12 }, { width: 18 },
+  ];
+
+  const ws2 = workbook.addWorksheet('Calculations');
+  const titleRow2 = ws2.addRow(['ASSUMPTIONS (Blue cells are editable)']);
+  titleRow2.getCell(1).font = { bold: true, size: 14 };
+  ws2.addRow([]);
+
+  const calcHeaderRow = ws2.addRow(['Calculation', 'Formula', 'Result']);
+  calcHeaderRow.eachCell((cell) => { cell.font = headerFont; });
+
+  const calculations = outline.appendix?.calculations || [];
+  for (const calc of calculations) {
+    ws2.addRow([calc.label || '', calc.formula || '', calc.result || '']);
+  }
+
+  ws2.columns = [{ width: 30 }, { width: 40 }, { width: 20 }];
+
+  const ws3 = workbook.addWorksheet('Summary');
+  const titleRow3 = ws3.addRow(['Document Summary']);
+  titleRow3.getCell(1).font = { bold: true, size: 14 };
+  ws3.addRow([]);
+  ws3.addRow(['Total Deals:', outline.appendix?.raw_deal_count || 0]);
+  ws3.addRow(['Total Pipeline Value:', outline.appendix?.raw_pipeline_value || 0]);
+
+  ws3.columns = [{ width: 25 }, { width: 20 }];
+
+  await workbook.xlsx.writeFile(outputPath);
+  return outputPath;
 }
 
 /**

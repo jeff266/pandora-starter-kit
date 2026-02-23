@@ -265,6 +265,8 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
       const conversationHistory = buildConversationHistory(state.messages || [] as any);
       const intentClassification = await classifyIntent(message, conversationHistory, workspaceId);
 
+      console.log('[Intent]', JSON.stringify(intentClassification));
+
       await logIntentClassification(workspaceId, message, intentClassification);
 
       // Handle advisory_with_data_option: ask gating question
@@ -430,7 +432,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
             documents: synthOutput,
           };
         } catch (err) {
-          console.error('[orchestrator] Document synthesis failed:', err);
+          console.error('[orchestrator] Document synthesis failed:', (err as Error).message, (err as Error).stack);
           // Fall through to regular Pandora Agent on error
         }
       }
