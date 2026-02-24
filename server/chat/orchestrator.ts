@@ -353,38 +353,69 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
       ) {
         try {
           const history = buildConversationHistory(state.messages || [] as any);
-
-          // Step 1: Run data mining through Pandora Agent
-          let agentMessage = message;
-          if (entityId && scopeType && !['workspace', 'pipeline', 'conversations'].includes(scopeType)) {
-            agentMessage = `[Context: viewing ${scopeType} id=${entityId}] ${message}`;
-          }
-
-          const pandoraResult = await runPandoraAgent(workspaceId, agentMessage, history);
-
-          // Step 2: Get workspace context
           const workspaceContext = await getWorkspaceContext(workspaceId);
 
-          // Step 3: Synthesize documents
-          const synthOutput = await synthesizeDocuments({
-            userMessage: message,
-            miningResult: {
-              chatResponse: pandoraResult.answer,
-              toolResults: pandoraResult.evidence.tool_calls.map((tc: any) => ({
+          let chatResponse: string;
+          let toolResults: any[] = [];
+          let toolCalls: any[] = [];
+          let evidence: any = { tool_calls: [], cited_records: [] };
+          let latencyMs = 0;
+
+          if (intentClassification.is_followup_doc) {
+            // Follow-up doc request: reuse the last assistant message instead of re-mining
+            const msgs = state.messages || [];
+            const lastAssistant = [...msgs].reverse().find((m: any) => m.role === 'assistant');
+            if (lastAssistant) {
+              chatResponse = lastAssistant.content || '';
+              toolResults = (lastAssistant.tool_trace || []).map((tc: any) => ({
                 tool: tc.tool,
                 result: tc.result,
                 error: tc.error,
-              })),
-              toolCalls: pandoraResult.evidence.tool_calls,
+              }));
+              toolCalls = lastAssistant.tool_trace || [];
+              evidence = {
+                tool_calls: toolCalls,
+                cited_records: lastAssistant.cited_records || [],
+              };
+              console.log('[orchestrator] Follow-up doc request — reusing last assistant response');
+            } else {
+              chatResponse = '';
+            }
+          } else {
+            // Fresh document request: mine data first
+            let agentMessage = message;
+            if (entityId && scopeType && !['workspace', 'pipeline', 'conversations'].includes(scopeType)) {
+              agentMessage = `[Context: viewing ${scopeType} id=${entityId}] ${message}`;
+            }
+
+            const pandoraResult = await runPandoraAgent(workspaceId, agentMessage, history);
+            chatResponse = pandoraResult.answer;
+            toolResults = pandoraResult.evidence.tool_calls.map((tc: any) => ({
+              tool: tc.tool,
+              result: tc.result,
+              error: tc.error,
+            }));
+            toolCalls = pandoraResult.evidence.tool_calls;
+            evidence = pandoraResult.evidence;
+            tokensUsed = pandoraResult.tokens_used;
+            latencyMs = pandoraResult.latency_ms;
+          }
+
+          const synthOutput = await synthesizeDocuments({
+            userMessage: intentClassification.is_followup_doc
+              ? `Convert the following analysis into a downloadable document:\n\n${chatResponse}`
+              : message,
+            miningResult: {
+              chatResponse,
+              toolResults,
+              toolCalls,
             },
             workspaceContext,
             workspaceId,
           });
 
-          // Step 4: Format response with download links
-          const formattedAnswer = formatDocumentResponse(synthOutput, workspaceId, pandoraResult.answer);
+          const formattedAnswer = formatDocumentResponse(synthOutput, workspaceId, chatResponse);
 
-          tokensUsed = pandoraResult.tokens_used;
           answer = formattedAnswer;
           routerDecision = 'document_request';
           dataStrategy = 'document_synthesis';
@@ -393,9 +424,9 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
             role: 'assistant',
             content: formattedAnswer,
             timestamp: new Date().toISOString(),
-            ...(pandoraResult.evidence.tool_calls.length > 0 ? {
-              tool_trace: pandoraResult.evidence.tool_calls,
-              cited_records: pandoraResult.evidence.cited_records,
+            ...(toolCalls.length > 0 ? {
+              tool_trace: toolCalls,
+              cited_records: evidence.cited_records,
             } : {}),
           } as any);
 
@@ -423,13 +454,13 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
             thread_id: threadId,
             scope: { type: scopeType, entity_id: entityId, rep_email: repEmail },
             router_decision: 'document_request',
-            data_strategy: 'document_synthesis',
+            data_strategy: intentClassification.is_followup_doc ? 'followup_doc_synthesis' : 'document_synthesis',
             tokens_used: tokensUsed,
             response_id: randomUUID(),
             feedback_enabled: true,
-            evidence: pandoraResult.evidence,
-            tool_call_count: pandoraResult.evidence.tool_calls.length,
-            latency_ms: pandoraResult.latency_ms,
+            evidence,
+            tool_call_count: toolCalls.length,
+            latency_ms: latencyMs,
             documents: synthOutput,
           };
         } catch (err) {

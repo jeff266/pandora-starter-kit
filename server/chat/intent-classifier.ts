@@ -148,6 +148,7 @@ export interface IntentClassification {
   gating_question?: string;     // Only set for advisory_with_data_option
   fast_path: boolean;           // true if determined by regex (no LLM used)
   tokens_used: number;          // 0 for fast path
+  is_followup_doc?: boolean;    // true when user wants previous response converted to a doc
 }
 
 // Fast-path pattern matchers (no LLM, ~0ms)
@@ -182,6 +183,17 @@ const DOCUMENT_REQUEST_PATTERNS = [
   /\bstrategic (plan|analysis|brief|review)\b/i,
   /\b(comprehensive|executive|detailed|full)\s+(summary|report|overview|briefing|analysis)\b/i,
   /\b(qbr|board)\s+(deck|report|prep|presentation)\b/i,
+];
+
+const FOLLOWUP_DOC_PATTERNS = [
+  /\b(in|into|as|to)\s+(a\s+)?(an?\s+)?(exportable\s+)?(downloadable\s+)?(docs?|documents?|docx|word|excel|xlsx|spreadsheet|files?)\b/i,
+  /\b(give|send|share|output|export|convert|turn)\b.*\b(docs?|documents?|docx|word|files?|download)\b/i,
+  /\bcreate the doc\b/i,
+  /\bdownload\s+(this|that|it)\b/i,
+  /\bexport\s+(this|that|it)\b/i,
+  /\bmake\s+(this|that|it)\s+(a\s+)?(docs?|documents?|downloadable|exportable)\b/i,
+  /\bcan\s+i\s+(have|get)\s+(this|that|it)\s+(as|in)\s/i,
+  /\b(put|have|get)\s+(this|that|it)\s+in\s+(a\s+)?(docs?|documents?)\b/i,
 ];
 
 const GATING_QUESTIONS: Record<string, string> = {
@@ -303,7 +315,21 @@ export async function classifyIntent(
   conversationHistory: Array<{ role: string; content: string }>,
   workspaceId: string,
 ): Promise<IntentClassification> {
-  // Fast path — document request patterns (check first as most specific)
+  // Fast path — follow-up document request ("put that in a doc", "export this", "create the doc")
+  for (const pattern of FOLLOWUP_DOC_PATTERNS) {
+    if (pattern.test(message)) {
+      return {
+        category: 'document_request',
+        confidence: 0.90,
+        reasoning: 'Follow-up document request — user wants previous response as downloadable doc',
+        fast_path: true,
+        tokens_used: 0,
+        is_followup_doc: true,
+      };
+    }
+  }
+
+  // Fast path — new document request patterns (check first as most specific)
   for (const pattern of DOCUMENT_REQUEST_PATTERNS) {
     if (pattern.test(message)) {
       return {
