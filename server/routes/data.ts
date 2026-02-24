@@ -431,24 +431,22 @@ router.get('/:id/accounts/:accountId/scores', async (req: Request, res: Response
     const result = await query(
       `SELECT
          s.account_id,
-         s.icp_score,
-         CASE
-           WHEN s.icp_score >= 85 THEN 'A'
-           WHEN s.icp_score >= 70 THEN 'B'
-           WHEN s.icp_score >= 50 THEN 'C'
-           ELSE 'D'
-         END as icp_tier,
-         s.lead_score,
-         CASE
-           WHEN s.lead_score >= 80 THEN 'HOT'
-           WHEN s.lead_score >= 50 THEN 'WARM'
-           ELSE 'COLD'
-         END as lead_tier,
-         s.intent_score,
+         s.total_score as icp_score,
+         COALESCE(s.grade,
+           CASE
+             WHEN s.total_score >= 85 THEN 'A'
+             WHEN s.total_score >= 70 THEN 'B'
+             WHEN s.total_score >= 50 THEN 'C'
+             ELSE 'D'
+           END
+         ) as icp_tier,
          s.engagement_score,
-         s.fit_score,
-         s.recency_score,
-         s.last_scored_at
+         s.signal_score,
+         s.firmographic_score,
+         s.relationship_score,
+         s.scored_at as last_scored_at,
+         s.score_breakdown,
+         s.synthesis_text
        FROM account_scores s
        WHERE s.workspace_id = $1 AND s.account_id = $2`,
       [workspaceId, accountId]
@@ -796,8 +794,7 @@ router.post('/:id/signals/batch-scan', async (req: Request, res: Response): Prom
          AND a.id NOT IN (
            SELECT DISTINCT account_id FROM account_signals
            WHERE workspace_id = $1
-             AND signal_type = 'market_news'
-             AND created_at > now() - ($3 || ' days')::interval
+             AND enriched_at > now() - ($3 || ' days')::interval
          )
        GROUP BY a.id, a.name
        ORDER BY max_deal_amount DESC

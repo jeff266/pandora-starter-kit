@@ -83,7 +83,6 @@ export class MarketSignalsCollector {
     const forceCheck = options?.force_check || false;
     const lookbackMonths = options?.lookback_months || 3;
 
-    // Get account info including ICP score
     const accountResult = await query<{
       name: string;
       domain: string | null;
@@ -93,15 +92,17 @@ export class MarketSignalsCollector {
       `SELECT
         a.name,
         a.domain,
-        s.icp_score,
-        CASE
-          WHEN s.icp_score >= 85 THEN 'A'
-          WHEN s.icp_score >= 70 THEN 'B'
-          WHEN s.icp_score >= 50 THEN 'C'
-          ELSE 'D'
-        END as icp_tier
+        s.total_score as icp_score,
+        COALESCE(s.grade,
+          CASE
+            WHEN s.total_score >= 85 THEN 'A'
+            WHEN s.total_score >= 70 THEN 'B'
+            WHEN s.total_score >= 50 THEN 'C'
+            ELSE 'D'
+          END
+        ) as icp_tier
       FROM accounts a
-      LEFT JOIN account_scores s ON s.account_id = a.id
+      LEFT JOIN account_scores s ON s.account_id = a.id AND s.workspace_id = a.workspace_id
       WHERE a.id = $1 AND a.workspace_id = $2`,
       [accountId, workspaceId]
     );
@@ -150,7 +151,7 @@ export class MarketSignalsCollector {
     }
 
     // Classify signals using LLM
-    const signals = await this.classifySignals(newsArticles, account.name);
+    const signals = await this.classifySignals(newsArticles, account.name, workspaceId);
 
     // Assess overall signal strength
     const signalStrength = this.assessSignalStrength(signals);
@@ -248,7 +249,8 @@ export class MarketSignalsCollector {
    */
   private async classifySignals(
     newsArticles: SerperNewsResult[],
-    companyName: string
+    companyName: string,
+    workspaceId?: string
   ): Promise<MarketSignal[]> {
     if (newsArticles.length === 0) {
       return [];
@@ -295,15 +297,15 @@ IMPORTANT:
 - If no significant signals found, return empty array []`;
 
     try {
-      const response = await callLLM({
-        model: 'deepseek',
-        systemPrompt: 'You are a market intelligence analyst. Extract and classify company signals from news articles. Return valid JSON only.',
-        prompt,
-        options: {
-          temperature: 0.1, // Low temperature for consistent classification
-          max_tokens: 2000,
-        },
-      });
+      const response = await callLLM(
+        workspaceId || 'system',
+        'classify',
+        {
+          systemPrompt: 'You are a market intelligence analyst. Extract and classify company signals from news articles. Return valid JSON only.',
+          messages: [{ role: 'user', content: prompt }],
+          maxTokens: 2000,
+        }
+      );
 
       // Parse LLM response
       const content = response.content || '';
@@ -409,50 +411,39 @@ IMPORTANT:
    * Store signals in database for future reference
    */
   async storeSignals(workspaceId: string, accountId: string, signals: MarketSignal[]): Promise<void> {
-    for (const signal of signals) {
-      try {
-        await query(
-          `INSERT INTO account_signals (
-            workspace_id,
-            account_id,
-            signal_type,
-            signal_category,
-            headline,
-            description,
-            source,
-            source_url,
-            signal_date,
-            priority,
-            relevance,
-            buying_trigger,
-            confidence,
-            metadata
-          ) VALUES ($1, $2, 'market_news', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-          ON CONFLICT (workspace_id, account_id, signal_type, headline, signal_date)
-          DO UPDATE SET
-            description = EXCLUDED.description,
-            priority = EXCLUDED.priority,
-            relevance = EXCLUDED.relevance,
-            updated_at = now()`,
-          [
-            workspaceId,
-            accountId,
-            signal.type,
-            signal.headline,
-            signal.description,
-            signal.source,
-            signal.url,
-            signal.date,
-            signal.priority,
-            signal.relevance,
-            signal.buying_trigger,
-            signal.confidence,
-            JSON.stringify({ type: signal.type }),
-          ]
-        );
-      } catch (error: any) {
-        console.error(`[MarketSignals] Error storing signal:`, error.message);
-      }
+    try {
+      const signalObjects = signals.map(s => ({
+        type: s.type || 'market_news',
+        signal: s.headline || s.description,
+        date: s.date || new Date().toISOString().split('T')[0],
+        relevance: s.relevance || 'medium',
+        source_url: s.url || '',
+        priority: s.priority || 'medium',
+        buying_trigger: s.buying_trigger || false,
+        confidence: s.confidence || 0.5,
+        source: s.source || '',
+      }));
+
+      const existingResult = await query(
+        `SELECT signals FROM account_signals WHERE workspace_id = $1 AND account_id = $2`,
+        [workspaceId, accountId]
+      );
+
+      const existingSignals = existingResult.rows[0]?.signals || [];
+      const mergedSignals = [...existingSignals, ...signalObjects];
+
+      await query(
+        `INSERT INTO account_signals (workspace_id, account_id, signals, enriched_at, updated_at)
+         VALUES ($1, $2, $3::jsonb, now(), now())
+         ON CONFLICT (workspace_id, account_id)
+         DO UPDATE SET
+           signals = $3::jsonb,
+           enriched_at = now(),
+           updated_at = now()`,
+        [workspaceId, accountId, JSON.stringify(mergedSignals)]
+      );
+    } catch (error: any) {
+      console.error(`[MarketSignals] Error storing signals:`, error.message);
     }
   }
 }

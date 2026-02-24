@@ -29,7 +29,7 @@ const DEFAULT_PREFERENCES = {
 router.get('/:workspaceId/dashboard/preferences', async (req: Request, res: Response): Promise<void> => {
   try {
     const { workspaceId } = req.params;
-    const userId = req.user?.id;
+    const userId = req.user?.user_id;
 
     if (!userId) {
       res.status(401).json({ error: 'User not authenticated' });
@@ -77,7 +77,7 @@ router.get('/:workspaceId/dashboard/preferences', async (req: Request, res: Resp
 router.put('/:workspaceId/dashboard/preferences', async (req: Request, res: Response): Promise<void> => {
   try {
     const { workspaceId } = req.params;
-    const userId = req.user?.id;
+    const userId = req.user?.user_id;
 
     if (!userId) {
       res.status(401).json({ error: 'User not authenticated' });
@@ -86,73 +86,38 @@ router.put('/:workspaceId/dashboard/preferences', async (req: Request, res: Resp
 
     const updates = req.body;
 
-    // Build SET clauses dynamically based on what's being updated
-    const setClauses: string[] = [];
-    const params: any[] = [userId, workspaceId];
-    let paramIdx = 3;
+    const existing = await query(
+      `SELECT * FROM user_dashboard_preferences WHERE user_id = $1 AND workspace_id = $2`,
+      [userId, workspaceId]
+    );
 
-    // Handle JSONB fields with deep merge
-    if (updates.sections_config !== undefined) {
-      setClauses.push(`sections_config = COALESCE(sections_config, '{}'::jsonb) || $${paramIdx}::jsonb`);
-      params.push(JSON.stringify(updates.sections_config));
-      paramIdx++;
-    }
-
-    if (updates.metric_cards !== undefined) {
-      setClauses.push(`metric_cards = COALESCE(metric_cards, '{}'::jsonb) || $${paramIdx}::jsonb`);
-      params.push(JSON.stringify(updates.metric_cards));
-      paramIdx++;
-    }
-
-    // Handle scalar fields
-    if (updates.pipeline_viz_mode !== undefined) {
-      setClauses.push(`pipeline_viz_mode = $${paramIdx}`);
-      params.push(updates.pipeline_viz_mode);
-      paramIdx++;
-    }
-
-    if (updates.monte_carlo_overlay !== undefined) {
-      setClauses.push(`monte_carlo_overlay = $${paramIdx}`);
-      params.push(updates.monte_carlo_overlay);
-      paramIdx++;
-    }
-
-    if (updates.default_time_range !== undefined) {
-      setClauses.push(`default_time_range = $${paramIdx}`);
-      params.push(updates.default_time_range);
-      paramIdx++;
-    }
-
-    if (setClauses.length === 0) {
-      res.status(400).json({ error: 'No valid fields to update' });
-      return;
-    }
-
-    // Upsert with ON CONFLICT
-    const setClause = setClauses.join(', ');
+    const merged = {
+      sections_config: JSON.stringify({
+        ...(existing.rows[0]?.sections_config || DEFAULT_PREFERENCES.sections_config),
+        ...(updates.sections_config || {}),
+      }),
+      metric_cards: JSON.stringify({
+        ...(existing.rows[0]?.metric_cards || DEFAULT_PREFERENCES.metric_cards),
+        ...(updates.metric_cards || {}),
+      }),
+      pipeline_viz_mode: updates.pipeline_viz_mode ?? existing.rows[0]?.pipeline_viz_mode ?? DEFAULT_PREFERENCES.pipeline_viz_mode,
+      monte_carlo_overlay: updates.monte_carlo_overlay ?? existing.rows[0]?.monte_carlo_overlay ?? DEFAULT_PREFERENCES.monte_carlo_overlay,
+      default_time_range: updates.default_time_range ?? existing.rows[0]?.default_time_range ?? DEFAULT_PREFERENCES.default_time_range,
+    };
 
     const result = await query(
       `INSERT INTO user_dashboard_preferences (user_id, workspace_id, sections_config, metric_cards, pipeline_viz_mode, monte_carlo_overlay, default_time_range)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, $6, $7)
        ON CONFLICT (user_id, workspace_id)
-       DO UPDATE SET ${setClause}
-       RETURNING
-         sections_config,
-         metric_cards,
-         pipeline_viz_mode,
-         monte_carlo_overlay,
-         default_time_range,
-         updated_at`,
-      [
-        userId,
-        workspaceId,
-        JSON.stringify(DEFAULT_PREFERENCES.sections_config),
-        JSON.stringify(DEFAULT_PREFERENCES.metric_cards),
-        DEFAULT_PREFERENCES.pipeline_viz_mode,
-        DEFAULT_PREFERENCES.monte_carlo_overlay,
-        DEFAULT_PREFERENCES.default_time_range,
-        ...params.slice(2), // Add the update params
-      ]
+       DO UPDATE SET
+         sections_config = $3::jsonb,
+         metric_cards = $4::jsonb,
+         pipeline_viz_mode = $5,
+         monte_carlo_overlay = $6,
+         default_time_range = $7,
+         updated_at = now()
+       RETURNING sections_config, metric_cards, pipeline_viz_mode, monte_carlo_overlay, default_time_range, updated_at`,
+      [userId, workspaceId, merged.sections_config, merged.metric_cards, merged.pipeline_viz_mode, merged.monte_carlo_overlay, merged.default_time_range]
     );
 
     res.json(result.rows[0]);

@@ -5,7 +5,7 @@ import cors from "cors";
 import rateLimit from "express-rate-limit";
 import cookieParser from "cookie-parser";
 import { verifyConnection } from "./db.js";
-import { requireWorkspaceAccess } from "./middleware/auth.js";
+import { requireWorkspaceAccess, requireUserSession } from "./middleware/auth.js";
 import { attachWorkspaceContext } from "./middleware/workspace-context.js";
 import healthRouter, { setAPHealthChecker, setServerReady } from "./routes/health.js";
 import workspacesRouter from "./routes/workspaces.js";
@@ -225,7 +225,7 @@ app.use("/api/auth/salesforce", salesforceAuthRouter);
 app.use("/api/auth/google", googleAuthRouter);
 
 app.use("/api/auth", userAuthRouter);
-app.use("/api/users/me/notifications", userNotificationsRouter);
+app.use("/api/users/me/notifications", requireUserSession, userNotificationsRouter);
 
 app.use("/api/consultant", consultantRouter);
 
