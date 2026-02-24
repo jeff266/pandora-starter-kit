@@ -16,6 +16,7 @@ interface MetricCardProps {
   trendPositive?: boolean;
   evidence?: MetricEvidence;
   loading?: boolean;
+  onShowData?: () => void;
 }
 
 export function MetricCard({
@@ -27,6 +28,7 @@ export function MetricCard({
   trendPositive = true,
   evidence,
   loading = false,
+  onShowData,
 }: MetricCardProps) {
   const [showMath, setShowMath] = useState(false);
 
@@ -184,6 +186,30 @@ export function MetricCard({
                 {typeof val === 'object' ? JSON.stringify(val) : String(val)}
               </div>
             ))}
+
+          {/* Show Data Link */}
+          {onShowData && (
+            <button
+              onClick={onShowData}
+              style={{
+                marginTop: 8,
+                padding: '6px 12px',
+                background: colors.accent,
+                color: '#fff',
+                border: 'none',
+                borderRadius: 6,
+                fontSize: 12,
+                fontWeight: 500,
+                cursor: 'pointer',
+                fontFamily: fonts.body,
+                transition: 'opacity 0.15s ease',
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.opacity = '0.9')}
+              onMouseLeave={(e) => (e.currentTarget.style.opacity = '1')}
+            >
+              Show Data
+            </button>
+          )}
         </div>
       )}
     </div>

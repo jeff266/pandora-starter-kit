@@ -674,6 +674,7 @@ export default function CommandCenter() {
               monte_carlo_p50: false,
             }}
             onToggleCard={(cardId, visible) => toggleMetricCard(cardId, visible)}
+            onShowData={(metricId) => setMetricBreakdown(metricId)}
             loading={authLoading || loading.pipeline || loading.summary}
           />
         </CollapsibleSection>
@@ -1888,6 +1889,56 @@ function MetricBreakdownModal({ metric, scopeId, onClose }: { metric: string; sc
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const navigate = useNavigate();
 
+  const handleExportCSV = () => {
+    if (!data?.deals?.length) return;
+
+    const isWinRate = metric === 'win_rate';
+    const headers = isWinRate
+      ? ['Deal', 'Owner', 'Amount', 'Stage', 'Outcome', 'Close Date']
+      : ['Deal', 'Owner', 'Amount', 'Probability', 'Weighted', 'Stage', 'Close Date'];
+
+    const rows = data.deals.map((d: any) => {
+      if (isWinRate) {
+        return [
+          d.name,
+          d.owner || '',
+          d.amount || 0,
+          d.stage || '',
+          d.outcome || '',
+          d.close_date || '',
+        ];
+      }
+      return [
+        d.name,
+        d.owner || '',
+        d.amount || 0,
+        d.probability || 0,
+        d.weighted_amount || 0,
+        d.stage || '',
+        d.close_date || '',
+      ];
+    });
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(cell => {
+        const str = String(cell);
+        // Escape quotes and wrap in quotes if contains comma
+        return str.includes(',') || str.includes('"') ? `"${str.replace(/"/g, '""')}"` : str;
+      }).join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `${metric}_deals_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   useEffect(() => {
     (async () => {
       try {
@@ -1947,7 +1998,27 @@ function MetricBreakdownModal({ metric, scopeId, onClose }: { metric: string; sc
             <div style={{ fontSize: 16, fontWeight: 700, color: colors.text }}>{metricLabels[metric] || metric}</div>
             {data?.formula && <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>{data.formula}</div>}
           </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: colors.textMuted, cursor: 'pointer', fontSize: 20, padding: 4 }}>✕</button>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            <button
+              onClick={handleExportCSV}
+              disabled={!data?.deals?.length}
+              style={{
+                padding: '6px 12px',
+                borderRadius: 6,
+                border: `1px solid ${colors.border}`,
+                background: colors.surface,
+                color: colors.accent,
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: data?.deals?.length ? 'pointer' : 'not-allowed',
+                opacity: data?.deals?.length ? 1 : 0.5,
+                fontFamily: fonts.body,
+              }}
+            >
+              Export CSV
+            </button>
+            <button onClick={onClose} style={{ background: 'none', border: 'none', color: colors.textMuted, cursor: 'pointer', fontSize: 20, padding: 4 }}>✕</button>
+          </div>
         </div>
 
         {data?.summary && (
