@@ -15,6 +15,16 @@ import { ConversationGaps } from '../components/ConversationGaps';
 import { useDemoMode } from '../contexts/DemoModeContext';
 import { useLens } from '../contexts/LensContext';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { useDashboardPreferences } from '../hooks/useDashboardPreferences';
+import {
+  CollapsibleSection,
+  DashboardHeader,
+  MetricsRow,
+  PipelineChart,
+  ActionsWidget,
+  SignalsWidget,
+  FindingsFeed,
+} from '../components/dashboard';
 
 interface Finding {
   id: string;
@@ -153,6 +163,7 @@ export default function CommandCenter() {
   const isMobile = useIsMobile();
   const { activeLens } = useLens();
   const wsId = currentWorkspace?.id || '';
+  const { preferences, updatePreferences, updateSection, toggleMetricCard, setTimeRange, setVizMode } = useDashboardPreferences();
   const [pipeline, setPipeline] = useState<any>(null);
   const [summary, setSummary] = useState<any>(null);
   const [findings, setFindings] = useState<Finding[]>([]);
@@ -242,7 +253,13 @@ export default function CommandCenter() {
 
   const fetchData = useCallback(async (pipelineParam?: string, isRefresh?: boolean) => {
     const pFilter = pipelineParam ?? selectedPipeline;
-    const pipelineQs = pFilter && pFilter !== 'default' ? `?scopeId=${encodeURIComponent(pFilter)}` : '';
+    let pipelineQs = pFilter && pFilter !== 'default' ? `?scopeId=${encodeURIComponent(pFilter)}` : '';
+
+    // Add time_range parameter from dashboard preferences
+    const timeRangeParam = preferences?.default_time_range || 'this_week';
+    pipelineQs = pipelineQs
+      ? `${pipelineQs}&time_range=${timeRangeParam}`
+      : `?time_range=${timeRangeParam}`;
 
     if (isRefresh) {
       setRefreshing(true);
@@ -276,7 +293,7 @@ export default function CommandCenter() {
 
     setLastUpdated(new Date());
     setRefreshing(false);
-  }, [selectedPipeline]);
+  }, [selectedPipeline, preferences?.default_time_range]);
 
   const handlePipelineChange = useCallback((value: string) => {
     setSelectedPipeline(value);
@@ -572,12 +589,17 @@ export default function CommandCenter() {
       <QuotaBanner />
       <PushBanner />
 
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 11, color: colors.textMuted }}>{updatedText}</span>
-          {refreshing && <InlineSpinner />}
-        </div>
-        {availablePipelines.length > 1 && (
+      <DashboardHeader
+        timeRange={preferences?.default_time_range || 'this_week'}
+        onTimeRangeChange={(range) => setTimeRange(range)}
+        lastRefreshed={lastUpdated.toISOString()}
+        onRefresh={() => fetchData(undefined, true)}
+        loading={refreshing}
+      />
+
+      {/* Keep pipeline selector for backwards compatibility */}
+      {availablePipelines.length > 1 && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: -16 }}>
           <select
             value={selectedPipeline}
             onChange={e => handlePipelineChange(e.target.value)}
@@ -602,53 +624,59 @@ export default function CommandCenter() {
               </option>
             ))}
           </select>
-        )}
-      </div>
+        </div>
+      )}
 
       <SectionErrorBoundary fallbackMessage="Failed to load metrics.">
-        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16 }}>
-          {authLoading || loading.pipeline || loading.summary ? (
-            Array.from({ length: 5 }).map((_, i) => <SkeletonCard key={i} height={100} />)
-          ) : (
-            <>
-              <MetricCard label="Total Pipeline" value={formatCurrency(anon.amount(totalPipeline))} onClick={() => setMetricBreakdown('total_pipeline')} />
-              <MetricCard label="Weighted Pipeline" value={formatCurrency(anon.amount(weightedPipeline))} onClick={() => setMetricBreakdown('weighted_pipeline')} />
-              <MetricCard
-                label="Coverage Ratio"
-                value={coverage != null ? `${Number(coverage).toFixed(1)}x` : '--'}
-                onClick={() => setMetricBreakdown('coverage')}
-              />
-              <MetricCard
-                label="Win Rate (90d)"
-                value={winRate != null ? formatPercent(Number(winRate)) : '--'}
-                onClick={() => setMetricBreakdown('win_rate')}
-              />
-              <div
-                onClick={() => navigate('/insights')}
-                style={{
-                  background: colors.surface,
-                  border: `1px solid ${colors.border}`,
-                  borderRadius: 10,
-                  padding: 16,
-                  cursor: 'pointer',
-                  transition: 'border-color 0.15s',
-                }}
-                onMouseEnter={e => (e.currentTarget.style.borderColor = colors.accent)}
-                onMouseLeave={e => (e.currentTarget.style.borderColor = colors.border)}
-              >
-                <div style={{ fontSize: 11, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  Open Findings
-                </div>
-                <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                  <FindingBadge count={actCount} severity="act" />
-                  <FindingBadge count={watchCount} severity="watch" />
-                  <FindingBadge count={notableCount} severity="notable" />
-                  <FindingBadge count={infoCount} severity="info" />
-                </div>
-              </div>
-            </>
-          )}
-        </div>
+        <CollapsibleSection
+          title="Pipeline Metrics"
+          defaultCollapsed={preferences?.sections_config?.metrics?.collapsed || false}
+          onToggle={(collapsed) => updateSection('metrics', { collapsed })}
+        >
+          <MetricsRow
+            metrics={{
+              total_pipeline: {
+                value: totalPipeline || 0,
+                deal_count: pipeline?.total_deals || 0,
+                trend: undefined,
+                trend_direction: 'flat' as const,
+              },
+              weighted_pipeline: {
+                value: weightedPipeline || 0,
+                trend: undefined,
+                trend_direction: 'flat' as const,
+              },
+              coverage_ratio: {
+                value: coverage || 0,
+                quota: pipeline?.coverage?.quota,
+                trend: undefined,
+                trend_direction: 'flat' as const,
+              },
+              win_rate: {
+                value: winRate || 0,
+                period_days: 90,
+                trend: undefined,
+                trend_direction: 'flat' as const,
+              },
+              open_deals: {
+                value: totalActive || 0,
+                trend: undefined,
+                trend_direction: 'flat' as const,
+              },
+            }}
+            evidence={pipeline?.metric_evidence}
+            visibleCards={preferences?.metric_cards || {
+              total_pipeline: true,
+              weighted_pipeline: true,
+              coverage_ratio: true,
+              win_rate: true,
+              open_deals: true,
+              monte_carlo_p50: false,
+            }}
+            onToggleCard={(cardId, visible) => toggleMetricCard(cardId, visible)}
+            loading={authLoading || loading.pipeline || loading.summary}
+          />
+        </CollapsibleSection>
       </SectionErrorBoundary>
 
       <SectionErrorBoundary fallbackMessage="Failed to load gap card.">
@@ -870,6 +898,43 @@ export default function CommandCenter() {
             </>
           )}
         </div>
+      </SectionErrorBoundary>
+
+      {/* Enhanced Dashboard Widgets - Phase 1 */}
+      <SectionErrorBoundary fallbackMessage="Failed to load actions and signals.">
+        <CollapsibleSection
+          title="Actions & Signals"
+          defaultCollapsed={preferences?.sections_config?.actions_signals?.collapsed || false}
+          onToggle={(collapsed) => updateSection('actions_signals', { collapsed })}
+        >
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 16 }}>
+            <ActionsWidget
+              summary={pipeline?.actions_summary}
+              loading={loading.pipeline}
+              workspaceId={wsId}
+            />
+            <SignalsWidget
+              summary={pipeline?.signals_summary}
+              loading={loading.pipeline}
+              workspaceId={wsId}
+            />
+          </div>
+        </CollapsibleSection>
+      </SectionErrorBoundary>
+
+      <SectionErrorBoundary fallbackMessage="Failed to load recent findings.">
+        <CollapsibleSection
+          title="Recent Findings"
+          defaultCollapsed={preferences?.sections_config?.findings?.collapsed || false}
+          onToggle={(collapsed) => updateSection('findings', { collapsed })}
+          badge={pipeline?.recent_findings?.length || 0}
+        >
+          <FindingsFeed
+            findings={pipeline?.recent_findings}
+            loading={loading.pipeline}
+            workspaceId={wsId}
+          />
+        </CollapsibleSection>
       </SectionErrorBoundary>
 
       {metricBreakdown && (
