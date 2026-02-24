@@ -745,6 +745,168 @@ export class HubSpotClient {
       return [];
     }
   }
+
+  // ==========================================================================
+  // WRITE METHODS (CRM Write-Back)
+  // ==========================================================================
+
+  /**
+   * Update deal properties in HubSpot
+   * API: PATCH https://api.hubapi.com/crm/v3/objects/deals/{dealId}
+   * Rate limit: 100 requests per 10 seconds (shared with reads)
+   */
+  async updateDeal(
+    dealId: string,
+    properties: Record<string, string | number | boolean>
+  ): Promise<{ success: boolean; updatedProperties: string[]; error?: string }> {
+    try {
+      if (!dealId || Object.keys(properties).length === 0) {
+        return { success: false, updatedProperties: [], error: 'Deal ID and properties are required' };
+      }
+
+      await this.request(`/crm/v3/objects/deals/${dealId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ properties }),
+      });
+
+      return {
+        success: true,
+        updatedProperties: Object.keys(properties),
+      };
+    } catch (error) {
+      return {
+        success: false,
+        updatedProperties: [],
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  /**
+   * Add a note to a deal in HubSpot
+   *
+   * HubSpot v3 notes are separate objects that get associated:
+   * Step 1: POST /crm/v3/objects/notes (create note)
+   * Step 2: PUT /crm/v3/objects/notes/{noteId}/associations/deals/{dealId}/note_to_deal (link to deal)
+   */
+  async addDealNote(
+    dealId: string,
+    noteBody: string
+  ): Promise<{ success: boolean; noteId?: string; error?: string }> {
+    try {
+      if (!dealId || !noteBody) {
+        return { success: false, error: 'Deal ID and note body are required' };
+      }
+
+      // Step 1: Create the note
+      const noteResponse = await this.request<{ id: string }>('/crm/v3/objects/notes', {
+        method: 'POST',
+        body: JSON.stringify({
+          properties: {
+            hs_note_body: noteBody,
+            hs_timestamp: Date.now().toString(),
+          },
+        }),
+      });
+
+      const noteId = noteResponse.id;
+
+      // Step 2: Associate with deal
+      try {
+        await this.request(
+          `/crm/v3/objects/notes/${noteId}/associations/deals/${dealId}/note_to_deal`,
+          {
+            method: 'PUT',
+          }
+        );
+      } catch (assocError) {
+        console.warn(`[HubSpot] Note created (${noteId}) but association with deal ${dealId} failed:`,
+          assocError instanceof Error ? assocError.message : String(assocError));
+        // Note exists but is orphaned - still return success with warning
+        return {
+          success: true,
+          noteId,
+          error: `Note created but association failed: ${assocError instanceof Error ? assocError.message : String(assocError)}`,
+        };
+      }
+
+      return { success: true, noteId };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  /**
+   * Update contact properties in HubSpot
+   * API: PATCH https://api.hubapi.com/crm/v3/objects/contacts/{contactId}
+   */
+  async updateContact(
+    contactId: string,
+    properties: Record<string, string | number | boolean>
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      if (!contactId || Object.keys(properties).length === 0) {
+        return { success: false, error: 'Contact ID and properties are required' };
+      }
+
+      await this.request(`/crm/v3/objects/contacts/${contactId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ properties }),
+      });
+
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  /**
+   * Fetch a single deal's current properties (for preview/comparison)
+   * API: GET /crm/v3/objects/deals/{dealId}?properties=closedate,dealstage,amount,...
+   */
+  async getDealProperties(
+    dealId: string,
+    propertyNames: string[]
+  ): Promise<Record<string, string> | null> {
+    try {
+      if (!dealId || propertyNames.length === 0) {
+        return null;
+      }
+
+      const propertiesParam = propertyNames.join(',');
+      const response = await this.request<{ properties: Record<string, string> }>(
+        `/crm/v3/objects/deals/${dealId}?properties=${propertiesParam}`
+      );
+
+      return response.properties || {};
+    } catch (error) {
+      console.warn(`[HubSpot] Failed to get deal properties for ${dealId}:`,
+        error instanceof Error ? error.message : String(error));
+      return null;
+    }
+  }
+
+  /**
+   * Get HubSpot portal ID (needed for deep links)
+   */
+  async getPortalId(): Promise<number | null> {
+    try {
+      const accountInfo = await this.request<{ portalId: number }>(
+        '/account-info/v3/details'
+      );
+      return accountInfo.portalId;
+    } catch (error) {
+      console.warn('[HubSpot] Failed to get portal ID:',
+        error instanceof Error ? error.message : String(error));
+      return null;
+    }
+  }
 }
 
 export interface PropertyHistoryEntry {

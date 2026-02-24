@@ -565,6 +565,49 @@ const PANDORA_TOOLS: ToolDef[] = [
       required: ['deal_id'],
     },
   },
+  {
+    name: 'check_stakeholder_status',
+    description:
+      'Check if key DECISION MAKERS on an open deal are still at the company via LinkedIn. By DEFAULT checks only critical roles (champion, economic_buyer, decision_maker, executive_sponsor) to save API costs and focus on contacts that impact deal outcomes. Detects departures, role changes, promotions. Returns per-contact status (active/departed/changed_role), risk levels (critical for champion/economic buyer departures), and actionable recommendations. Use when asked "has anyone left?" or "are the stakeholders still there?" or when assessing deal risk.',
+    parameters: {
+      type: 'object',
+      properties: {
+        deal_id: { type: 'string', description: 'Deal ID to check (must be open deal)' },
+        role_filter: {
+          type: 'string',
+          enum: ['critical_only', 'business_roles', 'all'],
+          description:
+            'Which roles to check: critical_only (champion, economic_buyer, decision_maker, exec_sponsor - DEFAULT), business_roles (adds procurement/influencer for deals >$50k), all (check every contact)',
+        },
+        check_all_roles: {
+          type: 'boolean',
+          description: 'Shortcut to check all contacts regardless of role (same as role_filter=all). Default false.',
+        },
+      },
+      required: ['deal_id'],
+    },
+  },
+  {
+    name: 'enrich_market_signals',
+    description:
+      'Fetch recent company news and detect market signals (funding, M&A, expansions, executive changes, layoffs). By DEFAULT only works for A/B tier accounts (ICP score ≥70) to optimize costs - returns message for C/D tier accounts suggesting focus on higher-fit accounts. Use force_check=true to override tier restriction. Detects buying triggers like funding rounds (expansion budget), new executives (fresh evaluation), expansions (new needs). Returns signal_strength (hot/warm/neutral), classified signals with priority levels, and buying_trigger flags. Use when asked "what\'s happening with [company]?" or "any news about [account]?" or when researching account status.',
+    parameters: {
+      type: 'object',
+      properties: {
+        account_id: { type: 'string', description: 'Account ID to check for market signals' },
+        account_name: { type: 'string', description: 'Account name to search (if account_id not provided)' },
+        force_check: {
+          type: 'boolean',
+          description: 'Override A/B tier filter to check C/D tier accounts (costs more, lower ROI). Default false.',
+        },
+        lookback_months: {
+          type: 'number',
+          description: 'How many months of news to fetch (default 3, max 6)',
+        },
+      },
+      required: [],
+    },
+  },
 ];
 
 // ─── System prompt ────────────────────────────────────────────────────────────
@@ -644,6 +687,10 @@ You have tools that query the company's live data. When someone asks a question,
 19. BLOCKER DETECTION: When asked "what's blocking this deal?" or about procurement/legal delays, call detect_process_blockers. Scans CRM, calls, and activity for evidence.
 
 20. BUYER SIGNAL DETECTION: When asked "is the buyer showing intent?" or about purchase signals, call detect_buyer_signals. Looks for procurement intros, budget allocation, verbal commits, etc.
+
+21. STAKEHOLDER STATUS CHECK: When asked "has anyone left?" or "are the stakeholders still there?" or about contact/champion departures, call check_stakeholder_status. Uses LinkedIn to verify employment status on OPEN deals only. By default checks only critical roles (champion, economic_buyer, decision_maker, executive_sponsor) to focus on decision makers. Use check_all_roles=true if user explicitly asks to check everyone. Detects departures, role changes, and assesses risk.
+
+22. MARKET SIGNALS: When asked "what's happening with [company]?" or "any news about [account]?" or to research account status, call enrich_market_signals. Fetches recent company news and detects signals: funding, M&A, expansions, executive changes, layoffs. By default only checks A/B tier accounts (ICP ≥70) for cost optimization. Identifies buying triggers (funding = expansion budget, new exec = fresh evaluation). Returns signal_strength and prioritized events.
 
 Today's date is ${new Date().toISOString().split('T')[0]}.`;
 

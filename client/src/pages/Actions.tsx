@@ -7,6 +7,7 @@ import Skeleton from '../components/Skeleton';
 import SectionErrorBoundary from '../components/SectionErrorBoundary';
 import { useDemoMode } from '../contexts/DemoModeContext';
 import { useIsMobile } from '../hooks/useIsMobile';
+import ExecutionDialog from '../components/ExecutionDialog';
 
 interface ActionsSummary {
   open_total: number;
@@ -89,6 +90,16 @@ const snoozeDurations = [
   { label: '2 weeks', days: 14 },
   { label: '1 month', days: 30 },
 ];
+
+// Action types that support CRM write-back
+const CRM_WRITABLE_TYPES = new Set([
+  'update_close_date',
+  'close_stale_deal',
+  'update_deal_stage',
+  'update_forecast',
+  'clean_data',
+  're_engage_deal',
+]);
 
 export default function Actions() {
   const navigate = useNavigate();
@@ -582,6 +593,7 @@ function ActionPanel({ action, onClose, onExecute, onReject, onSnooze, onReopen,
   const [showSnooze, setShowSnooze] = useState(false);
   const [executing, setExecuting] = useState(false);
   const [showExecLog, setShowExecLog] = useState(false);
+  const [showExecutionDialog, setShowExecutionDialog] = useState(false);
 
   const sc = sevColors[action.severity] || colors.textMuted;
   const hasFailed = action.execution_result?.some(op => op.error);
@@ -595,11 +607,18 @@ function ActionPanel({ action, onClose, onExecute, onReject, onSnooze, onReopen,
   const canReopen = ['dismissed', 'rejected', 'snoozed'].includes(action.execution_status);
 
   const hasCRMPayload = action.execution_payload?.crm_updates && action.execution_payload.crm_updates.length > 0;
+  const canExecuteCRM = CRM_WRITABLE_TYPES.has(action.action_type) || hasCRMPayload;
 
   async function handleExecuteClick() {
     setExecuting(true);
     await onExecute(action.id);
     setExecuting(false);
+  }
+
+  function handleExecutionSuccess() {
+    // Refresh the action - close panel to trigger refetch
+    onClose();
+    // The parent will call fetchData() which refreshes the list
   }
 
   return (
@@ -817,26 +836,41 @@ function ActionPanel({ action, onClose, onExecute, onReject, onSnooze, onReopen,
         }}>
           {isActionable && (
             <>
-              <button
-                onClick={handleExecuteClick}
-                disabled={executing}
-                style={{
-                  width: '100%', padding: '10px 16px', borderRadius: 8,
-                  background: executing ? colors.surfaceHover : colors.green,
-                  color: executing ? colors.textMuted : '#fff',
-                  fontSize: 13, fontWeight: 600, cursor: executing ? 'not-allowed' : 'pointer',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                }}
-              >
-                {executing ? (
-                  <>
-                    <span style={{ display: 'inline-block', width: 14, height: 14, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-                    Executing...
-                  </>
-                ) : (
-                  <>&#x2705; Approve &amp; Execute</>
-                )}
-              </button>
+              {canExecuteCRM ? (
+                <button
+                  onClick={() => setShowExecutionDialog(true)}
+                  style={{
+                    width: '100%', padding: '10px 16px', borderRadius: 8,
+                    background: colors.accent,
+                    color: '#fff',
+                    fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  }}
+                >
+                  &#x2705; Execute in CRM
+                </button>
+              ) : (
+                <button
+                  onClick={handleExecuteClick}
+                  disabled={executing}
+                  style={{
+                    width: '100%', padding: '10px 16px', borderRadius: 8,
+                    background: executing ? colors.surfaceHover : colors.green,
+                    color: executing ? colors.textMuted : '#fff',
+                    fontSize: 13, fontWeight: 600, cursor: executing ? 'not-allowed' : 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  }}
+                >
+                  {executing ? (
+                    <>
+                      <span style={{ display: 'inline-block', width: 14, height: 14, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                      Executing...
+                    </>
+                  ) : (
+                    <>&#x2705; Approve &amp; Execute</>
+                  )}
+                </button>
+              )}
 
               {!showSnooze && !showReject && (
                 <div style={{ display: 'flex', gap: 8 }}>
@@ -974,6 +1008,18 @@ function ActionPanel({ action, onClose, onExecute, onReject, onSnooze, onReopen,
           )}
         </div>
       </div>
+
+      {showExecutionDialog && (
+        <ExecutionDialog
+          workspaceId={api.getWorkspaceId()}
+          actionId={action.id}
+          actionTitle={action.title}
+          actionType={action.action_type}
+          open={showExecutionDialog}
+          onClose={() => setShowExecutionDialog(false)}
+          onExecuted={handleExecutionSuccess}
+        />
+      )}
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>

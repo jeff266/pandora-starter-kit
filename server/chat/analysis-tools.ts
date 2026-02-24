@@ -582,3 +582,229 @@ Respond ONLY with JSON:
     return { signals: [], error: err?.message, query_description: 'detect_buyer_signals failed' };
   }
 }
+
+// ─── Tool 5: check_stakeholder_status ────────────────────────────────────────
+
+export async function checkStakeholderStatus(
+  workspaceId: string,
+  params: Record<string, any>
+): Promise<any> {
+  const { deal_id, check_all_roles = false, role_filter } = params;
+
+  if (!deal_id) {
+    return {
+      error: 'deal_id is required',
+      query_description: 'check_stakeholder_status: missing deal_id parameter',
+    };
+  }
+
+  try {
+    // Check if LinkedIn API is configured
+    const { getLinkedInClient } = await import('../connectors/linkedin/client.js');
+    const linkedInClient = getLinkedInClient();
+
+    if (!linkedInClient.isConfigured()) {
+      return {
+        deal_id,
+        contacts: [],
+        error: 'LinkedIn API not configured (RAPIDAPI_KEY missing)',
+        message: 'LinkedIn stakeholder checking requires RAPIDAPI_KEY environment variable',
+        query_description: `check_stakeholder_status for deal ${deal_id}: API not configured`,
+      };
+    }
+
+    // Verify deal exists and is open
+    const dealResult = await query<{ name: string; stage_normalized: string }>(
+      `SELECT name, stage_normalized FROM deals WHERE id = $1 AND workspace_id = $2`,
+      [deal_id, workspaceId]
+    );
+
+    if (dealResult.rows.length === 0) {
+      return {
+        deal_id,
+        error: 'Deal not found',
+        query_description: `check_stakeholder_status: deal ${deal_id} not found`,
+      };
+    }
+
+    const deal = dealResult.rows[0];
+
+    // Only check open deals
+    if (deal.stage_normalized === 'closed_won' || deal.stage_normalized === 'closed_lost') {
+      return {
+        deal_id,
+        deal_name: deal.name,
+        contacts: [],
+        message: 'Stakeholder checking only runs on open deals',
+        query_description: `check_stakeholder_status for "${deal.name}": deal is closed, skipping check`,
+      };
+    }
+
+    // Determine role filter mode
+    let roleFilterMode: 'critical_only' | 'business_roles' | 'all' = 'critical_only';
+    if (check_all_roles === true) {
+      roleFilterMode = 'all';
+    } else if (role_filter) {
+      roleFilterMode = role_filter;
+    }
+
+    // Run stakeholder check with role filtering
+    const { getStakeholderChecker } = await import('../connectors/linkedin/stakeholder-checker.js');
+    const checker = getStakeholderChecker();
+
+    console.log(`[check_stakeholder_status] Checking stakeholders for deal: ${deal_id} (roleFilter: ${roleFilterMode})`);
+    const result = await checker.checkDeal(workspaceId, deal_id, {
+      roleFilter: roleFilterMode,
+    });
+
+    return {
+      deal_id: result.deal_id,
+      deal_name: result.deal_name,
+      deal_amount: result.deal_amount,
+      contacts_checked: result.contacts_checked,
+      role_filter_applied: result.role_filter_applied,
+      roles_checked_description: result.roles_checked_description,
+      contacts: result.contacts.map((c) => ({
+        contact_name: c.contact_name,
+        role: c.role || 'unknown',
+        linkedin_status: c.linkedin_status,
+        stored_company: c.stored_company,
+        stored_title: c.stored_title,
+        current_company: c.current_company,
+        current_title: c.current_title,
+        current_duration: c.current_duration,
+        risk_level: c.risk_level,
+        risk_reason: c.risk_reason,
+        linkedin_url: c.linkedin_url,
+      })),
+      risk_summary: result.risk_summary,
+      overall_risk: result.overall_risk,
+      recommendations: result.recommendations,
+      query_description: `check_stakeholder_status for "${deal.name}": ${result.overall_risk} risk, ${result.risk_summary.departed_count} departed, ${result.risk_summary.role_changes} role changes (${result.roles_checked_description})`,
+    };
+  } catch (err: any) {
+    console.error('[check_stakeholder_status] error:', err?.message);
+    return {
+      deal_id,
+      error: err?.message,
+      query_description: `check_stakeholder_status failed: ${err?.message}`,
+    };
+  }
+}
+
+// ─── Tool 6: enrich_market_signals ───────────────────────────────────────────
+
+export async function enrichMarketSignals(
+  workspaceId: string,
+  params: Record<string, any>
+): Promise<any> {
+  const { account_id, account_name, force_check = false, lookback_months = 3 } = params;
+
+  if (!account_id && !account_name) {
+    return {
+      error: 'account_id or account_name is required',
+      query_description: 'enrich_market_signals: missing account parameter',
+    };
+  }
+
+  try {
+    // Check if Serper API is configured
+    const { getMarketSignalsCollector } = await import('../connectors/serper/market-signals.js');
+    const collector = getMarketSignalsCollector();
+
+    if (!collector.isConfigured()) {
+      return {
+        account_id,
+        account_name,
+        signals: [],
+        error: 'Serper API not configured (SERPER_API_KEY missing)',
+        message: 'Market signals require SERPER_API_KEY environment variable',
+        query_description: 'enrich_market_signals: API not configured',
+      };
+    }
+
+    // Get account ID if name was provided
+    let resolvedAccountId = account_id;
+    if (!resolvedAccountId && account_name) {
+      const accountResult = await query<{ id: string; name: string }>(
+        `SELECT id, name FROM accounts WHERE workspace_id = $1 AND name ILIKE $2 LIMIT 1`,
+        [workspaceId, `%${account_name}%`]
+      );
+
+      if (accountResult.rows.length === 0) {
+        return {
+          account_name,
+          error: 'Account not found',
+          query_description: `enrich_market_signals: account "${account_name}" not found`,
+        };
+      }
+
+      resolvedAccountId = accountResult.rows[0].id;
+    }
+
+    // Fetch market signals
+    console.log(`[enrich_market_signals] Fetching signals for account: ${resolvedAccountId}`);
+    const result = await collector.getSignalsForAccount(workspaceId, resolvedAccountId, {
+      force_check,
+      lookback_months,
+    });
+
+    // Check if account doesn't qualify (C/D tier without force_check)
+    if (!force_check && result.signals.length === 0 && result.icp_tier && !['A', 'B'].includes(result.icp_tier)) {
+      return {
+        account_id: result.account_id,
+        account_name: result.account_name,
+        icp_tier: result.icp_tier,
+        icp_score: result.icp_score,
+        signals: [],
+        message: `Market signals only check A/B tier accounts (this account is ${result.icp_tier} tier with ICP score ${result.icp_score}/100). This saves API costs and focuses on high-value accounts. Use force_check=true to override.`,
+        suggestion: 'Focus on A/B tier accounts for signal monitoring, or improve ICP fit to auto-qualify.',
+        query_description: `enrich_market_signals for "${result.account_name}": ${result.icp_tier} tier, skipped (cost optimization)`,
+      };
+    }
+
+    // Store signals if any found
+    if (result.signals.length > 0) {
+      await collector.storeSignals(workspaceId, resolvedAccountId, result.signals);
+    }
+
+    return {
+      account_id: result.account_id,
+      account_name: result.account_name,
+      domain: result.domain,
+      icp_tier: result.icp_tier,
+      icp_score: result.icp_score,
+      signals: result.signals.map((s) => ({
+        type: s.type,
+        headline: s.headline,
+        description: s.description,
+        date: s.date,
+        source: s.source,
+        url: s.url,
+        relevance: s.relevance,
+        buying_trigger: s.buying_trigger,
+        priority: s.priority,
+      })),
+      signal_strength: result.signal_strength,
+      strongest_signal: result.strongest_signal
+        ? {
+            type: result.strongest_signal.type,
+            headline: result.strongest_signal.headline,
+            priority: result.strongest_signal.priority,
+            buying_trigger: result.strongest_signal.buying_trigger,
+          }
+        : null,
+      news_articles_found: result.news_articles_found,
+      checked_at: result.checked_at,
+      query_description: `enrich_market_signals for "${result.account_name}" (${result.icp_tier} tier): ${result.signal_strength} signals, ${result.signals.length} events detected`,
+    };
+  } catch (err: any) {
+    console.error('[enrich_market_signals] error:', err?.message);
+    return {
+      account_id,
+      account_name,
+      error: err?.message,
+      query_description: `enrich_market_signals failed: ${err?.message}`,
+    };
+  }
+}

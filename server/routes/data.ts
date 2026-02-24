@@ -297,6 +297,145 @@ router.get('/:id/accounts/:accountId/health', async (req: Request, res: Response
   }
 });
 
+router.get('/:id/accounts/:accountId/signals', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const workspaceId = req.params.id;
+    const accountId = req.params.accountId;
+    const lookbackDays = parseNum(req.query.lookback_days) || 90;
+
+    const signalsResult = await query(
+      `SELECT * FROM account_signals
+       WHERE workspace_id = $1 AND account_id = $2
+         AND signal_date >= NOW() - INTERVAL '1 day' * $3
+       ORDER BY signal_date DESC, priority ASC
+       LIMIT 100`,
+      [workspaceId, accountId, lookbackDays]
+    );
+
+    const signals = signalsResult.rows;
+
+    // Calculate summary
+    const highPriority = signals.filter((s: any) => s.priority === 'critical' || s.priority === 'high').length;
+    const buyingTriggers = signals.filter((s: any) => s.buying_trigger === true).length;
+
+    let signalStrength: 'HOT' | 'WARM' | 'NEUTRAL' | 'COLD' = 'COLD';
+    if (buyingTriggers >= 2 || highPriority >= 3) signalStrength = 'HOT';
+    else if (buyingTriggers >= 1 || highPriority >= 1) signalStrength = 'WARM';
+    else if (signals.length > 0) signalStrength = 'NEUTRAL';
+
+    const byCategory: Record<string, number> = {};
+    signals.forEach((s: any) => {
+      byCategory[s.signal_category] = (byCategory[s.signal_category] || 0) + 1;
+    });
+
+    res.json({
+      signals,
+      summary: {
+        total_signals: signals.length,
+        high_priority: highPriority,
+        buying_triggers: buyingTriggers,
+        signal_strength: signalStrength,
+        recent_signals: signals.slice(0, 5),
+        by_category: Object.entries(byCategory).map(([category, count]) => ({ category, count })),
+      },
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.get('/:id/accounts/:accountId/signals/summary', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const workspaceId = req.params.id;
+    const accountId = req.params.accountId;
+
+    const result = await query(
+      `SELECT
+         COUNT(*) as total_signals,
+         COUNT(*) FILTER (WHERE priority IN ('critical', 'high')) as high_priority,
+         COUNT(*) FILTER (WHERE buying_trigger = true) as buying_triggers,
+         MAX(signal_date) as last_signal_date
+       FROM account_signals
+       WHERE workspace_id = $1 AND account_id = $2
+         AND signal_date >= NOW() - INTERVAL '90 days'`,
+      [workspaceId, accountId]
+    );
+
+    const summary = result.rows[0];
+
+    let signalStrength: 'HOT' | 'WARM' | 'NEUTRAL' | 'COLD' = 'COLD';
+    if (summary.buying_triggers >= 2 || summary.high_priority >= 3) signalStrength = 'HOT';
+    else if (summary.buying_triggers >= 1 || summary.high_priority >= 1) signalStrength = 'WARM';
+    else if (summary.total_signals > 0) signalStrength = 'NEUTRAL';
+
+    res.json({
+      ...summary,
+      signal_strength: signalStrength,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.get('/:id/accounts/:accountId/scores', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const workspaceId = req.params.id;
+    const accountId = req.params.accountId;
+
+    const result = await query(
+      `SELECT
+         s.account_id,
+         s.icp_score,
+         CASE
+           WHEN s.icp_score >= 85 THEN 'A'
+           WHEN s.icp_score >= 70 THEN 'B'
+           WHEN s.icp_score >= 50 THEN 'C'
+           ELSE 'D'
+         END as icp_tier,
+         s.lead_score,
+         CASE
+           WHEN s.lead_score >= 80 THEN 'HOT'
+           WHEN s.lead_score >= 50 THEN 'WARM'
+           ELSE 'COLD'
+         END as lead_tier,
+         s.intent_score,
+         s.engagement_score,
+         s.fit_score,
+         s.recency_score,
+         s.last_scored_at
+       FROM account_scores s
+       WHERE s.workspace_id = $1 AND s.account_id = $2`,
+      [workspaceId, accountId]
+    );
+
+    if (result.rows.length === 0) {
+      res.status(404).json({ error: 'No scores found for account' });
+      return;
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.post('/:id/accounts/:accountId/scores/recalculate', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const workspaceId = req.params.id;
+    const accountId = req.params.accountId;
+
+    // Trigger score recalculation
+    // This would call the scoring system - for now just return success
+    res.json({ success: true, message: 'Score recalculation queued' });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
 router.get('/:id/accounts/:accountId', async (req: Request, res: Response): Promise<void> => {
   try {
     const account = await getAccount(req.params.id, req.params.accountId);

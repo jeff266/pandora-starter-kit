@@ -848,4 +848,126 @@ export class SalesforceClient {
   getApiLimits(): SalesforceApiLimits {
     return { ...this.apiLimits };
   }
+
+  // ==========================================================================
+  // WRITE METHODS (CRM Write-Back)
+  // ==========================================================================
+
+  /**
+   * Update Opportunity fields in Salesforce
+   * API: PATCH {instance_url}/services/data/v62.0/sobjects/Opportunity/{opportunityId}
+   *
+   * Salesforce returns 204 No Content on success (no body).
+   * On error, returns 400 with [{ errorCode, message, fields }]
+   */
+  async updateOpportunity(
+    opportunityId: string,
+    fields: Record<string, any>
+  ): Promise<{ success: boolean; error?: string; errorCode?: string }> {
+    try {
+      if (!opportunityId || Object.keys(fields).length === 0) {
+        return { success: false, error: 'Opportunity ID and fields are required' };
+      }
+
+      await this.request(`/sobjects/Opportunity/${opportunityId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(fields),
+      });
+
+      return { success: true };
+    } catch (error) {
+      if (error instanceof SalesforceApiError) {
+        return {
+          success: false,
+          error: error.message,
+          errorCode: error.errorCode,
+        };
+      }
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  /**
+   * Create a Task on an Opportunity in Salesforce
+   * Used for audit trail — records what Pandora changed
+   * API: POST {instance_url}/services/data/v62.0/sobjects/Task
+   */
+  async createOpportunityTask(
+    opportunityId: string,
+    subject: string,
+    description: string
+  ): Promise<{ success: boolean; taskId?: string; error?: string }> {
+    try {
+      if (!opportunityId || !subject) {
+        return { success: false, error: 'Opportunity ID and subject are required' };
+      }
+
+      const taskData = {
+        WhatId: opportunityId,
+        Subject: subject,
+        Description: description,
+        Status: 'Completed',
+        Priority: 'Normal',
+        ActivityDate: new Date().toISOString().split('T')[0], // Today's date in YYYY-MM-DD format
+      };
+
+      const response = await this.request<{ id: string }>('/sobjects/Task', {
+        method: 'POST',
+        body: JSON.stringify(taskData),
+      });
+
+      return {
+        success: true,
+        taskId: response.id,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  /**
+   * Alternative note method - create a Task for audit trail
+   * Used by the executor when calling addOpportunityNote
+   */
+  async addOpportunityNote(
+    opportunityId: string,
+    title: string,
+    body: string
+  ): Promise<{ success: boolean; taskId?: string; error?: string }> {
+    return this.createOpportunityTask(opportunityId, title, body);
+  }
+
+  /**
+   * Fetch current Opportunity field values (for preview)
+   * Uses existing SOQL query pattern
+   */
+  async getOpportunityFields(
+    opportunityId: string,
+    fieldNames: string[]
+  ): Promise<Record<string, any> | null> {
+    try {
+      if (!opportunityId || fieldNames.length === 0) {
+        return null;
+      }
+
+      const soql = `SELECT ${fieldNames.join(', ')} FROM Opportunity WHERE Id = '${opportunityId}'`;
+      const result = await this.query<Record<string, any>>(soql);
+
+      if (result.records.length === 0) {
+        return null;
+      }
+
+      return result.records[0];
+    } catch (error) {
+      console.warn(`[Salesforce] Failed to get opportunity fields for ${opportunityId}:`,
+        error instanceof Error ? error.message : String(error));
+      return null;
+    }
+  }
 }

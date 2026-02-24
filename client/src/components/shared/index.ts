@@ -9,3 +9,7 @@ export { default as LoadingState } from './LoadingState';
 export { default as DossierNarrative } from './DossierNarrative';
 export { default as ScopedAnalysis } from './ScopedAnalysis';
 export { default as AnalysisModal } from './AnalysisModal';
+export { SeverityBadge } from './SeverityBadge';
+export { EntityLink } from './EntityLink';
+export { SkillTag } from './SkillTag';
+export { SignalsSummaryWidget } from './SignalsSummaryWidget';

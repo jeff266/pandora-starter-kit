@@ -270,6 +270,185 @@ router.put('/:workspaceId/action-items/:actionId/status', async (req: Request<Wo
   }
 });
 
+router.get('/:workspaceId/action-items/:actionId/preview-execution', async (req: Request<WorkspaceParams & { actionId: string }>, res: Response) => {
+  try {
+    const { workspaceId, actionId } = req.params;
+
+    // Load action
+    const actionResult = await dbQuery(
+      `SELECT * FROM actions WHERE id = $1 AND workspace_id = $2`,
+      [actionId, workspaceId]
+    );
+
+    if (actionResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Action not found' });
+    }
+
+    const action = actionResult.rows[0];
+
+    // Verify action is executable
+    if (!['open', 'in_progress'].includes(action.execution_status)) {
+      return res.json({
+        action_id: actionId,
+        action_title: action.title,
+        action_type: action.action_type,
+        can_execute: false,
+        cannot_execute_reason: `Action is ${action.execution_status}, not executable`,
+      });
+    }
+
+    // Get deal and connector info
+    const deal = action.target_deal_id
+      ? (await dbQuery(`SELECT * FROM deals WHERE id = $1`, [action.target_deal_id])).rows[0]
+      : null;
+
+    if (!deal) {
+      return res.json({
+        action_id: actionId,
+        action_title: action.title,
+        action_type: action.action_type,
+        can_execute: false,
+        cannot_execute_reason: 'Target deal not found',
+      });
+    }
+
+    const crmSource = deal.source; // 'hubspot' or 'salesforce'
+    const externalId = deal.source_id || deal.external_id;
+
+    if (!externalId) {
+      return res.json({
+        action_id: actionId,
+        action_title: action.title,
+        action_type: action.action_type,
+        can_execute: false,
+        cannot_execute_reason: 'Deal has no external CRM ID',
+      });
+    }
+
+    // Get connector credentials
+    const { getCredentials } = await import('../connectors/adapters/credentials.js');
+    const connection = await getCredentials(workspaceId, crmSource);
+
+    if (!connection) {
+      return res.json({
+        action_id: actionId,
+        action_title: action.title,
+        action_type: action.action_type,
+        connector_type: crmSource,
+        can_execute: false,
+        cannot_execute_reason: `No ${crmSource} connector configured`,
+      });
+    }
+
+    if (connection.status === 'auth_expired') {
+      return res.json({
+        action_id: actionId,
+        action_title: action.title,
+        action_type: action.action_type,
+        connector_type: crmSource,
+        can_execute: false,
+        cannot_execute_reason: `${crmSource} authorization has expired. Please reconnect.`,
+      });
+    }
+
+    // Build CRM client
+    const { HubSpotClient } = await import('../connectors/hubspot/client.js');
+    const { SalesforceClient } = await import('../connectors/salesforce/client.js');
+    const { resolveFieldToCRM } = await import('../actions/field-resolver.js');
+
+    const credentials = connection.credentials;
+    const client = crmSource === 'hubspot'
+      ? new HubSpotClient(credentials.access_token || credentials.accessToken, workspaceId)
+      : new SalesforceClient({
+          accessToken: credentials.access_token || credentials.accessToken,
+          instanceUrl: credentials.instance_url || credentials.instanceUrl,
+          apiVersion: 'v62.0',
+        });
+
+    // Extract operations from execution_payload
+    const payload = action.execution_payload || {};
+    const operations: any[] = [];
+
+    if (payload.crm_updates && Array.isArray(payload.crm_updates)) {
+      for (const update of payload.crm_updates) {
+        const fieldInfo = resolveFieldToCRM(crmSource, update.field);
+        operations.push({
+          type: 'update_field',
+          field_label: fieldInfo.label,
+          field_api_name: fieldInfo.apiName,
+          current_value: null, // Will fetch below
+          proposed_value: update.proposed_value,
+          editable: true,
+        });
+      }
+    }
+
+    // Fetch current values from CRM
+    if (operations.length > 0) {
+      const fieldNames = operations.map(op => op.field_api_name);
+      try {
+        let currentValues: Record<string, any> | null = null;
+        if (crmSource === 'hubspot') {
+          currentValues = await client.getDealProperties(externalId, fieldNames);
+        } else if (crmSource === 'salesforce') {
+          currentValues = await client.getOpportunityFields(externalId, fieldNames);
+        }
+
+        if (currentValues) {
+          for (const op of operations) {
+            op.current_value = currentValues[op.field_api_name] || null;
+          }
+        }
+      } catch (err) {
+        console.warn(`[Preview] Failed to fetch current values:`, err);
+      }
+    }
+
+    // Build CRM deep link
+    let crmUrl = '';
+    if (crmSource === 'hubspot') {
+      const portalId = await client.getPortalId();
+      if (portalId) {
+        crmUrl = `https://app.hubspot.com/contacts/${portalId}/deal/${externalId}`;
+      }
+    } else if (crmSource === 'salesforce') {
+      crmUrl = `${credentials.instance_url || credentials.instanceUrl}/${externalId}`;
+    }
+
+    // Generate audit note preview
+    const auditNotePreview = `Action: ${action.title}\nType: ${action.action_type}\nSeverity: ${action.severity}\n\n${action.summary || ''}\n\nSource: Pandora ${action.source_skill} skill\nExecuted: ${new Date().toISOString()}`;
+
+    // Check for warnings
+    const warnings: string[] = [];
+    if (deal.stage_normalized === 'closed_won' || deal.stage_normalized === 'closed_lost') {
+      warnings.push('Deal is already closed — stage change may be blocked by CRM validation rules');
+    }
+
+    res.json({
+      action_id: actionId,
+      action_title: action.title,
+      action_type: action.action_type,
+      connector_type: crmSource,
+      target: {
+        entity_type: 'deal',
+        entity_name: deal.name,
+        external_id: externalId,
+        crm_url: crmUrl,
+      },
+      operations,
+      audit_note_preview: auditNotePreview,
+      warnings,
+      can_execute: operations.length > 0 || action.action_type.includes('notify'),
+      cannot_execute_reason: operations.length === 0 && !action.action_type.includes('notify')
+        ? 'No operations to perform'
+        : null,
+    });
+  } catch (err) {
+    console.error('[Preview Execution]', err);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 router.post('/:workspaceId/action-items/:actionId/execute', async (req: Request<WorkspaceParams & { actionId: string }>, res: Response) => {
   try {
     const { workspaceId, actionId } = req.params;
