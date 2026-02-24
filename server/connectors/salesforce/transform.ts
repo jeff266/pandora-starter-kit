@@ -897,7 +897,12 @@ export function transformStageHistory(
 }> {
   if (historyRecords.length === 0) return [];
 
-  // Group history by OpportunityId
+  const normalizedDealIdMap = new Map<string, string>();
+  for (const [sourceId, pandoraId] of dealIdMap.entries()) {
+    const normalized = normalizeSalesforceId(sourceId);
+    if (normalized) normalizedDealIdMap.set(normalized, pandoraId);
+  }
+
   const historyByOpp = new Map<string, SalesforceOpportunityFieldHistory[]>();
 
   for (const record of historyRecords) {
@@ -920,8 +925,7 @@ export function transformStageHistory(
 
   // Process each opportunity's stage history
   for (const [oppId, records] of historyByOpp.entries()) {
-    // Normalize ID before lookup (handles 15-char vs 18-char IDs)
-    const dealId = dealIdMap.get(normalizeSalesforceId(oppId)!);
+    const dealId = normalizedDealIdMap.get(normalizeSalesforceId(oppId)!);
     if (!dealId) {
       // Skip opportunities that don't exist in our deals table
       continue;

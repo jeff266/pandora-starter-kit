@@ -603,22 +603,33 @@ export class SalesforceClient {
     soql += ` ORDER BY OpportunityId, CreatedDate ASC`;
 
     try {
-      return await this.queryAll<SalesforceOpportunityFieldHistory>(soql);
+      const results = await this.queryAll<SalesforceOpportunityFieldHistory>(soql);
+      logger.info('[Salesforce] OpportunityFieldHistory fetched', {
+        recordCount: results.length,
+        since: since?.toISOString() || 'all time',
+      });
+      return results;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
 
-      // Graceful fallback: Field History Tracking may not be enabled for StageName
       if (
         errorMessage.includes('No such column') ||
         errorMessage.includes('sObject type') ||
         errorMessage.includes('INVALID_FIELD')
       ) {
-        logger.warn('[Salesforce] OpportunityFieldHistory unavailable (Field History Tracking may not be enabled for StageName)');
+        logger.warn('[Salesforce] OpportunityFieldHistory unavailable — Field History Tracking may not be enabled for StageName on this org', {
+          error: errorMessage,
+          soql,
+        });
         return [];
       }
 
-      logger.error('[Salesforce] OpportunityFieldHistory query failed', { error });
-      return [];
+      logger.error('[Salesforce] OpportunityFieldHistory query failed', {
+        error: errorMessage,
+        soql,
+        since: since?.toISOString(),
+      });
+      throw error;
     }
   }
 

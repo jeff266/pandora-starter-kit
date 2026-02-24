@@ -1085,6 +1085,45 @@ export class SalesforceAdapter implements CRMAdapter {
     }
   }
 
+  async backfillStageHistory(
+    workspaceId: string,
+    credentials: Record<string, any>
+  ): Promise<{ historyRecords: number; transitions: number; recorded: number }> {
+    const client = this.createClient(credentials);
+
+    const stages = await client.getOpportunityStages().catch(() => []);
+    const stageMap = new Map(stages.map((s: any) => [s.ApiName, s]));
+
+    const dealResult = await query<{ source_id: string; id: string }>(
+      `SELECT source_id, id FROM deals WHERE workspace_id = $1 AND source = 'salesforce'`,
+      [workspaceId]
+    );
+    const dealIdMap = new Map(dealResult.rows.map(r => [r.source_id, r.id]));
+
+    const historyRecords = await client.getOpportunityFieldHistory();
+
+    if (historyRecords.length === 0) {
+      return { historyRecords: 0, transitions: 0, recorded: 0 };
+    }
+
+    const transitions = transformStageHistory(historyRecords, workspaceId, dealIdMap, stageMap);
+
+    if (transitions.length === 0) {
+      return { historyRecords: historyRecords.length, transitions: 0, recorded: 0 };
+    }
+
+    const { recordStageChanges } = await import('../hubspot/stage-tracker.js');
+    const recorded = await recordStageChanges(transitions, 'salesforce_history');
+
+    logger.info('[Salesforce Adapter] Backfilled stage history', {
+      historyRecords: historyRecords.length,
+      transitions: transitions.length,
+      recorded,
+    });
+
+    return { historyRecords: historyRecords.length, transitions: transitions.length, recorded };
+  }
+
   /**
    * Sync OpportunityFieldHistory to deal_stage_history table
    * Gracefully handles case where Field History Tracking is not enabled
@@ -1129,11 +1168,13 @@ export class SalesforceAdapter implements CRMAdapter {
         recorded,
       });
     } catch (error) {
-      // Don't fail overall sync if stage history fails
-      // This is expected if Field History Tracking is not enabled for StageName
-      logger.warn('[Salesforce Adapter] Stage history sync failed (this is normal if Field History Tracking is not enabled)', {
-        error: error instanceof Error ? error.message : String(error),
-      });
+      const errMsg = error instanceof Error ? error.message : String(error);
+      const isFieldTrackingIssue = errMsg.includes('No such column') || errMsg.includes('sObject type') || errMsg.includes('INVALID_FIELD');
+      if (isFieldTrackingIssue) {
+        logger.warn('[Salesforce Adapter] Stage history sync skipped — Field History Tracking not enabled for StageName', { error: errMsg });
+      } else {
+        logger.error('[Salesforce Adapter] Stage history sync failed unexpectedly', { error: errMsg });
+      }
     }
   }
 

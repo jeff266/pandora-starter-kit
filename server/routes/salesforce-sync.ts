@@ -267,4 +267,38 @@ router.delete('/:workspaceId/connectors/salesforce/disconnect', async (req, res)
   }
 });
 
+router.post('/:workspaceId/connectors/salesforce/backfill-stage-history', async (req, res) => {
+  const { workspaceId } = req.params;
+
+  try {
+    const connResult = await query<{ status: string }>(
+      `SELECT status FROM connections
+       WHERE workspace_id = $1 AND connector_name = 'salesforce' AND status NOT IN ('disconnected')`,
+      [workspaceId]
+    );
+
+    if (connResult.rows.length === 0) {
+      res.status(404).json({ error: 'No active Salesforce connection found' });
+      return;
+    }
+
+    const credentials = await getFreshCredentials(workspaceId);
+
+    logger.info('Starting Salesforce stage history backfill', { workspaceId });
+    const result = await salesforceAdapter.backfillStageHistory(workspaceId, credentials);
+
+    logger.info('Salesforce stage history backfill complete', { workspaceId, ...result });
+    res.json({
+      success: true,
+      ...result,
+    });
+  } catch (error) {
+    logger.error('Salesforce stage history backfill failed', { workspaceId, error: (error as Error).message });
+    res.status(500).json({
+      error: 'Stage history backfill failed',
+      message: (error as Error).message,
+    });
+  }
+});
+
 export default router;
