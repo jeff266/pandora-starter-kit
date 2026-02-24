@@ -910,14 +910,91 @@ function formatSessionDate(dateStr: string): string {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
+function isTableRow(line: string): boolean {
+  const trimmed = line.trim();
+  return trimmed.startsWith('|') && trimmed.endsWith('|') && trimmed.includes(' | ');
+}
+
+function isSeparatorRow(line: string): boolean {
+  return /^\|[\s\-:|]+\|$/.test(line.trim());
+}
+
+function parseTableCells(line: string): string[] {
+  const trimmed = line.trim();
+  const inner = trimmed.startsWith('|') ? trimmed.slice(1) : trimmed;
+  const cleaned = inner.endsWith('|') ? inner.slice(0, -1) : inner;
+  return cleaned.split('|').map(c => c.trim());
+}
+
+function renderTable(tableLines: string[], keyBase: number): JSX.Element {
+  const headerLine = tableLines[0];
+  const hasSeparator = tableLines.length > 1 && isSeparatorRow(tableLines[1]);
+  const dataStartIdx = hasSeparator ? 2 : 1;
+  const headers = parseTableCells(headerLine);
+  const rows = tableLines.slice(dataStartIdx).map(l => parseTableCells(l));
+
+  return (
+    <div key={`table-${keyBase}`} style={{ overflowX: 'auto', margin: '8px 0', borderRadius: 8, border: '1px solid rgba(148, 163, 184, 0.15)' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, fontFamily: "'Inter', sans-serif" }}>
+        <thead>
+          <tr>
+            {headers.map((h, ci) => (
+              <th key={ci} style={{
+                padding: '8px 12px', textAlign: 'left', fontWeight: 600, fontSize: 11,
+                textTransform: 'uppercase', letterSpacing: '0.05em',
+                color: '#94a3b8', background: 'rgba(30, 41, 59, 0.8)',
+                borderBottom: '1px solid rgba(148, 163, 184, 0.15)', whiteSpace: 'nowrap',
+              }}>{formatInlineMarkdown(h)}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((cells, ri) => (
+            <tr key={ri} style={{ background: ri % 2 === 0 ? 'transparent' : 'rgba(30, 41, 59, 0.3)' }}>
+              {cells.map((cell, ci) => (
+                <td key={ci} style={{
+                  padding: '6px 12px', color: '#e2e8f0',
+                  borderBottom: '1px solid rgba(148, 163, 184, 0.08)', whiteSpace: 'nowrap',
+                }}>{formatInlineMarkdown(cell)}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function formatMarkdown(text: string): JSX.Element[] {
   const lines = text.split('\n');
   const elements: JSX.Element[] = [];
+  let i = 0;
 
-  lines.forEach((line, i) => {
+  while (i < lines.length) {
+    const line = lines[i];
+
+    if (isTableRow(line)) {
+      const tableLines: string[] = [line];
+      let j = i + 1;
+      if (j < lines.length && isSeparatorRow(lines[j])) {
+        tableLines.push(lines[j]);
+        j++;
+      }
+      while (j < lines.length && isTableRow(lines[j])) {
+        tableLines.push(lines[j]);
+        j++;
+      }
+      i = j;
+      if (tableLines.length >= 2) {
+        elements.push(renderTable(tableLines, i));
+      } else {
+        elements.push(<div key={i}>{formatInlineMarkdown(tableLines[0])}</div>);
+      }
+      continue;
+    }
+
     let content: JSX.Element;
 
-    // Handle headers
     if (line.startsWith('#### ')) {
       content = <div key={i} style={{ fontSize: 14, fontWeight: 600, color: '#cbd5e1', marginTop: 8, marginBottom: 4 }}>{formatInlineMarkdown(line.slice(5))}</div>;
     } else if (line.startsWith('### ')) {
@@ -939,7 +1016,8 @@ function formatMarkdown(text: string): JSX.Element[] {
     }
 
     elements.push(content);
-  });
+    i++;
+  }
 
   return elements;
 }

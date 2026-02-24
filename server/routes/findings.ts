@@ -788,6 +788,115 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
   }
 });
 
+router.get('/:workspaceId/pipeline/metric-breakdown', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { workspaceId } = req.params;
+    const metric = req.query.metric as string;
+    const scopeId = req.query.scopeId as string | undefined;
+
+    if (!metric || !['total_pipeline', 'weighted_pipeline', 'win_rate', 'coverage'].includes(metric)) {
+      res.status(400).json({ error: 'Invalid metric. Must be one of: total_pipeline, weighted_pipeline, win_rate, coverage' });
+      return;
+    }
+
+    let scopeFilterClause = '';
+    if (scopeId && scopeId !== 'all') {
+      try {
+        const scopeResult = await query<{ scope_id: string }>(
+          `SELECT scope_id FROM analysis_scopes WHERE workspace_id = $1 AND scope_id = $2 AND confirmed = true`,
+          [workspaceId, scopeId]
+        );
+        if (scopeResult.rows.length > 0) {
+          const escapedScope = `'${scopeId.replace(/'/g, "''")}'`;
+          scopeFilterClause = ` AND d.scope_id = ${escapedScope}`;
+        } else {
+          const escapedPipeline = `'${scopeId.replace(/'/g, "''")}'`;
+          scopeFilterClause = ` AND d.pipeline = ${escapedPipeline}`;
+        }
+      } catch {
+        const escapedPipeline = `'${scopeId.replace(/'/g, "''")}'`;
+        scopeFilterClause = ` AND d.pipeline = ${escapedPipeline}`;
+      }
+    }
+
+    if (metric === 'win_rate') {
+      const winRateClause = scopeFilterClause.replace(/d\./g, '');
+      const result = await query(
+        `SELECT
+           id, name, owner, amount, close_date, stage, stage_normalized,
+           COALESCE(probability, 0) as probability
+         FROM deals
+         WHERE workspace_id = $1
+           AND stage_normalized IN ('closed_won', 'closed_lost')
+           AND close_date >= now() - interval '90 days'
+           ${winRateClause}
+         ORDER BY close_date DESC`,
+        [workspaceId]
+      );
+      const won = result.rows.filter((r: any) => r.stage_normalized === 'closed_won');
+      const lost = result.rows.filter((r: any) => r.stage_normalized === 'closed_lost');
+      res.json({
+        metric: 'win_rate',
+        formula: 'Won Deals / (Won + Lost) over last 90 days',
+        summary: { won: won.length, lost: lost.length, total: result.rows.length, rate: result.rows.length > 0 ? won.length / result.rows.length : 0 },
+        deals: result.rows.map((d: any) => ({
+          id: d.id, name: d.name, owner: d.owner, amount: Number(d.amount) || 0,
+          close_date: d.close_date, stage: d.stage, outcome: d.stage_normalized === 'closed_won' ? 'Won' : 'Lost',
+        })),
+      });
+      return;
+    }
+
+    const result = await query(
+      `SELECT
+         d.id, d.name, d.owner, d.amount,
+         COALESCE(d.probability, 0) as probability,
+         COALESCE(d.stage, d.stage_normalized, 'Unknown') as stage,
+         d.stage_normalized, d.close_date,
+         COALESCE(d.days_in_stage, 0) as days_in_stage,
+         d.amount * CASE
+           WHEN d.probability IS NULL THEN 0.5
+           WHEN d.probability > 1 THEN d.probability / 100.0
+           ELSE d.probability
+         END as weighted_amount
+       FROM deals d
+       WHERE d.workspace_id = $1
+         AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+         ${scopeFilterClause}
+       ORDER BY d.amount DESC NULLS LAST`,
+      [workspaceId]
+    );
+
+    const deals = result.rows.map((d: any) => ({
+      id: d.id, name: d.name, owner: d.owner,
+      amount: Number(d.amount) || 0,
+      probability: Number(d.probability) || 0,
+      weighted_amount: Number(d.weighted_amount) || 0,
+      stage: d.stage, close_date: d.close_date,
+      days_in_stage: d.days_in_stage,
+    }));
+
+    const totalPipeline = deals.reduce((s: number, d: any) => s + d.amount, 0);
+    const weightedPipeline = deals.reduce((s: number, d: any) => s + d.weighted_amount, 0);
+
+    let formula = '';
+    if (metric === 'total_pipeline') formula = 'Sum of Amount for all open deals (excluding Closed Won/Lost)';
+    else if (metric === 'weighted_pipeline') formula = 'Sum of (Amount × Probability) for all open deals';
+    else if (metric === 'coverage') formula = 'Total Pipeline ÷ Quota Target';
+
+    res.json({
+      metric,
+      formula,
+      summary: { total_pipeline: totalPipeline, weighted_pipeline: weightedPipeline, deal_count: deals.length },
+      deals,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[findings] Metric breakdown error:', msg);
+    res.status(500).json({ error: msg });
+  }
+});
+
 const SEVERITY_ALIASES: Record<string, string> = {
   critical: 'act',
   warning: 'watch',

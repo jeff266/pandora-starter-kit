@@ -181,6 +181,7 @@ export default function CommandCenter() {
   const [askingAbout, setAskingAbout] = useState<'stage' | DealSummaryFull | null>(null);
   const [activeThread, setActiveThread] = useState<ThreadMessage[] | null>(null);
   const [threadLoading, setThreadLoading] = useState(false);
+  const [metricBreakdown, setMetricBreakdown] = useState<string | null>(null);
 
   useEffect(() => {
     const tickInterval = setInterval(() => setTick(t => t + 1), 30000);
@@ -610,15 +611,17 @@ export default function CommandCenter() {
             Array.from({ length: 5 }).map((_, i) => <SkeletonCard key={i} height={100} />)
           ) : (
             <>
-              <MetricCard label="Total Pipeline" value={formatCurrency(anon.amount(totalPipeline))} />
-              <MetricCard label="Weighted Pipeline" value={formatCurrency(anon.amount(weightedPipeline))} />
+              <MetricCard label="Total Pipeline" value={formatCurrency(anon.amount(totalPipeline))} onClick={() => setMetricBreakdown('total_pipeline')} />
+              <MetricCard label="Weighted Pipeline" value={formatCurrency(anon.amount(weightedPipeline))} onClick={() => setMetricBreakdown('weighted_pipeline')} />
               <MetricCard
                 label="Coverage Ratio"
                 value={coverage != null ? `${Number(coverage).toFixed(1)}x` : '--'}
+                onClick={() => setMetricBreakdown('coverage')}
               />
               <MetricCard
                 label="Win Rate (90d)"
                 value={winRate != null ? formatPercent(Number(winRate)) : '--'}
+                onClick={() => setMetricBreakdown('win_rate')}
               />
               <div
                 onClick={() => navigate('/insights')}
@@ -868,6 +871,14 @@ export default function CommandCenter() {
           )}
         </div>
       </SectionErrorBoundary>
+
+      {metricBreakdown && (
+        <MetricBreakdownModal
+          metric={metricBreakdown}
+          scopeId={selectedPipeline}
+          onClose={() => setMetricBreakdown(null)}
+        />
+      )}
 
       {/* Stage Drilldown overlay */}
       {selectedStageData && (
@@ -1775,22 +1786,173 @@ function FindingRow({ finding, onSnooze, onResolve, onNavigate }: {
   );
 }
 
-function MetricCard({ label, value, color }: { label: string; value: string; color?: string }) {
+function MetricCard({ label, value, color, onClick }: { label: string; value: string; color?: string; onClick?: () => void }) {
   return (
-    <div style={{
-      background: colors.surface,
-      border: `1px solid ${colors.border}`,
-      borderRadius: 10,
-      padding: 16,
-    }}>
-      <div style={{ fontSize: 11, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+    <div
+      onClick={onClick}
+      style={{
+        background: colors.surface,
+        border: `1px solid ${colors.border}`,
+        borderRadius: 10,
+        padding: 16,
+        cursor: onClick ? 'pointer' : 'default',
+        transition: 'border-color 0.15s',
+      }}
+      onMouseEnter={e => { if (onClick) e.currentTarget.style.borderColor = colors.accent; }}
+      onMouseLeave={e => { if (onClick) e.currentTarget.style.borderColor = colors.border; }}
+    >
+      <div style={{ fontSize: 11, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         {label}
+        {onClick && <span style={{ fontSize: 10, color: colors.textMuted, opacity: 0.6 }}>Click to drill down</span>}
       </div>
       <div style={{
         fontSize: 24, fontWeight: 700, fontFamily: fonts.mono,
         color: color || colors.text, marginTop: 6,
       }}>
         {value}
+      </div>
+    </div>
+  );
+}
+
+function MetricBreakdownModal({ metric, scopeId, onClose }: { metric: string; scopeId?: string; onClose: () => void }) {
+  const { wsId } = useWorkspace();
+  const { anon } = useDemoMode();
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [sortKey, setSortKey] = useState<string>('amount');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const qs = new URLSearchParams({ metric });
+        if (scopeId && scopeId !== 'all' && scopeId !== 'default') qs.set('scopeId', scopeId);
+        const result = await api.get(`/pipeline/metric-breakdown?${qs}`);
+        setData(result);
+      } catch (err) {
+        console.error('[MetricBreakdown]', err);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [metric, scopeId]);
+
+  const metricLabels: Record<string, string> = {
+    total_pipeline: 'Total Pipeline',
+    weighted_pipeline: 'Weighted Pipeline',
+    win_rate: 'Win Rate (90 days)',
+    coverage: 'Coverage Ratio',
+  };
+
+  const handleSort = (key: string) => {
+    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortKey(key); setSortDir('desc'); }
+  };
+
+  const sortedDeals = data?.deals ? [...data.deals].sort((a: any, b: any) => {
+    let av = a[sortKey], bv = b[sortKey];
+    if (typeof av === 'string') av = av.toLowerCase();
+    if (typeof bv === 'string') bv = bv.toLowerCase();
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    return sortDir === 'asc' ? (av > bv ? 1 : -1) : (av < bv ? 1 : -1);
+  }) : [];
+
+  const isWinRate = metric === 'win_rate';
+
+  const SortHeader = ({ label, field }: { label: string; field: string }) => (
+    <th
+      onClick={() => handleSort(field)}
+      style={{
+        padding: '8px 12px', textAlign: 'left', fontWeight: 600, fontSize: 11,
+        textTransform: 'uppercase', letterSpacing: '0.05em', cursor: 'pointer',
+        color: sortKey === field ? colors.accent : '#94a3b8',
+        background: 'rgba(30, 41, 59, 0.8)', borderBottom: '1px solid rgba(148, 163, 184, 0.15)',
+        whiteSpace: 'nowrap', userSelect: 'none',
+      }}
+    >
+      {label} {sortKey === field ? (sortDir === 'desc' ? '↓' : '↑') : ''}
+    </th>
+  );
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.6)' }} />
+      <div style={{
+        position: 'relative', background: colors.bg, border: `1px solid ${colors.border}`,
+        borderRadius: 12, width: '90vw', maxWidth: 1000, maxHeight: '85vh', display: 'flex', flexDirection: 'column',
+        boxShadow: '0 25px 50px rgba(0,0,0,0.5)',
+      }}>
+        <div style={{ padding: '16px 20px', borderBottom: `1px solid ${colors.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: colors.text }}>{metricLabels[metric] || metric}</div>
+            {data?.formula && <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>{data.formula}</div>}
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: colors.textMuted, cursor: 'pointer', fontSize: 20, padding: 4 }}>✕</button>
+        </div>
+
+        {data?.summary && (
+          <div style={{ padding: '12px 20px', borderBottom: `1px solid ${colors.border}`, display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+            {isWinRate ? (
+              <>
+                <div><span style={{ fontSize: 11, color: colors.textMuted, textTransform: 'uppercase' }}>Won</span><div style={{ fontSize: 20, fontWeight: 700, color: colors.green, fontFamily: fonts.mono }}>{data.summary.won}</div></div>
+                <div><span style={{ fontSize: 11, color: colors.textMuted, textTransform: 'uppercase' }}>Lost</span><div style={{ fontSize: 20, fontWeight: 700, color: colors.red, fontFamily: fonts.mono }}>{data.summary.lost}</div></div>
+                <div><span style={{ fontSize: 11, color: colors.textMuted, textTransform: 'uppercase' }}>Win Rate</span><div style={{ fontSize: 20, fontWeight: 700, color: colors.text, fontFamily: fonts.mono }}>{formatPercent(data.summary.rate)}</div></div>
+              </>
+            ) : (
+              <>
+                <div><span style={{ fontSize: 11, color: colors.textMuted, textTransform: 'uppercase' }}>Deals</span><div style={{ fontSize: 20, fontWeight: 700, color: colors.text, fontFamily: fonts.mono }}>{data.summary.deal_count}</div></div>
+                <div><span style={{ fontSize: 11, color: colors.textMuted, textTransform: 'uppercase' }}>Total Pipeline</span><div style={{ fontSize: 20, fontWeight: 700, color: colors.text, fontFamily: fonts.mono }}>{formatCurrency(anon.amount(data.summary.total_pipeline))}</div></div>
+                <div><span style={{ fontSize: 11, color: colors.textMuted, textTransform: 'uppercase' }}>Weighted</span><div style={{ fontSize: 20, fontWeight: 700, color: colors.accent, fontFamily: fonts.mono }}>{formatCurrency(anon.amount(data.summary.weighted_pipeline))}</div></div>
+              </>
+            )}
+          </div>
+        )}
+
+        <div style={{ flex: 1, overflowY: 'auto', padding: '0' }}>
+          {loading ? (
+            <div style={{ padding: 40, textAlign: 'center', color: colors.textMuted }}>Loading deal breakdown...</div>
+          ) : !data?.deals?.length ? (
+            <div style={{ padding: 40, textAlign: 'center', color: colors.textMuted }}>No deals found for this metric.</div>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead style={{ position: 'sticky', top: 0 }}>
+                <tr>
+                  <SortHeader label="Deal" field="name" />
+                  <SortHeader label="Owner" field="owner" />
+                  <SortHeader label="Amount" field="amount" />
+                  {!isWinRate && <SortHeader label="Probability" field="probability" />}
+                  {!isWinRate && <SortHeader label="Weighted" field="weighted_amount" />}
+                  <SortHeader label="Stage" field="stage" />
+                  {isWinRate && <SortHeader label="Outcome" field="outcome" />}
+                  <SortHeader label="Close Date" field="close_date" />
+                </tr>
+              </thead>
+              <tbody>
+                {sortedDeals.map((d: any, ri: number) => (
+                  <tr
+                    key={d.id}
+                    onClick={() => navigate(`/deals/${d.id}`)}
+                    style={{ background: ri % 2 === 0 ? 'transparent' : 'rgba(30, 41, 59, 0.3)', cursor: 'pointer' }}
+                    onMouseEnter={e => (e.currentTarget.style.background = 'rgba(100, 136, 234, 0.08)')}
+                    onMouseLeave={e => (e.currentTarget.style.background = ri % 2 === 0 ? 'transparent' : 'rgba(30, 41, 59, 0.3)')}
+                  >
+                    <td style={{ padding: '8px 12px', color: colors.accent, fontWeight: 500, maxWidth: 250, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{anon.deal(d.name)}</td>
+                    <td style={{ padding: '8px 12px', color: colors.textMuted, whiteSpace: 'nowrap' }}>{anon.name(d.owner)}</td>
+                    <td style={{ padding: '8px 12px', color: colors.text, fontFamily: fonts.mono, whiteSpace: 'nowrap' }}>{formatCurrency(anon.amount(d.amount))}</td>
+                    {!isWinRate && <td style={{ padding: '8px 12px', color: colors.textMuted, fontFamily: fonts.mono }}>{d.probability > 1 ? d.probability.toFixed(0) : (d.probability * 100).toFixed(0)}%</td>}
+                    {!isWinRate && <td style={{ padding: '8px 12px', color: colors.accent, fontFamily: fonts.mono, whiteSpace: 'nowrap' }}>{formatCurrency(anon.amount(d.weighted_amount))}</td>}
+                    <td style={{ padding: '8px 12px', color: colors.textMuted, whiteSpace: 'nowrap' }}>{d.stage}</td>
+                    {isWinRate && <td style={{ padding: '8px 12px' }}><span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 600, background: d.outcome === 'Won' ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)', color: d.outcome === 'Won' ? colors.green : colors.red }}>{d.outcome}</span></td>}
+                    <td style={{ padding: '8px 12px', color: colors.textMuted, whiteSpace: 'nowrap' }}>{d.close_date ? new Date(d.close_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' }) : '--'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       </div>
     </div>
   );
