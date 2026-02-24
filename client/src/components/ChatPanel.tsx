@@ -946,13 +946,46 @@ function formatMarkdown(text: string): JSX.Element[] {
 
 function formatInlineMarkdown(text: string): (string | JSX.Element)[] {
   const parts: (string | JSX.Element)[] = [];
-  const regex = /\*\*(.*?)\*\*/g;
+  const regex = /\*\*(.*?)\*\*|\[([^\]]+)\]\(([^)]+)\)/g;
   let last = 0;
   let match;
 
   while ((match = regex.exec(text)) !== null) {
     if (match.index > last) parts.push(text.slice(last, match.index));
-    parts.push(<strong key={match.index}>{match[1]}</strong>);
+    if (match[1] !== undefined) {
+      parts.push(<strong key={match.index}>{match[1]}</strong>);
+    } else if (match[2] !== undefined && match[3] !== undefined) {
+      const isDownload = match[3].includes('/generated-docs/');
+      parts.push(
+        <a
+          key={match.index}
+          href={match[3]}
+          target="_blank"
+          rel="noopener noreferrer"
+          {...(isDownload ? { download: '' } : {})}
+          style={{
+            color: '#6488ea',
+            textDecoration: 'none',
+            borderBottom: '1px solid rgba(100, 136, 234, 0.4)',
+            paddingBottom: 1,
+            ...(isDownload ? {
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '4px 10px',
+              background: 'rgba(100, 136, 234, 0.1)',
+              border: '1px solid rgba(100, 136, 234, 0.3)',
+              borderRadius: 6,
+              fontWeight: 500,
+              marginTop: 4,
+              marginBottom: 4,
+            } : {}),
+          }}
+        >
+          {isDownload ? '\u{1F4E5} ' : ''}{match[2]}
+        </a>
+      );
+    }
     last = match.index + match[0].length;
   }
   if (last < text.length) parts.push(text.slice(last));
