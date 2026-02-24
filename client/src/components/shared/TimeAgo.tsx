@@ -2,9 +2,11 @@ import React from 'react';
 
 interface TimeAgoProps {
   date: string | Date;
+  className?: string;
+  style?: React.CSSProperties;
 }
 
-export default function TimeAgo({ date }: TimeAgoProps) {
+export default function TimeAgo({ date, className, style }: TimeAgoProps) {
   const getTimeAgo = (d: string | Date): string => {
     const now = Date.now();
     const then = new Date(d).getTime();
@@ -26,5 +28,5 @@ export default function TimeAgo({ date }: TimeAgoProps) {
     return `${Math.floor(days / 365)}y ago`;
   };
 
-  return <span>{getTimeAgo(date)}</span>;
+  return <span className={className} style={style}>{getTimeAgo(date)}</span>;
 }

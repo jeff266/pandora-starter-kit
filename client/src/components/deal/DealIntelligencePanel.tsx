@@ -4,6 +4,7 @@ import { useScores } from '../../hooks/useScores';
 import { SeverityBadge } from '../shared/SeverityBadge';
 import TimeAgo from '../shared/TimeAgo';
 import { EntityLink } from '../shared/EntityLink';
+import { colors } from '../../styles/theme';
 import { api } from '../../lib/api';
 import {
   TrendingUp, Target, AlertCircle, CheckCircle2, Users,
@@ -68,11 +69,11 @@ export function DealIntelligencePanel({
 
   if (loading) {
     return (
-      <div className={`p-4 ${className || ''}`}>
-        <div className="animate-pulse space-y-4">
-          <div className="h-6 bg-gray-100 rounded w-1/3" />
-          <div className="h-32 bg-gray-100 rounded" />
-          <div className="h-32 bg-gray-100 rounded" />
+      <div style={{ padding: 16 }} className={className}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ height: 24, background: colors.surfaceHover, borderRadius: 8, width: '33%' }} />
+          <div style={{ height: 128, background: colors.surfaceHover, borderRadius: 8 }} />
+          <div style={{ height: 128, background: colors.surfaceHover, borderRadius: 8 }} />
         </div>
       </div>
     );
@@ -94,35 +95,46 @@ export function DealIntelligencePanel({
   return (
     <div className={className}>
       {/* Header */}
-      <div className="p-4 border-b border-gray-200">
-        <h3 className="text-lg font-semibold">Deal Intelligence</h3>
-        <p className="text-xs text-gray-500 mt-1">
+      <div style={{ padding: 16, borderBottom: `1px solid ${colors.border}` }}>
+        <h3 style={{ fontSize: 18, fontWeight: 600, color: colors.text, margin: 0 }}>
+          Deal Intelligence
+        </h3>
+        <p style={{ fontSize: 11, color: colors.textMuted, marginTop: 4, marginBottom: 0 }}>
           Real-time market signals and stakeholder status
         </p>
       </div>
 
-      <div className="p-4 space-y-4">
+      <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
         {/* Account Score Summary */}
         {scores && (
-          <div className="bg-gray-50 rounded-lg p-3">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-medium text-gray-700">ACCOUNT FIT</span>
+          <div style={{ background: colors.surface, borderRadius: 8, padding: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <span style={{ fontSize: 11, fontWeight: 500, color: colors.textSecondary }}>
+                ACCOUNT FIT
+              </span>
               <EntityLink
                 type="account"
                 id={accountId}
                 name="View Details"
                 workspaceId={workspaceId}
-                className="text-xs"
+                className={className}
+                style={{ fontSize: 11 }}
               />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
               <div>
-                <div className="text-xs text-gray-600 mb-1">ICP Score</div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xl font-bold">{scores.icp_score}</span>
+                <div style={{ fontSize: 11, color: colors.textMuted, marginBottom: 4 }}>ICP Score</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 20, fontWeight: 700, color: colors.text }}>
+                    {scores.icp_score}
+                  </span>
                   <span
-                    className="px-1.5 py-0.5 rounded text-xs font-bold text-white"
                     style={{
+                      padding: '2px 6px',
+                      borderRadius: 4,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: 'white',
                       backgroundColor:
                         scores.icp_tier === 'A' ? '#10b981' :
                         scores.icp_tier === 'B' ? '#3b82f6' :
@@ -134,12 +146,18 @@ export function DealIntelligencePanel({
                 </div>
               </div>
               <div>
-                <div className="text-xs text-gray-600 mb-1">Lead Score</div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xl font-bold">{scores.lead_score}</span>
+                <div style={{ fontSize: 11, color: colors.textMuted, marginBottom: 4 }}>Lead Score</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 20, fontWeight: 700, color: colors.text }}>
+                    {scores.lead_score}
+                  </span>
                   <span
-                    className="px-1.5 py-0.5 rounded text-xs font-bold text-white"
                     style={{
+                      padding: '2px 6px',
+                      borderRadius: 4,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: 'white',
                       backgroundColor:
                         scores.lead_tier === 'HOT' ? '#ef4444' :
                         scores.lead_tier === 'WARM' ? '#f59e0b' : '#6b7280',
@@ -155,12 +173,17 @@ export function DealIntelligencePanel({
 
         {/* Signal Strength */}
         {signalsSummary && (
-          <div className="bg-gray-50 rounded-lg p-3">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-medium text-gray-700">MARKET SIGNALS</span>
+          <div style={{ background: colors.surface, borderRadius: 8, padding: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <span style={{ fontSize: 11, fontWeight: 500, color: colors.textSecondary }}>
+                MARKET SIGNALS
+              </span>
               <div
-                className="px-2 py-0.5 rounded text-xs font-bold"
                 style={{
+                  padding: '2px 8px',
+                  borderRadius: 4,
+                  fontSize: 11,
+                  fontWeight: 700,
                   backgroundColor:
                     signalsSummary.signal_strength === 'HOT' ? '#fee2e2' :
                     signalsSummary.signal_strength === 'WARM' ? '#fef3c7' :
@@ -174,22 +197,24 @@ export function DealIntelligencePanel({
                 {signalsSummary.signal_strength}
               </div>
             </div>
-            <div className="grid grid-cols-3 gap-2 text-center">
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, textAlign: 'center' }}>
               <div>
-                <div className="text-lg font-bold">{signalsSummary.total_signals}</div>
-                <div className="text-xs text-gray-600">Total</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: colors.text }}>
+                  {signalsSummary.total_signals}
+                </div>
+                <div style={{ fontSize: 11, color: colors.textMuted }}>Total</div>
               </div>
               <div>
-                <div className="text-lg font-bold text-orange-600">
+                <div style={{ fontSize: 18, fontWeight: 700, color: colors.orange }}>
                   {signalsSummary.high_priority}
                 </div>
-                <div className="text-xs text-gray-600">High Priority</div>
+                <div style={{ fontSize: 11, color: colors.textMuted }}>High Priority</div>
               </div>
               <div>
-                <div className="text-lg font-bold text-green-600">
+                <div style={{ fontSize: 18, fontWeight: 700, color: colors.green }}>
                   {signalsSummary.buying_triggers}
                 </div>
-                <div className="text-xs text-gray-600">Buying Triggers</div>
+                <div style={{ fontSize: 11, color: colors.textMuted }}>Buying Triggers</div>
               </div>
             </div>
           </div>
@@ -198,18 +223,28 @@ export function DealIntelligencePanel({
         {/* Buying Triggers */}
         {buyingTriggers.length > 0 && (
           <div>
-            <div className="flex items-center gap-2 mb-2">
-              <Zap className="h-4 w-4 text-green-600" />
-              <span className="text-sm font-semibold">Buying Triggers ({buyingTriggers.length})</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <Zap style={{ width: 16, height: 16, color: colors.green }} />
+              <span style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>
+                Buying Triggers ({buyingTriggers.length})
+              </span>
             </div>
-            <div className="space-y-2">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {buyingTriggers.map(signal => (
                 <div
                   key={signal.id}
-                  className="text-sm p-2 bg-green-50 border border-green-200 rounded"
+                  style={{
+                    fontSize: 13,
+                    padding: 8,
+                    background: colors.greenSoft,
+                    border: `1px solid ${colors.green}`,
+                    borderRadius: 6,
+                  }}
                 >
-                  <div className="font-medium text-green-900">{signal.headline}</div>
-                  <div className="text-xs text-green-700 mt-1">
+                  <div style={{ fontWeight: 500, color: colors.text, marginBottom: 4 }}>
+                    {signal.headline}
+                  </div>
+                  <div style={{ fontSize: 11, color: colors.textMuted }}>
                     <TimeAgo date={signal.signal_date} />
                   </div>
                 </div>
@@ -221,18 +256,28 @@ export function DealIntelligencePanel({
         {/* High Priority Signals */}
         {highPrioritySignals.length > 0 && buyingTriggers.length === 0 && (
           <div>
-            <div className="flex items-center gap-2 mb-2">
-              <TrendingUp className="h-4 w-4 text-orange-600" />
-              <span className="text-sm font-semibold">High Priority Signals</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <TrendingUp style={{ width: 16, height: 16, color: colors.orange }} />
+              <span style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>
+                High Priority Signals
+              </span>
             </div>
-            <div className="space-y-2">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {highPrioritySignals.map(signal => (
                 <div
                   key={signal.id}
-                  className="text-sm p-2 bg-orange-50 border border-orange-200 rounded"
+                  style={{
+                    fontSize: 13,
+                    padding: 8,
+                    background: 'rgba(249,115,22,0.1)',
+                    border: `1px solid ${colors.orange}`,
+                    borderRadius: 6,
+                  }}
                 >
-                  <div className="font-medium text-orange-900">{signal.headline}</div>
-                  <div className="text-xs text-orange-700 mt-1">
+                  <div style={{ fontWeight: 500, color: colors.text, marginBottom: 4 }}>
+                    {signal.headline}
+                  </div>
+                  <div style={{ fontSize: 11, color: colors.textMuted }}>
                     <TimeAgo date={signal.signal_date} />
                   </div>
                 </div>
@@ -244,24 +289,36 @@ export function DealIntelligencePanel({
         {/* Stakeholder Risks */}
         {criticalStakeholders.length > 0 && (
           <div>
-            <div className="flex items-center gap-2 mb-2">
-              <AlertCircle className="h-4 w-4 text-red-600" />
-              <span className="text-sm font-semibold">Stakeholder Risks</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <AlertCircle style={{ width: 16, height: 16, color: colors.red }} />
+              <span style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>
+                Stakeholder Risks
+              </span>
             </div>
-            <div className="space-y-2">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {criticalStakeholders.map((stakeholder, idx) => (
                 <div
                   key={idx}
-                  className="text-sm p-2 bg-red-50 border border-red-200 rounded"
+                  style={{
+                    fontSize: 13,
+                    padding: 8,
+                    background: colors.redSoft,
+                    border: `1px solid ${colors.red}`,
+                    borderRadius: 6,
+                  }}
                 >
-                  <div className="font-medium text-red-900">{stakeholder.contact_name}</div>
-                  <div className="text-xs text-red-700">
+                  <div style={{ fontWeight: 500, color: colors.text }}>
+                    {stakeholder.contact_name}
+                  </div>
+                  <div style={{ fontSize: 11, color: colors.textMuted }}>
                     {stakeholder.status === 'departed' && 'Left the company'}
                     {stakeholder.status === 'promoted' && 'Promoted to new role'}
                     {stakeholder.status === 'role_changed' && 'Role changed'}
                   </div>
                   {stakeholder.current_title && (
-                    <div className="text-xs text-red-600 mt-1">{stakeholder.current_title}</div>
+                    <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 4 }}>
+                      {stakeholder.current_title}
+                    </div>
                   )}
                 </div>
               ))}
@@ -271,46 +328,46 @@ export function DealIntelligencePanel({
 
         {/* Overall Status */}
         {!loading && (
-          <div className="pt-3 border-t border-gray-200">
+          <div style={{ paddingTop: 12, borderTop: `1px solid ${colors.border}` }}>
             {hasOpportunities && !hasRisks && (
-              <div className="flex items-start gap-2 text-sm text-green-700">
-                <CheckCircle2 className="h-4 w-4 mt-0.5 flex-shrink-0" />
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, color: colors.green }}>
+                <CheckCircle2 style={{ width: 16, height: 16, marginTop: 2, flexShrink: 0 }} />
                 <div>
-                  <div className="font-medium">Strong Opportunity</div>
-                  <div className="text-xs mt-1">
+                  <div style={{ fontWeight: 500 }}>Strong Opportunity</div>
+                  <div style={{ fontSize: 11, marginTop: 4, color: colors.textMuted }}>
                     Multiple buying triggers detected. Good time to engage.
                   </div>
                 </div>
               </div>
             )}
             {hasRisks && !hasOpportunities && (
-              <div className="flex items-start gap-2 text-sm text-red-700">
-                <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, color: colors.red }}>
+                <AlertCircle style={{ width: 16, height: 16, marginTop: 2, flexShrink: 0 }} />
                 <div>
-                  <div className="font-medium">Attention Required</div>
-                  <div className="text-xs mt-1">
+                  <div style={{ fontWeight: 500 }}>Attention Required</div>
+                  <div style={{ fontSize: 11, marginTop: 4, color: colors.textMuted }}>
                     Stakeholder changes or low scores detected. Review deal status.
                   </div>
                 </div>
               </div>
             )}
             {hasRisks && hasOpportunities && (
-              <div className="flex items-start gap-2 text-sm text-orange-700">
-                <Target className="h-4 w-4 mt-0.5 flex-shrink-0" />
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, color: colors.orange }}>
+                <Target style={{ width: 16, height: 16, marginTop: 2, flexShrink: 0 }} />
                 <div>
-                  <div className="font-medium">Mixed Signals</div>
-                  <div className="text-xs mt-1">
+                  <div style={{ fontWeight: 500 }}>Mixed Signals</div>
+                  <div style={{ fontSize: 11, marginTop: 4, color: colors.textMuted }}>
                     Both opportunities and risks present. Strategic engagement recommended.
                   </div>
                 </div>
               </div>
             )}
             {!hasRisks && !hasOpportunities && signals.length === 0 && (
-              <div className="flex items-start gap-2 text-sm text-gray-600">
-                <CheckCircle2 className="h-4 w-4 mt-0.5 flex-shrink-0" />
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, color: colors.textMuted }}>
+                <CheckCircle2 style={{ width: 16, height: 16, marginTop: 2, flexShrink: 0 }} />
                 <div>
-                  <div className="font-medium">Status Quo</div>
-                  <div className="text-xs mt-1">
+                  <div style={{ fontWeight: 500 }}>Status Quo</div>
+                  <div style={{ fontSize: 11, marginTop: 4 }}>
                     No recent signals detected. Standard engagement cadence.
                   </div>
                 </div>

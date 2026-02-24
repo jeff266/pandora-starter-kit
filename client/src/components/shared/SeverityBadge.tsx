@@ -1,4 +1,4 @@
-import { Badge } from "@/components/ui/badge";
+import React from 'react';
 
 export type Severity = "critical" | "high" | "medium" | "low";
 
@@ -10,27 +10,43 @@ interface SeverityBadgeProps {
 const severityConfig = {
   critical: {
     label: "Critical",
-    className: "bg-red-500 text-white hover:bg-red-600",
+    bg: '#ef4444',
+    color: '#fff',
   },
   high: {
     label: "High",
-    className: "bg-orange-500 text-white hover:bg-orange-600",
+    bg: '#f97316',
+    color: '#fff',
   },
   medium: {
     label: "Medium",
-    className: "bg-yellow-500 text-white hover:bg-yellow-600",
+    bg: '#eab308',
+    color: '#fff',
   },
   low: {
     label: "Low",
-    className: "bg-blue-500 text-white hover:bg-blue-600",
+    bg: '#3b82f6',
+    color: '#fff',
   },
 };
 
 export function SeverityBadge({ severity, className }: SeverityBadgeProps) {
   const config = severityConfig[severity];
+
   return (
-    <Badge className={`${config.className} ${className || ""}`}>
+    <span
+      style={{
+        display: 'inline-block',
+        fontSize: 11,
+        fontWeight: 600,
+        padding: '2px 8px',
+        borderRadius: 4,
+        backgroundColor: config.bg,
+        color: config.color,
+      }}
+      className={className}
+    >
       {config.label}
-    </Badge>
+    </span>
   );
 }

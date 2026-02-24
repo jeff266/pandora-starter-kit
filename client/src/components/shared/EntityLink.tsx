@@ -1,4 +1,5 @@
 import { Link } from "wouter";
+import { colors } from '../../styles/theme';
 
 interface EntityLinkProps {
   type: "account" | "deal" | "contact";
@@ -19,7 +20,15 @@ export function EntityLink({ type, id, name, workspaceId, className }: EntityLin
 
   return (
     <Link href={path}>
-      <a className={`text-blue-600 hover:text-blue-800 hover:underline ${className || ""}`}>
+      <a
+        style={{
+          color: colors.accent,
+          textDecoration: 'none',
+        }}
+        className={className}
+        onMouseEnter={(e) => (e.currentTarget.style.textDecoration = 'underline')}
+        onMouseLeave={(e) => (e.currentTarget.style.textDecoration = 'none')}
+      >
         {name}
       </a>
     </Link>

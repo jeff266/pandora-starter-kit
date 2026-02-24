@@ -1,6 +1,7 @@
 import React from 'react';
 import { useSignals } from '../../hooks/useSignals';
 import { TrendingUp, AlertCircle, Zap, Calendar } from 'lucide-react';
+import { colors } from '../../styles/theme';
 import TimeAgo from './TimeAgo';
 
 interface SignalsSummaryWidgetProps {
@@ -20,8 +21,8 @@ export function SignalsSummaryWidget({
 
   if (loading) {
     return (
-      <div className={`animate-pulse ${className || ''}`}>
-        <div className="h-16 bg-gray-100 rounded" />
+      <div style={{ padding: 16 }} className={className}>
+        <div style={{ height: 64, background: colors.surfaceHover, borderRadius: 8 }} />
       </div>
     );
   }
@@ -29,8 +30,16 @@ export function SignalsSummaryWidget({
   if (!summary || summary.total_signals === 0) {
     if (compact) return null;
     return (
-      <div className={`p-3 bg-gray-50 rounded-lg border border-gray-200 ${className || ''}`}>
-        <div className="text-sm text-gray-600">No recent signals</div>
+      <div
+        style={{
+          padding: 12,
+          background: colors.surface,
+          borderRadius: 8,
+          border: `1px solid ${colors.border}`,
+        }}
+        className={className}
+      >
+        <div style={{ fontSize: 13, color: colors.textMuted }}>No recent signals</div>
       </div>
     );
   }
@@ -47,18 +56,24 @@ export function SignalsSummaryWidget({
   if (compact) {
     return (
       <div
-        className={`inline-flex items-center gap-2 px-2 py-1 rounded-lg border ${className || ''}`}
         style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '4px 8px',
+          borderRadius: 8,
+          border: `1px solid ${colors.border}`,
           backgroundColor: colors.bg,
           borderColor: colors.border,
         }}
+        className={className}
       >
-        <Zap className="h-3 w-3" style={{ color: colors.text }} />
-        <span className="text-xs font-medium" style={{ color: colors.text }}>
+        <Zap style={{ width: 12, height: 12, color: colors.text }} />
+        <span style={{ fontSize: 11, fontWeight: 500, color: colors.text }}>
           {summary.signal_strength}
         </span>
         {summary.buying_triggers > 0 && (
-          <span className="text-xs" style={{ color: colors.text }}>
+          <span style={{ fontSize: 11, color: colors.text }}>
             • {summary.buying_triggers} trigger{summary.buying_triggers !== 1 ? 's' : ''}
           </span>
         )}
@@ -70,23 +85,29 @@ export function SignalsSummaryWidget({
 
   return (
     <div
-      className={`p-4 rounded-lg border ${className || ''}`}
       style={{
+        padding: 16,
+        borderRadius: 8,
+        border: `1px solid ${colors.border}`,
         backgroundColor: colors.bg,
         borderColor: colors.border,
       }}
+      className={className}
     >
       {/* Header */}
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <TrendingUp className="h-4 w-4" style={{ color: colors.text }} />
-          <span className="text-sm font-semibold" style={{ color: colors.text }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <TrendingUp style={{ width: 16, height: 16, color: colors.text }} />
+          <span style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>
             Market Signals
           </span>
         </div>
         <div
-          className="px-2 py-0.5 rounded text-xs font-bold"
           style={{
+            padding: '2px 8px',
+            borderRadius: 4,
+            fontSize: 11,
+            fontWeight: 700,
             backgroundColor: colors.text,
             color: 'white',
           }}
@@ -96,28 +117,28 @@ export function SignalsSummaryWidget({
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-3 gap-2 mb-3">
-        <div className="text-center">
-          <div className="text-lg font-bold" style={{ color: colors.text }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 12 }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: colors.text }}>
             {summary.total_signals}
           </div>
-          <div className="text-xs" style={{ color: colors.text, opacity: 0.8 }}>
+          <div style={{ fontSize: 11, color: colors.text, opacity: 0.8 }}>
             Total
           </div>
         </div>
-        <div className="text-center">
-          <div className="text-lg font-bold" style={{ color: colors.text }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: colors.text }}>
             {summary.high_priority}
           </div>
-          <div className="text-xs" style={{ color: colors.text, opacity: 0.8 }}>
+          <div style={{ fontSize: 11, color: colors.text, opacity: 0.8 }}>
             High Priority
           </div>
         </div>
-        <div className="text-center">
-          <div className="text-lg font-bold" style={{ color: colors.text }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: colors.text }}>
             {summary.buying_triggers}
           </div>
-          <div className="text-xs" style={{ color: colors.text, opacity: 0.8 }}>
+          <div style={{ fontSize: 11, color: colors.text, opacity: 0.8 }}>
             Buying Triggers
           </div>
         </div>
@@ -125,19 +146,19 @@ export function SignalsSummaryWidget({
 
       {/* Recent Signals */}
       {showDetails && recentSignals.length > 0 && (
-        <div className="space-y-2 pt-3 border-t" style={{ borderColor: colors.border }}>
-          <div className="text-xs font-medium" style={{ color: colors.text }}>
+        <div style={{ paddingTop: 12, marginTop: 12, borderTop: `1px solid ${colors.border}` }}>
+          <div style={{ fontSize: 11, fontWeight: 500, color: colors.text, marginBottom: 8 }}>
             Recent Signals:
           </div>
           {recentSignals.map((signal, idx) => (
-            <div key={signal.id || idx} className="text-xs space-y-0.5">
-              <div className="font-medium" style={{ color: colors.text }}>
+            <div key={signal.id || idx} style={{ fontSize: 11, marginBottom: 8 }}>
+              <div style={{ fontWeight: 500, color: colors.text, marginBottom: 2 }}>
                 {signal.headline}
               </div>
               <div style={{ color: colors.text, opacity: 0.7 }}>
                 <TimeAgo date={signal.signal_date} />
                 {signal.buying_trigger && (
-                  <span className="ml-2 font-medium">• Buying Trigger</span>
+                  <span style={{ marginLeft: 8, fontWeight: 500 }}>• Buying Trigger</span>
                 )}
               </div>
             </div>
@@ -147,13 +168,15 @@ export function SignalsSummaryWidget({
 
       {/* Signal Categories */}
       {showDetails && summary.by_category && summary.by_category.length > 0 && (
-        <div className="pt-2 mt-2 border-t" style={{ borderColor: colors.border }}>
-          <div className="flex flex-wrap gap-1">
+        <div style={{ paddingTop: 8, marginTop: 8, borderTop: `1px solid ${colors.border}` }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
             {summary.by_category.slice(0, 4).map(({ category, count }) => (
               <span
                 key={category}
-                className="px-1.5 py-0.5 rounded text-xs"
                 style={{
+                  padding: '2px 6px',
+                  borderRadius: 4,
+                  fontSize: 11,
                   backgroundColor: colors.text,
                   color: 'white',
                   opacity: 0.9,

@@ -1,5 +1,6 @@
 import React from 'react';
 import { useScores } from '../../hooks/useScores';
+import { colors } from '../../styles/theme';
 import { TrendingUp, Target, Zap, Users, Calendar, RefreshCw } from 'lucide-react';
 
 interface AccountScorecardProps {
@@ -25,12 +26,12 @@ export function AccountScorecard({ accountId, workspaceId, className }: AccountS
 
   if (loading) {
     return (
-      <div className={`p-6 ${className || ''}`}>
-        <div className="animate-pulse space-y-4">
-          <div className="h-8 bg-gray-100 rounded w-1/3" />
-          <div className="space-y-3">
+      <div style={{ padding: 24 }} className={className}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ height: 32, background: colors.surfaceHover, borderRadius: 8, width: '33%' }} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {[1, 2, 3, 4].map(i => (
-              <div key={i} className="h-16 bg-gray-100 rounded" />
+              <div key={i} style={{ height: 64, background: colors.surfaceHover, borderRadius: 8 }} />
             ))}
           </div>
         </div>
@@ -40,8 +41,8 @@ export function AccountScorecard({ accountId, workspaceId, className }: AccountS
 
   if (error || !scores) {
     return (
-      <div className={`p-6 ${className || ''}`}>
-        <div className="text-red-600 text-sm">
+      <div style={{ padding: 24 }} className={className}>
+        <div style={{ color: colors.red, fontSize: 13 }}>
           {error || 'No scores available for this account'}
         </div>
       </div>
@@ -74,37 +75,69 @@ export function AccountScorecard({ accountId, workspaceId, className }: AccountS
   return (
     <div className={className}>
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-gray-200">
-        <h3 className="text-lg font-semibold">Account Scores</h3>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: 16,
+          borderBottom: `1px solid ${colors.border}`,
+        }}
+      >
+        <h3 style={{ fontSize: 18, fontWeight: 600, color: colors.text, margin: 0 }}>
+          Account Scores
+        </h3>
         <button
           onClick={handleRecalculate}
           disabled={recalculating}
-          className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 disabled:opacity-50"
+          style={{
+            fontSize: 11,
+            color: colors.accent,
+            background: 'transparent',
+            border: 'none',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            opacity: recalculating ? 0.5 : 1,
+            cursor: recalculating ? 'not-allowed' : 'pointer',
+          }}
           title="Recalculate scores"
+          onMouseEnter={(e) => !recalculating && (e.currentTarget.style.color = colors.accentSoft)}
+          onMouseLeave={(e) => !recalculating && (e.currentTarget.style.color = colors.accent)}
         >
-          <RefreshCw className={`h-3 w-3 ${recalculating ? 'animate-spin' : ''}`} />
+          <RefreshCw
+            style={{
+              width: 12,
+              height: 12,
+              animation: recalculating ? 'spin 1s linear infinite' : 'none',
+            }}
+          />
           Recalculate
         </button>
       </div>
 
-      <div className="p-4 space-y-4">
+      <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
         {/* Primary Scores */}
-        <div className="grid grid-cols-2 gap-4">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16 }}>
           {/* ICP Score */}
           <div
-            className="p-4 rounded-lg border"
             style={{
+              padding: 16,
+              borderRadius: 8,
+              border: `1px solid ${icpColors.border}`,
               backgroundColor: icpColors.bg,
-              borderColor: icpColors.border,
             }}
           >
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-medium" style={{ color: icpColors.color }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <span style={{ fontSize: 11, fontWeight: 500, color: icpColors.color }}>
                 ICP SCORE
               </span>
               <div
-                className="px-2 py-0.5 rounded text-xs font-bold"
                 style={{
+                  padding: '2px 8px',
+                  borderRadius: 4,
+                  fontSize: 11,
+                  fontWeight: 700,
                   backgroundColor: icpColors.color,
                   color: 'white',
                 }}
@@ -112,29 +145,33 @@ export function AccountScorecard({ accountId, workspaceId, className }: AccountS
                 {scores.icp_tier}
               </div>
             </div>
-            <div className="flex items-baseline gap-1">
-              <span className="text-3xl font-bold" style={{ color: icpColors.color }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+              <span style={{ fontSize: 30, fontWeight: 700, color: icpColors.color }}>
                 {scores.icp_score}
               </span>
-              <span className="text-sm text-gray-600">/100</span>
+              <span style={{ fontSize: 13, color: colors.textMuted }}>/100</span>
             </div>
           </div>
 
           {/* Lead Score */}
           <div
-            className="p-4 rounded-lg border"
             style={{
+              padding: 16,
+              borderRadius: 8,
+              border: `1px solid ${leadColors.border}`,
               backgroundColor: leadColors.bg,
-              borderColor: leadColors.border,
             }}
           >
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-medium" style={{ color: leadColors.color }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <span style={{ fontSize: 11, fontWeight: 500, color: leadColors.color }}>
                 LEAD SCORE
               </span>
               <div
-                className="px-2 py-0.5 rounded text-xs font-bold"
                 style={{
+                  padding: '2px 8px',
+                  borderRadius: 4,
+                  fontSize: 11,
+                  fontWeight: 700,
                   backgroundColor: leadColors.color,
                   color: 'white',
                 }}
@@ -142,40 +179,47 @@ export function AccountScorecard({ accountId, workspaceId, className }: AccountS
                 {scores.lead_tier}
               </div>
             </div>
-            <div className="flex items-baseline gap-1">
-              <span className="text-3xl font-bold" style={{ color: leadColors.color }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+              <span style={{ fontSize: 30, fontWeight: 700, color: leadColors.color }}>
                 {scores.lead_score}
               </span>
-              <span className="text-sm text-gray-600">/100</span>
+              <span style={{ fontSize: 13, color: colors.textMuted }}>/100</span>
             </div>
           </div>
         </div>
 
         {/* Component Scores */}
-        <div className="space-y-3">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {scoreMetrics.map((metric) => {
             const Icon = metric.icon;
             return (
-              <div key={metric.label} className="flex items-center gap-3">
+              <div key={metric.label} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <div
-                  className="p-2 rounded-lg"
-                  style={{ backgroundColor: `${metric.color}15` }}
+                  style={{
+                    padding: 8,
+                    borderRadius: 8,
+                    backgroundColor: `${metric.color}15`,
+                  }}
                 >
-                  <Icon className="h-4 w-4" style={{ color: metric.color }} />
+                  <Icon style={{ width: 16, height: 16, color: metric.color }} />
                 </div>
-                <div className="flex-1">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-medium text-gray-700">{metric.label}</span>
-                    <span className="text-sm font-semibold" style={{ color: metric.color }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <span style={{ fontSize: 11, fontWeight: 500, color: colors.textSecondary }}>
+                      {metric.label}
+                    </span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: metric.color }}>
                       {metric.value}
                     </span>
                   </div>
-                  <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                  <div style={{ height: 6, background: colors.surfaceHover, borderRadius: 999, overflow: 'hidden' }}>
                     <div
-                      className="h-full rounded-full transition-all duration-500"
                       style={{
+                        height: '100%',
+                        borderRadius: 999,
                         backgroundColor: metric.color,
                         width: `${metric.value}%`,
+                        transition: 'width 0.5s',
                       }}
                     />
                   </div>
@@ -187,8 +231,8 @@ export function AccountScorecard({ accountId, workspaceId, className }: AccountS
 
         {/* Last Scored */}
         {scores.last_scored_at && (
-          <div className="pt-3 border-t border-gray-200">
-            <p className="text-xs text-gray-500">
+          <div style={{ paddingTop: 12, borderTop: `1px solid ${colors.border}` }}>
+            <p style={{ fontSize: 11, color: colors.textMuted, margin: 0 }}>
               Last scored: {new Date(scores.last_scored_at).toLocaleDateString('en-US', {
                 month: 'short',
                 day: 'numeric',
@@ -200,6 +244,12 @@ export function AccountScorecard({ accountId, workspaceId, className }: AccountS
           </div>
         )}
       </div>
+
+      <style>{`
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
   );
 }

@@ -98,10 +98,10 @@ export function AccountSignalsTimeline({
 
   if (loading) {
     return (
-      <div className={`p-6 ${className || ''}`}>
-        <div className="animate-pulse space-y-4">
+      <div style={{ padding: 24 }} className={className}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {[1, 2, 3].map(i => (
-            <div key={i} className="h-20 bg-gray-100 rounded-lg" />
+            <div key={i} style={{ height: 80, background: colors.surfaceHover, borderRadius: 8 }} />
           ))}
         </div>
       </div>
@@ -110,28 +110,44 @@ export function AccountSignalsTimeline({
 
   if (error) {
     return (
-      <div className={`p-6 ${className || ''}`}>
-        <div className="text-red-600 text-sm">Error loading signals: {error}</div>
+      <div style={{ padding: 24 }} className={className}>
+        <div style={{ color: colors.red, fontSize: 13 }}>Error loading signals: {error}</div>
       </div>
     );
   }
 
+  const strengthColors = {
+    HOT: { bg: '#fee2e2', text: '#dc2626' },
+    WARM: { bg: '#fef3c7', text: '#d97706' },
+    NEUTRAL: { bg: '#dbeafe', text: '#2563eb' },
+    COLD: { bg: '#f3f4f6', text: '#6b7280' },
+  };
+
   return (
     <div className={className}>
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-gray-200">
-        <div className="flex items-center gap-3">
-          <h3 className="text-lg font-semibold">Market Signals</h3>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: 16,
+          borderBottom: `1px solid ${colors.border}`,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <h3 style={{ fontSize: 18, fontWeight: 600, color: colors.text, margin: 0 }}>
+            Market Signals
+          </h3>
           {summary && (
             <div
-              className="px-2 py-1 rounded text-xs font-medium"
               style={{
-                backgroundColor: summary.signal_strength === 'HOT' ? '#fee2e2' :
-                  summary.signal_strength === 'WARM' ? '#fef3c7' :
-                  summary.signal_strength === 'NEUTRAL' ? '#dbeafe' : '#f3f4f6',
-                color: summary.signal_strength === 'HOT' ? '#dc2626' :
-                  summary.signal_strength === 'WARM' ? '#d97706' :
-                  summary.signal_strength === 'NEUTRAL' ? '#2563eb' : '#6b7280',
+                padding: '4px 8px',
+                borderRadius: 4,
+                fontSize: 11,
+                fontWeight: 500,
+                backgroundColor: strengthColors[summary.signal_strength]?.bg || strengthColors.COLD.bg,
+                color: strengthColors[summary.signal_strength]?.text || strengthColors.COLD.text,
               }}
             >
               {summary.signal_strength}
@@ -141,38 +157,80 @@ export function AccountSignalsTimeline({
         <button
           onClick={handleRefresh}
           disabled={refreshing}
-          className="p-2 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
+          style={{
+            padding: 8,
+            background: 'transparent',
+            border: 'none',
+            borderRadius: 8,
+            cursor: refreshing ? 'not-allowed' : 'pointer',
+            opacity: refreshing ? 0.5 : 1,
+            transition: 'background 0.2s',
+          }}
+          onMouseEnter={(e) => !refreshing && (e.currentTarget.style.background = colors.surfaceHover)}
+          onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
           title="Refresh signals"
         >
-          <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+          <RefreshCw
+            style={{
+              width: 16,
+              height: 16,
+              color: colors.text,
+              animation: refreshing ? 'spin 1s linear infinite' : 'none',
+            }}
+          />
         </button>
       </div>
 
       {/* Summary Stats */}
       {summary && (
-        <div className="grid grid-cols-3 gap-4 p-4 bg-gray-50 border-b border-gray-200">
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, 1fr)',
+            gap: 16,
+            padding: 16,
+            background: colors.surface,
+            borderBottom: `1px solid ${colors.border}`,
+          }}
+        >
           <div>
-            <div className="text-2xl font-bold">{summary.total_signals}</div>
-            <div className="text-xs text-gray-600">Total Signals</div>
+            <div style={{ fontSize: 24, fontWeight: 700, color: colors.text }}>{summary.total_signals}</div>
+            <div style={{ fontSize: 11, color: colors.textMuted }}>Total Signals</div>
           </div>
           <div>
-            <div className="text-2xl font-bold text-orange-600">{summary.high_priority}</div>
-            <div className="text-xs text-gray-600">High Priority</div>
+            <div style={{ fontSize: 24, fontWeight: 700, color: colors.orange }}>{summary.high_priority}</div>
+            <div style={{ fontSize: 11, color: colors.textMuted }}>High Priority</div>
           </div>
           <div>
-            <div className="text-2xl font-bold text-green-600">{summary.buying_triggers}</div>
-            <div className="text-xs text-gray-600">Buying Triggers</div>
+            <div style={{ fontSize: 24, fontWeight: 700, color: colors.green }}>{summary.buying_triggers}</div>
+            <div style={{ fontSize: 11, color: colors.textMuted }}>Buying Triggers</div>
           </div>
         </div>
       )}
 
       {/* Filters */}
-      <div className="flex items-center gap-2 p-4 bg-white border-b border-gray-200">
-        <Filter className="h-4 w-4 text-gray-400" />
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: 16,
+          background: colors.surface,
+          borderBottom: `1px solid ${colors.border}`,
+        }}
+      >
+        <Filter style={{ width: 16, height: 16, color: colors.textMuted }} />
         <select
           value={filterCategory}
           onChange={(e) => setFilterCategory(e.target.value as any)}
-          className="text-sm border border-gray-300 rounded px-2 py-1"
+          style={{
+            fontSize: 13,
+            border: `1px solid ${colors.border}`,
+            borderRadius: 6,
+            padding: '6px 10px',
+            background: colors.surface,
+            color: colors.text,
+          }}
         >
           <option value="all">All Categories</option>
           {categories.map(cat => (
@@ -182,7 +240,14 @@ export function AccountSignalsTimeline({
         <select
           value={filterPriority}
           onChange={(e) => setFilterPriority(e.target.value as any)}
-          className="text-sm border border-gray-300 rounded px-2 py-1"
+          style={{
+            fontSize: 13,
+            border: `1px solid ${colors.border}`,
+            borderRadius: 6,
+            padding: '6px 10px',
+            background: colors.surface,
+            color: colors.text,
+          }}
         >
           <option value="all">All Priorities</option>
           <option value="high">High Priority Only</option>
@@ -191,94 +256,132 @@ export function AccountSignalsTimeline({
       </div>
 
       {/* Signals Timeline */}
-      <div className="p-4 space-y-3 max-h-96 overflow-y-auto">
+      <div style={{ padding: 16, maxHeight: 384, overflowY: 'auto' }}>
         {filteredSignals.length === 0 ? (
           <EmptyState
             title="No signals found"
             description="No market signals detected for this account in the last 90 days."
           />
         ) : (
-          filteredSignals.map(signal => {
-            const Icon = categoryIcons[signal.signal_category];
-            const color = categoryColors[signal.signal_category];
-            const isExpanded = expanded.includes(signal.id);
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {filteredSignals.map(signal => {
+              const Icon = categoryIcons[signal.signal_category];
+              const color = categoryColors[signal.signal_category];
+              const isExpanded = expanded.includes(signal.id);
 
-            return (
-              <div
-                key={signal.id}
-                className="border border-gray-200 rounded-lg hover:border-gray-300 transition-colors"
-              >
-                <div className="p-3">
-                  <div className="flex items-start gap-3">
-                    <div
-                      className="p-2 rounded-lg"
-                      style={{ backgroundColor: `${color}15` }}
-                    >
-                      <Icon className="h-4 w-4" style={{ color }} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1">
-                          <h4 className="font-medium text-sm">{signal.headline}</h4>
-                          <div className="flex items-center gap-2 mt-1">
-                            <span className="text-xs text-gray-500">
-                              {categoryLabels[signal.signal_category]}
-                            </span>
-                            <span className="text-xs text-gray-400">•</span>
-                            <TimeAgo date={signal.signal_date} className="text-xs text-gray-500" />
-                            {signal.buying_trigger && (
-                              <>
-                                <span className="text-xs text-gray-400">•</span>
-                                <span className="text-xs text-green-600 font-medium">
-                                  Buying Trigger
-                                </span>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                        <SeverityBadge severity={signal.priority} />
-                      </div>
-
-                      {signal.description && isExpanded && (
-                        <p className="text-sm text-gray-600 mt-2">{signal.description}</p>
-                      )}
-
-                      <div className="flex items-center gap-2 mt-2">
-                        {signal.source && (
-                          <span className="text-xs text-gray-500">{signal.source}</span>
-                        )}
-                        {signal.source_url && (
-                          <a
-                            href={signal.source_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-xs text-blue-600 hover:underline flex items-center gap-1"
-                          >
-                            View <ExternalLink className="h-3 w-3" />
-                          </a>
-                        )}
-                      </div>
-                    </div>
-
-                    {signal.description && (
-                      <button
-                        onClick={() => toggleExpanded(signal.id)}
-                        className="p-1 hover:bg-gray-100 rounded"
+              return (
+                <div
+                  key={signal.id}
+                  style={{
+                    border: `1px solid ${colors.border}`,
+                    borderRadius: 8,
+                    transition: 'border-color 0.2s',
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.borderColor = colors.borderLight)}
+                  onMouseLeave={(e) => (e.currentTarget.style.borderColor = colors.border)}
+                >
+                  <div style={{ padding: 12 }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                      <div
+                        style={{
+                          padding: 8,
+                          borderRadius: 8,
+                          background: `${color}15`,
+                        }}
                       >
-                        {isExpanded ? (
-                          <ChevronUp className="h-4 w-4 text-gray-400" />
-                        ) : (
-                          <ChevronDown className="h-4 w-4 text-gray-400" />
+                        <Icon style={{ width: 16, height: 16, color }} />
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+                          <div style={{ flex: 1 }}>
+                            <h4 style={{ fontWeight: 500, fontSize: 13, color: colors.text, margin: 0 }}>
+                              {signal.headline}
+                            </h4>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                              <span style={{ fontSize: 11, color: colors.textMuted }}>
+                                {categoryLabels[signal.signal_category]}
+                              </span>
+                              <span style={{ fontSize: 11, color: colors.textDim }}>•</span>
+                              <TimeAgo date={signal.signal_date} />
+                              {signal.buying_trigger && (
+                                <>
+                                  <span style={{ fontSize: 11, color: colors.textDim }}>•</span>
+                                  <span style={{ fontSize: 11, color: colors.green, fontWeight: 500 }}>
+                                    Buying Trigger
+                                  </span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                          <SeverityBadge severity={signal.priority} />
+                        </div>
+
+                        {signal.description && isExpanded && (
+                          <p style={{ fontSize: 13, color: colors.textSecondary, marginTop: 8, marginBottom: 0 }}>
+                            {signal.description}
+                          </p>
                         )}
-                      </button>
-                    )}
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                          {signal.source && (
+                            <span style={{ fontSize: 11, color: colors.textMuted }}>{signal.source}</span>
+                          )}
+                          {signal.source_url && (
+                            <a
+                              href={signal.source_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{
+                                fontSize: 11,
+                                color: colors.accent,
+                                textDecoration: 'none',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 4,
+                              }}
+                              onMouseEnter={(e) => (e.currentTarget.style.textDecoration = 'underline')}
+                              onMouseLeave={(e) => (e.currentTarget.style.textDecoration = 'none')}
+                            >
+                              View <ExternalLink style={{ width: 12, height: 12 }} />
+                            </a>
+                          )}
+                        </div>
+                      </div>
+
+                      {signal.description && (
+                        <button
+                          onClick={() => toggleExpanded(signal.id)}
+                          style={{
+                            padding: 4,
+                            background: 'transparent',
+                            border: 'none',
+                            borderRadius: 4,
+                            cursor: 'pointer',
+                          }}
+                          onMouseEnter={(e) => (e.currentTarget.style.background = colors.surfaceHover)}
+                          onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                        >
+                          {isExpanded ? (
+                            <ChevronUp style={{ width: 16, height: 16, color: colors.textMuted }} />
+                          ) : (
+                            <ChevronDown style={{ width: 16, height: 16, color: colors.textMuted }} />
+                          )}
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            );
-          })
+              );
+            })}
+          </div>
         )}
       </div>
+
+      <style>{`
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
   );
 }
