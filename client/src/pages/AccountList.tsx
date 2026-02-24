@@ -9,6 +9,7 @@ import { useDemoMode } from '../contexts/DemoModeContext';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { buildAccountCrmUrl, useCrmInfo } from '../lib/deeplinks';
 import { useLens } from '../contexts/LensContext';
+import { AccountSignalsTimeline } from '../components/account';
 
 const PAGE_SIZE = 50;
 
@@ -1069,6 +1070,15 @@ export default function AccountList() {
                   ))}
                 </div>
               </div>
+            )}
+
+            {/* Signals Timeline */}
+            {selectedAccount.id && (
+              <AccountSignalsTimeline
+                accountId={selectedAccount.id}
+                accountName={selectedAccount.name || 'Account'}
+                workspaceId={api.getWorkspaceId()}
+              />
             )}
 
             {/* Why this matters */}

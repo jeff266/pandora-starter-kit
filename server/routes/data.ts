@@ -301,41 +301,70 @@ router.get('/:id/accounts/:accountId/signals', async (req: Request, res: Respons
   try {
     const workspaceId = req.params.id;
     const accountId = req.params.accountId;
-    const lookbackDays = parseNum(req.query.lookback_days) || 90;
 
     const signalsResult = await query(
-      `SELECT * FROM account_signals
+      `SELECT id, signals, signal_summary, enrichment_source, created_at, updated_at
+       FROM account_signals
        WHERE workspace_id = $1 AND account_id = $2
-         AND signal_date >= NOW() - INTERVAL '1 day' * $3
-       ORDER BY signal_date DESC, priority ASC
-       LIMIT 100`,
-      [workspaceId, accountId, lookbackDays]
+       ORDER BY COALESCE(updated_at, created_at) DESC
+       LIMIT 5`,
+      [workspaceId, accountId]
     );
 
-    const signals = signalsResult.rows;
+    const priorityMap: Record<string, string> = {
+      funding: 'high', acquisition: 'high', executive_change: 'high',
+      expansion: 'medium', partnership: 'medium', product_launch: 'medium',
+      hiring: 'medium', layoff: 'high',
+    };
+    const buyingTriggerTypes = new Set(['funding', 'expansion', 'hiring', 'executive_change']);
 
-    // Calculate summary
-    const highPriority = signals.filter((s: any) => s.priority === 'critical' || s.priority === 'high').length;
-    const buyingTriggers = signals.filter((s: any) => s.buying_trigger === true).length;
+    const allSignals: any[] = [];
+    for (const row of signalsResult.rows) {
+      const rawSignals = Array.isArray(row.signals) ? row.signals : [];
+      for (const s of rawSignals) {
+        const category = (s.type || 'partnership').toLowerCase().replace(/\s+/g, '_');
+        allSignals.push({
+          id: `${row.id}-${allSignals.length}`,
+          workspace_id: workspaceId,
+          account_id: accountId,
+          signal_type: 'market_news',
+          signal_category: category,
+          headline: s.signal || s.headline || '',
+          description: s.signal || '',
+          source: s.source || row.enrichment_source || 'web',
+          source_url: s.source_url || null,
+          signal_date: s.date || row.updated_at || row.created_at,
+          priority: priorityMap[category] || 'medium',
+          relevance: s.relevance >= 0.7 ? 'high' : s.relevance >= 0.4 ? 'medium' : 'low',
+          buying_trigger: buyingTriggerTypes.has(category),
+          confidence: s.relevance || 0.5,
+          metadata: null,
+          created_at: row.created_at,
+        });
+      }
+    }
+
+    const highPriority = allSignals.filter((s: any) => s.priority === 'critical' || s.priority === 'high').length;
+    const buyingTriggers = allSignals.filter((s: any) => s.buying_trigger === true).length;
 
     let signalStrength: 'HOT' | 'WARM' | 'NEUTRAL' | 'COLD' = 'COLD';
     if (buyingTriggers >= 2 || highPriority >= 3) signalStrength = 'HOT';
     else if (buyingTriggers >= 1 || highPriority >= 1) signalStrength = 'WARM';
-    else if (signals.length > 0) signalStrength = 'NEUTRAL';
+    else if (allSignals.length > 0) signalStrength = 'NEUTRAL';
 
     const byCategory: Record<string, number> = {};
-    signals.forEach((s: any) => {
+    allSignals.forEach((s: any) => {
       byCategory[s.signal_category] = (byCategory[s.signal_category] || 0) + 1;
     });
 
     res.json({
-      signals,
+      signals: allSignals,
       summary: {
-        total_signals: signals.length,
+        total_signals: allSignals.length,
         high_priority: highPriority,
         buying_triggers: buyingTriggers,
         signal_strength: signalStrength,
-        recent_signals: signals.slice(0, 5),
+        recent_signals: allSignals.slice(0, 5),
         by_category: Object.entries(byCategory).map(([category, count]) => ({ category, count })),
       },
     });
@@ -351,26 +380,41 @@ router.get('/:id/accounts/:accountId/signals/summary', async (req: Request, res:
     const accountId = req.params.accountId;
 
     const result = await query(
-      `SELECT
-         COUNT(*) as total_signals,
-         COUNT(*) FILTER (WHERE priority IN ('critical', 'high')) as high_priority,
-         COUNT(*) FILTER (WHERE buying_trigger = true) as buying_triggers,
-         MAX(signal_date) as last_signal_date
+      `SELECT signals, COALESCE(updated_at, created_at) as last_date
        FROM account_signals
        WHERE workspace_id = $1 AND account_id = $2
-         AND signal_date >= NOW() - INTERVAL '90 days'`,
+       ORDER BY COALESCE(updated_at, created_at) DESC LIMIT 5`,
       [workspaceId, accountId]
     );
 
-    const summary = result.rows[0];
+    const buyingTriggerTypes = new Set(['funding', 'expansion', 'hiring', 'executive_change']);
+    const highPriorityTypes = new Set(['funding', 'acquisition', 'executive_change', 'layoff']);
+    let totalSignals = 0;
+    let highPriority = 0;
+    let buyingTriggers = 0;
+    let lastSignalDate: string | null = null;
+
+    for (const row of result.rows) {
+      if (!lastSignalDate) lastSignalDate = row.last_date;
+      const sigs = Array.isArray(row.signals) ? row.signals : [];
+      for (const s of sigs) {
+        totalSignals++;
+        const cat = (s.type || '').toLowerCase();
+        if (highPriorityTypes.has(cat)) highPriority++;
+        if (buyingTriggerTypes.has(cat)) buyingTriggers++;
+      }
+    }
 
     let signalStrength: 'HOT' | 'WARM' | 'NEUTRAL' | 'COLD' = 'COLD';
-    if (summary.buying_triggers >= 2 || summary.high_priority >= 3) signalStrength = 'HOT';
-    else if (summary.buying_triggers >= 1 || summary.high_priority >= 1) signalStrength = 'WARM';
-    else if (summary.total_signals > 0) signalStrength = 'NEUTRAL';
+    if (buyingTriggers >= 2 || highPriority >= 3) signalStrength = 'HOT';
+    else if (buyingTriggers >= 1 || highPriority >= 1) signalStrength = 'WARM';
+    else if (totalSignals > 0) signalStrength = 'NEUTRAL';
 
     res.json({
-      ...summary,
+      total_signals: totalSignals,
+      high_priority: highPriority,
+      buying_triggers: buyingTriggers,
+      last_signal_date: lastSignalDate,
       signal_strength: signalStrength,
     });
   } catch (err) {
@@ -825,14 +869,14 @@ router.get('/:id/signals/scan-status', async (req: Request, res: Response): Prom
       accounts_scanned_this_week: number;
     }>(
       `SELECT
-         COUNT(DISTINCT account_id) FILTER (WHERE signal_type = 'market_news') as accounts_scanned,
-         COUNT(*) FILTER (WHERE signal_type = 'market_news') as total_market_signals,
-         MAX(created_at) FILTER (WHERE signal_type = 'market_news') as last_scan_at,
+         COUNT(DISTINCT account_id) as accounts_scanned,
+         COALESCE(SUM(jsonb_array_length(COALESCE(signals, '[]'::jsonb))), 0) as total_market_signals,
+         MAX(COALESCE(updated_at, created_at)) as last_scan_at,
          COUNT(DISTINCT account_id) FILTER (
-           WHERE signal_type = 'market_news' AND created_at > now() - interval '7 days'
+           WHERE COALESCE(updated_at, created_at) > now() - interval '7 days'
          ) as accounts_scanned_this_week
        FROM account_signals
-       WHERE workspace_id = $1`,
+       WHERE workspace_id = $1 AND signals IS NOT NULL AND jsonb_array_length(COALESCE(signals, '[]'::jsonb)) > 0`,
       [req.params.id]
     );
 

@@ -9,6 +9,7 @@ export type SignalCategory =
   | 'layoff'
   | 'product_launch'
   | 'partnership'
+  | 'hiring'
   | 'stakeholder_departure'
   | 'stakeholder_promotion'
   | 'stakeholder_role_change';

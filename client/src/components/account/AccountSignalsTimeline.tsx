@@ -6,7 +6,7 @@ import EmptyState from '../shared/EmptyState';
 import { colors, fonts } from '../../styles/theme';
 import {
   TrendingUp, Building2, Users, Briefcase, AlertTriangle,
-  Rocket, Handshake, ArrowUpCircle, ArrowDownCircle, UserMinus,
+  Rocket, Handshake, ArrowUpCircle, ArrowDownCircle, UserMinus, UserPlus,
   RefreshCw, ChevronDown, ChevronUp, ExternalLink, Filter
 } from 'lucide-react';
 
@@ -25,6 +25,7 @@ const categoryIcons: Record<SignalCategory, React.ElementType> = {
   layoff: AlertTriangle,
   product_launch: Rocket,
   partnership: Handshake,
+  hiring: UserPlus,
   stakeholder_departure: UserMinus,
   stakeholder_promotion: ArrowUpCircle,
   stakeholder_role_change: Users,
@@ -38,6 +39,7 @@ const categoryColors: Record<SignalCategory, string> = {
   layoff: '#ef4444',
   product_launch: '#06b6d4',
   partnership: '#6366f1',
+  hiring: '#22c55e',
   stakeholder_departure: '#dc2626',
   stakeholder_promotion: '#22c55e',
   stakeholder_role_change: '#f59e0b',
@@ -51,6 +53,7 @@ const categoryLabels: Record<SignalCategory, string> = {
   layoff: 'Layoff',
   product_launch: 'Product Launch',
   partnership: 'Partnership',
+  hiring: 'Hiring',
   stakeholder_departure: 'Stakeholder Left',
   stakeholder_promotion: 'Promotion',
   stakeholder_role_change: 'Role Change',
@@ -265,8 +268,8 @@ export function AccountSignalsTimeline({
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {filteredSignals.map(signal => {
-              const Icon = categoryIcons[signal.signal_category];
-              const color = categoryColors[signal.signal_category];
+              const Icon = categoryIcons[signal.signal_category] || Briefcase;
+              const color = categoryColors[signal.signal_category] || '#6b7280';
               const isExpanded = expanded.includes(signal.id);
 
               return (
