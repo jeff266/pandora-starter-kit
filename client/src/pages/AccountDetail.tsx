@@ -7,6 +7,7 @@ import { formatCurrency, formatDate, formatTimeAgo, severityColor } from '../lib
 import Skeleton from '../components/Skeleton';
 import SectionErrorBoundary from '../components/SectionErrorBoundary';
 import { DossierNarrative, AnalysisModal } from '../components/shared';
+import { AccountSignalsTimeline } from '../components/account';
 import { useDemoMode } from '../contexts/DemoModeContext';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { buildAccountCrmUrl, buildConversationUrl, useCrmInfo } from '../lib/deeplinks';
@@ -711,6 +712,23 @@ export default function AccountDetail() {
             <DetailRow label="Owner" value={account.owner_email ? anon.email(account.owner_email) : account.owner ? anon.person(account.owner) : undefined} />
             <DetailRow label="Created" value={account.created_at ? formatDate(account.created_at) : undefined} />
           </Card>
+
+          {accountId && (
+            <SectionErrorBoundary fallbackMessage="Unable to load market signals.">
+              <div style={{
+                background: colors.surface,
+                border: `1px solid ${colors.border}`,
+                borderRadius: 10,
+                overflow: 'hidden',
+              }}>
+                <AccountSignalsTimeline
+                  accountId={accountId}
+                  accountName={account.name || 'Account'}
+                  workspaceId={api.getWorkspaceId()}
+                />
+              </div>
+            </SectionErrorBoundary>
+          )}
 
           {accountId && (
             <div style={{
