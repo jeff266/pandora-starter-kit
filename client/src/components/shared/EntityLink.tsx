@@ -1,4 +1,5 @@
-import { Link } from "wouter";
+import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { colors } from '../../styles/theme';
 
 interface EntityLinkProps {
@@ -7,9 +8,12 @@ interface EntityLinkProps {
   name: string;
   workspaceId: string;
   className?: string;
+  style?: React.CSSProperties;
 }
 
-export function EntityLink({ type, id, name, workspaceId, className }: EntityLinkProps) {
+export function EntityLink({ type, id, name, workspaceId, className, style }: EntityLinkProps) {
+  const navigate = useNavigate();
+
   const pathMap = {
     account: `/workspaces/${workspaceId}/accounts/${id}`,
     deal: `/workspaces/${workspaceId}/deals/${id}`,
@@ -18,19 +22,26 @@ export function EntityLink({ type, id, name, workspaceId, className }: EntityLin
 
   const path = pathMap[type];
 
+  const handleClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    navigate(path);
+  };
+
   return (
-    <Link href={path}>
-      <a
-        style={{
-          color: colors.accent,
-          textDecoration: 'none',
-        }}
-        className={className}
-        onMouseEnter={(e) => (e.currentTarget.style.textDecoration = 'underline')}
-        onMouseLeave={(e) => (e.currentTarget.style.textDecoration = 'none')}
-      >
-        {name}
-      </a>
-    </Link>
+    <a
+      href={path}
+      onClick={handleClick}
+      style={{
+        color: colors.accent,
+        textDecoration: 'none',
+        cursor: 'pointer',
+        ...style,
+      }}
+      className={className}
+      onMouseEnter={(e) => (e.currentTarget.style.textDecoration = 'underline')}
+      onMouseLeave={(e) => (e.currentTarget.style.textDecoration = 'none')}
+    >
+      {name}
+    </a>
   );
 }
