@@ -11,22 +11,19 @@
 
 | Rating | Count | Tools |
 |--------|-------|-------|
-| 🟢 LIVE | 19 | query_deals, query_accounts, query_conversations, query_contacts, query_activity_timeline, get_skill_evidence, compute_metric, compute_stage_benchmarks, query_stage_history, query_field_history, compute_metric_segmented, search_transcripts, compute_activity_trend, infer_contact_role, compute_close_probability, compute_forecast_accuracy, compute_pipeline_creation, compute_inqtr_close_rate, compute_competitive_rates |
-| 🟢 FIXED | 1 | compute_shrink_rate (field_change_log table created + backfilled with 4,175 stage + 2,193 amount records) |
-| 🔴 STUB/MISSING | 13 | score_icp_fit, score_multithreading, score_conversation_sentiment, compute_rep_conversions, detect_buyer_signals, check_stakeholder_status, enrich_market_signals, query_product_usage, compute_wallet_share, compute_attention_score, score_activity_quality, detect_process_blockers, compute_source_conversion |
+| 🟢 LIVE | 28 | query_deals, query_accounts, query_conversations, query_contacts, query_activity_timeline, get_skill_evidence, compute_metric, compute_stage_benchmarks, query_stage_history, query_field_history, compute_metric_segmented, search_transcripts, compute_activity_trend, infer_contact_role, compute_close_probability, compute_forecast_accuracy, compute_pipeline_creation, compute_inqtr_close_rate, compute_competitive_rates, compute_shrink_rate, score_icp_fit, score_multithreading, score_conversation_sentiment, compute_rep_conversions, compute_source_conversion, detect_process_blockers, detect_buyer_signals, query_schema, query_conversation_signals, get_workspace_context |
+| ⏸️ DEFERRED | 2 | check_stakeholder_status (needs LinkedIn API), enrich_market_signals (needs News API) |
+| 🗑️ DROPPED | 3 | query_product_usage (no data source), compute_wallet_share (no data model), compute_attention_score (covered by activity_timeline) |
 
 ### Architecture Note
 Two tool systems exist:
-1. **Ask Pandora chat tools** (`server/chat/data-tools.ts` → `executeDataTool()`) — 20 tools called by conversational agent
+1. **Ask Pandora chat tools** (`server/chat/data-tools.ts` + `scoring-tools.ts` + `analysis-tools.ts` → `executeDataTool()`) — 28 tools called by conversational agent
 2. **Skill runtime tools** (`server/skills/tool-definitions.ts` → `toolRegistry`) — 80+ tools called by scheduled skills
 
-All 19 LIVE tools are in `server/chat/data-tools.ts`, dispatched via `pandora-agent.ts`.
-All 13 MISSING tools have zero code anywhere in the codebase — aspirational spec items never built.
-
-### Notable Gaps
-- `score_icp_fit`: ICP scoring exists as `icpScoreOpenDeals` in skill runtime but NOT exposed as chat tool
-- `compute_shrink_rate`: **FIXED** — `field_change_log` table created + backfilled (4,175 stage + 2,193 amount records)
-- `query_field_history`: **FIXED** — `field_change_log` table now available with proper indexes
+All 28 LIVE tools are dispatched via `pandora-agent.ts`. Chat tool coverage: **28/30 (93%)** — only 2 deferred (external API dependency).
+### Notable Gaps (Remaining)
+- `check_stakeholder_status`: Deferred — requires LinkedIn API integration
+- `enrich_market_signals`: Deferred — requires News API wiring (Serper exists but not configured for market signals)
 
 ---
 
@@ -307,3 +304,6 @@ All 6 hardcoded agents are 🟡 (DEFINED) because:
 | 2. dependsOn Bugs | Fixed 3 skills referencing `outputKey` instead of step ID: `competitive-intelligence`, `stage-velocity-benchmarks`, `forecast-accuracy-tracking` | DONE |
 | 3. Missing Migrations | Applied 5 migrations: `targets`, `quotas`, `deal_score_snapshots`, `report_share_links`, `tool_call_logs` | DONE |
 | 4. field_change_log | Created table with indexes, backfilled 4,175 stage + 2,193 amount records from existing data. Unblocks `compute_shrink_rate` and `query_field_history`. | DONE |
+| 5. New Chat Tools | Built 7 new tools: `score_icp_fit`, `score_multithreading`, `score_conversation_sentiment`, `compute_rep_conversions`, `compute_source_conversion`, `detect_process_blockers`, `detect_buyer_signals`. Split into `scoring-tools.ts` and `analysis-tools.ts`. Registered in `pandora-agent.ts` with agent system prompt guidance. | DONE |
+| 6. compute_shrink_rate fix | Fixed DISTINCT ON query for field_change_log, verified working with real data. | DONE |
+| 7. Dropped/Deferred | Dropped 3 tools (no data source), deferred 2 tools (external API dependency). Coverage: 28/30 (93%). | DONE |

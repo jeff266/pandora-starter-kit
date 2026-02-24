@@ -14,6 +14,8 @@ import { getWorkspaceContext } from './workspace-context.js';
 import { getCachedResult, setCachedResult } from './tool-result-cache.js';
 import { shouldCompress, compressToolResult } from './tool-result-compressor.js';
 import { formatCurrency } from '../utils/format-currency.js';
+import { scoreIcpFit, scoreMultithreading, scoreConversationSentiment } from './scoring-tools.js';
+import { computeRepConversions, computeSourceConversion, detectProcessBlockers, detectBuyerSignals } from './analysis-tools.js';
 
 // ─── Tool result types ───────────────────────────────────────────────────────
 
@@ -264,6 +266,20 @@ export async function executeDataTool(
           };
         }
         break;
+      case 'score_icp_fit':
+        result = await scoreIcpFit(workspaceId, params); break;
+      case 'score_multithreading':
+        result = await scoreMultithreading(workspaceId, params); break;
+      case 'score_conversation_sentiment':
+        result = await scoreConversationSentiment(workspaceId, params); break;
+      case 'compute_rep_conversions':
+        result = await computeRepConversions(workspaceId, params); break;
+      case 'compute_source_conversion':
+        result = await computeSourceConversion(workspaceId, params); break;
+      case 'detect_process_blockers':
+        result = await detectProcessBlockers(workspaceId, params); break;
+      case 'detect_buyer_signals':
+        result = await detectBuyerSignals(workspaceId, params); break;
       default:
         throw new Error(`Unknown tool: ${toolName}`);
     }
@@ -3213,13 +3229,14 @@ export async function computeShrinkRate(workspaceId: string, params: Record<stri
               fcl.first_amount
        FROM deals d
        JOIN (
-         SELECT deal_id,
-                first_value(new_value::numeric) OVER (PARTITION BY deal_id ORDER BY changed_at ASC) AS first_amount
+         SELECT DISTINCT ON (deal_id) deal_id,
+                new_value::numeric AS first_amount
          FROM field_change_log
          WHERE workspace_id = $1
            AND field_name = 'amount'
            AND new_value IS NOT NULL
            AND new_value ~ '^[0-9]+(\.[0-9]+)?$'
+         ORDER BY deal_id, changed_at ASC
        ) fcl ON fcl.deal_id = d.id
        WHERE d.workspace_id = $1
          AND d.stage_normalized = 'closed_won'

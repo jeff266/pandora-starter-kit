@@ -475,6 +475,96 @@ const PANDORA_TOOLS: ToolDef[] = [
       required: [],
     },
   },
+  {
+    name: 'score_icp_fit',
+    description:
+      'Get ICP fit score for an account or deal. Returns 0-100 score with firmographic/engagement/signal/relationship breakdown, grade (A-F), scoring mode, and synthesis text. Looks up existing scores from the ICP scoring system.',
+    parameters: {
+      type: 'object',
+      properties: {
+        deal_id: { type: 'string', description: 'Deal ID — will resolve to its linked account' },
+        account_id: { type: 'string', description: 'Account ID to score' },
+        account_name: { type: 'string', description: 'Account name to search for (partial match)' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'score_multithreading',
+    description:
+      'Assess how well-threaded a deal is: contact count, role coverage (champion, economic buyer, technical evaluator), engagement levels, and risk factors. Returns 0-100 score. Use when investigating deal risk or asking "is this deal single-threaded?"',
+    parameters: {
+      type: 'object',
+      properties: {
+        deal_id: { type: 'string', description: 'Deal ID to analyze' },
+      },
+      required: ['deal_id'],
+    },
+  },
+  {
+    name: 'score_conversation_sentiment',
+    description:
+      'Analyze sentiment across recent sales calls for a deal. Returns overall score (-1.0 to 1.0), trend (improving/stable/declining), buying signals, red flags, and per-call breakdown. Uses AI to classify call summaries.',
+    parameters: {
+      type: 'object',
+      properties: {
+        deal_id: { type: 'string', description: 'Deal ID to analyze' },
+        last_n_calls: { type: 'number', description: 'Number of recent calls to analyze (default 3, max 5)' },
+      },
+      required: ['deal_id'],
+    },
+  },
+  {
+    name: 'compute_rep_conversions',
+    description:
+      'Calculate stage-to-stage conversion rates per rep compared to team average. Shows where each rep excels or leaks deals in the pipeline. Returns per-stage conversion rates, delta vs team, best/worst conversion stages.',
+    parameters: {
+      type: 'object',
+      properties: {
+        rep_email: { type: 'string', description: 'Filter to one rep (omit for all reps)' },
+        date_range: { type: 'string', description: 'ISO date — analyze transitions since this date (default: last 180 days)' },
+        pipeline: { type: 'string', description: 'Filter by pipeline name (partial match)' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'compute_source_conversion',
+    description:
+      'Analyze lead source effectiveness: win rates, deal sizes, cycle times, and revenue by source. Answers "which lead sources convert best?" and "which sources produce the largest deals?"',
+    parameters: {
+      type: 'object',
+      properties: {
+        date_range: { type: 'string', description: 'ISO date — analyze deals created since this date (default: last 12 months)' },
+        source: { type: 'string', description: 'Filter to a specific source (partial match)' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'detect_process_blockers',
+    description:
+      'Identify procurement, legal, security, or approval blockers on a deal. Scans CRM fields, call transcripts, and activity patterns for evidence, then classifies blockers by type with estimated delay. Use when a deal appears stalled or the user asks "what\'s blocking this deal?"',
+    parameters: {
+      type: 'object',
+      properties: {
+        deal_id: { type: 'string', description: 'Deal ID to investigate' },
+      },
+      required: ['deal_id'],
+    },
+  },
+  {
+    name: 'detect_buyer_signals',
+    description:
+      'Detect purchase intent signals on a deal: procurement introductions, budget allocation, verbal commitments, security reviews, contract activity, executive engagement. Scans calls, activities, CRM fields, and contacts. Returns classified signals with confidence scores and overall signal strength (strong/moderate/weak/none).',
+    parameters: {
+      type: 'object',
+      properties: {
+        deal_id: { type: 'string', description: 'Deal ID to analyze' },
+      },
+      required: ['deal_id'],
+    },
+  },
 ];
 
 // ─── System prompt ────────────────────────────────────────────────────────────
@@ -489,7 +579,7 @@ You have tools that query the company's live data. When someone asks a question,
 
 1. NEVER GUESS. Every number you cite must come from a tool call. If you're unsure, call a tool.
 
-2. NEVER SAY "I WOULD NEED." If a tool exists that could get the data, call it. You have 7 tools covering deals, accounts, conversations, contacts, activity timelines, skill evidence, and metric calculations. Use them.
+2. NEVER SAY "I WOULD NEED." If a tool exists that could get the data, call it. You have 28 tools covering deals, accounts, conversations, contacts, activity timelines, skill evidence, metric calculations, ICP scoring, multithreading analysis, sentiment analysis, rep conversions, source conversion, process blockers, and buyer signals. Use them.
 
 3. SHOW YOUR WORK. When citing totals or metrics, list the underlying records. "19 deals totaling $303K" is better than "$303K." Name the top deals.
 
@@ -540,6 +630,20 @@ You have tools that query the company's live data. When someone asks a question,
 12. FORECAST QUESTIONS REQUIRE PROBABILITY WEIGHTING: For any forecast question, call compute_close_probability to score deals, then reference get_skill_evidence('forecast-model') for the full probability-weighted forecast with rep haircuts and in-quarter creation projections. Never present unweighted pipeline totals as a "forecast." Raw pipeline ≠ forecast.
 
 13. COMPETITIVE QUESTIONS: Check get_skill_evidence('competitive-intelligence') first. For specific competitor deep-dives, also use search_transcripts and compute_competitive_rates to find recent mentions and win/loss patterns.
+
+14. ICP & ACCOUNT SCORING: When asked "does this account match our ICP?" or "how good is this account?", call score_icp_fit. It returns existing scores from the ICP scoring system.
+
+15. MULTITHREADING: When asked "is this deal single-threaded?" or about stakeholder coverage, call score_multithreading. It analyzes contacts, roles, and engagement.
+
+16. SENTIMENT ANALYSIS: When asked about deal sentiment, call tone, or "how are calls going?", call score_conversation_sentiment. It analyzes recent call summaries with AI.
+
+17. REP CONVERSION ANALYSIS: When asked "where does this rep leak deals?" or about stage conversion rates, call compute_rep_conversions. Compares rep vs team conversion at each stage.
+
+18. SOURCE ANALYSIS: When asked "which lead sources convert best?" or about source ROI, call compute_source_conversion. Breaks down win rates, deal sizes, and cycle times by source.
+
+19. BLOCKER DETECTION: When asked "what's blocking this deal?" or about procurement/legal delays, call detect_process_blockers. Scans CRM, calls, and activity for evidence.
+
+20. BUYER SIGNAL DETECTION: When asked "is the buyer showing intent?" or about purchase signals, call detect_buyer_signals. Looks for procurement intros, budget allocation, verbal commits, etc.
 
 Today's date is ${new Date().toISOString().split('T')[0]}.`;
 
