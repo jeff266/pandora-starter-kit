@@ -30,5 +30,5 @@ export async function initRenderers(): Promise<void> {
   registerRenderer(new CommandCenterRenderer());
   registerRenderer(new PPTXRenderer());
 
-  console.log('[Renderers] Registered 5 renderers: xlsx, pdf, slack_blocks, command_center, pptx (stub)');
+  console.log('[Renderers] Registered 5 renderers: xlsx, pdf, slack_blocks, command_center, pptx');
 }
