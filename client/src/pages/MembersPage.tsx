@@ -10,8 +10,17 @@ interface Member {
   id: string;
   name: string;
   email: string;
-  role: string;
-  created_at: string;
+  role: { id: string; name: string } | string;
+  joined_at: string;
+  created_at?: string;
+}
+
+function getRoleName(role: { id: string; name: string } | string): string {
+  return typeof role === 'object' ? role.name : role;
+}
+
+function getRoleId(role: { id: string; name: string } | string): string {
+  return typeof role === 'object' ? role.id : role;
 }
 
 const roleBadgeColors: Record<string, string> = {
@@ -19,6 +28,14 @@ const roleBadgeColors: Record<string, string> = {
   member: colors.textSecondary,
   viewer: colors.textMuted,
 };
+
+interface WorkspaceRole {
+  id: string;
+  name: string;
+  description: string | null;
+  is_system: boolean;
+  system_type: string | null;
+}
 
 export default function MembersPage() {
   const { user, currentWorkspace } = useWorkspace();
@@ -29,17 +46,33 @@ export default function MembersPage() {
   const [error, setError] = useState('');
   const [showInvite, setShowInvite] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState('member');
+  const [inviteRoleId, setInviteRoleId] = useState('');
+  const [inviteNote, setInviteNote] = useState('');
   const [inviteLoading, setInviteLoading] = useState(false);
   const [inviteError, setInviteError] = useState('');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [roles, setRoles] = useState<WorkspaceRole[]>([]);
 
   const isAdmin = currentWorkspace?.role === 'admin';
-  const adminCount = members.filter(m => m.role === 'admin').length;
+  const adminCount = members.filter(m => getRoleName(m.role) === 'admin').length;
 
   useEffect(() => {
     fetchMembers();
+    fetchRoles();
   }, []);
+
+  const fetchRoles = async () => {
+    try {
+      const data = await api.get('/roles');
+      const rolesList = data.roles || [];
+      setRoles(rolesList);
+      const memberRole = rolesList.find((r: WorkspaceRole) => r.system_type === 'member' || r.name.toLowerCase() === 'member');
+      if (memberRole) setInviteRoleId(memberRole.id);
+      else if (rolesList.length > 0) setInviteRoleId(rolesList[0].id);
+    } catch {
+      setRoles([]);
+    }
+  };
 
   const fetchMembers = async () => {
     try {
@@ -63,9 +96,10 @@ export default function MembersPage() {
     setInviteLoading(true);
     setInviteError('');
     try {
-      await api.post('/members/invite', { email: inviteEmail.trim(), role: inviteRole });
+      await api.post('/members/invite', { email: inviteEmail.trim(), roleId: inviteRoleId, note: inviteNote.trim() || undefined });
       showToast('Invite sent successfully', 'success');
       setInviteEmail('');
+      setInviteNote('');
       setShowInvite(false);
       fetchMembers();
     } catch (err: any) {
@@ -75,10 +109,11 @@ export default function MembersPage() {
     }
   };
 
-  const handleRoleChange = async (memberId: string, newRole: string) => {
+  const handleRoleChange = async (memberId: string, newRoleId: string) => {
     try {
-      await api.patch(`/members/${memberId}`, { role: newRole });
-      setMembers(prev => prev.map(m => m.id === memberId ? { ...m, role: newRole } : m));
+      await api.patch(`/members/${memberId}/role`, { roleId: newRoleId });
+      const role = roles.find(r => r.id === newRoleId);
+      setMembers(prev => prev.map(m => m.id === memberId ? { ...m, role: role ? { id: role.id, name: role.name } : m.role } : m));
       showToast('Role updated', 'success');
     } catch (err: any) {
       showToast(err.message || 'Failed to update role', 'error');
@@ -146,14 +181,19 @@ export default function MembersPage() {
               </div>
               <div>
                 <label style={{ fontSize: 11, fontWeight: 600, color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Role</label>
-                <select value={inviteRole} onChange={e => setInviteRole(e.target.value)}
+                <select value={inviteRoleId} onChange={e => setInviteRoleId(e.target.value)}
                   style={{ display: 'block', marginTop: 4, padding: '8px 12px', background: colors.surfaceRaised, border: `1px solid ${colors.border}`, borderRadius: 6, color: colors.text, fontSize: 13 }}>
-                  <option value="admin">Admin</option>
-                  <option value="member">Member</option>
-                  <option value="viewer">Viewer</option>
+                  {roles.map(r => (
+                    <option key={r.id} value={r.id}>{r.name.charAt(0).toUpperCase() + r.name.slice(1)}</option>
+                  ))}
                 </select>
               </div>
-              <button type="submit" disabled={inviteLoading}
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: 11, fontWeight: 600, color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Note (optional)</label>
+                <input type="text" value={inviteNote} onChange={e => setInviteNote(e.target.value)} placeholder=""
+                  style={{ display: 'block', width: '100%', marginTop: 4, padding: '8px 12px', background: colors.surfaceRaised, border: `1px solid ${colors.border}`, borderRadius: 6, color: colors.text, fontSize: 13 }} />
+              </div>
+              <button type="submit" disabled={inviteLoading || !inviteRoleId}
                 style={{ padding: '8px 16px', background: inviteLoading ? colors.surfaceHover : colors.accent, color: '#fff', borderRadius: 6, fontSize: 12, fontWeight: 600, border: 'none', cursor: 'pointer', opacity: inviteLoading ? 0.7 : 1, whiteSpace: 'nowrap' }}>
                 {inviteLoading ? 'Sending...' : 'Send Invite'}
               </button>
@@ -188,8 +228,8 @@ export default function MembersPage() {
           <div key={member.id} style={{ padding: '12px 14px', borderBottom: `1px solid ${colors.border}` }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
               <span style={{ fontSize: 14, fontWeight: 500, color: colors.text }}>{member.name ? anon.person(member.name) : '--'}</span>
-              <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 4, background: `${roleBadgeColors[member.role] || colors.textMuted}15`, color: roleBadgeColors[member.role] || colors.textMuted, textTransform: 'capitalize' }}>
-                {member.role}
+              <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 4, background: `${roleBadgeColors[getRoleName(member.role)] || colors.textMuted}15`, color: roleBadgeColors[getRoleName(member.role)] || colors.textMuted, textTransform: 'capitalize' }}>
+                {getRoleName(member.role)}
               </span>
             </div>
             <div style={{ fontSize: 12, color: colors.textSecondary }}>{anon.email(member.email)}</div>
@@ -203,20 +243,20 @@ export default function MembersPage() {
             <span style={{ fontSize: 13, color: colors.textSecondary }}>{anon.email(member.email)}</span>
             <div>
               {isAdmin && canModify(member) ? (
-                <select value={member.role} onChange={e => handleRoleChange(member.id, e.target.value)}
-                  style={{ padding: '2px 8px', background: colors.surfaceRaised, border: `1px solid ${colors.border}`, borderRadius: 4, color: roleBadgeColors[member.role] || colors.textMuted, fontSize: 11, fontWeight: 600 }}>
-                  <option value="admin">Admin</option>
-                  <option value="member">Member</option>
-                  <option value="viewer">Viewer</option>
+                <select value={getRoleId(member.role)} onChange={e => handleRoleChange(member.id, e.target.value)}
+                  style={{ padding: '2px 8px', background: colors.surfaceRaised, border: `1px solid ${colors.border}`, borderRadius: 4, color: roleBadgeColors[getRoleName(member.role)] || colors.textMuted, fontSize: 11, fontWeight: 600 }}>
+                  {roles.map(r => (
+                    <option key={r.id} value={r.id}>{r.name.charAt(0).toUpperCase() + r.name.slice(1)}</option>
+                  ))}
                 </select>
               ) : (
-                <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 4, background: `${roleBadgeColors[member.role] || colors.textMuted}15`, color: roleBadgeColors[member.role] || colors.textMuted, textTransform: 'capitalize' }}>
-                  {member.role}
+                <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 4, background: `${roleBadgeColors[getRoleName(member.role)] || colors.textMuted}15`, color: roleBadgeColors[getRoleName(member.role)] || colors.textMuted, textTransform: 'capitalize' }}>
+                  {getRoleName(member.role)}
                 </span>
               )}
             </div>
             <span style={{ fontSize: 12, color: colors.textMuted }}>
-              {member.created_at ? new Date(member.created_at).toLocaleDateString() : '--'}
+              {(member.joined_at || member.created_at) ? new Date(member.joined_at || member.created_at!).toLocaleDateString() : '--'}
             </span>
             {isAdmin && (
               <div style={{ textAlign: 'right' }}>

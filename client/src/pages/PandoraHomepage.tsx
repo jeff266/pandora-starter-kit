@@ -213,7 +213,7 @@ export default function PandoraHomepage() {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <PandoraEyeLogo size={28} />
+          <img src="/pandora-logo.png" alt="Pandora" style={{ width: 32, height: 32, borderRadius: 8 }} />
           <span style={{ fontSize: 18, fontWeight: 600, letterSpacing: "-0.02em" }}>
             <span style={gradText}>pandora</span>
           </span>
@@ -307,46 +307,7 @@ export default function PandoraHomepage() {
               justifyContent: "center",
               animation: "float 6s ease-in-out infinite",
             }}>
-              <svg width="140" height="90" viewBox="0 0 140 90" fill="none" style={{ display: "block" }}>
-                <defs>
-                  <linearGradient id="heroEyeGrad" x1="0" y1="0" x2="140" y2="90">
-                    <stop offset="0%" stopColor={t.purple} />
-                    <stop offset="50%" stopColor={t.cyan} />
-                    <stop offset="100%" stopColor={t.accentLight} />
-                  </linearGradient>
-                  <filter id="glow">
-                    <feGaussianBlur stdDeviation="3" result="blur" />
-                    <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
-                  </filter>
-                </defs>
-                <path d="M70 10C40 10 15 30 5 45c10 15 35 35 65 35s55-20 65-35C125 30 100 10 70 10z" stroke="url(#heroEyeGrad)" strokeWidth="2.5" fill="none" filter="url(#glow)" />
-                <circle cx="70" cy="45" r="18" stroke="url(#heroEyeGrad)" strokeWidth="2" fill="none" />
-                <path d="M70 33 C76 33 82 38 82 45 C82 52 76 57 70 57 C64 57 58 52 58 45 C58 38 64 33 70 33" stroke="url(#heroEyeGrad)" strokeWidth="1.5" fill="none" opacity="0.6" />
-                <circle cx="70" cy="45" r="8" fill="url(#heroEyeGrad)" opacity="0.3" />
-                <circle cx="70" cy="45" r="4" fill="url(#heroEyeGrad)" opacity="0.8" />
-                {[
-                  [12,30],[22,18],[35,12],[28,25],[18,40],
-                  [12,58],[22,70],[35,78],[28,63],[18,50],
-                ].map(([cx,cy],i) => (
-                  <circle key={`l${i}`} cx={cx} cy={cy} r="2.5" fill={t.purple} opacity={0.6 + (i%3)*0.15}>
-                    <animate attributeName="opacity" values={`${0.4+i*0.05};${0.8+i*0.03};${0.4+i*0.05}`} dur={`${2+i*0.3}s`} repeatCount="indefinite" />
-                  </circle>
-                ))}
-                {[
-                  [128,30],[118,18],[105,12],[112,25],[122,40],
-                  [128,58],[118,70],[105,78],[112,63],[122,50],
-                ].map(([cx,cy],i) => (
-                  <circle key={`r${i}`} cx={cx} cy={cy} r="2.5" fill={t.cyan} opacity={0.6 + (i%3)*0.15}>
-                    <animate attributeName="opacity" values={`${0.4+i*0.05};${0.8+i*0.03};${0.4+i*0.05}`} dur={`${2.5+i*0.3}s`} repeatCount="indefinite" />
-                  </circle>
-                ))}
-                <line x1="12" y1="30" x2="28" y2="25" stroke={t.purple} strokeWidth="0.8" opacity="0.3" />
-                <line x1="22" y1="18" x2="35" y2="12" stroke={t.purple} strokeWidth="0.8" opacity="0.3" />
-                <line x1="128" y1="30" x2="112" y2="25" stroke={t.cyan} strokeWidth="0.8" opacity="0.3" />
-                <line x1="118" y1="18" x2="105" y2="12" stroke={t.cyan} strokeWidth="0.8" opacity="0.3" />
-                <line x1="12" y1="58" x2="28" y2="63" stroke={t.purple} strokeWidth="0.8" opacity="0.3" />
-                <line x1="128" y1="58" x2="112" y2="63" stroke={t.cyan} strokeWidth="0.8" opacity="0.3" />
-              </svg>
+              <img src="/pandora-logo.png" alt="Pandora" style={{ width: 140, height: 140, borderRadius: 24, boxShadow: `0 0 60px ${t.accentGlow}, 0 0 120px ${t.purpleGlow}` }} />
             </div>
           </Reveal>
 
@@ -661,19 +622,7 @@ export default function PandoraHomepage() {
                   pointerEvents: "none",
                 }} />
                 <div style={{ position: "relative", zIndex: 1 }}>
-                  <div style={{ marginBottom: 8 }}>
-                    <svg width="48" height="32" viewBox="0 0 48 32" fill="none" style={{ display: "inline-block" }}>
-                      <defs>
-                        <linearGradient id="flowEyeGrad" x1="0" y1="0" x2="48" y2="32">
-                          <stop offset="0%" stopColor={t.purple} />
-                          <stop offset="100%" stopColor={t.cyan} />
-                        </linearGradient>
-                      </defs>
-                      <path d="M24 4C14 4 6 12 2 16c4 4 12 12 22 12s18-8 22-12C42 12 34 4 24 4z" stroke="url(#flowEyeGrad)" strokeWidth="1.5" fill="none" />
-                      <circle cx="24" cy="16" r="5" fill="url(#flowEyeGrad)" opacity="0.5" />
-                      <circle cx="24" cy="16" r="2" fill="url(#flowEyeGrad)" />
-                    </svg>
-                  </div>
+                  <img src="/pandora-logo.png" alt="Pandora" style={{ width: 48, height: 48, borderRadius: 10, marginBottom: 8 }} />
                   <div style={{ fontSize: 16, fontWeight: 700, ...gradText, marginBottom: 4 }}>pandora</div>
                   <div style={{ fontSize: 11, fontFamily: mono, color: t.textMuted }}>16 skills · 20 tools</div>
                   <div style={{ fontSize: 11, fontFamily: mono, color: t.textMuted, marginTop: 2 }}>Compute → Classify → Synthesize</div>
@@ -994,7 +943,7 @@ export default function PandoraHomepage() {
         }}>
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-              <PandoraEyeLogo size={16} />
+              <img src="/pandora-logo.png" alt="Pandora" style={{ width: 18, height: 18, borderRadius: 4 }} />
               <span style={{ fontSize: 14, fontWeight: 600, ...gradText }}>pandora</span>
             </div>
             <p style={{ fontSize: 12, color: t.textMuted, lineHeight: 1.6, marginBottom: 16 }}>
