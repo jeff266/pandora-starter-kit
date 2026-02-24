@@ -76,6 +76,11 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
   const [loadingSessions, setLoadingSessions] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const lastAssistantRef = useRef<HTMLDivElement>(null);
+  const [exportingIdx, setExportingIdx] = useState<number | null>(null);
+  const [exportDesc, setExportDesc] = useState('');
+  const prevMessageCount = useRef(0);
 
   useEffect(() => {
     if (isOpen && inputRef.current) {
@@ -84,7 +89,16 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
   }, [isOpen]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const newCount = messages.length;
+    const lastMsg = messages[newCount - 1];
+    if (newCount > prevMessageCount.current && lastMsg?.role === 'assistant') {
+      setTimeout(() => {
+        lastAssistantRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 50);
+    } else if (newCount > prevMessageCount.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+    prevMessageCount.current = newCount;
   }, [messages]);
 
   const submitFeedback = async (responseId: string, signalType: 'thumbs_up' | 'thumbs_down') => {
@@ -154,8 +168,8 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
     startNewChat();
   }, [scope?.type, scope?.entity_id, startNewChat]);
 
-  const sendMessage = async () => {
-    const text = input.trim();
+  const sendMessage = async (overrideText?: string) => {
+    const text = (overrideText || input).trim();
     if (!text || loading) return;
 
     setInput('');
@@ -213,6 +227,27 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
     }
   };
 
+  const handleExportAsDoc = (idx: number) => {
+    if (exportingIdx === idx) {
+      setExportingIdx(null);
+      setExportDesc('');
+      return;
+    }
+    setExportingIdx(idx);
+    setExportDesc('');
+  };
+
+  const submitExport = (msgContent: string) => {
+    const desc = exportDesc.trim();
+    const snippet = msgContent.slice(0, 200).replace(/\n/g, ' ');
+    const prompt = desc
+      ? `Export the previous analysis as a document: ${desc}`
+      : `Export the previous analysis as a downloadable document. Context: ${snippet}`;
+    setExportingIdx(null);
+    setExportDesc('');
+    sendMessage(prompt);
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -254,7 +289,7 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
           </div>
         </div>
 
-        <div style={{ ...styles.messagesContainer, ...(isMobile ? { padding: '12px 10px' } : {}) }}>
+        <div ref={messagesContainerRef} style={{ ...styles.messagesContainer, ...(isMobile ? { padding: '12px 10px' } : {}) }}>
           {isHistoryView ? (
             <div style={styles.historyView}>
               {loadingSessions ? (
@@ -313,9 +348,14 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
                 </div>
               )}
 
-          {messages.map((msg, idx) => (
+          {messages.map((msg, idx) => {
+            const isLastAssistant = msg.role === 'assistant' && idx === messages.length - 1;
+            const isLongResponse = msg.role === 'assistant' && msg.content.length > 400;
+            const alreadyHasDoc = msg.content.includes('/generated-docs/');
+            return (
             <div
               key={idx}
+              ref={isLastAssistant ? lastAssistantRef : undefined}
               style={{
                 ...styles.messageBubble,
                 ...(msg.role === 'user' ? styles.userBubble : styles.assistantBubble),
@@ -344,6 +384,86 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
                   toolCallCount={msg.tool_call_count}
                   latencyMs={msg.latency_ms}
                 />
+              )}
+              {msg.role === 'assistant' && isLongResponse && !alreadyHasDoc && !loading && (
+                <div style={{ marginTop: 10, borderTop: '1px solid #1e293b', paddingTop: 10 }}>
+                  {exportingIdx === idx ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <div style={{ fontSize: 12, color: '#94a3b8' }}>
+                        Briefly describe the doc you want (or leave blank for a general export):
+                      </div>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <input
+                          type="text"
+                          value={exportDesc}
+                          onChange={e => setExportDesc(e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); submitExport(msg.content); } }}
+                          placeholder="e.g. QBR deck, executive summary..."
+                          autoFocus
+                          style={{
+                            flex: 1,
+                            background: '#0f172a',
+                            border: '1px solid #2a3150',
+                            borderRadius: 6,
+                            padding: '6px 10px',
+                            color: '#e2e8f0',
+                            fontSize: 12,
+                            outline: 'none',
+                          }}
+                        />
+                        <button
+                          onClick={() => submitExport(msg.content)}
+                          style={{
+                            padding: '6px 14px',
+                            background: '#6488ea',
+                            border: 'none',
+                            borderRadius: 6,
+                            color: '#fff',
+                            fontSize: 12,
+                            cursor: 'pointer',
+                            fontWeight: 600,
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          Generate
+                        </button>
+                        <button
+                          onClick={() => { setExportingIdx(null); setExportDesc(''); }}
+                          style={{
+                            padding: '6px 10px',
+                            background: 'transparent',
+                            border: '1px solid #2a3150',
+                            borderRadius: 6,
+                            color: '#94a3b8',
+                            fontSize: 12,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => handleExportAsDoc(idx)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        padding: '6px 14px',
+                        background: 'rgba(100, 136, 234, 0.1)',
+                        border: '1px solid rgba(100, 136, 234, 0.3)',
+                        borderRadius: 6,
+                        color: '#6488ea',
+                        fontSize: 12,
+                        cursor: 'pointer',
+                        fontWeight: 500,
+                      }}
+                    >
+                      Export as Document
+                    </button>
+                  )}
+                </div>
               )}
               {msg.role === 'assistant' && msg.feedbackEnabled && msg.responseId && (
                 <div style={{
@@ -388,7 +508,8 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
                 </div>
               )}
             </div>
-          ))}
+          );
+          })}
 
           {loading && (
             <div style={{ ...styles.messageBubble, ...styles.assistantBubble }}>
