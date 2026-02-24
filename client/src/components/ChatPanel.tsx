@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useIsMobile } from '../hooks/useIsMobile';
-import { api } from '../lib/api';
+import { api, getAuthToken } from '../lib/api';
 import { useDemoMode } from '../contexts/DemoModeContext';
 
 interface ToolCall {
@@ -956,35 +956,73 @@ function formatInlineMarkdown(text: string): (string | JSX.Element)[] {
       parts.push(<strong key={match.index}>{match[1]}</strong>);
     } else if (match[2] !== undefined && match[3] !== undefined) {
       const isDownload = match[3].includes('/generated-docs/');
-      parts.push(
-        <a
-          key={match.index}
-          href={match[3]}
-          target="_blank"
-          rel="noopener noreferrer"
-          {...(isDownload ? { download: '' } : {})}
-          style={{
-            color: '#6488ea',
-            textDecoration: 'none',
-            borderBottom: '1px solid rgba(100, 136, 234, 0.4)',
-            paddingBottom: 1,
-            ...(isDownload ? {
+      if (isDownload) {
+        const url = match[3];
+        const label = match[2];
+        parts.push(
+          <button
+            key={match.index}
+            onClick={async (e) => {
+              e.preventDefault();
+              const btn = e.currentTarget;
+              btn.textContent = 'Downloading...';
+              try {
+                const res = await fetch(url, {
+                  headers: { 'Authorization': `Bearer ${getAuthToken()}` },
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const blob = await res.blob();
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = url.split('/').pop() || 'document';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(a.href);
+                btn.textContent = '\u2705 Downloaded';
+              } catch (err) {
+                btn.textContent = '\u274C Download failed';
+                console.error('[Download]', err);
+              }
+            }}
+            style={{
+              color: '#6488ea',
+              cursor: 'pointer',
+              border: '1px solid rgba(100, 136, 234, 0.3)',
+              background: 'rgba(100, 136, 234, 0.1)',
+              borderRadius: 6,
+              fontWeight: 500,
+              padding: '4px 10px',
               display: 'inline-flex',
               alignItems: 'center',
               gap: 4,
-              padding: '4px 10px',
-              background: 'rgba(100, 136, 234, 0.1)',
-              border: '1px solid rgba(100, 136, 234, 0.3)',
-              borderRadius: 6,
-              fontWeight: 500,
               marginTop: 4,
               marginBottom: 4,
-            } : {}),
-          }}
-        >
-          {isDownload ? '\u{1F4E5} ' : ''}{match[2]}
-        </a>
-      );
+              fontFamily: 'inherit',
+              fontSize: 'inherit',
+            }}
+          >
+            {'\u{1F4E5}'} {label}
+          </button>
+        );
+      } else {
+        parts.push(
+          <a
+            key={match.index}
+            href={match[3]}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              color: '#6488ea',
+              textDecoration: 'none',
+              borderBottom: '1px solid rgba(100, 136, 234, 0.4)',
+              paddingBottom: 1,
+            }}
+          >
+            {match[2]}
+          </a>
+        );
+      }
     }
     last = match.index + match[0].length;
   }

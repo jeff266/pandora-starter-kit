@@ -11,6 +11,10 @@ export function getWorkspaceId(): string {
   return _workspaceId;
 }
 
+export function getAuthToken(): string {
+  return _token;
+}
+
 export function setActiveLens(lensId: string | null) {
   _activeLens = lensId;
 }
