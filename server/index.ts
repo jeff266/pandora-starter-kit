@@ -98,6 +98,7 @@ import notificationPreferencesRouter from './routes/notification-preferences.js'
 import skillRunRequestsRouter from './routes/skill-run-requests.js';
 import reportsRouter, { cleanupReportFiles } from './routes/reports.js';
 import documentsRouter from './routes/documents.js';
+import dashboardPreferencesRouter from './routes/dashboard-preferences.js';
 import { startPushTriggers, stopPushTriggers } from './push/trigger-manager.js';
 import { initRenderers } from './renderers/index.js';
 import { cleanupExpiredAnnotations } from './feedback/cleanup.js';
@@ -277,6 +278,7 @@ workspaceApiRouter.use(projectUpdatesRouter);
 workspaceApiRouter.use(funnelRouter);
 workspaceApiRouter.use(workspaceConfigRouter);
 workspaceApiRouter.use(adminScopesRouter);
+workspaceApiRouter.use(dashboardPreferencesRouter);
 workspaceApiRouter.use(agentsWorkspaceRouter);
 workspaceApiRouter.use(findingsRouter);
 workspaceApiRouter.use(actionItemsRouter);

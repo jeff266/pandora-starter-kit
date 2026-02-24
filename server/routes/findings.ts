@@ -11,6 +11,52 @@ import { getScopeWhereClause, type ActiveScope } from '../config/scope-loader.js
 
 const router = Router();
 
+// Helper function to calculate time range dates
+function calculateTimeRange(timeRange: string): { start: Date; end: Date } | null {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  switch (timeRange) {
+    case 'today':
+      return {
+        start: today,
+        end: new Date(today.getTime() + 24 * 60 * 60 * 1000 - 1),
+      };
+
+    case 'this_week': {
+      // Get Monday of current week
+      const dayOfWeek = now.getDay();
+      const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek; // Sunday = 0, Monday = 1
+      const monday = new Date(today);
+      monday.setDate(today.getDate() + diff);
+
+      // Get Sunday of current week
+      const sunday = new Date(monday);
+      sunday.setDate(monday.getDate() + 6);
+      sunday.setHours(23, 59, 59, 999);
+
+      return { start: monday, end: sunday };
+    }
+
+    case 'this_month': {
+      const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+      const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+      return { start: firstDay, end: lastDay };
+    }
+
+    case 'this_quarter': {
+      const quarter = Math.floor(now.getMonth() / 3);
+      const firstMonth = quarter * 3;
+      const firstDay = new Date(now.getFullYear(), firstMonth, 1);
+      const lastDay = new Date(now.getFullYear(), firstMonth + 3, 0, 23, 59, 59, 999);
+      return { start: firstDay, end: lastDay };
+    }
+
+    default:
+      return null;
+  }
+}
+
 router.get('/:workspaceId/crm/link-info', async (req: Request, res: Response): Promise<void> => {
   try {
     const { workspaceId } = req.params;
@@ -348,6 +394,22 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
     // Support both legacy 'pipeline' and new 'scopeId' query params
     const scopeId = req.query.scopeId as string | undefined;
     const pipelineFilter = req.query.pipeline as string | undefined;
+    const timeRangeParam = req.query.time_range as string | undefined;
+
+    // Calculate time range filter if provided
+    let timeRangeFilter = '';
+    let dateRange: { start: string; end: string } | null = null;
+    if (timeRangeParam && ['today', 'this_week', 'this_month', 'this_quarter'].includes(timeRangeParam)) {
+      const range = calculateTimeRange(timeRangeParam);
+      if (range) {
+        dateRange = {
+          start: range.start.toISOString(),
+          end: range.end.toISOString(),
+        };
+        // Filter deals by close_date for both metrics and pipeline display
+        timeRangeFilter = ` AND d.close_date >= '${range.start.toISOString()}'::timestamptz AND d.close_date <= '${range.end.toISOString()}'::timestamptz`;
+      }
+    }
 
     // Build scope filter clause
     let scopeFilterClause = '';
@@ -468,6 +530,7 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
        WHERE d.workspace_id = $1
          AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
          ${scopeFilterClause}
+         ${timeRangeFilter}
          ${excludeStagesClause}
          ${stageFilterClause}
        GROUP BY COALESCE(d.stage, d.stage_normalized, 'Unknown')
@@ -612,6 +675,112 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
       prev_rate,
     });
     const win_trend = trailing_90d > prev_rate + 0.02 ? 'up' : trailing_90d < prev_rate - 0.02 ? 'down' : 'stable';
+
+    // --- Enhanced Dashboard Data (Phase 1) ---
+    // Fetch actions summary, signals summary, recent findings, and metric evidence in parallel
+    const [actionsSummaryResult, signalsSummaryResult, recentFindingsResult] = await Promise.all([
+      // Actions summary
+      query(
+        `SELECT
+           count(*) FILTER (WHERE execution_status = 'open')::int as total_open,
+           count(*) FILTER (WHERE execution_status = 'open' AND severity = 'critical')::int as critical,
+           COALESCE(sum(impact_amount) FILTER (WHERE execution_status = 'open' AND severity = 'critical'), 0)::float as critical_amount,
+           count(*) FILTER (WHERE execution_status = 'open' AND severity = 'high')::int as warning,
+           COALESCE(sum(impact_amount) FILTER (WHERE execution_status = 'open' AND severity = 'high'), 0)::float as warning_amount,
+           count(*) FILTER (WHERE execution_status = 'open' AND severity IN ('medium', 'low'))::int as info
+         FROM action_items
+         WHERE workspace_id = $1`,
+        [workspaceId]
+      ).catch(() => ({ rows: [{ total_open: 0, critical: 0, critical_amount: 0, warning: 0, warning_amount: 0, info: 0 }] })),
+
+      // Signals summary (last 7 days)
+      query(
+        `SELECT
+           count(*)::int as total_this_week,
+           jsonb_object_agg(signal_type, cnt) as by_type
+         FROM (
+           SELECT signal_type, count(*)::int as cnt
+           FROM account_signals
+           WHERE workspace_id = $1
+             AND created_at >= now() - interval '7 days'
+           GROUP BY signal_type
+         ) s`,
+        [workspaceId]
+      ).catch(() => ({ rows: [{ total_this_week: 0, by_type: {} }] })),
+
+      // Recent findings (top 10)
+      query(
+        `SELECT
+           f.id,
+           f.skill_id,
+           f.severity,
+           f.message,
+           d.name as deal_name,
+           a.name as account_name,
+           f.owner_email,
+           f.found_at
+         FROM findings f
+         LEFT JOIN deals d ON d.id = f.deal_id AND d.workspace_id = f.workspace_id
+         LEFT JOIN accounts a ON a.id = f.account_id AND a.workspace_id = f.workspace_id
+         WHERE f.workspace_id = $1
+           AND f.resolved_at IS NULL
+         ORDER BY
+           CASE f.severity WHEN 'act' THEN 1 WHEN 'watch' THEN 2 WHEN 'notable' THEN 3 ELSE 4 END,
+           f.found_at DESC
+         LIMIT 10`,
+        [workspaceId]
+      ).catch(() => ({ rows: [] })),
+    ]);
+
+    // Build actions summary
+    const actionsRow = actionsSummaryResult.rows[0] || {};
+    const actions_summary = {
+      total_open: actionsRow.total_open || 0,
+      critical: actionsRow.critical || 0,
+      critical_amount: actionsRow.critical_amount || 0,
+      warning: actionsRow.warning || 0,
+      warning_amount: actionsRow.warning_amount || 0,
+      info: actionsRow.info || 0,
+      top_actions: [], // Would need a separate query to get top 5 actions
+    };
+
+    // Build signals summary
+    const signalsRow = signalsSummaryResult.rows[0] || {};
+    const signals_summary = {
+      total_this_week: signalsRow.total_this_week || 0,
+      by_type: signalsRow.by_type || {},
+      hot_accounts: [], // Would need a separate query to get hot accounts
+    };
+
+    // Recent findings
+    const recent_findings = recentFindingsResult.rows;
+
+    // Build metric evidence
+    const metric_evidence = {
+      total_pipeline: {
+        formula: 'SUM(amount) WHERE stage NOT IN (closed_won, closed_lost)',
+        deal_count: total_deals,
+        excludes: `Excludes closed deals and stages: ${excludedFromPipeline.join(', ') || 'none'}`,
+        time_range: timeRangeParam || 'all',
+      },
+      weighted_pipeline: {
+        formula: 'SUM(amount × probability)',
+        method: 'Using stage-default probabilities where deal probability is null',
+      },
+      coverage_ratio: {
+        formula: 'weighted_pipeline / remaining_quota',
+        quota_source: quota ? 'From revenue targets' : 'Not configured',
+        remaining_quota: quota || null,
+      },
+      win_rate: {
+        formula: 'closed_won / (closed_won + closed_lost) trailing 90 days',
+        won_count: wr.won_90,
+        lost_count: wr.total_closed_90 - wr.won_90,
+        excluded_reasons: excludedFromWinRate.length > 0 ? [`Excluded stages: ${excludedFromWinRate.join(', ')}`] : [],
+      },
+    };
+
+    // --- End Enhanced Dashboard Data ---
 
     // --- D1: include_deals support ---
     const includeDealsBool = req.query.include_deals === 'true';
@@ -763,6 +932,13 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
           trend: win_trend,
         },
         findings_summary,
+        // Enhanced dashboard data (Phase 1)
+        time_range: timeRangeParam,
+        date_range: dateRange,
+        metric_evidence,
+        actions_summary,
+        signals_summary,
+        recent_findings,
       });
       return;
     }
@@ -780,6 +956,13 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
         trend: win_trend,
       },
       findings_summary,
+      // Enhanced dashboard data (Phase 1)
+      time_range: timeRangeParam,
+      date_range: dateRange,
+      metric_evidence,
+      actions_summary,
+      signals_summary,
+      recent_findings,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
