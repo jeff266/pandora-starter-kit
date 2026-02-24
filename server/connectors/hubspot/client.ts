@@ -26,6 +26,25 @@ export class HubSpotClient {
     return this.accessToken;
   }
 
+  async ensureFreshToken(): Promise<boolean> {
+    if (!this.workspaceId) return true;
+    try {
+      const { getConnectorCredentials } = await import('../../lib/credential-store.js');
+      const creds = await getConnectorCredentials(this.workspaceId, 'hubspot');
+      const refreshToken = creds?.refreshToken || creds?.refresh_token;
+      if (!refreshToken) {
+        console.log('[HubSpot Client] No refresh token, skipping proactive refresh');
+        return true;
+      }
+
+      console.log('[HubSpot Client] Proactive token refresh before sync');
+      return await this.refreshAccessToken();
+    } catch (err) {
+      console.error('[HubSpot Client] Proactive refresh check failed:', err instanceof Error ? err.message : err);
+      return true;
+    }
+  }
+
   private async refreshAccessToken(): Promise<boolean> {
     if (!this.workspaceId) return false;
 

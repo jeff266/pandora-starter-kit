@@ -83,6 +83,7 @@ export class HubSpotConnector implements PandoraConnector {
 
   async discoverSchema(connection: Connection): Promise<SourceSchema> {
     const client = new HubSpotClient(connection.credentials.accessToken!, connection.workspaceId);
+    await client.ensureFreshToken();
     const schema = await runSchemaDiscovery(client);
     const pipelines = await discoverPipelines(client);
     await storeSchemaMetadata(connection.workspaceId, schema, pipelines);
@@ -91,16 +92,19 @@ export class HubSpotConnector implements PandoraConnector {
 
   async initialSync(connection: Connection, workspaceId: string): Promise<SyncResult> {
     const client = new HubSpotClient(connection.credentials.accessToken!, workspaceId);
+    await client.ensureFreshToken();
     return initialSync(client, workspaceId);
   }
 
   async incrementalSync(connection: Connection, workspaceId: string, since: Date): Promise<SyncResult> {
     const client = new HubSpotClient(connection.credentials.accessToken!, workspaceId);
+    await client.ensureFreshToken();
     return incrementalSync(client, workspaceId, since);
   }
 
   async backfillSync(connection: Connection, workspaceId: string): Promise<SyncResult> {
     const client = new HubSpotClient(connection.credentials.accessToken!, workspaceId);
+    await client.ensureFreshToken();
     return backfillAssociations(client, workspaceId);
   }
 
