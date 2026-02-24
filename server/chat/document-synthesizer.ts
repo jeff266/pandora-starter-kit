@@ -5,8 +5,7 @@
 
 import { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, AlignmentType, HeadingLevel, BorderStyle, ShadingType } from 'docx';
 import ExcelJS from 'exceljs';
-import * as fs from 'fs';
-import * as path from 'path';
+import pool from '../db.js';
 import { callLLM } from '../utils/llm-router.js';
 import { formatCurrency } from '../utils/format-currency.js';
 import { getWorkspaceContext, type WorkspaceContext } from './workspace-context.js';
@@ -721,17 +720,16 @@ async function generateDocx(
     .slice(0, 30);
 
   const filename = `${workspaceId}-${new Date().toISOString().slice(0, 10)}-${slug}.docx`;
-  const outputDir = '/tmp/pandora-docs';
-
-  if (!fs.existsSync(outputDir)) {
-    fs.mkdirSync(outputDir, { recursive: true });
-  }
-
-  const outputPath = path.join(outputDir, filename);
   const buffer = await Packer.toBuffer(doc);
-  fs.writeFileSync(outputPath, buffer);
 
-  return outputPath;
+  await pool.query(
+    `INSERT INTO generated_documents (workspace_id, filename, content_type, data, file_size)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (workspace_id, filename) DO UPDATE SET data = $4, file_size = $5, created_at = NOW()`,
+    [workspaceId, filename, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', buffer, buffer.length]
+  );
+
+  return filename;
 }
 
 /**
@@ -749,13 +747,6 @@ async function generateXlsx(
     .slice(0, 30);
 
   const filename = `${workspaceId}-${new Date().toISOString().slice(0, 10)}-${slug}-data.xlsx`;
-  const outputDir = '/tmp/pandora-docs';
-
-  if (!fs.existsSync(outputDir)) {
-    fs.mkdirSync(outputDir, { recursive: true });
-  }
-
-  const outputPath = path.join(outputDir, filename);
 
   const workbook = new ExcelJS.Workbook();
 
@@ -821,8 +812,16 @@ async function generateXlsx(
 
   ws3.columns = [{ width: 25 }, { width: 20 }];
 
-  await workbook.xlsx.writeFile(outputPath);
-  return outputPath;
+  const xlsxBuffer = await workbook.xlsx.writeBuffer() as Buffer;
+
+  await pool.query(
+    `INSERT INTO generated_documents (workspace_id, filename, content_type, data, file_size)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (workspace_id, filename) DO UPDATE SET data = $4, file_size = $5, created_at = NOW()`,
+    [workspaceId, filename, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', xlsxBuffer, xlsxBuffer.length]
+  );
+
+  return filename;
 }
 
 /**
@@ -838,18 +837,18 @@ export async function synthesizeDocuments(input: SynthesisInput): Promise<Synthe
   const outline = await generateDocumentOutline(input, extractedData);
 
   // Step 3: Generate docx
-  const docxPath = await generateDocx(outline, extractedData, input.workspaceId);
-  console.log('[DocumentSynthesizer] Generated docx:', docxPath);
+  const docxFilename = await generateDocx(outline, extractedData, input.workspaceId);
+  console.log('[DocumentSynthesizer] Generated docx:', docxFilename);
 
   // Step 4: Generate xlsx
-  const xlsxPath = await generateXlsx(outline, extractedData, input.workspaceId);
-  console.log('[DocumentSynthesizer] Generated xlsx:', xlsxPath);
+  const xlsxFilename = await generateXlsx(outline, extractedData, input.workspaceId);
+  console.log('[DocumentSynthesizer] Generated xlsx:', xlsxFilename);
 
   return {
-    docxPath,
-    xlsxPath,
-    docxFilename: path.basename(docxPath),
-    xlsxFilename: path.basename(xlsxPath),
+    docxPath: docxFilename,
+    xlsxPath: xlsxFilename,
+    docxFilename,
+    xlsxFilename,
   };
 }
 
@@ -865,17 +864,17 @@ export async function testDocumentGeneration(
   const outline: DocumentOutline = buildOutlineFromChatContent(chatContent);
   const extractedData = extractDealsFromChatContent(chatContent);
 
-  const docxPath = await generateDocx(outline, extractedData, workspaceId);
-  console.log('[DocumentSynthesizer] Test: generated docx:', docxPath);
+  const docxFilename = await generateDocx(outline, extractedData, workspaceId);
+  console.log('[DocumentSynthesizer] Test: generated docx:', docxFilename);
 
-  const xlsxPath = await generateXlsx(outline, extractedData, workspaceId);
-  console.log('[DocumentSynthesizer] Test: generated xlsx:', xlsxPath);
+  const xlsxFilename = await generateXlsx(outline, extractedData, workspaceId);
+  console.log('[DocumentSynthesizer] Test: generated xlsx:', xlsxFilename);
 
   return {
-    docxPath,
-    xlsxPath,
-    docxFilename: path.basename(docxPath),
-    xlsxFilename: path.basename(xlsxPath),
+    docxPath: docxFilename,
+    xlsxPath: xlsxFilename,
+    docxFilename,
+    xlsxFilename,
   };
 }
 

@@ -4,7 +4,6 @@
  */
 
 import { Router, type Request, type Response } from 'express';
-import * as fs from 'fs';
 import * as path from 'path';
 import { testDocumentGeneration, formatDocumentResponse } from '../chat/document-synthesizer.js';
 import pool from '../db.js';
@@ -31,29 +30,23 @@ router.get('/:workspaceId/generated-docs/:filename', async (req: Request, res: R
       return;
     }
 
-    const filePath = path.join('/tmp/pandora-docs', safeName);
+    const result = await pool.query(
+      'SELECT data, content_type, file_size FROM generated_documents WHERE workspace_id = $1 AND filename = $2',
+      [workspaceId, safeName]
+    );
 
-    if (!fs.existsSync(filePath)) {
+    if (result.rows.length === 0) {
       res.status(404).json({ error: 'Document not found or expired' });
       return;
     }
 
-    const contentType = ext === '.docx'
-      ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-      : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-
-    res.setHeader('Content-Type', contentType);
+    const doc = result.rows[0];
+    res.setHeader('Content-Type', doc.content_type);
     res.setHeader('Content-Disposition', `attachment; filename="${safeName}"`);
-
-    const stream = fs.createReadStream(filePath);
-    stream.pipe(res);
-
-    stream.on('error', (err) => {
-      console.error('[documents] Stream error:', err);
-      if (!res.headersSent) {
-        res.status(500).json({ error: 'Failed to download document' });
-      }
-    });
+    if (doc.file_size) {
+      res.setHeader('Content-Length', doc.file_size);
+    }
+    res.send(doc.data);
 
   } catch (err) {
     console.error('[documents] Download error:', err);
