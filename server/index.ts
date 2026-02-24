@@ -103,6 +103,7 @@ import { initRenderers } from './renderers/index.js';
 import { cleanupExpiredAnnotations } from './feedback/cleanup.js';
 import crmWritebackRouter from './routes/crm-writeback.js';
 import agentFeedbackRouter from './routes/agent-feedback.js';
+import waitlistRouter from './routes/waitlist.js';
 
 dotenv.config();
 
@@ -137,7 +138,7 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Admin-Key', 'X-Pandora-Lens', 'X-Workspace-Id'],
 }));
 
 app.use((_req, res, next) => {
@@ -215,6 +216,7 @@ app.use("/api/slack/interactions", slackInteractionsRouter);
 
 // Public webhook endpoints - token-based auth in URL path
 app.use("/api", publicWebhooksRouter);
+app.use("/api/waitlist", waitlistRouter);
 
 // OAuth routes - PUBLIC (no auth required for browser redirects)
 app.use("/api/auth/hubspot", hubspotAuthRouter);

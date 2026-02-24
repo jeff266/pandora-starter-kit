@@ -9,6 +9,7 @@ import Placeholder from './components/Placeholder';
 import ChatPanel from './components/ChatPanel';
 import LoginPage from './pages/LoginPage';
 import AuthCallback from './pages/AuthCallback';
+import PandoraHomepage from './pages/PandoraHomepage';
 import WorkspacePicker from './pages/WorkspacePicker';
 import JoinWorkspace from './pages/JoinWorkspace';
 import MembersPage from './pages/MembersPage';
@@ -184,7 +185,15 @@ export default function App() {
   }
 
   if (!isAuthenticated) {
-    return <LoginPage />;
+    if (location.pathname === '/login') {
+      return <LoginPage />;
+    }
+    return (
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="*" element={<PandoraHomepage />} />
+      </Routes>
+    );
   }
 
   if (workspaces.length === 0) {

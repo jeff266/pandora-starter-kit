@@ -1932,7 +1932,7 @@ function MetricBreakdownModal({ metric, scopeId, onClose }: { metric: string; sc
                     onMouseLeave={e => (e.currentTarget.style.background = ri % 2 === 0 ? 'transparent' : 'rgba(30, 41, 59, 0.3)')}
                   >
                     <td style={{ padding: '8px 12px', color: colors.accent, fontWeight: 500, maxWidth: 250, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{anon.deal(d.name)}</td>
-                    <td style={{ padding: '8px 12px', color: colors.textMuted, whiteSpace: 'nowrap' }}>{anon.name(d.owner)}</td>
+                    <td style={{ padding: '8px 12px', color: colors.textMuted, whiteSpace: 'nowrap' }}>{anon.person(d.owner)}</td>
                     <td style={{ padding: '8px 12px', color: colors.text, fontFamily: fonts.mono, whiteSpace: 'nowrap' }}>{formatCurrency(anon.amount(d.amount))}</td>
                     {!isWinRate && <td style={{ padding: '8px 12px', color: colors.textMuted, fontFamily: fonts.mono }}>{d.probability > 1 ? d.probability.toFixed(0) : (d.probability * 100).toFixed(0)}%</td>}
                     {!isWinRate && <td style={{ padding: '8px 12px', color: colors.accent, fontFamily: fonts.mono, whiteSpace: 'nowrap' }}>{formatCurrency(anon.amount(d.weighted_amount))}</td>}
