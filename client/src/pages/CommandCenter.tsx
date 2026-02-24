@@ -1816,7 +1816,6 @@ function MetricCard({ label, value, color, onClick }: { label: string; value: st
 }
 
 function MetricBreakdownModal({ metric, scopeId, onClose }: { metric: string; scopeId?: string; onClose: () => void }) {
-  const { wsId } = useWorkspace();
   const { anon } = useDemoMode();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -1862,20 +1861,13 @@ function MetricBreakdownModal({ metric, scopeId, onClose }: { metric: string; sc
 
   const isWinRate = metric === 'win_rate';
 
-  const SortHeader = ({ label, field }: { label: string; field: string }) => (
-    <th
-      onClick={() => handleSort(field)}
-      style={{
-        padding: '8px 12px', textAlign: 'left', fontWeight: 600, fontSize: 11,
-        textTransform: 'uppercase', letterSpacing: '0.05em', cursor: 'pointer',
-        color: sortKey === field ? colors.accent : '#94a3b8',
-        background: 'rgba(30, 41, 59, 0.8)', borderBottom: '1px solid rgba(148, 163, 184, 0.15)',
-        whiteSpace: 'nowrap', userSelect: 'none',
-      }}
-    >
-      {label} {sortKey === field ? (sortDir === 'desc' ? '↓' : '↑') : ''}
-    </th>
-  );
+  const sortHeaderStyle = (field: string): React.CSSProperties => ({
+    padding: '8px 12px', textAlign: 'left' as const, fontWeight: 600, fontSize: 11,
+    textTransform: 'uppercase' as const, letterSpacing: '0.05em', cursor: 'pointer',
+    color: sortKey === field ? colors.accent : '#94a3b8',
+    background: 'rgba(30, 41, 59, 0.8)', borderBottom: '1px solid rgba(148, 163, 184, 0.15)',
+    whiteSpace: 'nowrap' as const, userSelect: 'none' as const,
+  });
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
@@ -1920,14 +1912,14 @@ function MetricBreakdownModal({ metric, scopeId, onClose }: { metric: string; sc
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead style={{ position: 'sticky', top: 0 }}>
                 <tr>
-                  <SortHeader label="Deal" field="name" />
-                  <SortHeader label="Owner" field="owner" />
-                  <SortHeader label="Amount" field="amount" />
-                  {!isWinRate && <SortHeader label="Probability" field="probability" />}
-                  {!isWinRate && <SortHeader label="Weighted" field="weighted_amount" />}
-                  <SortHeader label="Stage" field="stage" />
-                  {isWinRate && <SortHeader label="Outcome" field="outcome" />}
-                  <SortHeader label="Close Date" field="close_date" />
+                  <th onClick={() => handleSort('name')} style={sortHeaderStyle('name')}>Deal {sortKey === 'name' ? (sortDir === 'desc' ? '↓' : '↑') : ''}</th>
+                  <th onClick={() => handleSort('owner')} style={sortHeaderStyle('owner')}>Owner {sortKey === 'owner' ? (sortDir === 'desc' ? '↓' : '↑') : ''}</th>
+                  <th onClick={() => handleSort('amount')} style={sortHeaderStyle('amount')}>Amount {sortKey === 'amount' ? (sortDir === 'desc' ? '↓' : '↑') : ''}</th>
+                  {!isWinRate && <th onClick={() => handleSort('probability')} style={sortHeaderStyle('probability')}>Probability {sortKey === 'probability' ? (sortDir === 'desc' ? '↓' : '↑') : ''}</th>}
+                  {!isWinRate && <th onClick={() => handleSort('weighted_amount')} style={sortHeaderStyle('weighted_amount')}>Weighted {sortKey === 'weighted_amount' ? (sortDir === 'desc' ? '↓' : '↑') : ''}</th>}
+                  <th onClick={() => handleSort('stage')} style={sortHeaderStyle('stage')}>Stage {sortKey === 'stage' ? (sortDir === 'desc' ? '↓' : '↑') : ''}</th>
+                  {isWinRate && <th onClick={() => handleSort('outcome')} style={sortHeaderStyle('outcome')}>Outcome {sortKey === 'outcome' ? (sortDir === 'desc' ? '↓' : '↑') : ''}</th>}
+                  <th onClick={() => handleSort('close_date')} style={sortHeaderStyle('close_date')}>Close Date {sortKey === 'close_date' ? (sortDir === 'desc' ? '↓' : '↑') : ''}</th>
                 </tr>
               </thead>
               <tbody>
