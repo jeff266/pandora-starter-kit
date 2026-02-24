@@ -60,6 +60,23 @@ interface ChatSessionPreview {
   user_email?: string;
 }
 
+const CHAT_MIN_WIDTH = 380;
+const CHAT_DEFAULT_WIDTH = 440;
+const CHAT_TABLE_WIDTH = 720;
+const CHAT_MAX_WIDTH = 900;
+const CHAT_WIDTH_KEY = 'pandora_chat_width';
+
+function getStoredWidth(): number {
+  try {
+    const v = sessionStorage.getItem(CHAT_WIDTH_KEY);
+    if (v) {
+      const n = parseInt(v, 10);
+      if (n >= CHAT_MIN_WIDTH && n <= CHAT_MAX_WIDTH) return n;
+    }
+  } catch {}
+  return CHAT_DEFAULT_WIDTH;
+}
+
 export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
   const isMobile = useIsMobile();
   const { anon } = useDemoMode();
@@ -81,6 +98,85 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
   const [exportingIdx, setExportingIdx] = useState<number | null>(null);
   const [exportDesc, setExportDesc] = useState('');
   const prevMessageCount = useRef(0);
+  const [panelWidth, setPanelWidth] = useState(getStoredWidth);
+  const isResizing = useRef(false);
+  const resizeStartX = useRef(0);
+  const resizeStartWidth = useRef(0);
+
+  const hasTableContent = messages.some(m => m.role === 'assistant' && m.content.split('\n').some(l => isTableRow(l)));
+
+  useEffect(() => {
+    if (hasTableContent) {
+      setPanelWidth(prev => {
+        if (prev < CHAT_TABLE_WIDTH) {
+          try { sessionStorage.setItem(CHAT_WIDTH_KEY, String(CHAT_TABLE_WIDTH)); } catch {}
+          return CHAT_TABLE_WIDTH;
+        }
+        return prev;
+      });
+    }
+  }, [hasTableContent]);
+
+  const activeMoveRef = useRef<((ev: MouseEvent) => void) | null>(null);
+  const activeUpRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (activeMoveRef.current) document.removeEventListener('mousemove', activeMoveRef.current);
+      if (activeUpRef.current) document.removeEventListener('mouseup', activeUpRef.current);
+      isResizing.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen && isResizing.current) {
+      if (activeMoveRef.current) document.removeEventListener('mousemove', activeMoveRef.current);
+      if (activeUpRef.current) document.removeEventListener('mouseup', activeUpRef.current);
+      isResizing.current = false;
+      activeMoveRef.current = null;
+      activeUpRef.current = null;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    }
+  }, [isOpen]);
+
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    isResizing.current = true;
+    resizeStartX.current = e.clientX;
+    resizeStartWidth.current = panelWidth;
+
+    const handleMouseMove = (ev: MouseEvent) => {
+      if (!isResizing.current) return;
+      const delta = resizeStartX.current - ev.clientX;
+      const newWidth = Math.min(CHAT_MAX_WIDTH, Math.max(CHAT_MIN_WIDTH, resizeStartWidth.current + delta));
+      setPanelWidth(newWidth);
+    };
+
+    const handleMouseUp = () => {
+      isResizing.current = false;
+      activeMoveRef.current = null;
+      activeUpRef.current = null;
+      setPanelWidth(w => {
+        try { sessionStorage.setItem(CHAT_WIDTH_KEY, String(w)); } catch {}
+        return w;
+      });
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    activeMoveRef.current = handleMouseMove;
+    activeUpRef.current = handleMouseUp;
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, [panelWidth]);
 
   useEffect(() => {
     if (isOpen && inputRef.current) {
@@ -265,7 +361,19 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
 
   return (
     <div style={styles.overlay} onClick={onClose}>
-      <div style={{ ...styles.panel, ...(isMobile ? { width: '100%' } : {}) }} onClick={e => e.stopPropagation()}>
+      <div style={{ ...styles.panel, ...(isMobile ? { width: '100%' } : { width: panelWidth }) }} onClick={e => e.stopPropagation()}>
+        {!isMobile && (
+          <div
+            onMouseDown={handleResizeStart}
+            style={{
+              position: 'absolute', left: 0, top: 0, bottom: 0, width: 6,
+              cursor: 'col-resize', zIndex: 10,
+              background: 'transparent',
+            }}
+            onMouseEnter={e => (e.currentTarget.style.background = 'rgba(100,136,234,0.4)')}
+            onMouseLeave={e => { if (!isResizing.current) e.currentTarget.style.background = 'transparent'; }}
+          />
+        )}
         <div style={{ ...styles.header, ...(isMobile ? { padding: '12px 14px' } : {}) }}>
           <div>
             <div style={styles.title}>{isHistoryView ? 'Past Conversations' : 'Ask Pandora'}</div>
@@ -1136,13 +1244,13 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: 'flex-end',
   },
   panel: {
-    width: 440,
     maxWidth: '100vw',
     height: '100vh',
     backgroundColor: '#0f1117',
     borderLeft: '1px solid #1e2230',
     display: 'flex',
     flexDirection: 'column',
+    position: 'relative',
   },
   header: {
     padding: '16px 20px',
