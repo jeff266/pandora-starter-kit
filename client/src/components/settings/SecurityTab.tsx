@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { colors, fonts } from '../../styles/theme';
 import Toast from '../Toast';
+import { useWorkspace } from '../../context/WorkspaceContext';
 
 type PasswordStrength = 'weak' | 'fair' | 'strong';
 
@@ -20,7 +20,7 @@ function evaluatePasswordStrength(password: string): PasswordStrength {
 }
 
 export default function SecurityTab() {
-  const navigate = useNavigate();
+  const { logout } = useWorkspace();
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -106,9 +106,7 @@ export default function SecurityTab() {
         },
       }).catch(() => {});
     } finally {
-      localStorage.removeItem('pandora_session');
-      localStorage.removeItem('pandora_last_workspace');
-      navigate('/login?reason=signed_out_all');
+      await logout();
     }
   };
 
