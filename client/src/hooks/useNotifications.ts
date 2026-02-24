@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { api } from '../lib/api';
+import { api, getAuthToken } from '../lib/api';
 
 export interface Notification {
   id: string;
@@ -21,90 +21,99 @@ interface UseNotificationsReturn {
   refresh: () => Promise<void>;
 }
 
+async function userRequest(method: string, path: string, body?: any) {
+  const token = getAuthToken();
+  const headers: Record<string, string> = {
+    'Authorization': `Bearer ${token}`,
+  };
+  if (body) {
+    headers['Content-Type'] = 'application/json';
+  }
+  const res = await fetch(`/api${path}`, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 export function useNotifications(workspaceId: string): UseNotificationsReturn {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch unread count
   const fetchUnreadCount = useCallback(async () => {
     try {
-      const response = (await api.get('/users/me/notifications/unread-count')) as { count: number };
+      const response = await userRequest('GET', '/users/me/notifications/unread-count') as { count: number };
       setUnreadCount(response.count);
     } catch (err) {
       console.error('Failed to fetch unread count:', err);
     }
   }, []);
 
-  // Fetch recent notifications
   const fetchNotifications = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const response = (await api.get(`/workspaces/${workspaceId}/notifications`)) as {
+      const response = (await api.get('/notifications')) as {
         notifications: Notification[];
       };
-      setNotifications(response.notifications);
+      setNotifications(response.notifications || []);
     } catch (err) {
       console.error('Failed to fetch notifications:', err);
       setError('Failed to load notifications');
     } finally {
       setLoading(false);
     }
-  }, [workspaceId]);
+  }, []);
 
-  // Mark single notification as read
   const markRead = useCallback(async (notificationId: string) => {
-    // Optimistic update
     setNotifications(prev =>
       prev.map(n => n.id === notificationId ? { ...n, read: true } : n)
     );
     setUnreadCount(prev => Math.max(0, prev - 1));
 
     try {
-      await api.post(`/workspaces/${workspaceId}/notifications/${notificationId}/read`, {});
+      await api.post(`/notifications/${notificationId}/read`, {});
     } catch (err) {
       console.error('Failed to mark notification as read:', err);
-      // Revert on error
       setNotifications(prev =>
         prev.map(n => n.id === notificationId ? { ...n, read: false } : n)
       );
       setUnreadCount(prev => prev + 1);
     }
-  }, [workspaceId]);
+  }, []);
 
-  // Mark all notifications as read
   const markAllRead = useCallback(async () => {
     const previousNotifications = [...notifications];
     const previousUnreadCount = unreadCount;
 
-    // Optimistic update
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
     setUnreadCount(0);
 
     try {
-      await api.post(`/workspaces/${workspaceId}/notifications/read-all`, {});
+      await api.post('/notifications/read-all', {});
     } catch (err) {
       console.error('Failed to mark all as read:', err);
-      // Revert on error
       setNotifications(previousNotifications);
       setUnreadCount(previousUnreadCount);
     }
-  }, [workspaceId, notifications, unreadCount]);
+  }, [notifications, unreadCount]);
 
-  // Manual refresh
   const refresh = useCallback(async () => {
     await Promise.all([fetchUnreadCount(), fetchNotifications()]);
   }, [fetchUnreadCount, fetchNotifications]);
 
-  // Initial fetch on mount
   useEffect(() => {
     fetchUnreadCount();
     fetchNotifications();
   }, [fetchUnreadCount, fetchNotifications]);
 
-  // Poll unread count every 30 seconds
   useEffect(() => {
     const interval = setInterval(() => {
       fetchUnreadCount();

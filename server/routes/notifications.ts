@@ -16,7 +16,7 @@ export const workspaceNotificationsRouter = Router();
  * GET /notifications
  * List recent notifications for current user in workspace
  */
-workspaceNotificationsRouter.get('/notifications', async (req: Request, res: Response) => {
+workspaceNotificationsRouter.get('/:workspaceId/notifications', async (req: Request, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId as string;
     const userId = req.user?.user_id;
@@ -39,7 +39,7 @@ workspaceNotificationsRouter.get('/notifications', async (req: Request, res: Res
  * POST /notifications/:notificationId/read
  * Mark a single notification as read
  */
-workspaceNotificationsRouter.post('/notifications/:notificationId/read', async (req: Request, res: Response) => {
+workspaceNotificationsRouter.post('/:workspaceId/notifications/:notificationId/read', async (req: Request, res: Response) => {
   try {
     const notificationId = req.params.notificationId as string;
     const userId = req.user?.user_id;
@@ -61,7 +61,7 @@ workspaceNotificationsRouter.post('/notifications/:notificationId/read', async (
  * POST /notifications/read-all
  * Mark all unread notifications as read for current user in workspace
  */
-workspaceNotificationsRouter.post('/notifications/read-all', async (req: Request, res: Response) => {
+workspaceNotificationsRouter.post('/:workspaceId/notifications/read-all', async (req: Request, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId as string;
     const userId = req.user?.user_id;

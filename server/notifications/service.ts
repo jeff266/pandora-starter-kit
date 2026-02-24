@@ -39,10 +39,10 @@ export class NotificationService {
         INSERT INTO notifications (
           workspace_id,
           user_id,
-          type,
+          notification_type,
           title,
           body,
-          action_url
+          link_url
         ) VALUES ($1, $2, $3, $4, $5, $6)
       `, [workspaceId, userId, type, title, body || null, actionUrl || null]);
 
@@ -101,8 +101,8 @@ export class NotificationService {
     try {
       await query<Record<string, never>>(`
         UPDATE notifications
-        SET read_at = NOW()
-        WHERE id = $1 AND user_id = $2 AND read_at IS NULL
+        SET is_read = true, read_at = NOW()
+        WHERE id = $1 AND user_id = $2 AND is_read = false
       `, [notificationId, userId]);
     } catch (err) {
       console.error('[notifications] Error marking notification as read:', err instanceof Error ? err.message : err);
@@ -117,10 +117,10 @@ export class NotificationService {
     try {
       await query<Record<string, never>>(`
         UPDATE notifications
-        SET read_at = NOW()
+        SET is_read = true, read_at = NOW()
         WHERE user_id = $1
           AND workspace_id = $2
-          AND read_at IS NULL
+          AND is_read = false
       `, [userId, workspaceId]);
     } catch (err) {
       console.error('[notifications] Error marking all as read:', err instanceof Error ? err.message : err);
@@ -168,11 +168,11 @@ export class NotificationService {
           id,
           workspace_id,
           user_id,
-          type,
+          notification_type AS type,
           title,
           body,
-          action_url,
-          read_at,
+          link_url AS action_url,
+          is_read AS read,
           created_at
         FROM notifications
         WHERE user_id = $1
@@ -196,7 +196,7 @@ export class NotificationService {
       const result = await query<{ count: string }>(`
         SELECT COUNT(*)::text as count
         FROM notifications
-        WHERE user_id = $1 AND read_at IS NULL
+        WHERE user_id = $1 AND is_read = false
       `, [userId]);
 
       return parseInt(result.rows[0]?.count || '0', 10);
