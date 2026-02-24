@@ -12,7 +12,7 @@
 | Rating | Count | Tools |
 |--------|-------|-------|
 | 🟢 LIVE | 19 | query_deals, query_accounts, query_conversations, query_contacts, query_activity_timeline, get_skill_evidence, compute_metric, compute_stage_benchmarks, query_stage_history, query_field_history, compute_metric_segmented, search_transcripts, compute_activity_trend, infer_contact_role, compute_close_probability, compute_forecast_accuracy, compute_pipeline_creation, compute_inqtr_close_rate, compute_competitive_rates |
-| 🟠 PARTIAL | 1 | compute_shrink_rate (always returns 10% fallback — `field_change_log` table missing) |
+| 🟢 FIXED | 1 | compute_shrink_rate (field_change_log table created + backfilled with 4,175 stage + 2,193 amount records) |
 | 🔴 STUB/MISSING | 13 | score_icp_fit, score_multithreading, score_conversation_sentiment, compute_rep_conversions, detect_buyer_signals, check_stakeholder_status, enrich_market_signals, query_product_usage, compute_wallet_share, compute_attention_score, score_activity_quality, detect_process_blockers, compute_source_conversion |
 
 ### Architecture Note
@@ -25,8 +25,8 @@ All 13 MISSING tools have zero code anywhere in the codebase — aspirational sp
 
 ### Notable Gaps
 - `score_icp_fit`: ICP scoring exists as `icpScoreOpenDeals` in skill runtime but NOT exposed as chat tool
-- `compute_shrink_rate`: Code exists but `field_change_log` table doesn't, so always returns hardcoded 10%
-- `query_field_history`: Works via `deal_stage_history` fallback; intended `field_change_log` table missing
+- `compute_shrink_rate`: **FIXED** — `field_change_log` table created + backfilled (4,175 stage + 2,193 amount records)
+- `query_field_history`: **FIXED** — `field_change_log` table now available with proper indexes
 
 ---
 
@@ -296,3 +296,14 @@ All 6 hardcoded agents are 🟡 (DEFINED) because:
 | Renderers | `server/renderers/*.ts` |
 | Migrations | `server/migrations/*.sql` |
 | DB | `server/db.ts` |
+
+---
+
+## Fixes Applied (2026-02-24)
+
+| Fix | Description | Status |
+|-----|-------------|--------|
+| 1. PPTX Registry | Replaced stub with wrapper class adapting `renderPPTX()` to `Renderer` interface. Added `templateMatrix` support. | DONE |
+| 2. dependsOn Bugs | Fixed 3 skills referencing `outputKey` instead of step ID: `competitive-intelligence`, `stage-velocity-benchmarks`, `forecast-accuracy-tracking` | DONE |
+| 3. Missing Migrations | Applied 5 migrations: `targets`, `quotas`, `deal_score_snapshots`, `report_share_links`, `tool_call_logs` | DONE |
+| 4. field_change_log | Created table with indexes, backfilled 4,175 stage + 2,193 amount records from existing data. Unblocks `compute_shrink_rate` and `query_field_history`. | DONE |
