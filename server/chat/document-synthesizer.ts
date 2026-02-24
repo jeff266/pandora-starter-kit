@@ -235,8 +235,8 @@ async function generateDocumentOutline(
         workspaceContext: input.workspaceContext,
       }, null, 2),
     }],
-    maxTokens: 4000,
-    temperature: 0.3,
+    maxTokens: 6000,
+    temperature: 0.2,
     _tracking: {
       workspaceId: input.workspaceId,
       phase: 'document_synthesis',
@@ -245,21 +245,113 @@ async function generateDocumentOutline(
   });
 
   const text = response.content.trim();
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  const outline = parseOutlineJSON(text);
 
-  if (!jsonMatch) {
-    throw new Error('Failed to extract JSON from document synthesis response');
-  }
-
-  const outline = JSON.parse(jsonMatch[0]) as DocumentOutline;
-
-  // Ensure appendix has deal data
   if (extractedData.deals.length > 0) {
+    if (!outline.appendix) {
+      outline.appendix = { data_source: '', query_filters: '', calculations: [], raw_deal_count: 0, raw_pipeline_value: 0 };
+    }
     outline.appendix.raw_deal_count = extractedData.deals.length;
     outline.appendix.raw_pipeline_value = extractedData.deals.reduce((sum, d) => sum + d.amount, 0);
   }
 
   return outline;
+}
+
+function stripTrailingCommas(s: string): string {
+  return s.replace(/,\s*([}\]])/g, '$1');
+}
+
+function stripCodeFences(s: string): string {
+  return s.replace(/^```(?:json)?\s*\n?/gm, '').replace(/\n?```\s*$/gm, '');
+}
+
+function escapeUnescapedNewlinesInStrings(s: string): string {
+  const result: string[] = [];
+  let inStr = false;
+  let esc = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (esc) { result.push(ch); esc = false; continue; }
+    if (ch === '\\' && inStr) { result.push(ch); esc = true; continue; }
+    if (ch === '"') { inStr = !inStr; result.push(ch); continue; }
+    if (inStr && ch === '\n') { result.push('\\n'); continue; }
+    if (inStr && ch === '\r') { continue; }
+    if (inStr && ch === '\t') { result.push('\\t'); continue; }
+    result.push(ch);
+  }
+  return result.join('');
+}
+
+function closeOpenJSON(s: string): string {
+  let braces = 0;
+  let brackets = 0;
+  let inString = false;
+  let escape = false;
+
+  for (const ch of s) {
+    if (escape) { escape = false; continue; }
+    if (ch === '\\' && inString) { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === '{') braces++;
+    if (ch === '}') braces--;
+    if (ch === '[') brackets++;
+    if (ch === ']') brackets--;
+  }
+
+  let closed = s.replace(/,\s*$/, '');
+  while (brackets > 0) { closed += ']'; brackets--; }
+  while (braces > 0) { closed += '}'; braces--; }
+  return closed;
+}
+
+function parseOutlineJSON(text: string): DocumentOutline {
+  let cleaned = stripCodeFences(text);
+  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    throw new Error('Failed to extract JSON from document synthesis response');
+  }
+
+  let raw = jsonMatch[0];
+
+  try {
+    return JSON.parse(raw) as DocumentOutline;
+  } catch (e1) {
+    console.warn('[DocumentSynthesizer] JSON.parse failed:', (e1 as Error).message?.slice(0, 100));
+  }
+
+  try {
+    return JSON.parse(stripTrailingCommas(raw)) as DocumentOutline;
+  } catch (_e2) {
+    console.warn('[DocumentSynthesizer] Strip trailing commas failed, trying string escape');
+  }
+
+  try {
+    return JSON.parse(escapeUnescapedNewlinesInStrings(stripTrailingCommas(raw))) as DocumentOutline;
+  } catch (_e3) {
+    console.warn('[DocumentSynthesizer] String escape failed, trying close-open');
+  }
+
+  try {
+    const repaired = closeOpenJSON(escapeUnescapedNewlinesInStrings(stripTrailingCommas(raw)));
+    return JSON.parse(repaired) as DocumentOutline;
+  } catch (_e4) {
+    console.warn('[DocumentSynthesizer] Close-open failed, trying truncation');
+  }
+
+  const lastGoodBrace = raw.lastIndexOf('}');
+  if (lastGoodBrace > 0) {
+    const truncated = raw.slice(0, lastGoodBrace + 1);
+    try {
+      const repaired = closeOpenJSON(escapeUnescapedNewlinesInStrings(stripTrailingCommas(truncated)));
+      return JSON.parse(repaired) as DocumentOutline;
+    } catch (_e5) {
+      // fall through
+    }
+  }
+
+  throw new Error('Failed to parse document outline JSON after all repair attempts');
 }
 
 /**
