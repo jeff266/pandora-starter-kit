@@ -84,7 +84,7 @@ export class SyncScheduler {
 
     // Market signals batch scan (weekly on Monday at 6:00 AM UTC)
     const marketSignalsTask = cron.schedule('0 6 * * 1', () => {
-      this.runMarketSignalsBatchScan().catch((err) => {
+      runMarketSignalsBatchScan().catch((err) => {
         console.error('[Scheduler] Unhandled error in market signals batch scan:', err);
       });
     }, { timezone: 'UTC' });
@@ -307,7 +307,7 @@ async function runPostSyncBackfill(workspaceId: string): Promise<void> {
   }
 }
 
-  async runMarketSignalsBatchScan(): Promise<void> {
+async function runMarketSignalsBatchScan(): Promise<void> {
     console.log('[Scheduler] Starting weekly market signals batch scan');
 
     try {
@@ -398,7 +398,6 @@ async function runPostSyncBackfill(workspaceId: string): Promise<void> {
       const msg = error instanceof Error ? error.message : String(error);
       console.error('[Scheduler] Market signals batch scan failed:', msg);
     }
-  }
 }
 
 let schedulerInstance: SyncScheduler | null = null;
