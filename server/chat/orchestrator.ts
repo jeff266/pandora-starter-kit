@@ -22,6 +22,7 @@ import { estimateTokens } from './token-estimator.js';
 import { callLLM } from '../utils/llm-router.js';
 import { getWorkspaceContext, type WorkspaceContext } from './workspace-context.js';
 import { synthesizeDocuments, formatDocumentResponse } from './document-synthesizer.js';
+import { formatCurrency } from '../utils/format-currency.js';
 
 export interface ConversationTurnInput {
   surface: 'slack_thread' | 'slack_dm' | 'in_app';
@@ -852,10 +853,7 @@ When recommending frameworks or structures, explain the reasoning behind each ch
     contextBullets.push(`ACV range: ${workspaceContext.acv_range}`);
   }
   if (workspaceContext.avg_deal_size !== null && workspaceContext.avg_deal_size !== undefined) {
-    const formatted = workspaceContext.avg_deal_size >= 1000
-      ? `$${Math.round(workspaceContext.avg_deal_size / 1000)}K`
-      : `$${Math.round(workspaceContext.avg_deal_size)}`;
-    contextBullets.push(`Avg deal size: ${formatted}`);
+    contextBullets.push(`Avg deal size: ${formatCurrency(workspaceContext.avg_deal_size)}`);
   }
   if (workspaceContext.avg_sales_cycle_days !== null && workspaceContext.avg_sales_cycle_days !== undefined) {
     contextBullets.push(`Avg sales cycle: ${Math.round(workspaceContext.avg_sales_cycle_days)} days`);

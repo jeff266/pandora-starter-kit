@@ -8,6 +8,7 @@ import ExcelJS from 'exceljs';
 import * as fs from 'fs';
 import * as path from 'path';
 import { callLLM } from '../utils/llm-router.js';
+import { formatCurrency } from '../utils/format-currency.js';
 import { getWorkspaceContext, type WorkspaceContext } from './workspace-context.js';
 
 export interface ToolCall {
@@ -678,7 +679,7 @@ async function generateDocx(
         new TableRow({
           children: [
             new TableCell({ children: [new Paragraph({ text: deal.name, size: 18 })] }),
-            new TableCell({ children: [new Paragraph({ text: `$${(deal.amount / 1000).toFixed(0)}K`, size: 18 })] }),
+            new TableCell({ children: [new Paragraph({ text: formatCurrency(deal.amount), size: 18 })] }),
             new TableCell({ children: [new Paragraph({ text: deal.stage, size: 18 })] }),
             new TableCell({ children: [new Paragraph({ text: deal.forecast_category || '—', size: 18 })] }),
             new TableCell({ children: [new Paragraph({ text: deal.close_date?.slice(0, 10) || '—', size: 18 })] }),

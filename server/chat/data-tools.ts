@@ -13,6 +13,7 @@ import { queryConversationSignals, type SignalQueryFilters } from '../signals/qu
 import { getWorkspaceContext } from './workspace-context.js';
 import { getCachedResult, setCachedResult } from './tool-result-cache.js';
 import { shouldCompress, compressToolResult } from './tool-result-compressor.js';
+import { formatCurrency } from '../utils/format-currency.js';
 
 // ─── Tool result types ───────────────────────────────────────────────────────
 
@@ -426,7 +427,7 @@ async function queryDeals(workspaceId: string, params: Record<string, any>): Pro
     deals: rows.rows,
     total_count: totalCount,
     total_amount: totalAmount,
-    query_description: `${description} — ${totalCount} records, $${(totalAmount / 1000).toFixed(0)}K total`,
+    query_description: `${description} — ${totalCount} records, ${formatCurrency(totalAmount)} total`,
   };
 }
 
@@ -881,9 +882,7 @@ async function computeTotalPipeline(workspaceId: string, params: Record<string, 
   const total = rows.reduce((s: number, r: any) => s + (Number(r.amount) || 0), 0);
   const formatted = !isFinite(total) || isNaN(total) || total === 0
     ? '$0'
-    : total >= 1_000_000
-    ? `$${(total / 1_000_000).toFixed(2)}M`
-    : `$${(total / 1_000).toFixed(0)}K`;
+    : formatCurrency(total);
 
   return {
     metric: 'total_pipeline',
@@ -918,9 +917,7 @@ async function computeWeightedPipeline(workspaceId: string, params: Record<strin
   const rows = result.rows;
   const normProb = (p: number) => p > 1 ? p / 100 : p;
   const weighted = rows.reduce((s: number, r: any) => s + (r.amount || 0) * normProb(r.probability || 0), 0);
-  const formatted = weighted >= 1_000_000
-    ? `$${(weighted / 1_000_000).toFixed(2)}M`
-    : `$${(weighted / 1_000).toFixed(0)}K`;
+  const formatted = formatCurrency(weighted);
 
   return {
     metric: 'weighted_pipeline',
@@ -1017,9 +1014,7 @@ async function computeAvgDealSize(workspaceId: string, params: Record<string, an
   const avg = rows.length > 0 ? sum / rows.length : 0;
   const formatted = !isFinite(avg) || isNaN(avg) || avg === 0
     ? '$0'
-    : avg >= 1_000_000
-    ? `$${(avg / 1_000_000).toFixed(2)}M`
-    : `$${(avg / 1_000).toFixed(0)}K`;
+    : formatCurrency(avg);
 
   return {
     metric: 'avg_deal_size',
@@ -1114,13 +1109,13 @@ const pipelineResult = await query<{ total: string; cnt: string }>(
   const pipeline = parseFloat(pipelineResult.rows[0]?.total || '0');
   const dealCount = parseInt(pipelineResult.rows[0]?.cnt || '0');
   const ratio = quota ? pipeline / quota : 0;
-  const formatted = quota ? `${ratio.toFixed(2)}x` : `${(pipeline / 1000).toFixed(0)}K (no quota set)`;
+  const formatted = quota ? `${ratio.toFixed(2)}x` : `${formatCurrency(pipeline)} (no quota set)`;
 
   return {
     metric: 'coverage_ratio',
     value: ratio,
     formatted,
-    formula: quota ? `pipeline ($${(pipeline / 1000).toFixed(0)}K) / quota ($${(quota / 1000).toFixed(0)}K) = ${formatted}` : `Pipeline = $${(pipeline / 1000).toFixed(0)}K, quota not configured`,
+    formula: quota ? `pipeline (${formatCurrency(pipeline)}) / quota (${formatCurrency(quota)}) = ${formatted}` : `Pipeline = ${formatCurrency(pipeline)}, quota not configured`,
     inputs: { numerator: pipeline, denominator: quota || null, description: `${dealCount} open deals` },
     underlying_records: [],
     exclusions: [],
@@ -1153,9 +1148,7 @@ async function computePipelineCreated(workspaceId: string, params: Record<string
   const total = rows.reduce((s: number, r: any) => s + (Number(r.amount) || 0), 0);
   const formatted = !isFinite(total) || isNaN(total) || total === 0
     ? '$0'
-    : total >= 1_000_000
-    ? `$${(total / 1_000_000).toFixed(2)}M`
-    : `$${(total / 1_000).toFixed(0)}K`;
+    : formatCurrency(total);
 
   return {
     metric: 'pipeline_created',
@@ -1198,7 +1191,7 @@ async function computePipelineClosed(workspaceId: string, params: Record<string,
   const rows = result.rows;
   const won = rows.filter((r: any) => r.stage_normalized === 'closed_won');
   const totalWon = won.reduce((s: number, r: any) => s + (r.amount || 0), 0);
-  const formatted = totalWon >= 1_000_000 ? `$${(totalWon / 1_000_000).toFixed(2)}M` : `$${(totalWon / 1_000).toFixed(0)}K`;
+  const formatted = formatCurrency(totalWon);
 
   return {
     metric: 'pipeline_closed',
@@ -1941,7 +1934,7 @@ function formatMetricValue(metric: string, val: number): string {
   if (metric === 'win_rate') return `${(val * 100).toFixed(1)}%`;
   if (metric === 'avg_sales_cycle') return `${Math.round(val)} days`;
   if (metric === 'avg_deal_size' || metric === 'total_pipeline' || metric === 'pipeline_created') {
-    return val >= 1_000_000 ? `$${(val / 1_000_000).toFixed(2)}M` : `$${(val / 1_000).toFixed(0)}K`;
+    return formatCurrency(val);
   }
   return String(val);
 }

@@ -1,4 +1,5 @@
 import { query } from '../db.js';
+import { formatCurrency } from '../utils/format-currency.js';
 
 export interface HeuristicResult {
   matched: boolean;
@@ -195,7 +196,7 @@ async function handleRepDeals(workspaceId: string, match: RegExpMatchArray): Pro
   }
 
   const lines = dealsResult.rows.map((d: any) => {
-    const amt = d.amount ? `$${(d.amount / 1000).toFixed(0)}K` : 'N/A';
+    const amt = d.amount ? formatCurrency(d.amount) : 'N/A';
     return `- **${d.name}** — ${d.stage || 'Unknown'} — ${amt}`;
   });
 
@@ -226,12 +227,12 @@ async function handlePipelineSummary(workspaceId: string, _match: RegExpMatchArr
   const totalDeals = result.rows.reduce((s: number, r: any) => s + r.deal_count, 0);
   const totalValue = result.rows.reduce((s: number, r: any) => s + r.total_value, 0);
   const lines = result.rows.map((r: any) =>
-    `- **${r.stage || 'Unknown'}**: ${r.deal_count} deals — $${(r.total_value / 1000).toFixed(0)}K`
+    `- **${r.stage || 'Unknown'}**: ${r.deal_count} deals — ${formatCurrency(r.total_value)}`
   );
 
   return {
     matched: true,
-    answer: `**Pipeline Summary** — ${totalDeals} deals, $${(totalValue / 1000).toFixed(0)}K total\n\n${lines.join('\n')}`,
+    answer: `**Pipeline Summary** — ${totalDeals} deals, ${formatCurrency(totalValue)} total\n\n${lines.join('\n')}`,
     scope_hint: { type: 'pipeline' },
   };
 }

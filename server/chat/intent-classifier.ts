@@ -180,6 +180,8 @@ const DOCUMENT_REQUEST_PATTERNS = [
   /\b(framework|report|document|briefing)\b.*\b(for|on|about)\b/i,
   /\bcapacity plan(ning)?\b/i,
   /\bstrategic (plan|analysis|brief|review)\b/i,
+  /\b(comprehensive|executive|detailed|full)\s+(summary|report|overview|briefing|analysis)\b/i,
+  /\b(qbr|board)\s+(deck|report|prep|presentation)\b/i,
 ];
 
 const GATING_QUESTIONS: Record<string, string> = {

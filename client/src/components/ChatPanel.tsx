@@ -543,6 +543,61 @@ const TOOL_ICONS: Record<string, string> = {
   query_activity_timeline: '📅',
 };
 
+function CollapsibleDeals({ deals, totalCount, totalAmount }: { deals: any[]; totalCount: number; totalAmount: number }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div style={{ marginTop: 4 }}>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        style={{
+          background: 'none',
+          border: '1px solid #1e2230',
+          borderRadius: 4,
+          color: '#6488ea',
+          cursor: 'pointer',
+          padding: '3px 8px',
+          fontSize: 11,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4,
+        }}
+      >
+        <span style={{ fontSize: 10 }}>{expanded ? '▼' : '▶'}</span>
+        {expanded ? 'Hide' : 'View'} deals ({totalCount} deals · {formatAmount(totalAmount)})
+      </button>
+      {expanded && (
+        <div style={{ overflowX: 'auto', marginTop: 4 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid #1e2230' }}>
+                {['Deal', 'Amount', 'Stage', 'Close', 'Owner'].map(h => (
+                  <th key={h} style={{ textAlign: 'left', padding: '3px 6px', color: '#64748b', fontWeight: 500 }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {deals.slice(0, 15).map((d: any, di: number) => (
+                <tr key={di} style={{ borderBottom: '1px solid #1a1f30' }}>
+                  <td style={{ padding: '3px 6px', color: '#e2e8f0', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</td>
+                  <td style={{ padding: '3px 6px', color: '#94a3b8' }}>{formatAmount(d.amount)}</td>
+                  <td style={{ padding: '3px 6px', color: '#94a3b8' }}>{d.stage || '—'}</td>
+                  <td style={{ padding: '3px 6px', color: '#94a3b8' }}>{d.close_date?.slice(0, 10) || '—'}</td>
+                  <td style={{ padding: '3px 6px', color: '#94a3b8', maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.owner_name || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {deals.length > 15 && (
+            <div style={{ color: '#64748b', fontSize: 11, marginTop: 4, paddingLeft: 6 }}>
+              +{deals.length - 15} more deals not shown
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function EvidencePanel({ evidence, toolCallCount, latencyMs }: {
   evidence: Evidence;
   toolCallCount?: number;
@@ -606,36 +661,7 @@ function EvidencePanel({ evidence, toolCallCount, latencyMs }: {
 
               {/* Render deal table if result has deals */}
               {tc.result?.deals && tc.result.deals.length > 0 && (
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, marginTop: 4 }}>
-                    <thead>
-                      <tr style={{ borderBottom: '1px solid #1e2230' }}>
-                        {['Deal', 'Amount', 'Stage', 'Close', 'Owner'].map(h => (
-                          <th key={h} style={{ textAlign: 'left', padding: '3px 6px', color: '#64748b', fontWeight: 500 }}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {tc.result.deals.slice(0, 15).map((d: any, di: number) => (
-                        <tr key={di} style={{ borderBottom: '1px solid #1a1f30' }}>
-                          <td style={{ padding: '3px 6px', color: '#e2e8f0', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</td>
-                          <td style={{ padding: '3px 6px', color: '#94a3b8' }}>{formatAmount(d.amount)}</td>
-                          <td style={{ padding: '3px 6px', color: '#94a3b8' }}>{d.stage || '—'}</td>
-                          <td style={{ padding: '3px 6px', color: '#94a3b8' }}>{d.close_date?.slice(0, 10) || '—'}</td>
-                          <td style={{ padding: '3px 6px', color: '#94a3b8', maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.owner_name || '—'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  {tc.result.deals.length > 15 && (
-                    <div style={{ color: '#64748b', fontSize: 11, marginTop: 4, paddingLeft: 6 }}>
-                      +{tc.result.deals.length - 15} more deals not shown
-                    </div>
-                  )}
-                  <div style={{ color: '#64748b', fontSize: 11, marginTop: 4, paddingLeft: 6 }}>
-                    Total: {tc.result.total_count} deals · {formatAmount(tc.result.total_amount)}
-                  </div>
-                </div>
+                <CollapsibleDeals deals={tc.result.deals} totalCount={tc.result.total_count} totalAmount={tc.result.total_amount} />
               )}
 
               {/* Render compute_metric result */}
