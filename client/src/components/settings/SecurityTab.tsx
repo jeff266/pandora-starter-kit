@@ -99,24 +99,16 @@ export default function SecurityTab() {
   const handleLogoutAll = async () => {
     try {
       const token = localStorage.getItem('pandora_session');
-      const res = await fetch('/api/auth/logout-all', {
+      await fetch('/api/auth/logout-all', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
         },
-      });
-
-      if (!res.ok) {
-        throw new Error('Failed to logout');
-      }
-
-      // Clear local storage and redirect
+      }).catch(() => {});
+    } finally {
       localStorage.removeItem('pandora_session');
       localStorage.removeItem('pandora_last_workspace');
       navigate('/login?reason=signed_out_all');
-    } catch (err) {
-      console.error('Failed to logout all:', err);
-      setToast({ message: 'Failed to sign out', type: 'error' });
     }
   };
 

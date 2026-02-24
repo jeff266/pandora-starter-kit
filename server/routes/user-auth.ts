@@ -303,6 +303,12 @@ router.post('/logout', async (req: Request, res: Response) => {
       await revokeRefreshToken(refreshTokenRaw);
     }
 
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.substring(7);
+      await query(`DELETE FROM user_sessions WHERE token = $1`, [token]).catch(() => {});
+    }
+
     clearRefreshTokenCookie(res);
 
     res.json({ success: true });
@@ -327,6 +333,7 @@ router.post('/logout-all', requireAuth, async (req: Request, res: Response) => {
     }
 
     await revokeAllUserTokens(userId);
+    await query(`DELETE FROM user_sessions WHERE user_id = $1`, [userId]);
 
     clearRefreshTokenCookie(res);
 
