@@ -855,6 +855,147 @@ export async function synthesizeDocuments(input: SynthesisInput): Promise<Synthe
 /**
  * Format chat response with download links
  */
+export async function testDocumentGeneration(
+  workspaceId: string,
+  chatContent: string
+): Promise<SynthesisOutput> {
+  console.log('[DocumentSynthesizer] Test mode — generating docs from existing chat content');
+
+  const outline: DocumentOutline = buildOutlineFromChatContent(chatContent);
+  const extractedData = extractDealsFromChatContent(chatContent);
+
+  const docxPath = await generateDocx(outline, extractedData, workspaceId);
+  console.log('[DocumentSynthesizer] Test: generated docx:', docxPath);
+
+  const xlsxPath = await generateXlsx(outline, extractedData, workspaceId);
+  console.log('[DocumentSynthesizer] Test: generated xlsx:', xlsxPath);
+
+  return {
+    docxPath,
+    xlsxPath,
+    docxFilename: path.basename(docxPath),
+    xlsxFilename: path.basename(xlsxPath),
+  };
+}
+
+function extractDealsFromChatContent(content: string): ExtractedData {
+  const deals: Deal[] = [];
+  const dealPattern = /\*\*(.+?)\*\*\s*[-–—]\s*\$?([\d,.]+[KMB]?)\s*\((?:Close[: ]*)?(.+?)\)\s*[-–—]\s*([\w.]+)/g;
+  let match;
+  while ((match = dealPattern.exec(content)) !== null) {
+    const rawAmount = match[2].replace(/,/g, '');
+    let amount = parseFloat(rawAmount);
+    if (rawAmount.endsWith('M')) amount = parseFloat(rawAmount) * 1_000_000;
+    else if (rawAmount.endsWith('K')) amount = parseFloat(rawAmount) * 1_000;
+    deals.push({
+      name: match[1].trim(),
+      amount,
+      stage: 'Pipeline',
+      close_date: match[3].trim(),
+      owner_name: match[4].trim(),
+    });
+  }
+
+  return {
+    deals,
+    metrics: {},
+    signals: [],
+    icpProfile: null,
+    queryParams: {},
+  };
+}
+
+function buildOutlineFromChatContent(content: string): DocumentOutline {
+  const titleMatch = content.match(/# \*\*(.+?)\*\*/);
+  const subtitleMatch = content.match(/## \*\*(.+?)\*\*/);
+
+  const sections: DocumentSection[] = [];
+  const sectionPattern = /## \*\*(\d+)\.\s+(.+?)\*\*/g;
+  let sMatch;
+  const sectionStarts: { num: number; heading: string; pos: number }[] = [];
+  while ((sMatch = sectionPattern.exec(content)) !== null) {
+    sectionStarts.push({ num: parseInt(sMatch[1]), heading: sMatch[2], pos: sMatch.index });
+  }
+
+  for (let i = 0; i < sectionStarts.length; i++) {
+    const start = sectionStarts[i];
+    const endPos = i + 1 < sectionStarts.length ? sectionStarts[i + 1].pos : content.length;
+    const body = content.slice(start.pos, endPos).trim();
+
+    const bullets: string[] = [];
+    const bulletPattern = /^\d+\.\s+[✅*]*\s*\*\*(.+?)\*\*/gm;
+    let bMatch;
+    while ((bMatch = bulletPattern.exec(body)) !== null) {
+      bullets.push(bMatch[1].trim());
+    }
+
+    const tableHeaders: string[] = [];
+    const tableRows: string[][] = [];
+    const tablePattern = /\|(.+)\|/g;
+    let tMatch;
+    let isHeader = true;
+    while ((tMatch = tablePattern.exec(body)) !== null) {
+      const cells = tMatch[1].split('|').map(c => c.trim()).filter(c => c && !c.match(/^[-:]+$/));
+      if (cells.length === 0) continue;
+      if (cells.every(c => c.match(/^[-:]+$/))) continue;
+      if (isHeader && cells.length > 0) {
+        tableHeaders.push(...cells);
+        isHeader = false;
+      } else if (cells.length > 0 && !cells[0].match(/^[-:]+$/)) {
+        tableRows.push(cells);
+      }
+    }
+
+    const contentLines = body.split('\n')
+      .filter(l => !l.startsWith('#') && !l.startsWith('|') && !l.match(/^\d+\.\s+[✅]/) && l.trim())
+      .slice(0, 3)
+      .join(' ')
+      .slice(0, 500);
+
+    const section: DocumentSection = {
+      number: start.num,
+      heading: start.heading,
+      content: contentLines,
+    };
+
+    if (tableHeaders.length > 0 && tableRows.length > 0) {
+      section.table = { headers: tableHeaders, rows: tableRows.slice(0, 20) };
+    }
+    if (bullets.length > 0) {
+      section.bullets = bullets.slice(0, 10);
+    }
+
+    sections.push(section);
+  }
+
+  if (sections.length === 0) {
+    sections.push({
+      number: 1,
+      heading: 'Analysis',
+      content: content.slice(0, 2000),
+    });
+  }
+
+  return {
+    title: titleMatch ? titleMatch[1] : 'Strategic Framework',
+    subtitle: subtitleMatch ? subtitleMatch[1] : 'Generated from Pandora Analysis',
+    prepared_for: null,
+    prepared_date: new Date().toISOString().slice(0, 10),
+    context_box: { lines: ['Generated from existing chat analysis (test mode — no Claude credits used)'] },
+    sections,
+    key_items_table: null,
+    bottom_line: 'Document generated from cached chat data for testing the DOCX/XLSX pipeline.',
+    assumptions: ['This document was generated from a previous chat response, not a fresh Claude analysis.'],
+    appendix: {
+      data_source: 'Cached chat response',
+      query_filters: 'N/A (test mode)',
+      calculations: [],
+      raw_deal_count: 0,
+      raw_pipeline_value: 0,
+    },
+  };
+}
+
 export function formatDocumentResponse(
   synthOutput: SynthesisOutput,
   workspaceId: string,
@@ -863,10 +1004,10 @@ export function formatDocumentResponse(
   return `${chatAnswer}
 
 📄 **Strategic Framework (Word doc)**
-[Download ${synthOutput.docxFilename}](/api/workspaces/${workspaceId}/documents/${synthOutput.docxFilename})
+[Download ${synthOutput.docxFilename}](/api/workspaces/${workspaceId}/generated-docs/${synthOutput.docxFilename})
 
 📊 **Pipeline Data & Calculations (Excel)**
-[Download ${synthOutput.xlsxFilename}](/api/workspaces/${workspaceId}/documents/${synthOutput.xlsxFilename})
+[Download ${synthOutput.xlsxFilename}](/api/workspaces/${workspaceId}/generated-docs/${synthOutput.xlsxFilename})
 
 The Excel file includes editable assumptions — you can adjust parameters and see calculations update automatically.`;
 }
