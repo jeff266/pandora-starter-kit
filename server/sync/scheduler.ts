@@ -82,8 +82,16 @@ export class SyncScheduler {
     }, { timezone: 'UTC' });
     this.tasks.push(refreshTokenCleanupTask);
 
+    // Market signals batch scan (weekly on Monday at 6:00 AM UTC)
+    const marketSignalsTask = cron.schedule('0 6 * * 1', () => {
+      this.runMarketSignalsBatchScan().catch((err) => {
+        console.error('[Scheduler] Unhandled error in market signals batch scan:', err);
+      });
+    }, { timezone: 'UTC' });
+    this.tasks.push(marketSignalsTask);
+
     const scheduleDescriptions = SYNC_SCHEDULES.map(s => s.label).join(', ');
-    console.log(`[Scheduler] Sync schedules registered: ${scheduleDescriptions}, CRM (dynamic 15-min heartbeat), Consultant (every 6 hours), Agent cleanup (daily at 3 AM), Refresh token cleanup (daily at 3 AM)`);
+    console.log(`[Scheduler] Sync schedules registered: ${scheduleDescriptions}, CRM (dynamic 15-min heartbeat), Consultant (every 6 hours), Agent cleanup (daily at 3 AM), Refresh token cleanup (daily at 3 AM), Market signals (weekly on Monday at 6 AM)`);
   }
 
   stop(): void {
@@ -296,6 +304,100 @@ async function runPostSyncBackfill(workspaceId: string): Promise<void> {
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     console.error(`[Scheduler] Backfill failed for workspace ${workspaceId}: ${msg}`);
+  }
+}
+
+  async runMarketSignalsBatchScan(): Promise<void> {
+    console.log('[Scheduler] Starting weekly market signals batch scan');
+
+    try {
+      // Get all workspaces with connected CRMs (they have accounts worth scanning)
+      const workspacesResult = await query<{ workspace_id: string }>(
+        `SELECT DISTINCT workspace_id FROM connector_configs
+         WHERE status = 'connected' AND connector_type IN ('hubspot', 'salesforce')`
+      );
+
+      if (workspacesResult.rows.length === 0) {
+        console.log('[Scheduler] No workspaces with connected CRMs found');
+        return;
+      }
+
+      console.log(`[Scheduler] Found ${workspacesResult.rows.length} workspace(s) with connected CRMs`);
+
+      // Import the market signals collector dynamically
+      const { getMarketSignalsCollector } = await import('../connectors/serper/market-signals.js');
+      const collector = getMarketSignalsCollector();
+
+      if (!collector.isConfigured()) {
+        console.log('[Scheduler] Market signals API not configured (SERPER_API_KEY missing), skipping');
+        return;
+      }
+
+      let totalScanned = 0;
+      let totalSignals = 0;
+      let totalCost = 0;
+
+      for (const ws of workspacesResult.rows) {
+        try {
+          // For each workspace, find accounts with active deals that haven't been scanned recently
+          const accountsResult = await query<{ id: string; name: string }>(
+            `SELECT DISTINCT a.id, a.name
+             FROM accounts a
+             JOIN deals d ON d.account_id = a.id AND d.workspace_id = a.workspace_id
+             WHERE a.workspace_id = $1
+               AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+               AND d.amount >= 10000
+               AND a.id NOT IN (
+                 SELECT DISTINCT account_id FROM account_signals
+                 WHERE workspace_id = $1
+                   AND signal_type = 'market_news'
+                   AND created_at > now() - interval '7 days'
+               )
+             LIMIT 50`,
+            [ws.workspace_id]
+          );
+
+          console.log(`[Scheduler] Workspace ${ws.workspace_id}: ${accountsResult.rows.length} account(s) to scan`);
+
+          for (const account of accountsResult.rows) {
+            try {
+              // Rate limit: 500ms between requests
+              await new Promise(r => setTimeout(r, 500));
+
+              const result = await collector.getSignalsForAccount(
+                ws.workspace_id,
+                account.id,
+                { force_check: false } // Respect ICP tier filtering
+              );
+
+              // Store signals
+              if (result.signals.length > 0) {
+                await collector.storeSignals(ws.workspace_id, account.id, result.signals);
+                console.log(`[Scheduler] ${account.name}: ${result.signals.length} signal(s) found (${result.signal_strength})`);
+              }
+
+              totalScanned++;
+              totalSignals += result.signals.length;
+              totalCost += 0.005; // $0.004 Serper + $0.001 DeepSeek
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              console.error(`[Scheduler] Failed to scan ${account.name}:`, msg);
+            }
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error(`[Scheduler] Failed to process workspace ${ws.workspace_id}:`, msg);
+        }
+      }
+
+      console.log(
+        `[Scheduler] Market signals batch scan complete: ${totalScanned} account(s) scanned, ` +
+        `${totalSignals} signal(s) found, cost: $${totalCost.toFixed(3)}`
+      );
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error('[Scheduler] Market signals batch scan failed:', msg);
+    }
   }
 }
 

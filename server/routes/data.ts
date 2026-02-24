@@ -681,4 +681,171 @@ router.get('/:id/documents', async (req: Request, res: Response): Promise<void> 
   }
 });
 
+// ─── Market Signals Endpoints ───────────────────────────────────────────────
+
+/**
+ * POST /api/workspaces/:id/accounts/:accountId/scan-signals
+ * Triggers an on-demand market signal scan for a single account
+ */
+router.post('/:id/accounts/:accountId/scan-signals', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { getMarketSignalsCollector } = await import('../connectors/serper/market-signals.js');
+    const collector = getMarketSignalsCollector();
+
+    if (!collector.isConfigured()) {
+      res.status(503).json({ error: 'Market signals API not configured (SERPER_API_KEY missing)' });
+      return;
+    }
+
+    const result = await collector.getSignalsForAccount(
+      req.params.id,
+      req.params.accountId,
+      { force_check: true } // Force check even for lower-tier accounts
+    );
+
+    // Store signals if any were found
+    if (result.signals.length > 0) {
+      await collector.storeSignals(req.params.id, req.params.accountId, result.signals);
+    }
+
+    res.json({
+      account_name: result.account_name,
+      signals_found: result.signals.length,
+      top_signal: result.strongest_signal?.headline || null,
+      signal_strength: result.signal_strength,
+      icp_tier: result.icp_tier,
+      cost_usd: 0.005, // Estimated cost: $0.004 Serper + $0.001 DeepSeek
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[Market Signals] Scan failed:', msg);
+    res.status(500).json({ error: msg });
+  }
+});
+
+/**
+ * POST /api/workspaces/:id/signals/batch-scan
+ * Triggers batch scan for accounts with active deals
+ */
+router.post('/:id/signals/batch-scan', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { getMarketSignalsCollector } = await import('../connectors/serper/market-signals.js');
+    const collector = getMarketSignalsCollector();
+
+    if (!collector.isConfigured()) {
+      res.status(503).json({ error: 'Market signals API not configured (SERPER_API_KEY missing)' });
+      return;
+    }
+
+    const limit = req.body.limit || 50;
+    const minAmount = req.body.min_deal_amount || 10000;
+    const daysSince = req.body.days_since_last_scan || 7;
+
+    // Find accounts with active deals that haven't been scanned recently
+    const accountsResult = await query<{ id: string; name: string; max_deal_amount: number }>(
+      `SELECT DISTINCT a.id, a.name, MAX(d.amount) as max_deal_amount
+       FROM accounts a
+       JOIN deals d ON d.account_id = a.id AND d.workspace_id = a.workspace_id
+       WHERE a.workspace_id = $1
+         AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+         AND d.amount >= $2
+         AND a.id NOT IN (
+           SELECT DISTINCT account_id FROM account_signals
+           WHERE workspace_id = $1
+             AND signal_type = 'market_news'
+             AND created_at > now() - ($3 || ' days')::interval
+         )
+       GROUP BY a.id, a.name
+       ORDER BY max_deal_amount DESC
+       LIMIT $4`,
+      [req.params.id, minAmount, daysSince, limit]
+    );
+
+    const results = [];
+    const errors = [];
+    let totalSignals = 0;
+    let totalCost = 0;
+
+    for (const account of accountsResult.rows) {
+      try {
+        // Rate limit: 500ms between requests
+        await new Promise(r => setTimeout(r, 500));
+
+        const result = await collector.getSignalsForAccount(
+          req.params.id,
+          account.id,
+          { force_check: false } // Respect ICP tier filtering
+        );
+
+        // Store signals
+        if (result.signals.length > 0) {
+          await collector.storeSignals(req.params.id, account.id, result.signals);
+        }
+
+        results.push({
+          account_name: result.account_name,
+          signals: result.signals.length,
+          score: result.signal_strength,
+        });
+
+        totalSignals += result.signals.length;
+        totalCost += 0.005; // $0.004 Serper + $0.001 DeepSeek
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        errors.push(`${account.name}: ${msg}`);
+      }
+    }
+
+    console.log(`[Market Signals Batch] Scanned ${results.length} accounts, found ${totalSignals} signals, cost $${totalCost.toFixed(3)}`);
+
+    res.json({
+      accounts_scanned: results.length,
+      total_signals: totalSignals,
+      total_cost_usd: totalCost,
+      errors,
+      results,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[Market Signals] Batch scan failed:', msg);
+    res.status(500).json({ error: msg });
+  }
+});
+
+/**
+ * GET /api/workspaces/:id/signals/scan-status
+ * Shows when accounts were last scanned for market signals
+ */
+router.get('/:id/signals/scan-status', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const status = await query<{
+      accounts_scanned: number;
+      total_market_signals: number;
+      last_scan_at: Date | null;
+      accounts_scanned_this_week: number;
+    }>(
+      `SELECT
+         COUNT(DISTINCT account_id) FILTER (WHERE signal_type = 'market_news') as accounts_scanned,
+         COUNT(*) FILTER (WHERE signal_type = 'market_news') as total_market_signals,
+         MAX(created_at) FILTER (WHERE signal_type = 'market_news') as last_scan_at,
+         COUNT(DISTINCT account_id) FILTER (
+           WHERE signal_type = 'market_news' AND created_at > now() - interval '7 days'
+         ) as accounts_scanned_this_week
+       FROM account_signals
+       WHERE workspace_id = $1`,
+      [req.params.id]
+    );
+
+    res.json(status.rows[0] || {
+      accounts_scanned: 0,
+      total_market_signals: 0,
+      last_scan_at: null,
+      accounts_scanned_this_week: 0,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
 export default router;
