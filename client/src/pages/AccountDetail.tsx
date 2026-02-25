@@ -7,6 +7,7 @@ import { formatCurrency, formatDate, formatTimeAgo, severityColor } from '../lib
 import Skeleton from '../components/Skeleton';
 import SectionErrorBoundary from '../components/SectionErrorBoundary';
 import { DossierNarrative, AnalysisModal } from '../components/shared';
+import { renderMarkdown } from '../lib/render-markdown';
 import { AccountSignalsTimeline } from '../components/account';
 import { useDemoMode } from '../contexts/DemoModeContext';
 import { useIsMobile } from '../hooks/useIsMobile';
@@ -786,9 +787,9 @@ export default function AccountDetail() {
                   border: `1px solid ${colors.borderLight}`,
                   borderRadius: 6,
                 }}>
-                  <p style={{ fontSize: 13, lineHeight: 1.6, color: colors.text, margin: 0, marginBottom: 12, whiteSpace: 'pre-wrap' }}>
-                    {anon.text(askAnswer.answer)}
-                  </p>
+                  <div style={{ fontSize: 13, lineHeight: 1.6, color: colors.text, margin: 0, marginBottom: 12, whiteSpace: 'pre-wrap' }}>
+                    {renderMarkdown(anon.text(askAnswer.answer))}
+                  </div>
                   <div style={{ display: 'flex', gap: 16, fontSize: 11, color: colors.textMuted, fontFamily: fonts.mono }}>
                     {askAnswer.data_consulted && (
                       <span>Data: {Object.values(askAnswer.data_consulted).filter((v: any) => typeof v === 'number' && v > 0).length} sources</span>

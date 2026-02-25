@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../../lib/api';
 import { colors, fonts } from '../../styles/theme';
+import { renderMarkdown } from '../../lib/render-markdown';
 
 interface AnalysisModalProps {
   scope: {
@@ -203,12 +204,12 @@ export default function AnalysisModal({ scope, visible, onClose }: AnalysisModal
                 background: colors.surfaceRaised,
                 border: `1px solid ${colors.borderLight}`,
               }}>
-                <p style={{
+                <div style={{
                   fontSize: 13, lineHeight: 1.7, color: colors.text,
                   margin: 0, whiteSpace: 'pre-wrap',
                 }}>
-                  {result.answer}
-                </p>
+                  {renderMarkdown(result.answer)}
+                </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
                   {result.confidence && (

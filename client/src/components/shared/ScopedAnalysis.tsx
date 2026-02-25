@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { api } from '../../lib/api';
 import { colors, fonts } from '../../styles/theme';
+import { renderMarkdown } from '../../lib/render-markdown';
 
 interface ScopedAnalysisProps {
   scope: {
@@ -110,17 +111,18 @@ export default function ScopedAnalysis({ scope, workspaceId }: ScopedAnalysisPro
             borderRadius: 6,
           }}
         >
-          <p
+          <div
             style={{
               fontSize: 13,
               lineHeight: 1.6,
               color: colors.text,
               margin: 0,
               marginBottom: 12,
+              whiteSpace: 'pre-wrap',
             }}
           >
-            {answer.answer}
-          </p>
+            {renderMarkdown(answer.answer)}
+          </div>
 
           <div
             style={{

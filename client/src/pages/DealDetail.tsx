@@ -7,6 +7,7 @@ import { formatCurrency, formatDate, formatTimeAgo, severityColor } from '../lib
 import Skeleton from '../components/Skeleton';
 import SectionErrorBoundary from '../components/SectionErrorBoundary';
 import { DossierNarrative, AnalysisModal } from '../components/shared';
+import { renderMarkdown } from '../lib/render-markdown';
 import { useDemoMode } from '../contexts/DemoModeContext';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { buildDealCrmUrl, buildConversationUrl, useCrmInfo } from '../lib/deeplinks';
@@ -73,37 +74,6 @@ function gradeBg(grade: string): string {
     case 'F': return `${colors.red}20`;
     default: return `${colors.textMuted}20`;
   }
-}
-
-// Simple markdown renderer for basic formatting
-function renderMarkdown(text: string): React.ReactNode {
-  const parts: React.ReactNode[] = [];
-  let lastIndex = 0;
-
-  // Handle bold (**text**)
-  const boldRegex = /\*\*(.+?)\*\*/g;
-  let match: RegExpExecArray | null;
-
-  while ((match = boldRegex.exec(text)) !== null) {
-    // Add text before the match
-    if (match.index > lastIndex) {
-      parts.push(text.substring(lastIndex, match.index));
-    }
-    // Add the bolded text
-    parts.push(
-      <strong key={match.index} style={{ fontWeight: 600 }}>
-        {match[1]}
-      </strong>
-    );
-    lastIndex = match.index + match[0].length;
-  }
-
-  // Add remaining text after the last match
-  if (lastIndex < text.length) {
-    parts.push(text.substring(lastIndex));
-  }
-
-  return <>{parts}</>;
 }
 
 
