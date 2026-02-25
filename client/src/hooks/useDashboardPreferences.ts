@@ -23,7 +23,7 @@ export interface DashboardPreferences {
   };
   pipeline_viz_mode: 'horizontal_bars' | 'funnel' | 'kanban' | 'table';
   monte_carlo_overlay: boolean;
-  default_time_range: 'today' | 'this_week' | 'this_month' | 'this_quarter';
+  default_time_range: 'today' | 'this_week' | 'this_month' | 'this_quarter' | 'this_year';
   updated_at?: string;
 }
 

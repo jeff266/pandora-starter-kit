@@ -4,8 +4,8 @@ import { colors, fonts } from '../../styles/theme';
 import { formatTimeAgo } from '../../lib/format';
 
 interface DashboardHeaderProps {
-  timeRange: 'today' | 'this_week' | 'this_month' | 'this_quarter';
-  onTimeRangeChange: (range: 'today' | 'this_week' | 'this_month' | 'this_quarter') => void;
+  timeRange: 'today' | 'this_week' | 'this_month' | 'this_quarter' | 'this_year';
+  onTimeRangeChange: (range: 'today' | 'this_week' | 'this_month' | 'this_quarter' | 'this_year') => void;
   lastRefreshed?: string;
   onRefresh: () => void;
   onConfigureClick?: () => void;
@@ -25,6 +25,7 @@ export function DashboardHeader({
     { value: 'this_week', label: 'This Week' },
     { value: 'this_month', label: 'This Month' },
     { value: 'this_quarter', label: 'This Quarter' },
+    { value: 'this_year', label: 'This Year' },
   ];
 
   return (
