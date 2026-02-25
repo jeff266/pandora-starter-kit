@@ -26,6 +26,20 @@ router.get('/:id/forecast/snapshots', async (req, res) => {
       [workspaceId, limit]
     );
 
+    // Fetch latest Monte Carlo results
+    const mcResult = await query(
+      `SELECT result
+       FROM skill_runs
+       WHERE workspace_id = $1
+         AND skill_id = 'monte-carlo-forecast'
+         AND status = 'completed'
+       ORDER BY completed_at DESC
+       LIMIT 1`,
+      [workspaceId]
+    );
+    const mcData = mcResult.rows[0]?.result;
+    const mcCommandCenter = mcData?.commandCenter || null;
+
     const snapshots = runs.rows.map((row: any) => {
       const result = row.result || {};
       const output = row.output || {};
@@ -42,11 +56,11 @@ router.get('/:id/forecast/snapshots', async (req, res) => {
         scope_id: params.scope_id || null,
         stage_weighted_forecast: team.weightedForecast || null,
         category_weighted_forecast: team.baseCase || null,
-        monte_carlo_p50: null,
-        monte_carlo_p25: null,
-        monte_carlo_p75: null,
-        monte_carlo_p10: null,
-        monte_carlo_p90: null,
+        monte_carlo_p50: mcCommandCenter?.p50 || null,
+        monte_carlo_p25: mcCommandCenter?.p25 || null,
+        monte_carlo_p75: mcCommandCenter?.p75 || null,
+        monte_carlo_p10: mcCommandCenter?.p10 || null,
+        monte_carlo_p90: mcCommandCenter?.p90 || null,
         attainment: team.closedWon || null,
         quota: team.teamQuota || quotaConfig.team_quota || null,
         total_pipeline: team.pipeline || null,
@@ -65,6 +79,8 @@ router.get('/:id/forecast/snapshots', async (req, res) => {
           rep_email: r.email || '',
           deals: r.dealCount || 0,
           pipeline: r.pipeline || 0,
+          stage_weighted: r.weightedForecast || 0,
+          category_weighted: r.baseCase || 0,
           closed_won: r.closedWon || 0,
           commit: r.commit || 0,
           best_case: r.bestCase || 0,

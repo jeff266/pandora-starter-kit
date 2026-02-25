@@ -111,7 +111,7 @@ const cards: CardDef[] = [
   {
     label: 'Pipe Gen',
     metricKey: 'pipe_gen',
-    getValue: (s) => s.pipe_gen ?? s.pipeline_total,
+    getValue: (s) => s.pipe_gen,
     format: formatCurrency,
     color: colors.accent,
   },

@@ -97,8 +97,33 @@ export default function ForecastPage() {
       });
   }, [wsId]);
 
-  const latest = snapshots.length > 0 ? snapshots[snapshots.length - 1] : null;
-  const previous = snapshots.length > 1 ? snapshots[snapshots.length - 2] : null;
+  // Deduplicate snapshots by week (keep latest per week)
+  const weeklySnapshots = useMemo(() => {
+    if (snapshots.length === 0) return [];
+
+    const weekMap = new Map<string, ForecastSnapshot>();
+    for (const snap of snapshots) {
+      const date = new Date(snap.snapshot_date);
+      // Get week key as YYYY-WW format
+      const year = date.getFullYear();
+      const week = Math.floor((date.getTime() - new Date(year, 0, 1).getTime()) / (7 * 24 * 60 * 60 * 1000));
+      const weekKey = `${year}-${week}`;
+
+      // Keep the latest snapshot for each week
+      const existing = weekMap.get(weekKey);
+      if (!existing || new Date(snap.snapshot_date) > new Date(existing.snapshot_date)) {
+        weekMap.set(weekKey, snap);
+      }
+    }
+
+    // Sort by date ascending
+    return Array.from(weekMap.values()).sort((a, b) =>
+      new Date(a.snapshot_date).getTime() - new Date(b.snapshot_date).getTime()
+    );
+  }, [snapshots]);
+
+  const latest = weeklySnapshots.length > 0 ? weeklySnapshots[weeklySnapshots.length - 1] : null;
+  const previous = weeklySnapshots.length > 1 ? weeklySnapshots[weeklySnapshots.length - 2] : null;
   const quota = latest?.quota || null;
 
   const currentMetrics = useMemo(() => {
@@ -301,7 +326,7 @@ export default function ForecastPage() {
         <div style={{ flex: 1, minWidth: 0, width: isMobile ? '100%' : 'auto' }}>
           <SectionErrorBoundary fallbackMessage="Failed to load forecast chart.">
             <ForecastChart
-              snapshots={snapshots}
+              snapshots={weeklySnapshots}
               quota={quota}
               onPointClick={(snapshot, metric) => {
                 console.log('Chart point clicked:', metric, snapshot.snapshot_date);

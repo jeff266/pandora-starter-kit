@@ -2678,7 +2678,8 @@ const forecastRollup: ToolDefinition = {
           owner,
           forecast_category,
           COUNT(*) AS deal_count,
-          COALESCE(SUM(amount), 0) AS total_amount
+          COALESCE(SUM(amount), 0) AS total_amount,
+          COALESCE(SUM(amount * CASE WHEN probability IS NULL THEN 0 WHEN probability > 1 THEN probability / 100.0 ELSE probability END), 0) AS weighted_amount
         FROM deals
         WHERE workspace_id = $1
           AND forecast_category IS NOT NULL
@@ -2691,6 +2692,7 @@ const forecastRollup: ToolDefinition = {
 
       const repMap = new Map<string, {
         closedWon: number; commit: number; bestCase: number; pipeline: number; notForecasted: number;
+        commitWeighted: number; bestCaseWeighted: number; pipelineWeighted: number;
         dealCount: number;
       }>();
 
@@ -2698,18 +2700,32 @@ const forecastRollup: ToolDefinition = {
         const ownerRaw = row.owner as string;
         const owner = resolveOwnerName(ownerRaw, nameMap);
         if (!repMap.has(owner)) {
-          repMap.set(owner, { closedWon: 0, commit: 0, bestCase: 0, pipeline: 0, notForecasted: 0, dealCount: 0 });
+          repMap.set(owner, {
+            closedWon: 0, commit: 0, bestCase: 0, pipeline: 0, notForecasted: 0,
+            commitWeighted: 0, bestCaseWeighted: 0, pipelineWeighted: 0,
+            dealCount: 0
+          });
         }
         const rep = repMap.get(owner)!;
         const amt = Number(row.total_amount);
+        const weightedAmt = Number(row.weighted_amount);
         const cnt = Number(row.deal_count);
         rep.dealCount += cnt;
 
         switch (row.forecast_category) {
           case 'closed': rep.closedWon += amt; break;
-          case 'commit': rep.commit += amt; break;
-          case 'best_case': rep.bestCase += amt; break;
-          case 'pipeline': rep.pipeline += amt; break;
+          case 'commit':
+            rep.commit += amt;
+            rep.commitWeighted += weightedAmt;
+            break;
+          case 'best_case':
+            rep.bestCase += amt;
+            rep.bestCaseWeighted += weightedAmt;
+            break;
+          case 'pipeline':
+            rep.pipeline += amt;
+            rep.pipelineWeighted += weightedAmt;
+            break;
           case 'not_forecasted': rep.notForecasted += amt; break;
         }
       }
@@ -2721,6 +2737,8 @@ const forecastRollup: ToolDefinition = {
       const byRep = Array.from(repMap.entries()).map(([name, data]) => {
         const repQuota = repQuotas?.[name] ?? null;
         const repBear = data.closedWon + data.commit;
+        const repBase = data.closedWon + data.commit + data.bestCase;
+        const repWeighted = data.closedWon + data.commitWeighted + data.bestCaseWeighted + data.pipelineWeighted;
         const attainment = repQuota ? repBear / repQuota : null;
 
         let status: string | null = null;
@@ -2741,6 +2759,8 @@ const forecastRollup: ToolDefinition = {
           notForecasted: data.notForecasted,
           dealCount: data.dealCount,
           bearCase: repBear,
+          baseCase: repBase,
+          weightedForecast: repWeighted,
           quota: repQuota,
           attainment,
           status,

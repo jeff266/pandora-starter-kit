@@ -364,7 +364,6 @@ Return ONLY a JSON array with no other text.`,
 
 CONTEXT:
 - Period: {{time_windows.analysisRange.quarter}}
-- Week: Week {{time_windows.currentWeek}} of quarter
 - Team Quota: {{quota_config.teamQuota}}
 - Current Forecast: {{forecast_data.team.commit}}
 
