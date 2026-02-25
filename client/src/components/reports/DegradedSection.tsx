@@ -1,4 +1,5 @@
 import React from 'react';
+import { Icon } from '../icons';
 
 interface DegradedSectionProps {
   sectionId: string;
@@ -15,9 +16,9 @@ export default function DegradedSection({
 }: DegradedSectionProps) {
   // Map missing skills to connector recommendations
   const connectorHints: Record<string, { name: string; icon: string }> = {
-    'conversation-intelligence': { name: 'Gong or Fireflies', icon: '🎙️' },
-    'monte-carlo-forecast': { name: 'more deal history', icon: '📊' },
-    'stage-velocity-benchmarks': { name: 'deal stage history', icon: '⏱️' },
+    'conversation-intelligence': { name: 'Gong or Fireflies', icon: 'network' },
+    'monte-carlo-forecast': { name: 'more deal history', icon: 'trending' },
+    'stage-velocity-benchmarks': { name: 'deal stage history', icon: 'flow' },
   };
 
   const missingConnector = sourceSkills
@@ -26,7 +27,7 @@ export default function DegradedSection({
 
   return (
     <div className="border border-slate-200 rounded-lg p-8 text-center bg-slate-50">
-      <div className="text-4xl mb-4">ℹ️</div>
+      <div className="text-4xl mb-4 inline-flex items-center justify-center"><Icon name="lightbulb" size={40} /></div>
       <p className="text-slate-700 mb-2">
         {missingConnector
           ? `Connect ${missingConnector.name} to enable this section`
