@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { colors, fonts } from '../../styles/theme';
 import { Notification } from '../../hooks/useNotifications';
 import { timeAgo } from '../../utils/time';
+import { Icon, type IconName } from '../icons';
 
 interface NotificationPanelProps {
   notifications: Notification[];
@@ -35,16 +36,16 @@ export default function NotificationPanel({
     onClose();
   };
 
-  const getNotificationIcon = (type: string): { icon: string; color: string } => {
+  const getNotificationIcon = (type: string): { icon: IconName | string; color: string } => {
     switch (type) {
       case 'invite_received':
-        return { icon: '👤+', color: colors.accent };
+        return { icon: 'connections', color: colors.accent };
       case 'invite_request_submitted':
-        return { icon: '👤', color: colors.yellow };
+        return { icon: 'connections', color: colors.yellow };
       case 'invite_request_resolved':
         return { icon: '✓', color: colors.green };
       case 'agent_pending_review':
-        return { icon: '🤖', color: colors.yellow };
+        return { icon: 'brain', color: colors.yellow };
       case 'agent_review_resolved':
         return { icon: '✓', color: colors.green };
       case 'skill_run_request':
@@ -52,11 +53,11 @@ export default function NotificationPanel({
       case 'skill_run_resolved':
         return { icon: '✓', color: colors.green };
       case 'member_suspended':
-        return { icon: '⚠', color: colors.red };
+        return { icon: 'target', color: colors.red };
       case 'role_changed':
-        return { icon: '🛡', color: colors.accent };
+        return { icon: 'building', color: colors.accent };
       default:
-        return { icon: '🔔', color: colors.textMuted };
+        return { icon: 'target', color: colors.textMuted };
     }
   };
 
@@ -189,7 +190,7 @@ export default function NotificationPanel({
           </div>
         ) : notifications.length === 0 ? (
           <div style={{ padding: 40, textAlign: 'center' }}>
-            <div style={{ fontSize: 48, opacity: 0.3, marginBottom: 12 }}>🔔</div>
+            <div style={{ opacity: 0.3, marginBottom: 12 }}><Icon name="target" size={48} /></div>
             <p style={{ fontSize: 14, color: colors.text, marginBottom: 4 }}>
               You're all caught up
             </p>
@@ -236,7 +237,7 @@ export default function NotificationPanel({
                       marginTop: 2,
                     }}
                   >
-                    {icon}
+                    {typeof icon === 'string' && icon.length <= 2 ? icon : <Icon name={icon as IconName} size={12} style={{ filter: `brightness(0) saturate(100%)` }} />}
                   </div>
 
                   {/* Content */}
