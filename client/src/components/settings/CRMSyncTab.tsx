@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useWorkspace } from '../../context/WorkspaceContext';
 import { colors, fonts } from '../../styles/theme';
 import Toast from '../Toast';
+import { api } from '../../lib/api';
 
 interface Mapping {
   id: string;
@@ -47,8 +48,7 @@ export function CRMSyncTab() {
 
   const loadMappings = async () => {
     try {
-      const response = await fetch(`/api/workspaces/${workspaceId}/crm-writeback/mappings`);
-      const data = await response.json();
+      const data = await api.get('/crm-writeback/mappings');
       setMappings(data.mappings || []);
     } catch (err) {
       console.error('Failed to load mappings:', err);
@@ -224,15 +224,10 @@ function MappingRow({ mapping, onUpdate, workspaceId, onToast }: any) {
   const handleTest = async () => {
     setTesting(true);
     try {
-      const response = await fetch(
-        `/api/workspaces/${workspaceId}/crm-writeback/mappings/${mapping.id}/test`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ crm_record_id: 'test-record-id' }),
-        }
+      const data = await api.post(
+        `/crm-writeback/mappings/${mapping.id}/test`,
+        { crm_record_id: 'test-record-id' }
       );
-      const data = await response.json();
       onToast({
         message: data.result?.success ? 'Test write succeeded' : `Test failed: ${data.result?.error}`,
         type: data.result?.success ? 'success' : 'error',
@@ -246,10 +241,8 @@ function MappingRow({ mapping, onUpdate, workspaceId, onToast }: any) {
 
   const handleToggle = async () => {
     try {
-      await fetch(`/api/workspaces/${workspaceId}/crm-writeback/mappings/${mapping.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ is_active: !mapping.is_active }),
+      await api.patch(`/crm-writeback/mappings/${mapping.id}`, {
+        is_active: !mapping.is_active,
       });
       onUpdate();
     } catch (err) {
@@ -340,8 +333,7 @@ function AddMappingPanel({ workspaceId, onClose, onSave }: any) {
 
   const loadPandoraFields = async () => {
     try {
-      const response = await fetch(`/api/workspaces/${workspaceId}/crm-writeback/fields`);
-      const data = await response.json();
+      const data = await api.get('/crm-writeback/fields');
       setPandoraFields(data.fields || []);
     } catch (err) {
       console.error('Failed to load Pandora fields:', err);
@@ -350,10 +342,7 @@ function AddMappingPanel({ workspaceId, onClose, onSave }: any) {
 
   const loadCRMProperties = async (objectType: string) => {
     try {
-      const response = await fetch(
-        `/api/workspaces/${workspaceId}/crm-writeback/crm-properties?objectType=${objectType}`
-      );
-      const data = await response.json();
+      const data = await api.get(`/crm-writeback/crm-properties?objectType=${objectType}`);
       setCrmProperties(data.properties || []);
     } catch (err) {
       console.error('Failed to load CRM properties:', err);
@@ -365,19 +354,15 @@ function AddMappingPanel({ workspaceId, onClose, onSave }: any) {
     setSaving(true);
     try {
       const selectedCRM = crmProperties.find(p => p.name === selectedCRMProperty);
-      await fetch(`/api/workspaces/${workspaceId}/crm-writeback/mappings`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          crm_type: 'hubspot',
-          pandora_field: selectedPandoraField,
-          crm_object_type: selectedObjectType,
-          crm_property_name: selectedCRMProperty,
-          crm_property_label: selectedCRM?.label || selectedCRMProperty,
-          crm_field_type: selectedCRM?.type || 'text',
-          sync_trigger: syncTrigger,
-          write_mode: writeMode,
-        }),
+      await api.post('/crm-writeback/mappings', {
+        crm_type: 'hubspot',
+        pandora_field: selectedPandoraField,
+        crm_object_type: selectedObjectType,
+        crm_property_name: selectedCRMProperty,
+        crm_property_label: selectedCRM?.label || selectedCRMProperty,
+        crm_field_type: selectedCRM?.type || 'text',
+        sync_trigger: syncTrigger,
+        write_mode: writeMode,
       });
       onSave();
     } catch (err) {
@@ -596,8 +581,7 @@ function SyncLog({ workspaceId }: { workspaceId: string }) {
 
   const loadLog = async () => {
     try {
-      const response = await fetch(`/api/workspaces/${workspaceId}/crm-writeback/log?limit=10`);
-      const data = await response.json();
+      const data = await api.get('/crm-writeback/log?limit=10');
       setLogEntries(data.log_entries || []);
     } catch (err) {
       console.error('Failed to load sync log:', err);
