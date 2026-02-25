@@ -319,6 +319,7 @@ export default function DealDetail() {
       setAskHistory(prev => [...prev, {
         role: 'assistant',
         content: result.answer,
+        follow_up_questions: result.follow_up_questions || [],
         metadata: {
           confidence: result.confidence,
           data_consulted: result.data_consulted,
@@ -337,6 +338,49 @@ export default function DealDetail() {
       }
     } finally {
       setAskLoading(false);
+    }
+  };
+
+  const handleFollowUpClick = async (question: string) => {
+    if (askLoading || !dealId) return;
+
+    setAskQuestion(question);
+    setAskLoading(true);
+    setAskError('');
+
+    // Add user message to history
+    setAskHistory(prev => [...prev, { role: 'user', content: question }]);
+
+    try {
+      const result = await api.post('/analyze', {
+        question: question,
+        scope: { type: 'deal', entity_id: dealId },
+      });
+
+      // Add assistant response to history
+      setAskHistory(prev => [...prev, {
+        role: 'assistant',
+        content: result.answer,
+        follow_up_questions: result.follow_up_questions || [],
+        metadata: {
+          confidence: result.confidence,
+          data_consulted: result.data_consulted,
+          tokens_used: result.tokens_used,
+          latency_ms: result.latency_ms,
+        }
+      }]);
+    } catch (err: any) {
+      // Remove optimistic user message on error
+      setAskHistory(prev => prev.slice(0, -1));
+
+      if (err.message?.includes('429') || err.message?.includes('rate limit')) {
+        setAskError('Analysis limit reached. Try again in a few minutes.');
+      } else {
+        setAskError(err.message || 'Failed to get answer');
+      }
+    } finally {
+      setAskLoading(false);
+      setAskQuestion(''); // Clear input after submission
     }
   };
 
@@ -1329,6 +1373,47 @@ export default function DealDetail() {
                           )}
                           {msg.metadata.tokens_used && <span>{msg.metadata.tokens_used} tokens</span>}
                           {msg.metadata.latency_ms && <span>{(msg.metadata.latency_ms / 1000).toFixed(1)}s</span>}
+                        </div>
+                      )}
+                      {msg.follow_up_questions && msg.follow_up_questions.length > 0 && msg.role === 'assistant' && (
+                        <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${colors.borderLight}` }}>
+                          <div style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, marginBottom: 8, textTransform: 'uppercase' }}>
+                            Follow-up Questions
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            {msg.follow_up_questions.slice(0, 3).map((question: string, qIdx: number) => (
+                              <button
+                                key={qIdx}
+                                onClick={() => handleFollowUpClick(question)}
+                                disabled={askLoading}
+                                style={{
+                                  fontSize: 12,
+                                  padding: '8px 12px',
+                                  background: askLoading ? colors.surfaceRaised : colors.accentSoft,
+                                  color: askLoading ? colors.textMuted : colors.accent,
+                                  border: `1px solid ${askLoading ? colors.borderLight : `${colors.accent}30`}`,
+                                  borderRadius: 6,
+                                  cursor: askLoading ? 'not-allowed' : 'pointer',
+                                  textAlign: 'left',
+                                  transition: 'all 0.2s',
+                                }}
+                                onMouseEnter={(e) => {
+                                  if (!askLoading) {
+                                    e.currentTarget.style.background = colors.accent;
+                                    e.currentTarget.style.color = 'white';
+                                  }
+                                }}
+                                onMouseLeave={(e) => {
+                                  if (!askLoading) {
+                                    e.currentTarget.style.background = colors.accentSoft;
+                                    e.currentTarget.style.color = colors.accent;
+                                  }
+                                }}
+                              >
+                                {question}
+                              </button>
+                            ))}
+                          </div>
                         </div>
                       )}
                     </div>

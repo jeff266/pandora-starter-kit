@@ -62,6 +62,7 @@ export interface ConversationTurnResult {
   evidence?: any;
   tool_call_count?: number;
   latency_ms?: number;
+  follow_up_questions?: string[];
   documents?: {
     docxPath: string;
     xlsxPath: string;
@@ -543,6 +544,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
         tokens_used: tokensUsed,
         response_id: randomUUID(),
         feedback_enabled: true,
+        follow_up_questions: pandoraResult.follow_up_questions || [],
         ...(pandoraResult.evidence.tool_calls.length > 0 ? {
           evidence: pandoraResult.evidence,
           tool_call_count: pandoraResult.tool_call_count,

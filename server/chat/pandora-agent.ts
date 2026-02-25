@@ -608,6 +608,25 @@ const PANDORA_TOOLS: ToolDef[] = [
       required: [],
     },
   },
+  {
+    name: 'query_deal_outcomes',
+    description:
+      'Query closed deal outcomes (won/lost) with historical scores. Returns deal_id, deal_name, outcome, amount, closed_at, days_open, composite_score, crm_score, skill_score, conversation_score at time of close. Use for win/loss analysis, score validation, or understanding what score ranges correlate with wins vs losses.',
+    parameters: {
+      type: 'object',
+      properties: {
+        outcome: { type: 'string', enum: ['won', 'lost'], description: 'Filter by deal outcome' },
+        stage_at_close: { type: 'string', description: 'Stage the deal was in when closed (partial match)' },
+        amount_min: { type: 'number', description: 'Minimum deal amount' },
+        amount_max: { type: 'number', description: 'Maximum deal amount' },
+        closed_after: { type: 'string', description: 'ISO date — deals closed on or after this date' },
+        closed_before: { type: 'string', description: 'ISO date — deals closed on or before this date' },
+        limit: { type: 'number', description: 'Max records to return (default 50, max 200)' },
+        order_by: { type: 'string', enum: ['closed_at', 'amount', 'composite_score'], description: 'Sort field (default: closed_at DESC)' },
+      },
+      required: [],
+    },
+  },
 ];
 
 // ─── System prompt ────────────────────────────────────────────────────────────
@@ -692,6 +711,12 @@ You have tools that query the company's live data. When someone asks a question,
 
 22. MARKET SIGNALS: When asked "what's happening with [company]?" or "any news about [account]?" or to research account status, call enrich_market_signals. Fetches recent company news and detects signals: funding, M&A, expansions, executive changes, layoffs. By default only checks A/B tier accounts (ICP ≥70) for cost optimization. Identifies buying triggers (funding = expansion budget, new exec = fresh evaluation). Returns signal_strength and prioritized events.
 
+23. DEAL OUTCOMES: When asked about closed deals, win/loss patterns, or score validation, use query_deal_outcomes. Returns historical outcome data with scores at time of close. Useful for understanding what score ranges predict wins vs losses.
+
+## Follow-Up Questions
+
+After your answer, on a new line starting with "FOLLOWUPS:", suggest 2-3 natural follow-up questions the user might ask next, separated by pipes (|). Questions must be answerable by your available tools — do not suggest questions requiring data you cannot access. Cap at 3 questions.
+
 Today's date is ${new Date().toISOString().split('T')[0]}.`;
 
 // ─── Response types ───────────────────────────────────────────────────────────
@@ -712,6 +737,7 @@ export interface PandoraCitedRecord {
 
 export interface PandoraResponse {
   answer: string;
+  follow_up_questions: string[];
   evidence: {
     tool_calls: PandoraToolCall[];
     cited_records: PandoraCitedRecord[];
@@ -719,6 +745,21 @@ export interface PandoraResponse {
   tokens_used: number;
   tool_call_count: number;
   latency_ms: number;
+}
+
+// ─── Follow-up question parser ────────────────────────────────────────────────
+
+function parseFollowUpQuestions(content: string): { answer: string; followups: string[] } {
+  let answer = content;
+  let followups: string[] = [];
+
+  const followupMatch = content.match(/\n\s*FOLLOWUPS?:\s*(.+)/i);
+  if (followupMatch) {
+    followups = followupMatch[1].split('|').map(q => q.trim()).filter(q => q.length > 0);
+    answer = content.substring(0, followupMatch.index!).trim();
+  }
+
+  return { answer, followups };
 }
 
 // ─── Pre-flight question classifier ───────────────────────────────────────────
@@ -871,8 +912,11 @@ export async function runPandoraAgent(
         continue;
       }
 
+      const parsed = parseFollowUpQuestions(response.content);
+
       return {
-        answer: response.content,
+        answer: parsed.answer,
+        follow_up_questions: parsed.followups,
         evidence: {
           tool_calls: toolTrace,
           cited_records: extractCitedRecords(toolTrace),
@@ -940,8 +984,11 @@ export async function runPandoraAgent(
 
   totalTokens += (finalResponse.usage?.input || 0) + (finalResponse.usage?.output || 0);
 
+  const parsedFinal = parseFollowUpQuestions(finalResponse.content);
+
   return {
-    answer: finalResponse.content,
+    answer: parsedFinal.answer,
+    follow_up_questions: parsedFinal.followups,
     evidence: {
       tool_calls: toolTrace,
       cited_records: extractCitedRecords(toolTrace),

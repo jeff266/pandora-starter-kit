@@ -16,6 +16,7 @@ import { shouldCompress, compressToolResult } from './tool-result-compressor.js'
 import { formatCurrency } from '../utils/format-currency.js';
 import { scoreIcpFit, scoreMultithreading, scoreConversationSentiment } from './scoring-tools.js';
 import { computeRepConversions, computeSourceConversion, detectProcessBlockers, detectBuyerSignals, checkStakeholderStatus, enrichMarketSignals } from './analysis-tools.js';
+import { queryDealOutcomes } from './query-deal-outcomes.js';
 
 // ─── Tool result types ───────────────────────────────────────────────────────
 
@@ -284,6 +285,8 @@ export async function executeDataTool(
         result = await checkStakeholderStatus(workspaceId, params); break;
       case 'enrich_market_signals':
         result = await enrichMarketSignals(workspaceId, params); break;
+      case 'query_deal_outcomes':
+        result = await queryDealOutcomes(workspaceId, params); break;
       default:
         throw new Error(`Unknown tool: ${toolName}`);
     }
