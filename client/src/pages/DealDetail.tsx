@@ -107,6 +107,7 @@ export default function DealDetail() {
   const isMobile = useIsMobile();
   const [dossier, setDossier] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [narrativeLoading, setNarrativeLoading] = useState(false);
   const [error, setError] = useState('');
   const [dismissingId, setDismissingId] = useState<string | null>(null);
   const [snoozingId, setSnoozingId] = useState<string | null>(null);
@@ -141,7 +142,11 @@ export default function DealDetail() {
 
   const fetchDossier = async (withNarrative = false) => {
     if (!dealId) return;
-    setLoading(true);
+    if (withNarrative) {
+      setNarrativeLoading(true);
+    } else {
+      setLoading(true);
+    }
     try {
       const url = withNarrative
         ? `/deals/${dealId}/dossier?narrative=true`
@@ -152,7 +157,11 @@ export default function DealDetail() {
     } catch (err: any) {
       setError(err.message);
     } finally {
-      setLoading(false);
+      if (withNarrative) {
+        setNarrativeLoading(false);
+      } else {
+        setLoading(false);
+      }
     }
   };
 
@@ -648,6 +657,7 @@ export default function DealDetail() {
       {dealId && (
         <DossierNarrative
           narrative={narrative}
+          loading={narrativeLoading}
           onGenerate={() => fetchDossier(true)}
         />
       )}
