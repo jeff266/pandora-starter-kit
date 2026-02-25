@@ -87,10 +87,16 @@ router.post('/:workspaceId/sql/execute', async (req: Request, res: Response) => 
     await client.query(`SET LOCAL app.current_workspace_id = '${workspaceId}'`);
     await client.query(`SET LOCAL statement_timeout = ${QUERY_TIMEOUT_MS}`);
 
+    // Verify the session variable was set (for debugging)
+    const varCheck = await client.query(`SELECT current_setting('app.current_workspace_id', true) as workspace_id`);
+    console.log('[sql-workspace] Session workspace_id:', varCheck.rows[0]?.workspace_id, 'Expected:', workspaceId);
+
     // Execute the query (RLS policies will automatically filter by workspace_id)
     const startTime = Date.now();
     const result = await client.query(sql);
     const executionTime = Date.now() - startTime;
+
+    console.log('[sql-workspace] Query returned', result.rows.length, 'rows');
 
     await client.query('COMMIT');
 
