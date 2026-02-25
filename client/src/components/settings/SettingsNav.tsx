@@ -1,10 +1,11 @@
 import React from 'react';
 import { colors, fonts } from '../../styles/theme';
+import { Icon, type IconName } from '../icons';
 
 interface NavItem {
   key: string;
   label: string;
-  icon: string;
+  icon: IconName | string;
 }
 
 interface SettingsNavProps {
@@ -14,19 +15,19 @@ interface SettingsNavProps {
 }
 
 const userTabs: NavItem[] = [
-  { key: 'profile', label: 'Profile', icon: '👤' },
-  { key: 'security', label: 'Security', icon: '🔒' },
-  { key: 'preferences', label: 'Preferences', icon: '⚙️' },
+  { key: 'profile', label: 'Profile', icon: 'connections' },
+  { key: 'security', label: 'Security', icon: 'filter' },
+  { key: 'preferences', label: 'Preferences', icon: 'filter' },
   { key: 'workspaces', label: 'Workspaces', icon: '▦' },
 ];
 
 const adminTabs: NavItem[] = [
-  { key: 'members', label: 'Members', icon: '👥' },
-  { key: 'roles', label: 'Roles', icon: '🛡️' },
-  { key: 'notifications', label: 'Notifications', icon: '🔔' },
-  { key: 'features', label: 'Features', icon: '⚡' },
-  { key: 'crm-sync', label: 'CRM Sync', icon: '🔄' },
-  { key: 'billing', label: 'Billing', icon: '💳' },
+  { key: 'members', label: 'Members', icon: 'connections' },
+  { key: 'roles', label: 'Roles', icon: 'building' },
+  { key: 'notifications', label: 'Notifications', icon: 'target' },
+  { key: 'features', label: 'Features', icon: 'flow' },
+  { key: 'crm-sync', label: 'CRM Sync', icon: 'refresh' },
+  { key: 'billing', label: 'Billing', icon: 'chart-growth' },
 ];
 
 export default function SettingsNav({ activeTab, onTabChange, isAdmin = false }: SettingsNavProps) {
@@ -81,7 +82,9 @@ export default function SettingsNav({ activeTab, onTabChange, isAdmin = false }:
               if (!isActive) e.currentTarget.style.background = 'transparent';
             }}
           >
-            <span style={{ fontSize: 16, opacity: 0.9 }}>{tab.icon}</span>
+            <span style={{ fontSize: 16, opacity: 0.9, display: 'inline-flex', alignItems: 'center' }}>
+              {typeof tab.icon === 'string' && tab.icon.length === 1 ? tab.icon : <Icon name={tab.icon as IconName} size={16} style={{ filter: isActive ? 'brightness(0) saturate(100%) invert(47%) sepia(68%) saturate(1869%) hue-rotate(204deg) brightness(96%) contrast(94%)' : 'brightness(0) saturate(100%) invert(62%) sepia(11%) saturate(566%) hue-rotate(181deg) brightness(94%) contrast(88%)' }} />}
+            </span>
             <span>{tab.label}</span>
           </button>
         );
@@ -132,7 +135,9 @@ export default function SettingsNav({ activeTab, onTabChange, isAdmin = false }:
                   if (!isActive) e.currentTarget.style.background = 'transparent';
                 }}
               >
-                <span style={{ fontSize: 16, opacity: 0.9 }}>{tab.icon}</span>
+                <span style={{ fontSize: 16, opacity: 0.9, display: 'inline-flex', alignItems: 'center' }}>
+                  {typeof tab.icon === 'string' && tab.icon.length === 1 ? tab.icon : <Icon name={tab.icon as IconName} size={16} style={{ filter: isActive ? 'brightness(0) saturate(100%) invert(47%) sepia(68%) saturate(1869%) hue-rotate(204deg) brightness(96%) contrast(94%)' : 'brightness(0) saturate(100%) invert(62%) sepia(11%) saturate(566%) hue-rotate(181deg) brightness(94%) contrast(88%)' }} />}
+                </span>
                 <span>{tab.label}</span>
               </button>
             );
@@ -174,7 +179,9 @@ export default function SettingsNav({ activeTab, onTabChange, isAdmin = false }:
                 transition: 'background 0.12s, color 0.12s',
               }}
             >
-              <span style={{ marginRight: 6 }}>{tab.icon}</span>
+              <span style={{ marginRight: 6, display: 'inline-flex', alignItems: 'center' }}>
+                {typeof tab.icon === 'string' && tab.icon.length === 1 ? tab.icon : <Icon name={tab.icon as IconName} size={14} style={{ filter: isActive ? 'brightness(0) saturate(100%) invert(47%) sepia(68%) saturate(1869%) hue-rotate(204deg) brightness(96%) contrast(94%)' : 'brightness(0) saturate(100%) invert(62%) sepia(11%) saturate(566%) hue-rotate(181deg) brightness(94%) contrast(88%)' }} />}
+              </span>
               {tab.label}
             </button>
           );
@@ -200,7 +207,9 @@ export default function SettingsNav({ activeTab, onTabChange, isAdmin = false }:
                 transition: 'background 0.12s, color 0.12s',
               }}
             >
-              <span style={{ marginRight: 6 }}>{tab.icon}</span>
+              <span style={{ marginRight: 6, display: 'inline-flex', alignItems: 'center' }}>
+                {typeof tab.icon === 'string' && tab.icon.length === 1 ? tab.icon : <Icon name={tab.icon as IconName} size={14} style={{ filter: isActive ? 'brightness(0) saturate(100%) invert(47%) sepia(68%) saturate(1869%) hue-rotate(204deg) brightness(96%) contrast(94%)' : 'brightness(0) saturate(100%) invert(62%) sepia(11%) saturate(566%) hue-rotate(181deg) brightness(94%) contrast(88%)' }} />}
+              </span>
               {tab.label}
             </button>
           );
