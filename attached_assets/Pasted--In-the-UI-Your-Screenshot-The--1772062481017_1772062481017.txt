@@ -1,0 +1,73 @@
+📍 In the UI (Your Screenshot)               
+                                               
+  The conversation history appears in the same 
+  panel below the input field, but it's        
+  currently empty because no questions have    
+  been asked yet. Once you submit a question,  
+  you'll see:                                  
+                                               
+  [Conversation History section - lines        
+  1349-1420 in DealDetail.tsx]                 
+  ├── User messages (blue/accent background)   
+  └── Pandora responses (gray background)      
+      └── Follow-up question buttons (if any)  
+                                               
+  🗄️ Database Storage                          
+                                               
+  Tables: chat_sessions and                    
+  chat_session_messages                        
+                                               
+  -- To query all Ask Pandora history for a    
+  specific deal:                               
+  SELECT                                       
+    csm.role,                                  
+    csm.content,                               
+    csm.metadata,                              
+    csm.created_at                             
+  FROM chat_session_messages csm               
+  JOIN chat_sessions cs ON cs.id =             
+  csm.session_id                               
+  WHERE cs.workspace_id = '<workspace_id>'     
+    AND cs.entity_type = 'deal'                
+    AND cs.entity_id = '<deal_id>'             
+  ORDER BY csm.created_at ASC;                 
+                                               
+  Location:                                    
+  server/migrations/083_chat_sessions.sql      
+                                               
+  🔌 API Endpoint                              
+                                               
+  GET /api/workspaces/:workspaceId/analyze/hist
+  ory/deal/:dealId                             
+                                               
+  Implementation:                              
+  server/routes/analysis.ts:258-280            
+                                               
+  Function: getEntityMessages() in             
+  server/chat/session-service.ts:375           
+                                               
+  💻 Frontend Code                             
+                                               
+  File: client/src/pages/DealDetail.tsx        
+                                               
+  - History loading: Line 289-298              
+  (fetchAskHistory function)                   
+  - Called on mount: Line 201 in useEffect     
+  - State: Line 148 (askHistory state)         
+  - Rendering: Lines 1349-1420                 
+                                               
+  ✅ To See It Work:                           
+                                               
+  1. Type a question in the input (e.g.,       
+  "What's the biggest risk to closing this     
+  deal?")                                      
+  2. Click "Ask"                               
+  3. The conversation history will appear below
+   with:                                       
+    - Your question                            
+    - Pandora's answer                         
+    - Follow-up question buttons (new feature  
+  you just added!)                             
+                                               
+  The history persists across page refreshes   
+  and is scoped to the current deal.
