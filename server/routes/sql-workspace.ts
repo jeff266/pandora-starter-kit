@@ -156,33 +156,17 @@ router.post('/:workspaceId/sql/execute', async (req: Request, res: Response) => 
 });
 
 /**
- * Simple workspace_id injection helper.
- * For production, use Postgres row-level security or a proper query parser.
+ * Replace $1 placeholder with the actual workspace_id value.
+ * This allows users to write queries with "WHERE workspace_id = $1"
+ * and have it automatically substituted with their workspace ID.
  *
- * This function adds "WHERE workspace_id = $1" clauses to FROM/JOIN tables.
- * Limitations:
- * - Basic regex-based approach
- * - Won't handle complex subqueries correctly
- * - Won't handle aliases properly
- *
- * For MVP purposes only. Recommend using RLS policies in production.
+ * For production, consider using Postgres row-level security policies.
  */
 function injectWorkspaceFilter(sql: string, workspaceId: string): string {
-  // For now, return SQL as-is and rely on application-level filtering
-  // In production, you should:
-  // 1. Use Postgres row-level security (RLS) policies on all tables
-  // 2. Or use a SQL parser library to inject WHERE workspace_id = X safely
-
-  // This is a PLACEHOLDER - workspace_id filtering should be handled by:
-  // - Database views that filter by workspace_id automatically
-  // - Row-level security policies
-  // - Or manual injection in each query (user responsibility)
-
-  // For safety, we're not modifying the query automatically.
-  // The schema should already have workspace_id columns, and users
-  // should include "WHERE workspace_id = 'xxx'" in their queries.
-
-  return sql;
+  // Replace $1 with the properly escaped workspace_id literal
+  // Use Postgres string escaping to prevent SQL injection
+  const escapedWorkspaceId = workspaceId.replace(/'/g, "''");
+  return sql.replace(/\$1/g, `'${escapedWorkspaceId}'`);
 }
 
 /**
