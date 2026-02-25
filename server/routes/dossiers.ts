@@ -33,11 +33,13 @@ router.get('/:workspaceId/deals/:dealId/dossier', async (req, res) => {
 
     if (includeNarrative) {
       try {
-        const narrative = await synthesizeDealNarrative(workspaceId, dossier);
+        const { narrative, recommended_actions } = await synthesizeDealNarrative(workspaceId, dossier);
         (dossier as any).narrative = narrative;
+        (dossier as any).recommended_actions = recommended_actions;
       } catch (err) {
         console.error('[Deal Dossier] Narrative synthesis failed:', (err as Error).message);
         (dossier as any).narrative = null;
+        (dossier as any).recommended_actions = [];
       }
     }
 

@@ -108,7 +108,12 @@ function buildAccountContext(dossier: AccountDossier): string {
 const DEAL_SYSTEM_PROMPT = `You are a RevOps analyst summarizing a deal for a sales leader.
 Write 2-4 sentences covering: current deal status, recent activity or inactivity, relationship health (threading, engagement), and any critical findings or risks.
 Be direct, specific, and actionable. Reference actual data points. Do not use bullet points or headers.
-If information is missing, note it briefly but focus on what is known.`;
+If information is missing, note it briefly but focus on what is known.
+
+After the summary paragraph, output a separate JSON block with recommended actions:
+{"recommended_actions": ["action 1", "action 2", "action 3"]}
+
+Cap at 3 actions maximum, each under 15 words, verb-led (e.g., "Schedule call with VP", "Update close date to reflect timeline", "Add missing contacts to CRM").`;
 
 const ACCOUNT_SYSTEM_PROMPT = `You are a RevOps analyst summarizing an account relationship for a sales leader.
 Write 2-4 sentences covering: overall relationship health, engagement trends, deal status, and any notable findings or coverage gaps.
@@ -118,7 +123,7 @@ If information is missing, note it briefly but focus on what is known.`;
 export async function synthesizeDealNarrative(
   workspaceId: string,
   dossier: DealDossier
-): Promise<string> {
+): Promise<{ narrative: string; recommended_actions: string[] }> {
   const context = buildDealContext(dossier);
 
   const response = await callLLM(workspaceId, 'reason', {
@@ -129,7 +134,7 @@ export async function synthesizeDealNarrative(
         content: `Summarize this deal:\n\n${context}`,
       },
     ],
-    maxTokens: 300,
+    maxTokens: 400,
     temperature: 0.3,
     _tracking: {
       feature: 'dossier_narrative',
@@ -137,7 +142,25 @@ export async function synthesizeDealNarrative(
     },
   });
 
-  return response.content || '';
+  const content = response.content || '';
+
+  // Parse JSON block if present
+  const jsonMatch = content.match(/\{[\s\S]*?"recommended_actions"[\s\S]*?\}/);
+  let recommended_actions: string[] = [];
+  let narrative = content;
+
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[0]);
+      recommended_actions = (parsed.recommended_actions || []).slice(0, 3);
+      narrative = content.replace(jsonMatch[0], '').trim();
+    } catch (err) {
+      // If JSON parsing fails, return full content as narrative
+      console.warn('[Narrative] Failed to parse recommended_actions:', err);
+    }
+  }
+
+  return { narrative, recommended_actions };
 }
 
 export async function synthesizeAccountNarrative(

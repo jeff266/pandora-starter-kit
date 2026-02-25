@@ -471,6 +471,7 @@ export async function assembleDealDossier(
 
   const contacts_never_called = mappedContacts
     .filter((c: any) => c.email && !participantEmails.has(c.email.toLowerCase()))
+    .filter((c, i, arr) => arr.findIndex(x => x.email === c.email) === i)
     .map((c: any) => ({
       name: c.name,
       title: c.title,

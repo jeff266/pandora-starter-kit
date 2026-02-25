@@ -3,12 +3,14 @@ import { colors } from '../../styles/theme';
 
 interface DossierNarrativeProps {
   narrative?: string;
+  recommended_actions?: string[];
   loading?: boolean;
   onGenerate: () => void;
 }
 
 export default function DossierNarrative({
   narrative,
+  recommended_actions = [],
   loading = false,
   onGenerate,
 }: DossierNarrativeProps) {
@@ -97,16 +99,43 @@ export default function DossierNarrative({
           />
         </div>
       ) : narrative ? (
-        <p
-          style={{
-            fontSize: 14,
-            lineHeight: 1.6,
-            color: colors.text,
-            margin: 0,
-          }}
-        >
-          {narrative}
-        </p>
+        <>
+          <p
+            style={{
+              fontSize: 14,
+              lineHeight: 1.6,
+              color: colors.text,
+              margin: 0,
+              marginBottom: recommended_actions.length > 0 ? 16 : 0,
+            }}
+          >
+            {narrative}
+          </p>
+          {recommended_actions.length > 0 && (
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: colors.textSecondary, marginBottom: 8 }}>
+                Recommended Actions
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {recommended_actions.map((action, idx) => (
+                  <div
+                    key={idx}
+                    style={{
+                      fontSize: 13,
+                      color: colors.text,
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: 8,
+                    }}
+                  >
+                    <span style={{ color: colors.accent, flexShrink: 0 }}>→</span>
+                    <span>{action}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
       ) : (
         <p style={{ fontSize: 13, color: colors.textMuted, textAlign: 'center' }}>
           Failed to generate narrative. Please try again.

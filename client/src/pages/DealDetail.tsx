@@ -324,6 +324,7 @@ export default function DealDetail() {
   const conversations = dossier.conversations || [];
   const stageHistory = dossier.stage_history || [];
   const narrative = dossier.narrative;
+  const recommended_actions = dossier.recommended_actions || [];
   const riskScore = dossier.risk_score;
   const activeScore: ActiveScore | undefined = dossier.active_score;
   const mechanicalScore: MechanicalScore | null = dossier.mechanical_score ?? null;
@@ -477,6 +478,63 @@ export default function DealDetail() {
                   {daysInStage}d in stage
                 </span>
               )}
+              {(activeScore || (riskScore && riskScore.grade)) && (() => {
+                const displayGrade = activeScore ? activeScore.grade : riskScore.grade;
+                const displayScore = activeScore ? activeScore.score : riskScore.score;
+                const isProvisional = activeScore && (activeScore as any).degradation_state === 'crm_only';
+                return (
+                  <div style={{ position: 'relative' }}>
+                    <div
+                      onClick={() => setShowScoreBreakdown(v => !v)}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 4,
+                        padding: '2px 8px', borderRadius: 4,
+                        background: gradeBg(displayGrade),
+                        border: `1px solid ${gradeColor(displayGrade)}30`,
+                        cursor: 'pointer',
+                        userSelect: 'none',
+                      }}
+                      title="Click to see score breakdown"
+                    >
+                      <span style={{
+                        fontSize: 11, fontWeight: 700,
+                        color: gradeColor(displayGrade),
+                        fontFamily: fonts.mono,
+                      }}>
+                        {displayGrade}
+                      </span>
+                      <span style={{ fontSize: 11, fontWeight: 600, fontFamily: fonts.mono, color: colors.text }}>
+                        {displayScore}
+                      </span>
+                      {isProvisional && (
+                        <span
+                          title="Score based on CRM data only"
+                          style={{
+                            fontSize: 8,
+                            fontWeight: 600,
+                            color: colors.accent,
+                            background: `${colors.accent}15`,
+                            padding: '1px 3px',
+                            borderRadius: 2,
+                            textTransform: 'uppercase',
+                          }}
+                        >
+                          P
+                        </span>
+                      )}
+                    </div>
+                    {showScoreBreakdown && riskScore && activeScore && (
+                      <ScoreBreakdownPanel
+                        riskScore={riskScore}
+                        mechanicalScore={mechanicalScore}
+                        activeScore={activeScore}
+                        coverageGaps={coverageGapsData}
+                        onClose={() => setShowScoreBreakdown(false)}
+                      />
+                    )}
+                  </div>
+                );
+              })()}
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: isMobile ? 8 : 16, marginTop: 8, fontSize: 12, color: colors.textMuted }}>
               <span>Owner: {deal.owner_name ? anon.person(deal.owner_name) : deal.owner_email ? anon.email(deal.owner_email) : deal.owner ? anon.person(deal.owner) : '--'}</span>
@@ -540,99 +598,6 @@ export default function DealDetail() {
                 </a>
               );
             })()}
-
-            {(activeScore || (riskScore && riskScore.grade)) && (() => {
-              const displayGrade = activeScore ? activeScore.grade : riskScore.grade;
-              const displayScore = activeScore ? activeScore.score : riskScore.score;
-              const displaySource = activeScore ? activeScore.source : 'health';
-              const showDivergence = activeScore && (activeScore as any).divergence_flag;
-              const isProvisional = activeScore && (activeScore as any).degradation_state === 'crm_only';
-              return (
-                <div style={{ position: 'relative' }}>
-                  <div
-                    onClick={() => setShowScoreBreakdown(v => !v)}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 8,
-                      padding: '8px 14px', borderRadius: 8,
-                      background: gradeBg(displayGrade),
-                      border: `1px solid ${gradeColor(displayGrade)}30`,
-                      cursor: 'pointer',
-                      userSelect: 'none',
-                    }}
-                  >
-                    <span style={{
-                      fontSize: 20, fontWeight: 700,
-                      color: gradeColor(displayGrade),
-                      fontFamily: fonts.mono,
-                    }}>
-                      {displayGrade}
-                    </span>
-                    <div style={{ display: 'flex', flexDirection: 'column' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <span style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase' }}>
-                          Score
-                        </span>
-                        {isProvisional && (
-                          <span
-                            title="Score based on CRM data only — will update as call recordings and AI findings become available"
-                            style={{
-                              fontSize: 8,
-                              fontWeight: 600,
-                              color: colors.accent,
-                              background: `${colors.accent}15`,
-                              padding: '2px 4px',
-                              borderRadius: 3,
-                              textTransform: 'uppercase',
-                              cursor: 'help',
-                            }}
-                          >
-                            Provisional
-                          </span>
-                        )}
-                      </div>
-                      <span style={{ fontSize: 14, fontWeight: 600, fontFamily: fonts.mono, color: colors.text }}>
-                        {displayScore}
-                      </span>
-                      <span style={{ fontSize: 9, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                        {displaySource === 'skill' ? 'SKILL' : 'HEALTH'}
-                      </span>
-                    </div>
-                    {showDivergence && (
-                      <div style={{
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: 2,
-                        paddingLeft: 8,
-                        borderLeft: `1px solid ${colors.textMuted}20`,
-                      }}>
-                        <span style={{
-                          fontSize: 9,
-                          fontWeight: 600,
-                          color: colors.yellow,
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 4
-                        }}>
-                          ⚠ Scores diverge
-                        </span>
-                        <div style={{ fontSize: 10, color: colors.textMuted }}>
-                          <div>Skill: {(activeScore as any).skill_score}</div>
-                          <div>Health: {(activeScore as any).health_score ?? '—'}</div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  {showScoreBreakdown && riskScore && activeScore && (
-                    <ScoreBreakdownPanel
-                      riskScore={riskScore}
-                      mechanicalScore={mechanicalScore}
-                      activeScore={activeScore}
-                      onClose={() => setShowScoreBreakdown(false)}
-                    />
-                  )}
-                </div>
-              );
-            })()}
           </div>
         </div>
 
@@ -662,6 +627,7 @@ export default function DealDetail() {
       {dealId && (
         <DossierNarrative
           narrative={narrative}
+          recommended_actions={recommended_actions}
           loading={narrativeLoading}
           onGenerate={() => fetchDossier(true)}
         />
@@ -1360,11 +1326,13 @@ function ScoreBreakdownPanel({
   riskScore,
   mechanicalScore,
   activeScore,
+  coverageGaps,
   onClose,
 }: {
   riskScore: { score: number; grade: string; signal_counts: { act: number; watch: number; notable: number; info: number } };
   mechanicalScore: { score: number | null; grade: string } | null;
   activeScore: ActiveScore;
+  coverageGaps: any;
   onClose: () => void;
 }) {
   const weights = activeScore.weights_used;
@@ -1503,6 +1471,23 @@ function ScoreBreakdownPanel({
                       {signal.keyword} ({signal.points > 0 ? '+' : ''}{signal.points}) · from "{signal.call_title}"
                     </div>
                   ))}
+                </div>
+              )}
+              {/* Warning for account conversations not linked to deal */}
+              {c.label === 'Conversations' && activeScore.degradation_state === 'no_conversations' && coverageGaps?.days_since_last_call != null && (
+                <div style={{
+                  fontSize: 10,
+                  marginTop: 6,
+                  padding: '6px 8px',
+                  background: `${colors.yellow}15`,
+                  borderRadius: 4,
+                  border: `1px solid ${colors.yellow}30`,
+                  color: colors.text,
+                }}>
+                  <div style={{ marginBottom: 4 }}>Recent account calls not linked to this deal — score may be understated.</div>
+                  <a href="/conversations" style={{ color: colors.accent, textDecoration: 'none', fontSize: 10 }}>
+                    View in Conversations →
+                  </a>
                 </div>
               )}
             </div>
