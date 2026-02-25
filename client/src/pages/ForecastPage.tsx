@@ -131,10 +131,8 @@ export default function ForecastPage() {
     if (!latest) return [];
     const q = latest.quota || 0;
     const p = latest.total_pipeline || 0;
-    const now = new Date();
-    const qLabel = `Q${Math.ceil((now.getMonth() + 1) / 3)} ${now.getFullYear()}`;
-    return [{ label: qLabel, pipeline: p, quota: q }];
-  }, [latest]);
+    return [{ label: weekInfo.label, pipeline: p, quota: q }];
+  }, [latest, weekInfo]);
 
   const pipeGenWeeks = useMemo(() => {
     return snapshots.slice(-8).map(s => ({
@@ -143,11 +141,21 @@ export default function ForecastPage() {
     }));
   }, [snapshots]);
 
-  const weekNum = useMemo(() => {
+  const weekInfo = useMemo(() => {
+    if (!latest) return { label: '', weekNum: 0, totalWeeks: 13 };
+    const snapshotDate = new Date(latest.snapshot_date);
+    const firstDate = new Date(snapshots[0].snapshot_date);
+    const daysDiff = Math.round((snapshotDate.getTime() - firstDate.getTime()) / (1000 * 60 * 60 * 24));
+    const weeksOfData = Math.max(1, Math.ceil(daysDiff / 7) + 1);
     const now = new Date();
-    const qStart = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
-    return Math.ceil(((now.getTime() - qStart.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1);
-  }, []);
+    const quarter = Math.ceil((now.getMonth() + 1) / 3);
+    const year = now.getFullYear();
+    return {
+      label: `Q${quarter} ${year}`,
+      weekNum: weeksOfData,
+      totalWeeks: 13,
+    };
+  }, [latest, snapshots]);
 
   if (loading) {
     return (
@@ -224,7 +232,7 @@ export default function ForecastPage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <h1 style={{ fontSize: 20, fontWeight: 700, color: colors.text, fontFamily: fonts.sans, margin: 0 }}>Forecast</h1>
           <span style={{ fontSize: 12, color: colors.textMuted, fontFamily: fonts.mono }}>
-            Week {weekNum} of 13
+            {weekInfo.label} · {snapshots.length} snapshot{snapshots.length !== 1 ? 's' : ''}
           </span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
