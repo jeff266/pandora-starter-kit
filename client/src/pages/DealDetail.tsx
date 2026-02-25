@@ -741,12 +741,10 @@ export default function DealDetail() {
         {/* Left Column */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {/* Findings */}
+          {findingsList.length > 0 && (
           <SectionErrorBoundary fallbackMessage="Something went wrong loading findings.">
           <Card title="Findings" count={findingsList.length}>
-            {findingsList.length === 0 ? (
-              <EmptyText>No active findings for this deal</EmptyText>
-            ) : (
-              findingsList.map((f: any, i: number) => {
+            {findingsList.map((f: any, i: number) => {
                 const isProcessing = dismissingId === f.id || snoozingId === f.id;
                 return (
                   <div key={f.id || i} style={{
@@ -838,9 +836,10 @@ export default function DealDetail() {
                   </div>
                 );
               })
-            )}
+            }
           </Card>
           </SectionErrorBoundary>
+          )}
 
           {/* Stage History */}
           <SectionErrorBoundary fallbackMessage="Unable to load stage history.">
