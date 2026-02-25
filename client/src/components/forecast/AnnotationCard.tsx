@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import type { ForecastAnnotation } from '../../hooks/useForecastAnnotations';
+import { colors, fonts } from '../../styles/theme';
 
 interface AnnotationCardProps {
   annotation: ForecastAnnotation;
@@ -9,32 +10,28 @@ interface AnnotationCardProps {
 
 const SEVERITY_CONFIG = {
   critical: {
-    bg: 'bg-red-50',
-    border: 'border-red-200',
-    accent: 'border-l-red-500',
+    accent: colors.red,
+    bg: colors.redSoft,
     icon: '🔴',
-    textColor: 'text-red-900',
+    textColor: '#fca5a5',
   },
   warning: {
-    bg: 'bg-amber-50',
-    border: 'border-amber-200',
-    accent: 'border-l-amber-500',
+    accent: colors.yellow,
+    bg: colors.yellowSoft,
     icon: '⚠️',
-    textColor: 'text-amber-900',
+    textColor: '#fde68a',
   },
   positive: {
-    bg: 'bg-green-50',
-    border: 'border-green-200',
-    accent: 'border-l-green-500',
+    accent: colors.green,
+    bg: colors.greenSoft,
     icon: '✅',
-    textColor: 'text-green-900',
+    textColor: '#86efac',
   },
   info: {
-    bg: 'bg-blue-50',
-    border: 'border-blue-200',
-    accent: 'border-l-blue-500',
+    accent: colors.accent,
+    bg: colors.accentSoft,
     icon: 'ℹ️',
-    textColor: 'text-blue-900',
+    textColor: '#93c5fd',
   },
 };
 
@@ -78,91 +75,113 @@ export default function AnnotationCard({
 
   return (
     <div
-      className={`border ${config.border} ${config.bg} ${config.accent} border-l-4 rounded-lg p-3 mb-2 transition-all duration-200 hover:shadow-sm`}
+      style={{
+        background: colors.surfaceRaised,
+        border: `1px solid ${colors.border}`,
+        borderLeft: `3px solid ${config.accent}`,
+        borderRadius: 6,
+        padding: '10px 12px',
+        marginBottom: 6,
+        cursor: 'pointer',
+        transition: 'background 0.15s',
+      }}
+      onMouseEnter={e => (e.currentTarget.style.background = colors.surfaceHover)}
+      onMouseLeave={e => (e.currentTarget.style.background = colors.surfaceRaised)}
+      onClick={() => setExpanded(!expanded)}
     >
-      <div className="flex items-start gap-3">
-        {/* Icon */}
-        <div className="text-lg mt-0.5 flex-shrink-0">{config.icon}</div>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+        <div style={{ fontSize: 14, flexShrink: 0, marginTop: 1 }}>{config.icon}</div>
 
-        {/* Content */}
-        <div className="flex-1 min-w-0">
-          {/* Header */}
-          <div className="flex items-start justify-between gap-2">
-            <div className="flex-1">
-              <div className={`text-sm font-semibold ${config.textColor} leading-snug`}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: config.textColor, lineHeight: 1.4, fontFamily: fonts.sans }}>
                 {annotation.title}
               </div>
-              <div className="text-xs text-slate-500 mt-0.5">
+              <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 2, fontFamily: fonts.sans }}>
                 {ACTIONABILITY_LABELS[annotation.actionability]}
               </div>
             </div>
 
-            {/* Expand/Collapse Button */}
-            <button
-              onClick={() => setExpanded(!expanded)}
-              className="text-slate-400 hover:text-slate-600 transition-colors flex-shrink-0"
-              aria-label={expanded ? 'Collapse' : 'Expand'}
+            <svg
+              style={{
+                width: 16,
+                height: 16,
+                flexShrink: 0,
+                color: colors.textMuted,
+                transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
+                transition: 'transform 0.2s',
+              }}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
             >
-              <svg
-                className={`w-5 h-5 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
           </div>
 
-          {/* Expanded Content */}
           {expanded && (
-            <div className="mt-3 space-y-2">
-              {/* Body */}
-              <div className="text-sm text-slate-700 leading-relaxed">{annotation.body}</div>
+            <div style={{ marginTop: 10 }} onClick={e => e.stopPropagation()}>
+              {annotation.body && (
+                <div style={{ fontSize: 12, color: colors.textSecondary, lineHeight: 1.6, marginBottom: 8, fontFamily: fonts.sans }}>
+                  {annotation.body}
+                </div>
+              )}
 
-              {/* Impact */}
               {annotation.impact && (
-                <div className="text-sm">
-                  <span className="font-semibold text-slate-900">Impact:</span>{' '}
-                  <span className="text-slate-700">{annotation.impact}</span>
+                <div style={{ fontSize: 12, marginBottom: 8, fontFamily: fonts.sans }}>
+                  <span style={{ fontWeight: 600, color: colors.text }}>Impact: </span>
+                  <span style={{ color: colors.textSecondary }}>{annotation.impact}</span>
                 </div>
               )}
 
-              {/* Recommendation */}
               {annotation.recommendation && (
-                <div className="text-sm bg-white bg-opacity-50 rounded p-2 border border-slate-200">
-                  <span className="font-semibold text-slate-900">→ Recommended Action:</span>{' '}
-                  <span className="text-slate-700">{annotation.recommendation}</span>
+                <div style={{
+                  fontSize: 12,
+                  background: 'rgba(59,130,246,0.06)',
+                  borderRadius: 4,
+                  padding: '8px 10px',
+                  border: `1px solid ${colors.border}`,
+                  marginBottom: 10,
+                  fontFamily: fonts.sans,
+                }}>
+                  <span style={{ fontWeight: 600, color: colors.accent }}>→ </span>
+                  <span style={{ color: colors.textSecondary }}>{annotation.recommendation}</span>
                 </div>
               )}
 
-              {/* Actions */}
-              <div className="flex items-center gap-2 pt-2 border-t border-slate-200">
-                <button
-                  onClick={handleDismiss}
-                  disabled={actionInProgress}
-                  className="text-xs px-3 py-1.5 bg-white border border-slate-300 rounded hover:bg-slate-50 text-slate-700 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Dismiss
-                </button>
-                <button
-                  onClick={() => handleSnooze(1)}
-                  disabled={actionInProgress}
-                  className="text-xs px-3 py-1.5 bg-white border border-slate-300 rounded hover:bg-slate-50 text-slate-700 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Snooze 1w
-                </button>
-                <button
-                  onClick={() => handleSnooze(2)}
-                  disabled={actionInProgress}
-                  className="text-xs px-3 py-1.5 bg-white border border-slate-300 rounded hover:bg-slate-50 text-slate-700 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Snooze 2w
-                </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingTop: 8, borderTop: `1px solid ${colors.border}` }}>
+                {[
+                  { label: 'Dismiss', onClick: handleDismiss },
+                  { label: 'Snooze 1w', onClick: () => handleSnooze(1) },
+                  { label: 'Snooze 2w', onClick: () => handleSnooze(2) },
+                ].map(btn => (
+                  <button
+                    key={btn.label}
+                    onClick={btn.onClick}
+                    disabled={actionInProgress}
+                    style={{
+                      fontSize: 11,
+                      padding: '4px 10px',
+                      background: colors.surfaceHover,
+                      border: `1px solid ${colors.borderLight}`,
+                      borderRadius: 4,
+                      color: colors.textSecondary,
+                      fontWeight: 500,
+                      cursor: actionInProgress ? 'not-allowed' : 'pointer',
+                      opacity: actionInProgress ? 0.5 : 1,
+                      fontFamily: fonts.sans,
+                      transition: 'background 0.12s',
+                    }}
+                    onMouseEnter={e => { if (!actionInProgress) e.currentTarget.style.background = colors.surfaceActive; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = colors.surfaceHover; }}
+                  >
+                    {btn.label}
+                  </button>
+                ))}
                 {annotation.evidence.deal_names.length > 0 && (
-                  <span className="text-xs text-slate-500 ml-auto">
-                    {annotation.evidence.deal_names.length} deal
-                    {annotation.evidence.deal_names.length !== 1 ? 's' : ''}
+                  <span style={{ fontSize: 11, color: colors.textMuted, marginLeft: 'auto', fontFamily: fonts.mono }}>
+                    {annotation.evidence.deal_names.length} deal{annotation.evidence.deal_names.length !== 1 ? 's' : ''}
                   </span>
                 )}
               </div>
