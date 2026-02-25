@@ -13,66 +13,117 @@
 -- - Users CANNOT bypass this by modifying their SQL queries
 -- ============================================================================
 
--- Enable RLS on all workspace-scoped tables
-ALTER TABLE deals ENABLE ROW LEVEL SECURITY;
-ALTER TABLE accounts ENABLE ROW LEVEL SECURITY;
-ALTER TABLE contacts ENABLE ROW LEVEL SECURITY;
-ALTER TABLE activities ENABLE ROW LEVEL SECURITY;
-ALTER TABLE conversations ENABLE ROW LEVEL SECURITY;
-ALTER TABLE deal_stage_history ENABLE ROW LEVEL SECURITY;
-ALTER TABLE deal_contacts ENABLE ROW LEVEL SECURITY;
-ALTER TABLE lead_scores ENABLE ROW LEVEL SECURITY;
-ALTER TABLE findings ENABLE ROW LEVEL SECURITY;
-ALTER TABLE action_items ENABLE ROW LEVEL SECURITY;
-ALTER TABLE workspace_saved_queries ENABLE ROW LEVEL SECURITY;
+-- Enable RLS on all workspace-scoped tables (only if they exist)
+DO $$
+BEGIN
+  -- Core CRM tables
+  IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'deals') THEN
+    ALTER TABLE deals ENABLE ROW LEVEL SECURITY;
+  END IF;
+
+  IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'accounts') THEN
+    ALTER TABLE accounts ENABLE ROW LEVEL SECURITY;
+  END IF;
+
+  IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'contacts') THEN
+    ALTER TABLE contacts ENABLE ROW LEVEL SECURITY;
+  END IF;
+
+  IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'activities') THEN
+    ALTER TABLE activities ENABLE ROW LEVEL SECURITY;
+  END IF;
+
+  IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'conversations') THEN
+    ALTER TABLE conversations ENABLE ROW LEVEL SECURITY;
+  END IF;
+
+  IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'deal_stage_history') THEN
+    ALTER TABLE deal_stage_history ENABLE ROW LEVEL SECURITY;
+  END IF;
+
+  IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'deal_contacts') THEN
+    ALTER TABLE deal_contacts ENABLE ROW LEVEL SECURITY;
+  END IF;
+
+  -- Optional tables
+  IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'lead_scores') THEN
+    ALTER TABLE lead_scores ENABLE ROW LEVEL SECURITY;
+  END IF;
+
+  IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'findings') THEN
+    ALTER TABLE findings ENABLE ROW LEVEL SECURITY;
+  END IF;
+
+  IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'action_items') THEN
+    ALTER TABLE action_items ENABLE ROW LEVEL SECURITY;
+  END IF;
+
+  IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'workspace_saved_queries') THEN
+    ALTER TABLE workspace_saved_queries ENABLE ROW LEVEL SECURITY;
+  END IF;
+END $$;
 
 -- ============================================================================
--- RLS Policies - Force workspace filtering
+-- RLS Policies - Force workspace filtering (only if tables exist)
 -- ============================================================================
 
--- Deals table
-CREATE POLICY workspace_isolation_deals ON deals
-  USING (workspace_id = current_setting('app.current_workspace_id', true)::uuid);
+DO $$
+BEGIN
+  -- Deals table
+  IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'deals') THEN
+    EXECUTE 'CREATE POLICY workspace_isolation_deals ON deals USING (workspace_id = current_setting(''app.current_workspace_id'', true)::uuid)';
+  END IF;
 
--- Accounts table
-CREATE POLICY workspace_isolation_accounts ON accounts
-  USING (workspace_id = current_setting('app.current_workspace_id', true)::uuid);
+  -- Accounts table
+  IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'accounts') THEN
+    EXECUTE 'CREATE POLICY workspace_isolation_accounts ON accounts USING (workspace_id = current_setting(''app.current_workspace_id'', true)::uuid)';
+  END IF;
 
--- Contacts table
-CREATE POLICY workspace_isolation_contacts ON contacts
-  USING (workspace_id = current_setting('app.current_workspace_id', true)::uuid);
+  -- Contacts table
+  IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'contacts') THEN
+    EXECUTE 'CREATE POLICY workspace_isolation_contacts ON contacts USING (workspace_id = current_setting(''app.current_workspace_id'', true)::uuid)';
+  END IF;
 
--- Activities table
-CREATE POLICY workspace_isolation_activities ON activities
-  USING (workspace_id = current_setting('app.current_workspace_id', true)::uuid);
+  -- Activities table
+  IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'activities') THEN
+    EXECUTE 'CREATE POLICY workspace_isolation_activities ON activities USING (workspace_id = current_setting(''app.current_workspace_id'', true)::uuid)';
+  END IF;
 
--- Conversations table
-CREATE POLICY workspace_isolation_conversations ON conversations
-  USING (workspace_id = current_setting('app.current_workspace_id', true)::uuid);
+  -- Conversations table
+  IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'conversations') THEN
+    EXECUTE 'CREATE POLICY workspace_isolation_conversations ON conversations USING (workspace_id = current_setting(''app.current_workspace_id'', true)::uuid)';
+  END IF;
 
--- Deal stage history table
-CREATE POLICY workspace_isolation_deal_stage_history ON deal_stage_history
-  USING (workspace_id = current_setting('app.current_workspace_id', true)::uuid);
+  -- Deal stage history table
+  IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'deal_stage_history') THEN
+    EXECUTE 'CREATE POLICY workspace_isolation_deal_stage_history ON deal_stage_history USING (workspace_id = current_setting(''app.current_workspace_id'', true)::uuid)';
+  END IF;
 
--- Deal contacts table
-CREATE POLICY workspace_isolation_deal_contacts ON deal_contacts
-  USING (workspace_id = current_setting('app.current_workspace_id', true)::uuid);
+  -- Deal contacts table
+  IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'deal_contacts') THEN
+    EXECUTE 'CREATE POLICY workspace_isolation_deal_contacts ON deal_contacts USING (workspace_id = current_setting(''app.current_workspace_id'', true)::uuid)';
+  END IF;
 
--- Lead scores table
-CREATE POLICY workspace_isolation_lead_scores ON lead_scores
-  USING (workspace_id = current_setting('app.current_workspace_id', true)::uuid);
+  -- Lead scores table
+  IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'lead_scores') THEN
+    EXECUTE 'CREATE POLICY workspace_isolation_lead_scores ON lead_scores USING (workspace_id = current_setting(''app.current_workspace_id'', true)::uuid)';
+  END IF;
 
--- Findings table
-CREATE POLICY workspace_isolation_findings ON findings
-  USING (workspace_id = current_setting('app.current_workspace_id', true)::uuid);
+  -- Findings table
+  IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'findings') THEN
+    EXECUTE 'CREATE POLICY workspace_isolation_findings ON findings USING (workspace_id = current_setting(''app.current_workspace_id'', true)::uuid)';
+  END IF;
 
--- Action items table
-CREATE POLICY workspace_isolation_action_items ON action_items
-  USING (workspace_id = current_setting('app.current_workspace_id', true)::uuid);
+  -- Action items table
+  IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'action_items') THEN
+    EXECUTE 'CREATE POLICY workspace_isolation_action_items ON action_items USING (workspace_id = current_setting(''app.current_workspace_id'', true)::uuid)';
+  END IF;
 
--- Workspace saved queries table
-CREATE POLICY workspace_isolation_saved_queries ON workspace_saved_queries
-  USING (workspace_id = current_setting('app.current_workspace_id', true)::uuid);
+  -- Workspace saved queries table
+  IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'workspace_saved_queries') THEN
+    EXECUTE 'CREATE POLICY workspace_isolation_saved_queries ON workspace_saved_queries USING (workspace_id = current_setting(''app.current_workspace_id'', true)::uuid)';
+  END IF;
+END $$;
 
 -- ============================================================================
 -- Comments
