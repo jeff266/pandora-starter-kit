@@ -72,7 +72,7 @@ export interface Deal {
 }
 
 // ============================================================================
-// Currency Formatter
+// Currency Formatter & Deal Field Normalizers
 // ============================================================================
 
 export function fmt(n: number): string {
@@ -82,6 +82,30 @@ export function fmt(n: number): string {
   if (n >= 100_000) return `$${(n / 1_000).toFixed(0)}K`;
   if (n >= 1_000) return `$${(n / 1_000).toFixed(1)}K`;
   return `$${n.toLocaleString()}`;
+}
+
+/**
+ * Normalize deal amount from various CRM field names
+ * Handles HubSpot (amount, hs_amount, deal_amount) and Salesforce (Amount)
+ */
+function getDealAmount(deal: any): number {
+  const amount = deal.amount ?? deal.deal_amount ?? deal.value ??
+    deal.properties?.amount ?? deal.hs_amount ?? deal.Amount ?? 0;
+
+  // Handle string amounts from HubSpot
+  if (typeof amount === 'string') return parseFloat(amount) || 0;
+  return Number(amount) || 0;
+}
+
+/**
+ * Normalize deal creation date from various CRM field names
+ */
+function getDealCreatedDate(deal: any): Date | null {
+  const raw = deal.created_date ?? deal.createdate ?? deal.created_at ??
+    deal.hs_createdate ?? deal.CreatedDate ?? deal.properties?.createdate;
+  if (!raw) return null;
+  const d = new Date(raw);
+  return isNaN(d.getTime()) ? null : d;
 }
 
 // ============================================================================
@@ -154,7 +178,7 @@ export function getBreakdownData(
         explanation: `For each of ${(ctx.simulations || 10000).toLocaleString()} simulations, every open deal is independently sampled for win/loss using its stage-specific win rate (adjusted for deal-level risk signals like days in stage, activity recency). Deals that "close" are summed. P50 is the median total across all simulations — the outcome you're most likely to land at.`,
         inputs: [
           { label: 'Open deals in window', value: String(ctx.dealCount || deals.filter(d => !['closed_won', 'closed_lost'].includes(d.stage_normalized)).length) },
-          { label: 'Total pipeline value', value: fmt(deals.filter(d => !['closed_won', 'closed_lost'].includes(d.stage_normalized)).reduce((s, d) => s + d.amount, 0)) },
+          { label: 'Total pipeline value', value: fmt(deals.filter(d => !['closed_won', 'closed_lost'].includes(d.stage_normalized)).reduce((s, d) => s + getDealAmount(d), 0)) },
           { label: 'Avg historical win rate', value: `${((ctx.avgWinRate || 0.17) * 100).toFixed(1)}% (90-day trailing)` },
           { label: 'Simulations run', value: (ctx.simulations || 10000).toLocaleString() },
         ],
@@ -167,12 +191,16 @@ export function getBreakdownData(
         ] : undefined,
         deals: deals
           .filter(d => !['closed_won', 'closed_lost'].includes(d.stage_normalized))
-          .map(d => ({
-            ...d,
-            contribution: d.amount * (d.probability / 100),
-            stage: d.stage_normalized,
-            owner: d.owner_name,
-          }))
+          .map(d => {
+            const amount = getDealAmount(d);
+            return {
+              ...d,
+              amount,
+              contribution: amount * (d.probability / 100),
+              stage: d.stage_normalized,
+              owner: d.owner_name,
+            };
+          })
           .sort((a, b) => (b.contribution || 0) - (a.contribution || 0)),
         dealsLabel: 'Top contributing deals (by expected value)',
       };
@@ -188,15 +216,19 @@ export function getBreakdownData(
         explanation: `Each open deal's amount is multiplied by its stage probability (from CRM or Pandora defaults). The stage-weighted forecast is the sum of all weighted values. This method treats every deal independently — it doesn't account for historical close patterns or deal-level risk signals.`,
         inputs: [
           { label: 'Open deals', value: String(swDeals.length) },
-          { label: 'Total pipeline', value: fmt(swDeals.reduce((s, d) => s + d.amount, 0)) },
+          { label: 'Total pipeline', value: fmt(swDeals.reduce((s, d) => s + getDealAmount(d), 0)) },
           { label: 'Result', value: `${swDeals.length} deals × probabilities = ${fmt(value)}` },
         ],
-        deals: swDeals.map(d => ({
-          ...d,
-          contribution: d.amount * (d.probability / 100),
-          stage: d.stage_normalized,
-          owner: d.owner_name,
-        })).sort((a, b) => (b.contribution || 0) - (a.contribution || 0)),
+        deals: swDeals.map(d => {
+          const amount = getDealAmount(d);
+          return {
+            ...d,
+            amount,
+            contribution: amount * (d.probability / 100),
+            stage: d.stage_normalized,
+            owner: d.owner_name,
+          };
+        }).sort((a, b) => (b.contribution || 0) - (a.contribution || 0)),
         dealsLabel: 'Deal breakdown (sorted by weighted value)',
         notes: 'Stage probabilities come from the CRM deal.probability field. If blank, Pandora applies default probabilities based on the normalized stage mapping (Prospecting 10%, Qualification 20%, Discovery 30%, Evaluation 50%, Proposal 60%, Negotiation 80%, Commit 90%).',
       };
@@ -210,7 +242,7 @@ export function getBreakdownData(
         const cat = d.forecast_category || 'Other';
         if (!grouped[cat]) grouped[cat] = { count: 0, pipeline: 0 };
         grouped[cat].count++;
-        grouped[cat].pipeline += d.amount;
+        grouped[cat].pipeline += getDealAmount(d);
       });
       return {
         title: `Category Weighted Forecast: ${fmt(value)}`,
@@ -229,8 +261,13 @@ export function getBreakdownData(
     case 'closed_won': {
       const closedDeals = deals
         .filter(d => d.stage_normalized === 'closed_won' || d.is_closed_won)
-        .filter(d => ctx.repEmail ? d.owner_email === ctx.repEmail : true)
+        .filter(d => ctx.repEmail ? d.owner_email === ctx.repEmail : true);
+
+      // Sort by amount descending using normalized amount
+      const sortedDeals = closedDeals
+        .map(d => ({ ...d, amount: getDealAmount(d) }))
         .sort((a, b) => b.amount - a.amount);
+
       return {
         title: ctx.repName
           ? `Closed Won: ${fmt(value)} (${ctx.repName})`
@@ -244,7 +281,7 @@ export function getBreakdownData(
             { label: 'Attainment', value: `${Math.round(value / ctx.quota * 100)}%` }
           ] : []),
         ],
-        deals: closedDeals.map(d => ({
+        deals: sortedDeals.map(d => ({
           ...d,
           stage: 'Closed Won',
           owner: d.owner_name,
@@ -283,17 +320,48 @@ export function getBreakdownData(
       };
     }
 
-    case 'pipe_gen':
+    case 'pipe_gen': {
+      // Filter to deals created in the trailing 8 weeks
+      const eightWeeksAgo = new Date();
+      eightWeeksAgo.setDate(eightWeeksAgo.getDate() - 56);
+
+      const pipeGenDeals = deals
+        .map(d => {
+          const created = getDealCreatedDate(d);
+          const amount = getDealAmount(d);
+          return { ...d, amount, created };
+        })
+        .filter(d => d.created && d.created >= eightWeeksAgo)
+        .sort((a, b) => b.amount - a.amount);
+
+      const totalCreated = pipeGenDeals.reduce((s, d) => s + d.amount, 0);
+      const weeklyAvg = pipeGenDeals.length > 0 ? totalCreated / 8 : 0;
+
       return {
         title: `Pipeline Generated: ${fmt(value)}`,
         explanation: 'Sum of amount for all deals created within the trailing 8-week window, regardless of current stage or status. This measures raw pipeline creation velocity.',
         inputs: [
           { label: 'Trailing period', value: '8 weeks' },
-          { label: 'Total created', value: fmt(value) },
-          { label: 'Weekly average', value: ctx.weeklyAvg ? `${fmt(ctx.weeklyAvg)}/wk` : 'N/A' },
-          { label: 'Deals created', value: String(ctx.pipeGenDealCount || '—') },
+          { label: 'Total created', value: fmt(totalCreated) },
+          { label: 'Weekly average', value: weeklyAvg > 0 ? `${fmt(weeklyAvg)}/wk` : 'N/A' },
+          { label: 'Deals created', value: String(pipeGenDeals.length) },
         ],
+        deals: pipeGenDeals.map(d => ({
+          id: d.id,
+          name: d.name || d.dealname || d.deal_name || 'Unnamed',
+          amount: d.amount,
+          stage: d.stage_normalized || d.dealstage || '',
+          stage_normalized: d.stage_normalized || '',
+          probability: d.probability || 0,
+          owner_name: d.owner_name || d.hubspot_owner_id || '',
+          owner_email: d.owner_email || '',
+          created_date: d.created?.toISOString() || '',
+          closeDate: d.close_date || d.closedate || '',
+          owner: d.owner_name || '',
+        })),
+        dealsLabel: 'Deals created (sorted by amount)',
       };
+    }
 
     default:
       return { title: fmt(value), explanation: '' };
