@@ -58,6 +58,8 @@ export interface DealDossier {
   }>;
   stage_history: Array<{
     stage: string;
+    stage_normalized?: string;
+    stage_label?: string;
     entered_at: string;
     exited_at: string | null;
     days_in_stage: number;

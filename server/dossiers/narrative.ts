@@ -42,9 +42,11 @@ function buildDealContext(dossier: DealDossier): string {
 
   if (dossier.stage_history.length > 0) {
     lines.push(`\nStage history: ${dossier.stage_history.length} transitions`);
-    const last = dossier.stage_history[dossier.stage_history.length - 1];
-    if (last) {
-      lines.push(`  Current: ${last.stage_label || last.stage} (entered ${last.entered_at?.split('T')[0] || '?'})`);
+    for (const sh of dossier.stage_history) {
+      const label = sh.stage_label || sh.stage_normalized || sh.stage || 'Unknown';
+      const entered = sh.entered_at?.split('T')[0] || '?';
+      const days = sh.days_in_stage != null ? ` (${sh.days_in_stage}d)` : '';
+      lines.push(`  ${label}${days} — entered ${entered}`);
     }
   }
 
@@ -184,10 +186,15 @@ export async function synthesizeDealNarrative(
       recommended_actions = (parsed.recommended_actions || []).slice(0, 3);
       narrative = content.replace(jsonMatch[0], '').trim();
     } catch (err) {
-      // If JSON parsing fails, return full content as narrative
       console.warn('[Narrative] Failed to parse recommended_actions:', err);
     }
   }
+
+  narrative = narrative
+    .replace(/```json\s*```/g, '')
+    .replace(/```json/g, '')
+    .replace(/```/g, '')
+    .trim();
 
   return { narrative, recommended_actions };
 }
