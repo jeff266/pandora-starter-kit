@@ -40,6 +40,7 @@ import ReportsPage from './pages/ReportsPage';
 import ReportBuilder from './pages/ReportBuilder';
 import AgentBuilder from './pages/AgentBuilder';
 import FiltersPage from './pages/FiltersPage';
+import SQLWorkspace from './pages/SQLWorkspace';
 import { colors, fonts } from './styles/theme';
 import { useIsMobile } from './hooks/useIsMobile';
 
@@ -63,6 +64,7 @@ const pageTitles: Record<string, string> = {
   '/enrichment': 'Enrichment Connectors',
   '/filters': 'Named Filters',
   '/data-dictionary': 'Data Dictionary',
+  '/sql-workspace': 'SQL Workspace',
   '/members': 'Members',
   '/marketplace': 'Marketplace',
   '/settings': 'Settings',
@@ -247,6 +249,7 @@ export default function App() {
             <Route path="/connectors/health" element={<ConnectorHealth />} />
             <Route path="/filters" element={<FiltersPage />} />
             <Route path="/data-dictionary" element={<Placeholder title="Data Dictionary" />} />
+            <Route path="/sql-workspace" element={<SQLWorkspace />} />
             <Route path="/marketplace" element={<MarketplacePage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/settings/:tab" element={<SettingsPage />} />

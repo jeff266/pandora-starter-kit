@@ -12,6 +12,7 @@ export const colors = {
   textSecondary: '#94a3b8',
   textMuted: '#5a6578',
   textDim: '#3a4252',
+  textTertiary: '#475569',
   accent: '#3b82f6',
   accentSoft: 'rgba(59,130,246,0.12)',
   green: '#22c55e',
@@ -27,5 +28,6 @@ export const colors = {
 
 export const fonts = {
   sans: "'IBM Plex Sans', -apple-system, sans-serif",
+  body: "'IBM Plex Sans', -apple-system, sans-serif",
   mono: "'IBM Plex Mono', 'SF Mono', monospace",
 } as const;
