@@ -77,6 +77,7 @@ export interface DealDossier {
     threading: 'multi' | 'dual' | 'single';
     stage_velocity: 'fast' | 'normal' | 'slow';
     data_completeness: number;
+    velocity_suspect: boolean;
   };
   coverage_gaps: {
     contacts_never_called: Array<{ name: string; title: string | null; email: string | null }>;
@@ -264,7 +265,8 @@ function computeHealthSignals(
   contacts: Array<{
     engagement_level: 'active' | 'fading' | 'dark' | 'unengaged';
     seniority: string | null;
-  }>
+  }>,
+  daysSinceLastCall: number | null
 ): DealDossier['health_signals'] {
   let activity_recency: 'active' | 'cooling' | 'stale' = 'stale';
   if (activities.length > 0 && activities[0].timestamp) {
@@ -307,14 +309,28 @@ function computeHealthSignals(
 
   const daysInStage = deal?.calculated_days_in_stage ?? deal?.days_in_stage ?? 0;
   let stage_velocity: 'fast' | 'normal' | 'slow' = 'normal';
-  if (daysInStage <= 14) stage_velocity = 'fast';
-  else if (daysInStage > 45) stage_velocity = 'slow';
+  let velocity_suspect = false;
+
+  // Fix 1: Deal just entered stage cannot be stalled
+  if (daysInStage === 0 || daysInStage === null) {
+    stage_velocity = 'fast';
+  } else if (daysInStage <= 14) {
+    stage_velocity = 'fast';
+  } else if (daysInStage > 45) {
+    stage_velocity = 'slow';
+  }
+
+  // Fix 2: Recent call activity may indicate stale stage data
+  if (stage_velocity === 'slow' && daysSinceLastCall !== null && daysSinceLastCall <= 7) {
+    stage_velocity = 'normal';
+    velocity_suspect = true;
+  }
 
   const fields = [deal?.amount, deal?.close_date, deal?.owner, deal?.stage, deal?.source, deal?.pipeline];
   const filledCount = fields.filter(f => f != null && f !== '').length;
   const data_completeness = Math.round((filledCount / fields.length) * 100);
 
-  return { activity_recency, threading, stage_velocity, data_completeness };
+  return { activity_recency, threading, stage_velocity, data_completeness, velocity_suspect };
 }
 
 function gradeFromScore(s: number): string {
@@ -420,8 +436,17 @@ export async function assembleDealDossier(
     };
   });
 
+  // Compute days since last call for velocity suspect detection
+  let daysSinceLastCall: number | null = null;
+  if (conversations.length > 0 && conversations[0].call_date) {
+    const mostRecentCallDate = new Date(conversations[0].call_date).getTime();
+    if (mostRecentCallDate > 0) {
+      daysSinceLastCall = Math.round((Date.now() - mostRecentCallDate) / (1000 * 60 * 60 * 24));
+    }
+  }
+
   // Compute health signals using engagement-weighted contacts
-  const health_signals = computeHealthSignals(deal, activities, mappedContacts);
+  const health_signals = computeHealthSignals(deal, activities, mappedContacts, daysSinceLastCall);
 
   const mappedConversations = conversations.map((cv: any) => ({
     id: cv.id,

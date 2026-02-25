@@ -367,10 +367,15 @@ export default function DealDetail() {
   };
 
   const healthItems = [
-    { label: 'Activity', value: signalLabel('activity_recency', health.activity_recency), color: statusColor(health.activity_recency) },
-    { label: 'Threading', value: signalLabel('threading', health.threading), color: statusColor(health.threading) },
-    { label: 'Velocity', value: signalLabel('stage_velocity', health.stage_velocity), color: statusColor(health.stage_velocity) },
-    { label: 'Data', value: health.data_completeness != null ? `${health.data_completeness}% complete` : null, color: (health.data_completeness || 0) > 60 ? colors.green : colors.yellow },
+    { label: 'Activity', value: signalLabel('activity_recency', health.activity_recency), color: statusColor(health.activity_recency), tooltip: undefined },
+    { label: 'Threading', value: signalLabel('threading', health.threading), color: statusColor(health.threading), tooltip: undefined },
+    {
+      label: 'Velocity',
+      value: health.velocity_suspect ? 'Check velocity' : signalLabel('stage_velocity', health.stage_velocity),
+      color: health.velocity_suspect ? colors.yellow : statusColor(health.stage_velocity),
+      tooltip: health.velocity_suspect ? 'Recent call activity suggests this deal may be moving — stage data may be stale.' : undefined
+    },
+    { label: 'Data', value: health.data_completeness != null ? `${health.data_completeness}% complete` : null, color: (health.data_completeness || 0) > 60 ? colors.green : colors.yellow, tooltip: undefined },
   ];
 
   // Merge activities and conversations into unified timeline
@@ -634,7 +639,7 @@ export default function DealDetail() {
         {/* Deal Signals */}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: isMobile ? 10 : 16, marginTop: 16 }}>
           {healthItems.map((h, i) => (
-            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }} title={h.tooltip}>
               <span style={{
                 width: 7,
                 height: 7,
