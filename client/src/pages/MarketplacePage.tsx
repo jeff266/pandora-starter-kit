@@ -25,7 +25,7 @@ const CONNECTOR_CATALOG: ConnectorDef[] = [
     category: 'crm',
     description: 'Sync deals, contacts, and companies. Powers pipeline analysis, forecasting, and data quality skills.',
     status: 'available',
-    logo: '🟠',
+    logo: 'https://cdn.simpleicons.org/hubspot/FF7A59',
     authRoute: '/api/auth/hubspot',
     authType: 'oauth',
   },
@@ -35,7 +35,7 @@ const CONNECTOR_CATALOG: ConnectorDef[] = [
     category: 'crm',
     description: 'Sync opportunities, contacts, and accounts from any Salesforce org. Supports custom fields and stage history.',
     status: 'available',
-    logo: '🔵',
+    logo: 'https://cdn.simpleicons.org/salesforce/00A1E0',
     authRoute: '/api/auth/salesforce',
     authType: 'oauth',
   },
@@ -45,7 +45,7 @@ const CONNECTOR_CATALOG: ConnectorDef[] = [
     category: 'conversation',
     description: 'Pull call transcripts, deal signals, and engagement data. Enables conversation intelligence skills.',
     status: 'available',
-    logo: '🎯',
+    logo: 'https://cdn.simpleicons.org/gong/EE5F3D',
     authRoute: '/api/connectors/gong/connect',
     authType: 'api_key',
   },
@@ -55,7 +55,7 @@ const CONNECTOR_CATALOG: ConnectorDef[] = [
     category: 'conversation',
     description: 'Import meeting transcripts, action items, and summaries. Works with any video call platform.',
     status: 'available',
-    logo: '🦋',
+    logo: 'https://fireflies.ai/wp-content/uploads/2022/01/fireflies-logo.svg',
     authRoute: '/api/connectors/fireflies/connect',
     authType: 'api_key',
   },
@@ -65,7 +65,7 @@ const CONNECTOR_CATALOG: ConnectorDef[] = [
     category: 'conversation',
     description: 'AI meeting notes and highlights synced directly to your pipeline.',
     status: 'coming_soon',
-    logo: '🌊',
+    logo: 'https://assets-global.website-files.com/625fa68eb86d83e7c234bdd0/625fa68eb86d83c0dd34be4b_Fathom%20Logo%20Icon%20Dark.svg',
   },
   {
     id: 'google_drive',
@@ -73,7 +73,7 @@ const CONNECTOR_CATALOG: ConnectorDef[] = [
     category: 'productivity',
     description: 'Connect documents, playbooks, and battle cards for context-aware AI analysis.',
     status: 'coming_soon',
-    logo: '📁',
+    logo: 'https://cdn.simpleicons.org/googledrive/4285F4',
   },
   {
     id: 'notion',
@@ -81,7 +81,7 @@ const CONNECTOR_CATALOG: ConnectorDef[] = [
     category: 'productivity',
     description: "Pull wikis, runbooks, and templates into Pandora's knowledge layer.",
     status: 'coming_soon',
-    logo: '⬛',
+    logo: 'https://cdn.simpleicons.org/notion/000000',
   },
   {
     id: 'asana',
@@ -89,7 +89,7 @@ const CONNECTOR_CATALOG: ConnectorDef[] = [
     category: 'operations',
     description: 'Push findings and action items directly to Asana tasks. Close the loop on RevOps recommendations.',
     status: 'coming_soon',
-    logo: '🗂️',
+    logo: 'https://cdn.simpleicons.org/asana/F06A6A',
   },
   {
     id: 'monday',
@@ -97,7 +97,7 @@ const CONNECTOR_CATALOG: ConnectorDef[] = [
     category: 'operations',
     description: 'Sync RevOps tasks and project tracking with Monday boards.',
     status: 'coming_soon',
-    logo: '📋',
+    logo: 'https://cdn.simpleicons.org/monday/FF3D57',
   },
 ];
 
@@ -166,7 +166,26 @@ function ApiKeyModal({ connector, onClose, onSuccess, onToast }: ApiKeyModalProp
         onClick={e => e.stopPropagation()}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-          <span style={{ fontSize: 28 }}>{connector.logo}</span>
+          <div style={{
+            width: 48,
+            height: 48,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderRadius: 8,
+            background: colors.surfaceRaised,
+            flexShrink: 0,
+          }}>
+            <img
+              src={connector.logo}
+              alt={`${connector.name} logo`}
+              style={{
+                width: 28,
+                height: 28,
+                objectFit: 'contain',
+              }}
+            />
+          </div>
           <div>
             <div style={{ fontSize: 16, fontWeight: 600, color: colors.text }}>
               Connect {connector.name}
@@ -271,7 +290,26 @@ function ConnectorCard({ connector, isConnected, onConnect, onDisconnect }: Conn
     >
       {/* Logo + Name */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span style={{ fontSize: 28 }}>{connector.logo}</span>
+        <div style={{
+          width: 40,
+          height: 40,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderRadius: 8,
+          background: '#1A1F2B',
+          flexShrink: 0,
+        }}>
+          <img
+            src={connector.logo}
+            alt={`${connector.name} logo`}
+            style={{
+              width: 24,
+              height: 24,
+              objectFit: 'contain',
+            }}
+          />
+        </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 15, fontWeight: 600, color: '#F1F5F9' }}>
             {connector.name}
