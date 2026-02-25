@@ -2,10 +2,16 @@ import React, { useState, useEffect } from 'react';
 import { colors, fonts } from '../../styles/theme';
 import Toast from '../Toast';
 import { useWorkspace } from '../../context/WorkspaceContext';
+import { api } from '../../lib/api';
 
 interface UserPreferences {
   anonymize_mode?: boolean;
 }
+
+const MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
 
 export default function PreferencesTab() {
   const { currentWorkspace } = useWorkspace();
@@ -14,9 +20,12 @@ export default function PreferencesTab() {
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [workspaceForceAnonymize, setWorkspaceForceAnonymize] = useState(false);
+  const [fiscalYearStartMonth, setFiscalYearStartMonth] = useState(1);
+  const [savingFiscal, setSavingFiscal] = useState(false);
 
   useEffect(() => {
     fetchPreferences();
+    fetchCadenceConfig();
   }, []);
 
   const fetchPreferences = async () => {
@@ -38,6 +47,34 @@ export default function PreferencesTab() {
       setToast({ message: 'Failed to load preferences', type: 'error' });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchCadenceConfig = async () => {
+    try {
+      const data = await api.get('/workspace-config');
+      const cadence = data?.config?.cadence || data?.cadence;
+      if (cadence?.fiscal_year_start_month) {
+        setFiscalYearStartMonth(cadence.fiscal_year_start_month);
+      }
+    } catch (err) {
+      console.error('Failed to load cadence config:', err);
+    }
+  };
+
+  const handleFiscalYearChange = async (month: number) => {
+    const prev = fiscalYearStartMonth;
+    setFiscalYearStartMonth(month);
+    setSavingFiscal(true);
+    try {
+      await api.patch('/workspace-config/cadence', { fiscal_year_start_month: month });
+      setToast({ message: `Fiscal year start updated to ${MONTHS[month - 1]}`, type: 'success' });
+    } catch (err) {
+      setFiscalYearStartMonth(prev);
+      console.error('Failed to update fiscal year:', err);
+      setToast({ message: 'Failed to update fiscal year', type: 'error' });
+    } finally {
+      setSavingFiscal(false);
     }
   };
 
@@ -175,7 +212,74 @@ export default function PreferencesTab() {
         )}
       </div>
 
-      {/* SECTION 2: Coming Soon - Notification Preferences */}
+      {/* SECTION 2: Fiscal Year */}
+      <div
+        style={{
+          background: colors.surface,
+          border: `1px solid ${colors.border}`,
+          borderRadius: 8,
+          padding: 32,
+          marginBottom: 24,
+        }}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <h2 style={{ fontSize: 16, fontWeight: 600, color: colors.text, marginBottom: 8 }}>
+            Fiscal Year
+          </h2>
+          <p style={{ fontSize: 13, color: colors.textSecondary, lineHeight: 1.6 }}>
+            Set the month your fiscal year begins. This determines how quarters, week numbers, and attainment periods are calculated across the platform — including the Forecast page, quota tracking, and skill outputs.
+          </p>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <label style={{ fontSize: 13, color: colors.textSecondary, whiteSpace: 'nowrap' }}>
+            Fiscal year starts in
+          </label>
+          <select
+            value={fiscalYearStartMonth}
+            onChange={(e) => handleFiscalYearChange(parseInt(e.target.value))}
+            disabled={savingFiscal}
+            style={{
+              padding: '8px 12px',
+              fontSize: 14,
+              fontFamily: fonts.sans,
+              color: colors.text,
+              background: colors.bg,
+              border: `1px solid ${colors.border}`,
+              borderRadius: 6,
+              cursor: savingFiscal ? 'wait' : 'pointer',
+              outline: 'none',
+              minWidth: 140,
+            }}
+          >
+            {MONTHS.map((month, i) => (
+              <option key={i + 1} value={i + 1}>{month}</option>
+            ))}
+          </select>
+          {savingFiscal && (
+            <span style={{ fontSize: 12, color: colors.textMuted }}>Saving...</span>
+          )}
+        </div>
+
+        {fiscalYearStartMonth !== 1 && (
+          <div
+            style={{
+              marginTop: 16,
+              padding: 12,
+              background: 'rgba(99, 102, 241, 0.08)',
+              border: `1px solid rgba(99, 102, 241, 0.2)`,
+              borderRadius: 6,
+              fontSize: 13,
+              color: colors.textSecondary,
+              lineHeight: 1.5,
+            }}
+          >
+            FY{new Date().getFullYear() + 1} runs {MONTHS[fiscalYearStartMonth - 1]} {new Date().getFullYear()} – {MONTHS[(fiscalYearStartMonth - 2 + 12) % 12]} {new Date().getFullYear() + 1}
+          </div>
+        )}
+      </div>
+
+      {/* SECTION 3: Coming Soon - Notification Preferences */}
       <div
         style={{
           background: colors.surface,

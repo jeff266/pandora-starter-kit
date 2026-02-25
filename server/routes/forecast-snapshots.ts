@@ -1,13 +1,18 @@
 import { Router } from 'express';
 import { query } from '../db.js';
+import { WorkspaceConfigLoader } from '../config/workspace-config-loader.js';
 
 const router = Router();
+const configLoader = new WorkspaceConfigLoader();
 
 router.get('/:id/forecast/snapshots', async (req, res) => {
   try {
     const { id: workspaceId } = req.params;
     const { limit: limitParam } = req.query;
     const limit = Math.min(parseInt(limitParam as string) || 13, 26);
+
+    const config = await configLoader.getConfig(workspaceId);
+    const fiscalYearStartMonth = config.cadence?.fiscal_year_start_month || 1;
 
     const runs = await query(
       `SELECT run_id, completed_at, result, output, params
@@ -77,6 +82,7 @@ router.get('/:id/forecast/snapshots', async (req, res) => {
       snapshots,
       total: snapshots.length,
       workspace_id: workspaceId,
+      fiscal_year_start_month: fiscalYearStartMonth,
     });
   } catch (err: any) {
     console.error('[ForecastSnapshots] Error:', err.message);

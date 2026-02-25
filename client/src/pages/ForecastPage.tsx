@@ -58,6 +58,7 @@ export default function ForecastPage() {
   const [error, setError] = useState<string | null>(null);
   const [showAI, setShowAI] = useState(true);
   const [drillDown, setDrillDown] = useState<{ open: boolean; title: string; deals: any[] }>({ open: false, title: '', deals: [] });
+  const [fiscalYearStartMonth, setFiscalYearStartMonth] = useState(1);
 
   const { annotations, grouped, dismiss, snooze } = useForecastAnnotations(wsId);
 
@@ -67,6 +68,7 @@ export default function ForecastPage() {
     api.get('/forecast/snapshots?limit=13')
       .then((data: any) => {
         setSnapshots(data.snapshots || []);
+        if (data.fiscal_year_start_month) setFiscalYearStartMonth(data.fiscal_year_start_month);
         setError(null);
       })
       .catch((err: any) => {
@@ -127,6 +129,25 @@ export default function ForecastPage() {
     }));
   }, [latest, anon]);
 
+  const weekInfo = useMemo(() => {
+    if (!latest) return { label: '', weekNum: 0, totalWeeks: 13 };
+    const now = new Date();
+    const fyMonth = fiscalYearStartMonth - 1;
+    const adjustedMonth = (now.getMonth() - fyMonth + 12) % 12;
+    const fiscalQuarter = Math.floor(adjustedMonth / 3) + 1;
+    const fiscalQStart = new Date(now.getFullYear(), fyMonth + (fiscalQuarter - 1) * 3, 1);
+    if (fiscalQStart > now) fiscalQStart.setFullYear(fiscalQStart.getFullYear() - 1);
+    const daysSinceQStart = Math.floor((now.getTime() - fiscalQStart.getTime()) / (1000 * 60 * 60 * 24));
+    const weekNum = Math.min(13, Math.floor(daysSinceQStart / 7) + 1);
+    const fyYear = now.getMonth() + 1 >= fiscalYearStartMonth ? now.getFullYear() : now.getFullYear() - 1;
+    const fyLabel = fiscalYearStartMonth === 1 ? `${fyYear}` : `FY${fyYear + 1}`;
+    return {
+      label: `Q${fiscalQuarter} ${fyLabel}`,
+      weekNum,
+      totalWeeks: 13,
+    };
+  }, [latest, fiscalYearStartMonth]);
+
   const coverageQuarters = useMemo(() => {
     if (!latest) return [];
     const q = latest.quota || 0;
@@ -140,22 +161,6 @@ export default function ForecastPage() {
       created: s.pipe_gen_this_week || 0,
     }));
   }, [snapshots]);
-
-  const weekInfo = useMemo(() => {
-    if (!latest) return { label: '', weekNum: 0, totalWeeks: 13 };
-    const snapshotDate = new Date(latest.snapshot_date);
-    const firstDate = new Date(snapshots[0].snapshot_date);
-    const daysDiff = Math.round((snapshotDate.getTime() - firstDate.getTime()) / (1000 * 60 * 60 * 24));
-    const weeksOfData = Math.max(1, Math.ceil(daysDiff / 7) + 1);
-    const now = new Date();
-    const quarter = Math.ceil((now.getMonth() + 1) / 3);
-    const year = now.getFullYear();
-    return {
-      label: `Q${quarter} ${year}`,
-      weekNum: weeksOfData,
-      totalWeeks: 13,
-    };
-  }, [latest, snapshots]);
 
   if (loading) {
     return (
@@ -232,7 +237,7 @@ export default function ForecastPage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <h1 style={{ fontSize: 20, fontWeight: 700, color: colors.text, fontFamily: fonts.sans, margin: 0 }}>Forecast</h1>
           <span style={{ fontSize: 12, color: colors.textMuted, fontFamily: fonts.mono }}>
-            {weekInfo.label} · {snapshots.length} snapshot{snapshots.length !== 1 ? 's' : ''}
+            {weekInfo.label} · Week {weekInfo.weekNum} of {weekInfo.totalWeeks}
           </span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

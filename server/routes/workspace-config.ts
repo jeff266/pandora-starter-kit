@@ -168,6 +168,11 @@ router.patch(
         return;
       }
 
+      if (section === 'cadence') {
+        const mergedCadence = { ...(existing.cadence || {}), ...sectionData };
+        sectionData = mergedCadence;
+      }
+
       if (section === 'voice') {
         const validDetail = ['concise', 'standard', 'detailed'];
         const validFraming = ['direct', 'balanced', 'diplomatic'];
