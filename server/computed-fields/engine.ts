@@ -213,8 +213,9 @@ async function computeDeals(
              conversation_signals = $8,
              close_date_suspect = $9,
              experimental_score = $10,
+             composite_score = $11,
              updated_at = NOW()
-         WHERE id = $1 AND workspace_id = $11`,
+         WHERE id = $1 AND workspace_id = $12`,
         [
           deal.id,
           scores.velocityScore,
@@ -226,6 +227,7 @@ async function computeDeals(
           JSON.stringify(conversationSignals),
           closeDateSuspect,
           experimentalScore,
+          productionComposite.score,
           workspaceId,
         ]
       );

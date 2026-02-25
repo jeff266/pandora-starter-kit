@@ -73,7 +73,7 @@ export async function getPipelineRiskSummary(
   }
 
   const dealsResult = await query(
-    `SELECT id, name, amount, stage, stage_normalized, owner, close_date, days_in_stage, source_id, source, pipeline, health_score
+    `SELECT id, name, amount, stage, stage_normalized, owner, close_date, days_in_stage, source_id, source, pipeline, health_score, composite_score
      FROM deals
      WHERE workspace_id = $1 AND stage_normalized NOT IN ('closed_won', 'closed_lost')${whereExtra}
      ORDER BY amount DESC NULLS LAST`,
@@ -105,8 +105,8 @@ export async function getPipelineRiskSummary(
 
   const mergedDeals = rawDeals.map(d => {
     const risk = scoreMap.get(d.id);
-    const dbHealthScore = d.health_score != null ? Number(d.health_score) : null;
-    const effectiveScore = risk?.score ?? dbHealthScore ?? 100;
+    const dbCompositeScore = d.composite_score != null ? Number(d.composite_score) : null;
+    const effectiveScore = risk?.score ?? dbCompositeScore ?? 100;
     const effectiveGrade = risk?.grade ?? computeGradeFromScore(effectiveScore);
     return {
       deal_id: d.id,
@@ -123,9 +123,9 @@ export async function getPipelineRiskSummary(
       source_id: d.source_id ?? null,
       source: d.source ?? null,
       pipeline: d.pipeline ?? null,
-      mechanical_score: dbHealthScore,
-      mechanical_grade: dbHealthScore != null ? computeGradeFromScore(dbHealthScore) : null,
-      active_source: ((risk?.score != null && (d.health_score == null || risk.score <= Number(d.health_score))) ? 'skill' : 'health') as 'skill' | 'health',
+      mechanical_score: dbCompositeScore,
+      mechanical_grade: dbCompositeScore != null ? computeGradeFromScore(dbCompositeScore) : null,
+      active_source: ((risk?.score != null && (d.composite_score == null || risk.score <= Number(d.composite_score))) ? 'skill' : 'health') as 'skill' | 'health',
     };
   });
 

@@ -120,7 +120,7 @@ export default function DealList() {
       const closedDeals: DealRow[] = rawDeals
         .filter((d: any) => !riskDealIds.has(d.id))
         .map((d: any) => {
-          const effectiveScore = d.health_score != null ? Number(d.health_score) : 100;
+          const effectiveScore = d.composite_score != null ? Number(d.composite_score) : (d.health_score != null ? Number(d.health_score) : 100);
           return {
             id: d.id,
             name: d.name || '',
