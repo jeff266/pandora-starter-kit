@@ -33,10 +33,11 @@ interface DealScores {
 export function computeDealScores(
   deal: DealRow,
   config: DealConfig,
-  activity?: DealActivity
+  activity?: DealActivity,
+  closeDateSuspect?: boolean
 ): DealScores {
   const velocity = calculateVelocity(deal, config);
-  const { risk, factors } = calculateRisk(deal, config, activity);
+  const { risk, factors } = calculateRisk(deal, config, activity, closeDateSuspect);
 
   return {
     velocityScore: clamp(Math.round(velocity * 100) / 100, 0, 100),
@@ -81,7 +82,8 @@ function calculateVelocity(deal: DealRow, config: DealConfig): number {
 function calculateRisk(
   deal: DealRow,
   config: DealConfig,
-  activity?: DealActivity
+  activity?: DealActivity,
+  closeDateSuspect?: boolean
 ): { risk: number; factors: string[] } {
   let risk = 0;
   const factors: string[] = [];
@@ -104,15 +106,18 @@ function calculateRisk(
     factors.push('No recorded activity');
   }
 
-  const closeDate = deal.close_date ? new Date(deal.close_date) : null;
-  if (closeDate) {
-    const daysToClose = daysBetween(new Date(), closeDate);
-    if (daysToClose < 0) {
-      risk += 25;
-      factors.push(`Close date passed ${Math.abs(daysToClose)} days ago`);
-    } else if (daysToClose < 7) {
-      risk += 10;
-      factors.push(`Closing in ${daysToClose} days`);
+  // Skip close date penalty if recent conversation mentions timeline (suggests stale close date)
+  if (!closeDateSuspect) {
+    const closeDate = deal.close_date ? new Date(deal.close_date) : null;
+    if (closeDate) {
+      const daysToClose = daysBetween(new Date(), closeDate);
+      if (daysToClose < 0) {
+        risk += 25;
+        factors.push(`Close date passed ${Math.abs(daysToClose)} days ago`);
+      } else if (daysToClose < 7) {
+        risk += 10;
+        factors.push(`Closing in ${daysToClose} days`);
+      }
     }
   }
 
@@ -166,6 +171,7 @@ export interface ConversationSignal {
 export interface ConversationModifierResult {
   modifier: number;
   signals: ConversationSignal[];
+  close_date_suspect: boolean;
 }
 
 export async function computeConversationModifier(
@@ -229,9 +235,41 @@ export async function computeConversationModifier(
 
   const cappedModifier = Math.max(-20, Math.min(20, modifier));
 
+  // Detect timeline patterns in recent conversations
+  const timelinePatterns = [
+    'onboarding in',
+    'starting in',
+    'first two weeks',
+    'end of',
+    'by january', 'by february', 'by march', 'by april', 'by may', 'by june',
+    'by july', 'by august', 'by september', 'by october', 'by november', 'by december',
+    'next month',
+    'this quarter',
+    'beginning of',
+  ];
+
+  let close_date_suspect = false;
+  const now = Date.now();
+  const fourteenDaysAgo = now - (14 * 24 * 60 * 60 * 1000);
+
+  for (const conv of result.rows) {
+    const callDate = conv.call_date ? new Date(conv.call_date).getTime() : 0;
+    if (callDate >= fourteenDaysAgo) {
+      const text = ((conv.summary ?? '') + ' ' + (conv.title ?? '')).toLowerCase();
+      for (const pattern of timelinePatterns) {
+        if (text.includes(pattern)) {
+          close_date_suspect = true;
+          break;
+        }
+      }
+      if (close_date_suspect) break;
+    }
+  }
+
   return {
     modifier: cappedModifier,
     signals,
+    close_date_suspect,
   };
 }
 

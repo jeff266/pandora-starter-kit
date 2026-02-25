@@ -11,6 +11,7 @@ export interface DealDossier {
     stage: string;
     stage_normalized: string;
     close_date: string | null;
+    close_date_suspect: boolean;
     owner_email: string;
     owner_name: string;
     days_in_stage: number;
@@ -356,6 +357,7 @@ export async function assembleDealDossier(
   const healthScoreVal = deal?.health_score != null ? Number(deal.health_score) : null;
   const conversationModifier = deal?.conversation_modifier != null ? Number(deal.conversation_modifier) : 0;
   const conversationSignals = deal?.conversation_signals ? JSON.parse(deal.conversation_signals) : [];
+  const closeDateSuspect = deal?.close_date_suspect === true;
   const riskScore = riskResult ?? { score: 100, grade: 'A', signal_counts: { act: 0, watch: 0, notable: 0, info: 0 } };
 
   // Normalize conversation modifier (-20 to +20) to 0-100 scale
@@ -479,6 +481,7 @@ export async function assembleDealDossier(
       stage: deal.stage || '',
       stage_normalized: deal.stage_normalized || '',
       close_date: deal.close_date ? new Date(deal.close_date).toISOString() : null,
+      close_date_suspect: closeDateSuspect,
       owner_email: deal.owner || '',
       owner_name: deal.owner || '',
       days_in_stage: Math.max(0, Math.round(deal.calculated_days_in_stage ?? deal.days_in_stage ?? 0)),

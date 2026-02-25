@@ -466,7 +466,14 @@ export default function DealDetail() {
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: isMobile ? 8 : 16, marginTop: 8, fontSize: 12, color: colors.textMuted }}>
               <span>Owner: {deal.owner_name ? anon.person(deal.owner_name) : deal.owner_email ? anon.email(deal.owner_email) : deal.owner ? anon.person(deal.owner) : '--'}</span>
-              <span>Close: {deal.close_date ? formatDate(deal.close_date) : '--'}</span>
+              <span>
+                Close: {deal.close_date ? formatDate(deal.close_date) : '--'}
+                {deal.close_date_suspect && (
+                  <span style={{ color: colors.yellow, marginLeft: 4 }} title="A recent conversation mentions a timeline — close date may need updating">
+                    ⚠ May be stale
+                  </span>
+                )}
+              </span>
               {deal.account_name && (
                 <span
                   style={{ color: colors.accent, cursor: 'pointer' }}

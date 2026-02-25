@@ -115,7 +115,9 @@ async function computeDeals(
 
     for (const deal of deals) {
       const activity = activityMap.get(deal.id);
-      const scores = computeDealScores(deal, config, activity);
+      // Read existing close_date_suspect flag from previous run to suppress close date penalty if needed
+      const existingCloseDateSuspect = (deal as any).close_date_suspect === true;
+      const scores = computeDealScores(deal, config, activity, existingCloseDateSuspect);
 
       // Calculate days_in_stage: time since stage_changed_at (or created_at if never changed)
       const stageAnchor = (deal as any).stage_changed_at
@@ -127,6 +129,7 @@ async function computeDeals(
       const conversationModifierResult = await computeConversationModifier(deal.id, workspaceId);
       const conversationModifier = conversationModifierResult.modifier;
       const conversationSignals = conversationModifierResult.signals;
+      const closeDateSuspect = conversationModifierResult.close_date_suspect;
 
       const baseHealthScore = 100 - scores.dealRisk;
       const healthScore = Math.min(100, Math.max(0, Math.round((baseHealthScore + conversationModifier) * 100) / 100));
@@ -208,9 +211,10 @@ async function computeDeals(
              days_in_stage = $6,
              conversation_modifier = $7,
              conversation_signals = $8,
-             experimental_score = $9,
+             close_date_suspect = $9,
+             experimental_score = $10,
              updated_at = NOW()
-         WHERE id = $1 AND workspace_id = $10`,
+         WHERE id = $1 AND workspace_id = $11`,
         [
           deal.id,
           scores.velocityScore,
@@ -220,6 +224,7 @@ async function computeDeals(
           daysInStage,
           conversationModifier,
           JSON.stringify(conversationSignals),
+          closeDateSuspect,
           experimentalScore,
           workspaceId,
         ]
