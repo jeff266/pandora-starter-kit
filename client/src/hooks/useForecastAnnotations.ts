@@ -60,7 +60,7 @@ export function useForecastAnnotations(workspaceId: string, period?: string) {
 
         const params = period ? `?period=${period}` : '';
         const data: AnnotationsResponse = await api.get(
-          `/workspaces/${workspaceId}/forecast/annotations${params}`
+          `/forecast/annotations${params}`
         );
 
         setAnnotations(data.annotations || []);
@@ -85,7 +85,7 @@ export function useForecastAnnotations(workspaceId: string, period?: string) {
 
   const dismiss = async (annotationId: string) => {
     try {
-      await api.patch(`/workspaces/${workspaceId}/forecast/annotations/${annotationId}`, {
+      await api.patch(`/forecast/annotations/${annotationId}`, {
         action: 'dismiss',
       });
 
@@ -100,7 +100,7 @@ export function useForecastAnnotations(workspaceId: string, period?: string) {
 
   const snooze = async (annotationId: string, weeks: 1 | 2) => {
     try {
-      await api.patch(`/workspaces/${workspaceId}/forecast/annotations/${annotationId}`, {
+      await api.patch(`/forecast/annotations/${annotationId}`, {
         action: `snooze_${weeks}w`,
       });
 
@@ -115,7 +115,7 @@ export function useForecastAnnotations(workspaceId: string, period?: string) {
 
   const reactivate = async (annotationId: string) => {
     try {
-      await api.patch(`/workspaces/${workspaceId}/forecast/annotations/${annotationId}`, {
+      await api.patch(`/forecast/annotations/${annotationId}`, {
         action: 'reactivate',
       });
 
