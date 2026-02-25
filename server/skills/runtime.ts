@@ -234,14 +234,18 @@ export class SkillRuntime {
         // Evidence failure is non-fatal — skill still returns its output
       }
 
-      // Include annotations if present from merge step
-      const annotations = context.stepResults.final_annotations || null;
-      const annotationsMetadata = annotations ? {
+      const annotations = context.stepResults.final_annotations;
+      const annotationsList = Array.isArray(annotations) && annotations.length > 0 ? annotations : null;
+      const annotationsMetadata = annotationsList ? {
         total_before_filter: context.metadata.totalAnnotationsBeforeFilter || 0,
-        total_active: annotations.length || 0,
+        total_active: annotationsList.length,
       } : null;
 
-      await this.logSkillRun(runId, skill.id, workspaceId, 'completed', finalOutput, undefined, context.metadata.tokenUsage, evidence, annotations, annotationsMetadata);
+      if (annotationsList) {
+        console.log(`[Skill Runtime] Storing ${annotationsList.length} annotations in output`);
+      }
+
+      await this.logSkillRun(runId, skill.id, workspaceId, 'completed', finalOutput, undefined, context.metadata.tokenUsage, evidence, annotationsList, annotationsMetadata);
 
       try {
         const findings = extractFindings(skill.id, runId, workspaceId, context.stepResults);
@@ -324,6 +328,8 @@ export class SkillRuntime {
         completedAt: new Date(),
         errors: context.metadata.errors.length > 0 ? context.metadata.errors : undefined,
         evidence,
+        annotations: annotationsList || undefined,
+        annotationsMetadata: annotationsMetadata || undefined,
       };
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);

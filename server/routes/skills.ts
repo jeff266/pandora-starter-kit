@@ -69,7 +69,12 @@ async function handleSkillRun(workspaceId: string, skillId: string, params: any,
         'manual',
         JSON.stringify(params || {}),
         result.stepData ? JSON.stringify(result.stepData) : (result.output ? JSON.stringify(result.output) : null),
-        result.output ? JSON.stringify(result.evidence ? { narrative: result.output, evidence: result.evidence } : result.output) : null,
+        result.output ? JSON.stringify({
+          ...(typeof result.output === 'string' ? { narrative: result.output } : result.output),
+          ...(result.evidence ? { evidence: result.evidence } : {}),
+          ...((result as any).annotations ? { annotations: (result as any).annotations } : {}),
+          ...((result as any).annotationsMetadata ? { annotations_metadata: (result as any).annotationsMetadata } : {}),
+        }) : null,
         typeof result.output === 'string' ? result.output
           : (result.output && typeof result.output === 'object' && typeof (result.output as any).report === 'string') ? (result.output as any).report
           : (result.output && typeof result.output === 'object' && typeof (result.output as any).narrative === 'string') ? (result.output as any).narrative
