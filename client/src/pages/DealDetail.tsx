@@ -111,6 +111,8 @@ export default function DealDetail() {
   const [pipelines, setPipelines] = useState<string[]>([]);
   const [pipelineEditing, setPipelineEditing] = useState(false);
   const [pipelineSaving, setPipelineSaving] = useState(false);
+  const [coverageGapsExpanded, setCoverageGapsExpanded] = useState(true);
+  const [expandedSummaries, setExpandedSummaries] = useState<Set<string>>(new Set());
   const pipelineDropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -321,8 +323,6 @@ export default function DealDetail() {
     (coverageGapsData.unlinked_calls > 0) ||
     (coverageGapsData.total_contacts === 0);
 
-  const [coverageGapsExpanded, setCoverageGapsExpanded] = useState(true);
-
   // Map signal values to readable labels
   const signalLabel = (type: string, value?: string | null) => {
     if (!value) return 'N/A';
@@ -350,8 +350,6 @@ export default function DealDetail() {
     { label: 'Velocity', value: signalLabel('stage_velocity', health.stage_velocity), color: statusColor(health.stage_velocity) },
     { label: 'Data', value: health.data_completeness != null ? `${health.data_completeness}% complete` : null, color: (health.data_completeness || 0) > 60 ? colors.green : colors.yellow },
   ];
-
-  const [expandedSummaries, setExpandedSummaries] = useState<Set<string>>(new Set());
 
   // Merge activities and conversations into unified timeline
   const timeline = [
