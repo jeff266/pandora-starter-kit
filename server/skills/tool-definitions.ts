@@ -96,6 +96,8 @@ import { getDealRiskScore } from '../tools/deal-risk-score.js';
 import { getPipelineRiskSummary } from '../tools/pipeline-risk-summary.js';
 import { filterResolver } from '../tools/filter-resolver.js';
 import type { FilterResolutionMetadata } from '../types/workspace-config.js';
+import { computeForecastAnnotations } from '../analysis/forecast-annotations.js';
+import { mergeAnnotationsWithUserState } from '../analysis/annotation-merge.js';
 
 // ============================================================================
 // Helper: Safe Tool Execution
@@ -3199,6 +3201,123 @@ const gatherDealConcentrationRisk: ToolDefinition = {
         hasQuotaConfig: quotaConfig?.hasQuotas || false,
         riskLevel,
       };
+    }, params);
+  },
+};
+
+const computeForecastAnnotationsTool: ToolDefinition = {
+  name: 'computeForecastAnnotations',
+  description: 'Run all 6 annotation detection functions (forecast divergence, deal risks, attainment pace, confidence band, rep forecast bias, coverage & pipe gen trends) and return ranked raw annotations.',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('computeForecastAnnotations', async () => {
+      const forecastData = (context.stepResults as any).forecast_data;
+      const previousForecast = (context.stepResults as any).previous_forecast;
+      const wowDelta = (context.stepResults as any).wow_delta;
+
+      // Get current snapshot from forecast_data
+      const currentSnapshot = forecastData?.team || null;
+
+      // Get previous snapshots - for now just the most recent one
+      const previousSnapshots = previousForecast?.available && previousForecast.team
+        ? [previousForecast.team]
+        : [];
+
+      // Get all open deals with enriched data
+      const dealsResult = await query<any>(
+        `SELECT id, name, amount, probability, forecast_category, stage_normalized,
+                owner, close_date, last_activity_date, days_in_stage, created_at
+         FROM deals
+         WHERE workspace_id = $1
+           AND stage_normalized NOT IN ('closed_lost', 'closed_won')
+           AND amount IS NOT NULL
+         ORDER BY amount DESC`,
+        [context.workspaceId]
+      );
+
+      const deals = dealsResult.rows;
+
+      // Get Monte Carlo results if available (check for monte-carlo-forecast skill run)
+      let mcResults = null;
+      try {
+        const mcRun = await query(
+          `SELECT output FROM skill_runs
+           WHERE workspace_id = $1 AND skill_id = 'monte-carlo-forecast' AND status = 'completed'
+           ORDER BY completed_at DESC LIMIT 1`,
+          [context.workspaceId]
+        );
+
+        if (mcRun.rows.length > 0) {
+          mcResults = mcRun.rows[0].output?.simulation_results || null;
+        }
+      } catch (err) {
+        console.log('[ComputeAnnotations] No Monte Carlo results available');
+      }
+
+      // Get coverage projections if available (check for pipeline-coverage skill run)
+      let coverageProjections = [];
+      try {
+        const coverageRun = await query(
+          `SELECT output FROM skill_runs
+           WHERE workspace_id = $1 AND skill_id = 'pipeline-coverage' AND status = 'completed'
+           ORDER BY completed_at DESC LIMIT 1`,
+          [context.workspaceId]
+        );
+
+        if (coverageRun.rows.length > 0) {
+          coverageProjections = coverageRun.rows[0].output?.projections || [];
+        }
+      } catch (err) {
+        console.log('[ComputeAnnotations] No coverage projections available');
+      }
+
+      // Get weekly pipe gen trend (last 8 weeks)
+      const pipeGenResult = await query<any>(
+        `SELECT DATE_TRUNC('week', created_at) as week, SUM(amount) as amount
+         FROM deals
+         WHERE workspace_id = $1
+           AND created_at >= NOW() - INTERVAL '8 weeks'
+         GROUP BY 1
+         ORDER BY 1 ASC`,
+        [context.workspaceId]
+      );
+
+      const weeklyPipeGen = pipeGenResult.rows;
+
+      // Call the orchestrator
+      const rawAnnotations = await computeForecastAnnotations(
+        context.workspaceId,
+        currentSnapshot,
+        previousSnapshots,
+        deals,
+        mcResults,
+        coverageProjections,
+        weeklyPipeGen,
+        query
+      );
+
+      return rawAnnotations;
+    }, params);
+  },
+};
+
+const mergeAnnotationsWithUserStateTool: ToolDefinition = {
+  name: 'mergeAnnotationsWithUserState',
+  description: 'Merge synthesized annotation data with user lifecycle state (dismiss/snooze). Single source of truth for annotation filtering.',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('mergeAnnotationsWithUserState', async () => {
+      return await mergeAnnotationsWithUserState(context);
     }, params);
   },
 };
@@ -6797,6 +6916,8 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['prepareForecastSummary', prepareForecastSummary],
   ['gatherPreviousForecast', gatherPreviousForecast],
   ['gatherDealConcentrationRisk', gatherDealConcentrationRisk],
+  ['computeForecastAnnotations', computeForecastAnnotationsTool],
+  ['mergeAnnotationsWithUserState', mergeAnnotationsWithUserStateTool],
   ['waterfallAnalysis', waterfallAnalysisTool],
   ['waterfallDeltas', waterfallDeltasTool],
   ['topDealsInMotion', topDealsInMotionTool],

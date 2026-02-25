@@ -17,6 +17,8 @@ export const forecastRollupSkill: SkillDefinition = {
     'gatherDealConcentrationRisk',
     'prepareForecastSummary',
     'calculateOutputBudget',
+    'computeForecastAnnotations',
+    'mergeAnnotationsWithUserState',
   ],
 
   requiredContext: ['goals_and_targets'],
@@ -174,6 +176,7 @@ Return ONLY the JSON array, no other text.`,
         'prepare-summary',
         'classify-forecast-risks',
         'calculate-output-budget',
+        'merge-and-store-annotations',
       ],
       claudePrompt: `You are a senior RevOps analyst delivering the Monday morning forecast briefing for {{business_model.company_name}}.
 
@@ -240,7 +243,32 @@ STRUCTURE YOUR REPORT:
 
 {{voiceBlock}}
 
-After your report, emit an <actions> block containing a JSON array of specific, executable actions. Each action must have:
+{{#if final_annotations}}
+AI ANNOTATIONS (computed by forecast analysis):
+{{{json final_annotations}}}
+
+IMPORTANT: After your main forecast report, add a section for AI Alerts.
+Only include annotations with severity "critical" or "warning" (skip positive/info).
+Limit to the top 3 most urgent annotations.
+Format each annotation as a Slack markdown block:
+
+---
+
+⚠️ *AI Alerts ({{final_annotations.length}})*
+
+{{#each final_annotations}}
+{{#if (or (eq severity "critical") (eq severity "warning"))}}
+{{#if severity "critical"}}🔴{{else}}🟡{{/if}} *{{title}}*
+{{body}}
+{{#if recommendation}}→ {{recommendation}}{{/if}}
+
+{{/if}}
+{{/each}}
+
+_View all insights in the Command Center →_
+{{/if}}
+
+After your report (including AI alerts if present), emit an <actions> block containing a JSON array of specific, executable actions. Each action must have:
 - action_type: one of "update_forecast", "accelerate_deal", "flag_at_risk", "schedule_review", "validate_commit"
 - severity: "critical" | "warning" | "info"
 - title: short action title
@@ -256,6 +284,134 @@ Focus on the top 5-10 most impactful forecast risks or opportunities. Example:
 [{"action_type":"validate_commit","severity":"warning","title":"Validate $150K commit from Sara","summary":"3 committed deals totaling $150K have no activity in 14+ days.","recommended_steps":["Review deal status with Sara in 1:1","Downgrade to best case if no update by Friday"],"owner_email":"sara@company.com","impact_amount":150000,"urgency_label":"this_week"}]
 </actions>`,
       outputKey: 'narrative',
+    },
+
+    {
+      id: 'compute-annotations',
+      name: 'Compute Forecast Annotations',
+      tier: 'compute',
+      dependsOn: ['gather-forecast-data', 'gather-previous-forecast', 'gather-wow-delta'],
+      computeFn: 'computeForecastAnnotations',
+      computeArgs: {},
+      outputKey: 'raw_annotations',
+    },
+
+    {
+      id: 'classify-annotations',
+      name: 'Classify Annotation Severity & Anchors',
+      tier: 'deepseek',
+      dependsOn: ['compute-annotations'],
+      deepseekPrompt: `You are classifying forecast annotations for precise display in a RevOps dashboard.
+
+RULES:
+- Maximum 2 annotations can be 'critical' severity
+- Titles must include specific numbers (dollar amounts, percentages, counts)
+- Anchor assignment determines where the annotation appears in the UI
+- Be precise about actionability: 'immediate' = this week, 'strategic' = next 30 days, 'monitor' = ongoing
+
+ANCHOR TYPES:
+- chart: Pin to specific week number on forecast chart (for trends over time)
+- metric: Attach to a dashboard metric card
+- deal: Attach to a specific deal card (include deal_id and deal_name)
+- rep: Attach to a rep's row in the team breakdown (include rep_email and rep_name)
+- coverage: Attach to coverage/pipe gen section (include period label)
+- global: Show in main alerts panel (no specific anchor)
+
+For each annotation, return JSON:
+{
+  "id": "{type}-{entity_id}-{snapshot_date}",
+  "severity": "critical|warning|positive|info",
+  "actionability": "immediate|strategic|monitor",
+  "title": "60-char max headline with specific numbers",
+  "anchor": {
+    "type": "chart|metric|deal|rep|coverage|global",
+    ... type-specific fields
+  }
+}
+
+Annotations to classify:
+{{#each raw_annotations}}
+Type: {{type}}
+Data: {{{json raw_data}}}
+
+{{/each}}
+
+Return ONLY a JSON array with no other text.`,
+      deepseekSchema: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            severity: { enum: ['critical', 'warning', 'positive', 'info'] },
+            actionability: { enum: ['immediate', 'strategic', 'monitor'] },
+            title: { type: 'string' },
+            anchor: { type: 'object' },
+          },
+          required: ['id', 'severity', 'title', 'anchor'],
+        },
+      },
+      parseAs: 'json',
+      outputKey: 'classified_annotations',
+    },
+
+    {
+      id: 'synthesize-annotations',
+      name: 'Synthesize Annotation Narratives',
+      tier: 'claude',
+      dependsOn: ['classify-annotations', 'compute-annotations'],
+      claudePrompt: `You're a senior RevOps analyst writing annotation narratives for the forecast dashboard.
+
+CONTEXT:
+- Period: {{time_windows.analysisRange.quarter}}
+- Week: Week {{time_windows.currentWeek}} of quarter
+- Team Quota: {{quota_config.teamQuota}}
+- Current Forecast: {{forecast_data.team.commit}}
+
+WRITING RULES:
+1. Every sentence must include a specific number (dollar amount, percentage, deal name, rep name)
+2. Focus on "why this matters" more than "what happened"
+3. Impact must be quantified in revenue or percentage terms
+4. Recommendations must be actionable THIS WEEK (specific meeting, call, review)
+5. Body: 2-3 sentences maximum
+6. Impact: One sentence with dollar impact or null if not quantifiable
+7. Recommendation: One specific action or null if just informational
+
+For each annotation, return JSON:
+{
+  "id": "{{id from classified_annotations}}",
+  "body": "2-3 sentences explaining why this matters",
+  "impact": "One quantified sentence or null",
+  "recommendation": "One specific action or null"
+}
+
+Annotations with their raw data:
+{{#each classified_annotations}}
+---
+ID: {{id}}
+Title: {{title}}
+Severity: {{severity}}
+Actionability: {{actionability}}
+
+Raw Data:
+{{{json (lookup ../raw_annotations @index)}}}
+
+{{/each}}
+
+Return ONLY a JSON array with no other text.`,
+      maxTokens: 2000,
+      parseAs: 'json',
+      outputKey: 'synthesized_annotations',
+    },
+
+    {
+      id: 'merge-and-store-annotations',
+      name: 'Merge Annotations with User State',
+      tier: 'compute',
+      dependsOn: ['synthesize-annotations'],
+      computeFn: 'mergeAnnotationsWithUserState',
+      computeArgs: {},
+      outputKey: 'final_annotations',
     },
   ],
 

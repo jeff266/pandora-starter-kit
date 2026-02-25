@@ -234,7 +234,14 @@ export class SkillRuntime {
         // Evidence failure is non-fatal — skill still returns its output
       }
 
-      await this.logSkillRun(runId, skill.id, workspaceId, 'completed', finalOutput, undefined, context.metadata.tokenUsage, evidence);
+      // Include annotations if present from merge step
+      const annotations = context.stepResults.final_annotations || null;
+      const annotationsMetadata = annotations ? {
+        total_before_filter: context.metadata.totalAnnotationsBeforeFilter || 0,
+        total_active: annotations.length || 0,
+      } : null;
+
+      await this.logSkillRun(runId, skill.id, workspaceId, 'completed', finalOutput, undefined, context.metadata.tokenUsage, evidence, annotations, annotationsMetadata);
 
       try {
         const findings = extractFindings(skill.id, runId, workspaceId, context.stepResults);
@@ -838,7 +845,9 @@ Important:
     output?: any,
     error?: string,
     tokenUsageData?: { compute: number; deepseek: number; claude: number; claudeCacheCreation?: number; claudeCacheRead?: number },
-    evidence?: SkillEvidence
+    evidence?: SkillEvidence,
+    annotations?: any,
+    annotationsMetadata?: any
   ): Promise<void> {
     try {
       if (status === 'running') {
@@ -873,9 +882,11 @@ Important:
 
         // Build result_data with both narrative output and evidence
         // Save evidence even if output is null (e.g., when synthesis step fails)
-        const resultData = (output || evidence) ? {
+        const resultData = (output || evidence || annotations) ? {
           ...(output ? { narrative: output } : {}),
           ...(evidence ? { evidence } : {}),
+          ...(annotations ? { annotations } : {}),
+          ...(annotationsMetadata ? { annotations_metadata: annotationsMetadata } : {}),
         } : null;
 
         await query(
