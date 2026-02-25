@@ -152,6 +152,7 @@ router.post('/:workspaceId/analyze', async (req: Request, res: Response): Promis
               data_consulted: result.data_consulted,
               tokens_used: result.tokens_used,
               latency_ms: result.latency_ms,
+              follow_up_questions: result.follow_up_questions || [],
             }
           );
         })

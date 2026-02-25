@@ -260,7 +260,11 @@ export default function DealDetail() {
     if (!dealId || !currentWorkspace) return;
     try {
       const result = await api.get(`/analyze/history/deal/${dealId}`);
-      setAskHistory(result.messages || []);
+      const messages = (result.messages || []).map((msg: any) => ({
+        ...msg,
+        follow_up_questions: msg.follow_up_questions || msg.metadata?.follow_up_questions || [],
+      }));
+      setAskHistory(messages);
     } catch (err: any) {
       console.warn('Failed to load Q&A history:', err);
       setAskHistory([]);
