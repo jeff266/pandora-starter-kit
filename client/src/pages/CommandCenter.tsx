@@ -10,8 +10,6 @@ import QuotaBanner from '../components/QuotaBanner';
 import { useWorkspace } from '../context/WorkspaceContext';
 import SectionErrorBoundary from '../components/SectionErrorBoundary';
 import MonteCarloPanel from '../components/MonteCarloPanel';
-import GapCard from '../components/GapCard';
-import { ConversationGaps } from '../components/ConversationGaps';
 import { useDemoMode } from '../contexts/DemoModeContext';
 import { useLens } from '../contexts/LensContext';
 import { useIsMobile } from '../hooks/useIsMobile';
@@ -25,7 +23,7 @@ import {
   SignalsWidget,
   FindingsFeed,
 } from '../components/dashboard';
-import { AnnotationsPanel } from '../components/forecast';
+import CompactAlerts from '../components/command-center/CompactAlerts';
 
 interface Finding {
   id: string;
@@ -629,16 +627,6 @@ export default function CommandCenter() {
         </div>
       )}
 
-      <SectionErrorBoundary fallbackMessage="Failed to load annotations.">
-        <div style={{ marginBottom: 24 }}>
-          <AnnotationsPanel
-            workspaceId={wsId}
-            defaultExpanded={true}
-            showToggle={true}
-          />
-        </div>
-      </SectionErrorBoundary>
-
       <SectionErrorBoundary fallbackMessage="Failed to load metrics.">
         <CollapsibleSection
           title="Pipeline Metrics"
@@ -692,12 +680,8 @@ export default function CommandCenter() {
         </CollapsibleSection>
       </SectionErrorBoundary>
 
-      <SectionErrorBoundary fallbackMessage="Failed to load gap card.">
-        <GapCard wsId={wsId} />
-      </SectionErrorBoundary>
-
-      <SectionErrorBoundary fallbackMessage="Failed to load conversation gaps.">
-        <ConversationGaps />
+      <SectionErrorBoundary fallbackMessage="Failed to load alerts.">
+        <CompactAlerts workspaceId={wsId} />
       </SectionErrorBoundary>
 
       <SectionErrorBoundary fallbackMessage="Failed to load forecast panel.">

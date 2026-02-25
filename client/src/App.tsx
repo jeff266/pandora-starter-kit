@@ -41,6 +41,7 @@ import ReportBuilder from './pages/ReportBuilder';
 import AgentBuilder from './pages/AgentBuilder';
 import FiltersPage from './pages/FiltersPage';
 import SQLWorkspace from './pages/SQLWorkspace';
+import ForecastPage from './pages/ForecastPage';
 import { colors, fonts } from './styles/theme';
 import { useIsMobile } from './hooks/useIsMobile';
 
@@ -71,6 +72,7 @@ const pageTitles: Record<string, string> = {
   '/icp-profile': 'ICP Profile',
   '/admin/scopes': 'Workspace Scopes',
   '/admin/token-usage': 'Token Usage',
+  '/forecast': 'Forecast',
 };
 
 function getPageTitle(pathname: string): string {
@@ -254,6 +256,7 @@ export default function App() {
             <Route path="/filters" element={<FiltersPage />} />
             <Route path="/data-dictionary" element={<Placeholder title="Data Dictionary" />} />
             <Route path="/sql-workspace" element={<SQLWorkspace />} />
+            <Route path="/forecast" element={<ForecastPage />} />
             <Route path="/marketplace" element={<MarketplacePage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/settings/:tab" element={<SettingsPage />} />

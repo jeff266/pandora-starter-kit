@@ -1,2 +1,9 @@
 export { default as AnnotationCard } from './AnnotationCard';
 export { default as AnnotationsPanel } from './AnnotationsPanel';
+export { default as DrillDownPanel } from './DrillDownPanel';
+export { default as ChartInsightsSidebar } from './ChartInsightsSidebar';
+export { default as CoverageBars } from './CoverageBars';
+export { default as PipeGenChart } from './PipeGenChart';
+export { default as RepTable } from './RepTable';
+export { default as MetricCards } from './MetricCards';
+export { default as ForecastChart } from './ForecastChart';

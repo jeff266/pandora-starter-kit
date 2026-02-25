@@ -108,6 +108,7 @@ import crmWritebackRouter from './routes/crm-writeback.js';
 import agentFeedbackRouter from './routes/agent-feedback.js';
 import waitlistRouter from './routes/waitlist.js';
 import forecastAnnotationsRouter from './routes/forecast-annotations.js';
+import forecastSnapshotsRouter from './routes/forecast-snapshots.js';
 
 dotenv.config();
 
@@ -290,6 +291,7 @@ workspaceApiRouter.use(dossiersRouter);
 workspaceApiRouter.use(conversationsRouter);
 workspaceApiRouter.use(analysisRouter);
 workspaceApiRouter.use(forecastAnnotationsRouter);
+workspaceApiRouter.use(forecastSnapshotsRouter);
 workspaceApiRouter.use(routerApiRouter);
 workspaceApiRouter.use(crmWritebackRouter);
 workspaceApiRouter.use(agentFeedbackRouter);
