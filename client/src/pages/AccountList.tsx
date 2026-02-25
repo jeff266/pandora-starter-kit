@@ -10,6 +10,7 @@ import { useIsMobile } from '../hooks/useIsMobile';
 import { buildAccountCrmUrl, useCrmInfo } from '../lib/deeplinks';
 import { useLens } from '../contexts/LensContext';
 import { AccountSignalsTimeline } from '../components/account';
+import { Icon } from '../components/icons';
 
 const PAGE_SIZE = 50;
 
@@ -100,7 +101,7 @@ function ScoringLockedBanner() {
       background: '#fefce8', border: '1px solid #fde68a', borderRadius: 10, padding: '14px 20px',
       display: 'flex', alignItems: 'center', gap: 12,
     }}>
-      <span style={{ fontSize: 16 }}>🔒</span>
+      <Icon name="lock" size={18} color="#92400e" />
       <div>
         <div style={{ fontSize: 13, fontWeight: 600, color: '#92400e' }}>Account Scoring Locked</div>
         <div style={{ fontSize: 12, color: '#a16207', marginTop: 2 }}>
@@ -118,7 +119,7 @@ function ScoringReadyBanner({ onActivate, activating }: { onActivate: () => void
       display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <span style={{ fontSize: 16 }}>✨</span>
+        <Icon name="sparkles" size={18} color="#166534" />
         <div>
           <div style={{ fontSize: 13, fontWeight: 600, color: '#166534' }}>Account Scoring Ready</div>
           <div style={{ fontSize: 12, color: '#15803d', marginTop: 2 }}>
@@ -155,7 +156,7 @@ function ScoringProcessingBanner({ step, scored, total }: { step: string | null;
       background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 10, padding: '14px 20px',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span style={{ fontSize: 16 }}>⏳</span>
+        <Icon name="timer" size={18} color="#1e40af" />
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: '#1e40af' }}>Scoring in Progress</div>
           <div style={{ fontSize: 12, color: '#2563eb', marginTop: 2 }}>{label}</div>
@@ -1054,7 +1055,7 @@ export default function AccountList() {
                         alignItems: 'center',
                         gap: 8,
                       }}>
-                        <span>⚠</span>
+                        <Icon name="warning" size={14} color={colors.yellow} />
                         <span style={{ flex: 1 }}>
                           Limited enrichment data — ICP fit and industry may be inaccurate.
                         </span>
