@@ -1050,8 +1050,7 @@ export default function SQLWorkspace() {
        d.days_in_stage, d.owner, a.name AS account
 FROM deals d
 JOIN accounts a ON d.account_id = a.id
-WHERE d.workspace_id = $1
-  AND d.stage_normalized NOT IN ('closed_won','closed_lost')
+WHERE d.stage_normalized NOT IN ('closed_won','closed_lost')
   AND d.days_in_stage > 30
   AND d.amount > 50000
 ORDER BY d.amount DESC

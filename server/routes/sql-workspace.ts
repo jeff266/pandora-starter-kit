@@ -81,18 +81,18 @@ router.post('/:workspaceId/sql/execute', async (req: Request, res: Response) => 
   // Execute query with workspace scoping and timeout
   const client = await pool.connect();
   try {
-    // Set statement timeout for this query
-    await client.query(`SET statement_timeout = ${QUERY_TIMEOUT_MS}`);
+    // CRITICAL: Set workspace_id session variable for Row-Level Security
+    // This enforces workspace isolation at the database level - users CANNOT bypass this
+    await client.query('BEGIN');
+    await client.query(`SET LOCAL app.current_workspace_id = '${workspaceId}'`);
+    await client.query(`SET LOCAL statement_timeout = ${QUERY_TIMEOUT_MS}`);
 
-    // Inject workspace_id filter into the query (basic implementation)
-    // NOTE: This is a simplified approach. For production, you'd want a more robust
-    // query parser or use Postgres row-level security policies.
-    const workspaceScopedSQL = injectWorkspaceFilter(sql, workspaceId);
-
-    // Execute the query
+    // Execute the query (RLS policies will automatically filter by workspace_id)
     const startTime = Date.now();
-    const result = await client.query(workspaceScopedSQL);
+    const result = await client.query(sql);
     const executionTime = Date.now() - startTime;
+
+    await client.query('COMMIT');
 
     // Limit rows returned
     const rows = result.rows.slice(0, MAX_ROWS);
@@ -147,27 +147,13 @@ router.post('/:workspaceId/sql/execute', async (req: Request, res: Response) => 
       code: err.code,
     });
   } finally {
-    // Reset timeout and release client
+    // Rollback transaction and release client
     try {
-      await client.query('RESET statement_timeout');
+      await client.query('ROLLBACK');
     } catch {}
     client.release();
   }
 });
-
-/**
- * Replace $1 placeholder with the actual workspace_id value.
- * This allows users to write queries with "WHERE workspace_id = $1"
- * and have it automatically substituted with their workspace ID.
- *
- * For production, consider using Postgres row-level security policies.
- */
-function injectWorkspaceFilter(sql: string, workspaceId: string): string {
-  // Replace $1 with the properly escaped workspace_id literal
-  // Use Postgres string escaping to prevent SQL injection
-  const escapedWorkspaceId = workspaceId.replace(/'/g, "''");
-  return sql.replace(/\$1/g, `'${escapedWorkspaceId}'`);
-}
 
 /**
  * GET /api/workspaces/:workspaceId/sql/saved
@@ -377,12 +363,16 @@ router.post('/:workspaceId/sql/saved/:queryId/run', async (req: Request, res: Re
     // Execute the query using the same logic as /sql/execute
     const client = await pool.connect();
     try {
-      await client.query(`SET statement_timeout = ${QUERY_TIMEOUT_MS}`);
-      const workspaceScopedSQL = injectWorkspaceFilter(sql_text, workspaceId);
+      // CRITICAL: Set workspace_id session variable for Row-Level Security
+      await client.query('BEGIN');
+      await client.query(`SET LOCAL app.current_workspace_id = '${workspaceId}'`);
+      await client.query(`SET LOCAL statement_timeout = ${QUERY_TIMEOUT_MS}`);
 
       const startTime = Date.now();
-      const result = await client.query(workspaceScopedSQL);
+      const result = await client.query(sql_text);
       const executionTime = Date.now() - startTime;
+
+      await client.query('COMMIT');
 
       const rows = result.rows.slice(0, MAX_ROWS);
       const truncated = result.rows.length > MAX_ROWS;
@@ -412,7 +402,7 @@ router.post('/:workspaceId/sql/saved/:queryId/run', async (req: Request, res: Re
       });
     } finally {
       try {
-        await client.query('RESET statement_timeout');
+        await client.query('ROLLBACK');
       } catch {}
       client.release();
     }

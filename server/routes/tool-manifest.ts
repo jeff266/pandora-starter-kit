@@ -61,8 +61,7 @@ function getQueryLayerTools(): ToolManifestEntry[] {
   a.name AS account_name
 FROM deals d
 LEFT JOIN accounts a ON d.account_id = a.id
-WHERE d.workspace_id = $1
-  AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+WHERE d.stage_normalized NOT IN ('closed_won', 'closed_lost')
 ORDER BY d.close_date ASC
 LIMIT 100`,
       source: 'query_tool',
@@ -85,7 +84,6 @@ FROM accounts a
 LEFT JOIN deals d ON d.account_id = a.id
   AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
 LEFT JOIN contacts c ON c.account_id = a.id
-WHERE a.workspace_id = $1
 GROUP BY a.id
 ORDER BY open_deals_count DESC
 LIMIT 100`,
@@ -107,7 +105,6 @@ LIMIT 100`,
   a.name AS account_name
 FROM contacts c
 LEFT JOIN accounts a ON c.account_id = a.id
-WHERE c.workspace_id = $1
 ORDER BY c.last_name ASC
 LIMIT 100`,
       source: 'query_tool',
@@ -129,8 +126,7 @@ LIMIT 100`,
 FROM conversations c
 LEFT JOIN accounts a ON c.account_id = a.id
 LEFT JOIN deals d ON c.deal_id = d.id
-WHERE c.workspace_id = $1
-  AND c.is_internal = FALSE
+WHERE c.is_internal = FALSE
   AND c.call_date >= CURRENT_DATE - INTERVAL '30 days'
 ORDER BY c.call_date DESC
 LIMIT 100`,
@@ -151,8 +147,7 @@ LIMIT 100`,
   d.name AS deal_name
 FROM deal_stage_history dsh
 JOIN deals d ON dsh.deal_id = d.id
-WHERE dsh.workspace_id = $1
-  AND dsh.changed_at >= CURRENT_DATE - INTERVAL '90 days'
+WHERE dsh.changed_at >= CURRENT_DATE - INTERVAL '90 days'
 ORDER BY dsh.changed_at DESC
 LIMIT 100`,
       source: 'query_tool',
@@ -222,8 +217,7 @@ SELECT
 FROM deals d
 LEFT JOIN quotas q ON q.owner = d.owner
   AND q.period = 'Q1 2026'
-WHERE d.workspace_id = $1
-  AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+WHERE d.stage_normalized NOT IN ('closed_won', 'closed_lost')
   AND d.close_date >= '2026-01-01'
   AND d.close_date < '2026-04-01'
 GROUP BY d.owner, q.quota_amount
@@ -241,8 +235,7 @@ SELECT
   a.name AS account_name
 FROM deals d
 LEFT JOIN accounts a ON d.account_id = a.id
-WHERE d.workspace_id = $1
-  AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+WHERE d.stage_normalized NOT IN ('closed_won', 'closed_lost')
   AND (d.days_in_stage > 30 OR d.days_since_activity > 14)
   AND d.amount > 10000
 ORDER BY d.days_in_stage DESC, d.amount DESC
@@ -264,8 +257,7 @@ SELECT
     ELSE 'unknown'
   END AS issue_type
 FROM deals d
-WHERE d.workspace_id = $1
-  AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+WHERE d.stage_normalized NOT IN ('closed_won', 'closed_lost')
   AND (
     d.close_date < CURRENT_DATE
     OR d.amount IS NULL
