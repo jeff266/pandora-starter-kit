@@ -1173,6 +1173,13 @@ export default function CommandCenter() {
   );
 }
 
+// Helper to decode unicode escape sequences in strings (e.g., "\u2640" -> "♀")
+function decodeUnicodeEscapes(str: string): string {
+  return str.replace(/\\u([0-9a-fA-F]{4})/g, (_, code) =>
+    String.fromCharCode(parseInt(code, 16))
+  );
+}
+
 const FINDING_LABELS_MAP: Record<string, { label: string; color: string; bg: string; icon: string }> = {
   stale_deal: { label: 'Stale', color: '#EF4444', bg: 'rgba(239,68,68,0.12)', icon: '\u23F0' },
   single_thread: { label: 'Single Thread', color: '#F59E0B', bg: 'rgba(245,158,11,0.12)', icon: '\uD83D\uDC64' },
@@ -1486,7 +1493,7 @@ function DrilldownDealRow({ deal, isLast, isAsking, isMobile, onAsk }: {
                   fontSize: 10, fontWeight: 600, fontFamily: 'IBM Plex Mono, monospace',
                   padding: '1px 6px', borderRadius: 3,
                   color: '#EF4444', background: 'rgba(239,68,68,0.12)',
-                }} title={`Finding: ${f}`}>\u26A0 {f.replace(/_/g, ' ')}</span>
+                }} title={`Finding: ${f}`}>\u26A0 {decodeUnicodeEscapes(f.replace(/_/g, ' '))}</span>
               );
             }
           })}
