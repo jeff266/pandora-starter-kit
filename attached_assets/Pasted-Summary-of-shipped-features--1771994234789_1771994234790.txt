@@ -1,0 +1,35 @@
+Summary of shipped features:                               
+                                                             
+  ✅ Backend (7 new files, 4 modified)                       
+  - server/analysis/annotation-types.ts - Type definitions   
+  for 12 annotation types                                    
+  - server/analysis/forecast-annotations.ts - 6 detection    
+  functions + orchestrator (500+ lines)                      
+  - server/analysis/annotation-merge.ts - User state merge   
+  with 5% material change detection                          
+  - server/migrations/081_forecast_annotation_state.sql -    
+  Lifecycle state table                                      
+  - server/routes/forecast-annotations.ts - 3 API endpoints  
+  with post-read filtering                                   
+  - Modified: skill definition, runtime, tool registry,      
+  server index                                               
+                                                             
+  ✅ Frontend (4 new files, 1 modified)                      
+  - client/src/hooks/useForecastAnnotations.ts - Fetch hook  
+  with optimistic updates                                    
+  - client/src/components/forecast/AnnotationCard.tsx -      
+  Expandable card with dismiss/snooze                        
+  - client/src/components/forecast/AnnotationsPanel.tsx -    
+  Full panel with severity grouping                          
+  - Integrated into Command Center (after filters, before    
+  metrics)                                                   
+                                                             
+  ✅ Slack Integration                                       
+  - Critical/warning alerts appended to Monday forecast      
+  digest                                                     
+  - Top 3 most urgent annotations with emoji indicators      
+  - Link to Command Center for full details                  
+                                                             
+  The full annotation engine is live. Next Monday's          
+  forecast-rollup run will generate the first batch of AI    
+  insights.  
