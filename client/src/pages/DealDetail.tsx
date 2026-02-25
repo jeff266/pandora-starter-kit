@@ -140,7 +140,7 @@ export default function DealDetail() {
   const [snoozeDropdownId, setSnoozeDropdownId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [askQuestion, setAskQuestion] = useState('');
-  const [askAnswer, setAskAnswer] = useState<any>(null);
+  const [askHistory, setAskHistory] = useState<Array<{ role: 'user' | 'assistant'; content: string; metadata?: any }>>([]);
   const [askLoading, setAskLoading] = useState(false);
   const [askError, setAskError] = useState('');
   const { crmInfo } = useCrmInfo();
@@ -193,6 +193,7 @@ export default function DealDetail() {
 
   useEffect(() => {
     fetchDossier();
+    fetchAskHistory();
     if (dealId) {
       api.get(`/deals/${dealId}/score-history`).then((res: any) => {
         setScoreHistory(res.snapshots || []);
@@ -280,18 +281,50 @@ export default function DealDetail() {
     }
   };
 
+  const fetchAskHistory = useCallback(async () => {
+    if (!dealId || !currentWorkspace) return;
+    try {
+      const result = await api.get(`/analyze/history/deal/${dealId}`);
+      setAskHistory(result.messages || []);
+    } catch (err: any) {
+      console.warn('Failed to load Q&A history:', err);
+      setAskHistory([]);
+    }
+  }, [dealId, currentWorkspace]);
+
   const handleAsk = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!askQuestion.trim() || askLoading || !dealId) return;
+
+    const userQuestion = askQuestion.trim();
+    setAskQuestion(''); // Clear input immediately
     setAskLoading(true);
     setAskError('');
+
+    // Optimistically add user message to history
+    setAskHistory(prev => [...prev, { role: 'user', content: userQuestion }]);
+
     try {
       const result = await api.post('/analyze', {
-        question: askQuestion.trim(),
+        question: userQuestion,
         scope: { type: 'deal', entity_id: dealId },
       });
-      setAskAnswer(result);
+
+      // Add assistant response to history
+      setAskHistory(prev => [...prev, {
+        role: 'assistant',
+        content: result.answer,
+        metadata: {
+          confidence: result.confidence,
+          data_consulted: result.data_consulted,
+          tokens_used: result.tokens_used,
+          latency_ms: result.latency_ms,
+        }
+      }]);
     } catch (err: any) {
+      // Remove optimistic user message on error
+      setAskHistory(prev => prev.slice(0, -1));
+
       if (err.message?.includes('429') || err.message?.includes('rate limit')) {
         setAskError('Analysis limit reached. Try again in a few minutes.');
       } else {
@@ -1264,23 +1297,37 @@ export default function DealDetail() {
                 </div>
               )}
 
-              {askAnswer && (
-                <div style={{
-                  marginTop: 12, padding: 16,
-                  background: colors.surfaceRaised,
-                  border: `1px solid ${colors.borderLight}`,
-                  borderRadius: 6,
-                }}>
-                  <div style={{ fontSize: 13, lineHeight: 1.6, color: colors.text, margin: 0, marginBottom: 12, whiteSpace: 'pre-wrap' }}>
-                    {renderMarkdown(anon.text(askAnswer.answer))}
-                  </div>
-                  <div style={{ display: 'flex', gap: 16, fontSize: 11, color: colors.textMuted, fontFamily: fonts.mono }}>
-                    {askAnswer.data_consulted && (
-                      <span>Data: {Object.values(askAnswer.data_consulted).filter((v: any) => typeof v === 'number' && v > 0).length} sources</span>
-                    )}
-                    {askAnswer.tokens_used && <span>{askAnswer.tokens_used} tokens</span>}
-                    {askAnswer.latency_ms && <span>{(askAnswer.latency_ms / 1000).toFixed(1)}s</span>}
-                  </div>
+              {/* Conversation History */}
+              {askHistory.length > 0 && (
+                <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 12, maxHeight: 500, overflowY: 'auto' }}>
+                  {askHistory.map((msg, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        padding: 12,
+                        background: msg.role === 'user' ? colors.accentSoft : colors.surfaceRaised,
+                        border: `1px solid ${msg.role === 'user' ? `${colors.accent}30` : colors.borderLight}`,
+                        borderRadius: 6,
+                        borderLeft: `3px solid ${msg.role === 'user' ? colors.accent : colors.textMuted}`,
+                      }}
+                    >
+                      <div style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, marginBottom: 6, textTransform: 'uppercase' }}>
+                        {msg.role === 'user' ? 'You' : 'Pandora'}
+                      </div>
+                      <div style={{ fontSize: 13, lineHeight: 1.6, color: colors.text, whiteSpace: 'pre-wrap' }}>
+                        {renderMarkdown(anon.text(msg.content))}
+                      </div>
+                      {msg.metadata && msg.role === 'assistant' && (
+                        <div style={{ display: 'flex', gap: 12, fontSize: 10, color: colors.textMuted, fontFamily: fonts.mono, marginTop: 8 }}>
+                          {msg.metadata.data_consulted && (
+                            <span>Data: {Object.values(msg.metadata.data_consulted).filter((v: any) => typeof v === 'number' && v > 0).length} sources</span>
+                          )}
+                          {msg.metadata.tokens_used && <span>{msg.metadata.tokens_used} tokens</span>}
+                          {msg.metadata.latency_ms && <span>{(msg.metadata.latency_ms / 1000).toFixed(1)}s</span>}
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

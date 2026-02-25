@@ -9,6 +9,8 @@ export interface ChatSession {
   id: string;
   workspace_id: string;
   user_id: string;
+  entity_type?: string | null;  // 'deal', 'account', etc.
+  entity_id?: string | null;    // ID of the entity
   title: string;
   created_at: string;
   updated_at: string;
@@ -45,7 +47,11 @@ export interface ChatSessionWithMessages extends ChatSessionWithPreview {
 export async function createChatSession(
   workspaceId: string,
   userId: string,
-  firstMessage: string
+  firstMessage: string,
+  options?: {
+    entityType?: string;
+    entityId?: string;
+  }
 ): Promise<ChatSession> {
   // Generate title from first message (max 80 chars, truncate at word boundary)
   let title = firstMessage.trim().slice(0, 80);
@@ -59,10 +65,10 @@ export async function createChatSession(
   }
 
   const result = await query(
-    `INSERT INTO chat_sessions (workspace_id, user_id, title, created_at, updated_at)
-     VALUES ($1, $2, $3, NOW(), NOW())
+    `INSERT INTO chat_sessions (workspace_id, user_id, entity_type, entity_id, title, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
      RETURNING *`,
-    [workspaceId, userId, title]
+    [workspaceId, userId, options?.entityType || null, options?.entityId || null, title]
   );
 
   return result.rows[0];
@@ -326,7 +332,11 @@ export async function getOrCreateSession(
   workspaceId: string,
   userId: string,
   sessionId: string | null,
-  firstMessage: string
+  firstMessage: string,
+  options?: {
+    entityType?: string;
+    entityId?: string;
+  }
 ): Promise<string> {
   if (sessionId) {
     // Verify session exists and belongs to user
@@ -339,7 +349,64 @@ export async function getOrCreateSession(
     }
   }
 
+  // If entity-scoped, check for existing session for this entity
+  if (options?.entityType && options?.entityId) {
+    const result = await query(
+      `SELECT id FROM chat_sessions
+       WHERE workspace_id = $1 AND user_id = $2
+         AND entity_type = $3 AND entity_id = $4
+       ORDER BY last_message_at DESC NULLS LAST
+       LIMIT 1`,
+      [workspaceId, userId, options.entityType, options.entityId]
+    );
+    if (result.rows.length > 0) {
+      return result.rows[0].id;
+    }
+  }
+
   // Create new session
-  const session = await createChatSession(workspaceId, userId, firstMessage);
+  const session = await createChatSession(workspaceId, userId, firstMessage, options);
   return session.id;
+}
+
+/**
+ * Get messages for an entity (e.g., all Q&A for a specific deal)
+ */
+export async function getEntityMessages(
+  workspaceId: string,
+  entityType: string,
+  entityId: string,
+  requestingUserId: string
+): Promise<ChatMessage[]> {
+  // Get the most recent session for this entity
+  const sessionResult = await query(
+    `SELECT id FROM chat_sessions
+     WHERE workspace_id = $1 AND entity_type = $2 AND entity_id = $3
+     ORDER BY last_message_at DESC NULLS LAST
+     LIMIT 1`,
+    [workspaceId, entityType, entityId]
+  );
+
+  if (sessionResult.rows.length === 0) {
+    return [];
+  }
+
+  const sessionId = sessionResult.rows[0].id;
+
+  // Fetch messages
+  const messagesResult = await query(
+    `SELECT id, role, content, created_at, metadata
+     FROM chat_session_messages
+     WHERE session_id = $1
+     ORDER BY created_at ASC`,
+    [sessionId]
+  );
+
+  return messagesResult.rows.map((row: any) => ({
+    id: row.id,
+    role: row.role,
+    content: row.content,
+    created_at: row.created_at,
+    metadata: row.metadata,
+  }));
 }

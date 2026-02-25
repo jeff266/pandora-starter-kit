@@ -8,6 +8,7 @@ import {
   type AnalysisRequest,
 } from '../analysis/scoped-analysis.js';
 import { logChatMessage } from '../lib/chat-logger.js';
+import { getOrCreateSession, appendChatMessage, getEntityMessages } from '../chat/session-service.js';
 import { randomUUID } from 'crypto';
 
 const router = Router();
@@ -115,6 +116,50 @@ router.post('/:workspaceId/analyze', async (req: Request, res: Response): Promis
       tokenCost: result.tokens_used ?? null,
     });
 
+    // Persist to chat sessions for history (fire-and-forget to not slow response)
+    const userId = req.user?.user_id;
+    if (userId && scope.entity_id) {
+      getOrCreateSession(
+        workspaceId,
+        userId,
+        null,
+        question.trim(),
+        {
+          entityType: scope.type,
+          entityId: scope.entity_id,
+        }
+      )
+        .then((chatSessionId) => {
+          // Save user question
+          return appendChatMessage(
+            chatSessionId,
+            workspaceId,
+            userId,
+            'user',
+            question.trim()
+          ).then(() => chatSessionId);
+        })
+        .then((chatSessionId) => {
+          // Save assistant answer
+          return appendChatMessage(
+            chatSessionId,
+            workspaceId,
+            userId,
+            'assistant',
+            result.answer,
+            {
+              confidence: result.confidence,
+              data_consulted: result.data_consulted,
+              tokens_used: result.tokens_used,
+              latency_ms: result.latency_ms,
+            }
+          );
+        })
+        .catch((err) => {
+          console.warn('[analysis] Failed to persist to chat session:', err);
+        });
+    }
+
     try {
       await query(
         `INSERT INTO token_usage (workspace_id, phase, step_name, provider, model, input_tokens, output_tokens, total_tokens, estimated_cost_usd, prompt_chars, response_chars, truncated, latency_ms)
@@ -202,6 +247,34 @@ router.get('/:workspaceId/analyze/suggestions', async (req: Request, res: Respon
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('[analysis] Suggestions error:', msg);
+    res.status(500).json({ error: msg });
+  }
+});
+
+/**
+ * GET /api/workspaces/:workspaceId/analyze/history/:entityType/:entityId
+ * Get Q&A history for a specific entity (e.g., deal, account)
+ */
+router.get('/:workspaceId/analyze/history/:entityType/:entityId', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { workspaceId, entityType, entityId } = req.params;
+
+    if (!VALID_SCOPE_TYPES.includes(entityType)) {
+      res.status(400).json({ error: `Invalid entity type. Must be one of: ${VALID_SCOPE_TYPES.join(', ')}` });
+      return;
+    }
+
+    const userId = req.user?.user_id;
+    if (!userId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const messages = await getEntityMessages(workspaceId, entityType, entityId, userId);
+    res.json({ messages });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[analysis] History fetch error:', msg);
     res.status(500).json({ error: msg });
   }
 });
