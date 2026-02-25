@@ -1,6 +1,7 @@
 import { query } from '../db.js';
 import { getDealRiskScore } from '../tools/deal-risk-score.js';
 import { getActiveAnnotations } from '../feedback/annotations.js';
+import { computeCompositeScore } from '../computed-fields/deal-scores.js';
 
 export interface DealDossier {
   deal: {
@@ -101,6 +102,8 @@ export interface DealDossier {
     divergence: number;
     divergence_flag: boolean;
     conversation_modifier: number;
+    weights_used: { crm: number; findings: number; conversations: number };
+    degradation_state: 'full' | 'no_conversations' | 'no_findings' | 'crm_only';
   };
   annotations: Array<{
     id: string;
@@ -313,13 +316,34 @@ export async function assembleDealDossier(
     throw new Error(`Deal ${dealId} not found in workspace ${workspaceId}`);
   }
 
-  // Compute active score (lower of skill vs mechanical)
+  // Compute composite active score with graceful degradation
   const healthScoreVal = deal?.health_score != null ? Number(deal.health_score) : null;
   const conversationModifier = deal?.conversation_modifier != null ? Number(deal.conversation_modifier) : 0;
   const riskScore = riskResult ?? { score: 100, grade: 'A', signal_counts: { act: 0, watch: 0, notable: 0, info: 0 } };
-  const activeScore = healthScoreVal != null ? Math.min(riskScore.score, healthScoreVal) : riskScore.score;
+
+  // Normalize conversation modifier (-20 to +20) to 0-100 scale
+  // Base of 50, then add modifier (so -20 = 30, 0 = 50, +20 = 70)
+  const conversationScore = conversationModifier !== 0 ? Math.max(0, Math.min(100, 50 + conversationModifier * 2.5)) : null;
+
+  const compositeResult = computeCompositeScore(
+    healthScoreVal,
+    riskScore.score,
+    conversationScore
+  );
+
+  const activeScore = compositeResult.score;
   const activeSource: 'skill' | 'health' = (healthScoreVal != null && healthScoreVal < riskScore.score) ? 'health' : 'skill';
-  const divergence = healthScoreVal !== null ? Math.abs(riskScore.score - healthScoreVal) : 0;
+
+  // Calculate divergence as largest gap between any two available inputs
+  const availableScores = [
+    healthScoreVal,
+    riskScore.score,
+    conversationScore
+  ].filter((s): s is number => s !== null);
+
+  const divergence = availableScores.length >= 2
+    ? Math.max(...availableScores) - Math.min(...availableScores)
+    : 0;
   const divergenceFlag = divergence >= 20;
 
   const accountDomain = deal?.account_domain || null;
@@ -479,13 +503,15 @@ export async function assembleDealDossier(
     } : null,
     active_score: {
       score: activeScore,
-      grade: gradeFromScore(activeScore),
+      grade: compositeResult.grade,
       source: activeSource,
       skill_score: riskScore.score,
       health_score: healthScoreVal,
       divergence,
       divergence_flag: divergenceFlag,
       conversation_modifier: conversationModifier,
+      weights_used: compositeResult.weights_used,
+      degradation_state: compositeResult.degradation_state,
     },
     annotations: annotations.map((a: any) => ({
       id: a.id,

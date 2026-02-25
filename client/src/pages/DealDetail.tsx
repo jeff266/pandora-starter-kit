@@ -85,6 +85,8 @@ interface ActiveScore {
   divergence: number;
   divergence_flag: boolean;
   conversation_modifier: number;
+  weights_used: { crm: number; findings: number; conversations: number };
+  degradation_state: 'full' | 'no_conversations' | 'no_findings' | 'crm_only';
 }
 
 interface MechanicalScore {
@@ -517,6 +519,7 @@ export default function DealDetail() {
               const displayScore = activeScore ? activeScore.score : riskScore.score;
               const displaySource = activeScore ? activeScore.source : 'health';
               const showDivergence = activeScore && (activeScore as any).divergence_flag;
+              const isProvisional = activeScore && (activeScore as any).degradation_state === 'crm_only';
               return (
                 <div style={{ position: 'relative' }}>
                   <div
@@ -538,9 +541,28 @@ export default function DealDetail() {
                       {displayGrade}
                     </span>
                     <div style={{ display: 'flex', flexDirection: 'column' }}>
-                      <span style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase' }}>
-                        Score
-                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <span style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase' }}>
+                          Score
+                        </span>
+                        {isProvisional && (
+                          <span
+                            title="Score based on CRM data only — will update as call recordings and AI findings become available"
+                            style={{
+                              fontSize: 8,
+                              fontWeight: 600,
+                              color: colors.accent,
+                              background: `${colors.accent}15`,
+                              padding: '2px 4px',
+                              borderRadius: 3,
+                              textTransform: 'uppercase',
+                              cursor: 'help',
+                            }}
+                          >
+                            Provisional
+                          </span>
+                        )}
+                      </div>
                       <span style={{ fontSize: 14, fontWeight: 600, fontFamily: fonts.mono, color: colors.text }}>
                         {displayScore}
                       </span>
@@ -1314,12 +1336,36 @@ function ScoreBreakdownPanel({
 }: {
   riskScore: { score: number; grade: string; signal_counts: { act: number; watch: number; notable: number; info: number } };
   mechanicalScore: { score: number | null; grade: string } | null;
-  activeScore: { score: number; grade: string; source: 'skill' | 'health' };
+  activeScore: ActiveScore;
   onClose: () => void;
 }) {
-  const isSkill = activeScore.source === 'skill';
-  const sc = riskScore.signal_counts;
-  const allZero = sc.act === 0 && sc.watch === 0 && sc.notable === 0 && sc.info === 0;
+  const weights = activeScore.weights_used;
+  const crmScore = activeScore.health_score;
+  const findingsScore = activeScore.skill_score;
+  const conversationScore = activeScore.conversation_modifier !== 0
+    ? Math.max(0, Math.min(100, 50 + activeScore.conversation_modifier * 2.5))
+    : null;
+
+  const contributions = [
+    {
+      label: 'CRM Data',
+      score: crmScore,
+      weight: weights.crm,
+      color: colors.accent,
+    },
+    {
+      label: 'AI Findings',
+      score: findingsScore,
+      weight: weights.findings,
+      color: '#6488ea',
+    },
+    {
+      label: 'Conversations',
+      score: conversationScore,
+      weight: weights.conversations,
+      color: colors.green,
+    },
+  ];
 
   return (
     <>
@@ -1334,7 +1380,7 @@ function ScoreBreakdownPanel({
       <div style={{
         position: 'absolute', top: 60, right: 0, zIndex: 100,
         background: colors.surface, border: `1px solid ${colors.border}`,
-        borderRadius: 10, padding: 20, width: 280, fontSize: 13,
+        borderRadius: 10, padding: 20, width: 300, fontSize: 13,
         boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
       }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 12 }}>
@@ -1342,79 +1388,92 @@ function ScoreBreakdownPanel({
         </div>
         <div style={{ height: 1, background: colors.border, marginBottom: 12 }} />
 
-        {/* Two columns: Skill-based vs Health */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
-              Skill-based
-            </div>
-            <div style={{ fontSize: 22, fontWeight: 700, fontFamily: fonts.mono, color: gradeColor(riskScore.grade) }}>
-              {riskScore.score}
-            </div>
-            <div style={{ fontSize: 11, color: gradeColor(riskScore.grade), fontWeight: 600 }}>
-              {riskScore.grade}
-            </div>
+        <div style={{ textAlign: 'center', marginBottom: 16 }}>
+          <div style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+            Composite Score
           </div>
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
-              Health
-            </div>
-            <div style={{ fontSize: 22, fontWeight: 700, fontFamily: fonts.mono, color: mechanicalScore ? gradeColor(mechanicalScore.grade) : colors.textMuted }}>
-              {mechanicalScore?.score ?? '—'}
-            </div>
-            <div style={{ fontSize: 11, color: mechanicalScore ? gradeColor(mechanicalScore.grade) : colors.textMuted, fontWeight: 600 }}>
-              {mechanicalScore?.grade ?? '—'}
-            </div>
+          <div style={{ fontSize: 28, fontWeight: 700, fontFamily: fonts.mono, color: gradeColor(activeScore.grade) }}>
+            {activeScore.score}
+          </div>
+          <div style={{ fontSize: 12, color: gradeColor(activeScore.grade), fontWeight: 600 }}>
+            {activeScore.grade}
           </div>
         </div>
 
-        <div style={{
-          fontSize: 11, color: colors.textMuted, textAlign: 'center',
-          padding: '6px 10px', background: colors.surfaceRaised, borderRadius: 6, marginBottom: 12,
-        }}>
-          Showing: <span style={{ fontWeight: 600, color: isSkill ? '#6488ea' : colors.accent }}>
-            {isSkill ? 'SKILL' : 'HEALTH'}
-          </span> score (lower of two)
+        <div style={{ height: 1, background: colors.border, marginBottom: 12 }} />
+
+        <div style={{ fontSize: 11, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>
+          Score Contributions
         </div>
 
-        <div style={{ height: 1, background: colors.border, marginBottom: 10 }} />
-        <div style={{ fontSize: 11, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
-          Active score drivers
-        </div>
+        {contributions.map((c, idx) => {
+          const isActive = c.weight > 0;
+          const contribution = isActive && c.score !== null ? c.score * c.weight : 0;
 
-        {isSkill ? (
-          allZero ? (
-            <p style={{ fontSize: 12, color: colors.textMuted }}>
-              No active findings — score based on historical baseline
-            </p>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-              {sc.act > 0 && (
-                <div style={{ fontSize: 12, color: colors.red }}>
-                  • {sc.act} critical finding{sc.act !== 1 ? 's' : ''}
+          return (
+            <div key={idx} style={{ marginBottom: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                <span style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: isActive ? colors.text : colors.textMuted,
+                }}>
+                  {c.label}
+                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {!isActive && (
+                    <span style={{ fontSize: 10, color: colors.textMuted, fontStyle: 'italic' }}>
+                      No data yet
+                    </span>
+                  )}
+                  <span style={{
+                    fontSize: 11,
+                    fontFamily: fonts.mono,
+                    color: isActive ? colors.text : colors.textMuted,
+                  }}>
+                    {Math.round(c.weight * 100)}%
+                  </span>
                 </div>
-              )}
-              {sc.watch > 0 && (
-                <div style={{ fontSize: 12, color: colors.yellow }}>
-                  • {sc.watch} watch finding{sc.watch !== 1 ? 's' : ''}
-                </div>
-              )}
-              {sc.notable > 0 && (
-                <div style={{ fontSize: 12, color: colors.textSecondary }}>
-                  • {sc.notable} notable
-                </div>
-              )}
-              {sc.info > 0 && (
-                <div style={{ fontSize: 12, color: colors.textMuted }}>
-                  • {sc.info} informational
+              </div>
+              <div style={{
+                height: 6,
+                background: colors.surfaceRaised,
+                borderRadius: 3,
+                overflow: 'hidden',
+              }}>
+                {isActive && c.score !== null && (
+                  <div style={{
+                    height: '100%',
+                    width: `${(contribution / activeScore.score) * 100}%`,
+                    background: c.color,
+                    transition: 'width 0.3s ease',
+                  }} />
+                )}
+              </div>
+              {isActive && c.score !== null && (
+                <div style={{
+                  fontSize: 10,
+                  color: colors.textMuted,
+                  marginTop: 2,
+                }}>
+                  {c.score.toFixed(0)} × {Math.round(c.weight * 100)}% = {contribution.toFixed(1)}
                 </div>
               )}
             </div>
-          )
-        ) : (
-          <p style={{ fontSize: 12, color: colors.textMuted }}>
-            No skill findings yet — using activity-based health score
-          </p>
+          );
+        })}
+
+        {activeScore.degradation_state !== 'full' && (
+          <div style={{
+            fontSize: 10,
+            color: colors.textMuted,
+            marginTop: 12,
+            padding: '8px 10px',
+            background: colors.surfaceRaised,
+            borderRadius: 6,
+          }}>
+            Weights automatically redistributed based on available data
+          </div>
         )}
       </div>
     </>

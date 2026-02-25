@@ -141,4 +141,68 @@ router.post('/:workspaceId/actions/refresh-computed-fields', async (req: Request
   }
 });
 
+router.post('/:workspaceId/actions/toggle-experimental-scoring', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    const { workspaceId } = req.params;
+
+    // Check if workspace has sufficient outcome data
+    const outcomeCount = await query<{ count: string }>(
+      `SELECT COUNT(*)::text as count FROM deal_outcomes WHERE workspace_id = $1`,
+      [workspaceId]
+    );
+
+    const count = parseInt(outcomeCount.rows[0]?.count || '0', 10);
+
+    if (count < 20) {
+      return res.status(400).json({
+        error: 'insufficient_data',
+        message: 'Need at least 20 closed deals to enable experimental scoring',
+        deals_needed: 20,
+        deals_have: count,
+      });
+    }
+
+    // Check if experimental weight row exists
+    const existingWeight = await query<{ id: string; active: boolean }>(
+      `SELECT id, active FROM workspace_score_weights
+       WHERE workspace_id = $1 AND weight_type = 'experimental'`,
+      [workspaceId]
+    );
+
+    if (existingWeight.rows.length === 0) {
+      // Create experimental weight row with default weights (will be optimized later)
+      await query(
+        `INSERT INTO workspace_score_weights (workspace_id, weight_type, crm_weight, findings_weight, conversations_weight, active)
+         VALUES ($1, 'experimental', 0.40, 0.35, 0.25, true)`,
+        [workspaceId]
+      );
+
+      res.json({
+        success: true,
+        message: 'Experimental scoring enabled',
+        active: true,
+      });
+    } else {
+      // Toggle active state
+      const newActive = !existingWeight.rows[0].active;
+      await query(
+        `UPDATE workspace_score_weights
+         SET active = $2, updated_at = NOW()
+         WHERE workspace_id = $1 AND weight_type = 'experimental'`,
+        [workspaceId, newActive]
+      );
+
+      res.json({
+        success: true,
+        message: newActive ? 'Experimental scoring enabled' : 'Experimental scoring disabled',
+        active: newActive,
+      });
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[Actions] Toggle experimental scoring error:', message);
+    res.status(500).json({ error: message });
+  }
+});
+
 export default router;

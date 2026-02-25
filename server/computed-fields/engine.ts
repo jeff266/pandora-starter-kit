@@ -1,8 +1,9 @@
 import { query, getClient } from '../db.js';
 import { getContext } from '../context/index.js';
-import { computeDealScores, computeConversationModifier, type DealRow } from './deal-scores.js';
+import { computeDealScores, computeConversationModifier, computeCompositeScore, type DealRow, type CompositeScoreResult } from './deal-scores.js';
 import { computeContactEngagement, type ContactRow } from './contact-scores.js';
 import { computeAccountHealth, type AccountRow } from './account-scores.js';
+import { getDealRiskScore } from '../tools/deal-risk-score.js';
 
 export interface ComputeResult {
   workspaceId: string;
@@ -44,12 +45,45 @@ async function computeDeals(
   workspaceId: string,
   config: { staleDealDays: number; salesCycleDays: number; avgDealSize: number }
 ): Promise<{ processed: number; updated: number }> {
-  const result = await query<DealRow>(
-    `SELECT id, amount, stage, close_date, probability, days_in_stage,
+  // Fetch workspace score weights
+  const weightsResult = await query<{
+    weight_type: string;
+    crm_weight: string;
+    findings_weight: string;
+    conversations_weight: string;
+    active: boolean;
+  }>(
+    `SELECT weight_type, crm_weight, findings_weight, conversations_weight, active
+     FROM workspace_score_weights
+     WHERE workspace_id = $1 AND active = true`,
+    [workspaceId]
+  );
+
+  const productionWeights = weightsResult.rows.find(r => r.weight_type === 'production');
+  const experimentalWeights = weightsResult.rows.find(r => r.weight_type === 'experimental');
+
+  const prodWeights = productionWeights
+    ? {
+        crm: parseFloat(productionWeights.crm_weight),
+        findings: parseFloat(productionWeights.findings_weight),
+        conversations: parseFloat(productionWeights.conversations_weight),
+      }
+    : { crm: 0.40, findings: 0.35, conversations: 0.25 }; // fallback defaults
+
+  const expWeights = experimentalWeights
+    ? {
+        crm: parseFloat(experimentalWeights.crm_weight),
+        findings: parseFloat(experimentalWeights.findings_weight),
+        conversations: parseFloat(experimentalWeights.conversations_weight),
+      }
+    : null;
+
+  // Query all deals (open and recently closed for outcome logging)
+  const result = await query<DealRow & { stage_normalized?: string; name?: string }>(
+    `SELECT id, amount, stage, stage_normalized, name, close_date, probability, days_in_stage,
             last_activity_date, created_at, pipeline, stage_changed_at
      FROM deals
-     WHERE workspace_id = $1
-       AND stage NOT IN ('closedwon', 'closedlost', 'closed won', 'closed lost')`,
+     WHERE workspace_id = $1`,
     [workspaceId]
   );
 
@@ -94,6 +128,74 @@ async function computeDeals(
       const baseHealthScore = 100 - scores.dealRisk;
       const healthScore = Math.min(100, Math.max(0, Math.round((baseHealthScore + conversationModifier) * 100) / 100));
 
+      // Get skill score from findings
+      let skillScore: number | null = null;
+      try {
+        const riskResult = await getDealRiskScore(workspaceId, deal.id);
+        skillScore = riskResult.score;
+      } catch {
+        // No findings yet, skill score remains null
+      }
+
+      // Normalize conversation modifier to 0-100 scale
+      const conversationScore = conversationModifier !== 0
+        ? Math.max(0, Math.min(100, 50 + conversationModifier * 2.5))
+        : null;
+
+      // Compute production composite score
+      const productionComposite = computeCompositeScore(
+        healthScore,
+        skillScore,
+        conversationScore,
+        prodWeights
+      );
+
+      // Compute experimental score if workspace has active experimental weights
+      let experimentalScore: number | null = null;
+      if (expWeights) {
+        const experimentalComposite = computeCompositeScore(
+          healthScore,
+          skillScore,
+          conversationScore,
+          expWeights
+        );
+        experimentalScore = experimentalComposite.score;
+      }
+
+      // Check if deal is closed - if so, log outcome
+      const isClosed = ['closed_won', 'closed_lost', 'closedwon', 'closedlost'].includes(
+        (deal.stage_normalized || deal.stage || '').toLowerCase().replace(/\s+/g, '')
+      );
+
+      if (isClosed) {
+        const outcome = (deal.stage_normalized || deal.stage || '').toLowerCase().includes('won') ? 'won' : 'lost';
+        const daysOpen = Math.floor((Date.now() - new Date(deal.created_at).getTime()) / (1000 * 60 * 60 * 24));
+
+        // Insert outcome record (ignore if already exists)
+        await client.query(
+          `INSERT INTO deal_outcomes (
+            workspace_id, deal_id, deal_name, outcome,
+            crm_score, skill_score, conversation_score, composite_score,
+            amount, days_open, stage_duration_days, closed_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+          ON CONFLICT (workspace_id, deal_id) DO NOTHING`,
+          [
+            workspaceId,
+            deal.id,
+            deal.name || 'Untitled',
+            outcome,
+            healthScore,
+            skillScore,
+            conversationScore,
+            productionComposite.score,
+            deal.amount ? parseFloat(deal.amount) : null,
+            daysOpen,
+            daysInStage,
+          ]
+        );
+      }
+
+      // Update deal with scores
       await client.query(
         `UPDATE deals
          SET velocity_score = $2,
@@ -102,9 +204,20 @@ async function computeDeals(
              health_score = $5,
              days_in_stage = $6,
              conversation_modifier = $7,
+             experimental_score = $8,
              updated_at = NOW()
-         WHERE id = $1 AND workspace_id = $8`,
-        [deal.id, scores.velocityScore, scores.dealRisk, JSON.stringify(scores.riskFactors), healthScore, daysInStage, conversationModifier, workspaceId]
+         WHERE id = $1 AND workspace_id = $9`,
+        [
+          deal.id,
+          scores.velocityScore,
+          scores.dealRisk,
+          JSON.stringify(scores.riskFactors),
+          healthScore,
+          daysInStage,
+          conversationModifier,
+          experimentalScore,
+          workspaceId,
+        ]
       );
       updated++;
     }

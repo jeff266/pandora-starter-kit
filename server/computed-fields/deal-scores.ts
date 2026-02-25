@@ -189,3 +189,85 @@ export async function computeConversationModifier(
 
   return Math.max(-20, Math.min(20, modifier));
 }
+
+export interface CompositeScoreResult {
+  score: number;
+  grade: string;
+  weights_used: { crm: number; findings: number; conversations: number };
+  degradation_state: 'full' | 'no_conversations' | 'no_findings' | 'crm_only';
+}
+
+export function computeCompositeScore(
+  crmScore: number | null,
+  skillScore: number | null,
+  conversationScore: number | null,
+  weights: { crm: number; findings: number; conversations: number } = { crm: 0.40, findings: 0.35, conversations: 0.25 }
+): CompositeScoreResult {
+  // Determine which inputs are available
+  const hasCrm = crmScore !== null;
+  const hasFindings = skillScore !== null;
+  const hasConversations = conversationScore !== null;
+
+  // Determine degradation state
+  let degradationState: 'full' | 'no_conversations' | 'no_findings' | 'crm_only';
+  if (hasCrm && hasFindings && hasConversations) {
+    degradationState = 'full';
+  } else if (hasCrm && hasFindings && !hasConversations) {
+    degradationState = 'no_conversations';
+  } else if (hasCrm && !hasFindings && hasConversations) {
+    degradationState = 'no_findings';
+  } else {
+    degradationState = 'crm_only';
+  }
+
+  // Calculate redistributed weights
+  const availableInputs: Array<'crm' | 'findings' | 'conversations'> = [];
+  if (hasCrm) availableInputs.push('crm');
+  if (hasFindings) availableInputs.push('findings');
+  if (hasConversations) availableInputs.push('conversations');
+
+  if (availableInputs.length === 0) {
+    // No data at all - return default
+    return {
+      score: 50,
+      grade: 'C',
+      weights_used: { crm: 0, findings: 0, conversations: 0 },
+      degradation_state: 'crm_only',
+    };
+  }
+
+  // Redistribute weights proportionally
+  const originalWeights = { ...weights };
+  const totalOriginalWeight = availableInputs.reduce((sum, key) => sum + originalWeights[key], 0);
+
+  const weightsUsed = { crm: 0, findings: 0, conversations: 0 };
+  for (const input of availableInputs) {
+    weightsUsed[input] = originalWeights[input] / totalOriginalWeight;
+  }
+
+  // Calculate weighted score
+  let compositeScore = 0;
+  if (hasCrm) compositeScore += crmScore * weightsUsed.crm;
+  if (hasFindings) compositeScore += skillScore * weightsUsed.findings;
+  if (hasConversations) compositeScore += conversationScore * weightsUsed.conversations;
+
+  compositeScore = Math.round(compositeScore * 100) / 100;
+  compositeScore = clamp(compositeScore, 0, 100);
+
+  const grade = scoreToGrade(compositeScore);
+
+  return {
+    score: compositeScore,
+    grade,
+    weights_used: weightsUsed,
+    degradation_state: degradationState,
+  };
+}
+
+function scoreToGrade(score: number): string {
+  if (score >= 90) return 'A';
+  if (score >= 75) return 'B';
+  if (score >= 50) return 'C';
+  if (score >= 25) return 'D';
+  return 'F';
+}
