@@ -411,13 +411,13 @@ router.get('/:workspaceId/targets/revenue-model', async (req: Request, res: Resp
   const workspaceId = req.params.workspaceId as string;
 
   try {
-    // Check workspace_config first
     const configResult = await query(
-      `SELECT config_data FROM workspace_config WHERE workspace_id = $1`,
+      `SELECT definitions->'workspace_config' as config
+       FROM context_layer WHERE workspace_id = $1`,
       [workspaceId]
     );
 
-    const existingMetric = configResult.rows[0]?.config_data?.business_model?.revenue_metric;
+    const existingMetric = configResult.rows[0]?.config?.business_model?.revenue_metric;
 
     if (existingMetric) {
       res.json({
@@ -429,7 +429,6 @@ router.get('/:workspaceId/targets/revenue-model', async (req: Request, res: Resp
       return;
     }
 
-    // Detect from deal data
     const detected = await detectRevenueModel(workspaceId);
     res.json(detected);
   } catch (err) {
@@ -453,23 +452,22 @@ router.patch('/:workspaceId/targets/revenue-model', async (req: Request, res: Re
   }
 
   try {
-    // Load existing config
     const configResult = await query(
-      `SELECT config_data FROM workspace_config WHERE workspace_id = $1`,
+      `SELECT definitions->'workspace_config' as config
+       FROM context_layer WHERE workspace_id = $1`,
       [workspaceId]
     );
 
-    const configData = configResult.rows[0]?.config_data || {};
-    configData.business_model = configData.business_model || {};
-    configData.business_model.revenue_metric = metric;
+    const config = configResult.rows[0]?.config || {};
+    config.business_model = config.business_model || {};
+    config.business_model.revenue_metric = metric;
 
-    // Upsert config
     await query(
-      `INSERT INTO workspace_config (workspace_id, config_data)
-       VALUES ($1, $2::jsonb)
-       ON CONFLICT (workspace_id)
-       DO UPDATE SET config_data = $2::jsonb`,
-      [workspaceId, JSON.stringify(configData)]
+      `UPDATE context_layer
+       SET definitions = jsonb_set(COALESCE(definitions, '{}'), '{workspace_config}', $2::jsonb),
+           updated_at = NOW()
+       WHERE workspace_id = $1`,
+      [workspaceId, JSON.stringify(config)]
     );
 
     res.json({
