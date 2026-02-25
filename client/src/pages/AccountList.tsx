@@ -365,11 +365,33 @@ const GRADE_COLORS: Record<string, { bg: string; text: string }> = {
   F: { bg: '#f3f4f6', text: '#9ca3af' },
 };
 
-function ScoreBadge({ grade, score, scoreDelta, dataConfidence }: {
-  grade?: string; score?: number; scoreDelta?: number; dataConfidence?: number;
+function ScoreBadge({ grade, score, scoreDelta, dataConfidence, compact = false }: {
+  grade?: string; score?: number; scoreDelta?: number; dataConfidence?: number; compact?: boolean;
 }) {
   if (!grade) return <span style={{ color: '#9ca3af', fontSize: 12 }}>—</span>;
   const c = GRADE_COLORS[grade] || GRADE_COLORS.F;
+
+  // Compact mode: just the letter grade badge (for table view)
+  if (compact) {
+    return (
+      <span style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: c.bg,
+        color: c.text,
+        fontWeight: 700,
+        fontSize: 14,
+        borderRadius: 6,
+        width: 28,
+        height: 28,
+      }}>
+        {grade}
+      </span>
+    );
+  }
+
+  // Full mode: with score, delta, warning (for drawer/detail view)
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
       <span style={{
@@ -395,17 +417,26 @@ function SignalBadges({ signals, confidence }: { signals?: Signal[]; confidence?
     if (signals.some(s => s.type === 'expansion')) badges.push({ label: 'Expanding', color: '#ca8a04' });
     if (signals.some(s => s.type === 'layoff')) badges.push({ label: 'Layoffs', color: '#dc2626' });
   }
-  if ((confidence ?? 100) < 40 && signals !== undefined) badges.push({ label: 'Limited data', color: '#9ca3af' });
-  if (!signals && confidence === undefined) return <span style={{ fontSize: 11, color: '#9ca3af' }}>Unscored</span>;
-  if (badges.length === 0) return null;
+  // NOTE: Removed "Limited data" badge per spec - it adds noise when 80%+ rows have it
+
+  if (!signals && confidence === undefined) return <span style={{ fontSize: 11, color: '#9ca3af' }}>—</span>;
+  if (badges.length === 0) return <span style={{ fontSize: 11, color: '#9ca3af' }}>—</span>;
+
+  // Display inline (horizontal), max 2 visible
+  const visible = badges.slice(0, 2);
+  const remaining = badges.length - 2;
+
   return (
-    <span style={{ display: 'inline-flex', gap: 4, flexWrap: 'wrap' }}>
-      {badges.slice(0, 3).map((b, i) => (
+    <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+      {visible.map((b, i) => (
         <span key={i} style={{
           fontSize: 11, color: b.color, border: `1px solid ${b.color}`,
           borderRadius: 10, padding: '0px 6px', whiteSpace: 'nowrap',
         }}>{b.label}</span>
       ))}
+      {remaining > 0 && (
+        <span style={{ fontSize: 11, color: colors.textMuted }}>+{remaining}</span>
+      )}
     </span>
   );
 }
@@ -438,6 +469,8 @@ export default function AccountList() {
   const [drawerWhy, setDrawerWhy] = useState<string | null>(null);
   const [drawerWhyLoading, setDrawerWhyLoading] = useState(false);
   const [enrichingId, setEnrichingId] = useState<string | null>(null);
+  const [expandedAccountId, setExpandedAccountId] = useState<string | null>(null);
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
 
   useEffect(() => {
     fetchAccounts();
@@ -607,19 +640,15 @@ export default function AccountList() {
     setDomainFilter('all');
   };
 
+  // New 5-column layout: Account | Score | Signals | Activity | Pipeline
   type ColDef = { field: SortField; label: string; width: string; show: boolean };
   const scoringActive = scoringState?.state === 'active';
   const columns: ColDef[] = [
-    { field: 'name', label: 'Account Name', width: '22%', show: true },
-    { field: 'domain', label: 'Domain', width: '13%', show: true },
-    { field: 'score', label: 'Score', width: '8%', show: scoringActive },
-    { field: 'signals', label: 'Signals', width: '12%', show: scoringActive },
-    { field: 'icp_fit', label: 'ICP Fit', width: '7%', show: scoringActive },
-    { field: 'industry', label: 'Industry', width: '12%', show: hasIndustryData },
-    { field: 'open_deals', label: 'Open Deals', width: '8%', show: hasDealData },
-    { field: 'pipeline', label: 'Pipeline', width: '10%', show: hasPipelineData },
-    { field: 'contacts', label: 'Contacts', width: '7%', show: hasContactData },
-    { field: 'last_activity', label: 'Last Activity', width: '13%', show: hasActivityData },
+    { field: 'name', label: 'Account', width: '35%', show: true },  // Wide - includes domain below
+    { field: 'score', label: 'Score', width: '10%', show: scoringActive },
+    { field: 'signals', label: 'Signals', width: '20%', show: scoringActive },
+    { field: 'last_activity', label: 'Activity', width: '15%', show: hasActivityData },
+    { field: 'pipeline', label: 'Pipeline', width: '20%', show: hasPipelineData },
   ];
   const visibleColumns = columns.filter(c => c.show);
   const gridTemplate = visibleColumns.map(c => c.width).join(' ');
@@ -687,7 +716,7 @@ export default function AccountList() {
         <ScoringActiveBanner onRefresh={refreshIcp} activating={activating} />
       )}
 
-      {/* Filter Bar */}
+      {/* Filter Bar - Simplified: Score + Signals by default */}
       <div style={{
         display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap',
         background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, padding: '10px 16px',
@@ -703,14 +732,8 @@ export default function AccountList() {
             borderRadius: 6, color: colors.text, outline: 'none',
           }}
         />
-        {hasIndustryData && uniqueIndustries.length > 0 && (
-          <MultiSelectFilter
-            label="Industry"
-            values={industryFilter}
-            onChange={setIndustryFilter}
-            options={uniqueIndustries.map(i => ({ value: i, label: i }))}
-          />
-        )}
+
+        {/* Default filters: Score + Signals */}
         {accounts.some(a => a.grade) && (
           <MultiSelectFilter
             label="Score"
@@ -733,14 +756,43 @@ export default function AccountList() {
             options={uniqueSignalTypes.map(t => ({ value: t, label: SIGNAL_LABELS[t] || t }))}
           />
         )}
-        {uniqueOwners.length > 0 && (
-          <FilterSelect label="Owner" value={ownerFilter} onChange={setOwnerFilter}
-            options={[{ value: 'all', label: 'All' }, ...uniqueOwners.map(o => ({ value: o, label: anon.person(o) }))]} />
+
+        {/* Advanced filters (hidden by default) */}
+        {showAdvancedFilters && (
+          <>
+            {hasIndustryData && uniqueIndustries.length > 0 && (
+              <MultiSelectFilter
+                label="Industry"
+                values={industryFilter}
+                onChange={setIndustryFilter}
+                options={uniqueIndustries.map(i => ({ value: i, label: i }))}
+              />
+            )}
+            {uniqueDomains.length > 0 && (
+              <FilterSelect label="Domain" value={domainFilter} onChange={setDomainFilter}
+                options={[{ value: 'all', label: 'All' }, ...uniqueDomains.map(d => ({ value: d, label: d }))]} />
+            )}
+          </>
         )}
-        {uniqueDomains.length > 0 && (
-          <FilterSelect label="Domain" value={domainFilter} onChange={setDomainFilter}
-            options={[{ value: 'all', label: 'All' }, ...uniqueDomains.map(d => ({ value: d, label: d }))]} />
+
+        {/* "+ Add filter" button */}
+        {!showAdvancedFilters && (hasIndustryData || uniqueDomains.length > 0) && (
+          <button
+            onClick={() => setShowAdvancedFilters(true)}
+            style={{
+              fontSize: 11,
+              color: colors.accent,
+              background: 'none',
+              border: `1px solid ${colors.border}`,
+              borderRadius: 4,
+              padding: '4px 10px',
+              cursor: 'pointer',
+            }}
+          >
+            + Add filter
+          </button>
         )}
+
         {hasFilters && (
           <button onClick={clearFilters} style={{
             fontSize: 11, color: colors.accent, background: 'none', border: 'none', cursor: 'pointer',
@@ -849,100 +901,191 @@ export default function AccountList() {
               );
             }
 
+            const isExpanded = expandedAccountId === account.id;
+            const crmUrl = buildAccountCrmUrl(
+              crmInfo.crm,
+              crmInfo.portalId || null,
+              crmInfo.instanceUrl || null,
+              account.source_id || null,
+              account.source || null
+            );
+
             return (
-              <div
-                key={account.id}
-                onClick={openDrawer}
-                style={{
-                  display: 'grid', gridTemplateColumns: gridTemplate,
-                  padding: '12px 20px',
-                  borderBottom: `1px solid ${colors.border}`,
-                  cursor: 'pointer', transition: 'background 0.12s',
-                  alignItems: 'center',
-                }}
-                onMouseEnter={e => (e.currentTarget.style.background = colors.surfaceHover)}
-                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-              >
-                <div style={{ fontSize: 13, fontWeight: 500, color: colors.accent, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingRight: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-                  {anon.company(account.name || 'Unnamed')}
-                  {(() => {
-                    const crmUrl = buildAccountCrmUrl(
-                      crmInfo.crm,
-                      crmInfo.portalId || null,
-                      crmInfo.instanceUrl || null,
-                      account.source_id || null,
-                      account.source || null
-                    );
-                    return crmUrl ? (
-                      <a
-                        href={crmUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        title={`Open in ${crmInfo.crm}`}
-                        style={{ color: colors.textMuted, lineHeight: 0, flexShrink: 0 }}
-                      >
-                        <ExternalLink size={13} />
-                      </a>
-                    ) : null;
-                  })()}
-                </div>
-                <div style={{ fontSize: 12, color: colors.textSecondary, fontFamily: fonts.mono, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {account.domain || '—'}
-                </div>
-                {/* Score column — only shown when scoring is active */}
-                {scoringActive && (
+              <React.Fragment key={account.id}>
+                {/* Main row */}
+                <div
+                  onClick={() => setExpandedAccountId(isExpanded ? null : account.id)}
+                  style={{
+                    display: 'grid', gridTemplateColumns: gridTemplate,
+                    padding: '14px 20px',
+                    borderBottom: isExpanded ? 'none' : `1px solid ${colors.border}`,
+                    cursor: 'pointer', transition: 'background 0.12s',
+                    alignItems: 'center',
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.background = colors.surfaceHover)}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                >
+                  {/* Account column: name + domain below */}
                   <div>
-                    <ScoreBadge grade={account.grade} score={account.total_score} scoreDelta={account.score_delta} dataConfidence={account.data_confidence} />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                      <span style={{ fontSize: 13, fontWeight: 500, color: colors.accent }}>
+                        {anon.company(account.name || 'Unnamed')}
+                      </span>
+                      {crmUrl && (
+                        <a
+                          href={crmUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          title={`Open in ${crmInfo.crm}`}
+                          style={{ color: colors.textMuted, lineHeight: 0, flexShrink: 0 }}
+                        >
+                          <ExternalLink size={13} />
+                        </a>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 11, color: colors.textSecondary, fontFamily: fonts.mono }}>
+                      {account.domain || '—'}
+                    </div>
                   </div>
-                )}
-                {/* Signals column */}
-                {scoringActive && (
-                  <div>
-                    <SignalBadges signals={account.signals} confidence={account.classification_confidence} />
-                  </div>
-                )}
-                {/* ICP Fit column */}
-                {scoringActive && (
-                  <div style={{ fontSize: 12, fontFamily: fonts.mono, color: colors.text }}>
-                    {account.icp_fit_score !== undefined ? `${account.icp_fit_score}%` : '—'}
-                  </div>
-                )}
-                {hasIndustryData && (
-                  <div style={{ fontSize: 12, color: colors.textMuted }}>
-                    {account.industry || '—'}
-                  </div>
-                )}
-                {hasDealData && (
-                  <div style={{ fontSize: 12, fontFamily: fonts.mono, color: colors.text }}>
-                    {account.open_deal_count || '—'}
-                  </div>
-                )}
-                {hasPipelineData && (
-                  <div style={{ fontSize: 12, fontFamily: fonts.mono, color: colors.text }}>
-                    {account.total_pipeline ? formatCurrency(anon.amount(account.total_pipeline)) : '—'}
-                  </div>
-                )}
-                {hasContactData && (
-                  <div style={{ fontSize: 12, fontFamily: fonts.mono, color: colors.textMuted }}>
-                    {account.contact_count || '—'}
-                  </div>
-                )}
-                {hasActivityData && (
-                  <div style={{ fontSize: 11, color: colors.textMuted }}>
-                    {account.last_activity ? (
-                      <div>
-                        <div>{formatTimeAgo(account.last_activity)}</div>
-                        {account.enriched_at && (
-                          <div style={{ fontSize: 10, color: colors.textDim, marginTop: 2 }}>
-                            Enriched {formatTimeAgo(account.enriched_at)}
+
+                  {/* Score column: badge only (compact mode) */}
+                  {scoringActive && (
+                    <div>
+                      <ScoreBadge grade={account.grade} compact />
+                    </div>
+                  )}
+
+                  {/* Signals column: inline, max 2 */}
+                  {scoringActive && (
+                    <div>
+                      <SignalBadges signals={account.signals} confidence={account.classification_confidence} />
+                    </div>
+                  )}
+
+                  {/* Activity column */}
+                  {hasActivityData && (
+                    <div style={{ fontSize: 12, color: colors.textMuted }}>
+                      {account.last_activity ? formatTimeAgo(account.last_activity) : '—'}
+                    </div>
+                  )}
+
+                  {/* Pipeline column: amount + deal count */}
+                  {hasPipelineData && (
+                    <div style={{ textAlign: 'right' }}>
+                      {account.total_pipeline > 0 ? (
+                        <>
+                          <div style={{ fontSize: 14, fontWeight: 600, color: colors.text, fontFamily: fonts.mono }}>
+                            {formatCurrency(anon.amount(account.total_pipeline)).replace(',000', 'K').replace('.00', '')}
                           </div>
-                        )}
+                          <div style={{ fontSize: 11, color: colors.textMuted }}>
+                            {account.open_deal_count} {account.open_deal_count === 1 ? 'deal' : 'deals'}
+                          </div>
+                        </>
+                      ) : (
+                        <span style={{ fontSize: 12, color: colors.textMuted }}>—</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Expanded detail row */}
+                {isExpanded && (
+                  <div style={{
+                    padding: '16px 20px',
+                    background: colors.surfaceRaised,
+                    borderBottom: `1px solid ${colors.border}`,
+                  }}>
+                    {/* 4-column grid: Score | ICP Fit | Industry | Data Quality */}
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(4, 1fr)',
+                      gap: 16,
+                      marginBottom: 12,
+                    }}>
+                      <div>
+                        <div style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+                          SCORE
+                        </div>
+                        <div style={{ fontSize: 13, color: colors.text, fontFamily: fonts.mono }}>
+                          {account.total_score !== undefined ? `${account.total_score} / 100` : '—'}
+                        </div>
                       </div>
-                    ) : '—'}
+                      <div>
+                        <div style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+                          ICP FIT
+                        </div>
+                        <div style={{ fontSize: 13, color: account.icp_fit_score ? colors.text : colors.textMuted }}>
+                          {account.icp_fit_score !== undefined ? `${account.icp_fit_score}%` : <span style={{ fontStyle: 'italic' }}>Not scored</span>}
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+                          INDUSTRY
+                        </div>
+                        <div style={{ fontSize: 13, color: account.industry ? colors.text : colors.textMuted }}>
+                          {account.industry || <span style={{ fontStyle: 'italic' }}>Unknown</span>}
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+                          DATA QUALITY
+                        </div>
+                        <div style={{ fontSize: 13 }}>
+                          {(account.data_confidence ?? 100) >= 40 ? (
+                            <span style={{ color: colors.green }}>Rich</span>
+                          ) : (
+                            <span style={{ color: colors.yellow }}>Limited</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Limited data warning */}
+                    {(account.data_confidence ?? 100) < 40 && (
+                      <div style={{
+                        background: colors.yellowSoft,
+                        border: `1px solid ${colors.yellow}`,
+                        borderRadius: 6,
+                        padding: '8px 12px',
+                        fontSize: 12,
+                        color: colors.yellow,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                      }}>
+                        <span>⚠</span>
+                        <span style={{ flex: 1 }}>
+                          Limited enrichment data — ICP fit and industry may be inaccurate.
+                        </span>
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            setEnrichingId(account.id);
+                            try {
+                              await api.post(`/accounts/${account.id}/enrich`, {});
+                              await fetchAccounts();
+                            } catch {}
+                            setEnrichingId(null);
+                          }}
+                          disabled={enrichingId === account.id}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: colors.accent,
+                            fontSize: 12,
+                            cursor: enrichingId === account.id ? 'default' : 'pointer',
+                            opacity: enrichingId === account.id ? 0.6 : 1,
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {enrichingId === account.id ? 'Enriching...' : 'Trigger enrichment →'}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
-              </div>
+              </React.Fragment>
             );
           })
         )}
