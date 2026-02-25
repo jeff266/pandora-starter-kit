@@ -158,7 +158,7 @@ async function getContactsForDeal(workspaceId: string, dealId: string) {
 async function getConversationsForDeal(workspaceId: string, dealId: string) {
   const result = await query(
     `SELECT cv.id, cv.title, cv.call_date, cv.duration_seconds, cv.participants,
-            cv.link_method, cv.summary
+            cv.link_method, cv.summary, cv.source, cv.source_id, cv.source_data, cv.custom_fields
      FROM conversations cv
      WHERE cv.workspace_id = $1
        AND (cv.deal_id = $2 OR cv.account_id = (SELECT account_id FROM deals WHERE id = $2 AND workspace_id = $1))
@@ -321,7 +321,7 @@ export async function assembleDealDossier(
 
   const mappedContacts = contacts.map((c: any) => {
     const engagement_level = (() => {
-      if (!c.last_activity_date) return 'dark' as const;
+      if (!c.last_activity_date) return 'unengaged' as const;
       const daysSince = (Date.now() - new Date(c.last_activity_date).getTime()) / (1000*60*60*24);
       if (daysSince <= 14) return 'active' as const;
       if (daysSince <= 30) return 'fading' as const;
@@ -351,6 +351,10 @@ export async function assembleDealDossier(
     participants: Array.isArray(cv.participants) ? cv.participants : [],
     link_method: cv.link_method || '',
     summary: cv.summary ?? null,
+    source: cv.source ?? null,
+    source_id: cv.source_id ?? null,
+    source_data: cv.source_data ?? null,
+    custom_fields: cv.custom_fields ?? null,
   }));
 
   const participantEmails = new Set<string>();
@@ -362,7 +366,14 @@ export async function assembleDealDossier(
 
   const contacts_never_called = mappedContacts
     .filter((c: any) => c.email && !participantEmails.has(c.email.toLowerCase()))
-    .map((c: any) => ({ name: c.name, title: c.title, email: c.email }));
+    .map((c: any) => ({
+      name: c.name,
+      title: c.title,
+      email: c.email,
+      seniority: c.seniority,
+      buying_role: c.buying_role,
+      engagement_level: c.engagement_level,
+    }));
 
   let days_since_last_call: number | null = null;
   if (mappedConversations.length > 0) {
@@ -374,6 +385,17 @@ export async function assembleDealDossier(
       days_since_last_call = Math.round((Date.now() - mostRecent) / (1000 * 60 * 60 * 24));
     }
   }
+
+  // Stage-aware threshold for days since last call
+  const getCallThresholdForStage = (stage: string | null): number => {
+    if (!stage) return 10; // default
+    const normalized = stage.toLowerCase();
+    if (normalized.includes('prospect') || normalized.includes('discovery')) return 14;
+    if (normalized.includes('evaluation') || normalized.includes('proposal')) return 7;
+    if (normalized.includes('negotiat') || normalized.includes('clos')) return 5;
+    return 10; // default
+  };
+  const days_threshold = getCallThresholdForStage(deal.stage_normalized || deal.stage);
 
   const contacts_on_calls = mappedContacts.filter(
     (c: any) => c.email && participantEmails.has(c.email.toLowerCase())
@@ -433,6 +455,7 @@ export async function assembleDealDossier(
     coverage_gaps: {
       contacts_never_called,
       days_since_last_call,
+      days_threshold,
       total_contacts: mappedContacts.length,
       contacts_on_calls,
       unlinked_calls: unlinkedCalls,

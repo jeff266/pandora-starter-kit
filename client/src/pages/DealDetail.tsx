@@ -24,7 +24,7 @@ const SNOOZE_OPTIONS = [
   { label: '30d', days: 30 },
 ];
 
-const ENGAGEMENT_ORDER: Record<string, number> = { dark: 0, fading: 1, active: 2 };
+const ENGAGEMENT_ORDER: Record<string, number> = { unengaged: 0, dark: 1, fading: 2, active: 3 };
 const ROLE_PRIORITY: Record<string, number> = {
   executive_sponsor: 1,
   decision_maker: 2,
@@ -35,9 +35,10 @@ const ROLE_PRIORITY: Record<string, number> = {
 
 function engagementDot(level?: string): { color: string; label: string } {
   switch (level) {
-    case 'active': return { color: colors.green, label: 'Active' };
-    case 'fading': return { color: colors.yellow, label: 'Fading' };
+    case 'active': return { color: colors.green, label: 'Engaged' };
+    case 'fading': return { color: colors.yellow, label: 'Going dark' };
     case 'dark': return { color: colors.red, label: 'Dark' };
+    case 'unengaged': return { color: colors.textMuted, label: 'Unengaged' };
     default: return { color: colors.textMuted, label: 'Unknown' };
   }
 }
@@ -307,18 +308,89 @@ export default function DealDetail() {
   const daysInStage = deal.days_in_current_stage ??
     (stageHistory.length > 0 ? Math.round(stageHistory[stageHistory.length - 1]?.days_in_stage || 0) : null);
 
+  // Filter contacts_never_called to show only VP+/buying role contacts
+  const keyContactsNeverCalled = (coverageGapsData.contacts_never_called || []).filter((c: any) => {
+    const seniorityMatch = c.seniority && ['vp', 'c_suite', 'director', 'svp', 'evp'].includes(c.seniority.toLowerCase());
+    const hasBuyingRole = c.buying_role != null && c.buying_role !== '';
+    return seniorityMatch || hasBuyingRole;
+  });
+
   const hasCoverageGaps =
-    (coverageGapsData.contacts_never_called?.length > 0) ||
-    (coverageGapsData.days_since_last_call != null) ||
+    (keyContactsNeverCalled.length > 0) ||
+    (coverageGapsData.days_since_last_call != null && coverageGapsData.days_since_last_call > (coverageGapsData.days_threshold || 10)) ||
     (coverageGapsData.unlinked_calls > 0) ||
     (coverageGapsData.total_contacts === 0);
 
+  const [coverageGapsExpanded, setCoverageGapsExpanded] = useState(true);
+
+  // Map signal values to readable labels
+  const signalLabel = (type: string, value?: string | null) => {
+    if (!value) return 'N/A';
+    if (type === 'activity_recency') {
+      if (value === 'active') return 'Active';
+      if (value === 'cooling') return 'Cooling';
+      if (value === 'stale') return 'No activity';
+    }
+    if (type === 'threading') {
+      if (value === 'multi') return 'Multi-threaded';
+      if (value === 'dual') return '2 contacts';
+      if (value === 'single') return 'Single-threaded';
+    }
+    if (type === 'stage_velocity') {
+      if (value === 'fast') return 'Moving fast';
+      if (value === 'normal') return 'On track';
+      if (value === 'slow') return 'Stalled';
+    }
+    return value;
+  };
+
   const healthItems = [
-    { label: 'Activity', value: health.activity_recency, color: statusColor(health.activity_recency) },
-    { label: 'Threading', value: health.threading, color: statusColor(health.threading) },
-    { label: 'Velocity', value: health.stage_velocity, color: statusColor(health.stage_velocity) },
-    { label: 'Data', value: health.data_completeness != null ? `${health.data_completeness}%` : null, color: (health.data_completeness || 0) > 60 ? colors.green : colors.yellow },
+    { label: 'Activity', value: signalLabel('activity_recency', health.activity_recency), color: statusColor(health.activity_recency) },
+    { label: 'Threading', value: signalLabel('threading', health.threading), color: statusColor(health.threading) },
+    { label: 'Velocity', value: signalLabel('stage_velocity', health.stage_velocity), color: statusColor(health.stage_velocity) },
+    { label: 'Data', value: health.data_completeness != null ? `${health.data_completeness}% complete` : null, color: (health.data_completeness || 0) > 60 ? colors.green : colors.yellow },
   ];
+
+  const [expandedSummaries, setExpandedSummaries] = useState<Set<string>>(new Set());
+
+  // Merge activities and conversations into unified timeline
+  const timeline = [
+    ...activities.map((a: any) => ({
+      id: a.id,
+      date: a.date,
+      type: 'activity' as const,
+      source: 'crm',
+      label: a.subject || a.type || 'Activity',
+      meta: a.owner_email,
+      icon: activityIcon(a.type),
+    })),
+    ...conversations.map((c: any) => ({
+      id: c.id,
+      date: c.date,
+      type: 'conversation' as const,
+      source: c.source || (c.link_method?.toLowerCase().includes('gong') ? 'gong' : c.link_method?.toLowerCase().includes('fireflies') ? 'fireflies' : 'crm'),
+      label: c.title || 'Untitled conversation',
+      meta: `${c.duration_minutes ? `${c.duration_minutes}min` : ''}${c.participants?.length ? ` · ${c.participants.length} participant${c.participants.length > 1 ? 's' : ''}` : ''}`,
+      summary: c.summary,
+      source_id: c.source_id,
+      source_data: c.source_data,
+      custom_fields: c.custom_fields,
+      link_method: c.link_method,
+    })),
+  ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  const sourceBadge = (source: string) => {
+    switch (source.toLowerCase()) {
+      case 'crm':
+        return { label: 'CRM', bg: `${colors.textMuted}18`, color: colors.textMuted };
+      case 'gong':
+        return { label: 'Gong', bg: `${colors.accent}18`, color: colors.accent };
+      case 'fireflies':
+        return { label: 'Fireflies', bg: `${colors.purple || '#9333EA'}18`, color: colors.purple || '#9333EA' };
+      default:
+        return { label: source.toUpperCase(), bg: `${colors.textMuted}18`, color: colors.textMuted };
+    }
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
@@ -487,7 +559,7 @@ export default function DealDetail() {
           </div>
         </div>
 
-        {/* Health Signals */}
+        {/* Deal Signals */}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: isMobile ? 10 : 16, marginTop: 16 }}>
           {healthItems.map((h, i) => (
             <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -528,58 +600,94 @@ export default function DealDetail() {
           borderRadius: 10,
           padding: 16,
         }}>
-          <h3 style={{ fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 12 }}>
-            Coverage Gaps
-          </h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {coverageGapsData.total_contacts === 0 && (
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                <span style={{ color: colors.yellow, fontSize: 14, marginTop: 1, flexShrink: 0 }}>&#9888;</span>
-                <p style={{ fontSize: 13, color: colors.text, lineHeight: 1.4 }}>No contacts linked to this deal</p>
-              </div>
-            )}
+          <div
+            onClick={() => setCoverageGapsExpanded(!coverageGapsExpanded)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              cursor: 'pointer',
+              marginBottom: coverageGapsExpanded ? 12 : 0,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <h3 style={{ fontSize: 13, fontWeight: 600, color: colors.text, margin: 0 }}>
+                ⚠ Coverage Gaps
+              </h3>
+              <span style={{ fontSize: 11, color: colors.textMuted }}>
+                {[
+                  coverageGapsData.total_contacts === 0 ? 'no contacts' : null,
+                  coverageGapsData.days_since_last_call != null && coverageGapsData.days_since_last_call > (coverageGapsData.days_threshold || 10) ? `${coverageGapsData.days_since_last_call}d since call` : null,
+                  keyContactsNeverCalled.length > 0 ? `${keyContactsNeverCalled.length} key contact${keyContactsNeverCalled.length > 1 ? 's' : ''}` : null,
+                  coverageGapsData.unlinked_calls > 0 ? `${coverageGapsData.unlinked_calls} unlinked` : null,
+                ].filter(Boolean).join(' · ')}
+              </span>
+            </div>
+            <span style={{ fontSize: 12, color: colors.textMuted }}>
+              {coverageGapsExpanded ? '▼' : '▶'}
+            </span>
+          </div>
 
-            {coverageGapsData.days_since_last_call != null && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <span style={{ color: colors.yellow, fontSize: 14, flexShrink: 0 }}>&#9888;</span>
-                <span style={{ fontSize: 13, color: colors.text }}>Days Since Last Call</span>
-                <span style={{
-                  fontSize: 18, fontWeight: 700, fontFamily: fonts.mono,
-                  color: coverageGapsData.days_since_last_call > 14 ? colors.red : colors.yellow,
-                }}>
-                  {coverageGapsData.days_since_last_call}
-                </span>
-              </div>
-            )}
-
-            {coverageGapsData.contacts_never_called?.length > 0 && (
-              <div>
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 6 }}>
+          {coverageGapsExpanded && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {coverageGapsData.total_contacts === 0 && (
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
                   <span style={{ color: colors.yellow, fontSize: 14, marginTop: 1, flexShrink: 0 }}>&#9888;</span>
-                  <span style={{ fontSize: 13, fontWeight: 500, color: colors.text }}>
-                    {coverageGapsData.contacts_never_called.length} Contact{coverageGapsData.contacts_never_called.length > 1 ? 's' : ''} Never Called
+                  <p style={{ fontSize: 13, color: colors.text, lineHeight: 1.4 }}>No contacts linked to this deal</p>
+                </div>
+              )}
+
+              {coverageGapsData.days_since_last_call != null && coverageGapsData.days_since_last_call > (coverageGapsData.days_threshold || 10) && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span style={{ color: colors.yellow, fontSize: 14, flexShrink: 0 }}>&#9888;</span>
+                  <span style={{ fontSize: 13, color: colors.text }}>Days Since Last Call</span>
+                  <span style={{
+                    fontSize: 18, fontWeight: 700, fontFamily: fonts.mono,
+                    color: coverageGapsData.days_since_last_call > (coverageGapsData.days_threshold || 10) ? colors.red : colors.yellow,
+                  }}>
+                    {coverageGapsData.days_since_last_call}
+                  </span>
+                  <span style={{ fontSize: 11, color: colors.textMuted }}>
+                    (threshold: {coverageGapsData.days_threshold || 10}d)
                   </span>
                 </div>
-                <div style={{ paddingLeft: 22, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {coverageGapsData.contacts_never_called.map((c: any, i: number) => (
-                    <div key={i} style={{ fontSize: 12, color: colors.textSecondary }}>
-                      {c.name ? anon.person(c.name) : c.email ? anon.email(c.email) : 'Unknown'}
-                      {c.title && <span style={{ color: colors.textMuted }}> — {c.title}</span>}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+              )}
 
-            {coverageGapsData.unlinked_calls > 0 && (
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                <span style={{ color: colors.yellow, fontSize: 14, marginTop: 1, flexShrink: 0 }}>&#9888;</span>
-                <p style={{ fontSize: 13, color: colors.text, lineHeight: 1.4 }}>
-                  {coverageGapsData.unlinked_calls} call{coverageGapsData.unlinked_calls > 1 ? 's' : ''} match this account's domain but aren't linked to this deal
-                </p>
-              </div>
-            )}
-          </div>
+              {keyContactsNeverCalled.length > 0 && (
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 6 }}>
+                    <span style={{ color: colors.yellow, fontSize: 14, marginTop: 1, flexShrink: 0 }}>&#9888;</span>
+                    <span style={{ fontSize: 13, fontWeight: 500, color: colors.text }}>
+                      Key Contacts Never Engaged
+                    </span>
+                  </div>
+                  <div style={{ paddingLeft: 22, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {keyContactsNeverCalled.slice(0, 5).map((c: any, i: number) => (
+                      <div key={i} style={{ fontSize: 12, color: colors.textSecondary }}>
+                        {c.name ? anon.person(c.name) : c.email ? anon.email(c.email) : 'Unknown'}
+                        {c.title && <span style={{ color: colors.textMuted }}> — {c.title}</span>}
+                        {c.buying_role && <span style={{ color: colors.accent, marginLeft: 4 }}>({c.buying_role.replace(/_/g, ' ')})</span>}
+                      </div>
+                    ))}
+                    {keyContactsNeverCalled.length > 5 && (
+                      <div style={{ fontSize: 11, color: colors.textMuted, fontStyle: 'italic' }}>
+                        and {keyContactsNeverCalled.length - 5} other{keyContactsNeverCalled.length - 5 > 1 ? 's' : ''}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {coverageGapsData.unlinked_calls > 0 && (
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                  <span style={{ color: colors.yellow, fontSize: 14, marginTop: 1, flexShrink: 0 }}>&#9888;</span>
+                  <p style={{ fontSize: 13, color: colors.text, lineHeight: 1.4 }}>
+                    {coverageGapsData.unlinked_calls} call{coverageGapsData.unlinked_calls > 1 ? 's' : ''} match this account's domain but aren't linked to this deal
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
       </SectionErrorBoundary>
@@ -588,9 +696,9 @@ export default function DealDetail() {
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.8fr 1fr', gap: 16, alignItems: 'start' }}>
         {/* Left Column */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {/* Active Findings */}
+          {/* Findings */}
           <SectionErrorBoundary fallbackMessage="Something went wrong loading findings.">
-          <Card title="Active Findings" count={findingsList.length}>
+          <Card title="Findings" count={findingsList.length}>
             {findingsList.length === 0 ? (
               <EmptyText>No active findings for this deal</EmptyText>
             ) : (
@@ -725,81 +833,105 @@ export default function DealDetail() {
 
           {/* Activity Timeline */}
           <SectionErrorBoundary fallbackMessage="Unable to load recent activity.">
-          <Card title="Recent Activity" count={activities.length}>
-            {activities.length === 0 ? (
-              <EmptyText>No activity records</EmptyText>
+          <Card title="Timeline" count={timeline.length}>
+            {timeline.length === 0 ? (
+              <EmptyText>No activity or conversation records</EmptyText>
             ) : (
-              activities.slice(0, 20).map((a: any, i: number) => (
-                <div key={i} style={{ display: 'flex', gap: 10, padding: '6px 0', borderBottom: `1px solid ${colors.border}` }}>
-                  <span style={{ fontSize: 12, width: 24, textAlign: 'center', flexShrink: 0 }}>
-                    {activityIcon(a.type)}
-                  </span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ fontSize: 12, color: colors.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {anon.text(a.subject || a.type || 'Activity')}
-                    </p>
-                    <span style={{ fontSize: 11, color: colors.textMuted }}>
-                      {a.actor ? anon.person(a.actor) : ''} · {a.timestamp ? formatTimeAgo(a.timestamp) : ''}
-                    </span>
-                  </div>
-                </div>
-              ))
-            )}
-          </Card>
-          </SectionErrorBoundary>
+              timeline.slice(0, 30).map((item: any) => {
+                const badge = sourceBadge(item.source);
+                const isExpanded = expandedSummaries.has(item.id);
 
-          {/* Conversations */}
-          <SectionErrorBoundary fallbackMessage="Unable to load conversations.">
-          <Card title="Conversations" count={conversations.length}>
-            {conversations.length === 0 ? (
-              <EmptyText>No linked conversations</EmptyText>
-            ) : (
-              conversations.map((c: any, i: number) => {
-                const lm = linkMethodPill(c.link_method);
                 return (
-                  <div key={i} style={{ padding: '8px 0', borderBottom: `1px solid ${colors.border}` }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <p style={{ fontSize: 13, fontWeight: 500, color: colors.text, flex: 1 }}>
-                        {anon.text(c.title || 'Untitled conversation')}
-                      </p>
-                      {lm && (
-                        <span style={{
-                          fontSize: 9, fontWeight: 600, padding: '1px 6px', borderRadius: 4,
-                          background: lm.bg, color: lm.color,
-                        }}>
-                          {lm.label}
+                  <div key={item.id} style={{ padding: '8px 0', borderBottom: `1px solid ${colors.border}` }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                      {item.type === 'activity' && (
+                        <span style={{ fontSize: 12, width: 20, textAlign: 'center', flexShrink: 0, marginTop: 2 }}>
+                          {item.icon}
                         </span>
                       )}
-                      {(() => {
-                        const conversationUrl = buildConversationUrl(
-                          c.source,
-                          c.source_id,
-                          c.source_data,
-                          c.custom_fields
-                        );
-                        return conversationUrl ? (
-                          <a
-                            href={conversationUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            title={`Open in ${c.source}`}
-                            style={{ color: colors.accent, lineHeight: 0, marginLeft: 8 }}
-                          >
-                            <ExternalLink size={14} />
-                          </a>
-                        ) : null;
-                      })()}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          <p style={{
+                            fontSize: item.type === 'conversation' ? 13 : 12,
+                            fontWeight: item.type === 'conversation' ? 500 : 400,
+                            color: colors.text,
+                            margin: 0,
+                            flex: 1,
+                            minWidth: 0,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}>
+                            {anon.text(item.label)}
+                          </p>
+                          <span style={{
+                            fontSize: 9,
+                            fontWeight: 600,
+                            padding: '1px 6px',
+                            borderRadius: 4,
+                            background: badge.bg,
+                            color: badge.color,
+                            flexShrink: 0,
+                          }}>
+                            {badge.label}
+                          </span>
+                          {item.type === 'conversation' && (() => {
+                            const conversationUrl = buildConversationUrl(
+                              item.source,
+                              item.source_id,
+                              item.source_data,
+                              item.custom_fields
+                            );
+                            return conversationUrl ? (
+                              <a
+                                href={conversationUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title={`Open in ${item.source}`}
+                                style={{ color: colors.accent, lineHeight: 0, flexShrink: 0 }}
+                              >
+                                <ExternalLink size={14} />
+                              </a>
+                            ) : null;
+                          })()}
+                        </div>
+                        <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>
+                          {item.date ? formatTimeAgo(item.date) : ''}
+                          {item.meta && ` · ${anon.text(item.meta)}`}
+                        </div>
+                        {item.summary && (
+                          <div style={{ marginTop: 4 }}>
+                            <button
+                              onClick={() => {
+                                const newExpanded = new Set(expandedSummaries);
+                                if (isExpanded) {
+                                  newExpanded.delete(item.id);
+                                } else {
+                                  newExpanded.add(item.id);
+                                }
+                                setExpandedSummaries(newExpanded);
+                              }}
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                color: colors.accent,
+                                fontSize: 11,
+                                cursor: 'pointer',
+                                padding: 0,
+                                textDecoration: 'underline',
+                              }}
+                            >
+                              {isExpanded ? 'Hide summary' : 'Show summary'}
+                            </button>
+                            {isExpanded && (
+                              <p style={{ fontSize: 12, color: colors.textSecondary, marginTop: 4, lineHeight: 1.4 }}>
+                                {anon.text(item.summary)}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>
-                      {c.date ? formatDate(c.date) : ''}
-                      {c.duration_minutes ? ` · ${c.duration_minutes}m` : ''}
-                      {c.participant_count ? ` · ${c.participant_count} participants` : ''}
-                    </div>
-                    {c.summary && (
-                      <p style={{ fontSize: 12, color: colors.textSecondary, marginTop: 4, lineHeight: 1.4 }}>
-                        {anon.text(c.summary.slice(0, 200))}{c.summary.length > 200 ? '...' : ''}
-                      </p>
-                    )}
                   </div>
                 );
               })
@@ -818,8 +950,25 @@ export default function DealDetail() {
             ) : (
               contactsList.map((c: any, i: number) => {
                 const eng = engagementDot(c.engagement_level);
+                // Add visual separator between engaged and unengaged contacts
+                const prevContact = i > 0 ? contactsList[i - 1] : null;
+                const showUnengagedSeparator = prevContact && prevContact.engagement_level !== 'unengaged' && c.engagement_level === 'unengaged';
                 return (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: `1px solid ${colors.border}` }}>
+                  <React.Fragment key={i}>
+                    {showUnengagedSeparator && (
+                      <div style={{
+                        borderTop: `1px solid ${colors.border}`,
+                        padding: '8px 0',
+                        fontSize: 10,
+                        color: colors.textMuted,
+                        textTransform: 'uppercase',
+                        letterSpacing: 0.5,
+                        fontWeight: 600,
+                      }}>
+                        Not yet engaged
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: `1px solid ${colors.border}` }}>
                     <div style={{
                       width: 26, height: 26, borderRadius: '50%',
                       background: colors.surfaceHover,
@@ -871,6 +1020,7 @@ export default function DealDetail() {
                       </div>
                     </div>
                   </div>
+                  </React.Fragment>
                 );
               })
             )}
