@@ -306,7 +306,7 @@ export default function DealDetail() {
   const deal = dossier.deal || {};
   const health = dossier.health_signals || {};
   const findingsList = dossier.findings || [];
-  const contactsList = [...(dossier.contacts || [])].sort((a: any, b: any) => {
+  const sortedContacts = [...(dossier.contacts || [])].sort((a: any, b: any) => {
     // Sort by buying role first (Executive Sponsor > Decision Maker > Influencer)
     const aRole = a.buying_role ? a.buying_role.toLowerCase().replace(/ /g, '_') : '';
     const bRole = b.buying_role ? b.buying_role.toLowerCase().replace(/ /g, '_') : '';
@@ -320,6 +320,32 @@ export default function DealDetail() {
     const bEngagement = ENGAGEMENT_ORDER[b.engagement_level] ?? 3;
     return bEngagement - aEngagement; // Active first
   });
+
+  // Deduplicate contacts by id and merge buying roles
+  const contactsById = new Map<string, any>();
+  for (const contact of sortedContacts) {
+    const id = contact.id;
+    if (!id) {
+      // If no id, treat as unique
+      contactsById.set(`no-id-${Math.random()}`, contact);
+      continue;
+    }
+
+    if (contactsById.has(id)) {
+      // Merge buying_role if different
+      const existing = contactsById.get(id);
+      if (contact.buying_role && contact.buying_role !== existing.buying_role) {
+        const existingRoles = existing.buying_role ? existing.buying_role.split(' / ') : [];
+        if (!existingRoles.includes(contact.buying_role)) {
+          existing.buying_role = [...existingRoles, contact.buying_role].join(' / ');
+        }
+      }
+    } else {
+      contactsById.set(id, { ...contact });
+    }
+  }
+  const contactsList = Array.from(contactsById.values());
+
   const activities = dossier.activities || [];
   const conversations = dossier.conversations || [];
   const stageHistory = dossier.stage_history || [];
