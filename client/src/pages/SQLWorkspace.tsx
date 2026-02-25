@@ -4,11 +4,12 @@ import { useWorkspace } from '../context/WorkspaceContext';
 import { colors, fonts } from '../styles/theme';
 import { api } from '../lib/api';
 import { highlightSQL } from '../utils/sql-highlight';
+import { Icon } from '../components/icons';
 
 // ─── Schema ───
 const SCHEMA = {
   deals: {
-    icon: '💰',
+    icon: 'chart-growth',
     desc: 'Pipeline deals from CRM',
     columns: [
       { name: 'id', type: 'UUID', pk: true, desc: 'Unique deal identifier' },
@@ -37,7 +38,7 @@ const SCHEMA = {
     ],
   },
   contacts: {
-    icon: '👤',
+    icon: 'connections',
     desc: 'People linked to deals and accounts',
     columns: [
       { name: 'id', type: 'UUID', pk: true, desc: 'Unique contact identifier' },
@@ -61,7 +62,7 @@ const SCHEMA = {
     ],
   },
   accounts: {
-    icon: '🏢',
+    icon: 'building',
     desc: 'Companies and organizations',
     columns: [
       { name: 'id', type: 'UUID', pk: true, desc: 'Unique account identifier' },
@@ -82,7 +83,7 @@ const SCHEMA = {
     ],
   },
   activities: {
-    icon: '⚡',
+    icon: 'flow',
     desc: 'Emails, calls, meetings, notes',
     columns: [
       { name: 'id', type: 'UUID', pk: true, desc: 'Activity identifier' },
@@ -105,7 +106,7 @@ const SCHEMA = {
     ],
   },
   conversations: {
-    icon: '🎙️',
+    icon: 'network',
     desc: 'Call transcripts from Gong/Fireflies/Fathom',
     columns: [
       { name: 'id', type: 'UUID', pk: true, desc: 'Conversation identifier' },
@@ -132,7 +133,7 @@ const SCHEMA = {
     ],
   },
   deal_stage_history: {
-    icon: '📊',
+    icon: 'trending',
     desc: 'Stage transition audit trail',
     columns: [
       { name: 'id', type: 'UUID', pk: true, desc: 'History record ID' },
@@ -144,7 +145,7 @@ const SCHEMA = {
     ],
   },
   deal_contacts: {
-    icon: '🤝',
+    icon: 'connections',
     desc: 'Deal-contact associations with roles',
     columns: [
       { name: 'deal_id', type: 'UUID', fk: 'deals', desc: 'Deal ID' },
@@ -155,7 +156,7 @@ const SCHEMA = {
     ],
   },
   lead_scores: {
-    icon: '🎯',
+    icon: 'target',
     desc: 'Account-level lead scores',
     columns: [
       { name: 'account_id', type: 'UUID', fk: 'accounts', desc: 'Scored account' },
@@ -504,7 +505,7 @@ function ErrorPanel({ errors, warnings, onApplyFix }: ErrorPanelProps) {
               color: 'white',
             }}
           >
-            {e.type === 'blocked' ? '🚫' : '✕'}
+            {e.type === 'blocked' ? <Icon name="filter" size={10} /> : '✕'}
           </span>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 11.5, color: colors.red, fontWeight: 600, fontFamily: fonts.body }}>{e.message}</div>
@@ -645,7 +646,7 @@ function RuntimeError({ error }: RuntimeErrorProps) {
       </pre>
       {error.hint && (
         <div style={{ marginTop: 10, padding: 10, background: colors.surfaceHover, borderRadius: 4, border: `1px solid ${colors.border}` }}>
-          <div style={{ fontSize: 10, color: colors.textSecondary, marginBottom: 4, fontWeight: 600, fontFamily: fonts.body }}>💡 SUGGESTION</div>
+          <div style={{ fontSize: 10, color: colors.textSecondary, marginBottom: 4, fontWeight: 600, fontFamily: fonts.body, display: 'flex', alignItems: 'center', gap: 4 }}><Icon name="lightbulb" size={10} style={{ filter: 'brightness(0) saturate(100%) invert(62%) sepia(11%) saturate(566%) hue-rotate(181deg) brightness(94%) contrast(88%)' }} /> SUGGESTION</div>
           <div style={{ fontSize: 11, color: colors.text, lineHeight: 1.5, fontFamily: fonts.body }}>{error.hint}</div>
         </div>
       )}
@@ -660,7 +661,7 @@ function GuideDrawer({ isOpen, onClose }: GuideDrawerProps) {
   const sections = [
     {
       title: 'What You Can Do',
-      icon: '✅',
+      icon: 'check-flow',
       items: [
         { label: 'SELECT queries', desc: 'Read any data in your workspace' },
         { label: 'JOINs', desc: 'Combine tables (deals + accounts, deals + contacts, etc.)' },
@@ -674,7 +675,7 @@ function GuideDrawer({ isOpen, onClose }: GuideDrawerProps) {
     },
     {
       title: "What's Blocked",
-      icon: '🚫',
+      icon: 'filter',
       items: [
         { label: 'INSERT / UPDATE / DELETE', desc: 'No data modification — workspace is read-only' },
         { label: 'DROP / ALTER / CREATE', desc: 'No schema changes' },
@@ -684,7 +685,7 @@ function GuideDrawer({ isOpen, onClose }: GuideDrawerProps) {
     },
     {
       title: 'Automatic Guardrails',
-      icon: '🛡️',
+      icon: 'building',
       items: [
         { label: 'workspace_id scoping', desc: 'Automatically injected — you never need to filter by it' },
         { label: 'Query timeout', desc: 'Queries abort after 30 seconds' },
@@ -694,7 +695,7 @@ function GuideDrawer({ isOpen, onClose }: GuideDrawerProps) {
     },
     {
       title: 'Common Patterns',
-      icon: '📝',
+      icon: 'flow',
       content: [
         {
           label: 'Filter by stage',
@@ -786,7 +787,7 @@ function GuideDrawer({ isOpen, onClose }: GuideDrawerProps) {
                   fontFamily: fonts.body,
                 }}
               >
-                <span style={{ fontSize: 12 }}>{section.icon}</span> {section.title}
+                <Icon name={section.icon as any} size={12} style={{ filter: 'brightness(0) saturate(100%) invert(92%) sepia(10%) saturate(301%) hue-rotate(179deg) brightness(100%) contrast(94%)' }} /> {section.title}
               </div>
               {section.items &&
                 section.items.map((item, i) => (
@@ -888,7 +889,7 @@ function SchemaPanel({ onInsert, expandedTable, setExpandedTable, hoveredCol, se
                 if (expandedTable !== table) e.currentTarget.style.background = 'transparent';
               }}
             >
-              <span style={{ fontSize: 12 }}>{icon}</span>
+              <Icon name={icon as any} size={12} style={{ filter: expandedTable === table ? 'brightness(0) saturate(100%) invert(92%) sepia(10%) saturate(301%) hue-rotate(179deg) brightness(100%) contrast(94%)' : 'brightness(0) saturate(100%) invert(62%) sepia(11%) saturate(566%) hue-rotate(181deg) brightness(94%) contrast(88%)' }} />
               <div style={{ flex: 1 }}>
                 <div>{table}</div>
                 {expandedTable === table && (

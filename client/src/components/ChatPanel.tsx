@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { api, getAuthToken } from '../lib/api';
 import { useDemoMode } from '../contexts/DemoModeContext';
+import { Icon } from './icons';
 
 interface ToolCall {
   tool: string;
@@ -404,7 +405,7 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
                 <div style={styles.historyLoading}>Loading conversations...</div>
               ) : sessions.length === 0 ? (
                 <div style={styles.historyEmpty}>
-                  <div style={styles.emptyIcon}>💬</div>
+                  <div style={styles.emptyIcon}><Icon name="network" size={40} /></div>
                   <div style={styles.emptyTitle}>No conversations yet</div>
                   <div style={styles.emptyText}>Your chat history will appear here</div>
                 </div>
@@ -437,7 +438,7 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
             <>
               {messages.length === 0 && !loading && (
                 <div style={styles.emptyState}>
-                  <div style={styles.emptyIcon}>💬</div>
+                  <div style={styles.emptyIcon}><Icon name="network" size={40} /></div>
                   <div style={styles.emptyTitle}>Ask Pandora</div>
                   <div style={styles.emptyText}>
                     Ask about your pipeline, deals, reps, or any RevOps data.
@@ -724,7 +725,7 @@ function ChainOfThoughtPanel({ evidence, latencyMs, visible }: {
       paddingTop: 8,
     }}>
       <div style={{ fontSize: 11, color: '#475569', marginBottom: hasTools ? 6 : 0, display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span style={{ color: '#334155' }}>⚙</span>
+        <Icon name="filter" size={12} style={{ filter: 'brightness(0) saturate(100%) invert(21%) sepia(9%) saturate(939%) hue-rotate(182deg) brightness(95%) contrast(89%)' }} />
         {hasTools
           ? `${toolCalls.length} tool call${toolCalls.length !== 1 ? 's' : ''}${latencyMs != null ? ` · ${(latencyMs / 1000).toFixed(1)}s` : ''}`
           : `no tools called${latencyMs != null ? ` · ${(latencyMs / 1000).toFixed(1)}s` : ''}`
@@ -732,8 +733,8 @@ function ChainOfThoughtPanel({ evidence, latencyMs, visible }: {
       </div>
       {toolCalls.map((tc, i) => (
         <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 4, alignItems: 'flex-start' }}>
-          <span style={{ color: '#334155', fontSize: 11, flexShrink: 0, marginTop: 1 }}>
-            {i + 1}. {TOOL_ICONS[tc.tool] || '🔧'}
+          <span style={{ color: '#334155', fontSize: 11, flexShrink: 0, marginTop: 1, display: 'flex', alignItems: 'center', gap: 4 }}>
+            {i + 1}. <Icon name={(TOOL_ICONS[tc.tool] || 'filter') as any} size={11} style={{ filter: 'brightness(0) saturate(100%) invert(21%) sepia(9%) saturate(939%) hue-rotate(182deg) brightness(95%) contrast(89%)' }} />
           </span>
           <div style={{ minWidth: 0 }}>
             <span style={{ color: '#6488ea', fontSize: 11, fontWeight: 600 }}>{tc.tool}</span>
@@ -763,13 +764,13 @@ function formatAmount(v: any): string {
 }
 
 const TOOL_ICONS: Record<string, string> = {
-  query_deals: '💼',
-  query_accounts: '🏢',
-  query_conversations: '🎙',
-  get_skill_evidence: '🔍',
-  compute_metric: '📊',
-  query_contacts: '👤',
-  query_activity_timeline: '📅',
+  query_deals: 'chart-growth',
+  query_accounts: 'building',
+  query_conversations: 'network',
+  get_skill_evidence: 'target',
+  compute_metric: 'trending',
+  query_contacts: 'connections',
+  query_activity_timeline: 'flow',
 };
 
 function CollapsibleDeals({ deals, totalCount, totalAmount }: { deals: any[]; totalCount: number; totalAmount: number }) {
@@ -880,8 +881,9 @@ function EvidencePanel({ evidence, toolCallCount, latencyMs }: {
         }}>
           {evidence.tool_calls.map((tc, i) => (
             <div key={i} style={{ marginBottom: 12 }}>
-              <div style={{ color: '#6488ea', fontWeight: 600, marginBottom: 4 }}>
-                {TOOL_ICONS[tc.tool] || '🔧'} {tc.tool}
+              <div style={{ color: '#6488ea', fontWeight: 600, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Icon name={(TOOL_ICONS[tc.tool] || 'filter') as any} size={14} style={{ filter: 'brightness(0) saturate(100%) invert(47%) sepia(68%) saturate(1869%) hue-rotate(204deg) brightness(96%) contrast(94%)' }} />
+                {tc.tool}
                 {tc.error && <span style={{ color: '#ef4444', marginLeft: 8 }}>FAILED</span>}
               </div>
               <div style={{ color: '#64748b', marginBottom: 4, fontSize: 11 }}>
@@ -918,8 +920,10 @@ function EvidencePanel({ evidence, toolCallCount, latencyMs }: {
                         fontSize: 10,
                         flexShrink: 0,
                         marginTop: 1,
+                        display: 'inline-flex',
+                        alignItems: 'center',
                       }}>
-                        {c.severity === 'act' ? '⚠' : c.severity === 'watch' ? '●' : 'ℹ'}
+                        {c.severity === 'act' ? <Icon name="target" size={10} style={{ filter: 'brightness(0) saturate(100%) invert(36%) sepia(95%) saturate(3186%) hue-rotate(346deg) brightness(95%) contrast(92%)' }} /> : c.severity === 'watch' ? '●' : 'ℹ'}
                       </span>
                       <span style={{ color: '#94a3b8' }}>
                         {c.entity_name && <strong style={{ color: '#cbd5e1' }}>{c.entity_name}: </strong>}
