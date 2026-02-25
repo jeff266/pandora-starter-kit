@@ -1,3 +1,5 @@
+import { query } from '../db.js';
+
 export interface DealRow {
   id: string;
   amount: string | null;
@@ -114,12 +116,18 @@ function calculateRisk(
     }
   }
 
+  // Calculate velocity penalty multiplier based on recent activity
+  const daysSinceActivity = lastActivity
+    ? daysBetween(lastActivity, new Date())
+    : 999;
+  const velocityPenaltyMultiplier = daysSinceActivity <= 7 ? 0.5 : 1.0;
+
   const daysInStage = deal.days_in_stage ?? 0;
   if (daysInStage > config.salesCycleDays * 0.5) {
-    risk += 20;
+    risk += 20 * velocityPenaltyMultiplier;
     factors.push(`Stuck in stage for ${daysInStage} days`);
   } else if (daysInStage > config.salesCycleDays * 0.25) {
-    risk += 10;
+    risk += 10 * velocityPenaltyMultiplier;
     factors.push(`${daysInStage} days in current stage`);
   }
 
@@ -146,4 +154,38 @@ function daysBetween(a: Date, b: Date): number {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+export async function computeConversationModifier(
+  dealId: string,
+  workspaceId: string
+): Promise<number> {
+  const result = await query(
+    `SELECT summary, call_date, title
+     FROM conversations
+     WHERE (deal_id = $1 OR account_id = (
+       SELECT account_id FROM deals WHERE id = $1 AND workspace_id = $2
+     ))
+     AND workspace_id = $2
+     AND call_date >= NOW() - INTERVAL '30 days'
+     ORDER BY call_date DESC
+     LIMIT 3`,
+    [dealId, workspaceId]
+  );
+
+  const positive = ['pilot', 'moving forward', 'next steps',
+                    'onboarding', 'contract', 'confirmed', 'excited', 'sign'];
+  const negative = ['paused', 'budget freeze', 'no response',
+                    'lost contact', 'competitor', 'not a fit', 'declined'];
+
+  let modifier = 0;
+  for (const conv of result.rows) {
+    const text = ((conv.summary ?? '') + ' ' + (conv.title ?? '')).toLowerCase();
+    const hasPositive = positive.some(k => text.includes(k));
+    const hasNegative = negative.some(k => text.includes(k));
+    if (hasPositive && !hasNegative) modifier += 8;
+    if (hasNegative) modifier -= 10;
+  }
+
+  return Math.max(-20, Math.min(20, modifier));
 }

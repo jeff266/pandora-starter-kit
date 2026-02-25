@@ -96,6 +96,11 @@ export interface DealDossier {
     score: number;
     grade: string;
     source: 'skill' | 'health';
+    skill_score: number;
+    health_score: number | null;
+    divergence: number;
+    divergence_flag: boolean;
+    conversation_modifier: number;
   };
   annotations: Array<{
     id: string;
@@ -310,9 +315,12 @@ export async function assembleDealDossier(
 
   // Compute active score (lower of skill vs mechanical)
   const healthScoreVal = deal?.health_score != null ? Number(deal.health_score) : null;
+  const conversationModifier = deal?.conversation_modifier != null ? Number(deal.conversation_modifier) : 0;
   const riskScore = riskResult ?? { score: 100, grade: 'A', signal_counts: { act: 0, watch: 0, notable: 0, info: 0 } };
   const activeScore = healthScoreVal != null ? Math.min(riskScore.score, healthScoreVal) : riskScore.score;
   const activeSource: 'skill' | 'health' = (healthScoreVal != null && healthScoreVal < riskScore.score) ? 'health' : 'skill';
+  const divergence = healthScoreVal !== null ? Math.abs(riskScore.score - healthScoreVal) : 0;
+  const divergenceFlag = divergence >= 20;
 
   const accountDomain = deal?.account_domain || null;
   const unlinkedCalls = await getUnlinkedCallCount(workspaceId, dealId, accountDomain).catch(() => 0);
@@ -473,6 +481,11 @@ export async function assembleDealDossier(
       score: activeScore,
       grade: gradeFromScore(activeScore),
       source: activeSource,
+      skill_score: riskScore.score,
+      health_score: healthScoreVal,
+      divergence,
+      divergence_flag: divergenceFlag,
+      conversation_modifier: conversationModifier,
     },
     annotations: annotations.map((a: any) => ({
       id: a.id,

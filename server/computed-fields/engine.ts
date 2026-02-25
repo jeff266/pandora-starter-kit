@@ -1,6 +1,6 @@
 import { query, getClient } from '../db.js';
 import { getContext } from '../context/index.js';
-import { computeDealScores, type DealRow } from './deal-scores.js';
+import { computeDealScores, computeConversationModifier, type DealRow } from './deal-scores.js';
 import { computeContactEngagement, type ContactRow } from './contact-scores.js';
 import { computeAccountHealth, type AccountRow } from './account-scores.js';
 
@@ -89,7 +89,11 @@ async function computeDeals(
         : new Date(deal.created_at);
       const daysInStage = Math.floor((Date.now() - stageAnchor.getTime()) / (1000 * 60 * 60 * 24));
 
-      const healthScore = Math.round((100 - scores.dealRisk) * 100) / 100;
+      // Get conversation sentiment modifier
+      const conversationModifier = await computeConversationModifier(deal.id, workspaceId);
+      const baseHealthScore = 100 - scores.dealRisk;
+      const healthScore = Math.min(100, Math.max(0, Math.round((baseHealthScore + conversationModifier) * 100) / 100));
+
       await client.query(
         `UPDATE deals
          SET velocity_score = $2,
@@ -97,9 +101,10 @@ async function computeDeals(
              deal_risk_factors = $4,
              health_score = $5,
              days_in_stage = $6,
+             conversation_modifier = $7,
              updated_at = NOW()
-         WHERE id = $1 AND workspace_id = $7`,
-        [deal.id, scores.velocityScore, scores.dealRisk, JSON.stringify(scores.riskFactors), healthScore, daysInStage, workspaceId]
+         WHERE id = $1 AND workspace_id = $8`,
+        [deal.id, scores.velocityScore, scores.dealRisk, JSON.stringify(scores.riskFactors), healthScore, daysInStage, conversationModifier, workspaceId]
       );
       updated++;
     }

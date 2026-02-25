@@ -80,6 +80,15 @@ export async function emitSyncCompleted(
 
   const crmSynced = connectorTypes.some(c => ['hubspot', 'salesforce'].includes(c));
   if (crmSynced) {
+    // Recompute computed fields (health scores, velocity, etc.)
+    import('../computed-fields/engine.js').then(({ computeFields }) => {
+      computeFields(workspaceId).then(result => {
+        console.log(`[ComputedFields] Post-sync: ${result.deals.updated} deals, ${result.contacts.updated} contacts, ${result.accounts.updated} accounts updated`);
+      }).catch(err => {
+        console.error(`[ComputedFields] Post-sync failed:`, err instanceof Error ? err.message : err);
+      });
+    }).catch(() => {});
+
     // Recompute scoring state — closed_won count may have changed
     import('../scoring/workspace-scoring-state.js').then(({ recomputeScoringState }) => {
       recomputeScoringState(workspaceId).catch(err => {

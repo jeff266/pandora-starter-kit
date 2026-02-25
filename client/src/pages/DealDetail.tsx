@@ -80,6 +80,11 @@ interface ActiveScore {
   score: number;
   grade: string;
   source: 'skill' | 'health';
+  skill_score: number;
+  health_score: number | null;
+  divergence: number;
+  divergence_flag: boolean;
+  conversation_modifier: number;
 }
 
 interface MechanicalScore {
@@ -511,6 +516,7 @@ export default function DealDetail() {
               const displayGrade = activeScore ? activeScore.grade : riskScore.grade;
               const displayScore = activeScore ? activeScore.score : riskScore.score;
               const displaySource = activeScore ? activeScore.source : 'health';
+              const showDivergence = activeScore && (activeScore as any).divergence_flag;
               return (
                 <div style={{ position: 'relative' }}>
                   <div
@@ -542,6 +548,30 @@ export default function DealDetail() {
                         {displaySource === 'skill' ? 'SKILL' : 'HEALTH'}
                       </span>
                     </div>
+                    {showDivergence && (
+                      <div style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 2,
+                        paddingLeft: 8,
+                        borderLeft: `1px solid ${colors.textMuted}20`,
+                      }}>
+                        <span style={{
+                          fontSize: 9,
+                          fontWeight: 600,
+                          color: colors.yellow,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 4
+                        }}>
+                          ⚠ Scores diverge
+                        </span>
+                        <div style={{ fontSize: 10, color: colors.textMuted }}>
+                          <div>Skill: {(activeScore as any).skill_score}</div>
+                          <div>Health: {(activeScore as any).health_score ?? '—'}</div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                   {showScoreBreakdown && riskScore && activeScore && (
                     <ScoreBreakdownPanel
