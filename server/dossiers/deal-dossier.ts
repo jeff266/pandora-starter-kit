@@ -254,7 +254,10 @@ async function getUnlinkedCallCount(workspaceId: string, dealId: string, account
 function computeHealthSignals(
   deal: any,
   activities: any[],
-  contacts: any[]
+  contacts: Array<{
+    engagement_level: 'active' | 'fading' | 'dark' | 'unengaged';
+    seniority: string | null;
+  }>
 ): DealDossier['health_signals'] {
   let activity_recency: 'active' | 'cooling' | 'stale' = 'stale';
   if (activities.length > 0 && activities[0].timestamp) {
@@ -264,9 +267,36 @@ function computeHealthSignals(
     else if (daysSince <= 21) activity_recency = 'cooling';
   }
 
+  // Compute engagement-weighted threading score
+  const getEngagementMultiplier = (level: string): number => {
+    switch (level) {
+      case 'active': return 1.0;
+      case 'fading': return 0.5;
+      case 'dark': return 0.1;
+      case 'unengaged': return 0.0;
+      default: return 0.0;
+    }
+  };
+
+  const getSeniorityMultiplier = (seniority: string | null): number => {
+    if (!seniority) return 1.0;
+    const normalized = seniority.toLowerCase();
+    if (normalized.includes('c_level') || normalized.includes('c-level') ||
+        normalized.includes('svp') || normalized.includes('evp')) return 2.0;
+    if (normalized.includes('vp') || normalized.includes('director')) return 1.5;
+    if (normalized.includes('manager') || normalized.includes('senior')) return 1.0;
+    return 0.75;
+  };
+
+  const effective_thread_score = contacts.reduce((sum, contact) => {
+    const engagementMult = getEngagementMultiplier(contact.engagement_level);
+    const seniorityMult = getSeniorityMultiplier(contact.seniority);
+    return sum + (engagementMult * seniorityMult);
+  }, 0);
+
   let threading: 'multi' | 'dual' | 'single' = 'single';
-  if (contacts.length >= 3) threading = 'multi';
-  else if (contacts.length === 2) threading = 'dual';
+  if (effective_thread_score >= 3.0) threading = 'multi';
+  else if (effective_thread_score >= 1.5) threading = 'dual';
 
   const daysInStage = deal?.calculated_days_in_stage ?? deal?.days_in_stage ?? 0;
   let stage_velocity: 'fast' | 'normal' | 'slow' = 'normal';
@@ -349,8 +379,6 @@ export async function assembleDealDossier(
   const accountDomain = deal?.account_domain || null;
   const unlinkedCalls = await getUnlinkedCallCount(workspaceId, dealId, accountDomain).catch(() => 0);
 
-  const health_signals = computeHealthSignals(deal, activities, contacts);
-
   const mappedContacts = contacts.map((c: any) => {
     const engagement_level = (() => {
       if (!c.last_activity_date) return 'unengaged' as const;
@@ -374,6 +402,9 @@ export async function assembleDealDossier(
       engagement_level,
     };
   });
+
+  // Compute health signals using engagement-weighted contacts
+  const health_signals = computeHealthSignals(deal, activities, mappedContacts);
 
   const mappedConversations = conversations.map((cv: any) => ({
     id: cv.id,
