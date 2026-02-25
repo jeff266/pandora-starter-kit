@@ -137,7 +137,7 @@ export async function synthesizeDealNarrative(
     },
   });
 
-  return response.text || '';
+  return response.content || '';
 }
 
 export async function synthesizeAccountNarrative(
@@ -162,5 +162,5 @@ export async function synthesizeAccountNarrative(
     },
   });
 
-  return response.text || '';
+  return response.content || '';
 }
