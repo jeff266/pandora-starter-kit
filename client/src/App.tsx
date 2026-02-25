@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, lazy, Suspense } from 'react';
-import { Routes, Route, useLocation } from 'react-router-dom';
+import { Routes, Route, useLocation, Navigate } from 'react-router-dom';
 import { useWorkspace } from './context/WorkspaceContext';
 import { useDemoMode } from './contexts/DemoModeContext';
 import { setApiCredentials, api } from './lib/api';
@@ -196,6 +196,10 @@ export default function App() {
         <Route path="*" element={<PandoraHomepage />} />
       </Routes>
     );
+  }
+
+  if (location.pathname === '/login') {
+    return <Navigate to="/" replace />;
   }
 
   if (workspaces.length === 0) {
