@@ -1,6 +1,8 @@
 import React from 'react';
 import { colors, fonts } from '../../styles/theme';
 import { formatCurrency } from '../../lib/format';
+import { useIsMobile } from '../../hooks/useIsMobile';
+import { getFormulaLine, type FormulaContext, type MathContext } from '../../lib/forecast-math';
 
 interface Snapshot {
   snapshot_date: string;
@@ -9,16 +11,20 @@ interface Snapshot {
   mc_p50?: number;
   mc_p25?: number;
   mc_p75?: number;
+  mc_p10?: number;
+  mc_p90?: number;
   closed_won?: number;
   pipeline_total?: number;
   quota?: number;
   pipe_gen?: number;
+  deal_count?: number;
   [key: string]: any;
 }
 
 interface MetricCardsProps {
   current: Snapshot | null;
   previous?: Snapshot | null;
+  onMetricClick?: (metric: string, value: number, context: MathContext) => void;
 }
 
 function pctChange(curr: number | undefined, prev: number | undefined): { label: string; trend: 'up' | 'down' | 'stable' } | null {
@@ -45,6 +51,7 @@ function trendArrow(trend: 'up' | 'down' | 'stable'): string {
 
 interface CardDef {
   label: string;
+  metricKey: string;  // for getFormulaLine
   getValue: (s: Snapshot) => number | undefined;
   format: (v: number) => string;
   color?: string;
@@ -54,18 +61,21 @@ interface CardDef {
 const cards: CardDef[] = [
   {
     label: 'MC P50',
+    metricKey: 'mc_p50',
     getValue: (s) => s.mc_p50,
     format: formatCurrency,
     color: colors.purple,
   },
   {
     label: 'Closed Won',
+    metricKey: 'closed_won',
     getValue: (s) => s.closed_won,
     format: formatCurrency,
     color: colors.green,
   },
   {
     label: 'Gap to Quota',
+    metricKey: 'gap_to_quota',
     getValue: (s) => {
       const quota = s.quota;
       const closed = s.closed_won ?? 0;
@@ -87,6 +97,7 @@ const cards: CardDef[] = [
   },
   {
     label: 'MC Range',
+    metricKey: 'mc_range',
     getValue: (s) => s.mc_p25,
     format: (_v) => '--',
     color: colors.accent,
@@ -99,16 +110,19 @@ const cards: CardDef[] = [
   },
   {
     label: 'Pipe Gen',
+    metricKey: 'pipe_gen',
     getValue: (s) => s.pipe_gen ?? s.pipeline_total,
     format: formatCurrency,
     color: colors.accent,
   },
 ];
 
-export default function MetricCards({ current, previous }: MetricCardsProps) {
+export default function MetricCards({ current, previous, onMetricClick }: MetricCardsProps) {
+  const isMobile = useIsMobile();
+
   if (!current) {
     return (
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(5, 1fr)', gap: 12 }}>
         {Array.from({ length: 5 }).map((_, i) => (
           <div
             key={i}
@@ -126,7 +140,7 @@ export default function MetricCards({ current, previous }: MetricCardsProps) {
   }
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(5, 1fr)', gap: 12 }}>
       {cards.map((card) => {
         const val = card.getValue(current);
         const prevVal = previous ? card.getValue(previous) : undefined;
@@ -144,14 +158,59 @@ export default function MetricCards({ current, previous }: MetricCardsProps) {
           displayValue = val != null && Number.isFinite(val) ? card.format(val) : '--';
         }
 
+        // Build formula context
+        const formulaContext: FormulaContext = {
+          dealCount: current.deal_count,
+          quota: current.quota,
+          closedWon: current.closed_won,
+          simulations: 10000,
+        };
+
+        const formulaLine = val != null && Number.isFinite(val)
+          ? getFormulaLine(card.metricKey, val, formulaContext)
+          : '';
+
+        // Build math context for click
+        const mathContext: MathContext = {
+          ...formulaContext,
+          mcResults: {
+            p10: current.mc_p10 || 0,
+            p25: current.mc_p25 || 0,
+            p50: current.mc_p50 || 0,
+            p75: current.mc_p75 || 0,
+            p90: current.mc_p90 || 0,
+          },
+        };
+
+        const handleClick = () => {
+          if (val != null && Number.isFinite(val) && onMetricClick) {
+            onMetricClick(card.metricKey, val, mathContext);
+          }
+        };
+
         return (
           <div
             key={card.label}
+            onClick={handleClick}
             style={{
               background: colors.surface,
               border: `1px solid ${colors.border}`,
               borderRadius: 10,
               padding: 16,
+              cursor: onMetricClick ? 'pointer' : 'default',
+              transition: 'transform 0.12s, box-shadow 0.12s',
+            }}
+            onMouseEnter={(e) => {
+              if (onMetricClick) {
+                e.currentTarget.style.transform = 'translateY(-2px)';
+                e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (onMetricClick) {
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = 'none';
+              }
             }}
           >
             <div
@@ -204,6 +263,19 @@ export default function MetricCards({ current, previous }: MetricCardsProps) {
                 }}
               >
                 {subtitle}
+              </div>
+            )}
+            {formulaLine && (
+              <div
+                style={{
+                  fontSize: 11,
+                  color: colors.textMuted,
+                  marginTop: 6,
+                  fontFamily: fonts.mono,
+                  letterSpacing: '-0.01em',
+                }}
+              >
+                → {formulaLine}
               </div>
             )}
           </div>

@@ -156,6 +156,7 @@ export function CRMSyncTab() {
           border: `1px solid ${colors.border}`,
           borderRadius: 8,
           overflow: 'hidden',
+          overflowX: 'auto',
           background: colors.surface,
         }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -633,12 +634,13 @@ function SyncLog({ workspaceId }: { workspaceId: string }) {
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
+            gap: 12,
             padding: '12px 16px',
             fontSize: 13,
             borderBottom: i < logEntries.length - 1 ? `1px solid ${colors.border}` : 'none',
           }}
         >
-          <div style={{ color: colors.textSecondary }}>
+          <div style={{ color: colors.textSecondary, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             <span style={{ color: colors.textMuted }}>
               {new Date(entry.created_at).toLocaleString()}
             </span>
@@ -647,7 +649,7 @@ function SyncLog({ workspaceId }: { workspaceId: string }) {
             {' → '}
             <span style={{ fontFamily: fonts.mono, color: colors.textSecondary }}>{entry.crm_property_name}</span>
           </div>
-          <div>
+          <div style={{ flexShrink: 0 }}>
             {entry.status === 'success' ? (
               <span style={{ color: colors.green, fontWeight: 500 }}>Synced</span>
             ) : (

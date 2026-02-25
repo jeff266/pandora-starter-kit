@@ -148,6 +148,7 @@ export default function RepTable({ reps, annotations = [] }: RepTableProps) {
                     background: colors.surface,
                     position: 'sticky',
                     top: 0,
+                    zIndex: 10,
                   }}
                 >
                   {col.label}{sortArrow(col.key)}
@@ -165,6 +166,7 @@ export default function RepTable({ reps, annotations = [] }: RepTableProps) {
                 background: colors.surface,
                 position: 'sticky',
                 top: 0,
+                zIndex: 10,
                 minWidth: 120,
               }}>
                 Attainment

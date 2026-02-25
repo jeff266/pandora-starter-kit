@@ -266,6 +266,7 @@ export default function ExecutionDialog({
                         border: `1px solid ${colors.border}`,
                         borderRadius: 8,
                         overflow: 'hidden',
+                        overflowX: 'auto',
                       }}
                     >
                       <table style={{ width: '100%', borderCollapse: 'collapse' }}>

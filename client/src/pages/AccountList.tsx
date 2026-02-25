@@ -116,7 +116,7 @@ function ScoringReadyBanner({ onActivate, activating }: { onActivate: () => void
   return (
     <div style={{
       background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '14px 20px',
-      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <Icon name="lightbulb" size={18} style={{ filter: 'brightness(0) saturate(100%) invert(29%) sepia(52%) saturate(1841%) hue-rotate(102deg) brightness(95%) contrast(88%)' }} />
@@ -180,7 +180,7 @@ function ScoringActiveBanner({ onRefresh, activating }: { onRefresh: () => void;
   return (
     <div style={{
       background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10,
-      padding: '10px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      padding: '10px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ fontSize: 13, color: '#16a34a' }}>●</span>
@@ -1054,6 +1054,7 @@ export default function AccountList() {
                         display: 'flex',
                         alignItems: 'center',
                         gap: 8,
+                        flexWrap: 'wrap',
                       }}>
                         <Icon name="target" size={14} style={{ filter: 'brightness(0) saturate(100%) invert(79%) sepia(51%) saturate(1757%) hue-rotate(358deg) brightness(93%) contrast(91%)' }} />
                         <span style={{ flex: 1 }}>

@@ -5,6 +5,7 @@ import { colors, fonts } from '../styles/theme';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { useForecastAnnotations } from '../hooks/useForecastAnnotations';
 import { useDemoMode } from '../contexts/DemoModeContext';
+import { useIsMobile } from '../hooks/useIsMobile';
 import SectionErrorBoundary from '../components/SectionErrorBoundary';
 import {
   MetricCards,
@@ -16,7 +17,9 @@ import {
   ChartInsightsSidebar,
   AnnotationsPanel,
 } from '../components/forecast';
+import { MathBreakdown } from '../components/forecast/MathBreakdown';
 import type { RepRow } from '../components/forecast/RepTable';
+import type { MathContext, Deal } from '../lib/forecast-math';
 
 interface SnapshotData {
   run_id: string;
@@ -51,6 +54,7 @@ export default function ForecastPage() {
   const { currentWorkspace } = useWorkspace();
   const { anon } = useDemoMode();
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const wsId = currentWorkspace?.id || '';
 
   const [snapshots, setSnapshots] = useState<SnapshotData[]>([]);
@@ -59,6 +63,8 @@ export default function ForecastPage() {
   const [showAI, setShowAI] = useState(true);
   const [drillDown, setDrillDown] = useState<{ open: boolean; title: string; deals: any[] }>({ open: false, title: '', deals: [] });
   const [fiscalYearStartMonth, setFiscalYearStartMonth] = useState(1);
+  const [mathPanel, setMathPanel] = useState<{ metric: string; value: number; context: MathContext } | null>(null);
+  const [deals, setDeals] = useState<Deal[]>([]);
 
   const { annotations, grouped, dismiss, snooze } = useForecastAnnotations(wsId);
 
@@ -76,6 +82,19 @@ export default function ForecastPage() {
         setError('Failed to load forecast data');
       })
       .finally(() => setLoading(false));
+  }, [wsId]);
+
+  // Fetch deals for Show the Math
+  useEffect(() => {
+    if (!wsId) return;
+    api.get('/deals')
+      .then((data: any) => {
+        const dealList = Array.isArray(data) ? data : data.data || data.deals || [];
+        setDeals(dealList);
+      })
+      .catch((err: any) => {
+        console.error('[ForecastPage] Failed to load deals:', err);
+      });
   }, [wsId]);
 
   const latest = snapshots.length > 0 ? snapshots[snapshots.length - 1] : null;
@@ -271,11 +290,15 @@ export default function ForecastPage() {
       </div>
 
       <SectionErrorBoundary fallbackMessage="Failed to load metric cards.">
-        <MetricCards current={currentMetrics} previous={previousMetrics} />
+        <MetricCards
+          current={currentMetrics}
+          previous={previousMetrics}
+          onMetricClick={(metric, value, context) => setMathPanel({ metric, value, context })}
+        />
       </SectionErrorBoundary>
 
-      <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
+      <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 16, alignItems: 'flex-start' }}>
+        <div style={{ flex: 1, minWidth: 0, width: isMobile ? '100%' : 'auto' }}>
           <SectionErrorBoundary fallbackMessage="Failed to load forecast chart.">
             <ForecastChart
               snapshots={snapshots}
@@ -288,7 +311,7 @@ export default function ForecastPage() {
         </div>
 
         {showAI && grouped.chart.length > 0 && (
-          <div style={{ width: 300, flexShrink: 0 }}>
+          <div style={{ width: isMobile ? '100%' : 300, flexShrink: 0 }}>
             <SectionErrorBoundary fallbackMessage="Failed to load chart insights.">
               <ChartInsightsSidebar
                 annotations={[...grouped.chart, ...grouped.global]}
@@ -301,7 +324,7 @@ export default function ForecastPage() {
       </div>
 
       {showAI && (grouped.deals.length > 0 || repRows.length > 0) && (
-        <div style={{ display: 'grid', gridTemplateColumns: repRows.length > 0 ? '1fr 320px' : '1fr', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : (repRows.length > 0 ? '1fr 320px' : '1fr'), gap: 16 }}>
           {repRows.length > 0 && (
             <SectionErrorBoundary fallbackMessage="Failed to load rep table.">
               <RepTable
@@ -375,7 +398,7 @@ export default function ForecastPage() {
         </SectionErrorBoundary>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 16 }}>
         {coverageQuarters.length > 0 && (
           <SectionErrorBoundary fallbackMessage="Failed to load coverage bars.">
             <CoverageBars
@@ -409,6 +432,17 @@ export default function ForecastPage() {
         deals={drillDown.deals}
         onDealClick={(dealId) => navigate(`/deals/${dealId}`)}
       />
+
+      {mathPanel && (
+        <MathBreakdown
+          metric={mathPanel.metric}
+          value={mathPanel.value}
+          context={mathPanel.context}
+          deals={deals}
+          workspaceId={wsId}
+          onClose={() => setMathPanel(null)}
+        />
+      )}
     </div>
   );
 }

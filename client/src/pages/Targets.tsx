@@ -624,7 +624,10 @@ function SetTargetModal({ existingTarget, revenueModel, onClose, onSave }: {
   const fetchPipelines = async () => {
     try {
       const res = await api.get('/deals/pipelines');
-      setPipelines(res.pipelines || []);
+      // API returns { data: ["Pipeline 1", "Pipeline 2"] }
+      // Map to { id, name } objects (using pipeline name as both id and name)
+      const pipelineNames = res.data || [];
+      setPipelines(pipelineNames.map((name: string) => ({ id: name, name })));
     } catch (err) {
       console.error('Failed to fetch pipelines:', err);
     }
