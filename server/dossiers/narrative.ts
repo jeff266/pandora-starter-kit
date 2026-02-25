@@ -110,6 +110,10 @@ Write 2-4 sentences covering: current deal status, recent activity or inactivity
 Be direct, specific, and actionable. Reference actual data points. Do not use bullet points or headers.
 If information is missing, note it briefly but focus on what is known.
 
+Conversation weighting: If a conversation occurred within the last 7 days, treat it as the most important signal in the dossier and lead the summary with what was discussed and what it implies for deal momentum. Do not characterize a deal as stalling if a substantive call occurred within the last 7 days.
+
+Stage inference: Compare the current CRM stage against the behavioral signals in the dossier (conversation topics, contact seniority engaged, timeline specificity). If the behavioral signals suggest the deal is further along than the CRM stage indicates, include a sentence flagging this: 'Based on recent conversations, this deal appears to be further along than the current stage reflects — consider updating the stage.'
+
 After the summary paragraph, output a separate JSON block with recommended actions:
 {"recommended_actions": ["action 1", "action 2", "action 3"]}
 
