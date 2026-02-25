@@ -102,6 +102,12 @@ export interface DealDossier {
     divergence: number;
     divergence_flag: boolean;
     conversation_modifier: number;
+    conversation_signals: Array<{
+      keyword: string;
+      call_title: string;
+      call_date: string;
+      points: number;
+    }>;
     weights_used: { crm: number; findings: number; conversations: number };
     degradation_state: 'full' | 'no_conversations' | 'no_findings' | 'crm_only';
   };
@@ -349,6 +355,7 @@ export async function assembleDealDossier(
   // Compute composite active score with graceful degradation
   const healthScoreVal = deal?.health_score != null ? Number(deal.health_score) : null;
   const conversationModifier = deal?.conversation_modifier != null ? Number(deal.conversation_modifier) : 0;
+  const conversationSignals = deal?.conversation_signals ? JSON.parse(deal.conversation_signals) : [];
   const riskScore = riskResult ?? { score: 100, grade: 'A', signal_counts: { act: 0, watch: 0, notable: 0, info: 0 } };
 
   // Normalize conversation modifier (-20 to +20) to 0-100 scale
@@ -541,6 +548,7 @@ export async function assembleDealDossier(
       divergence,
       divergence_flag: divergenceFlag,
       conversation_modifier: conversationModifier,
+      conversation_signals: conversationSignals,
       weights_used: compositeResult.weights_used,
       degradation_state: compositeResult.degradation_state,
     },

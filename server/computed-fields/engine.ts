@@ -123,8 +123,11 @@ async function computeDeals(
         : new Date(deal.created_at);
       const daysInStage = Math.floor((Date.now() - stageAnchor.getTime()) / (1000 * 60 * 60 * 24));
 
-      // Get conversation sentiment modifier
-      const conversationModifier = await computeConversationModifier(deal.id, workspaceId);
+      // Get conversation sentiment modifier and signals
+      const conversationModifierResult = await computeConversationModifier(deal.id, workspaceId);
+      const conversationModifier = conversationModifierResult.modifier;
+      const conversationSignals = conversationModifierResult.signals;
+
       const baseHealthScore = 100 - scores.dealRisk;
       const healthScore = Math.min(100, Math.max(0, Math.round((baseHealthScore + conversationModifier) * 100) / 100));
 
@@ -204,9 +207,10 @@ async function computeDeals(
              health_score = $5,
              days_in_stage = $6,
              conversation_modifier = $7,
-             experimental_score = $8,
+             conversation_signals = $8,
+             experimental_score = $9,
              updated_at = NOW()
-         WHERE id = $1 AND workspace_id = $9`,
+         WHERE id = $1 AND workspace_id = $10`,
         [
           deal.id,
           scores.velocityScore,
@@ -215,6 +219,7 @@ async function computeDeals(
           healthScore,
           daysInStage,
           conversationModifier,
+          JSON.stringify(conversationSignals),
           experimentalScore,
           workspaceId,
         ]

@@ -156,10 +156,22 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
+export interface ConversationSignal {
+  keyword: string;
+  call_title: string;
+  call_date: string;
+  points: number;
+}
+
+export interface ConversationModifierResult {
+  modifier: number;
+  signals: ConversationSignal[];
+}
+
 export async function computeConversationModifier(
   dealId: string,
   workspaceId: string
-): Promise<number> {
+): Promise<ConversationModifierResult> {
   const result = await query(
     `SELECT summary, call_date, title
      FROM conversations
@@ -179,15 +191,48 @@ export async function computeConversationModifier(
                     'lost contact', 'competitor', 'not a fit', 'declined'];
 
   let modifier = 0;
+  const signals: ConversationSignal[] = [];
+
   for (const conv of result.rows) {
     const text = ((conv.summary ?? '') + ' ' + (conv.title ?? '')).toLowerCase();
-    const hasPositive = positive.some(k => text.includes(k));
-    const hasNegative = negative.some(k => text.includes(k));
-    if (hasPositive && !hasNegative) modifier += 8;
-    if (hasNegative) modifier -= 10;
+    const callTitle = conv.title || 'Untitled call';
+    const callDate = conv.call_date ? new Date(conv.call_date).toISOString() : '';
+
+    // Check for positive keywords
+    for (const keyword of positive) {
+      if (text.includes(keyword)) {
+        signals.push({
+          keyword,
+          call_title: callTitle,
+          call_date: callDate,
+          points: 8,
+        });
+        modifier += 8;
+        break; // Only count one positive keyword per conversation
+      }
+    }
+
+    // Check for negative keywords
+    for (const keyword of negative) {
+      if (text.includes(keyword)) {
+        signals.push({
+          keyword,
+          call_title: callTitle,
+          call_date: callDate,
+          points: -10,
+        });
+        modifier -= 10;
+        break; // Only count one negative keyword per conversation
+      }
+    }
   }
 
-  return Math.max(-20, Math.min(20, modifier));
+  const cappedModifier = Math.max(-20, Math.min(20, modifier));
+
+  return {
+    modifier: cappedModifier,
+    signals,
+  };
 }
 
 export interface CompositeScoreResult {
