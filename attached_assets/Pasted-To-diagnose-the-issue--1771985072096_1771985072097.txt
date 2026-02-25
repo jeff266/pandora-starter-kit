@@ -1,0 +1,38 @@
+To diagnose the issue:                                     
+                                                             
+  1. First, verify the migration actually succeeded:         
+  npm run migrate                                            
+                                                             
+  Look for:                                                  
+  [migrate] Applying 095_row_level_security.sql...           
+  [migrate] ✓ 095_row_level_security.sql applied successfully
+                                                             
+  2. Check if RLS is enabled on your tables:                 
+                                                             
+  Run this in SQL Workspace:                                 
+  SELECT tablename, rowsecurity                              
+  FROM pg_tables                                             
+  WHERE schemaname = 'public'                                
+    AND tablename IN ('deals', 'accounts', 'contacts',       
+  'activities')                                              
+                                                             
+  You should see rowsecurity = true for all tables.          
+                                                             
+  3. After restarting your server, run the query again and   
+  check your server logs for:                                
+  [sql-workspace] Session workspace_id: <uuid> Expected:     
+  <uuid>                                                     
+  [sql-workspace] Query returned X rows                      
+                                                             
+  This will tell us if:                                      
+  - The session variable is being set correctly              
+  - RLS is filtering the results (should only return rows    
+  from your workspace)                                       
+                                                             
+  If RLS is still not working, we might need to check if the 
+  policies were created correctly with:                      
+  SELECT schemaname, tablename, policyname, permissive,      
+  roles, cmd, qual                                           
+  FROM pg_policies                                           
+  WHERE tablename IN ('deals', 'accounts', 'contacts')       
+                                                            
