@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { requireAuth } from '../middleware/auth.js';
 import {
   handleSkillTrigger,
   handleEvent,
@@ -7,6 +8,10 @@ import {
 } from '../skills/webhook.js';
 
 const router = Router();
+
+// Require authentication for all webhook endpoints
+// Note: These are for n8n/automation tool integration, not public CRM webhooks
+router.use(requireAuth);
 
 router.post('/skills/:skillId/trigger', handleSkillTrigger);
 

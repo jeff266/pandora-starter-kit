@@ -9,6 +9,7 @@ import { requirePermission, requireAnyPermission } from '../middleware/permissio
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
+import { randomUUID } from 'crypto';
 import { renderDeliverable, renderMultiple } from '../renderers/registry.js';
 import { query } from '../db.js';
 import type { RendererInput, RenderOptions, BrandingConfig } from '../renderers/types.js';
@@ -289,7 +290,7 @@ async function assembleRendererInput(
 }
 
 function generateDownloadId(): string {
-  return `dl_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+  return `dl_${randomUUID()}`;
 }
 
 async function storeDownloadReference(

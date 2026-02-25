@@ -321,13 +321,14 @@ workspaceApiRouter.use(sqlWorkspaceRouter);
 workspaceApiRouter.use(toolManifestRouter);
 app.use("/api/workspaces", workspaceApiRouter);
 
-app.use("/api", skillsRouter);
+// Webhooks router - intentionally public with token validation in handlers
 app.use("/api/webhooks", webhooksRouter);
+
+// Quotas router - has requireWorkspaceAccess middleware internally
 app.use("/api", quotasRouter);
-app.use("/api/funnel", funnelRouter);
+
+// Agents global router - read-only global agent registry
 app.use("/api", agentsGlobalRouter);
-app.use("/api", agentBuilderRouter);
-app.use("/api/downloads", downloadsRouter);
 
 app.use(dealInsightsRouter);
 

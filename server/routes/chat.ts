@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from 'express';
+import { randomUUID } from 'crypto';
 import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { handleConversationTurn } from '../chat/orchestrator.js';
 import { getConversationState } from '../chat/conversation-state.js';
@@ -45,7 +46,7 @@ router.post('/:workspaceId/chat', async (req: Request, res: Response): Promise<v
       return;
     }
 
-    const threadTs = thread_id || `web_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const threadTs = thread_id || `web_${randomUUID()}`;
 
     const result = await handleConversationTurn({
       surface: 'in_app',
