@@ -148,6 +148,17 @@ function compressDealContext(dossier: DealDossier): { text: string; sources: str
     }
   }
 
+  if ((dossier as any).narrative) {
+    lines.push(`\nDEAL SUMMARY (AI-generated${(dossier as any).narrative_generated_at ? `, ${fmtDate((dossier as any).narrative_generated_at)}` : ''}):`);
+    lines.push((dossier as any).narrative);
+    if ((dossier as any).recommended_actions?.length > 0) {
+      lines.push('Recommended actions:');
+      for (const action of (dossier as any).recommended_actions) {
+        lines.push(`- ${action}`);
+      }
+    }
+  }
+
   return { text: lines.join('\n'), sources };
 }
 

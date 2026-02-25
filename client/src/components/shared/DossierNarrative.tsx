@@ -1,22 +1,34 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { colors } from '../../styles/theme';
+import { renderMarkdown } from '../../lib/render-markdown';
 
 interface DossierNarrativeProps {
-  narrative?: string;
+  narrative?: string | null;
   recommended_actions?: string[];
+  narrative_generated_at?: string | null;
   loading?: boolean;
   onGenerate: () => void;
+}
+
+function formatTimeAgo(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
 }
 
 export default function DossierNarrative({
   narrative,
   recommended_actions = [],
+  narrative_generated_at,
   loading = false,
   onGenerate,
 }: DossierNarrativeProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
-
-  if (!narrative && !isExpanded) {
+  if (!narrative && !loading) {
     return (
       <div
         style={{
@@ -33,10 +45,7 @@ export default function DossierNarrative({
           Generate an AI summary of this dossier
         </span>
         <button
-          onClick={() => {
-            setIsExpanded(true);
-            onGenerate();
-          }}
+          onClick={onGenerate}
           disabled={loading}
           style={{
             fontSize: 12,
@@ -49,7 +58,7 @@ export default function DossierNarrative({
             cursor: loading ? 'not-allowed' : 'pointer',
           }}
         >
-          {loading ? 'Generating...' : 'Generate Summary'}
+          Generate Summary
         </button>
       </div>
     );
@@ -65,10 +74,17 @@ export default function DossierNarrative({
       }}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <h3 style={{ fontSize: 13, fontWeight: 600, color: colors.accent, margin: 0 }}>
-          AI Summary
-        </h3>
-        {!loading && !narrative && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <h3 style={{ fontSize: 13, fontWeight: 600, color: colors.accent, margin: 0 }}>
+            AI Summary
+          </h3>
+          {narrative_generated_at && !loading && (
+            <span style={{ fontSize: 10, color: colors.textMuted }}>
+              {formatTimeAgo(narrative_generated_at)}
+            </span>
+          )}
+        </div>
+        {!loading && (
           <button
             onClick={onGenerate}
             style={{
@@ -100,17 +116,18 @@ export default function DossierNarrative({
         </div>
       ) : narrative ? (
         <>
-          <p
+          <div
             style={{
               fontSize: 14,
               lineHeight: 1.6,
               color: colors.text,
               margin: 0,
               marginBottom: recommended_actions.length > 0 ? 16 : 0,
+              whiteSpace: 'pre-wrap',
             }}
           >
-            {narrative}
-          </p>
+            {renderMarkdown(narrative)}
+          </div>
           {recommended_actions.length > 0 && (
             <div>
               <div style={{ fontSize: 12, fontWeight: 600, color: colors.textSecondary, marginBottom: 8 }}>

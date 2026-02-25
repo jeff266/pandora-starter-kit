@@ -746,6 +746,7 @@ export default function DealDetail() {
         <DossierNarrative
           narrative={narrative}
           recommended_actions={recommended_actions}
+          narrative_generated_at={dossier?.narrative_generated_at}
           loading={narrativeLoading}
           onGenerate={() => fetchDossier(true)}
         />

@@ -36,6 +36,13 @@ router.get('/:workspaceId/deals/:dealId/dossier', async (req, res) => {
         const { narrative, recommended_actions } = await synthesizeDealNarrative(workspaceId, dossier);
         (dossier as any).narrative = narrative;
         (dossier as any).recommended_actions = recommended_actions;
+        (dossier as any).narrative_generated_at = new Date().toISOString();
+
+        query(
+          `UPDATE deals SET narrative = $1, narrative_actions = $2, narrative_generated_at = NOW()
+           WHERE id = $3 AND workspace_id = $4`,
+          [narrative, JSON.stringify(recommended_actions || []), dealId, workspaceId]
+        ).catch(err => console.warn('[Deal Dossier] Failed to persist narrative:', err.message));
       } catch (err) {
         console.error('[Deal Dossier] Narrative synthesis failed:', (err as Error).message);
         (dossier as any).narrative = null;

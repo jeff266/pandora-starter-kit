@@ -601,7 +601,9 @@ export async function assembleDealDossier(
       expires_at: a.expires_at ? new Date(a.expires_at).toISOString() : null,
     })),
     enrichment: enrichment ?? null,
-    narrative: null,
+    narrative: deal.narrative || null,
+    recommended_actions: deal.narrative_actions || [],
+    narrative_generated_at: deal.narrative_generated_at ? new Date(deal.narrative_generated_at).toISOString() : null,
     hasUserContext: annotations.length > 0,
     data_availability: {
       has_stage_history: stageHistory.length > 0,

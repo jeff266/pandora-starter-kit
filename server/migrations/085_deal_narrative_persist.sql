@@ -1,0 +1,3 @@
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS narrative TEXT;
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS narrative_actions JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS narrative_generated_at TIMESTAMPTZ;
