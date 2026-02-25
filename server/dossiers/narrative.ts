@@ -48,11 +48,36 @@ function buildDealContext(dossier: DealDossier): string {
     }
   }
 
+  const signals = dossier.active_score?.conversation_signals;
+  if (Array.isArray(signals) && signals.length > 0) {
+    const formatted = signals
+      .filter((s: any) => s && typeof s.keyword === 'string')
+      .map((s: any) => `"${s.keyword}" (${s.call_title || 'untitled'}, ${s.call_date?.split('T')[0] || '?'}, ${s.points > 0 ? '+' : ''}${s.points ?? 0}pts)`)
+      .join('; ');
+    if (formatted) lines.push(`\nConversation signals: ${formatted}`);
+  }
+
   if (dossier.conversations.length > 0) {
     lines.push(`\nConversations: ${dossier.conversations.length} linked`);
-    const recent = dossier.conversations[0];
-    if (recent) {
-      lines.push(`  Most recent: "${recent.title}" on ${recent.date?.split('T')[0] || '?'}`);
+    const recentConvos = dossier.conversations.slice(0, 3);
+    let summaryBudget = 1200;
+    for (const conv of recentConvos) {
+      const dateStr = conv.date?.split('T')[0] || '?';
+      lines.push(`  "${conv.title || 'Untitled'}" on ${dateStr}`);
+      if (typeof conv.summary === 'string' && conv.summary.trim() && summaryBudget > 0) {
+        const cleaned = conv.summary
+          .replace(/<[^>]+>/g, '')
+          .replace(/&amp;/g, '&')
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/\s+/g, ' ')
+          .trim();
+        if (cleaned) {
+          const trimmed = cleaned.slice(0, Math.min(600, summaryBudget));
+          lines.push(`    Summary: ${trimmed}`);
+          summaryBudget -= trimmed.length;
+        }
+      }
     }
   }
 

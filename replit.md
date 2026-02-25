@@ -34,7 +34,7 @@ Pandora is built on Node.js 20 with TypeScript 5+, utilizing Express.js and Post
 -   **ICP Enrichment Pipeline:** 6-step pipeline for closed deal analysis, including Apollo API enrichment and Serper Google search.
 -   **Slack App Infrastructure:** Dual-mode `SlackAppClient`, signature verification, API endpoints, thread anchoring, message tracking, and channel configuration.
 -   **Scoped Analysis Engine:** AI-powered "ask about this entity" with 4 scope types (deal, account, pipeline, rep), utilizing compact text context compressors and returning structured `AnalysisResult` with confidence and follow-ups.
--   **Dossier Assemblers:** Enhanced deal and account dossiers with enrichment sections, engagement tracking, relationship health metrics, and optional Claude narrative synthesis.
+-   **Dossier Assemblers:** Enhanced deal and account dossiers with enrichment sections, engagement tracking, relationship health metrics, and optional Claude narrative synthesis. Deal narrative context includes conversation signals (keyword hits with points) and summaries from the 3 most recent conversations (HTML-stripped, 1200-char aggregate budget) so Claude can lead with recent call substance rather than defaulting to stall narratives.
 -   **Command Center (Backend):** Backend API for findings extraction, dossier assembly, scoped analysis, findings management, pipeline snapshots, and connector status.
 -   **Actions Queue:** Manages the full lifecycle of actions with status tracking, approval workflows, CRM write-back, and automatic expiry.
 -   **Playbooks System:** Defines skill pipelines, tracks run statistics, and visualizes execution phases.
