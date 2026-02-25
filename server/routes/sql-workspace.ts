@@ -81,15 +81,12 @@ router.post('/:workspaceId/sql/execute', async (req: Request, res: Response) => 
   // Execute query with workspace scoping and timeout
   const client = await pool.connect();
   try {
-    // CRITICAL: Set workspace_id session variable for Row-Level Security
-    // This enforces workspace isolation at the database level - users CANNOT bypass this
     await client.query('BEGIN');
     await client.query(`SET LOCAL app.current_workspace_id = '${workspaceId}'`);
     await client.query(`SET LOCAL statement_timeout = ${QUERY_TIMEOUT_MS}`);
+    await client.query(`SET LOCAL ROLE pandora_rls_user`);
 
-    // Verify the session variable was set (for debugging)
-    const varCheck = await client.query(`SELECT current_setting('app.current_workspace_id', true) as workspace_id`);
-    console.log('[sql-workspace] Session workspace_id:', varCheck.rows[0]?.workspace_id, 'Expected:', workspaceId);
+    console.log('[sql-workspace] Session workspace_id:', workspaceId, '(role: pandora_rls_user)');
 
     // Execute the query (RLS policies will automatically filter by workspace_id)
     const startTime = Date.now();
