@@ -55,7 +55,7 @@ function getQueryLayerTools(): ToolManifestEntry[] {
   d.amount,
   d.stage_normalized,
   d.close_date,
-  d.owner_name,
+  d.owner,
   d.health_score,
   d.days_in_stage,
   a.name AS account_name
@@ -214,20 +214,19 @@ function getComputeFunctionSQL(computeFn: string, skillId: string): string | nul
   const sqlMap: Record<string, string> = {
     coverageByRep: `-- Pipeline Coverage by Rep
 SELECT
-  d.owner_email,
-  d.owner_name,
+  d.owner,
   SUM(d.amount) AS total_pipeline,
   COUNT(*) AS deal_count,
   q.quota_amount,
   ROUND(SUM(d.amount) / NULLIF(q.quota_amount, 0), 2) AS coverage_ratio
 FROM deals d
-LEFT JOIN quotas q ON q.rep_email = d.owner_email
+LEFT JOIN quotas q ON q.owner = d.owner
   AND q.period = 'Q1 2026'
 WHERE d.workspace_id = $1
   AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
   AND d.close_date >= '2026-01-01'
   AND d.close_date < '2026-04-01'
-GROUP BY d.owner_email, d.owner_name, q.quota_amount
+GROUP BY d.owner, q.quota_amount
 ORDER BY coverage_ratio ASC`,
 
     checkStaleDeals: `-- Stale Deal Detection
@@ -236,7 +235,7 @@ SELECT
   d.name,
   d.amount,
   d.stage_normalized,
-  d.owner_name,
+  d.owner,
   d.days_in_stage,
   d.days_since_activity,
   a.name AS account_name
@@ -256,7 +255,7 @@ SELECT
   d.amount,
   d.stage_normalized,
   d.close_date,
-  d.owner_name,
+  d.owner,
   CASE
     WHEN d.close_date < CURRENT_DATE THEN 'past_due'
     WHEN d.amount IS NULL OR d.amount = 0 THEN 'missing_amount'
