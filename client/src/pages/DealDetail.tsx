@@ -75,6 +75,32 @@ function gradeBg(grade: string): string {
   }
 }
 
+// Simple markdown renderer for basic formatting
+function renderMarkdown(text: string): React.ReactNode {
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let key = 0;
+
+  // Handle bold (**text**)
+  const boldRegex = /\*\*(.*?)\*\*/g;
+  let match: RegExpExecArray | null;
+
+  const processedText = text.replace(boldRegex, (match, content) => {
+    return `<BOLD>${content}</BOLD>`;
+  });
+
+  // Split by our custom markers
+  const segments = processedText.split(/(<BOLD>.*?<\/BOLD>)/);
+
+  return segments.map((segment, i) => {
+    if (segment.startsWith('<BOLD>') && segment.endsWith('</BOLD>')) {
+      const content = segment.slice(6, -7);
+      return <strong key={i} style={{ fontWeight: 600 }}>{content}</strong>;
+    }
+    return segment;
+  });
+}
+
 
 interface ActiveScore {
   score: number;
@@ -1245,9 +1271,9 @@ export default function DealDetail() {
                   border: `1px solid ${colors.borderLight}`,
                   borderRadius: 6,
                 }}>
-                  <p style={{ fontSize: 13, lineHeight: 1.6, color: colors.text, margin: 0, marginBottom: 12, whiteSpace: 'pre-wrap' }}>
-                    {anon.text(askAnswer.answer)}
-                  </p>
+                  <div style={{ fontSize: 13, lineHeight: 1.6, color: colors.text, margin: 0, marginBottom: 12, whiteSpace: 'pre-wrap' }}>
+                    {renderMarkdown(anon.text(askAnswer.answer))}
+                  </div>
                   <div style={{ display: 'flex', gap: 16, fontSize: 11, color: colors.textMuted, fontFamily: fonts.mono }}>
                     {askAnswer.data_consulted && (
                       <span>Data: {Object.values(askAnswer.data_consulted).filter((v: any) => typeof v === 'number' && v > 0).length} sources</span>
