@@ -319,6 +319,7 @@ export default function CommandCenter() {
   const totalPipeline = Number(pipeline?.total_pipeline) || 0;
   const weightedPipeline = Number(pipeline?.weighted_pipeline) || 0;
   const totalActive = summary?.total_active || 0;
+  const openDealsCount = Number(pipeline?.total_deals) || 0;
   const actCount = summary?.by_severity?.act || 0;
   const watchCount = summary?.by_severity?.watch || 0;
   const notableCount = summary?.by_severity?.notable || 0;
@@ -659,7 +660,7 @@ export default function CommandCenter() {
                 trend_direction: 'flat' as const,
               },
               open_deals: {
-                value: totalActive || 0,
+                value: openDealsCount || 0,
                 trend: undefined,
                 trend_direction: 'flat' as const,
               },
