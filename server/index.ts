@@ -107,6 +107,7 @@ import { cleanupExpiredAnnotations } from './feedback/cleanup.js';
 import crmWritebackRouter from './routes/crm-writeback.js';
 import agentFeedbackRouter from './routes/agent-feedback.js';
 import waitlistRouter from './routes/waitlist.js';
+import forecastAnnotationsRouter from './routes/forecast-annotations.js';
 
 dotenv.config();
 
@@ -288,6 +289,7 @@ workspaceApiRouter.use(playbooksRouter);
 workspaceApiRouter.use(dossiersRouter);
 workspaceApiRouter.use(conversationsRouter);
 workspaceApiRouter.use(analysisRouter);
+workspaceApiRouter.use(forecastAnnotationsRouter);
 workspaceApiRouter.use(routerApiRouter);
 workspaceApiRouter.use(crmWritebackRouter);
 workspaceApiRouter.use(agentFeedbackRouter);

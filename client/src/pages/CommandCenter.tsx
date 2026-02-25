@@ -25,6 +25,7 @@ import {
   SignalsWidget,
   FindingsFeed,
 } from '../components/dashboard';
+import { AnnotationsPanel } from '../components/forecast';
 
 interface Finding {
   id: string;
@@ -627,6 +628,16 @@ export default function CommandCenter() {
           </select>
         </div>
       )}
+
+      <SectionErrorBoundary fallbackMessage="Failed to load annotations.">
+        <div style={{ marginBottom: 24 }}>
+          <AnnotationsPanel
+            workspaceId={wsId}
+            defaultExpanded={true}
+            showToggle={true}
+          />
+        </div>
+      </SectionErrorBoundary>
 
       <SectionErrorBoundary fallbackMessage="Failed to load metrics.">
         <CollapsibleSection
