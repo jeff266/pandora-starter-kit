@@ -101,7 +101,7 @@ function ScoringLockedBanner() {
       background: '#fefce8', border: '1px solid #fde68a', borderRadius: 10, padding: '14px 20px',
       display: 'flex', alignItems: 'center', gap: 12,
     }}>
-      <Icon name="lock" size={18} color="#92400e" />
+      <Icon name="filter" size={18} style={{ filter: 'brightness(0) saturate(100%) invert(26%) sepia(45%) saturate(1850%) hue-rotate(358deg) brightness(93%) contrast(93%)' }} />
       <div>
         <div style={{ fontSize: 13, fontWeight: 600, color: '#92400e' }}>Account Scoring Locked</div>
         <div style={{ fontSize: 12, color: '#a16207', marginTop: 2 }}>
@@ -119,7 +119,7 @@ function ScoringReadyBanner({ onActivate, activating }: { onActivate: () => void
       display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <Icon name="sparkles" size={18} color="#166534" />
+        <Icon name="lightbulb" size={18} style={{ filter: 'brightness(0) saturate(100%) invert(29%) sepia(52%) saturate(1841%) hue-rotate(102deg) brightness(95%) contrast(88%)' }} />
         <div>
           <div style={{ fontSize: 13, fontWeight: 600, color: '#166534' }}>Account Scoring Ready</div>
           <div style={{ fontSize: 12, color: '#15803d', marginTop: 2 }}>
@@ -156,7 +156,7 @@ function ScoringProcessingBanner({ step, scored, total }: { step: string | null;
       background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 10, padding: '14px 20px',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <Icon name="timer" size={18} color="#1e40af" />
+        <Icon name="refresh" size={18} style={{ filter: 'brightness(0) saturate(100%) invert(25%) sepia(67%) saturate(2709%) hue-rotate(211deg) brightness(96%) contrast(91%)' }} />
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: '#1e40af' }}>Scoring in Progress</div>
           <div style={{ fontSize: 12, color: '#2563eb', marginTop: 2 }}>{label}</div>
@@ -1055,7 +1055,7 @@ export default function AccountList() {
                         alignItems: 'center',
                         gap: 8,
                       }}>
-                        <Icon name="warning" size={14} color={colors.yellow} />
+                        <Icon name="target" size={14} style={{ filter: 'brightness(0) saturate(100%) invert(79%) sepia(51%) saturate(1757%) hue-rotate(358deg) brightness(93%) contrast(91%)' }} />
                         <span style={{ flex: 1 }}>
                           Limited enrichment data — ICP fit and industry may be inaccurate.
                         </span>
