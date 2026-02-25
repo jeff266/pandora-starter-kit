@@ -356,9 +356,15 @@ export async function assembleDealDossier(
   // Compute composite active score with graceful degradation
   const healthScoreVal = deal?.health_score != null ? Number(deal.health_score) : null;
   const conversationModifier = deal?.conversation_modifier != null ? Number(deal.conversation_modifier) : 0;
-  const conversationSignals = deal?.conversation_signals && deal.conversation_signals !== ''
-    ? JSON.parse(deal.conversation_signals)
-    : [];
+  let conversationSignals = [];
+  try {
+    if (deal?.conversation_signals && typeof deal.conversation_signals === 'string' && deal.conversation_signals.trim() !== '') {
+      conversationSignals = JSON.parse(deal.conversation_signals);
+    }
+  } catch (err) {
+    console.warn('Failed to parse conversation_signals:', err);
+    conversationSignals = [];
+  }
   const closeDateSuspect = deal?.close_date_suspect === true;
   const riskScore = riskResult ?? { score: 100, grade: 'A', signal_counts: { act: 0, watch: 0, notable: 0, info: 0 } };
 
