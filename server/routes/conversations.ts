@@ -12,6 +12,7 @@ import { extractConversationSignals } from '../conversations/signal-extractor.js
 import { extractConversationSignals as extractStructuredSignals } from '../signals/extract-conversation-signals.js';
 import { queryConversationSignals } from '../signals/query-conversation-signals.js';
 import { query } from '../db.js';
+import { computeFieldsForDeal } from '../computed-fields/engine.js';
 
 const router = Router({ mergeParams: true });
 
@@ -408,6 +409,13 @@ router.post('/:id/conversations/without-deals/:conversationId/create-deal', asyn
       `UPDATE conversations SET deal_id = $1 WHERE id = $2`,
       [dealCrmId, conversationId]
     );
+
+    // Trigger compute to update conversation modifier immediately
+    try {
+      await computeFieldsForDeal(workspaceId, dealCrmId);
+    } catch (err) {
+      console.warn('[CWD] Failed to compute fields after conversation link:', err);
+    }
 
     res.json({
       success: true,

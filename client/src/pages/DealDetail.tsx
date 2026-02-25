@@ -459,17 +459,27 @@ export default function DealDetail() {
               <span style={{ fontSize: 24, fontWeight: 700, fontFamily: fonts.mono, color: colors.text }}>
                 {formatCurrency(anon.amount(Number(deal.amount) || 0))}
               </span>
-              <span style={{
-                fontSize: 11,
-                fontWeight: 600,
-                padding: '3px 10px',
-                borderRadius: 6,
-                background: colors.accentSoft,
-                color: colors.accent,
-                textTransform: 'capitalize',
-              }}>
-                {deal.stage_normalized?.replace(/_/g, ' ') || deal.stage || 'Unknown'}
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  padding: '3px 10px',
+                  borderRadius: 6,
+                  background: colors.accentSoft,
+                  color: colors.accent,
+                }}>
+                  {deal.stage || deal.stage_normalized?.replace(/_/g, ' ') || 'Unknown'}
+                </span>
+                {deal.stage && deal.stage_normalized && deal.stage.toLowerCase().replace(/\s+/g, '') !== deal.stage_normalized.toLowerCase().replace(/_/g, '') && (
+                  <span style={{
+                    fontSize: 10,
+                    color: colors.textMuted,
+                    textTransform: 'capitalize',
+                  }}>
+                    → {deal.stage_normalized.replace(/_/g, ' ')}
+                  </span>
+                )}
+              </div>
               {daysInStage != null && (
                 <span style={{
                   fontSize: 11, fontWeight: 500, fontFamily: fonts.mono,
