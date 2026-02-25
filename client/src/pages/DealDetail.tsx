@@ -79,26 +79,31 @@ function gradeBg(grade: string): string {
 function renderMarkdown(text: string): React.ReactNode {
   const parts: React.ReactNode[] = [];
   let lastIndex = 0;
-  let key = 0;
 
   // Handle bold (**text**)
-  const boldRegex = /\*\*(.*?)\*\*/g;
+  const boldRegex = /\*\*(.+?)\*\*/g;
   let match: RegExpExecArray | null;
 
-  const processedText = text.replace(boldRegex, (match, content) => {
-    return `<BOLD>${content}</BOLD>`;
-  });
-
-  // Split by our custom markers
-  const segments = processedText.split(/(<BOLD>.*?<\/BOLD>)/);
-
-  return segments.map((segment, i) => {
-    if (segment.startsWith('<BOLD>') && segment.endsWith('</BOLD>')) {
-      const content = segment.slice(6, -7);
-      return <strong key={i} style={{ fontWeight: 600 }}>{content}</strong>;
+  while ((match = boldRegex.exec(text)) !== null) {
+    // Add text before the match
+    if (match.index > lastIndex) {
+      parts.push(text.substring(lastIndex, match.index));
     }
-    return segment;
-  });
+    // Add the bolded text
+    parts.push(
+      <strong key={match.index} style={{ fontWeight: 600 }}>
+        {match[1]}
+      </strong>
+    );
+    lastIndex = match.index + match[0].length;
+  }
+
+  // Add remaining text after the last match
+  if (lastIndex < text.length) {
+    parts.push(text.substring(lastIndex));
+  }
+
+  return <>{parts}</>;
 }
 
 
