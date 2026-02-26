@@ -884,11 +884,11 @@ router.get('/:id/deals/:dealId/conversation-arc', async (req: Request, res: Resp
       deal_health_after: number | null;
       resolved_participants: any;
     }>(
-      `SELECT id, title, started_at, duration_seconds, summary,
+      `SELECT id, title, call_date as started_at, duration_seconds, summary,
               deal_health_before, deal_health_after, resolved_participants
        FROM conversations
        WHERE workspace_id = $1 AND deal_id = $2
-       ORDER BY started_at ASC`,
+       ORDER BY call_date ASC`,
       [workspaceId, dealId]
     );
 
@@ -911,7 +911,7 @@ router.get('/:id/deals/:dealId/conversation-arc', async (req: Request, res: Resp
       return {
         id: c.id,
         title: c.title || 'Untitled conversation',
-        started_at: c.started_at,
+        call_date: c.call_date,
         duration_seconds: c.duration_seconds || 0,
         health_delta: healthDelta,
         participant_count_external: externalCount,

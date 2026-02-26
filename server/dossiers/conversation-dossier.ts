@@ -143,7 +143,7 @@ export async function assembleConversationDossier(
     const conversationResult = await client.query<{
       id: string;
       title: string;
-      started_at: string;
+      call_date: string;
       duration_seconds: number;
       source: string;
       source_id: string;
@@ -159,7 +159,7 @@ export async function assembleConversationDossier(
       deal_id: string | null;
       account_id: string | null;
     }>(
-      `SELECT id, title, started_at, duration_seconds, source, source_id, source_data,
+      `SELECT id, title, call_date as started_at, duration_seconds, source, source_id, source_data,
               summary, action_items, keywords, resolved_participants, call_metrics,
               post_call_crm_state, deal_health_before, deal_health_after,
               deal_id, account_id
@@ -199,11 +199,11 @@ export async function assembleConversationDossier(
 
       // Load all conversations on this deal for arc
       const conversationsResult = await client.query(
-        `SELECT id, title, started_at, duration_seconds, summary,
+        `SELECT id, title, call_date as started_at, duration_seconds, summary,
                 deal_health_before, deal_health_after, resolved_participants
          FROM conversations
          WHERE workspace_id = $1 AND deal_id = $2
-         ORDER BY started_at ASC`,
+         ORDER BY call_date ASC`,
         [workspaceId, conv.deal_id]
       );
       allDealConversations = conversationsResult.rows;
@@ -227,7 +227,7 @@ export async function assembleConversationDossier(
     // Step 4: Compute CRM gaps
     const crmFollowThrough = computeCrmFollowThrough(
       conv.post_call_crm_state,
-      conv.started_at,
+      conv.call_date,
       conv.action_items
     );
 
@@ -261,7 +261,7 @@ export async function assembleConversationDossier(
       conversation: {
         id: conv.id,
         title: conv.title || 'Untitled conversation',
-        started_at: conv.started_at,
+        call_date: conv.call_date,
         duration_seconds: conv.duration_seconds || 0,
         source: conv.source,
         source_url: sourceUrl,
@@ -424,8 +424,8 @@ function computeHealthImpact(
   // Factor 2: Engagement recency reset
   if (previousConversation) {
     const gapDays = daysBetween(
-      new Date(previousConversation.started_at),
-      new Date(conversation.started_at)
+      new Date(previousConversation.call_date),
+      new Date(conversation.call_date)
     );
     if (gapDays > 7) {
       factors.push({
@@ -559,7 +559,7 @@ function buildConversationArc(
     return {
       id: c.id,
       title: c.title || 'Untitled conversation',
-      started_at: c.started_at,
+      call_date: c.call_date,
       duration_seconds: c.duration_seconds || 0,
       health_delta: healthDelta,
       is_current: c.id === currentConversationId,
@@ -698,7 +698,7 @@ function identifyAbsentContacts(
           (p: ResolvedParticipant) => p.email?.toLowerCase() === contact.email?.toLowerCase()
         );
         if (wasOnCall) {
-          lastConvDate = conv.started_at;
+          lastConvDate = conv.call_date;
         }
       }
 

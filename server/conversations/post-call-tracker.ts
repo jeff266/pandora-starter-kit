@@ -36,15 +36,15 @@ export async function snapshotDealStateAtCall(
     // Find conversations linked to deals but without a snapshot
     const conversationsResult = await query<{
       id: string;
-      started_at: string;
+      call_date: string;
       deal_id: string;
     }>(
-      `SELECT c.id, c.started_at, c.deal_id
+      `SELECT c.id, c.call_date, c.deal_id
        FROM conversations c
        WHERE c.workspace_id = $1
          AND c.deal_id IS NOT NULL
          AND c.post_call_crm_state IS NULL
-       ORDER BY c.started_at DESC
+       ORDER BY c.call_date DESC
        LIMIT 500`,
       [workspaceId]
     );
@@ -84,7 +84,7 @@ export async function snapshotDealStateAtCall(
              AND timestamp > $2
            LIMIT 1
          ) AS exists`,
-        [conv.deal_id, conv.started_at]
+        [conv.deal_id, conv.call_date]
       );
       const activityLogged = activityResult.rows[0]?.exists || false;
 
@@ -93,10 +93,10 @@ export async function snapshotDealStateAtCall(
         `SELECT EXISTS(
            SELECT 1 FROM conversations
            WHERE deal_id = $1
-             AND started_at > $2
+             AND call_date > $2
            LIMIT 1
          ) AS exists`,
-        [conv.deal_id, conv.started_at]
+        [conv.deal_id, conv.call_date]
       );
       const nextMeetingScheduled = nextMeetingResult.rows[0]?.exists || false;
 
@@ -149,17 +149,17 @@ export async function checkPostCallFollowThrough(
     // - Are 24h+ old
     const conversationsResult = await query<{
       id: string;
-      started_at: string;
+      call_date: string;
       deal_id: string;
       post_call_crm_state: PostCallCrmState;
     }>(
-      `SELECT c.id, c.started_at, c.deal_id, c.post_call_crm_state
+      `SELECT c.id, c.call_date, c.deal_id, c.post_call_crm_state
        FROM conversations c
        WHERE c.workspace_id = $1
          AND c.post_call_crm_state IS NOT NULL
          AND c.post_call_crm_state->>'deal_stage_after' IS NULL
-         AND c.started_at < NOW() - INTERVAL '24 hours'
-       ORDER BY c.started_at DESC
+         AND c.call_date < NOW() - INTERVAL '24 hours'
+       ORDER BY c.call_date DESC
        LIMIT 500`,
       [workspaceId]
     );
@@ -204,7 +204,7 @@ export async function checkPostCallFollowThrough(
          WHERE deal_id = $1
            AND timestamp > $2
            AND timestamp < NOW()`,
-        [conv.deal_id, conv.started_at]
+        [conv.deal_id, conv.call_date]
       );
       const activityLogged = Number(activityResult.rows[0]?.count || 0) > 0;
 
@@ -213,10 +213,10 @@ export async function checkPostCallFollowThrough(
         `SELECT EXISTS(
            SELECT 1 FROM conversations
            WHERE deal_id = $1
-             AND started_at > $2
+             AND call_date > $2
            LIMIT 1
          ) AS exists`,
-        [conv.deal_id, conv.started_at]
+        [conv.deal_id, conv.call_date]
       );
       const nextMeetingScheduled = nextMeetingResult.rows[0]?.exists || false;
 
@@ -224,7 +224,7 @@ export async function checkPostCallFollowThrough(
       // For now, we'll use a heuristic: if close_date is in the past relative to call date, it changed
       const closeDateAtCall = new Date(snapshot.captured_at);
       const currentCloseDate = new Date(deal.close_date);
-      const callDate = new Date(conv.started_at);
+      const callDate = new Date(conv.call_date);
 
       // Simple heuristic: close date changed if it's now later than it should have been
       const closeDateChanged = currentCloseDate > closeDateAtCall;
@@ -306,7 +306,7 @@ export async function getFollowThroughStats(
      FROM conversations
      WHERE workspace_id = $1
        AND deal_id IS NOT NULL
-       AND started_at > NOW() - INTERVAL '90 days'`,
+       AND call_date > NOW() - INTERVAL '90 days'`,
     [workspaceId]
   );
 

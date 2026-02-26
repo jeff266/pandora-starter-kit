@@ -75,11 +75,11 @@ COMMENT ON COLUMN conversations.deal_health_after IS
 
 -- 5. Indexes for the conversation detail page queries
 CREATE INDEX IF NOT EXISTS idx_conversations_deal_timeline
-  ON conversations (deal_id, started_at DESC)
+  ON conversations (deal_id, call_date DESC)
   WHERE deal_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_conversations_account_timeline
-  ON conversations (account_id, started_at DESC)
+  ON conversations (account_id, call_date DESC)
   WHERE account_id IS NOT NULL;
 
 -- Index for finding conversations needing participant resolution
@@ -89,12 +89,12 @@ CREATE INDEX IF NOT EXISTS idx_conversations_unresolved_participants
 
 -- Index for finding conversations needing post-call tracking
 CREATE INDEX IF NOT EXISTS idx_conversations_pending_snapshot
-  ON conversations (workspace_id, deal_id, started_at)
+  ON conversations (workspace_id, deal_id, call_date)
   WHERE post_call_crm_state IS NULL AND deal_id IS NOT NULL;
 
 -- Index for finding conversations needing follow-through check
 CREATE INDEX IF NOT EXISTS idx_conversations_pending_followup
-  ON conversations (workspace_id, started_at)
+  ON conversations (workspace_id, call_date)
   WHERE post_call_crm_state IS NOT NULL
     AND post_call_crm_state->>'deal_stage_after' IS NULL
-    AND started_at < NOW() - INTERVAL '24 hours';
+    AND call_date < NOW() - INTERVAL '24 hours';

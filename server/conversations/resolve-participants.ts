@@ -67,7 +67,7 @@ export async function resolveConversationParticipants(
        FROM conversations
        WHERE workspace_id = $1
          AND (resolved_participants = '[]' OR resolved_participants IS NULL)
-       ORDER BY started_at DESC
+       ORDER BY call_date DESC
        LIMIT 1000`,
       [workspaceId]
     );
