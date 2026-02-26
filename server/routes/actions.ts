@@ -6,6 +6,7 @@ import { formatPipelineSnapshot, formatPipelineOneLiner, postToSlack } from '../
 import { getGoals } from '../context/index.js';
 import { computeFields } from '../computed-fields/engine.js';
 import { refreshComputedFields } from '../tools/computed-fields-refresh.js';
+import { resolveConversationParticipants } from '../conversations/resolve-participants.js';
 
 const router = Router();
 
@@ -201,6 +202,25 @@ router.post('/:workspaceId/actions/toggle-experimental-scoring', async (req: Req
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.error('[Actions] Toggle experimental scoring error:', message);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.post('/:workspaceId/actions/resolve-participants', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    const { workspaceId } = req.params;
+
+    console.log(`[Actions] Starting participant resolution for workspace ${workspaceId}`);
+    const result = await resolveConversationParticipants(workspaceId);
+
+    console.log(`[Actions] Participant resolution complete:`, result);
+    res.json({
+      success: true,
+      ...result,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[Actions] Resolve participants error:', message);
     res.status(500).json({ error: message });
   }
 });

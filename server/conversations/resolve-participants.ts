@@ -238,20 +238,24 @@ async function resolveLevelOne(
       };
     }
 
-    // 1b. Email matches a deal owner
-    const ownerResult = await client.query(
-      `SELECT id, owner_email FROM deals
-       WHERE workspace_id = $1 AND LOWER(owner_email) = $2
-       LIMIT 1`,
-      [workspaceId, email]
-    );
-    if (ownerResult.rows.length > 0) {
-      return {
-        role: 'internal',
-        confidence: 1.0,
-        resolution_method: 'deal_owner_match',
-        crm_user_id: ownerResult.rows[0].id,
-      };
+    // 1b. Email matches a deal owner (best-effort — column name varies by schema)
+    try {
+      const ownerResult = await client.query(
+        `SELECT id FROM deals
+         WHERE workspace_id = $1 AND LOWER(owner_email) = $2
+         LIMIT 1`,
+        [workspaceId, email]
+      );
+      if (ownerResult.rows.length > 0) {
+        return {
+          role: 'internal',
+          confidence: 1.0,
+          resolution_method: 'deal_owner_match',
+          crm_user_id: ownerResult.rows[0].id,
+        };
+      }
+    } catch {
+      // owner_email column doesn't exist in this schema — skip this check
     }
 
     // 1c. Email matches a CRM contact
@@ -464,67 +468,85 @@ async function getInternalDomains(
   workspaceId: string,
   client: PoolClient
 ): Promise<InternalDomains> {
-  // Check workspace_config for stored internal_domains
-  const configResult = await client.query(
-    `SELECT config_value FROM workspace_config
-     WHERE workspace_id = $1 AND config_key = 'internal_domains'`,
-    [workspaceId]
-  );
+  // Check workspace_config for stored internal_domains (table may not exist in all deployments)
+  try {
+    const configResult = await client.query(
+      `SELECT config_value FROM workspace_config
+       WHERE workspace_id = $1 AND config_key = 'internal_domains'`,
+      [workspaceId]
+    );
 
-  if (configResult.rows.length > 0) {
-    const domains = configResult.rows[0].config_value as string[];
-    return { domains, source: 'config' };
+    if (configResult.rows.length > 0) {
+      const domains = configResult.rows[0].config_value as string[];
+      return { domains, source: 'config' };
+    }
+  } catch {
+    // workspace_config table doesn't exist — fall through to auto-detection
   }
-
-  // Auto-detect from deal owners
-  const detectionResult = await client.query<{ domain: string; n: number }>(
-    `SELECT SPLIT_PART(owner_email, '@', 2) as domain, COUNT(*) as n
-     FROM deals
-     WHERE workspace_id = $1 AND owner_email IS NOT NULL
-     GROUP BY 1 ORDER BY 2 DESC LIMIT 3`,
-    [workspaceId]
-  );
 
   const domains: string[] = [];
-  const rows = detectionResult.rows;
 
-  if (rows.length > 0) {
-    const totalDeals = rows.reduce((sum, r) => sum + Number(r.n), 0);
-    const topDomain = rows[0];
-
-    // If top domain covers 80%+ of deals, it's the primary internal domain
-    if (Number(topDomain.n) / totalDeals >= 0.8) {
-      domains.push(topDomain.domain);
-    } else {
-      // Otherwise, include top 2-3 domains
-      domains.push(...rows.map(r => r.domain));
-    }
-  }
-
-  // Also include connector auth email domain
-  const connectorResult = await client.query(
-    `SELECT DISTINCT SPLIT_PART(auth_email, '@', 2) as domain
-     FROM data_connectors
-     WHERE workspace_id = $1 AND auth_email IS NOT NULL`,
-    [workspaceId]
-  );
-
-  for (const row of connectorResult.rows) {
-    const domain = row.domain;
-    if (domain && !domains.includes(domain)) {
-      domains.push(domain);
-    }
-  }
-
-  // Store detected domains in config for next run
-  if (domains.length > 0) {
-    await client.query(
-      `INSERT INTO workspace_config (workspace_id, config_key, config_value, created_at)
-       VALUES ($1, 'internal_domains', $2, NOW())
-       ON CONFLICT (workspace_id, config_key)
-       DO UPDATE SET config_value = EXCLUDED.config_value, updated_at = NOW()`,
-      [workspaceId, JSON.stringify(domains)]
+  // Auto-detect from connector auth emails (best-effort — table name varies by deployment)
+  try {
+    const connectorResult = await client.query(
+      `SELECT DISTINCT SPLIT_PART(auth_email, '@', 2) as domain
+       FROM data_connectors
+       WHERE workspace_id = $1 AND auth_email IS NOT NULL`,
+      [workspaceId]
     );
+
+    for (const row of connectorResult.rows) {
+      const domain = row.domain;
+      if (domain && !domains.includes(domain)) {
+        domains.push(domain);
+      }
+    }
+  } catch {
+    // data_connectors table doesn't exist in this schema — skip
+  }
+
+  // Auto-detect from internal participant affiliation in Gong data
+  // (participants with affiliation=Internal give us the internal domain directly)
+  if (domains.length === 0) {
+    try {
+      const gongInternalResult = await client.query<{ domain: string; n: string }>(
+        `SELECT SPLIT_PART(p->>'email', '@', 2) as domain, COUNT(*) as n
+         FROM conversations c,
+              jsonb_array_elements(c.participants) p
+         WHERE c.workspace_id = $1
+           AND p->>'affiliation' = 'Internal'
+           AND p->>'email' IS NOT NULL
+           AND p->>'email' <> ''
+         GROUP BY 1
+         ORDER BY 2 DESC
+         LIMIT 3`,
+        [workspaceId]
+      );
+
+      for (const row of gongInternalResult.rows) {
+        const domain = row.domain;
+        if (domain && !domains.includes(domain)) {
+          domains.push(domain);
+        }
+      }
+    } catch {
+      // participants column not in expected shape — skip
+    }
+  }
+
+  // Store detected domains in config for next run (best-effort, table may not exist)
+  if (domains.length > 0) {
+    try {
+      await client.query(
+        `INSERT INTO workspace_config (workspace_id, config_key, config_value, created_at)
+         VALUES ($1, 'internal_domains', $2, NOW())
+         ON CONFLICT (workspace_id, config_key)
+         DO UPDATE SET config_value = EXCLUDED.config_value, updated_at = NOW()`,
+        [workspaceId, JSON.stringify(domains)]
+      );
+    } catch {
+      // workspace_config table doesn't exist — skip caching
+    }
   }
 
   return { domains, source: 'auto_detected' };
