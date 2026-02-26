@@ -67,10 +67,17 @@ export default function ConversationsPage() {
         api.get(`/workspaces/${workspaceId}/conversations/next-action-gaps`),
       ]);
 
+      console.log('[ConversationsPage] API response:', {
+        conversations: conversationsRes.conversations?.length || 0,
+        gaps: gapsRes.gaps?.length || 0,
+        params: params.toString(),
+      });
+
       setConversations(conversationsRes.conversations || []);
       setNextActionGaps(gapsRes.gaps || []);
     } catch (err) {
       console.error('Failed to load conversations:', err);
+      console.error('Error details:', { workspaceId, filter, params: params.toString() });
     } finally {
       setLoading(false);
     }
