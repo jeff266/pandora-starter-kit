@@ -187,12 +187,12 @@ export async function assembleConversationDossier(
 
       // Load all contacts on this deal
       const contactsResult = await client.query(
-        `SELECT id, COALESCE(first_name, '') || ' ' || COALESCE(last_name, '') as name,
-                title, email, buying_role
-         FROM contacts
-         WHERE workspace_id = $1
-           AND account_id = (SELECT account_id FROM deals WHERE id = $2)
-         ORDER BY last_name, first_name`,
+        `SELECT c.id, COALESCE(c.first_name, '') || ' ' || COALESCE(c.last_name, '') as name,
+                c.title, c.email, dc.buying_role
+         FROM deal_contacts dc
+         JOIN contacts c ON dc.contact_id = c.id AND c.workspace_id = $1
+         WHERE dc.deal_id = $2 AND dc.workspace_id = $1
+         ORDER BY c.last_name, c.first_name`,
         [workspaceId, conv.deal_id]
       );
       allDealContacts = contactsResult.rows;
