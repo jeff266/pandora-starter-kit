@@ -18,7 +18,7 @@ const router = Router({ mergeParams: true });
 
 router.post('/:id/conversations/extract-signals', async (req: Request, res: Response) => {
   try {
-    const workspaceId = req.params.id;
+    const workspaceId = req.params.workspaceId;
     const force = req.body.force === true;
     const limit = typeof req.body.limit === 'number' ? req.body.limit : 100;
 
@@ -36,7 +36,7 @@ router.post('/:id/conversations/extract-signals', async (req: Request, res: Resp
 
 router.get('/:id/conversations/signal-status', async (req: Request, res: Response) => {
   try {
-    const workspaceId = req.params.id;
+    const workspaceId = req.params.workspaceId;
 
     const [countRow, statsRow, lastExtractionRow] = await Promise.all([
       query<{
@@ -126,7 +126,7 @@ router.get('/:id/conversations/signal-status', async (req: Request, res: Respons
  */
 router.post('/:id/signals/extract', async (req: Request, res: Response) => {
   try {
-    const workspaceId = req.params.id;
+    const workspaceId = req.params.workspaceId;
     const force = req.body.force === true;
     const limit = typeof req.body.limit === 'number' ? req.body.limit : 50;
 
@@ -148,7 +148,7 @@ router.post('/:id/signals/extract', async (req: Request, res: Response) => {
  */
 router.get('/:id/signals', async (req: Request, res: Response) => {
   try {
-    const workspaceId = req.params.id;
+    const workspaceId = req.params.workspaceId;
     const {
       signal_type,
       signal_value,
@@ -190,7 +190,7 @@ router.get('/:id/signals', async (req: Request, res: Response) => {
  */
 router.get('/:id/signals/status', async (req: Request, res: Response) => {
   try {
-    const workspaceId = req.params.id;
+    const workspaceId = req.params.workspaceId;
 
     const [runsResult, signalsResult] = await Promise.all([
       query<{ status: string; count: string }>(
@@ -251,7 +251,7 @@ router.get('/:id/signals/status', async (req: Request, res: Response) => {
  */
 router.get('/:id/conversations/without-deals', async (req: Request, res: Response) => {
   try {
-    const workspaceId = req.params.id;
+    const workspaceId = req.params.workspaceId;
     const { status = 'pending', severity = 'all', limit = '25', offset = '0' } = req.query;
 
     const { findConversationsWithoutDeals } = await import('../analysis/conversation-without-deals.js');
@@ -292,7 +292,7 @@ router.get('/:id/conversations/without-deals', async (req: Request, res: Respons
  */
 router.get('/:id/conversations/without-deals/summary', async (req: Request, res: Response) => {
   try {
-    const workspaceId = req.params.id;
+    const workspaceId = req.params.workspaceId;
 
     const { findConversationsWithoutDeals } = await import('../analysis/conversation-without-deals.js');
 
@@ -473,12 +473,12 @@ router.post('/:id/conversations/without-deals/:conversationId/dismiss', async (r
 // ============================================================================
 
 /**
- * GET /api/workspaces/:id/conversations
+ * GET /api/workspaces/:workspaceId/conversations
  * Returns all conversations with optional filters
  */
-router.get('/:id/conversations', async (req: Request, res: Response) => {
+router.get('/:workspaceId/conversations', async (req: Request, res: Response) => {
   try {
-    const workspaceId = req.params.id;
+    const workspaceId = req.params.workspaceId;
     const {
       deal_id,
       account_id,
@@ -611,12 +611,12 @@ router.get('/:id/conversations', async (req: Request, res: Response) => {
 });
 
 /**
- * GET /api/workspaces/:id/conversations/next-action-gaps
+ * GET /api/workspaces/:workspaceId/conversations/next-action-gaps
  * Returns deals with stale conversations (no follow-up within 3+ days)
  */
-router.get('/:id/conversations/next-action-gaps', async (req: Request, res: Response) => {
+router.get('/:workspaceId/conversations/next-action-gaps', async (req: Request, res: Response) => {
   try {
-    const workspaceId = req.params.id;
+    const workspaceId = req.params.workspaceId;
     const { min_days = '3' } = req.query;
 
     const { detectNextActionGaps } = await import('../analysis/next-action-gaps.js');
