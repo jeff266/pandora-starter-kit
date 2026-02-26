@@ -93,8 +93,8 @@ CREATE INDEX IF NOT EXISTS idx_conversations_pending_snapshot
   WHERE post_call_crm_state IS NULL AND deal_id IS NOT NULL;
 
 -- Index for finding conversations needing follow-through check
+-- Note: Time-based filtering (24h+) is done in the query, not the index
 CREATE INDEX IF NOT EXISTS idx_conversations_pending_followup
   ON conversations (workspace_id, call_date)
   WHERE post_call_crm_state IS NOT NULL
-    AND post_call_crm_state->>'deal_stage_after' IS NULL
-    AND call_date < NOW() - INTERVAL '24 hours';
+    AND post_call_crm_state->>'deal_stage_after' IS NULL;
