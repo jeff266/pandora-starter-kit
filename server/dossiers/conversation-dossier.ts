@@ -25,7 +25,6 @@ export interface ConversationDossier {
     source_url: string | null;
     summary: string | null;
     action_items: any[];
-    keywords: string[];
     resolved_participants: ResolvedParticipant[];
     call_metrics: CallMetrics | null;
   };
@@ -160,7 +159,7 @@ export async function assembleConversationDossier(
       account_id: string | null;
     }>(
       `SELECT id, title, call_date as started_at, duration_seconds, source, source_id, source_data,
-              summary, action_items, keywords, resolved_participants, call_metrics,
+              summary, action_items, resolved_participants, call_metrics,
               post_call_crm_state, deal_health_before, deal_health_after,
               deal_id, account_id
        FROM conversations
@@ -267,7 +266,6 @@ export async function assembleConversationDossier(
         source_url: sourceUrl,
         summary: conv.summary,
         action_items: conv.action_items || [],
-        keywords: conv.keywords || [],
         resolved_participants: conv.resolved_participants || [],
         call_metrics: conv.call_metrics,
       },

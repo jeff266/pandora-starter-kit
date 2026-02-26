@@ -604,24 +604,6 @@ function DealImpactTab({
             {conversation.summary}
           </div>
 
-          {conversation.keywords && conversation.keywords.length > 0 && (
-            <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
-              {conversation.keywords.slice(0, 8).map((keyword, i) => (
-                <div
-                  key={i}
-                  style={{
-                    background: colors.surfaceHover,
-                    padding: '4px 10px',
-                    borderRadius: 6,
-                    fontSize: 11,
-                    color: colors.textMuted,
-                  }}
-                >
-                  {keyword}
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       )}
     </div>
