@@ -259,6 +259,7 @@ workspaceApiRouter.use(connectorsRouter);
 workspaceApiRouter.use(actionsRouter);
 workspaceApiRouter.use(contextRouter);
 workspaceApiRouter.use(syncRouter);
+workspaceApiRouter.use(conversationsRouter); // Mount before dataRouter to match specific routes first
 workspaceApiRouter.use(dataRouter);
 workspaceApiRouter.use(slackSettingsRouter);
 workspaceApiRouter.use(skillsRouter);
@@ -288,7 +289,6 @@ workspaceApiRouter.use(findingsRouter);
 workspaceApiRouter.use(actionItemsRouter);
 workspaceApiRouter.use(playbooksRouter);
 workspaceApiRouter.use(dossiersRouter);
-workspaceApiRouter.use(conversationsRouter);
 workspaceApiRouter.use(analysisRouter);
 workspaceApiRouter.use(forecastAnnotationsRouter);
 workspaceApiRouter.use(forecastSnapshotsRouter);
