@@ -149,6 +149,7 @@ export async function assembleConversationDossier(
       source_data: any;
       summary: string | null;
       action_items: any[];
+      next_steps: any[] | null;
       keywords: string[];
       resolved_participants: ResolvedParticipant[];
       call_metrics: CallMetrics | null;
@@ -159,7 +160,7 @@ export async function assembleConversationDossier(
       account_id: string | null;
     }>(
       `SELECT id, title, call_date as started_at, duration_seconds, source, source_id, source_data,
-              summary, action_items, resolved_participants, call_metrics,
+              summary, action_items, next_steps, resolved_participants, call_metrics,
               post_call_crm_state, deal_health_before, deal_health_after,
               deal_id, account_id
        FROM conversations
@@ -172,6 +173,17 @@ export async function assembleConversationDossier(
     }
 
     const conv = conversationResult.rows[0];
+
+    // Merge next_steps into action_items when action_items is empty
+    // Signal extractor writes to next_steps; action_items comes from Gong/Fireflies native
+    if ((!conv.action_items || conv.action_items.length === 0) && conv.next_steps && conv.next_steps.length > 0) {
+      conv.action_items = conv.next_steps.map((ns: any) => ({
+        text: ns.action,
+        owner: ns.owner !== 'unknown' ? ns.owner : undefined,
+        status: ns.status,
+        deadline: ns.deadline,
+      }));
+    }
 
     // Build source URL
     const sourceUrl = buildSourceUrl(conv.source, conv.source_id, conv.source_data);
@@ -395,10 +407,6 @@ function computeHealthImpact(
   const healthBefore = conversation.deal_health_before;
   const healthAfter = conversation.deal_health_after;
 
-  if (healthBefore === null && healthAfter === null) {
-    return null;
-  }
-
   const healthDelta = healthBefore !== null && healthAfter !== null
     ? Math.round((healthAfter - healthBefore) * 10) / 10
     : null;
@@ -456,6 +464,11 @@ function computeHealthImpact(
       delta: -3,
       detail: `Conversations suggest ${dealContext.inferred_phase} but CRM says ${dealContext.stage}`,
     });
+  }
+
+  // Return null only when there is nothing to show at all
+  if (healthBefore === null && healthAfter === null && factors.length === 0) {
+    return null;
   }
 
   return {
@@ -583,14 +596,10 @@ async function generateCoachingSignals(
 ): Promise<CoachingSignal[]> {
   const signals: CoachingSignal[] = [];
 
-  // Only generate signals if we have metrics
   const callMetrics = conversation.call_metrics;
-  if (!callMetrics) {
-    return signals;
-  }
 
-  // Talk ratio benchmark
-  if (callMetrics.talk_ratio_buyer !== null) {
+  // Talk ratio benchmark — only if native call metrics exist
+  if (callMetrics && callMetrics.talk_ratio_buyer !== null) {
     const benchmarkResult = await client.query<{ avg_buyer_talk: number }>(
       `SELECT AVG((c.call_metrics->>'talk_ratio_buyer')::numeric) as avg_buyer_talk
        FROM conversations c
