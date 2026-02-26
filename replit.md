@@ -18,7 +18,7 @@ Pandora is built on Node.js 20 with TypeScript 5+, utilizing Express.js and Post
 -   **Data Normalization:** Transforms raw data into 8 core entities: `deals`, `contacts`, `accounts`, `activities`, `conversations`, `tasks`, `calls`, and `documents`.
 -   **Context Layer:** A `context_layer` table, unique per workspace, stores business context in 5 JSONB sections for personalized AI analysis.
 -   **Skill Framework:** A registry and runtime for AI-powered skills, employing a COMPUTE → CLASSIFY → SYNTHESIZE pattern with a three-tier AI system.
--   **Computed Fields Engine:** Orchestrates batch computations for various scores (e.g., `velocity_score`, `deal_risk`, `engagement_score`).
+-   **Computed Fields Engine:** Orchestrates batch computations for various scores (e.g., `velocity_score`, `deal_risk`, `engagement_score`). Processes deals in batches of 50 with GC yields between batches. Post-sync compute deferred by 5 seconds to avoid overlap with sync I/O. Composite scoring uses `hasConversations` boolean for correct degradation states (`crm_only`, `no_findings`, `no_conversations`, `full`). Batch risk scores and conversation checks are pre-computed before the deal loop to minimize per-deal queries.
 -   **Sync Infrastructure:** Supports scheduled and manual asynchronous data synchronizations.
 -   **Agent Runner Framework:** Composes multiple skills into unified briefings, synthesizing outputs into narratives.
 -   **Conversational Agent:** Multi-turn AI chat with three-tier routing (heuristic→DeepSeek→Claude), unified orchestrator, thread anchoring, and structured state management. Includes implicit feedback detection and token optimization for efficiency.

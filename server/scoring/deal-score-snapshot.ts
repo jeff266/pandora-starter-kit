@@ -32,24 +32,46 @@ export async function runDealScoreSnapshots(
   const deals = dealsResult.rows;
   logger.info(`Processing ${deals.length} open deals`, { workspaceId });
 
+  const dealIds = deals.map(d => d.id);
+
+  const [batchFindings, batchSnapshots] = await Promise.all([
+    query<{ deal_id: string; severity: string; cnt: string }>(
+      `SELECT deal_id, severity, COUNT(*) as cnt
+       FROM findings
+       WHERE workspace_id=$1 AND entity_id = ANY($2) AND entity_type='deal' AND status='active'
+       GROUP BY deal_id, severity`,
+      [workspaceId, dealIds]
+    ),
+    query<{ deal_id: string; active_score: string }>(
+      `SELECT DISTINCT ON (deal_id) deal_id, active_score
+       FROM deal_score_snapshots
+       WHERE workspace_id = $1 AND deal_id = ANY($2)
+       ORDER BY deal_id, snapshot_date DESC`,
+      [workspaceId, dealIds]
+    ),
+  ]);
+
+  const findingsMap = new Map<string, Array<{ severity: string; cnt: number }>>();
+  for (const row of batchFindings.rows) {
+    const list = findingsMap.get(row.deal_id) || [];
+    list.push({ severity: row.severity, cnt: parseInt(row.cnt, 10) });
+    findingsMap.set(row.deal_id, list);
+  }
+
+  const snapshotMap = new Map(
+    batchSnapshots.rows.map(r => [r.deal_id, Number(r.active_score)])
+  );
+
   let commentaryGenerated = 0;
 
   for (const deal of deals) {
     try {
-      // Compute skill_score from findings
-      const findingsResult = await query<{ severity: string; cnt: string }>(
-        `SELECT severity, COUNT(*) as cnt
-         FROM findings
-         WHERE workspace_id=$1 AND entity_id=$2 AND entity_type='deal' AND status='active'
-         GROUP BY severity`,
-        [workspaceId, deal.id]
-      );
-
       const penalties: Record<string, number> = { act: -25, watch: -10, notable: -3, info: -1 };
       let skillScore = 100;
-      for (const row of findingsResult.rows) {
-        const penalty = penalties[row.severity] ?? 0;
-        skillScore += penalty * parseInt(row.cnt, 10);
+      const dealFindings = findingsMap.get(deal.id) || [];
+      for (const f of dealFindings) {
+        const penalty = penalties[f.severity] ?? 0;
+        skillScore += penalty * f.cnt;
       }
       skillScore = Math.max(0, skillScore);
 
@@ -58,16 +80,9 @@ export async function runDealScoreSnapshots(
       const activeSource: 'skill' | 'health' = skillScore <= healthScoreVal ? 'skill' : 'health';
       const grade = gradeFromScore(activeScore);
 
-      // Look up previous snapshot
-      const prevResult = await query<{ active_score: string }>(
-        `SELECT active_score FROM deal_score_snapshots
-         WHERE workspace_id=$1 AND deal_id=$2
-         ORDER BY snapshot_date DESC LIMIT 1`,
-        [workspaceId, deal.id]
-      );
-
-      const scoreDelta: number | null = prevResult.rows.length > 0
-        ? activeScore - Number(prevResult.rows[0].active_score)
+      const prevScore = snapshotMap.get(deal.id);
+      const scoreDelta: number | null = prevScore !== undefined
+        ? activeScore - prevScore
         : null;
 
       // Generate LLM commentary when score_delta is significant

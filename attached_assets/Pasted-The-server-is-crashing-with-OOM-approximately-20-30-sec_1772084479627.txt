@@ -1,0 +1,41 @@
+The server is crashing with OOM approximately 20-30 seconds after startup during CRM sync + compute-fields for a 405-deal workspace. Fix the memory pressure. Three targeted changes:
+1. server/computed-fields/engine.ts — Break the single transaction into batches
+The computeDeals() function currently wraps all 405 deals in one BEGIN/COMMIT. Change it to process deals in batches of 50, each batch in its own transaction. Between batches, allow the GC to run by adding a small yield: await new Promise(resolve => setImmediate(resolve)).
+tsconst BATCH_SIZE = 50;
+for (let i = 0; i < deals.length; i += BATCH_SIZE) {
+  const batch = deals.slice(i, i + BATCH_SIZE);
+  await client.query('BEGIN');
+  try {
+    for (const deal of batch) {
+      // existing per-deal logic
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  }
+  await new Promise(resolve => setImmediate(resolve)); // yield between batches
+}
+2. server/sync/post-sync-events.ts — Defer compute-fields after sync
+The computeFields(workspaceId) call we added today fires synchronously after sync completes. Change it to fire with a 5-second delay using setTimeout, and don't await it — fire and forget so the sync response returns before compute begins:
+ts// After sync completes — don't block, don't crash sync if compute fails
+setTimeout(() => {
+  computeFields(workspaceId).catch(err => 
+    console.error('Post-sync compute failed:', err)
+  );
+}, 5000);
+This prevents sync + compute from running simultaneously on startup.
+3. server/scoring/deal-score-snapshot.ts — Batch the getLastSnapshot queries
+Currently getLastSnapshot() is called inside the per-deal loop — 405 individual queries. Move it outside the loop: before the batch starts, fetch all last snapshots for the workspace in one query and build a Map keyed by deal_id. Then look up from the Map inside the loop instead of querying per deal.
+ts// Before the deal loop:
+const lastSnapshots = await getLastSnapshotsBatch(workspaceId, dealIds);
+const snapshotMap = new Map(lastSnapshots.map(s => [s.deal_id, s]));
+
+// Inside the loop:
+const lastSnapshot = snapshotMap.get(deal.id) ?? null;
+Add getLastSnapshotsBatch(workspaceId, dealIds) to deal-score-snapshot.ts:
+sqlSELECT DISTINCT ON (deal_id) *
+FROM deal_score_snapshots
+WHERE workspace_id = $1 AND deal_id = ANY($2)
+ORDER BY deal_id, created_at DESC
+No schema changes. No migrations. Report estimated query reduction after fix 3.

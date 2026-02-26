@@ -140,135 +140,137 @@ async function computeDeals(
 
   const hasAnySkillRuns = batchRiskScores.length > 0 && batchRiskScores[0].skills_evaluated.length > 0;
 
+  const BATCH_SIZE = 50;
   const client = await getClient();
   let updated = 0;
 
   try {
-    await client.query('BEGIN');
+    for (let i = 0; i < deals.length; i += BATCH_SIZE) {
+      const batch = deals.slice(i, i + BATCH_SIZE);
 
-    for (const deal of deals) {
-      const activity = activityMap.get(deal.id);
-      // Read existing close_date_suspect flag from previous run to suppress close date penalty if needed
-      const existingCloseDateSuspect = (deal as any).close_date_suspect === true;
-      const scores = computeDealScores(deal, config, activity, existingCloseDateSuspect);
+      await client.query('BEGIN');
+      try {
+        for (const deal of batch) {
+          const activity = activityMap.get(deal.id);
+          const existingCloseDateSuspect = (deal as any).close_date_suspect === true;
+          const scores = computeDealScores(deal, config, activity, existingCloseDateSuspect);
 
-      // Calculate days_in_stage: time since stage_changed_at (or created_at if never changed)
-      const stageAnchor = (deal as any).stage_changed_at
-        ? new Date((deal as any).stage_changed_at)
-        : new Date(deal.created_at);
-      const daysInStage = Math.floor((Date.now() - stageAnchor.getTime()) / (1000 * 60 * 60 * 24));
+          const stageAnchor = (deal as any).stage_changed_at
+            ? new Date((deal as any).stage_changed_at)
+            : new Date(deal.created_at);
+          const daysInStage = Math.floor((Date.now() - stageAnchor.getTime()) / (1000 * 60 * 60 * 24));
 
-      // Get conversation sentiment modifier and signals
-      const conversationModifierResult = await computeConversationModifier(deal.id, workspaceId);
-      const conversationModifier = conversationModifierResult.modifier;
-      const closeDateSuspect = conversationModifierResult.close_date_suspect;
+          const conversationModifierResult = await computeConversationModifier(deal.id, workspaceId);
+          const conversationModifier = conversationModifierResult.modifier;
+          const closeDateSuspect = conversationModifierResult.close_date_suspect;
 
-      const baseHealthScore = 100 - scores.dealRisk;
-      const healthScore = Math.min(100, Math.max(0, Math.round((baseHealthScore + conversationModifier) * 100) / 100));
+          const baseHealthScore = 100 - scores.dealRisk;
+          const healthScore = Math.min(100, Math.max(0, Math.round((baseHealthScore + conversationModifier) * 100) / 100));
 
-      const riskResult = riskScoreMap.get(deal.id);
-      let skillScore: number | null = null;
-      if (riskResult) {
-        if (riskResult.signals.length > 0 || hasAnySkillRuns) {
-          skillScore = riskResult.score;
-        }
-      }
+          const riskResult = riskScoreMap.get(deal.id);
+          let skillScore: number | null = null;
+          if (riskResult) {
+            if (riskResult.signals.length > 0 || hasAnySkillRuns) {
+              skillScore = riskResult.score;
+            }
+          }
 
-      const conversationScore = conversationModifier !== 0
-        ? Math.max(0, Math.min(100, 50 + conversationModifier * 2.5))
-        : null;
+          const conversationScore = conversationModifier !== 0
+            ? Math.max(0, Math.min(100, 50 + conversationModifier * 2.5))
+            : null;
 
-      const hasConversations = conversationModifierResult.signals.length > 0
-        || dealsWithConversations.has(deal.id);
+          const hasConversations = conversationModifierResult.signals.length > 0
+            || dealsWithConversations.has(deal.id);
 
-      const productionComposite = computeCompositeScore(
-        healthScore,
-        skillScore,
-        conversationScore,
-        prodWeights,
-        hasConversations
-      );
-
-      let experimentalScore: number | null = null;
-      if (expWeights) {
-        const experimentalComposite = computeCompositeScore(
-          healthScore,
-          skillScore,
-          conversationScore,
-          expWeights,
-          hasConversations
-        );
-        experimentalScore = experimentalComposite.score;
-      }
-
-      // Check if deal is closed - if so, log outcome
-      const isClosed = ['closed_won', 'closed_lost', 'closedwon', 'closedlost'].includes(
-        (deal.stage_normalized || deal.stage || '').toLowerCase().replace(/\s+/g, '')
-      );
-
-      if (isClosed) {
-        const outcome = (deal.stage_normalized || deal.stage || '').toLowerCase().includes('won') ? 'won' : 'lost';
-        const daysOpen = Math.floor((Date.now() - new Date(deal.created_at).getTime()) / (1000 * 60 * 60 * 24));
-
-        // Insert outcome record (ignore if already exists)
-        await client.query(
-          `INSERT INTO deal_outcomes (
-            workspace_id, deal_id, deal_name, outcome,
-            crm_score, skill_score, conversation_score, composite_score,
-            amount, days_open, stage_duration_days, closed_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
-          ON CONFLICT (workspace_id, deal_id) DO NOTHING`,
-          [
-            workspaceId,
-            deal.id,
-            deal.name || 'Untitled',
-            outcome,
+          const productionComposite = computeCompositeScore(
             healthScore,
             skillScore,
             conversationScore,
-            productionComposite.score,
-            deal.amount ? parseFloat(deal.amount) : null,
-            daysOpen,
-            daysInStage,
-          ]
-        );
+            prodWeights,
+            hasConversations
+          );
+
+          let experimentalScore: number | null = null;
+          if (expWeights) {
+            const experimentalComposite = computeCompositeScore(
+              healthScore,
+              skillScore,
+              conversationScore,
+              expWeights,
+              hasConversations
+            );
+            experimentalScore = experimentalComposite.score;
+          }
+
+          const isClosed = ['closed_won', 'closed_lost', 'closedwon', 'closedlost'].includes(
+            (deal.stage_normalized || deal.stage || '').toLowerCase().replace(/\s+/g, '')
+          );
+
+          if (isClosed) {
+            const outcome = (deal.stage_normalized || deal.stage || '').toLowerCase().includes('won') ? 'won' : 'lost';
+            const daysOpen = Math.floor((Date.now() - new Date(deal.created_at).getTime()) / (1000 * 60 * 60 * 24));
+
+            await client.query(
+              `INSERT INTO deal_outcomes (
+                workspace_id, deal_id, deal_name, outcome,
+                crm_score, skill_score, conversation_score, composite_score,
+                amount, days_open, stage_duration_days, closed_at
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+              ON CONFLICT (workspace_id, deal_id) DO NOTHING`,
+              [
+                workspaceId,
+                deal.id,
+                deal.name || 'Untitled',
+                outcome,
+                healthScore,
+                skillScore,
+                conversationScore,
+                productionComposite.score,
+                deal.amount ? parseFloat(deal.amount) : null,
+                daysOpen,
+                daysInStage,
+              ]
+            );
+          }
+
+          await client.query(
+            `UPDATE deals
+             SET velocity_score = $2,
+                 deal_risk = $3,
+                 deal_risk_factors = $4,
+                 health_score = $5,
+                 days_in_stage = $6,
+                 conversation_modifier = $7,
+                 close_date_suspect = $8,
+                 experimental_score = $9,
+                 composite_score = $10,
+                 updated_at = NOW()
+             WHERE id = $1 AND workspace_id = $11`,
+            [
+              deal.id,
+              scores.velocityScore,
+              scores.dealRisk,
+              JSON.stringify(scores.riskFactors),
+              healthScore,
+              daysInStage,
+              conversationModifier,
+              closeDateSuspect,
+              experimentalScore,
+              productionComposite.score,
+              workspaceId,
+            ]
+          );
+          updated++;
+        }
+
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
       }
 
-      // Update deal with scores
-      await client.query(
-        `UPDATE deals
-         SET velocity_score = $2,
-             deal_risk = $3,
-             deal_risk_factors = $4,
-             health_score = $5,
-             days_in_stage = $6,
-             conversation_modifier = $7,
-             close_date_suspect = $8,
-             experimental_score = $9,
-             composite_score = $10,
-             updated_at = NOW()
-         WHERE id = $1 AND workspace_id = $11`,
-        [
-          deal.id,
-          scores.velocityScore,
-          scores.dealRisk,
-          JSON.stringify(scores.riskFactors),
-          healthScore,
-          daysInStage,
-          conversationModifier,
-          closeDateSuspect,
-          experimentalScore,
-          productionComposite.score,
-          workspaceId,
-        ]
-      );
-      updated++;
+      await new Promise(resolve => setImmediate(resolve));
     }
-
-    await client.query('COMMIT');
-  } catch (err) {
-    await client.query('ROLLBACK');
-    throw err;
   } finally {
     client.release();
   }
