@@ -63,8 +63,8 @@ export default function ConversationsPage() {
       params.set('limit', '50');
 
       const [conversationsRes, gapsRes] = await Promise.all([
-        api.get(`/workspaces/${workspaceId}/conversations?${params.toString()}`),
-        api.get(`/workspaces/${workspaceId}/conversations/next-action-gaps`),
+        api.get(`/conversations?${params.toString()}`),
+        api.get(`/conversations/next-action-gaps`),
       ]);
 
       console.log('[ConversationsPage] API response:', {
@@ -77,7 +77,7 @@ export default function ConversationsPage() {
       setNextActionGaps(gapsRes.gaps || []);
     } catch (err) {
       console.error('Failed to load conversations:', err);
-      console.error('Error details:', { workspaceId, filter, params: params.toString() });
+      console.error('Error details:', { workspaceId, filter });
     } finally {
       setLoading(false);
     }
@@ -108,7 +108,7 @@ export default function ConversationsPage() {
 
   async function handleLinkDeal(conversationId: string, dealId: string) {
     try {
-      await api.post(`/workspaces/${workspaceId}/conversations/${conversationId}/link`, {
+      await api.post(`/conversations/${conversationId}/link`, {
         deal_id: dealId,
         link_method: 'manual',
       });
@@ -123,7 +123,7 @@ export default function ConversationsPage() {
 
   async function handleDismissLink(conversationId: string) {
     try {
-      await api.post(`/workspaces/${workspaceId}/conversations/${conversationId}/link`, {
+      await api.post(`/conversations/${conversationId}/link`, {
         action: 'dismiss',
       });
       setShowLinkModal(false);

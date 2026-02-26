@@ -45,7 +45,7 @@ export default function LinkDealModal({
     try {
       setLoading(true);
       // Fetch open deals from the workspace
-      const response = await api.get(`/workspaces/${workspaceId}/deals`);
+      const response = await api.get(`/deals`);
       const openDeals = (response.deals || []).filter(
         (d: any) => !['closed_won', 'closed_lost'].includes(d.stage_normalized?.toLowerCase())
       );
