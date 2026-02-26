@@ -6,3 +6,9 @@ dist/
 !tsconfig.json
 .cache/
 .local/
+
+# Replit internal files
+.replit-state/
+*.db
+*.db-shm
+*.db-wal
