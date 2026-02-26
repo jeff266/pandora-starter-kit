@@ -135,11 +135,22 @@ export default function ConversationDetail() {
   const [activeTab, setActiveTab] = useState<'impact' | 'actions' | 'coaching'>('impact');
 
   useEffect(() => {
-    if (!conversationId || !currentWorkspace) return;
+    if (!conversationId) {
+      setError('No conversation ID provided');
+      setLoading(false);
+      return;
+    }
+
+    if (!currentWorkspace) {
+      setError('No workspace selected. Please select a workspace from the Command Center.');
+      setLoading(false);
+      return;
+    }
 
     async function loadDossier() {
       try {
         setLoading(true);
+        setError(null);
         const data = await api.get(`/conversations/${conversationId}/dossier`);
         setDossier(data);
       } catch (err: any) {
@@ -164,13 +175,14 @@ export default function ConversationDetail() {
   }
 
   if (error || !dossier) {
+    const isWorkspaceError = error?.includes('workspace');
     return (
       <div style={{ padding: 40, textAlign: 'center' }}>
         <div style={{ fontSize: 16, color: colors.textMuted, marginBottom: 16 }}>
           {error || 'Conversation not found'}
         </div>
         <button
-          onClick={() => navigate(-1)}
+          onClick={() => navigate(isWorkspaceError ? '/' : -1)}
           style={{
             background: colors.accent,
             color: '#fff',
@@ -181,7 +193,7 @@ export default function ConversationDetail() {
             cursor: 'pointer',
           }}
         >
-          Go back
+          {isWorkspaceError ? 'Return to Command Center' : 'Go back'}
         </button>
       </div>
     );
