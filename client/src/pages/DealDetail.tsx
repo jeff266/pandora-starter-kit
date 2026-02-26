@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { ExternalLink, ChevronDown, Check } from 'lucide-react';
 import { api } from '../lib/api';
@@ -7,7 +7,6 @@ import { formatCurrency, formatDate, formatTimeAgo, severityColor } from '../lib
 import Skeleton from '../components/Skeleton';
 import SectionErrorBoundary from '../components/SectionErrorBoundary';
 import { DossierNarrative, AnalysisModal } from '../components/shared';
-import { renderMarkdown } from '../lib/render-markdown';
 import { useDemoMode } from '../contexts/DemoModeContext';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { buildDealCrmUrl, buildConversationUrl, useCrmInfo } from '../lib/deeplinks';
@@ -114,10 +113,6 @@ export default function DealDetail() {
   const [snoozingId, setSnoozingId] = useState<string | null>(null);
   const [snoozeDropdownId, setSnoozeDropdownId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
-  const [askQuestion, setAskQuestion] = useState('');
-  const [askHistory, setAskHistory] = useState<Array<{ role: 'user' | 'assistant'; content: string; metadata?: any }>>([]);
-  const [askLoading, setAskLoading] = useState(false);
-  const [askError, setAskError] = useState('');
   const { crmInfo } = useCrmInfo();
   const { user, currentWorkspace } = useWorkspace();
   const [analysisOpen, setAnalysisOpen] = useState(false);
@@ -168,7 +163,6 @@ export default function DealDetail() {
 
   useEffect(() => {
     fetchDossier();
-    fetchAskHistory();
     if (dealId) {
       api.get(`/deals/${dealId}/score-history`).then((res: any) => {
         setScoreHistory(res.snapshots || []);
@@ -253,108 +247,6 @@ export default function DealDetail() {
       setTimeout(() => setToast(null), 3000);
     } finally {
       setSnoozingId(null);
-    }
-  };
-
-  const fetchAskHistory = useCallback(async () => {
-    if (!dealId || !currentWorkspace) return;
-    try {
-      const result = await api.get(`/analyze/history/deal/${dealId}`);
-      const messages = (result.messages || []).map((msg: any) => ({
-        ...msg,
-        follow_up_questions: msg.follow_up_questions || msg.metadata?.follow_up_questions || [],
-      }));
-      setAskHistory(messages);
-    } catch (err: any) {
-      console.warn('Failed to load Q&A history:', err);
-      setAskHistory([]);
-    }
-  }, [dealId, currentWorkspace]);
-
-  const handleAsk = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!askQuestion.trim() || askLoading || !dealId) return;
-
-    const userQuestion = askQuestion.trim();
-    setAskQuestion(''); // Clear input immediately
-    setAskLoading(true);
-    setAskError('');
-
-    // Optimistically add user message to history
-    setAskHistory(prev => [...prev, { role: 'user', content: userQuestion }]);
-
-    try {
-      const result = await api.post('/analyze', {
-        question: userQuestion,
-        scope: { type: 'deal', entity_id: dealId },
-      });
-
-      // Add assistant response to history
-      setAskHistory(prev => [...prev, {
-        role: 'assistant',
-        content: result.answer,
-        follow_up_questions: result.follow_up_questions || [],
-        metadata: {
-          confidence: result.confidence,
-          data_consulted: result.data_consulted,
-          tokens_used: result.tokens_used,
-          latency_ms: result.latency_ms,
-        }
-      }]);
-    } catch (err: any) {
-      // Remove optimistic user message on error
-      setAskHistory(prev => prev.slice(0, -1));
-
-      if (err.message?.includes('429') || err.message?.includes('rate limit')) {
-        setAskError('Analysis limit reached. Try again in a few minutes.');
-      } else {
-        setAskError(err.message || 'Failed to get answer');
-      }
-    } finally {
-      setAskLoading(false);
-    }
-  };
-
-  const handleFollowUpClick = async (question: string) => {
-    if (askLoading || !dealId) return;
-
-    setAskQuestion(question);
-    setAskLoading(true);
-    setAskError('');
-
-    // Add user message to history
-    setAskHistory(prev => [...prev, { role: 'user', content: question }]);
-
-    try {
-      const result = await api.post('/analyze', {
-        question: question,
-        scope: { type: 'deal', entity_id: dealId },
-      });
-
-      // Add assistant response to history
-      setAskHistory(prev => [...prev, {
-        role: 'assistant',
-        content: result.answer,
-        follow_up_questions: result.follow_up_questions || [],
-        metadata: {
-          confidence: result.confidence,
-          data_consulted: result.data_consulted,
-          tokens_used: result.tokens_used,
-          latency_ms: result.latency_ms,
-        }
-      }]);
-    } catch (err: any) {
-      // Remove optimistic user message on error
-      setAskHistory(prev => prev.slice(0, -1));
-
-      if (err.message?.includes('429') || err.message?.includes('rate limit')) {
-        setAskError('Analysis limit reached. Try again in a few minutes.');
-      } else {
-        setAskError(err.message || 'Failed to get answer');
-      }
-    } finally {
-      setAskLoading(false);
-      setAskQuestion(''); // Clear input after submission
     }
   };
 
@@ -1271,132 +1163,6 @@ export default function DealDetail() {
             <DetailRow label="Last Modified" value={deal.updated_at ? formatDate(deal.updated_at) : undefined} />
           </Card>
 
-          {/* Ask Pandora */}
-          {dealId && (
-            <div style={{
-              background: colors.surface,
-              border: `1px solid ${colors.border}`,
-              borderRadius: 10,
-              padding: 20,
-            }}>
-              <h3 style={{ fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 12 }}>
-                Ask Pandora
-              </h3>
-              <form onSubmit={handleAsk} style={{ display: 'flex', gap: 8 }}>
-                <input
-                  type="text"
-                  value={askQuestion}
-                  onChange={e => setAskQuestion(e.target.value)}
-                  placeholder="Ask about this deal... e.g. 'What are the biggest risks?'"
-                  disabled={askLoading}
-                  style={{
-                    flex: 1, fontSize: 13, padding: '8px 12px',
-                    background: colors.surfaceRaised,
-                    border: `1px solid ${colors.border}`,
-                    borderRadius: 6, color: colors.text, outline: 'none',
-                  }}
-                />
-                <button
-                  type="submit"
-                  disabled={askLoading || !askQuestion.trim()}
-                  style={{
-                    fontSize: 12, fontWeight: 500, padding: '8px 16px',
-                    background: askLoading || !askQuestion.trim() ? colors.surfaceRaised : colors.accentSoft,
-                    color: askLoading || !askQuestion.trim() ? colors.textMuted : colors.accent,
-                    border: 'none', borderRadius: 6,
-                    cursor: askLoading || !askQuestion.trim() ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  {askLoading ? 'Analyzing...' : 'Ask'}
-                </button>
-              </form>
-
-              {askError && (
-                <div style={{
-                  marginTop: 12, padding: 12, background: colors.redSoft,
-                  border: `1px solid ${colors.red}33`, borderRadius: 6,
-                  color: colors.red, fontSize: 12,
-                }}>
-                  {askError}
-                </div>
-              )}
-
-              {/* Conversation History */}
-              {askHistory.length > 0 && (
-                <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 12, maxHeight: 500, overflowY: 'auto' }}>
-                  {askHistory.map((msg, i) => (
-                    <div
-                      key={i}
-                      style={{
-                        padding: 12,
-                        background: msg.role === 'user' ? colors.accentSoft : colors.surfaceRaised,
-                        border: `1px solid ${msg.role === 'user' ? `${colors.accent}30` : colors.borderLight}`,
-                        borderRadius: 6,
-                        borderLeft: `3px solid ${msg.role === 'user' ? colors.accent : colors.textMuted}`,
-                      }}
-                    >
-                      <div style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, marginBottom: 6, textTransform: 'uppercase' }}>
-                        {msg.role === 'user' ? 'You' : 'Pandora'}
-                      </div>
-                      <div style={{ fontSize: 13, lineHeight: 1.6, color: colors.text, whiteSpace: 'pre-wrap' }}>
-                        {renderMarkdown(anon.text(msg.content))}
-                      </div>
-                      {msg.metadata && msg.role === 'assistant' && (
-                        <div style={{ display: 'flex', gap: 12, fontSize: 10, color: colors.textMuted, fontFamily: fonts.mono, marginTop: 8 }}>
-                          {msg.metadata.data_consulted && (
-                            <span>Data: {Object.values(msg.metadata.data_consulted).filter((v: any) => typeof v === 'number' && v > 0).length} sources</span>
-                          )}
-                          {msg.metadata.tokens_used && <span>{msg.metadata.tokens_used} tokens</span>}
-                          {msg.metadata.latency_ms && <span>{(msg.metadata.latency_ms / 1000).toFixed(1)}s</span>}
-                        </div>
-                      )}
-                      {msg.follow_up_questions && msg.follow_up_questions.length > 0 && msg.role === 'assistant' && (
-                        <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${colors.borderLight}` }}>
-                          <div style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, marginBottom: 8, textTransform: 'uppercase' }}>
-                            Follow-up Questions
-                          </div>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                            {msg.follow_up_questions.slice(0, 3).map((question: string, qIdx: number) => (
-                              <button
-                                key={qIdx}
-                                onClick={() => handleFollowUpClick(question)}
-                                disabled={askLoading}
-                                style={{
-                                  fontSize: 12,
-                                  padding: '8px 12px',
-                                  background: askLoading ? colors.surfaceRaised : colors.accentSoft,
-                                  color: askLoading ? colors.textMuted : colors.accent,
-                                  border: `1px solid ${askLoading ? colors.borderLight : `${colors.accent}30`}`,
-                                  borderRadius: 6,
-                                  cursor: askLoading ? 'not-allowed' : 'pointer',
-                                  textAlign: 'left',
-                                  transition: 'all 0.2s',
-                                }}
-                                onMouseEnter={(e) => {
-                                  if (!askLoading) {
-                                    e.currentTarget.style.background = colors.accent;
-                                    e.currentTarget.style.color = 'white';
-                                  }
-                                }}
-                                onMouseLeave={(e) => {
-                                  if (!askLoading) {
-                                    e.currentTarget.style.background = colors.accentSoft;
-                                    e.currentTarget.style.color = colors.accent;
-                                  }
-                                }}
-                              >
-                                {question}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
         </div>
       </div>
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, lazy, Suspense } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, lazy, Suspense } from 'react';
 import { Routes, Route, useLocation, Navigate } from 'react-router-dom';
 import { useWorkspace } from './context/WorkspaceContext';
 import { useDemoMode } from './contexts/DemoModeContext';
@@ -127,6 +127,15 @@ export default function App() {
 
   // Close mobile menu on route change
   useEffect(() => { setMobileMenuOpen(false); }, [location.pathname]);
+
+  const pageContext = useMemo(() => {
+    const path = location.pathname;
+    const dealMatch = path.match(/\/deals\/([a-f0-9-]+)$/i);
+    if (dealMatch) return { type: 'deal', entity_id: dealMatch[1] } as const;
+    const accountMatch = path.match(/\/accounts\/([a-f0-9-]+)$/i);
+    if (accountMatch) return { type: 'account', entity_id: accountMatch[1] } as const;
+    return null;
+  }, [location.pathname]);
 
   useEffect(() => {
     if (token && currentWorkspace) {
@@ -274,31 +283,45 @@ export default function App() {
       </main>
       {!chatOpen && (
         <button
-          onClick={() => { setChatScope(undefined); setChatOpen(true); }}
+          onClick={() => {
+            if (pageContext) {
+              setChatScope({ type: pageContext.type, entity_id: pageContext.entity_id });
+            } else {
+              setChatScope(undefined);
+            }
+            setChatOpen(true);
+          }}
           style={{
             position: 'fixed',
             bottom: 24,
             right: 24,
-            width: 52,
-            height: 52,
-            borderRadius: '50%',
+            height: pageContext ? 'auto' : 52,
+            width: pageContext ? 'auto' : 52,
+            minWidth: 52,
+            borderRadius: pageContext ? 26 : '50%',
             backgroundColor: '#6488ea',
             color: '#fff',
             border: 'none',
-            fontSize: 22,
+            fontSize: pageContext ? 13 : 22,
+            fontWeight: pageContext ? 500 : undefined,
+            padding: pageContext ? '0 16px 0 14px' : 0,
             cursor: 'pointer',
             boxShadow: '0 4px 16px rgba(100,136,234,0.4)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
+            gap: 6,
             zIndex: 999,
             transition: 'transform 0.15s',
           }}
-          title="Ask Pandora"
-          onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.08)')}
+          title={pageContext ? `Ask about this ${pageContext.type}` : 'Ask Pandora'}
+          onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.05)')}
           onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}
         >
-          {'\uD83D\uDCAC'}
+          <span style={{ fontSize: 20, lineHeight: 1 }}>{'\uD83D\uDCAC'}</span>
+          {pageContext && (
+            <span>Ask about this {pageContext.type}</span>
+          )}
         </button>
       )}
       <ChatPanel
