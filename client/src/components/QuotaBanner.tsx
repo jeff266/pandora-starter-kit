@@ -9,6 +9,7 @@ interface QuotaStatus {
   pendingGoals: boolean;
   pendingCount: number;
   currentPeriod: string | null;
+  bannerDismissed: boolean;
 }
 
 export default function QuotaBanner() {
@@ -22,9 +23,10 @@ export default function QuotaBanner() {
       try {
         // Use /quotas directly — backend applies CURRENT_DATE comparison server-side,
         // avoiding JS Date serialization issues when passing dates as URL params.
-        const [quotaRes, pendingRes] = await Promise.all([
+        const [quotaRes, pendingRes, settingsRes] = await Promise.all([
           api.get('/quotas').catch(() => ({ quotas: [], period: null })),
           api.get('/quotas/pending-goals').catch(() => ({ pending: false })),
+          api.get('/settings').catch(() => ({ settings: {} })),
         ]);
 
         if (cancelled) return;
@@ -36,12 +38,15 @@ export default function QuotaBanner() {
           ? period.name || null
           : typeof period === 'string' ? period : null;
 
+        const bannerDismissed = settingsRes.settings?.quota_banner_dismissed === 'true';
+
         setStatus({
           hasQuotas,
           isStale: false,
           pendingGoals: pendingRes.pending || false,
           pendingCount: pendingRes.preview?.goals?.length || 0,
           currentPeriod: periodName,
+          bannerDismissed,
         });
       } catch {
         // silently ignore
@@ -111,7 +116,7 @@ export default function QuotaBanner() {
     );
   }
 
-  if (!status.hasQuotas) {
+  if (!status.hasQuotas && !status.bannerDismissed) {
     return (
       <div style={{
         background: colors.surfaceRaised,
@@ -149,7 +154,10 @@ export default function QuotaBanner() {
           Set Up Quotas
         </button>
         <button
-          onClick={() => setDismissed(true)}
+          onClick={() => {
+            setDismissed(true);
+            api.post('/quotas/dismiss-no-quotas-banner').catch(() => {});
+          }}
           style={{
             background: 'transparent',
             color: colors.textMuted,

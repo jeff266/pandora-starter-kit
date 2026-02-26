@@ -43,6 +43,9 @@ interface PipelineRiskSummary {
     mechanical_score: number | null;
     mechanical_grade: string | null;
     active_source: 'skill' | 'health';
+    days_since_last_call: number | null;
+    conversation_signals: any[] | null;
+    divergence_flag: boolean;
   }>;
   filter: {
     rep_email: string | null;
@@ -73,7 +76,7 @@ export async function getPipelineRiskSummary(
   }
 
   const dealsResult = await query(
-    `SELECT id, name, amount, stage, stage_normalized, owner, close_date, days_in_stage, source_id, source, pipeline, health_score, composite_score
+    `SELECT id, name, amount, stage, stage_normalized, owner, close_date, days_in_stage, source_id, source, pipeline, health_score, composite_score, days_since_last_call, conversation_signals
      FROM deals
      WHERE workspace_id = $1 AND stage_normalized NOT IN ('closed_won', 'closed_lost')${whereExtra}
      ORDER BY amount DESC NULLS LAST`,
@@ -108,6 +111,12 @@ export async function getPipelineRiskSummary(
     const dbCompositeScore = d.composite_score != null ? Number(d.composite_score) : null;
     const effectiveScore = risk?.score ?? dbCompositeScore ?? 100;
     const effectiveGrade = risk?.grade ?? computeGradeFromScore(effectiveScore);
+
+    // Divergence flag: true if skill and health scores differ by >15 points
+    const skillScore = risk?.score ?? null;
+    const healthScore = dbCompositeScore;
+    const divergence_flag = skillScore != null && healthScore != null && Math.abs(skillScore - healthScore) > 15;
+
     return {
       deal_id: d.id,
       deal_name: d.name || '',
@@ -126,6 +135,9 @@ export async function getPipelineRiskSummary(
       mechanical_score: dbCompositeScore,
       mechanical_grade: dbCompositeScore != null ? computeGradeFromScore(dbCompositeScore) : null,
       active_source: ((risk?.score != null && (d.composite_score == null || risk.score <= Number(d.composite_score))) ? 'skill' : 'health') as 'skill' | 'health',
+      days_since_last_call: d.days_since_last_call != null ? Number(d.days_since_last_call) : null,
+      conversation_signals: d.conversation_signals ?? null,
+      divergence_flag,
     };
   });
 

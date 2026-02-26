@@ -48,15 +48,45 @@ interface DealRow {
   mechanical_score: number | null;
   mechanical_grade: string | null;
   active_source: 'skill' | 'health' | undefined;
+  days_since_last_call?: number | null;
+  conversation_signals?: any[] | null;
+  divergence_flag?: boolean;
 }
 
-type SortField = 'name' | 'amount' | 'stage' | 'owner' | 'close_date' | 'health' | 'days_in_stage' | 'findings';
+type SortField = 'name' | 'amount' | 'stage' | 'owner' | 'close_date' | 'health' | 'days_in_stage' | 'last_call' | 'signals';
 type SortDir = 'asc' | 'desc';
 
 const DEFAULT_SORT: Record<SortField, SortDir> = {
   name: 'asc', amount: 'desc', stage: 'asc', owner: 'asc',
-  close_date: 'asc', health: 'asc', days_in_stage: 'desc', findings: 'desc',
+  close_date: 'asc', health: 'asc', days_in_stage: 'desc', last_call: 'desc', signals: 'desc',
 };
+
+function getStageAwareDaysColor(days: number | null, stageNormalized: string): string {
+  if (days == null) return colors.textMuted;
+
+  const stage = stageNormalized.toLowerCase();
+  let redThreshold = 30;
+  let yellowThreshold = 14;
+
+  if (stage.includes('pilot')) {
+    redThreshold = 45;
+    yellowThreshold = 21;
+  } else if (stage.includes('negotiation') || stage.includes('closing')) {
+    redThreshold = 14;
+    yellowThreshold = 7;
+  } else if (stage.includes('evaluation') || stage.includes('proposal')) {
+    redThreshold = 21;
+    yellowThreshold = 10;
+  }
+
+  if (days > redThreshold) return colors.red;
+  if (days > yellowThreshold) return '#eab308';
+  return colors.textMuted;
+}
+
+function toTitleCase(str: string): string {
+  return str.replace(/\b\w/g, char => char.toUpperCase());
+}
 
 export default function DealList() {
   const navigate = useNavigate();
@@ -112,6 +142,9 @@ export default function DealList() {
         mechanical_score: d.mechanical_score ?? null,
         mechanical_grade: d.mechanical_grade ?? null,
         active_source: d.active_source ?? undefined,
+        days_since_last_call: d.days_since_last_call ?? null,
+        conversation_signals: d.conversation_signals ?? null,
+        divergence_flag: d.divergence_flag ?? false,
       }));
 
       const riskDealIds = new Set(riskDeals.map(d => d.id));
@@ -225,7 +258,8 @@ export default function DealList() {
         }
         case 'health': cmp = a.score - b.score; break;
         case 'days_in_stage': cmp = (a.days_in_stage || 0) - (b.days_in_stage || 0); break;
-        case 'findings': {
+        case 'last_call': cmp = (a.days_since_last_call ?? 999) - (b.days_since_last_call ?? 999); break;
+        case 'signals': {
           const fa = a.signal_counts.act + a.signal_counts.watch + a.signal_counts.notable + a.signal_counts.info;
           const fb = b.signal_counts.act + b.signal_counts.watch + b.signal_counts.notable + b.signal_counts.info;
           cmp = fa - fb;
@@ -371,7 +405,7 @@ export default function DealList() {
         {!isMobile && (
           <div style={{
             display: 'grid',
-            gridTemplateColumns: '25% 12% 13% 13% 10% 8% 8% 11%',
+            gridTemplateColumns: '23% 11% 12% 12% 10% 8% 8% 8% 8%',
             padding: '10px 20px',
             background: colors.surfaceRaised,
             borderBottom: `1px solid ${colors.border}`,
@@ -384,7 +418,8 @@ export default function DealList() {
               ['close_date', 'Close Date'],
               ['health', 'Health'],
               ['days_in_stage', 'Days'],
-              ['findings', 'Findings'],
+              ['last_call', 'Last Call'],
+              ['signals', 'Signals'],
             ] as [SortField, string][]).map(([field, label]) => (
               <div
                 key={field}
@@ -419,7 +454,8 @@ export default function DealList() {
           pageDeals.map(deal => {
             const totalFindings = deal.signal_counts.act + deal.signal_counts.watch + deal.signal_counts.notable + deal.signal_counts.info;
             const pastDue = isCloseDatePast(deal.close_date, deal.is_closed);
-            const daysColor = (deal.days_in_stage || 0) > 45 ? colors.red : (deal.days_in_stage || 0) > 21 ? '#eab308' : colors.textMuted;
+            const daysColor = getStageAwareDaysColor(deal.days_in_stage, deal.stage_normalized);
+            const lastCallColor = getStageAwareDaysColor(deal.days_since_last_call ?? null, deal.stage_normalized);
 
             if (isMobile) {
               const dealUrl = buildDealCrmUrl(
@@ -493,7 +529,7 @@ export default function DealList() {
                 onClick={() => navigate(`/deals/${deal.id}`)}
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: '25% 12% 13% 13% 10% 8% 8% 11%',
+                  gridTemplateColumns: '23% 11% 12% 12% 10% 8% 8% 8% 8%',
                   padding: '12px 20px',
                   borderBottom: `1px solid ${colors.border}`,
                   cursor: 'pointer',
@@ -538,9 +574,11 @@ export default function DealList() {
                 <div>
                   <span style={{
                     fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 4,
-                    background: colors.accentSoft, color: colors.accent, textTransform: 'capitalize',
-                  }}>
-                    {deal.stage?.replace(/_/g, ' ') || '—'}
+                    background: colors.accentSoft, color: colors.accent,
+                    display: 'inline-block', maxWidth: '100%', overflow: 'hidden',
+                    textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }} title={deal.stage || '—'}>
+                    {deal.stage ? toTitleCase(deal.stage.replace(/_/g, ' ').replace(/\//g, '/')).slice(0, 20) + (deal.stage.length > 20 ? '...' : '') : '—'}
                   </span>
                 </div>
                 <div style={{ fontSize: 12, color: colors.textSecondary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -549,56 +587,92 @@ export default function DealList() {
                 <div style={{ fontSize: 12, color: pastDue ? colors.red : colors.textMuted, fontWeight: pastDue ? 600 : 400 }}>
                   {deal.close_date ? formatDate(deal.close_date) : '—'}
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                   {deal.grade && deal.grade !== '—' ? (
-                    <span style={{
-                      fontSize: 11, fontWeight: 700, fontFamily: fonts.mono,
-                      padding: '2px 8px', borderRadius: 4,
-                      background: `${GRADE_COLORS[deal.grade] || colors.textMuted}20`,
-                      color: GRADE_COLORS[deal.grade] || colors.textMuted,
-                    }}>
-                      {deal.grade}
-                    </span>
-                  ) : (
-                    <span style={{ fontSize: 11, color: colors.textDim }}>—</span>
-                  )}
-                  <span style={{
-                    fontSize: 9, fontWeight: 600, letterSpacing: '0.06em',
-                    color: deal.active_source === 'skill' ? '#6488ea' : colors.textMuted,
-                    textTransform: 'uppercase',
-                    lineHeight: 1,
-                  }}>
-                    {deal.active_source === 'skill' ? 'SKILL' : 'HEALTH'}
-                  </span>
-                </div>
-                <div style={{ fontSize: 12, fontFamily: fonts.mono, color: daysColor }}>
-                  {deal.days_in_stage != null ? `${Math.round(deal.days_in_stage)}` : '—'}
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  {totalFindings > 0 ? (
                     <>
-                      {deal.signal_counts.act > 0 && (
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: severityColor('act'), display: 'inline-block' }} />
-                          <span style={{ fontSize: 10, fontFamily: fonts.mono, color: severityColor('act') }}>{deal.signal_counts.act}</span>
-                        </span>
-                      )}
-                      {deal.signal_counts.watch > 0 && (
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: severityColor('watch'), display: 'inline-block' }} />
-                          <span style={{ fontSize: 10, fontFamily: fonts.mono, color: severityColor('watch') }}>{deal.signal_counts.watch}</span>
-                        </span>
-                      )}
-                      {deal.signal_counts.notable > 0 && (
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: severityColor('notable'), display: 'inline-block' }} />
-                          <span style={{ fontSize: 10, fontFamily: fonts.mono, color: severityColor('notable') }}>{deal.signal_counts.notable}</span>
+                      <span style={{
+                        fontSize: 11, fontWeight: 700, fontFamily: fonts.mono,
+                        padding: '2px 8px', borderRadius: 4,
+                        background: `${GRADE_COLORS[deal.grade] || colors.textMuted}20`,
+                        color: GRADE_COLORS[deal.grade] || colors.textMuted,
+                      }}>
+                        {deal.grade}
+                      </span>
+                      {deal.divergence_flag && (
+                        <span
+                          style={{ fontSize: 10, color: '#f97316', verticalAlign: 'super', cursor: 'help' }}
+                          title="Skill and health scores diverge significantly — click to see breakdown"
+                        >
+                          ⚠
                         </span>
                       )}
                     </>
                   ) : (
                     <span style={{ fontSize: 11, color: colors.textDim }}>—</span>
                   )}
+                </div>
+                <div style={{ fontSize: 12, fontFamily: fonts.mono, color: daysColor }}>
+                  {deal.days_in_stage != null ? `${Math.round(deal.days_in_stage)}` : '—'}
+                </div>
+                <div style={{ fontSize: 12, fontFamily: fonts.mono, color: lastCallColor }}>
+                  {deal.days_since_last_call != null ? `${Math.round(deal.days_since_last_call)}d` : (
+                    <span style={{ fontSize: 11, color: colors.textMuted }}>No calls</span>
+                  )}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  {(() => {
+                    // Most recent conversation signal
+                    if (deal.conversation_signals && Array.isArray(deal.conversation_signals) && deal.conversation_signals.length > 0) {
+                      const mostRecent = deal.conversation_signals[deal.conversation_signals.length - 1];
+                      const keyword = mostRecent.keyword || mostRecent.signal || mostRecent.label;
+                      const points = mostRecent.points ?? 0;
+                      const badgeColor = points > 0 ? colors.green : colors.red;
+                      const badgeBg = points > 0 ? '#f0fdf4' : '#fef2f2';
+
+                      return (
+                        <span style={{
+                          fontSize: 9, fontWeight: 600, padding: '2px 6px', borderRadius: 4,
+                          background: badgeBg, color: badgeColor,
+                        }}>
+                          {keyword}
+                        </span>
+                      );
+                    }
+
+                    // Fallback to highest severity finding
+                    if (deal.signal_counts.act > 0) {
+                      return (
+                        <span style={{
+                          fontSize: 9, fontWeight: 600, padding: '2px 6px', borderRadius: 4,
+                          background: '#fef2f2', color: severityColor('act'),
+                        }}>
+                          ACT
+                        </span>
+                      );
+                    }
+                    if (deal.signal_counts.watch > 0) {
+                      return (
+                        <span style={{
+                          fontSize: 9, fontWeight: 600, padding: '2px 6px', borderRadius: 4,
+                          background: '#fefce8', color: severityColor('watch'),
+                        }}>
+                          WATCH
+                        </span>
+                      );
+                    }
+                    if (deal.signal_counts.notable > 0) {
+                      return (
+                        <span style={{
+                          fontSize: 9, fontWeight: 600, padding: '2px 6px', borderRadius: 4,
+                          background: colors.surfaceRaised, color: colors.textMuted,
+                        }}>
+                          NOTABLE
+                        </span>
+                      );
+                    }
+
+                    return null;
+                  })()}
                 </div>
               </div>
             );

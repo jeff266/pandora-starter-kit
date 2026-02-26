@@ -658,4 +658,28 @@ router.post(
   }
 );
 
+router.post(
+  '/workspaces/:workspaceId/quotas/dismiss-no-quotas-banner',
+  async (req: Request<WorkspaceParams>, res: Response) => {
+    try {
+      const { workspaceId } = req.params;
+
+      // Store dismissal in workspace settings
+      await query(
+        `INSERT INTO workspace_settings (workspace_id, setting_key, setting_value)
+         VALUES ($1, 'quota_banner_dismissed', 'true')
+         ON CONFLICT (workspace_id, setting_key)
+         DO UPDATE SET setting_value = 'true', updated_at = NOW()`,
+        [workspaceId]
+      );
+
+      res.json({ success: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error('[Quotas] Dismiss no-quotas banner error:', message);
+      res.status(500).json({ error: message });
+    }
+  }
+);
+
 export default router;
