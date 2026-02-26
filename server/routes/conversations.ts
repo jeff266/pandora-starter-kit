@@ -532,9 +532,9 @@ router.get('/:workspaceId/conversations', async (req: Request, res: Response) =>
     }
 
     if (is_internal === 'true') {
-      whereConditions.push('c.is_internal = TRUE');
+      whereConditions.push("(c.custom_fields->>'is_internal')::boolean = TRUE");
     } else if (is_internal === 'false') {
-      whereConditions.push('(c.is_internal = FALSE OR c.is_internal IS NULL)');
+      whereConditions.push("((c.custom_fields->>'is_internal')::boolean = FALSE OR c.custom_fields->>'is_internal' IS NULL)");
     }
 
     const limitNum = parseInt(limit as string, 10);
@@ -548,18 +548,17 @@ router.get('/:workspaceId/conversations', async (req: Request, res: Response) =>
          c.title,
          c.call_date,
          c.duration_seconds,
-         c.rep_email,
+         c.participants,
          c.account_id,
          c.deal_id,
-         c.is_internal,
-         c.call_disposition,
-         c.engagement_quality,
-         c.source_type,
-         c.signals_extracted_at,
+         c.source,
+         c.custom_fields,
+         c.summary,
          a.name as account_name,
          d.name as deal_name,
          d.stage as deal_stage,
-         d.amount as deal_amount
+         d.amount as deal_amount,
+         d.owner as deal_owner
        FROM conversations c
        LEFT JOIN accounts a ON a.id = c.account_id AND a.workspace_id = c.workspace_id
        LEFT JOIN deals d ON d.id = c.deal_id AND d.workspace_id = c.workspace_id
@@ -580,24 +579,39 @@ router.get('/:workspaceId/conversations', async (req: Request, res: Response) =>
     console.log('[Conversations] result count:', result.rows.length, 'total:', countResult.rows[0]?.total);
 
     res.json({
-      conversations: result.rows.map((row: any) => ({
-        id: row.id,
-        title: row.title || 'Untitled Call',
-        call_date: row.call_date ? new Date(row.call_date).toISOString() : null,
-        duration_seconds: row.duration_seconds || null,
-        rep_email: row.rep_email || null,
-        account_id: row.account_id || null,
-        account_name: row.account_name || null,
-        deal_id: row.deal_id || null,
-        deal_name: row.deal_name || null,
-        deal_stage: row.deal_stage || null,
-        deal_amount: row.deal_amount != null ? Number(row.deal_amount) : null,
-        is_internal: row.is_internal || false,
-        call_disposition: row.call_disposition || null,
-        engagement_quality: row.engagement_quality || null,
-        source_type: row.source_type || null,
-        signals_extracted: row.signals_extracted_at != null,
-      })),
+      conversations: result.rows.map((row: any) => {
+        // Extract rep email from participants (could be array of objects or strings)
+        let rep_email = null;
+        if (row.participants && Array.isArray(row.participants)) {
+          const participant = row.participants.find((p: any) =>
+            typeof p === 'object' ? p.email : p.includes('@')
+          );
+          rep_email = typeof participant === 'object' ? participant.email : participant;
+        }
+        // If no participants, try to get from deal owner
+        if (!rep_email && row.deal_owner) {
+          rep_email = row.deal_owner;
+        }
+
+        return {
+          id: row.id,
+          title: row.title || 'Untitled Call',
+          call_date: row.call_date ? new Date(row.call_date).toISOString() : null,
+          duration_seconds: row.duration_seconds || null,
+          rep_email: rep_email || null,
+          account_id: row.account_id || null,
+          account_name: row.account_name || null,
+          deal_id: row.deal_id || null,
+          deal_name: row.deal_name || null,
+          deal_stage: row.deal_stage || null,
+          deal_amount: row.deal_amount != null ? Number(row.deal_amount) : null,
+          is_internal: row.custom_fields?.is_internal || false,
+          call_disposition: row.custom_fields?.call_disposition || null,
+          engagement_quality: row.custom_fields?.engagement_quality || null,
+          source_type: row.source || null,
+          signals_extracted: row.summary != null && row.summary.length > 0,
+        };
+      }),
       pagination: {
         total: parseInt(countResult.rows[0]?.total || '0', 10),
         limit: limitNum,
