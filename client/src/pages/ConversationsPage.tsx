@@ -250,7 +250,7 @@ export default function ConversationsPage() {
             {nextActionGaps.map(gap => (
               <div
                 key={gap.deal_id}
-                onClick={() => navigate(`/workspaces/${workspaceId}/deals/${gap.deal_id}`)}
+                onClick={() => navigate(`/deals/${gap.deal_id}`)}
                 style={{
                   display: 'grid',
                   gridTemplateColumns: '2fr 1fr 1fr 1.5fr 120px',
@@ -354,7 +354,7 @@ export default function ConversationsPage() {
                 }}
                 onClick={() => {
                   if (conv.deal_id) {
-                    navigate(`/workspaces/${workspaceId}/deals/${conv.deal_id}`);
+                    navigate(`/deals/${conv.deal_id}`);
                   }
                 }}
                 onMouseEnter={e => {
