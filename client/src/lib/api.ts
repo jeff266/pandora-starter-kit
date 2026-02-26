@@ -23,7 +23,7 @@ export function getActiveLens(): string | null {
   return _activeLens;
 }
 
-async function request(method: string, path: string, body?: any) {
+async function request(method: string, path: string, body?: any, signal?: AbortSignal) {
   const url = `/api/workspaces/${_workspaceId}${path}`;
   const headers: Record<string, string> = {
     'Authorization': `Bearer ${_token}`,
@@ -38,6 +38,7 @@ async function request(method: string, path: string, body?: any) {
     method,
     headers,
     body: body ? JSON.stringify(body) : undefined,
+    signal,
   });
   if (!res.ok) {
     const text = await res.text();
@@ -47,7 +48,7 @@ async function request(method: string, path: string, body?: any) {
 }
 
 export const api = {
-  get: (path: string) => request('GET', path),
+  get: (path: string, signal?: AbortSignal) => request('GET', path, undefined, signal),
   post: (path: string, body?: any) => request('POST', path, body),
   put: (path: string, body?: any) => request('PUT', path, body),
   patch: (path: string, body?: any) => request('PATCH', path, body),

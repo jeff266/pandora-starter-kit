@@ -570,9 +570,9 @@ router.get('/:workspaceId/conversations/list', async (req: Request, res: Respons
     }
 
     if (is_internal === 'true') {
-      whereConditions.push("(c.custom_fields->>'is_internal')::boolean = TRUE");
+      whereConditions.push('c.is_internal = TRUE');
     } else if (is_internal === 'false') {
-      whereConditions.push("((c.custom_fields->>'is_internal')::boolean = FALSE OR c.custom_fields->>'is_internal' IS NULL)");
+      whereConditions.push('c.is_internal = FALSE');
     }
 
     if (search) {
@@ -610,7 +610,7 @@ router.get('/:workspaceId/conversations/list', async (req: Request, res: Respons
          c.source,
          c.custom_fields,
          c.summary,
-         c.transcript_text,
+         (c.transcript_text IS NOT NULL) AS has_transcript,
          a.name as account_name,
          d.name as deal_name,
          d.stage as deal_stage,
@@ -669,7 +669,7 @@ router.get('/:workspaceId/conversations/list', async (req: Request, res: Respons
           source_type: row.source || null,
           signals_extracted: row.summary != null && row.summary.length > 0,
           summary: row.summary || null,
-          transcript_text: row.transcript_text || null,
+          has_transcript: Boolean(row.has_transcript),
         };
       }),
       pagination: {

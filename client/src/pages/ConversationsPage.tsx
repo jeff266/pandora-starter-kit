@@ -27,7 +27,7 @@ interface Conversation {
   source_type: string | null;
   signals_extracted: boolean;
   summary: string | null;
-  transcript_text: string | null;
+  has_transcript: boolean;
 }
 
 interface ToastItem {
@@ -95,10 +95,12 @@ export default function ConversationsPage() {
 
   useEffect(() => {
     if (!workspaceId) return;
-    initialLoad();
+    const controller = new AbortController();
+    initialLoad(controller.signal);
+    return () => controller.abort();
   }, [workspaceId]);
 
-  async function initialLoad() {
+  async function initialLoad(signal?: AbortSignal) {
     setLoading(true);
     try {
       const params = new URLSearchParams({
@@ -107,8 +109,8 @@ export default function ConversationsPage() {
       });
 
       const [convRes, gapsRes] = await Promise.all([
-        api.get(`/conversations/list?${params}`),
-        api.get(`/conversations/next-action-gaps`),
+        api.get(`/conversations/list?${params}`, signal),
+        api.get(`/conversations/next-action-gaps`, signal),
       ]);
 
       const total = convRes.pagination?.total ?? convRes.conversations?.length ?? 0;
@@ -126,10 +128,11 @@ export default function ConversationsPage() {
 
       // Server mode: also fetch filter option values
       if (mode === 'server') {
-        const opts = await api.get(`/conversations/filter-options`);
+        const opts = await api.get(`/conversations/filter-options`, signal);
         setFilterOptions({ owners: opts.owners || [], stages: opts.stages || [] });
       }
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.name === 'AbortError') return;
       console.error('[ConversationsPage] Failed to load:', err);
     } finally {
       setLoading(false);
@@ -821,7 +824,7 @@ export default function ConversationsPage() {
                               {summarizing.get(conv.id) ? 'Regenerating...' : '↺ Regenerate'}
                             </button>
                           </div>
-                        ) : conv.transcript_text ? (
+                        ) : conv.has_transcript ? (
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                             <span style={{ fontSize: 12, color: colors.textMuted, fontStyle: 'italic' }}>
                               No summary available
