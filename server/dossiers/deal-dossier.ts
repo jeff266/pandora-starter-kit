@@ -339,12 +339,35 @@ function gradeFromScore(s: number): string {
   if (s >= 90) return 'A'; if (s >= 75) return 'B'; if (s >= 50) return 'C'; if (s >= 25) return 'D'; return 'F';
 }
 
+const HUBSPOT_STAGE_LABELS: Record<string, string> = {
+  appointmentscheduled: 'Appointment Scheduled',
+  closedlost: 'Closed Lost',
+  closedwon: 'Closed Won',
+  contractsent: 'Contract Sent',
+  decisionmakerboughtin: 'Decision Maker Bought In',
+  presentationscheduled: 'Presentation Scheduled',
+  qualifiedtobuy: 'Qualified to Buy',
+};
+
 function formatStageLabel(rawStage: string, normalizedStage: string): string {
-  if (!rawStage) return normalizedStage || 'Unknown';
+  if (!rawStage) {
+    return normalizedStage
+      ? normalizedStage.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+      : 'Unknown';
+  }
   if (/^\d+$/.test(rawStage)) {
     return normalizedStage
       ? normalizedStage.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
       : 'Unknown Stage';
+  }
+  const lower = rawStage.toLowerCase();
+  if (HUBSPOT_STAGE_LABELS[lower]) {
+    return HUBSPOT_STAGE_LABELS[lower];
+  }
+  if (/^[a-z]+$/.test(rawStage)) {
+    return normalizedStage
+      ? normalizedStage.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+      : rawStage.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/\b\w/g, c => c.toUpperCase());
   }
   return rawStage;
 }

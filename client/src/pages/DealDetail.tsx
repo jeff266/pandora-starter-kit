@@ -871,8 +871,8 @@ export default function DealDetail() {
                       background: i === stageHistory.length - 1 ? colors.accent : colors.border,
                     }} />
                     <div>
-                      <span style={{ fontSize: 13, fontWeight: 500, color: colors.text, textTransform: 'capitalize' }}>
-                        {s.stage_label || s.stage_normalized?.replace(/_/g, ' ') || s.stage?.replace(/_/g, ' ') || 'Unknown'}
+                      <span style={{ fontSize: 13, fontWeight: 500, color: colors.text }}>
+                        {s.stage_label || s.stage?.replace(/_/g, ' ') || 'Unknown'}
                       </span>
                       <div style={{ fontSize: 11, color: colors.textMuted }}>
                         {s.entered_at ? formatDate(s.entered_at) : ''} {s.days_in_stage ? `· ${Math.round(s.days_in_stage)}d` : ''}
