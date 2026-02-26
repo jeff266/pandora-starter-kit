@@ -1,9 +1,34 @@
 import { query, getClient } from '../db.js';
 import { getContext } from '../context/index.js';
-import { computeDealScores, computeConversationModifier, computeCompositeScore, type DealRow, type CompositeScoreResult } from './deal-scores.js';
+import { computeDealScores, computeConversationModifier, computeCompositeScore, computeInferredPhase, type DealRow, type CompositeScoreResult, type InferredPhase } from './deal-scores.js';
 import { computeContactEngagement, type ContactRow } from './contact-scores.js';
 import { computeAccountHealth, type AccountRow } from './account-scores.js';
 import { getDealRiskScore, getBatchDealRiskScores } from '../tools/deal-risk-score.js';
+
+/**
+ * Check if CRM stage is equivalent to inferred phase
+ * @param crmStage - Normalized CRM stage (e.g., 'negotiation', 'qualification')
+ * @param inferredPhase - Inferred phase from keywords
+ * @returns true if they represent the same buyer journey stage
+ */
+function stagesMatch(crmStage: string | null, inferredPhase: InferredPhase): boolean {
+  if (!crmStage) return false;
+
+  const normalized = crmStage.toLowerCase();
+
+  // Equivalence map: CRM stages that map to inferred phases
+  const STAGE_PHASE_MAP: Record<InferredPhase, string[]> = {
+    pilot: ['pilot', 'proof of concept', 'trial', 'poc'],
+    negotiation: ['negotiation', 'contract review', 'legal review', 'closing', 'proposal accepted'],
+    decision: ['decision maker bought in', 'verbal commit', 'pending signature', 'commit'],
+    evaluation: ['evaluation', 'demo', 'demo conducted', 'proposal reviewed', 'presentation'],
+    discovery: ['discovery', 'qualification', 'qualified', 'new lead', 'prospecting'],
+    stalled: ['on hold', 'paused', 'stalled'],
+  };
+
+  const equivalentStages = STAGE_PHASE_MAP[inferredPhase] || [];
+  return equivalentStages.some(stage => normalized.includes(stage));
+}
 
 async function checkDealHasConversations(workspaceId: string, dealId: string): Promise<boolean> {
   const result = await query<{ exists: boolean }>(
@@ -136,7 +161,7 @@ async function computeDeals(
 
   const allDealIds = deals.map(d => d.id);
   const batchRiskScores = await getBatchDealRiskScores(workspaceId, allDealIds).catch(() => []);
-  const riskScoreMap = new Map(batchRiskScores.map(r => [r.deal_id, r]));
+  const riskScoreMap = new Map(batchRiskScores.map(r => [r.deal_id, r] as const));
 
   const hasAnySkillRuns = batchRiskScores.length > 0 && batchRiskScores[0].skills_evaluated.length > 0;
 
@@ -163,6 +188,34 @@ async function computeDeals(
           const conversationModifierResult = await computeConversationModifier(deal.id, workspaceId);
           const conversationModifier = conversationModifierResult.modifier;
           const closeDateSuspect = conversationModifierResult.close_date_suspect;
+
+          // Fetch conversations for phase inference (reuse same 30-day window)
+          const conversationsForPhase = await query<{ summary: string | null; title: string | null }>(
+            `SELECT summary, title
+             FROM conversations
+             WHERE (deal_id = $1 OR account_id = (
+               SELECT account_id FROM deals WHERE id = $1 AND workspace_id = $2
+             ))
+             AND workspace_id = $2
+             AND call_date >= NOW() - INTERVAL '30 days'
+             ORDER BY call_date DESC
+             LIMIT 3`,
+            [deal.id, workspaceId]
+          );
+
+          const conversationSummaries = conversationsForPhase.rows.map(r =>
+            ((r.summary ?? '') + ' ' + (r.title ?? '')).trim()
+          ).filter(s => s.length > 0);
+
+          // Compute inferred phase
+          const phaseResult = computeInferredPhase(conversationSummaries);
+
+          // Compute phase divergence
+          let phaseDivergence = false;
+          if (phaseResult && phaseResult.confidence >= 0.6) {
+            const dealStageNormalized = (deal as any).stage_normalized;
+            phaseDivergence = !stagesMatch(dealStageNormalized, phaseResult.phase);
+          }
 
           const baseHealthScore = 100 - scores.dealRisk;
           const healthScore = Math.min(100, Math.max(0, Math.round((baseHealthScore + conversationModifier) * 100) / 100));
@@ -244,8 +297,13 @@ async function computeDeals(
                  close_date_suspect = $8,
                  experimental_score = $9,
                  composite_score = $10,
+                 inferred_phase = $11,
+                 phase_confidence = $12,
+                 phase_signals = $13,
+                 phase_inferred_at = NOW(),
+                 phase_divergence = $14,
                  updated_at = NOW()
-             WHERE id = $1 AND workspace_id = $11`,
+             WHERE id = $1 AND workspace_id = $15`,
             [
               deal.id,
               scores.velocityScore,
@@ -257,6 +315,10 @@ async function computeDeals(
               closeDateSuspect,
               experimentalScore,
               productionComposite.score,
+              phaseResult?.phase ?? null,
+              phaseResult?.confidence ?? null,
+              phaseResult ? JSON.stringify(phaseResult.signals) : null,
+              phaseDivergence,
               workspaceId,
             ]
           );
@@ -524,6 +586,34 @@ export async function computeFieldsForDeal(workspaceId: string, dealId: string):
   const conversationModifier = conversationModifierResult.modifier;
   const closeDateSuspect = conversationModifierResult.close_date_suspect;
 
+  // Fetch conversations for phase inference (reuse same 30-day window)
+  const conversationsForPhase = await query<{ summary: string | null; title: string | null }>(
+    `SELECT summary, title
+     FROM conversations
+     WHERE (deal_id = $1 OR account_id = (
+       SELECT account_id FROM deals WHERE id = $1 AND workspace_id = $2
+     ))
+     AND workspace_id = $2
+     AND call_date >= NOW() - INTERVAL '30 days'
+     ORDER BY call_date DESC
+     LIMIT 3`,
+    [deal.id, workspaceId]
+  );
+
+  const conversationSummaries = conversationsForPhase.rows.map(r =>
+    ((r.summary ?? '') + ' ' + (r.title ?? '')).trim()
+  ).filter(s => s.length > 0);
+
+  // Compute inferred phase
+  const phaseResult = computeInferredPhase(conversationSummaries);
+
+  // Compute phase divergence
+  let phaseDivergence = false;
+  if (phaseResult && phaseResult.confidence >= 0.6) {
+    const dealStageNormalized = (deal as any).stage_normalized;
+    phaseDivergence = !stagesMatch(dealStageNormalized, phaseResult.phase);
+  }
+
   const baseHealthScore = 100 - scores.dealRisk;
   const healthScore = Math.min(100, Math.max(0, Math.round((baseHealthScore + conversationModifier) * 100) / 100));
 
@@ -608,8 +698,13 @@ export async function computeFieldsForDeal(workspaceId: string, dealId: string):
            close_date_suspect = $8,
            experimental_score = $9,
            composite_score = $10,
+           inferred_phase = $11,
+           phase_confidence = $12,
+           phase_signals = $13,
+           phase_inferred_at = NOW(),
+           phase_divergence = $14,
            updated_at = NOW()
-       WHERE id = $1 AND workspace_id = $11`,
+       WHERE id = $1 AND workspace_id = $15`,
       [
         deal.id,
         scores.velocityScore,
@@ -621,6 +716,10 @@ export async function computeFieldsForDeal(workspaceId: string, dealId: string):
         closeDateSuspect,
         experimentalScore,
         productionComposite.score,
+        phaseResult?.phase ?? null,
+        phaseResult?.confidence ?? null,
+        phaseResult ? JSON.stringify(phaseResult.signals) : null,
+        phaseDivergence,
         workspaceId,
       ]
     );

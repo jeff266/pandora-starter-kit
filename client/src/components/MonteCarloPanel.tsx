@@ -564,7 +564,7 @@ export default function MonteCarloPanel({ wsId, activePipeline }: { wsId?: strin
       {!pipelineContextBadge && <div style={{ marginBottom: 12 }} />}
 
       <div style={{ display: 'flex', gap: 20, alignItems: 'stretch' }}>
-        <div style={{ flex: '0 0 35%', maxWidth: '35%', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ flex: '0 0 50%', maxWidth: '50%', display: 'flex', flexDirection: 'column', gap: 14 }}>
           <HeadlineColumn
             p10={p10} p50={p50} p90={p90}
             probOfHittingTarget={probOfHittingTarget}
@@ -1143,8 +1143,8 @@ function VarianceDriversColumn({ drivers, maxImpact, anon }: {
   const [hoveredDriver, setHoveredDriver] = useState<{ driver: VarianceDriver; pos: { x: number; y: number; rowHeight: number } } | null>(null);
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8, position: 'relative', minWidth: 0 }}>
-      <div style={{ fontSize: 11, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8, position: 'relative', minWidth: 0, alignItems: 'center' }}>
+      <div style={{ fontSize: 11, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', alignSelf: 'flex-start' }}>
         What Moves The Number
       </div>
 
@@ -1154,10 +1154,11 @@ function VarianceDriversColumn({ drivers, maxImpact, anon }: {
         top5.map((d, i) => {
           const upWidth = maxImpact > 0 ? (d.upsideImpact / maxImpact) * barMaxWidth : 0;
           const downWidth = maxImpact > 0 ? (Math.abs(d.downsideImpact) / maxImpact) * barMaxWidth : 0;
+          const tornadoWidth = barMaxWidth * 2 + 1; // Total width of tornado (left + center + right)
           return (
             <div
               key={i}
-              style={{ display: 'flex', flexDirection: 'column', gap: 2, cursor: 'default', minWidth: 0 }}
+              style={{ display: 'flex', flexDirection: 'column', gap: 2, cursor: 'default', width: tornadoWidth + 80 }}
               onMouseEnter={(e) => {
                 const rect = e.currentTarget.getBoundingClientRect();
                 setHoveredDriver({ driver: d, pos: { x: rect.left, y: rect.top, rowHeight: rect.height } });
@@ -1171,6 +1172,7 @@ function VarianceDriversColumn({ drivers, maxImpact, anon }: {
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
+                textAlign: 'center',
               }}>
                 {d.label}
               </div>
@@ -1193,7 +1195,7 @@ function VarianceDriversColumn({ drivers, maxImpact, anon }: {
                   }} />
                 </div>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, fontFamily: fonts.mono }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, fontFamily: fonts.mono, width: tornadoWidth + 4 }}>
                 <span style={{ color: colors.red }}>-{fmtCompact(Math.abs(anon.amount(d.downsideImpact)))}</span>
                 <span style={{ color: colors.green }}>+{fmtCompact(anon.amount(d.upsideImpact))}</span>
               </div>

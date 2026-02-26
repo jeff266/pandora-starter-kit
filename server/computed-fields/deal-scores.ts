@@ -174,6 +174,29 @@ export interface ConversationModifierResult {
   close_date_suspect: boolean;
 }
 
+export interface PhaseSignal {
+  keyword: string;
+  phase: string;
+  count: number;
+}
+
+export interface PhaseInferenceResult {
+  phase: 'discovery' | 'evaluation' | 'pilot' | 'negotiation' | 'decision' | 'stalled';
+  confidence: number; // 0.0–1.0
+  signals: PhaseSignal[];
+}
+
+export type InferredPhase = 'discovery' | 'evaluation' | 'pilot' | 'negotiation' | 'decision' | 'stalled';
+
+const PHASE_KEYWORDS: Record<InferredPhase, string[]> = {
+  discovery: ['tell me more', 'how does it work', 'what is included', 'intro call', 'first call', 'learn about'],
+  evaluation: ['demo', 'trial', 'proof of concept', 'poc', 'evaluation', 'testing', 'comparing'],
+  pilot: ['pilot', 'onboarding', 'implementation', 'kicked off', 'going live', 'first week', 'launch'],
+  negotiation: ['contract', 'legal', 'procurement', 'redlines', 'terms', 'msa', 'sow', 'pricing review'],
+  decision: ['board approval', 'final decision', 'sign off', 'executive sign', 'approvals', 'last step'],
+  stalled: ['paused', 'budget freeze', 'revisit', 'not a priority', 'put on hold', 'delayed'],
+};
+
 export async function computeConversationModifier(
   dealId: string,
   workspaceId: string
@@ -270,6 +293,78 @@ export async function computeConversationModifier(
     modifier: cappedModifier,
     signals,
     close_date_suspect,
+  };
+}
+
+/**
+ * Infer deal phase from conversation keywords
+ * Uses same 30-day conversation window as conversation modifier
+ *
+ * @param summaries - Array of conversation summary strings from last 30 days
+ * @returns Phase inference result with confidence and signals, or null if insufficient data
+ */
+export function computeInferredPhase(summaries: string[]): PhaseInferenceResult | null {
+  if (!summaries || summaries.length === 0) {
+    return null;
+  }
+
+  // Combine all summaries into single text for scanning
+  const combinedText = summaries.join(' ').toLowerCase();
+
+  // Track hits per phase
+  const phaseHits = new Map<InferredPhase, PhaseSignal[]>();
+  let totalHits = 0;
+
+  // Scan for all keywords across all phases
+  for (const [phase, keywords] of Object.entries(PHASE_KEYWORDS)) {
+    const signals: PhaseSignal[] = [];
+
+    for (const keyword of keywords) {
+      const regex = new RegExp(`\\b${keyword.replace(/\s+/g, '\\s+')}\\b`, 'gi');
+      const matches = combinedText.match(regex);
+      const count = matches ? matches.length : 0;
+
+      if (count > 0) {
+        signals.push({ keyword, phase: phase as InferredPhase, count });
+        totalHits += count;
+      }
+    }
+
+    if (signals.length > 0) {
+      phaseHits.set(phase as InferredPhase, signals);
+    }
+  }
+
+  // Require at least 2 keyword hits to infer phase
+  if (totalHits < 2) {
+    return null;
+  }
+
+  // Find phase with highest hit count
+  let winningPhase: InferredPhase | null = null;
+  let winningCount = 0;
+  let winningSignals: PhaseSignal[] = [];
+
+  for (const [phase, signals] of Array.from(phaseHits.entries())) {
+    const phaseCount = signals.reduce((sum, s) => sum + s.count, 0);
+    if (phaseCount > winningCount) {
+      winningPhase = phase;
+      winningCount = phaseCount;
+      winningSignals = signals;
+    }
+  }
+
+  if (!winningPhase) {
+    return null;
+  }
+
+  // Confidence = hits for winning phase / total hits across all phases
+  const confidence = Number((winningCount / totalHits).toFixed(2));
+
+  return {
+    phase: winningPhase,
+    confidence,
+    signals: winningSignals,
   };
 }
 

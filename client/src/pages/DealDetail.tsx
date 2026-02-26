@@ -482,6 +482,42 @@ export default function DealDetail() {
                   {daysInStage}d in stage
                 </span>
               )}
+              {deal.phase_divergence && deal.phase_confidence >= 0.6 && (
+                <>
+                  <span style={{ color: colors.textMuted, fontSize: 13 }}>→</span>
+                  <div
+                    style={{
+                      background: colors.yellowSoft,
+                      border: `1px solid ${colors.yellow}`,
+                      borderRadius: 6,
+                      padding: '4px 10px',
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: colors.yellow,
+                      cursor: 'help',
+                    }}
+                    title={`Signals: ${deal.phase_signals?.map((s: any) => `${s.keyword} (${s.count})`).join(', ')}`}
+                  >
+                    ⚡ Likely: {deal.inferred_phase} ({Math.round(deal.phase_confidence * 100)}%)
+                  </div>
+                  <button
+                    onClick={() => {
+                      console.log('Update stage clicked - implement CRM navigation');
+                    }}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: colors.accent,
+                      fontSize: 11,
+                      cursor: 'pointer',
+                      textDecoration: 'underline',
+                      padding: 0,
+                    }}
+                  >
+                    Update stage
+                  </button>
+                </>
+              )}
               {(activeScore || (riskScore && riskScore.grade)) && (() => {
                 const displayGrade = activeScore ? activeScore.grade : riskScore.grade;
                 const displayScore = activeScore ? activeScore.score : riskScore.score;
@@ -679,6 +715,35 @@ export default function DealDetail() {
 
           {coverageGapsExpanded && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {/* Phase Divergence Warning */}
+              {deal.phase_divergence && deal.phase_confidence >= 0.6 && (
+                <div style={{
+                  background: colors.yellowSoft,
+                  border: `1px solid ${colors.yellow}`,
+                  borderRadius: 8,
+                  padding: 12,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 6 }}>
+                    <span style={{ fontSize: 16, flexShrink: 0 }}>⚡</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: colors.yellow }}>
+                      Stage Likely Stale
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 12, color: colors.textSecondary, marginBottom: 4, lineHeight: 1.4 }}>
+                    Conversations suggest this deal is in <strong>{deal.inferred_phase}</strong> phase
+                    but CRM shows <strong>{deal.stage_normalized || deal.stage}</strong> stage.
+                  </div>
+                  <div style={{ fontSize: 11, color: colors.textMuted, lineHeight: 1.4 }}>
+                    Consider updating the stage to unlock accurate benchmarking.
+                  </div>
+                  {deal.phase_signals && deal.phase_signals.length > 0 && (
+                    <div style={{ fontSize: 10, color: colors.textMuted, marginTop: 6, fontStyle: 'italic' }}>
+                      Signals: {deal.phase_signals.map((s: any) => `${s.keyword} (${s.count})`).join(', ')}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {coverageGapsData.total_contacts === 0 && (
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
                   <span style={{ color: colors.yellow, fontSize: 14, marginTop: 1, flexShrink: 0 }}>&#9888;</span>

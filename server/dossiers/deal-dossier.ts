@@ -26,6 +26,11 @@ export interface DealDossier {
     account_name: string | null;
     account_id: string | null;
     custom_fields: Record<string, any>;
+    inferred_phase: string | null;
+    phase_confidence: number | null;
+    phase_signals: Array<{ keyword: string; phase: string; count: number }>;
+    phase_divergence: boolean;
+    phase_inferred_at: string | null;
   };
   contacts: Array<{
     id: string;
@@ -540,6 +545,11 @@ export async function assembleDealDossier(
       account_name: deal.account_name ?? null,
       account_id: deal.account_id ?? null,
       custom_fields: deal.custom_fields || {},
+      inferred_phase: deal.inferred_phase ?? null,
+      phase_confidence: deal.phase_confidence ?? null,
+      phase_signals: deal.phase_signals ?? [],
+      phase_divergence: deal.phase_divergence ?? false,
+      phase_inferred_at: deal.phase_inferred_at ? new Date(deal.phase_inferred_at).toISOString() : null,
     },
     contacts: mappedContacts,
     conversations: mappedConversations,

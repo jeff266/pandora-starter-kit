@@ -130,7 +130,13 @@ If information is missing, note it briefly but focus on what is known.
 
 Conversation weighting: If a conversation occurred within the last 7 days, treat it as the most important signal in the dossier and lead the summary with what was discussed and what it implies for deal momentum. Do not characterize a deal as stalling if a substantive call occurred within the last 7 days.
 
-Stage inference: Compare the current CRM stage against the behavioral signals in the dossier (conversation topics, contact seniority engaged, timeline specificity). If the behavioral signals suggest the deal is further along than the CRM stage indicates, include a sentence flagging this: 'Based on recent conversations, this deal appears to be further along than the current stage reflects — consider updating the stage.'
+Phase inference: Structured phase data is provided above from keyword analysis. If phase_divergence is TRUE, explicitly surface this as a finding in your summary:
+- State the inferred phase and CRM stage side-by-side
+- Explain the divergence using the detected signals
+- Recommend the rep update the CRM stage to match the inferred phase
+- Example: "Recent conversations suggest this deal is in the pilot phase (mentioned 'onboarding', 'kicked off'), but CRM shows Demo Conducted stage. Update the stage to reflect actual progress."
+
+If confidence is below 60%, do not mention phase inference.
 
 After the summary paragraph, output a separate JSON block with recommended actions:
 {"recommended_actions": ["action 1", "action 2", "action 3"]}
@@ -148,12 +154,29 @@ export async function synthesizeDealNarrative(
 ): Promise<{ narrative: string; recommended_actions: string[] }> {
   const context = buildDealContext(dossier);
 
+  // Build phase inference context
+  let phaseContext = '';
+  if (dossier.deal.inferred_phase && dossier.deal.phase_confidence && dossier.deal.phase_confidence >= 0.6) {
+    const confidencePct = Math.round(dossier.deal.phase_confidence * 100);
+    const signalSummary = dossier.deal.phase_signals
+      .map(s => `${s.keyword} (${s.count})`)
+      .join(', ');
+
+    phaseContext = `\n\nPhase Inference Data:
+- Inferred phase from conversations: ${dossier.deal.inferred_phase} (${confidencePct}% confidence)
+- CRM stage: ${dossier.deal.stage_normalized}
+- Phase divergence: ${dossier.deal.phase_divergence ? 'YES — stages do not match' : 'no'}
+- Signals detected: ${signalSummary}`;
+  } else {
+    phaseContext = '\n\nPhase Inference Data: Insufficient conversation data to infer phase with confidence (< 60%).';
+  }
+
   const response = await callLLM(workspaceId, 'reason', {
     systemPrompt: DEAL_SYSTEM_PROMPT,
     messages: [
       {
         role: 'user' as const,
-        content: `Summarize this deal:\n\n${context}`,
+        content: `Summarize this deal:\n\n${context}${phaseContext}`,
       },
     ],
     maxTokens: 400,
