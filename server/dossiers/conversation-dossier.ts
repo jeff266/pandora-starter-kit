@@ -197,14 +197,49 @@ export async function assembleConversationDossier(
     if (conv.deal_id) {
       dealContext = await loadDealContext(conv.deal_id, workspaceId, client);
 
-      // Load all contacts on this deal
+      // Load all contacts on this deal — exclude internal (seller-side) users
+      // and deduplicate by contact ID, preferring the most specific buying role
       const contactsResult = await client.query(
-        `SELECT c.id, COALESCE(c.first_name, '') || ' ' || COALESCE(c.last_name, '') as name,
+        `SELECT DISTINCT ON (c.id)
+                c.id,
+                TRIM(COALESCE(c.first_name, '') || ' ' || COALESCE(c.last_name, '')) as name,
                 c.title, c.email, dc.buying_role
          FROM deal_contacts dc
          JOIN contacts c ON dc.contact_id = c.id AND c.workspace_id = $1
-         WHERE dc.deal_id = $2 AND dc.workspace_id = $1
-         ORDER BY c.last_name, c.first_name`,
+         WHERE dc.deal_id = $2
+           AND dc.workspace_id = $1
+           AND NOT EXISTS (
+             SELECT 1 FROM jsonb_each_text(
+               (SELECT settings->'owner_map' FROM workspaces WHERE id = $1)
+             ) om
+             WHERE om.value = TRIM(COALESCE(c.first_name, '') || ' ' || COALESCE(c.last_name, ''))
+           )
+           AND (
+             c.email IS NULL
+             OR SPLIT_PART(c.email, '@', 2) NOT IN (
+               SELECT SPLIT_PART(c2.email, '@', 2)
+               FROM contacts c2
+               WHERE c2.workspace_id = $1
+                 AND c2.email LIKE '%@%'
+                 AND SPLIT_PART(c2.email, '@', 2) NOT IN (
+                   'gmail.com','yahoo.com','hotmail.com','outlook.com',
+                   'icloud.com','me.com','aol.com','protonmail.com'
+                 )
+                 AND EXISTS (
+                   SELECT 1 FROM jsonb_each_text(
+                     (SELECT settings->'owner_map' FROM workspaces WHERE id = $1)
+                   ) om
+                   WHERE om.value = TRIM(COALESCE(c2.first_name, '') || ' ' || COALESCE(c2.last_name, ''))
+                 )
+             )
+           )
+         ORDER BY c.id,
+           CASE dc.buying_role
+             WHEN 'unknown' THEN 3
+             WHEN null THEN 4
+             ELSE 1
+           END,
+           dc.buying_role NULLS LAST`,
         [workspaceId, conv.deal_id]
       );
       allDealContacts = contactsResult.rows;
