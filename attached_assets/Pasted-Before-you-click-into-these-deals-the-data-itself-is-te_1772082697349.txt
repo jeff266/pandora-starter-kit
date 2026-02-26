@@ -1,0 +1,65 @@
+Before you click into these deals, the data itself is telling us some things worth flagging:
+
+---
+
+## What the Numbers Reveal Before You Open a Single Deal
+
+**Test 1 — "CRM Only" deals look wrong**
+
+360 Human Services: health=85, composite=92. A deal with no conversations and no findings should show `degradation_state: 'crm_only'` and the composite should equal the CRM score (100% weight on CRM). But composite 92 ≠ health 85. If CRM is the only input and gets 100% weight, composite should equal the CRM score exactly. The fact that they differ means either:
+
+- The graceful degradation weight redistribution isn't working correctly, OR
+- This deal actually has findings or conversations that aren't showing in this summary
+
+Check the deal detail and look at the Score Breakdown bars. If Findings or Conversations bars show any value other than 0%, the test deal selection is wrong and you need a truly empty deal.
+
+**Test 3 — Behavioral Framework is inverted**
+
+Health=65, composite=58. Composite is *lower* than health. This means skill findings are penalizing the deal below its CRM health score — the skill score must be below 58, dragging the composite down. That's the model working correctly (a finding identified a real problem), but worth confirming the finding makes sense for that deal.
+
+ACES ABA gap is 18.67 — just under the 20-point divergence flag threshold. If you want to confirm the divergence ⚠ badge fires, you need a deal with a 20+ gap. ACES is close but may not trigger it.
+
+---
+
+## What to Look For in the Browser
+
+**Test 1 — Open `/deals/00a66453-7475-4758-81c7-acb06562e6c2`**
+
+Score Breakdown should show:
+```
+CRM Data      ████████  [some %]
+AI Findings   ░░░░░░░░  No data yet  0%
+Conversations ░░░░░░░░  No data yet  0%
+"Weights automatically redistributed based on available data"
+```
+And "Provisional" badge next to the score in the deal header.
+
+If Findings or Conversations show any non-zero value — this isn't a clean test deal. Find one where both are genuinely empty.
+
+**Test 2 — Open `/deals/07581044-7798-410b-be5c-a439ec3cbec1`**
+
+Score Breakdown should show:
+```
+CRM Data      ████████  populated
+AI Findings   ░░░░░░░░  No data yet  0%
+Conversations ████░░░░  populated
+```
+No "Provisional" badge. Degradation state should be `no_findings`.
+
+**Test 3 — Open `/deals/a8509038-7ba4-482b-b654-43c993578976`**
+
+All three bars populated. No Provisional badge. Check whether the ⚠ divergence indicator appears on the score badge — gap is 18.67 so it's right at the threshold edge.
+
+---
+
+## Report Back
+
+Tell me what you actually see on each deal vs. what was expected. Specific things to confirm:
+
+1. Does "Provisional" badge appear on Test 1?
+2. Do the greyed-out bars show "No data yet" label correctly?
+3. Does the weight redistribution note appear ("Weights automatically redistributed...")?
+4. On Test 3, does the ⚠ divergence indicator appear or not?
+5. On any deal — does the Score Breakdown tooltip open correctly on click?
+
+While you're doing that the audit prompt for snapshot history is ready to run in parallel. Fire it in Claude Code now so the results are waiting when you're done with QA.

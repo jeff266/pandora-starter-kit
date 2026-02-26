@@ -1,0 +1,32 @@
+Fix two root cause bugs in the composite scoring system. These are interconnected — fix in order.
+Fix 1: server/tools/deal-risk-score.ts
+Find where the function returns when findings.length === 0. Currently it returns { score: 100, grade: 'A', signal_counts: {...} }. Change it to return null instead.
+Trace all callers of getDealRiskScore() — specifically in engine.ts and deal-dossier.ts. Anywhere that receives the result, add a null check. If the result is null, treat skillScore as null (not 100) so the composite engine's graceful degradation kicks in correctly.
+Fix 2: server/computed-fields/deal-scores.ts — computeCompositeScore()
+Change the function signature to accept has_conversations: boolean as an explicit parameter alongside the score inputs.
+Update the weight redistribution logic:
+
+If has_conversations = false: conversation weight = 0, redistribute to CRM and findings proportionally (existing behavior)
+If has_conversations = true AND conversationScore === 0 (neutral): conversation weight = half normal (0.125 instead of 0.25), redistribute the other half to CRM and findings proportionally
+If has_conversations = true AND conversationScore !== 0: full conversation weight (0.25, existing behavior)
+
+Update degradation_state logic:
+
+crm_only: skillScore is null AND has_conversations is false
+no_findings: skillScore is null AND has_conversations is true
+no_conversations: skillScore is not null AND has_conversations is false
+full: all inputs present
+
+Fix 3: server/computed-fields/engine.ts
+When calling computeCompositeScore(), pass has_conversations: conversationModifierResult.signals.length > 0 || (await checkDealHasConversations(workspaceId, deal.id)).
+Add helper checkDealHasConversations(workspaceId, dealId) that queries: SELECT EXISTS(SELECT 1 FROM conversations WHERE (deal_id = $1 OR account_id = (SELECT account_id FROM deals WHERE id = $1)) AND workspace_id = $2 AND is_internal = FALSE).
+Fix 4: server/dossiers/deal-dossier.ts
+Same change — when calling computeCompositeScore() in the dossier assembly, pass has_conversations based on whether mappedConversations.length > 0.
+Verify after changes:
+The three test deals should now produce:
+
+360 Human Services: degradation_state: 'crm_only', composite = health score exactly, Provisional badge
+Supportive Care ABA: degradation_state: 'no_findings', conversations get reduced weight
+ACES ABA: degradation_state: 'full', all three bars populated, conversations get 25% weight
+
+No migrations. No schema changes.
