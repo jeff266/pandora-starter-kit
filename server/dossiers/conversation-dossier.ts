@@ -312,8 +312,7 @@ async function loadDealContext(
     stage_changed_at: string;
     close_date: string;
     forecast_category: string | null;
-    owner_name: string;
-    owner_email: string;
+    owner: string;
     health_score: number | null;
     inferred_phase: string | null;
     phase_confidence: number | null;
@@ -322,7 +321,7 @@ async function loadDealContext(
     created_at: string;
   }>(
     `SELECT id, name, amount, stage, stage_normalized, stage_changed_at,
-            close_date, forecast_category, owner_name, owner_email, health_score,
+            close_date, forecast_category, owner, health_score,
             inferred_phase, phase_confidence, phase_divergence, phase_signals, created_at
      FROM deals
      WHERE id = $1 AND workspace_id = $2`,
@@ -367,8 +366,8 @@ async function loadDealContext(
     original_close_date: null, // TODO: from field change history
     close_date_pushes: closeDatePushes,
     forecast_category: deal.forecast_category,
-    owner_name: deal.owner_name || 'Unknown',
-    owner_email: deal.owner_email || '',
+    owner_name: deal.owner || 'Unknown',
+    owner_email: deal.owner || '',
     health_score: deal.health_score,
     inferred_phase: deal.inferred_phase,
     phase_confidence: deal.phase_confidence,
