@@ -6,5 +6,3 @@ dist/
 !tsconfig.json
 .cache/
 .local/
-.cache/
-.local/

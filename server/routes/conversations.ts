@@ -468,4 +468,223 @@ router.post('/:id/conversations/without-deals/:conversationId/dismiss', async (r
   }
 });
 
+// ============================================================================
+// General Conversations List Endpoint
+// ============================================================================
+
+/**
+ * GET /api/workspaces/:id/conversations
+ * Returns all conversations with optional filters
+ */
+router.get('/:id/conversations', async (req: Request, res: Response) => {
+  try {
+    const workspaceId = req.params.id;
+    const {
+      deal_id,
+      account_id,
+      rep_email,
+      from_date,
+      to_date,
+      has_deal,
+      is_internal,
+      limit = '50',
+      offset = '0',
+    } = req.query;
+
+    const params: any[] = [workspaceId];
+    const whereConditions: string[] = ['c.workspace_id = $1'];
+    let paramIndex = 2;
+
+    if (deal_id) {
+      whereConditions.push(`c.deal_id = $${paramIndex}`);
+      params.push(deal_id);
+      paramIndex++;
+    }
+
+    if (account_id) {
+      whereConditions.push(`c.account_id = $${paramIndex}`);
+      params.push(account_id);
+      paramIndex++;
+    }
+
+    if (rep_email) {
+      whereConditions.push(`c.rep_email = $${paramIndex}`);
+      params.push(rep_email);
+      paramIndex++;
+    }
+
+    if (from_date) {
+      whereConditions.push(`c.call_date >= $${paramIndex}`);
+      params.push(from_date);
+      paramIndex++;
+    }
+
+    if (to_date) {
+      whereConditions.push(`c.call_date <= $${paramIndex}`);
+      params.push(to_date);
+      paramIndex++;
+    }
+
+    if (has_deal === 'true') {
+      whereConditions.push('c.deal_id IS NOT NULL');
+    } else if (has_deal === 'false') {
+      whereConditions.push('c.deal_id IS NULL');
+    }
+
+    if (is_internal === 'true') {
+      whereConditions.push('c.is_internal = TRUE');
+    } else if (is_internal === 'false') {
+      whereConditions.push('c.is_internal = FALSE');
+    }
+
+    const limitNum = parseInt(limit as string, 10);
+    const offsetNum = parseInt(offset as string, 10);
+
+    const result = await query(
+      `SELECT
+         c.id,
+         c.title,
+         c.call_date,
+         c.duration_seconds,
+         c.rep_email,
+         c.account_id,
+         c.deal_id,
+         c.is_internal,
+         c.call_disposition,
+         c.engagement_quality,
+         c.source_type,
+         c.signals_extracted_at,
+         a.name as account_name,
+         d.name as deal_name,
+         d.stage as deal_stage,
+         d.amount as deal_amount
+       FROM conversations c
+       LEFT JOIN accounts a ON a.id = c.account_id AND a.workspace_id = c.workspace_id
+       LEFT JOIN deals d ON d.id = c.deal_id AND d.workspace_id = c.workspace_id
+       WHERE ${whereConditions.join(' AND ')}
+       ORDER BY c.call_date DESC NULLS LAST
+       LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
+      [...params, limitNum, offsetNum]
+    );
+
+    // Get total count for pagination
+    const countResult = await query(
+      `SELECT COUNT(*) as total
+       FROM conversations c
+       WHERE ${whereConditions.join(' AND ')}`,
+      params
+    );
+
+    res.json({
+      conversations: result.rows.map((row: any) => ({
+        id: row.id,
+        title: row.title || 'Untitled Call',
+        call_date: row.call_date ? new Date(row.call_date).toISOString() : null,
+        duration_seconds: row.duration_seconds || null,
+        rep_email: row.rep_email || null,
+        account_id: row.account_id || null,
+        account_name: row.account_name || null,
+        deal_id: row.deal_id || null,
+        deal_name: row.deal_name || null,
+        deal_stage: row.deal_stage || null,
+        deal_amount: row.deal_amount != null ? Number(row.deal_amount) : null,
+        is_internal: row.is_internal || false,
+        call_disposition: row.call_disposition || null,
+        engagement_quality: row.engagement_quality || null,
+        source_type: row.source_type || null,
+        signals_extracted: row.signals_extracted_at != null,
+      })),
+      pagination: {
+        total: parseInt(countResult.rows[0]?.total || '0', 10),
+        limit: limitNum,
+        offset: offsetNum,
+      },
+    });
+  } catch (err) {
+    console.error('[Conversations List]', err);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+/**
+ * GET /api/workspaces/:id/conversations/next-action-gaps
+ * Returns deals with stale conversations (no follow-up within 3+ days)
+ */
+router.get('/:id/conversations/next-action-gaps', async (req: Request, res: Response) => {
+  try {
+    const workspaceId = req.params.id;
+    const { min_days = '3' } = req.query;
+
+    const { detectNextActionGaps } = await import('../analysis/next-action-gaps.js');
+    const { gaps, summary } = await detectNextActionGaps(workspaceId, parseInt(min_days as string, 10));
+
+    res.json({
+      gaps,
+      summary,
+    });
+  } catch (err) {
+    console.error('[Next Action Gaps]', err);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+/**
+ * POST /api/workspaces/:id/conversations/:conversationId/link
+ * Link a conversation to a deal or dismiss the link suggestion
+ */
+router.post('/:id/conversations/:conversationId/link', async (req: Request, res: Response) => {
+  try {
+    const { id: workspaceId, conversationId } = req.params;
+    const { deal_id, link_method = 'manual', action = 'link' } = req.body;
+
+    if (action === 'dismiss') {
+      // Dismiss the link suggestion (for CWD workflow)
+      await query(
+        `UPDATE conversations
+         SET custom_data = jsonb_set(
+           COALESCE(custom_data, '{}'::jsonb),
+           '{link_dismissed}',
+           'true'::jsonb
+         ),
+         custom_data = jsonb_set(
+           COALESCE(custom_data, '{}'::jsonb),
+           '{link_dismissed_at}',
+           to_jsonb(NOW()::text)
+         )
+         WHERE id = $1 AND workspace_id = $2`,
+        [conversationId, workspaceId]
+      );
+
+      return res.json({ success: true, message: 'Link suggestion dismissed' });
+    }
+
+    if (!deal_id) {
+      return res.status(400).json({ error: 'deal_id is required when action is "link"' });
+    }
+
+    // Link the conversation to the deal
+    await query(
+      `UPDATE conversations
+       SET deal_id = $1,
+           custom_data = jsonb_set(
+             COALESCE(custom_data, '{}'::jsonb),
+             '{link_method}',
+             $2::jsonb
+           ),
+           custom_data = jsonb_set(
+             COALESCE(custom_data, '{}'::jsonb),
+             '{linked_at}',
+             to_jsonb(NOW()::text)
+           )
+       WHERE id = $3 AND workspace_id = $4`,
+      [deal_id, JSON.stringify(link_method), conversationId, workspaceId]
+    );
+
+    res.json({ success: true, message: 'Conversation linked to deal', deal_id });
+  } catch (err) {
+    console.error('[Link Conversation]', err);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 export default router;
