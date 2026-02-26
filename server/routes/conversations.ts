@@ -14,6 +14,7 @@ import { queryConversationSignals } from '../signals/query-conversation-signals.
 import { query } from '../db.js';
 import { computeFieldsForDeal } from '../computed-fields/engine.js';
 import { generateConversationSummary } from '../conversations/summarizer.js';
+import { assembleConversationDossier } from '../dossiers/conversation-dossier.js';
 
 const router = Router({ mergeParams: true });
 
@@ -836,6 +837,93 @@ router.post('/:id/conversations/:conversationId/summarize', async (req: Request,
     console.error('[Summarize]', err);
     const msg = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: msg });
+  }
+});
+
+// ============================================================================
+// Conversation Dossier — full context for conversation detail page
+// ============================================================================
+
+router.get('/:id/conversations/:conversationId/dossier', async (req: Request, res: Response) => {
+  try {
+    const workspaceId = req.params.id;
+    const conversationId = req.params.conversationId;
+
+    const dossier = await assembleConversationDossier(workspaceId, conversationId);
+
+    return res.json(dossier);
+  } catch (err) {
+    console.error('[ConversationDossier]', err);
+    const msg = err instanceof Error ? err.message : String(err);
+
+    if (msg.includes('not found')) {
+      return res.status(404).json({ error: msg });
+    }
+
+    res.status(500).json({ error: 'Failed to load conversation dossier' });
+  }
+});
+
+// ============================================================================
+// Conversation Arc — lightweight timeline for deal pages
+// ============================================================================
+
+router.get('/:id/deals/:dealId/conversation-arc', async (req: Request, res: Response) => {
+  try {
+    const workspaceId = req.params.id;
+    const dealId = req.params.dealId;
+
+    // Load all conversations for this deal
+    const result = await query<{
+      id: string;
+      title: string;
+      started_at: string;
+      duration_seconds: number;
+      summary: string | null;
+      deal_health_before: number | null;
+      deal_health_after: number | null;
+      resolved_participants: any;
+    }>(
+      `SELECT id, title, started_at, duration_seconds, summary,
+              deal_health_before, deal_health_after, resolved_participants
+       FROM conversations
+       WHERE workspace_id = $1 AND deal_id = $2
+       ORDER BY started_at ASC`,
+      [workspaceId, dealId]
+    );
+
+    const arc = result.rows.map(c => {
+      const healthBefore = c.deal_health_before;
+      const healthAfter = c.deal_health_after;
+      const healthDelta = healthBefore !== null && healthAfter !== null
+        ? Math.round((healthAfter - healthBefore) * 10) / 10
+        : null;
+
+      const resolvedParticipants = c.resolved_participants || [];
+      const externalCount = Array.isArray(resolvedParticipants)
+        ? resolvedParticipants.filter((p: any) => p.role === 'external' && p.confidence >= 0.7).length
+        : 0;
+
+      const summaryOneLiner = c.summary
+        ? c.summary.split('.')[0] + (c.summary.includes('.') ? '.' : '')
+        : null;
+
+      return {
+        id: c.id,
+        title: c.title || 'Untitled conversation',
+        started_at: c.started_at,
+        duration_seconds: c.duration_seconds || 0,
+        health_delta: healthDelta,
+        participant_count_external: externalCount,
+        summary_one_liner: summaryOneLiner,
+      };
+    });
+
+    return res.json({ arc });
+  } catch (err) {
+    console.error('[ConversationArc]', err);
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: 'Failed to load conversation arc' });
   }
 });
 

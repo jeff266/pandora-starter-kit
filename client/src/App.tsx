@@ -19,6 +19,7 @@ import AccountDetail from './pages/AccountDetail';
 import DealList from './pages/DealList';
 import AccountList from './pages/AccountList';
 import ConversationsPage from './pages/ConversationsPage';
+import ConversationDetail from './pages/ConversationDetail';
 import SkillsPage from './pages/SkillsPage';
 import SkillRunsPage from './pages/SkillRunsPage';
 import ConnectorsPage from './pages/ConnectorsPage';
@@ -252,6 +253,7 @@ export default function App() {
             <Route path="/portfolio" element={<ConsultantDashboard />} />
             <Route path="/deals" element={<DealList />} />
             <Route path="/deals/:dealId" element={<DealDetail />} />
+            <Route path="/conversations/:conversationId" element={<ConversationDetail />} />
             <Route path="/accounts" element={<AccountList />} />
             <Route path="/accounts/:accountId" element={<AccountDetail />} />
             <Route path="/conversations" element={<ConversationsPage />} />

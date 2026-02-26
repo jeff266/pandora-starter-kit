@@ -5,6 +5,8 @@ import { classifyAndUpdateInternalStatus } from '../analysis/conversation-intern
 import { extractInsightsFromConversations } from '../analysis/deal-insights-extractor.js';
 import { enrichClosedDeal } from '../enrichment/closed-deal-enrichment.js';
 import { getEnrichmentConfig } from '../enrichment/config.js';
+import { resolveConversationParticipants } from '../conversations/resolve-participants.js';
+import { snapshotDealStateAtCall, checkPostCallFollowThrough } from '../conversations/post-call-tracker.js';
 import { extractConversationSignals } from '../conversations/signal-extractor.js';
 import { extractConversationSignals as extractStructuredSignals } from '../signals/extract-conversation-signals.js';
 import { query } from '../db.js';
@@ -33,6 +35,33 @@ export async function emitSyncCompleted(
       const lr = await linkConversations(workspaceId);
       const total = lr.linked.tier1_email + lr.linked.tier2_native + lr.linked.tier3_inferred;
       console.log(`[Linker] Post-sync: ${total} linked, ${lr.stillUnlinked} unlinked (${lr.durationMs}ms)`);
+
+      // Step 1: Resolve speaker identity on conversations
+      resolveConversationParticipants(workspaceId)
+        .then(result => {
+          console.log(`[ParticipantResolver] Post-sync: ${result.processed} conversations, ${result.resolved_internal} internal, ${result.resolved_external} external (${result.duration_ms}ms)`);
+        })
+        .catch(err => {
+          console.error(`[ParticipantResolver] Post-sync failed:`, err instanceof Error ? err.message : err);
+        });
+
+      // Step 2: Snapshot deal state for newly linked conversations
+      snapshotDealStateAtCall(workspaceId)
+        .then(count => {
+          console.log(`[PostCallTracker] Post-sync: ${count} conversation snapshots created`);
+        })
+        .catch(err => {
+          console.error(`[PostCallTracker] Post-sync snapshot failed:`, err instanceof Error ? err.message : err);
+        });
+
+      // Step 3: Check follow-through on older conversations (24h+)
+      checkPostCallFollowThrough(workspaceId)
+        .then(count => {
+          console.log(`[PostCallTracker] Post-sync: ${count} conversations checked for follow-through`);
+        })
+        .catch(err => {
+          console.error(`[PostCallTracker] Post-sync follow-through failed:`, err instanceof Error ? err.message : err);
+        });
     } catch (err) {
       console.error(`[Linker] Post-sync failed:`, err instanceof Error ? err.message : err);
     }
