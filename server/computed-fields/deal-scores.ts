@@ -208,9 +208,9 @@ export async function computeConversationModifier(
        SELECT account_id FROM deals WHERE id = $1 AND workspace_id = $2
      ))
      AND workspace_id = $2
-     AND call_date >= NOW() - INTERVAL '30 days'
+     AND call_date >= NOW() - INTERVAL '90 days'
      ORDER BY call_date DESC
-     LIMIT 3`,
+     LIMIT 5`,
     [dealId, workspaceId]
   );
 
@@ -298,9 +298,9 @@ export async function computeConversationModifier(
 
 /**
  * Infer deal phase from conversation keywords
- * Uses same 30-day conversation window as conversation modifier
+ * Uses same 90-day conversation window as conversation modifier
  *
- * @param summaries - Array of conversation summary strings from last 30 days
+ * @param summaries - Array of conversation summary strings from last 90 days
  * @returns Phase inference result with confidence and signals, or null if insufficient data
  */
 export function computeInferredPhase(summaries: string[]): PhaseInferenceResult | null {

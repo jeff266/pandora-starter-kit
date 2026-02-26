@@ -189,7 +189,7 @@ async function computeDeals(
           const conversationModifier = conversationModifierResult.modifier;
           const closeDateSuspect = conversationModifierResult.close_date_suspect;
 
-          // Fetch conversations for phase inference (reuse same 30-day window)
+          // Fetch conversations for phase inference (90-day window)
           const conversationsForPhase = await query<{ summary: string | null; title: string | null }>(
             `SELECT summary, title
              FROM conversations
@@ -197,9 +197,9 @@ async function computeDeals(
                SELECT account_id FROM deals WHERE id = $1 AND workspace_id = $2
              ))
              AND workspace_id = $2
-             AND call_date >= NOW() - INTERVAL '30 days'
+             AND call_date >= NOW() - INTERVAL '90 days'
              ORDER BY call_date DESC
-             LIMIT 3`,
+             LIMIT 5`,
             [deal.id, workspaceId]
           );
 
@@ -210,12 +210,15 @@ async function computeDeals(
           // Compute inferred phase
           const phaseResult = computeInferredPhase(conversationSummaries);
 
-          // Compute phase divergence
-          let phaseDivergence = false;
-          if (phaseResult && phaseResult.confidence >= 0.6) {
-            const dealStageNormalized = (deal as any).stage_normalized;
-            phaseDivergence = !stagesMatch(dealStageNormalized, phaseResult.phase);
-          }
+          // Compute phase divergence — skip for closed deals
+          const dealStageNormalized = (deal as any).stage_normalized;
+          const isClosedForPhase = ['closed_won', 'closed_lost', 'closedwon', 'closedlost'].includes(
+            (dealStageNormalized || '').toLowerCase().replace(/\s+/g, '')
+          );
+          const phaseDivergence = phaseResult !== null &&
+            phaseResult.confidence >= 0.6 &&
+            !isClosedForPhase &&
+            !stagesMatch(dealStageNormalized, phaseResult.phase);
 
           const baseHealthScore = 100 - scores.dealRisk;
           const healthScore = Math.min(100, Math.max(0, Math.round((baseHealthScore + conversationModifier) * 100) / 100));
@@ -315,9 +318,9 @@ async function computeDeals(
               closeDateSuspect,
               experimentalScore,
               productionComposite.score,
-              phaseResult?.phase ?? null,
-              phaseResult?.confidence ?? null,
-              phaseResult ? JSON.stringify(phaseResult.signals) : null,
+              isClosedForPhase ? null : (phaseResult?.phase ?? null),
+              isClosedForPhase ? null : (phaseResult?.confidence ?? null),
+              isClosedForPhase ? null : (phaseResult ? JSON.stringify(phaseResult.signals) : null),
               phaseDivergence,
               workspaceId,
             ]
@@ -586,7 +589,7 @@ export async function computeFieldsForDeal(workspaceId: string, dealId: string):
   const conversationModifier = conversationModifierResult.modifier;
   const closeDateSuspect = conversationModifierResult.close_date_suspect;
 
-  // Fetch conversations for phase inference (reuse same 30-day window)
+  // Fetch conversations for phase inference (90-day window)
   const conversationsForPhase = await query<{ summary: string | null; title: string | null }>(
     `SELECT summary, title
      FROM conversations
@@ -594,9 +597,9 @@ export async function computeFieldsForDeal(workspaceId: string, dealId: string):
        SELECT account_id FROM deals WHERE id = $1 AND workspace_id = $2
      ))
      AND workspace_id = $2
-     AND call_date >= NOW() - INTERVAL '30 days'
+     AND call_date >= NOW() - INTERVAL '90 days'
      ORDER BY call_date DESC
-     LIMIT 3`,
+     LIMIT 5`,
     [deal.id, workspaceId]
   );
 
@@ -607,12 +610,15 @@ export async function computeFieldsForDeal(workspaceId: string, dealId: string):
   // Compute inferred phase
   const phaseResult = computeInferredPhase(conversationSummaries);
 
-  // Compute phase divergence
-  let phaseDivergence = false;
-  if (phaseResult && phaseResult.confidence >= 0.6) {
-    const dealStageNormalized = (deal as any).stage_normalized;
-    phaseDivergence = !stagesMatch(dealStageNormalized, phaseResult.phase);
-  }
+  // Compute phase divergence — skip for closed deals
+  const dealStageNormalized = (deal as any).stage_normalized;
+  const isClosedForPhase = ['closed_won', 'closed_lost', 'closedwon', 'closedlost'].includes(
+    (dealStageNormalized || '').toLowerCase().replace(/\s+/g, '')
+  );
+  const phaseDivergence = phaseResult !== null &&
+    phaseResult.confidence >= 0.6 &&
+    !isClosedForPhase &&
+    !stagesMatch(dealStageNormalized, phaseResult.phase);
 
   const baseHealthScore = 100 - scores.dealRisk;
   const healthScore = Math.min(100, Math.max(0, Math.round((baseHealthScore + conversationModifier) * 100) / 100));
@@ -716,9 +722,9 @@ export async function computeFieldsForDeal(workspaceId: string, dealId: string):
         closeDateSuspect,
         experimentalScore,
         productionComposite.score,
-        phaseResult?.phase ?? null,
-        phaseResult?.confidence ?? null,
-        phaseResult ? JSON.stringify(phaseResult.signals) : null,
+        isClosedForPhase ? null : (phaseResult?.phase ?? null),
+        isClosedForPhase ? null : (phaseResult?.confidence ?? null),
+        isClosedForPhase ? null : (phaseResult ? JSON.stringify(phaseResult.signals) : null),
         phaseDivergence,
         workspaceId,
       ]
