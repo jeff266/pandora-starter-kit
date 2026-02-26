@@ -13,8 +13,42 @@ import { extractConversationSignals as extractStructuredSignals } from '../signa
 import { queryConversationSignals } from '../signals/query-conversation-signals.js';
 import { query } from '../db.js';
 import { computeFieldsForDeal } from '../computed-fields/engine.js';
+import { generateConversationSummary } from '../conversations/summarizer.js';
 
 const router = Router({ mergeParams: true });
+
+// ============================================================================
+// Rate Limiting for Summary Generation
+// ============================================================================
+
+interface RateLimitEntry {
+  count: number;
+  windowStart: number;
+}
+
+const summarizeRateLimit = new Map<string, RateLimitEntry>();
+const RATE_LIMIT_WINDOW_MS = 3600000; // 1 hour
+const RATE_LIMIT_MAX = 10;
+
+function checkRateLimit(workspaceId: string): boolean {
+  const now = Date.now();
+  const entry = summarizeRateLimit.get(workspaceId);
+
+  // Reset if window expired or first request
+  if (!entry || now - entry.windowStart > RATE_LIMIT_WINDOW_MS) {
+    summarizeRateLimit.set(workspaceId, { count: 1, windowStart: now });
+    return true;
+  }
+
+  // Check limit
+  if (entry.count >= RATE_LIMIT_MAX) {
+    return false;
+  }
+
+  // Increment count
+  entry.count++;
+  return true;
+}
 
 router.post('/:id/conversations/extract-signals', async (req: Request, res: Response) => {
   try {
@@ -554,6 +588,7 @@ router.get('/:workspaceId/conversations/list', async (req: Request, res: Respons
          c.source,
          c.custom_fields,
          c.summary,
+         c.transcript_text,
          a.name as account_name,
          d.name as deal_name,
          d.stage as deal_stage,
@@ -610,6 +645,8 @@ router.get('/:workspaceId/conversations/list', async (req: Request, res: Respons
           engagement_quality: row.custom_fields?.engagement_quality || null,
           source_type: row.source || null,
           signals_extracted: row.summary != null && row.summary.length > 0,
+          summary: row.summary || null,
+          transcript_text: row.transcript_text || null,
         };
       }),
       pagination: {
@@ -702,6 +739,103 @@ router.post('/:id/conversations/:conversationId/link', async (req: Request, res:
   } catch (err) {
     console.error('[Link Conversation]', err);
     res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+/**
+ * POST /api/workspaces/:id/conversations/:conversationId/summarize
+ * Generate or regenerate summary for a single conversation
+ */
+router.post('/:id/conversations/:conversationId/summarize', async (req: Request, res: Response) => {
+  try {
+    const { id: workspaceId, conversationId } = req.params;
+    const force = req.query.force === 'true';
+
+    // 1. Fetch conversation
+    const convResult = await query<{
+      id: string;
+      title: string | null;
+      transcript_text: string | null;
+      summary: string | null;
+      duration_seconds: number | null;
+      participants: any;
+      deal_id: string | null;
+      workspace_id: string;
+    }>(
+      `SELECT id, title, transcript_text, summary, duration_seconds,
+              participants, deal_id, workspace_id
+       FROM conversations
+       WHERE id = $1 AND workspace_id = $2`,
+      [conversationId, workspaceId]
+    );
+
+    if (convResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Conversation not found' });
+    }
+
+    const conv = convResult.rows[0];
+
+    // 2. Check transcript
+    if (!conv.transcript_text || conv.transcript_text.trim().length === 0) {
+      return res.status(400).json({ error: 'No transcript available — cannot generate summary' });
+    }
+
+    // 3. Check existing summary
+    if (conv.summary && !force) {
+      return res.json({
+        summary: conv.summary,
+        regenerated: false,
+        deal_updated: false,
+      });
+    }
+
+    // 4. Rate limit check
+    if (!checkRateLimit(workspaceId)) {
+      return res.status(429).json({
+        error: 'Rate limit exceeded — max 10 summaries per workspace per hour',
+      });
+    }
+
+    // 5. Generate summary
+    console.log(`[Summarize] Generating summary for conversation ${conversationId}`);
+    const summary = await generateConversationSummary(workspaceId, {
+      id: conv.id,
+      title: conv.title,
+      transcript_text: conv.transcript_text,
+      duration_seconds: conv.duration_seconds,
+      participants: conv.participants || [],
+    });
+
+    // 6. Write to DB
+    await query(
+      `UPDATE conversations SET summary = $1, updated_at = NOW() WHERE id = $2`,
+      [summary, conversationId]
+    );
+
+    console.log(`[Summarize] Summary generated for conversation ${conversationId} (${summary.length} chars)`);
+
+    // 7. Trigger deal score update if linked
+    let dealUpdated = false;
+    if (conv.deal_id) {
+      try {
+        await computeFieldsForDeal(workspaceId, conv.deal_id);
+        dealUpdated = true;
+        console.log(`[Summarize] Triggered compute for deal ${conv.deal_id}`);
+      } catch (err) {
+        console.warn(`[Summarize] Failed to compute fields for deal ${conv.deal_id}:`, err);
+        // Don't fail the request if compute fails
+      }
+    }
+
+    return res.json({
+      summary,
+      regenerated: true,
+      deal_updated: dealUpdated,
+    });
+  } catch (err) {
+    console.error('[Summarize]', err);
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
   }
 });
 

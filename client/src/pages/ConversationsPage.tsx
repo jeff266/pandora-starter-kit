@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import { useWorkspace } from '../context/WorkspaceContext';
 import LinkDealModal from '../components/LinkDealModal';
+import Toast from '../components/Toast';
 
 interface Conversation {
   id: string;
@@ -22,6 +23,14 @@ interface Conversation {
   engagement_quality: string | null;
   source_type: string | null;
   signals_extracted: boolean;
+  summary: string | null;
+  transcript_text: string | null;
+}
+
+interface ToastItem {
+  id: string;
+  message: string;
+  type: 'success' | 'error' | 'info';
 }
 
 interface NextActionGap {
@@ -47,6 +56,9 @@ export default function ConversationsPage() {
   const [filter, setFilter] = useState<'all' | 'with_deals' | 'without_deals'>('all');
   const [showLinkModal, setShowLinkModal] = useState(false);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
+  const [summarizing, setSummarizing] = useState<Map<string, boolean>>(new Map());
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!workspaceId) return;
@@ -132,6 +144,49 @@ export default function ConversationsPage() {
     } catch (err) {
       console.error('Failed to dismiss link:', err);
       alert('Failed to dismiss link suggestion');
+    }
+  }
+
+  function showToast(message: string, type: 'success' | 'error' | 'info' = 'success') {
+    const id = Math.random().toString(36);
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 3000);
+  }
+
+  async function handleGenerateSummary(conversationId: string, force: boolean) {
+    setSummarizing(prev => new Map(prev).set(conversationId, true));
+    try {
+      const url = force
+        ? `/conversations/${conversationId}/summarize?force=true`
+        : `/conversations/${conversationId}/summarize`;
+      const res = await api.post(url);
+
+      // Update the conversation in local state with new summary
+      setConversations(prev => prev.map(c =>
+        c.id === conversationId ? { ...c, summary: res.summary } : c
+      ));
+
+      // Auto-expand row to show the generated summary
+      setExpandedRows(prev => new Set(prev).add(conversationId));
+
+      if (res.deal_updated) {
+        showToast('Summary generated · Deal score updated');
+      } else {
+        showToast('Summary generated');
+      }
+    } catch (err: any) {
+      console.error('Failed to generate summary:', err);
+      if (err.response?.status === 429) {
+        showToast('Rate limit reached — try again in an hour', 'error');
+      } else if (err.response?.status === 400) {
+        showToast('No transcript available', 'error');
+      } else {
+        showToast('Failed to generate summary', 'error');
+      }
+    } finally {
+      setSummarizing(prev => new Map(prev).set(conversationId, false));
     }
   }
 
@@ -340,30 +395,34 @@ export default function ConversationsPage() {
               No conversations found
             </div>
           ) : (
-            conversations.map(conv => (
-              <div
-                key={conv.id}
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '2.5fr 1.5fr 1fr 1fr 100px 100px',
-                  gap: 12,
-                  padding: '12px 16px',
-                  borderBottom: `1px solid ${colors.border}`,
-                  cursor: 'pointer',
-                  transition: 'background 0.15s',
-                }}
-                onClick={() => {
-                  if (conv.deal_id) {
-                    navigate(`/deals/${conv.deal_id}`);
-                  }
-                }}
-                onMouseEnter={e => {
-                  e.currentTarget.style.background = colors.surface;
-                }}
-                onMouseLeave={e => {
-                  e.currentTarget.style.background = 'transparent';
-                }}
-              >
+            conversations.map(conv => {
+              const isExpanded = expandedRows.has(conv.id);
+              return (
+                <div key={conv.id}>
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '2.5fr 1.5fr 1fr 1fr 100px 100px',
+                      gap: 12,
+                      padding: '12px 16px',
+                      borderBottom: isExpanded ? 'none' : `1px solid ${colors.border}`,
+                      cursor: 'pointer',
+                      transition: 'background 0.15s',
+                    }}
+                    onClick={() => {
+                      if (!isExpanded) {
+                        setExpandedRows(prev => new Set(prev).add(conv.id));
+                      } else if (conv.deal_id) {
+                        navigate(`/deals/${conv.deal_id}`);
+                      }
+                    }}
+                    onMouseEnter={e => {
+                      e.currentTarget.style.background = colors.surface;
+                    }}
+                    onMouseLeave={e => {
+                      e.currentTarget.style.background = 'transparent';
+                    }}
+                  >
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 2 }}>
                     {conv.title}
@@ -422,7 +481,98 @@ export default function ConversationsPage() {
                   {formatDuration(conv.duration_seconds)}
                 </div>
               </div>
-            ))
+
+              {/* Expanded Summary Section */}
+              {isExpanded && (
+                <div
+                  style={{
+                    padding: '16px',
+                    borderBottom: `1px solid ${colors.border}`,
+                    background: colors.surface,
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: colors.textMuted }}>
+                      Summary
+                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setExpandedRows(prev => {
+                          const next = new Set(prev);
+                          next.delete(conv.id);
+                          return next;
+                        });
+                      }}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: colors.textMuted,
+                        fontSize: 11,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Close ✕
+                    </button>
+                  </div>
+
+                  {conv.summary ? (
+                    <div>
+                      <div style={{ fontSize: 12, color: colors.textSecondary, lineHeight: 1.6, marginBottom: 8 }}>
+                        {conv.summary}
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleGenerateSummary(conv.id, true);
+                        }}
+                        disabled={summarizing.get(conv.id)}
+                        style={{
+                          fontSize: 10,
+                          color: colors.textMuted,
+                          background: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          padding: 0,
+                        }}
+                      >
+                        {summarizing.get(conv.id) ? 'Regenerating...' : '↺ Regenerate'}
+                      </button>
+                    </div>
+                  ) : conv.transcript_text ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 12, color: colors.textMuted, fontStyle: 'italic' }}>
+                        No summary available
+                      </span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleGenerateSummary(conv.id, false);
+                        }}
+                        disabled={summarizing.get(conv.id)}
+                        style={{
+                          fontSize: 11,
+                          color: colors.accent,
+                          background: 'none',
+                          border: `1px solid ${colors.accent}`,
+                          borderRadius: 4,
+                          padding: '2px 8px',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {summarizing.get(conv.id) ? 'Generating...' : 'Generate summary →'}
+                      </button>
+                    </div>
+                  ) : (
+                    <span style={{ fontSize: 12, color: colors.textMuted, fontStyle: 'italic' }}>
+                      No transcript — summary unavailable
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+            );
+          })
           )}
         </div>
       </div>
@@ -440,6 +590,16 @@ export default function ConversationsPage() {
           onDismiss={handleDismissLink}
         />
       )}
+
+      {/* Toast Notifications */}
+      {toasts.map(toast => (
+        <Toast
+          key={toast.id}
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToasts(prev => prev.filter(t => t.id !== toast.id))}
+        />
+      ))}
     </div>
   );
 }
