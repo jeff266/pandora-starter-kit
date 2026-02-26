@@ -564,7 +564,7 @@ export default function MonteCarloPanel({ wsId, activePipeline }: { wsId?: strin
       {!pipelineContextBadge && <div style={{ marginBottom: 12 }} />}
 
       <div style={{ display: 'flex', gap: 20, alignItems: 'stretch' }}>
-        <div style={{ flex: '0 0 45%', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ flex: '0 0 35%', maxWidth: '35%', display: 'flex', flexDirection: 'column', gap: 14 }}>
           <HeadlineColumn
             p10={p10} p50={p50} p90={p90}
             probOfHittingTarget={probOfHittingTarget}
@@ -846,7 +846,6 @@ function HeadlineColumn({ p10, p50, p90, probOfHittingTarget, quota, dataQuality
   const navigate = useNavigate();
   const hasQuota = probOfHittingTarget != null && quota != null;
   const isThinData = dataQualityTier === 1;
-  const [hoveredChip, setHoveredChip] = useState<string | null>(null);
 
   const percentileTooltips: Record<string, string> = {
     P10: 'Pessimistic: Only 10% chance outcome is worse than this',
@@ -908,79 +907,34 @@ function HeadlineColumn({ p10, p50, p90, probOfHittingTarget, quota, dataQuality
         </div>
       )}
 
-      {/* Stacked percentile chips with tooltips */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, position: 'relative' }}>
+      {/* Simple labeled rows */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {[
-          { label: 'P10', value: p10, color: colors.red },
-          { label: 'P50', value: p50, color: colors.text },
-          { label: 'P90', value: p90, color: colors.green },
-        ].map(chip => (
+          { label: 'Floor', key: 'P10', value: p10, color: colors.red },
+          { label: 'Median', key: 'P50', value: p50, color: colors.text },
+          { label: 'Ceiling', key: 'P90', value: p90, color: colors.green },
+        ].map(row => (
           <div
-            key={chip.label}
+            key={row.key}
             style={{
-              background: colors.surfaceRaised,
-              border: `1px solid ${colors.border}`,
-              borderRadius: 6,
-              padding: '5px 10px',
-              fontSize: 11,
-              fontFamily: fonts.mono,
-              color: colors.text,
               display: 'flex',
               justifyContent: 'space-between',
-              alignItems: 'center',
-              cursor: 'help',
-              position: 'relative',
+              alignItems: 'baseline',
+              fontSize: 11,
+              fontFamily: fonts.mono,
             }}
-            onMouseEnter={() => setHoveredChip(chip.label)}
-            onMouseLeave={() => setHoveredChip(null)}
+            title={percentileTooltips[row.key]}
           >
-            <span style={{ color: colors.textMuted, fontSize: 10, marginRight: 8 }}>{chip.label}</span>
-            <span style={{ fontWeight: 600, color: chip.color }}>{fmtCompact(anon.amount(chip.value))}</span>
-
-            {/* Tooltip */}
-            {hoveredChip === chip.label && (
-              <div style={{
-                position: 'absolute',
-                left: '100%',
-                top: '50%',
-                transform: 'translateY(-50%)',
-                marginLeft: 10,
-                background: '#1A1F2B',
-                border: `1px solid ${colors.border}`,
-                borderRadius: 6,
-                padding: '6px 10px',
-                fontSize: 11,
-                color: colors.textSecondary,
-                whiteSpace: 'nowrap',
-                zIndex: 100,
-                boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-                pointerEvents: 'none',
-              }}>
-                {percentileTooltips[chip.label]}
-              </div>
-            )}
+            <span style={{ color: colors.textMuted }}>{row.label}</span>
+            <span style={{ fontWeight: 600, color: row.color }}>{fmtCompact(anon.amount(row.value))}</span>
           </div>
         ))}
       </div>
 
-      <div>
-        <div style={{ display: 'flex', height: 8, borderRadius: 4, overflow: 'hidden', background: colors.surfaceRaised }}>
-          <div style={{
-            width: `${existingPct}%`,
-            background: colors.accent,
-            borderRadius: existingPct === 100 ? 4 : '4px 0 0 4px',
-          }} />
-          <div style={{
-            width: `${projectedPct}%`,
-            background: colors.purple,
-            borderRadius: projectedPct === 100 ? 4 : '0 4px 4px 0',
-          }} />
-        </div>
-        <div style={{ fontSize: 10, color: colors.textMuted, marginTop: 4 }}>
-          <span style={{ color: colors.accent }}>{existingPct}% existing</span>
-          {' · '}
-          <span style={{ color: colors.purple }}>{projectedPct}% new pipeline</span>
-        </div>
+      <div style={{ fontSize: 11, color: colors.textMuted }}>
+        <span style={{ color: colors.accent }}>{existingPct}% existing pipeline</span>
+        {' · '}
+        <span style={{ color: colors.purple }}>{projectedPct}% new pipeline needed</span>
       </div>
     </div>
   );
@@ -996,21 +950,14 @@ function RangeBar({ p10, p50, p90 }: { p10: number; p50: number; p90: number }) 
     <div style={{ padding: '24px 0' }}>
       <div style={{ position: 'relative', height: 6, borderRadius: 3,
                     background: 'rgba(255,255,255,0.08)', margin: '0 12px' }}>
-        {/* Filled range bar */}
+        {/* Filled range bar - monochromatic */}
         <div style={{ position: 'absolute', left: 0, right: 0, top: 0,
                       height: '100%', borderRadius: 3,
-                      background: 'linear-gradient(90deg, #e05c5c, #6488ea, #4caf82)' }} />
+                      background: 'rgba(255,255,255,0.15)' }} />
         {/* P50 marker */}
         <div style={{ position: 'absolute', left: `${p50pct}%`, top: -5,
                       width: 2, height: 16, background: '#fff',
                       transform: 'translateX(-50%)' }} />
-      </div>
-      {/* Labels */}
-      <div style={{ display: 'flex', justifyContent: 'space-between',
-                    marginTop: 8, fontSize: 11, color: 'rgba(255,255,255,0.5)' }}>
-        <span style={{ color: '#e05c5c' }}>P10 {fmtCompact(p10)}</span>
-        <span style={{ color: '#fff', fontWeight: 600 }}>P50 {fmtCompact(p50)}</span>
-        <span style={{ color: '#4caf82' }}>P90 {fmtCompact(p90)}</span>
       </div>
     </div>
   );
