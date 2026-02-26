@@ -39,6 +39,7 @@ export default function QuotaBanner() {
           : typeof period === 'string' ? period : null;
 
         const bannerDismissed = settingsRes.settings?.quota_banner_dismissed === 'true';
+        console.log('[QuotaBanner] Mount check — dismissed state:', bannerDismissed);
 
         setStatus({
           hasQuotas,
@@ -156,7 +157,10 @@ export default function QuotaBanner() {
         <button
           onClick={() => {
             setDismissed(true);
-            api.post('/quotas/dismiss-no-quotas-banner').catch(() => {});
+            console.log('[QuotaBanner] Dismiss clicked — calling API');
+            api.post('/quotas/dismiss-no-quotas-banner')
+              .then(res => console.log('[QuotaBanner] Dismiss response:', res.status, res.data))
+              .catch(err => console.error('[QuotaBanner] Dismiss failed:', err));
           }}
           style={{
             background: 'transparent',

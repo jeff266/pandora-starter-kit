@@ -5,7 +5,6 @@ import { colors, fonts } from '../styles/theme';
 import { formatCurrency, formatTimeAgo } from '../lib/format';
 import Skeleton from './Skeleton';
 import { useDemoMode } from '../contexts/DemoModeContext';
-import { ComposedChart, Area, ReferenceLine, XAxis, YAxis, ResponsiveContainer } from 'recharts';
 
 interface TornadoAssumption {
   label: string;
@@ -565,28 +564,20 @@ export default function MonteCarloPanel({ wsId, activePipeline }: { wsId?: strin
       {!pipelineContextBadge && <div style={{ marginBottom: 12 }} />}
 
       <div style={{ display: 'flex', gap: 20, alignItems: 'stretch' }}>
-        <HeadlineColumn
-          p10={p10} p50={p50} p90={p90}
-          probOfHittingTarget={probOfHittingTarget}
-          quota={quota}
-          dataQualityTier={dataQualityTier}
-          existingPct={existingPct}
-          projectedPct={projectedPct}
-          existingPipelineP50={existingPipelineP50}
-          projectedPipelineP50={projectedPipelineP50}
-          anon={anon}
-        />
-
-        <div style={{ width: 1, background: colors.border, flexShrink: 0 }} />
-
-        <ProbabilityDistribution
-          p10={p10}
-          p50={p50}
-          p90={p90}
-          quota={quota}
-          histogram={histogram || []}
-          anon={anon}
-        />
+        <div style={{ flex: '0 0 45%', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <HeadlineColumn
+            p10={p10} p50={p50} p90={p90}
+            probOfHittingTarget={probOfHittingTarget}
+            quota={quota}
+            dataQualityTier={dataQualityTier}
+            existingPct={existingPct}
+            projectedPct={projectedPct}
+            existingPipelineP50={existingPipelineP50}
+            projectedPipelineP50={projectedPipelineP50}
+            anon={anon}
+          />
+          <RangeBar p10={anon.amount(p10)} p50={anon.amount(p50)} p90={anon.amount(p90)} />
+        </div>
 
         <div style={{ width: 1, background: colors.border, flexShrink: 0 }} />
 
@@ -864,7 +855,7 @@ function HeadlineColumn({ p10, p50, p90, probOfHittingTarget, quota, dataQuality
   };
 
   return (
-    <div style={{ flex: '0 0 30%', display: 'flex', flexDirection: 'column', gap: 14 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       {hasQuota ? (
         <div>
           <div style={{
@@ -995,114 +986,31 @@ function HeadlineColumn({ p10, p50, p90, probOfHittingTarget, quota, dataQuality
   );
 }
 
-function ProbabilityDistribution({ p10, p50, p90, quota, histogram, anon }: {
-  p10: number; p50: number; p90: number;
-  quota: number | null;
-  histogram: { bucketMin: number; bucketMax: number; count: number }[];
-  anon: any;
-}) {
-  // Build chart data from histogram
-  const chartData = histogram.map(bucket => ({
-    value: (bucket.bucketMin + bucket.bucketMax) / 2,
-    frequency: bucket.count,
-  }));
-
-  // Find max frequency for scaling
-  const maxFreq = Math.max(...chartData.map(d => d.frequency), 1);
+function RangeBar({ p10, p50, p90 }: { p10: number; p50: number; p90: number }) {
+  const min = p10;
+  const max = p90;
+  const range = max - min;
+  const p50pct = ((p50 - min) / range) * 100;
 
   return (
-    <div style={{ flex: '0 0 42%', display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <div style={{ fontSize: 11, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
-        Probability Distribution
+    <div style={{ padding: '24px 0' }}>
+      <div style={{ position: 'relative', height: 6, borderRadius: 3,
+                    background: 'rgba(255,255,255,0.08)', margin: '0 12px' }}>
+        {/* Filled range bar */}
+        <div style={{ position: 'absolute', left: 0, right: 0, top: 0,
+                      height: '100%', borderRadius: 3,
+                      background: 'linear-gradient(90deg, #e05c5c, #6488ea, #4caf82)' }} />
+        {/* P50 marker */}
+        <div style={{ position: 'absolute', left: `${p50pct}%`, top: -5,
+                      width: 2, height: 16, background: '#fff',
+                      transform: 'translateX(-50%)' }} />
       </div>
-
-      <div style={{ height: 200, width: '100%' }}>
-        <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={chartData} margin={{ top: 10, right: 10, bottom: 20, left: 10 }}>
-            <defs>
-              <linearGradient id="distributionGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.4}/>
-                <stop offset="95%" stopColor="#3B82F6" stopOpacity={0.05}/>
-              </linearGradient>
-            </defs>
-
-            <XAxis
-              dataKey="value"
-              type="number"
-              domain={['dataMin', 'dataMax']}
-              tick={{ fontSize: 10, fill: colors.textMuted }}
-              tickFormatter={(v) => fmtCompact(anon.amount(v))}
-              stroke={colors.border}
-            />
-
-            <YAxis hide />
-
-            {/* Shaded area distribution */}
-            <Area
-              type="monotone"
-              dataKey="frequency"
-              stroke="none"
-              fill="url(#distributionGradient)"
-              fillOpacity={1}
-            />
-
-            {/* P10 reference line (pessimistic) - no label to avoid overlap */}
-            <ReferenceLine
-              x={p10}
-              stroke={colors.red}
-              strokeWidth={2}
-              strokeOpacity={0.7}
-            />
-
-            {/* P50 reference line (median - most prominent) - no label to avoid overlap */}
-            <ReferenceLine
-              x={p50}
-              stroke="#F1F5F9"
-              strokeWidth={3}
-            />
-
-            {/* P90 reference line (optimistic) - no label to avoid overlap */}
-            <ReferenceLine
-              x={p90}
-              stroke={colors.green}
-              strokeWidth={2}
-              strokeOpacity={0.7}
-            />
-
-            {/* Target reference line (if quota exists) */}
-            {quota != null && (
-              <ReferenceLine
-                x={quota}
-                stroke={colors.yellow}
-                strokeWidth={2}
-                strokeDasharray="4 4"
-                label={{
-                  value: `Target: ${fmtCompact(quota)}`,
-                  position: 'top',
-                  fill: colors.yellow,
-                  fontSize: 11,
-                  fontWeight: 600,
-                }}
-              />
-            )}
-          </ComposedChart>
-        </ResponsiveContainer>
-      </div>
-
-      {/* Legend below chart */}
-      <div style={{ display: 'flex', gap: 12, fontSize: 10, color: colors.textMuted, justifyContent: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <div style={{ width: 12, height: 2, background: colors.red, opacity: 0.7 }} />
-          <span>P10 Pessimistic</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <div style={{ width: 12, height: 3, background: '#F1F5F9' }} />
-          <span>P50 Median</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <div style={{ width: 12, height: 2, background: colors.green, opacity: 0.7 }} />
-          <span>P90 Optimistic</span>
-        </div>
+      {/* Labels */}
+      <div style={{ display: 'flex', justifyContent: 'space-between',
+                    marginTop: 8, fontSize: 11, color: 'rgba(255,255,255,0.5)' }}>
+        <span style={{ color: '#e05c5c' }}>P10 {fmtCompact(p10)}</span>
+        <span style={{ color: '#fff', fontWeight: 600 }}>P50 {fmtCompact(p50)}</span>
+        <span style={{ color: '#4caf82' }}>P90 {fmtCompact(p90)}</span>
       </div>
     </div>
   );
@@ -1288,7 +1196,7 @@ function VarianceDriversColumn({ drivers, maxImpact, anon }: {
   const [hoveredDriver, setHoveredDriver] = useState<{ driver: VarianceDriver; pos: { x: number; y: number; rowHeight: number } } | null>(null);
 
   return (
-    <div style={{ flex: '0 0 28%', display: 'flex', flexDirection: 'column', gap: 8, position: 'relative', minWidth: 0 }}>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8, position: 'relative', minWidth: 0 }}>
       <div style={{ fontSize: 11, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
         What Moves The Number
       </div>
