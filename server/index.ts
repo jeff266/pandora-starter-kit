@@ -436,6 +436,17 @@ async function start(): Promise<void> {
     process.exit(1);
   }
 
+  const dbMs = Math.round(tDb! - t0);
+  console.log(`[server] Core startup complete in ${dbMs}ms — deferring initialization`);
+
+  setTimeout(() => {
+    initializeAfterStart(t0, tDb!).catch(err => {
+      console.error('[server] Post-start initialization error:', err);
+    });
+  }, 100);
+}
+
+async function initializeAfterStart(t0: number, tDb: number): Promise<void> {
   try {
     const { seedProductionData } = await import('./seed-production.js');
     await seedProductionData();
@@ -478,13 +489,12 @@ async function start(): Promise<void> {
   cleanupReportFiles();
   setInterval(cleanupReportFiles, 60 * 60 * 1000);
 
-  // Cleanup old document files every 30 minutes
   const fs = await import('fs');
   setInterval(() => {
     const dir = '/tmp/pandora-docs';
     if (!fs.existsSync(dir)) return;
     const files = fs.readdirSync(dir);
-    const cutoff = Date.now() - 60 * 60 * 1000; // 1 hour
+    const cutoff = Date.now() - 60 * 60 * 1000;
     for (const f of files) {
       try {
         const filePath = path.join(dir, f);
@@ -503,17 +513,14 @@ async function start(): Promise<void> {
   const dbPool = (await import('./db.js')).default;
   startActionExpiryScheduler(dbPool);
 
-  // Report scheduler - check every minute for due reports
   const { checkScheduledReports, initializeScheduledReports } = await import('./reports/scheduler.js');
-  await initializeScheduledReports(); // Initialize next_due_at for existing reports
-  setInterval(checkScheduledReports, 60 * 1000); // Check every minute
+  await initializeScheduledReports();
+  setInterval(checkScheduledReports, 60 * 1000);
 
-  // Notification digest flush - check every 15 minutes
   const { flushDigests } = await import('./notifications/digest.js');
   setInterval(flushDigests, 15 * 60 * 1000);
   console.log('[NotificationDigest] Digest flush scheduler started (every 15 min)');
 
-  // Annotation cleanup - daily at 3 AM UTC
   const runAnnotationCleanup = () => {
     const now = new Date();
     if (now.getUTCHours() === 3 && now.getUTCMinutes() === 0) {
@@ -522,17 +529,16 @@ async function start(): Promise<void> {
       });
     }
   };
-  // Check every minute (piggyback on existing minute-interval checks if any)
   setInterval(runAnnotationCleanup, 60000);
 
   setServerReady();
 
   const tTotal = performance.now();
-  const dbMs = Math.round(tDb! - t0);
-  const migrationMs = Math.round(tMigration - tDb!);
+  const migrationMs = Math.round(tMigration - tDb);
   const registrationMs = Math.round(tRegistration - tMigration);
   const schedulerMs = Math.round(tSchedulers - tRegistration);
   const totalMs = Math.round(tTotal - t0);
+  const dbMs = Math.round(tDb - t0);
   console.log(
     `[server] Pandora v0.1.0 ready in ${totalMs}ms (db: ${dbMs}ms, migration: ${migrationMs}ms, registration: ${registrationMs}ms, schedulers: ${schedulerMs}ms)`
   );
