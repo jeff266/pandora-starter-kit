@@ -18,6 +18,7 @@ import DealDetail from './pages/DealDetail';
 import AccountDetail from './pages/AccountDetail';
 import DealList from './pages/DealList';
 import AccountList from './pages/AccountList';
+import ConversationsPage from './pages/ConversationsPage';
 import SkillsPage from './pages/SkillsPage';
 import SkillRunsPage from './pages/SkillRunsPage';
 import ConnectorsPage from './pages/ConnectorsPage';
@@ -50,6 +51,7 @@ const pageTitles: Record<string, string> = {
   '/portfolio': 'All Clients',
   '/deals': 'Open Deals',
   '/accounts': 'Accounts',
+  '/conversations': 'Conversations',
   '/targets': 'Targets',
   '/agents': 'Agents',
   '/agent-builder': 'Agent Builder',
@@ -146,11 +148,12 @@ export default function App() {
   const fetchBadges = useCallback(async () => {
     if (!currentWorkspace) return;
     try {
-      const [skillsRes, findingsRes, actionsRes, gapRes] = await Promise.allSettled([
+      const [skillsRes, findingsRes, actionsRes, gapRes, conversationsRes] = await Promise.allSettled([
         api.get('/skills'),
         api.get('/findings/summary'),
         api.get('/action-items/summary'),
         api.get('/targets/gap'),
+        api.get(`/workspaces/${currentWorkspace.id}/conversations/next-action-gaps`),
       ]);
       const newBadges: Record<string, number> = {};
       if (skillsRes.status === 'fulfilled') {
@@ -169,6 +172,10 @@ export default function App() {
         // Encode target status as number: 1=on_track(green), 2=at_risk(amber), 3=critical(red), 4=achieved(green)
         const statusMap: Record<string, number> = { 'on_track': 1, 'at_risk': 2, 'critical': 3, 'achieved': 4 };
         newBadges['targets'] = statusMap[gapRes.value.gap_status] || 0;
+      }
+      if (conversationsRes.status === 'fulfilled') {
+        const gaps = conversationsRes.value?.summary;
+        newBadges['conversations'] = gaps?.critical_count || 0;
       }
       setBadges(newBadges);
       setLastRefreshed(new Date());
@@ -247,6 +254,7 @@ export default function App() {
             <Route path="/deals/:dealId" element={<DealDetail />} />
             <Route path="/accounts" element={<AccountList />} />
             <Route path="/accounts/:accountId" element={<AccountDetail />} />
+            <Route path="/conversations" element={<ConversationsPage />} />
             <Route path="/targets" element={<Targets />} />
             <Route path="/skills" element={<SkillsPage />} />
             <Route path="/skills/:skillId/runs" element={<SkillRunsPage />} />
