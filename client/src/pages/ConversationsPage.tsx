@@ -410,11 +410,7 @@ export default function ConversationsPage() {
                       transition: 'background 0.15s',
                     }}
                     onClick={() => {
-                      if (!isExpanded) {
-                        setExpandedRows(prev => new Set(prev).add(conv.id));
-                      } else if (conv.deal_id) {
-                        navigate(`/deals/${conv.deal_id}`);
-                      }
+                      navigate(`/conversations/${conv.id}`);
                     }}
                     onMouseEnter={e => {
                       e.currentTarget.style.background = colors.surface;

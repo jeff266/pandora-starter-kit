@@ -5,6 +5,7 @@ import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import { formatCurrency, formatDate, formatTimeAgo } from '../lib/format';
 import Skeleton from '../components/Skeleton';
+import { useWorkspace } from '../context/WorkspaceContext';
 
 interface ResolvedParticipant {
   name: string;
@@ -125,15 +126,16 @@ interface ConversationDossier {
 }
 
 export default function ConversationDetail() {
-  const { workspaceId, conversationId } = useParams<{ workspaceId: string; conversationId: string }>();
+  const { conversationId } = useParams<{ conversationId: string }>();
   const navigate = useNavigate();
+  const { currentWorkspace } = useWorkspace();
   const [dossier, setDossier] = useState<ConversationDossier | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'impact' | 'actions' | 'coaching'>('impact');
 
   useEffect(() => {
-    if (!conversationId || !workspaceId) return;
+    if (!conversationId || !currentWorkspace) return;
 
     async function loadDossier() {
       try {
@@ -149,7 +151,7 @@ export default function ConversationDetail() {
     }
 
     loadDossier();
-  }, [conversationId, workspaceId]);
+  }, [conversationId, currentWorkspace]);
 
   if (loading) {
     return (
@@ -258,7 +260,7 @@ export default function ConversationDetail() {
             <div>
               <div style={{ fontSize: 11, color: colors.textMuted, marginBottom: 4 }}>Deal</div>
               <Link
-                to={`/workspace/${workspaceId}/deals/${deal_context.deal_id}`}
+                to={`/deals/${deal_context.deal_id}`}
                 style={{ fontSize: 14, fontWeight: 600, color: colors.text, textDecoration: 'none' }}
               >
                 {deal_context.deal_name}
@@ -360,7 +362,6 @@ export default function ConversationDetail() {
               healthImpact={health_impact}
               crmFollowThrough={crm_follow_through}
               conversationArc={conversation_arc}
-              workspaceId={workspaceId!}
             />
           )}
 
@@ -435,13 +436,11 @@ function DealImpactTab({
   healthImpact,
   crmFollowThrough,
   conversationArc,
-  workspaceId,
 }: {
   conversation: ConversationDossier['conversation'];
   healthImpact: ConversationDossier['health_impact'];
   crmFollowThrough: ConversationDossier['crm_follow_through'];
   conversationArc: ConversationArcEntry[];
-  workspaceId: string;
 }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
