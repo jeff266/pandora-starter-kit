@@ -129,6 +129,7 @@ export default function ConversationDetail() {
   const { conversationId } = useParams<{ conversationId: string }>();
   const navigate = useNavigate();
   const { currentWorkspace } = useWorkspace();
+  const workspaceId = currentWorkspace?.id;
   const [dossier, setDossier] = useState<ConversationDossier | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -563,7 +564,7 @@ function DealImpactTab({
             {conversationArc.map(entry => (
               <Link
                 key={entry.id}
-                to={`/workspace/${workspaceId}/conversations/${entry.id}`}
+                to={`/conversations/${entry.id}`}
                 style={{
                   display: 'block',
                   background: entry.is_current ? colors.accent + '10' : colors.surfaceHover,
