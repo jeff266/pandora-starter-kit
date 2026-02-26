@@ -101,7 +101,7 @@ export interface DealDossier {
     score: number;
     grade: string;
     source: 'skill' | 'health';
-    skill_score: number;
+    skill_score: number | null;
     health_score: number | null;
     divergence: number;
     divergence_flag: boolean;
@@ -392,25 +392,25 @@ export async function assembleDealDossier(
   const healthScoreVal = deal?.health_score != null ? Number(deal.health_score) : null;
   const conversationModifier = deal?.conversation_modifier != null ? Number(deal.conversation_modifier) : 0;
   const closeDateSuspect = deal?.close_date_suspect === true;
-  const riskScore = riskResult ?? { score: 100, grade: 'A', signal_counts: { act: 0, watch: 0, notable: 0, info: 0 } };
+  const skillScoreVal = riskResult?.score ?? null;
+  const hasConversations = conversations.length > 0;
 
-  // Normalize conversation modifier (-20 to +20) to 0-100 scale
-  // Base of 50, then add modifier (so -20 = 30, 0 = 50, +20 = 70)
   const conversationScore = conversationModifier !== 0 ? Math.max(0, Math.min(100, 50 + conversationModifier * 2.5)) : null;
 
   const compositeResult = computeCompositeScore(
     healthScoreVal,
-    riskScore.score,
-    conversationScore
+    skillScoreVal,
+    conversationScore,
+    undefined,
+    hasConversations
   );
 
   const activeScore = compositeResult.score;
-  const activeSource: 'skill' | 'health' = (healthScoreVal != null && healthScoreVal < riskScore.score) ? 'health' : 'skill';
+  const activeSource: 'skill' | 'health' = (healthScoreVal != null && skillScoreVal != null && healthScoreVal < skillScoreVal) ? 'health' : 'skill';
 
-  // Calculate divergence as largest gap between any two available inputs
   const availableScores = [
     healthScoreVal,
-    riskScore.score,
+    skillScoreVal,
     conversationScore
   ].filter((s): s is number => s !== null);
 
@@ -590,7 +590,7 @@ export async function assembleDealDossier(
       score: activeScore,
       grade: compositeResult.grade,
       source: activeSource,
-      skill_score: riskScore.score,
+      skill_score: skillScoreVal,
       health_score: healthScoreVal,
       divergence,
       divergence_flag: divergenceFlag,

@@ -3,7 +3,20 @@ import { getContext } from '../context/index.js';
 import { computeDealScores, computeConversationModifier, computeCompositeScore, type DealRow, type CompositeScoreResult } from './deal-scores.js';
 import { computeContactEngagement, type ContactRow } from './contact-scores.js';
 import { computeAccountHealth, type AccountRow } from './account-scores.js';
-import { getDealRiskScore } from '../tools/deal-risk-score.js';
+import { getDealRiskScore, getBatchDealRiskScores } from '../tools/deal-risk-score.js';
+
+async function checkDealHasConversations(workspaceId: string, dealId: string): Promise<boolean> {
+  const result = await query<{ exists: boolean }>(
+    `SELECT EXISTS(
+      SELECT 1 FROM conversations
+      WHERE (deal_id = $1 OR account_id = (SELECT account_id FROM deals WHERE id = $1 AND workspace_id = $2))
+        AND workspace_id = $2
+        AND is_internal = FALSE
+    ) AS exists`,
+    [dealId, workspaceId]
+  );
+  return result.rows[0]?.exists ?? false;
+}
 
 export interface ComputeResult {
   workspaceId: string;
@@ -107,6 +120,26 @@ async function computeDeals(
     }])
   );
 
+  const conversationDeals = await query<{ deal_id: string }>(
+    `SELECT DISTINCT d.id AS deal_id
+     FROM deals d
+     WHERE d.workspace_id = $1
+       AND EXISTS (
+         SELECT 1 FROM conversations cv
+         WHERE (cv.deal_id = d.id OR cv.account_id = d.account_id)
+           AND cv.workspace_id = $1
+           AND cv.is_internal = FALSE
+       )`,
+    [workspaceId]
+  );
+  const dealsWithConversations = new Set(conversationDeals.rows.map(r => r.deal_id));
+
+  const allDealIds = deals.map(d => d.id);
+  const batchRiskScores = await getBatchDealRiskScores(workspaceId, allDealIds).catch(() => []);
+  const riskScoreMap = new Map(batchRiskScores.map(r => [r.deal_id, r]));
+
+  const hasAnySkillRuns = batchRiskScores.length > 0 && batchRiskScores[0].skills_evaluated.length > 0;
+
   const client = await getClient();
   let updated = 0;
 
@@ -128,42 +161,42 @@ async function computeDeals(
       // Get conversation sentiment modifier and signals
       const conversationModifierResult = await computeConversationModifier(deal.id, workspaceId);
       const conversationModifier = conversationModifierResult.modifier;
-      const conversationSignals = conversationModifierResult.signals;
       const closeDateSuspect = conversationModifierResult.close_date_suspect;
 
       const baseHealthScore = 100 - scores.dealRisk;
       const healthScore = Math.min(100, Math.max(0, Math.round((baseHealthScore + conversationModifier) * 100) / 100));
 
-      // Get skill score from findings
+      const riskResult = riskScoreMap.get(deal.id);
       let skillScore: number | null = null;
-      try {
-        const riskResult = await getDealRiskScore(workspaceId, deal.id);
-        skillScore = riskResult.score;
-      } catch {
-        // No findings yet, skill score remains null
+      if (riskResult) {
+        if (riskResult.signals.length > 0 || hasAnySkillRuns) {
+          skillScore = riskResult.score;
+        }
       }
 
-      // Normalize conversation modifier to 0-100 scale
       const conversationScore = conversationModifier !== 0
         ? Math.max(0, Math.min(100, 50 + conversationModifier * 2.5))
         : null;
 
-      // Compute production composite score
+      const hasConversations = conversationModifierResult.signals.length > 0
+        || dealsWithConversations.has(deal.id);
+
       const productionComposite = computeCompositeScore(
         healthScore,
         skillScore,
         conversationScore,
-        prodWeights
+        prodWeights,
+        hasConversations
       );
 
-      // Compute experimental score if workspace has active experimental weights
       let experimentalScore: number | null = null;
       if (expWeights) {
         const experimentalComposite = computeCompositeScore(
           healthScore,
           skillScore,
           conversationScore,
-          expWeights
+          expWeights,
+          hasConversations
         );
         experimentalScore = experimentalComposite.score;
       }
@@ -487,7 +520,6 @@ export async function computeFieldsForDeal(workspaceId: string, dealId: string):
 
   const conversationModifierResult = await computeConversationModifier(deal.id, workspaceId);
   const conversationModifier = conversationModifierResult.modifier;
-  const conversationSignals = conversationModifierResult.signals;
   const closeDateSuspect = conversationModifierResult.close_date_suspect;
 
   const baseHealthScore = 100 - scores.dealRisk;
@@ -496,20 +528,24 @@ export async function computeFieldsForDeal(workspaceId: string, dealId: string):
   let skillScore: number | null = null;
   try {
     const riskResult = await getDealRiskScore(workspaceId, deal.id);
-    skillScore = riskResult.score;
+    skillScore = riskResult?.score ?? null;
   } catch {
-    // No findings yet
+    skillScore = null;
   }
 
   const conversationScore = conversationModifier !== 0
     ? Math.max(0, Math.min(100, 50 + conversationModifier * 2.5))
     : null;
 
+  const hasConversations = conversationModifierResult.signals.length > 0
+    || await checkDealHasConversations(workspaceId, deal.id);
+
   const productionComposite = computeCompositeScore(
     healthScore,
     skillScore,
     conversationScore,
-    prodWeights
+    prodWeights,
+    hasConversations
   );
 
   let experimentalScore: number | null = null;
@@ -518,7 +554,8 @@ export async function computeFieldsForDeal(workspaceId: string, dealId: string):
       healthScore,
       skillScore,
       conversationScore,
-      expWeights
+      expWeights,
+      hasConversations
     );
     experimentalScore = experimentalComposite.score;
   }

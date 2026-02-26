@@ -9,6 +9,10 @@ router.get('/:workspaceId/deals/:dealId/risk-score', async (req, res) => {
   try {
     const { workspaceId, dealId } = req.params;
     const result = await getDealRiskScore(workspaceId, dealId);
+    if (result === null) {
+      res.json({ success: true, data: { deal_id: dealId, score: null, grade: null, signals: [], signal_counts: { act: 0, watch: 0, notable: 0, info: 0 }, skills_evaluated: [], skills_missing: [], data_freshness: null, scored_at: new Date().toISOString(), message: 'No skills have been evaluated for this deal yet' } });
+      return;
+    }
     res.json({ success: true, data: result });
   } catch (err: any) {
     console.error('[deal-intelligence] Risk score error:', err.message);

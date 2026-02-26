@@ -52,7 +52,7 @@ function computeScoreFromSignals(signals: DealRiskSignal[]): {
   return { score: Math.max(0, score), signal_counts };
 }
 
-export async function getDealRiskScore(workspaceId: string, dealId: string): Promise<DealRiskResult> {
+export async function getDealRiskScore(workspaceId: string, dealId: string): Promise<DealRiskResult | null> {
   const [dealResult, findingsResult, skillRunsResult] = await Promise.all([
     query('SELECT id, name FROM deals WHERE id = $1 AND workspace_id = $2', [dealId, workspaceId]),
     query(
@@ -82,11 +82,15 @@ export async function getDealRiskScore(workspaceId: string, dealId: string): Pro
     found_at: r.found_at ? new Date(r.found_at).toISOString() : '',
   }));
 
-  const { score, signal_counts } = computeScoreFromSignals(signals);
-
   const evaluatedSkills = new Set(skillRunsResult.rows.map((r: any) => r.skill_id));
   const skills_evaluated = Array.from(evaluatedSkills);
   const skills_missing = EXPECTED_SKILLS.filter(s => !evaluatedSkills.has(s));
+
+  if (signals.length === 0 && skills_evaluated.length === 0) {
+    return null;
+  }
+
+  const { score, signal_counts } = computeScoreFromSignals(signals);
 
   let data_freshness: string | null = null;
   if (skillRunsResult.rows.length > 0) {

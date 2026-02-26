@@ -80,7 +80,7 @@ interface ActiveScore {
   score: number;
   grade: string;
   source: 'skill' | 'health';
-  skill_score: number;
+  skill_score: number | null;
   health_score: number | null;
   divergence: number;
   divergence_flag: boolean;

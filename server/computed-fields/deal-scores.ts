@@ -284,33 +284,38 @@ export function computeCompositeScore(
   crmScore: number | null,
   skillScore: number | null,
   conversationScore: number | null,
-  weights: { crm: number; findings: number; conversations: number } = { crm: 0.40, findings: 0.35, conversations: 0.25 }
+  weights: { crm: number; findings: number; conversations: number } = { crm: 0.40, findings: 0.35, conversations: 0.25 },
+  hasConversations: boolean = false
 ): CompositeScoreResult {
-  // Determine which inputs are available
   const hasCrm = crmScore !== null;
   const hasFindings = skillScore !== null;
-  const hasConversations = conversationScore !== null;
+  const hasConvScore = conversationScore !== null && conversationScore !== 0;
 
-  // Determine degradation state
   let degradationState: 'full' | 'no_conversations' | 'no_findings' | 'crm_only';
-  if (hasCrm && hasFindings && hasConversations) {
+  if (hasFindings && hasConversations) {
     degradationState = 'full';
-  } else if (hasCrm && hasFindings && !hasConversations) {
+  } else if (hasFindings && !hasConversations) {
     degradationState = 'no_conversations';
-  } else if (hasCrm && !hasFindings && hasConversations) {
+  } else if (!hasFindings && hasConversations) {
     degradationState = 'no_findings';
   } else {
     degradationState = 'crm_only';
   }
 
-  // Calculate redistributed weights
-  const availableInputs: Array<'crm' | 'findings' | 'conversations'> = [];
+  const originalWeights = { ...weights };
+
+  let effectiveConvWeight = 0;
+  if (hasConversations && hasConvScore) {
+    effectiveConvWeight = originalWeights.conversations;
+  } else if (hasConversations && !hasConvScore) {
+    effectiveConvWeight = originalWeights.conversations * 0.5;
+  }
+
+  const availableInputs: Array<'crm' | 'findings'> = [];
   if (hasCrm) availableInputs.push('crm');
   if (hasFindings) availableInputs.push('findings');
-  if (hasConversations) availableInputs.push('conversations');
 
-  if (availableInputs.length === 0) {
-    // No data at all - return default
+  if (availableInputs.length === 0 && effectiveConvWeight === 0) {
     return {
       score: 50,
       grade: 'C',
@@ -319,20 +324,26 @@ export function computeCompositeScore(
     };
   }
 
-  // Redistribute weights proportionally
-  const originalWeights = { ...weights };
-  const totalOriginalWeight = availableInputs.reduce((sum, key) => sum + originalWeights[key], 0);
+  const remainingWeight = 1 - effectiveConvWeight;
+  const totalCrmFindings = availableInputs.reduce((sum, key) => sum + originalWeights[key], 0);
 
-  const weightsUsed = { crm: 0, findings: 0, conversations: 0 };
-  for (const input of availableInputs) {
-    weightsUsed[input] = originalWeights[input] / totalOriginalWeight;
+  const weightsUsed = { crm: 0, findings: 0, conversations: effectiveConvWeight };
+  if (totalCrmFindings > 0) {
+    for (const input of availableInputs) {
+      weightsUsed[input] = (originalWeights[input] / totalCrmFindings) * remainingWeight;
+    }
+  } else if (effectiveConvWeight > 0) {
+    weightsUsed.conversations = 1;
   }
 
-  // Calculate weighted score
   let compositeScore = 0;
   if (hasCrm) compositeScore += crmScore * weightsUsed.crm;
   if (hasFindings) compositeScore += skillScore * weightsUsed.findings;
-  if (hasConversations) compositeScore += conversationScore * weightsUsed.conversations;
+  if (effectiveConvWeight > 0 && conversationScore !== null) {
+    compositeScore += conversationScore * weightsUsed.conversations;
+  } else if (effectiveConvWeight > 0 && hasConversations && !hasConvScore) {
+    compositeScore += 50 * weightsUsed.conversations;
+  }
 
   compositeScore = Math.round(compositeScore * 100) / 100;
   compositeScore = clamp(compositeScore, 0, 100);
