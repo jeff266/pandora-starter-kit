@@ -85,12 +85,6 @@ interface ActiveScore {
   divergence: number;
   divergence_flag: boolean;
   conversation_modifier: number;
-  conversation_signals: Array<{
-    keyword: string;
-    call_title: string;
-    call_date: string;
-    points: number;
-  }>;
   weights_used: { crm: number; findings: number; conversations: number };
   degradation_state: 'full' | 'no_conversations' | 'no_findings' | 'crm_only';
 }
@@ -1392,24 +1386,6 @@ function ScoreBreakdownPanel({
                   marginTop: 2,
                 }}>
                   {c.score.toFixed(0)} × {Math.round(c.weight * 100)}% = {contribution.toFixed(1)}
-                </div>
-              )}
-              {/* Show conversation signals for Conversations contribution */}
-              {c.label === 'Conversations' && activeScore.conversation_signals && activeScore.conversation_signals.length > 0 && (
-                <div style={{
-                  fontSize: 10,
-                  marginTop: 6,
-                  padding: '6px 8px',
-                  background: colors.surfaceRaised,
-                  borderRadius: 4,
-                  color: activeScore.conversation_modifier < 0 ? colors.red : colors.text,
-                }}>
-                  <div style={{ fontWeight: 600, marginBottom: 4 }}>Adjusted by:</div>
-                  {activeScore.conversation_signals.map((signal, sIdx) => (
-                    <div key={sIdx} style={{ marginBottom: 2 }}>
-                      {signal.keyword} ({signal.points > 0 ? '+' : ''}{signal.points}) · from "{signal.call_title}"
-                    </div>
-                  ))}
                 </div>
               )}
               {/* Warning for account conversations not linked to deal */}

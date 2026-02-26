@@ -50,15 +50,6 @@ function buildDealContext(dossier: DealDossier): string {
     }
   }
 
-  const signals = dossier.active_score?.conversation_signals;
-  if (Array.isArray(signals) && signals.length > 0) {
-    const formatted = signals
-      .filter((s: any) => s && typeof s.keyword === 'string')
-      .map((s: any) => `"${s.keyword}" (${s.call_title || 'untitled'}, ${s.call_date?.split('T')[0] || '?'}, ${s.points > 0 ? '+' : ''}${s.points ?? 0}pts)`)
-      .join('; ');
-    if (formatted) lines.push(`\nConversation signals: ${formatted}`);
-  }
-
   if (dossier.conversations.length > 0) {
     lines.push(`\nConversations: ${dossier.conversations.length} linked`);
     const recentConvos = dossier.conversations.slice(0, 3);
