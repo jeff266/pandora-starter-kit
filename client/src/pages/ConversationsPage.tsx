@@ -1,10 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import { useWorkspace } from '../context/WorkspaceContext';
 import LinkDealModal from '../components/LinkDealModal';
 import Toast from '../components/Toast';
+
+const CONVERSATIONS_THRESHOLD = 500;
 
 interface Conversation {
   id: string;
@@ -17,6 +19,7 @@ interface Conversation {
   deal_id: string | null;
   deal_name: string | null;
   deal_stage: string | null;
+  deal_owner: string | null;
   deal_amount: number | null;
   is_internal: boolean;
   call_disposition: string | null;
@@ -46,54 +49,184 @@ interface NextActionGap {
   gap_severity: 'critical' | 'warning' | 'moderate';
 }
 
+interface FilterOptions {
+  owners: string[];
+  stages: string[];
+}
+
 export default function ConversationsPage() {
   const navigate = useNavigate();
   const { currentWorkspace } = useWorkspace();
   const workspaceId = currentWorkspace?.id || '';
+
+  // Core data
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [nextActionGaps, setNextActionGaps] = useState<NextActionGap[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<'all' | 'with_deals' | 'without_deals'>('all');
+  const [filterMode, setFilterMode] = useState<'client' | 'server' | null>(null);
+  const [totalConversations, setTotalConversations] = useState(0);
+
+  // Tabs
+  const [activeTab, setActiveTab] = useState<'needs_attention' | 'all'>('needs_attention');
+
+  // Needs Attention filter
+  const [gapOwnerFilter, setGapOwnerFilter] = useState('');
+
+  // All Conversations filters
+  const [searchQuery, setSearchQuery] = useState('');
+  const [ownerFilter, setOwnerFilter] = useState('');
+  const [stageFilter, setStageFilter] = useState('');
+  const [linkedFilter, setLinkedFilter] = useState<'all' | 'linked' | 'unlinked'>('all');
+
+  // Server-mode specific
+  const [filterOptions, setFilterOptions] = useState<FilterOptions>({ owners: [], stages: [] });
+  const [serverLoading, setServerLoading] = useState(false);
+
+  // UI state
   const [showLinkModal, setShowLinkModal] = useState(false);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   const [summarizing, setSummarizing] = useState<Map<string, boolean>>(new Map());
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
 
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ─── Initial load ─────────────────────────────────────────────────────────
+
   useEffect(() => {
     if (!workspaceId) return;
-    fetchData();
-  }, [workspaceId, filter]);
+    initialLoad();
+  }, [workspaceId]);
 
-  async function fetchData() {
+  async function initialLoad() {
+    setLoading(true);
     try {
-      setLoading(true);
-      const params = new URLSearchParams();
-      if (filter === 'with_deals') params.set('has_deal', 'true');
-      if (filter === 'without_deals') params.set('has_deal', 'false');
-      params.set('is_internal', 'false');
-      params.set('limit', '50');
+      const params = new URLSearchParams({
+        is_internal: 'false',
+        limit: String(CONVERSATIONS_THRESHOLD),
+      });
 
-      const [conversationsRes, gapsRes] = await Promise.all([
-        api.get(`/conversations/list?${params.toString()}`),
+      const [convRes, gapsRes] = await Promise.all([
+        api.get(`/conversations/list?${params}`),
         api.get(`/conversations/next-action-gaps`),
       ]);
 
-      console.log('[ConversationsPage] API response:', {
-        conversations: conversationsRes.conversations?.length || 0,
-        gaps: gapsRes.gaps?.length || 0,
-        params: params.toString(),
-      });
+      const total = convRes.pagination?.total ?? convRes.conversations?.length ?? 0;
+      const mode: 'client' | 'server' = total <= CONVERSATIONS_THRESHOLD ? 'client' : 'server';
 
-      setConversations(conversationsRes.conversations || []);
+      setConversations(convRes.conversations || []);
+      setTotalConversations(total);
+      setFilterMode(mode);
       setNextActionGaps(gapsRes.gaps || []);
+
+      // Default to "All" tab when there are no gaps
+      if ((gapsRes.gaps || []).length === 0) {
+        setActiveTab('all');
+      }
+
+      // Server mode: also fetch filter option values
+      if (mode === 'server') {
+        const opts = await api.get(`/conversations/filter-options`);
+        setFilterOptions({ owners: opts.owners || [], stages: opts.stages || [] });
+      }
     } catch (err) {
-      console.error('Failed to load conversations:', err);
-      console.error('Error details:', { workspaceId, filter });
+      console.error('[ConversationsPage] Failed to load:', err);
     } finally {
       setLoading(false);
     }
   }
+
+  // ─── Server-side re-fetch when filters change ─────────────────────────────
+
+  const fetchServerFiltered = useCallback(async (
+    search: string,
+    owner: string,
+    stage: string,
+    linked: 'all' | 'linked' | 'unlinked',
+  ) => {
+    if (filterMode !== 'server') return;
+    setServerLoading(true);
+    try {
+      const params = new URLSearchParams({ is_internal: 'false', limit: '100' });
+      if (search) params.set('search', search);
+      if (owner) params.set('deal_owner', owner);
+      if (stage) params.set('deal_stage', stage);
+      if (linked === 'linked') params.set('has_deal', 'true');
+      if (linked === 'unlinked') params.set('has_deal', 'false');
+
+      const res = await api.get(`/conversations/list?${params}`);
+      setConversations(res.conversations || []);
+      setTotalConversations(res.pagination?.total ?? res.conversations?.length ?? 0);
+    } catch (err) {
+      console.error('[ConversationsPage] Server filter failed:', err);
+    } finally {
+      setServerLoading(false);
+    }
+  }, [filterMode]);
+
+  // Trigger server fetch on filter changes (debounce search only)
+  useEffect(() => {
+    if (filterMode !== 'server') return;
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => {
+      fetchServerFiltered(searchQuery, ownerFilter, stageFilter, linkedFilter);
+    }, searchQuery ? 300 : 0);
+    return () => {
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    };
+  }, [filterMode, searchQuery, ownerFilter, stageFilter, linkedFilter, fetchServerFiltered]);
+
+  // ─── Client-side filtering ────────────────────────────────────────────────
+
+  const filteredConversations = useMemo(() => {
+    if (filterMode !== 'client') return conversations;
+    return conversations.filter(c => {
+      if (searchQuery && !c.title.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+      if (ownerFilter && c.deal_owner !== ownerFilter) return false;
+      if (stageFilter && c.deal_stage !== stageFilter) return false;
+      if (linkedFilter === 'linked' && !c.deal_id) return false;
+      if (linkedFilter === 'unlinked' && c.deal_id) return false;
+      return true;
+    });
+  }, [filterMode, conversations, searchQuery, ownerFilter, stageFilter, linkedFilter]);
+
+  const displayedConversations = filterMode === 'client' ? filteredConversations : conversations;
+
+  // Derive filter option values from loaded data in client mode
+  const clientOwners = useMemo(() => {
+    if (filterMode !== 'client') return [];
+    return [...new Set(conversations.map(c => c.deal_owner).filter(Boolean) as string[])].sort();
+  }, [filterMode, conversations]);
+
+  const clientStages = useMemo(() => {
+    if (filterMode !== 'client') return [];
+    return [...new Set(conversations.map(c => c.deal_stage).filter(Boolean) as string[])].sort();
+  }, [filterMode, conversations]);
+
+  const availableOwners = filterMode === 'client' ? clientOwners : filterOptions.owners;
+  const availableStages = filterMode === 'client' ? clientStages : filterOptions.stages;
+
+  // Gap owner options
+  const gapOwners = useMemo(
+    () => [...new Set(nextActionGaps.map(g => g.deal_owner))].sort(),
+    [nextActionGaps]
+  );
+
+  const filteredGaps = useMemo(
+    () => gapOwnerFilter ? nextActionGaps.filter(g => g.deal_owner === gapOwnerFilter) : nextActionGaps,
+    [nextActionGaps, gapOwnerFilter]
+  );
+
+  const anyFilterActive = searchQuery || ownerFilter || stageFilter || linkedFilter !== 'all';
+
+  function clearAllFilters() {
+    setSearchQuery('');
+    setOwnerFilter('');
+    setStageFilter('');
+    setLinkedFilter('all');
+  }
+
+  // ─── Utility functions ────────────────────────────────────────────────────
 
   function formatDate(dateStr: string | null): string {
     if (!dateStr) return '—';
@@ -118,6 +251,16 @@ export default function ConversationsPage() {
     return colors.textMuted;
   }
 
+  function showToast(message: string, type: 'success' | 'error' | 'info' = 'success') {
+    const id = Math.random().toString(36);
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 3000);
+  }
+
+  // ─── Event handlers ───────────────────────────────────────────────────────
+
   async function handleLinkDeal(conversationId: string, dealId: string) {
     try {
       await api.post(`/conversations/${conversationId}/link`, {
@@ -126,7 +269,7 @@ export default function ConversationsPage() {
       });
       setShowLinkModal(false);
       setSelectedConversation(null);
-      fetchData(); // Refresh
+      initialLoad();
     } catch (err) {
       console.error('Failed to link conversation:', err);
       alert('Failed to link conversation to deal');
@@ -135,24 +278,14 @@ export default function ConversationsPage() {
 
   async function handleDismissLink(conversationId: string) {
     try {
-      await api.post(`/conversations/${conversationId}/link`, {
-        action: 'dismiss',
-      });
+      await api.post(`/conversations/${conversationId}/link`, { action: 'dismiss' });
       setShowLinkModal(false);
       setSelectedConversation(null);
-      fetchData(); // Refresh
+      initialLoad();
     } catch (err) {
       console.error('Failed to dismiss link:', err);
       alert('Failed to dismiss link suggestion');
     }
-  }
-
-  function showToast(message: string, type: 'success' | 'error' | 'info' = 'success') {
-    const id = Math.random().toString(36);
-    setToasts(prev => [...prev, { id, message, type }]);
-    setTimeout(() => {
-      setToasts(prev => prev.filter(t => t.id !== id));
-    }, 3000);
   }
 
   async function handleGenerateSummary(conversationId: string, force: boolean) {
@@ -163,12 +296,9 @@ export default function ConversationsPage() {
         : `/conversations/${conversationId}/summarize`;
       const res = await api.post(url);
 
-      // Update the conversation in local state with new summary
-      setConversations(prev => prev.map(c =>
-        c.id === conversationId ? { ...c, summary: res.summary } : c
-      ));
-
-      // Auto-expand row to show the generated summary
+      setConversations(prev =>
+        prev.map(c => (c.id === conversationId ? { ...c, summary: res.summary } : c))
+      );
       setExpandedRows(prev => new Set(prev).add(conversationId));
 
       if (res.deal_updated) {
@@ -190,6 +320,8 @@ export default function ConversationsPage() {
     }
   }
 
+  // ─── Loading state ────────────────────────────────────────────────────────
+
   if (loading) {
     return (
       <div style={{ padding: 24, fontFamily: fonts.sans }}>
@@ -198,79 +330,282 @@ export default function ConversationsPage() {
     );
   }
 
+  // ─── Render ───────────────────────────────────────────────────────────────
+
   return (
     <div style={{ padding: 24, fontFamily: fonts.sans, maxWidth: 1400, margin: '0 auto' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 700, color: colors.text, margin: 0 }}>Conversations</h1>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button
-            onClick={() => setFilter('all')}
-            style={{
-              background: filter === 'all' ? colors.accent : 'transparent',
-              color: filter === 'all' ? '#fff' : colors.textSecondary,
-              border: `1px solid ${filter === 'all' ? colors.accent : colors.border}`,
-              borderRadius: 6,
-              padding: '6px 12px',
-              fontSize: 12,
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
-          >
-            All
-          </button>
-          <button
-            onClick={() => setFilter('with_deals')}
-            style={{
-              background: filter === 'with_deals' ? colors.accent : 'transparent',
-              color: filter === 'with_deals' ? '#fff' : colors.textSecondary,
-              border: `1px solid ${filter === 'with_deals' ? colors.accent : colors.border}`,
-              borderRadius: 6,
-              padding: '6px 12px',
-              fontSize: 12,
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
-          >
-            Linked to Deals
-          </button>
-          <button
-            onClick={() => setFilter('without_deals')}
-            style={{
-              background: filter === 'without_deals' ? colors.accent : 'transparent',
-              color: filter === 'without_deals' ? '#fff' : colors.textSecondary,
-              border: `1px solid ${filter === 'without_deals' ? colors.accent : colors.border}`,
-              borderRadius: 6,
-              padding: '6px 12px',
-              fontSize: 12,
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
-          >
-            Unlinked
-          </button>
-        </div>
+
+      {/* Page header */}
+      <div style={{ marginBottom: 20 }}>
+        <h1 style={{ fontSize: 24, fontWeight: 700, color: colors.text, margin: 0 }}>
+          Conversations
+        </h1>
       </div>
 
-      {/* Needs Attention Section */}
-      {nextActionGaps.length > 0 && (
-        <div style={{ marginBottom: 32 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-            <h2 style={{ fontSize: 16, fontWeight: 600, color: colors.text, margin: 0 }}>
-              Needs Attention
-            </h2>
-            <span
+      {/* Tab bar */}
+      <div
+        style={{
+          display: 'flex',
+          gap: 0,
+          borderBottom: `1px solid ${colors.border}`,
+          marginBottom: 24,
+        }}
+      >
+        <TabButton
+          label="Needs Attention"
+          badge={nextActionGaps.length || undefined}
+          active={activeTab === 'needs_attention'}
+          onClick={() => setActiveTab('needs_attention')}
+        />
+        <TabButton
+          label="All Conversations"
+          active={activeTab === 'all'}
+          onClick={() => setActiveTab('all')}
+        />
+      </div>
+
+      {/* ── Needs Attention tab ── */}
+      {activeTab === 'needs_attention' && (
+        <div>
+          {nextActionGaps.length === 0 ? (
+            <div
               style={{
-                background: colors.red,
-                color: '#fff',
-                borderRadius: 12,
-                padding: '2px 8px',
-                fontSize: 11,
-                fontWeight: 600,
+                textAlign: 'center',
+                padding: '64px 24px',
+                color: colors.textMuted,
               }}
             >
-              {nextActionGaps.length}
-            </span>
+              <div style={{ fontSize: 32, marginBottom: 12 }}>✓</div>
+              <div style={{ fontSize: 15, fontWeight: 600, color: colors.text, marginBottom: 6 }}>
+                All deals are on track
+              </div>
+              <div style={{ fontSize: 13 }}>No calls are overdue for follow-up.</div>
+            </div>
+          ) : (
+            <>
+              {/* Rep filter */}
+              {gapOwners.length > 1 && (
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+                  <select
+                    value={gapOwnerFilter}
+                    onChange={e => setGapOwnerFilter(e.target.value)}
+                    style={selectStyle}
+                  >
+                    <option value="">All Reps</option>
+                    {gapOwners.map(o => (
+                      <option key={o} value={o}>{o}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div
+                style={{
+                  background: colors.surfaceRaised,
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: 8,
+                  overflow: 'hidden',
+                }}
+              >
+                {/* Header */}
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '2fr 1fr 1fr 1.5fr 120px',
+                    gap: 12,
+                    padding: '10px 16px',
+                    background: colors.surface,
+                    borderBottom: `1px solid ${colors.border}`,
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: colors.textMuted,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.5px',
+                  }}
+                >
+                  <div>Deal</div>
+                  <div>Owner</div>
+                  <div>Stage</div>
+                  <div>Last Call</div>
+                  <div style={{ textAlign: 'right' }}>Days Since</div>
+                </div>
+
+                {/* Rows */}
+                {filteredGaps.length === 0 ? (
+                  <div style={{ padding: 24, textAlign: 'center', fontSize: 13, color: colors.textMuted }}>
+                    No deals match this rep filter.
+                  </div>
+                ) : (
+                  filteredGaps.map(gap => (
+                    <div
+                      key={gap.deal_id}
+                      onClick={() => navigate(`/deals/${gap.deal_id}`)}
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '2fr 1fr 1fr 1.5fr 120px',
+                        gap: 12,
+                        padding: '12px 16px',
+                        borderBottom: `1px solid ${colors.border}`,
+                        cursor: 'pointer',
+                        transition: 'background 0.15s',
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.background = colors.surface; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+                    >
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>
+                          {gap.deal_name}
+                        </div>
+                        {gap.deal_amount != null && (
+                          <div style={{ fontSize: 11, color: colors.textMuted }}>
+                            ${(gap.deal_amount / 1000).toFixed(0)}k
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 12, color: colors.textSecondary }}>{gap.deal_owner}</div>
+                      <div style={{ fontSize: 12, color: colors.textSecondary }}>{gap.deal_stage}</div>
+                      <div style={{ fontSize: 12, color: colors.textSecondary }}>
+                        {gap.last_call_title || formatDate(gap.last_call_date)}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 700,
+                          color: getGapColor(gap.gap_severity),
+                          textAlign: 'right',
+                        }}
+                      >
+                        {gap.days_since_last_call}d
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ── All Conversations tab ── */}
+      {activeTab === 'all' && (
+        <div>
+          {/* Filter bar */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              marginBottom: 16,
+              flexWrap: 'wrap',
+            }}
+          >
+            {/* Search */}
+            <div style={{ position: 'relative', flex: '0 0 280px' }}>
+              <span
+                style={{
+                  position: 'absolute',
+                  left: 10,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  fontSize: 13,
+                  color: colors.textMuted,
+                  pointerEvents: 'none',
+                }}
+              >
+                🔍
+              </span>
+              <input
+                type="text"
+                placeholder="Search calls..."
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                style={{
+                  width: '100%',
+                  paddingLeft: 32,
+                  paddingRight: 12,
+                  paddingTop: 7,
+                  paddingBottom: 7,
+                  fontSize: 13,
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: 6,
+                  background: colors.surface,
+                  color: colors.text,
+                  outline: 'none',
+                  fontFamily: fonts.sans,
+                  boxSizing: 'border-box',
+                }}
+              />
+            </div>
+
+            {/* Owner dropdown */}
+            {availableOwners.length > 0 && (
+              <select
+                value={ownerFilter}
+                onChange={e => setOwnerFilter(e.target.value)}
+                style={selectStyle}
+              >
+                <option value="">All Owners</option>
+                {availableOwners.map(o => (
+                  <option key={o} value={o}>{o}</option>
+                ))}
+              </select>
+            )}
+
+            {/* Stage dropdown */}
+            {availableStages.length > 0 && (
+              <select
+                value={stageFilter}
+                onChange={e => setStageFilter(e.target.value)}
+                style={selectStyle}
+              >
+                <option value="">All Stages</option>
+                {availableStages.map(s => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+            )}
+
+            {/* Linked status */}
+            <select
+              value={linkedFilter}
+              onChange={e => setLinkedFilter(e.target.value as 'all' | 'linked' | 'unlinked')}
+              style={selectStyle}
+            >
+              <option value="all">All Calls</option>
+              <option value="linked">Linked to Deal</option>
+              <option value="unlinked">Unlinked</option>
+            </select>
+
+            {/* Clear + count */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginLeft: 'auto' }}>
+              {anyFilterActive && (
+                <button
+                  onClick={clearAllFilters}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    fontSize: 12,
+                    color: colors.accent,
+                    cursor: 'pointer',
+                    padding: 0,
+                    fontFamily: fonts.sans,
+                  }}
+                >
+                  Clear filters
+                </button>
+              )}
+              <span style={{ fontSize: 12, color: colors.textMuted, whiteSpace: 'nowrap' }}>
+                {filterMode === 'client'
+                  ? `${filteredConversations.length} of ${conversations.length}`
+                  : serverLoading
+                    ? 'Loading...'
+                    : `${conversations.length} of ${totalConversations}`
+                } conversations
+              </span>
+            </div>
           </div>
+
+          {/* Conversations table */}
           <div
             style={{
               background: colors.surfaceRaised,
@@ -283,7 +618,7 @@ export default function ConversationsPage() {
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: '2fr 1fr 1fr 1.5fr 120px',
+                gridTemplateColumns: '2.5fr 1.5fr 1fr 1fr 100px 100px',
                 gap: 12,
                 padding: '10px 16px',
                 background: colors.surface,
@@ -295,283 +630,235 @@ export default function ConversationsPage() {
                 letterSpacing: '0.5px',
               }}
             >
+              <div>Title</div>
+              <div>Account</div>
               <div>Deal</div>
               <div>Owner</div>
-              <div>Stage</div>
-              <div>Last Call</div>
-              <div style={{ textAlign: 'right' }}>Days Since</div>
+              <div>Date</div>
+              <div style={{ textAlign: 'right' }}>Duration</div>
             </div>
+
             {/* Rows */}
-            {nextActionGaps.map(gap => (
-              <div
-                key={gap.deal_id}
-                onClick={() => navigate(`/deals/${gap.deal_id}`)}
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '2fr 1fr 1fr 1.5fr 120px',
-                  gap: 12,
-                  padding: '12px 16px',
-                  borderBottom: `1px solid ${colors.border}`,
-                  cursor: 'pointer',
-                  transition: 'background 0.15s',
-                }}
-                onMouseEnter={e => {
-                  e.currentTarget.style.background = colors.surface;
-                }}
-                onMouseLeave={e => {
-                  e.currentTarget.style.background = 'transparent';
-                }}
-              >
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 2 }}>
-                    {gap.deal_name}
-                  </div>
-                  {gap.deal_amount != null && (
-                    <div style={{ fontSize: 11, color: colors.textMuted }}>
-                      ${(gap.deal_amount / 1000).toFixed(0)}k
-                    </div>
-                  )}
-                </div>
-                <div style={{ fontSize: 12, color: colors.textSecondary }}>{gap.deal_owner}</div>
-                <div style={{ fontSize: 12, color: colors.textSecondary }}>{gap.deal_stage}</div>
-                <div style={{ fontSize: 12, color: colors.textSecondary }}>
-                  {gap.last_call_title || formatDate(gap.last_call_date)}
-                </div>
-                <div
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: getGapColor(gap.gap_severity),
-                    textAlign: 'right',
-                  }}
-                >
-                  {gap.days_since_last_call}d
-                </div>
+            {(serverLoading && filterMode === 'server') ? (
+              <div style={{ padding: 32, textAlign: 'center', fontSize: 13, color: colors.textMuted }}>
+                Filtering...
               </div>
-            ))}
+            ) : displayedConversations.length === 0 ? (
+              <div style={{ padding: 48, textAlign: 'center' }}>
+                <div style={{ fontSize: 13, color: colors.textMuted, marginBottom: 8 }}>
+                  No conversations match your filters.
+                </div>
+                {anyFilterActive && (
+                  <button
+                    onClick={clearAllFilters}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      fontSize: 12,
+                      color: colors.accent,
+                      cursor: 'pointer',
+                      padding: 0,
+                      fontFamily: fonts.sans,
+                    }}
+                  >
+                    Clear filters
+                  </button>
+                )}
+              </div>
+            ) : (
+              displayedConversations.map(conv => {
+                const isExpanded = expandedRows.has(conv.id);
+                return (
+                  <div key={conv.id}>
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '2.5fr 1.5fr 1fr 1fr 100px 100px',
+                        gap: 12,
+                        padding: '12px 16px',
+                        borderBottom: isExpanded ? 'none' : `1px solid ${colors.border}`,
+                        cursor: 'pointer',
+                        transition: 'background 0.15s',
+                      }}
+                      onClick={() => navigate(`/conversations/${conv.id}`)}
+                      onMouseEnter={e => { e.currentTarget.style.background = colors.surface; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+                    >
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 2 }}>
+                          {conv.title}
+                        </div>
+                        {conv.call_disposition && (
+                          <div
+                            style={{
+                              fontSize: 10,
+                              color: colors.textMuted,
+                              textTransform: 'uppercase',
+                              letterSpacing: '0.5px',
+                            }}
+                          >
+                            {conv.call_disposition}
+                          </div>
+                        )}
+                      </div>
+
+                      <div style={{ fontSize: 12, color: colors.textSecondary }}>
+                        {conv.account_name || '—'}
+                      </div>
+
+                      <div>
+                        {conv.deal_name ? (
+                          <div style={{ fontSize: 12, color: colors.accent, fontWeight: 500 }}>
+                            {conv.deal_name.length > 20
+                              ? conv.deal_name.substring(0, 20) + '...'
+                              : conv.deal_name}
+                          </div>
+                        ) : (
+                          <button
+                            onClick={e => {
+                              e.stopPropagation();
+                              setSelectedConversation(conv);
+                              setShowLinkModal(true);
+                            }}
+                            style={{
+                              background: 'transparent',
+                              color: colors.textMuted,
+                              border: `1px dashed ${colors.border}`,
+                              borderRadius: 4,
+                              padding: '2px 8px',
+                              fontSize: 11,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Link Deal
+                          </button>
+                        )}
+                      </div>
+
+                      <div style={{ fontSize: 12, color: colors.textSecondary }}>
+                        {conv.deal_owner
+                          ? conv.deal_owner.split(' ')[0]
+                          : conv.rep_email?.split('@')[0] || '—'}
+                      </div>
+
+                      <div style={{ fontSize: 12, color: colors.textSecondary }}>
+                        {formatDate(conv.call_date)}
+                      </div>
+
+                      <div style={{ fontSize: 12, color: colors.textSecondary, textAlign: 'right' }}>
+                        {formatDuration(conv.duration_seconds)}
+                      </div>
+                    </div>
+
+                    {/* Expandable summary */}
+                    {isExpanded && (
+                      <div
+                        style={{
+                          padding: 16,
+                          borderBottom: `1px solid ${colors.border}`,
+                          background: colors.surface,
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'flex-start',
+                            marginBottom: 12,
+                          }}
+                        >
+                          <div style={{ fontSize: 12, fontWeight: 600, color: colors.textMuted }}>
+                            Summary
+                          </div>
+                          <button
+                            onClick={e => {
+                              e.stopPropagation();
+                              setExpandedRows(prev => {
+                                const next = new Set(prev);
+                                next.delete(conv.id);
+                                return next;
+                              });
+                            }}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              color: colors.textMuted,
+                              fontSize: 11,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Close ✕
+                          </button>
+                        </div>
+
+                        {conv.summary ? (
+                          <div>
+                            <div
+                              style={{
+                                fontSize: 12,
+                                color: colors.textSecondary,
+                                lineHeight: 1.6,
+                                marginBottom: 8,
+                              }}
+                            >
+                              {conv.summary}
+                            </div>
+                            <button
+                              onClick={e => {
+                                e.stopPropagation();
+                                handleGenerateSummary(conv.id, true);
+                              }}
+                              disabled={summarizing.get(conv.id)}
+                              style={{
+                                fontSize: 10,
+                                color: colors.textMuted,
+                                background: 'none',
+                                border: 'none',
+                                cursor: 'pointer',
+                                padding: 0,
+                              }}
+                            >
+                              {summarizing.get(conv.id) ? 'Regenerating...' : '↺ Regenerate'}
+                            </button>
+                          </div>
+                        ) : conv.transcript_text ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span style={{ fontSize: 12, color: colors.textMuted, fontStyle: 'italic' }}>
+                              No summary available
+                            </span>
+                            <button
+                              onClick={e => {
+                                e.stopPropagation();
+                                handleGenerateSummary(conv.id, false);
+                              }}
+                              disabled={summarizing.get(conv.id)}
+                              style={{
+                                fontSize: 11,
+                                color: colors.accent,
+                                background: 'none',
+                                border: `1px solid ${colors.accent}`,
+                                borderRadius: 4,
+                                padding: '2px 8px',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              {summarizing.get(conv.id) ? 'Generating...' : 'Generate summary →'}
+                            </button>
+                          </div>
+                        ) : (
+                          <span style={{ fontSize: 12, color: colors.textMuted, fontStyle: 'italic' }}>
+                            No transcript — summary unavailable
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
       )}
-
-      {/* All Conversations Section */}
-      <div>
-        <h2 style={{ fontSize: 16, fontWeight: 600, color: colors.text, marginBottom: 12 }}>
-          All Conversations
-        </h2>
-        <div
-          style={{
-            background: colors.surfaceRaised,
-            border: `1px solid ${colors.border}`,
-            borderRadius: 8,
-            overflow: 'hidden',
-          }}
-        >
-          {/* Header */}
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '2.5fr 1.5fr 1fr 1fr 100px 100px',
-              gap: 12,
-              padding: '10px 16px',
-              background: colors.surface,
-              borderBottom: `1px solid ${colors.border}`,
-              fontSize: 11,
-              fontWeight: 600,
-              color: colors.textMuted,
-              textTransform: 'uppercase',
-              letterSpacing: '0.5px',
-            }}
-          >
-            <div>Title</div>
-            <div>Account</div>
-            <div>Deal</div>
-            <div>Rep</div>
-            <div>Date</div>
-            <div style={{ textAlign: 'right' }}>Duration</div>
-          </div>
-          {/* Rows */}
-          {conversations.length === 0 ? (
-            <div style={{ padding: 32, textAlign: 'center', fontSize: 13, color: colors.textMuted }}>
-              No conversations found
-            </div>
-          ) : (
-            conversations.map(conv => {
-              const isExpanded = expandedRows.has(conv.id);
-              return (
-                <div key={conv.id}>
-                  <div
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: '2.5fr 1.5fr 1fr 1fr 100px 100px',
-                      gap: 12,
-                      padding: '12px 16px',
-                      borderBottom: isExpanded ? 'none' : `1px solid ${colors.border}`,
-                      cursor: 'pointer',
-                      transition: 'background 0.15s',
-                    }}
-                    onClick={() => {
-                      navigate(`/conversations/${conv.id}`);
-                    }}
-                    onMouseEnter={e => {
-                      e.currentTarget.style.background = colors.surface;
-                    }}
-                    onMouseLeave={e => {
-                      e.currentTarget.style.background = 'transparent';
-                    }}
-                  >
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 2 }}>
-                    {conv.title}
-                  </div>
-                  {conv.call_disposition && (
-                    <div
-                      style={{
-                        fontSize: 10,
-                        color: colors.textMuted,
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.5px',
-                      }}
-                    >
-                      {conv.call_disposition}
-                    </div>
-                  )}
-                </div>
-                <div style={{ fontSize: 12, color: colors.textSecondary }}>
-                  {conv.account_name || '—'}
-                </div>
-                <div>
-                  {conv.deal_name ? (
-                    <div style={{ fontSize: 12, color: colors.accent, fontWeight: 500 }}>
-                      {conv.deal_name.length > 20
-                        ? conv.deal_name.substring(0, 20) + '...'
-                        : conv.deal_name}
-                    </div>
-                  ) : (
-                    <button
-                      onClick={e => {
-                        e.stopPropagation();
-                        setSelectedConversation(conv);
-                        setShowLinkModal(true);
-                      }}
-                      style={{
-                        background: 'transparent',
-                        color: colors.textMuted,
-                        border: `1px dashed ${colors.border}`,
-                        borderRadius: 4,
-                        padding: '2px 8px',
-                        fontSize: 11,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      Link Deal
-                    </button>
-                  )}
-                </div>
-                <div style={{ fontSize: 12, color: colors.textSecondary }}>
-                  {conv.rep_email?.split('@')[0] || '—'}
-                </div>
-                <div style={{ fontSize: 12, color: colors.textSecondary }}>
-                  {formatDate(conv.call_date)}
-                </div>
-                <div style={{ fontSize: 12, color: colors.textSecondary, textAlign: 'right' }}>
-                  {formatDuration(conv.duration_seconds)}
-                </div>
-              </div>
-
-              {/* Expanded Summary Section */}
-              {isExpanded && (
-                <div
-                  style={{
-                    padding: '16px',
-                    borderBottom: `1px solid ${colors.border}`,
-                    background: colors.surface,
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: colors.textMuted }}>
-                      Summary
-                    </div>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setExpandedRows(prev => {
-                          const next = new Set(prev);
-                          next.delete(conv.id);
-                          return next;
-                        });
-                      }}
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        color: colors.textMuted,
-                        fontSize: 11,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      Close ✕
-                    </button>
-                  </div>
-
-                  {conv.summary ? (
-                    <div>
-                      <div style={{ fontSize: 12, color: colors.textSecondary, lineHeight: 1.6, marginBottom: 8 }}>
-                        {conv.summary}
-                      </div>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleGenerateSummary(conv.id, true);
-                        }}
-                        disabled={summarizing.get(conv.id)}
-                        style={{
-                          fontSize: 10,
-                          color: colors.textMuted,
-                          background: 'none',
-                          border: 'none',
-                          cursor: 'pointer',
-                          padding: 0,
-                        }}
-                      >
-                        {summarizing.get(conv.id) ? 'Regenerating...' : '↺ Regenerate'}
-                      </button>
-                    </div>
-                  ) : conv.transcript_text ? (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ fontSize: 12, color: colors.textMuted, fontStyle: 'italic' }}>
-                        No summary available
-                      </span>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleGenerateSummary(conv.id, false);
-                        }}
-                        disabled={summarizing.get(conv.id)}
-                        style={{
-                          fontSize: 11,
-                          color: colors.accent,
-                          background: 'none',
-                          border: `1px solid ${colors.accent}`,
-                          borderRadius: 4,
-                          padding: '2px 8px',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        {summarizing.get(conv.id) ? 'Generating...' : 'Generate summary →'}
-                      </button>
-                    </div>
-                  ) : (
-                    <span style={{ fontSize: 12, color: colors.textMuted, fontStyle: 'italic' }}>
-                      No transcript — summary unavailable
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-            );
-          })
-          )}
-        </div>
-      </div>
 
       {/* Link Deal Modal */}
       {showLinkModal && selectedConversation && workspaceId && (
@@ -599,3 +886,73 @@ export default function ConversationsPage() {
     </div>
   );
 }
+
+// ─── Sub-components ────────────────────────────────────────────────────────
+
+function TabButton({
+  label,
+  badge,
+  active,
+  onClick,
+}: {
+  label: string;
+  badge?: number;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+        padding: '10px 18px',
+        fontSize: 13,
+        fontWeight: active ? 600 : 500,
+        color: active ? colors.accent : colors.textSecondary,
+        background: 'none',
+        border: 'none',
+        borderBottom: active ? `2px solid ${colors.accent}` : '2px solid transparent',
+        cursor: 'pointer',
+        marginBottom: -1,
+        fontFamily: fonts.sans,
+        transition: 'color 0.15s',
+      }}
+    >
+      {label}
+      {badge != null && badge > 0 && (
+        <span
+          style={{
+            background: colors.red,
+            color: '#fff',
+            borderRadius: 10,
+            padding: '1px 6px',
+            fontSize: 10,
+            fontWeight: 700,
+            lineHeight: 1.5,
+          }}
+        >
+          {badge}
+        </span>
+      )}
+    </button>
+  );
+}
+
+// Shared select style
+const selectStyle: React.CSSProperties = {
+  padding: '7px 28px 7px 10px',
+  fontSize: 13,
+  border: `1px solid ${colors.border}`,
+  borderRadius: 6,
+  background: colors.surface,
+  color: colors.text,
+  cursor: 'pointer',
+  outline: 'none',
+  appearance: 'none',
+  backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E")`,
+  backgroundRepeat: 'no-repeat',
+  backgroundPosition: 'right 10px center',
+  fontFamily: 'inherit',
+};

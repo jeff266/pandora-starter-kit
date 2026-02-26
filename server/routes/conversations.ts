@@ -522,6 +522,9 @@ router.get('/:workspaceId/conversations/list', async (req: Request, res: Respons
       to_date,
       has_deal,
       is_internal,
+      search,
+      deal_stage,
+      deal_owner,
       limit = '50',
       offset = '0',
     } = req.query;
@@ -570,6 +573,24 @@ router.get('/:workspaceId/conversations/list', async (req: Request, res: Respons
       whereConditions.push("(c.custom_fields->>'is_internal')::boolean = TRUE");
     } else if (is_internal === 'false') {
       whereConditions.push("((c.custom_fields->>'is_internal')::boolean = FALSE OR c.custom_fields->>'is_internal' IS NULL)");
+    }
+
+    if (search) {
+      whereConditions.push(`c.title ILIKE $${paramIndex}`);
+      params.push(`%${search}%`);
+      paramIndex++;
+    }
+
+    if (deal_stage) {
+      whereConditions.push(`d.stage = $${paramIndex}`);
+      params.push(deal_stage);
+      paramIndex++;
+    }
+
+    if (deal_owner) {
+      whereConditions.push(`d.owner = $${paramIndex}`);
+      params.push(deal_owner);
+      paramIndex++;
     }
 
     const limitNum = parseInt(limit as string, 10);
@@ -640,6 +661,7 @@ router.get('/:workspaceId/conversations/list', async (req: Request, res: Respons
           deal_id: row.deal_id || null,
           deal_name: row.deal_name || null,
           deal_stage: row.deal_stage || null,
+          deal_owner: row.deal_owner || null,
           deal_amount: row.deal_amount != null ? Number(row.deal_amount) : null,
           is_internal: row.custom_fields?.is_internal || false,
           call_disposition: row.custom_fields?.call_disposition || null,
@@ -658,6 +680,48 @@ router.get('/:workspaceId/conversations/list', async (req: Request, res: Respons
     });
   } catch (err) {
     console.error('[Conversations List]', err);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+/**
+ * GET /api/workspaces/:workspaceId/conversations/filter-options
+ * Returns distinct filter option values (owners, stages) for the filter bar.
+ * Used in server-side filter mode when the full dataset isn't loaded into memory.
+ */
+router.get('/:workspaceId/conversations/filter-options', async (req: Request, res: Response) => {
+  try {
+    const workspaceId = req.params.workspaceId;
+
+    const [ownersResult, stagesResult] = await Promise.all([
+      query<{ owner: string }>(
+        `SELECT DISTINCT d.owner
+         FROM conversations c
+         JOIN deals d ON d.id = c.deal_id AND d.workspace_id = c.workspace_id
+         WHERE c.workspace_id = $1
+           AND d.owner IS NOT NULL
+           AND ((c.custom_fields->>'is_internal')::boolean = FALSE OR c.custom_fields->>'is_internal' IS NULL)
+         ORDER BY d.owner`,
+        [workspaceId]
+      ),
+      query<{ stage: string }>(
+        `SELECT DISTINCT d.stage
+         FROM conversations c
+         JOIN deals d ON d.id = c.deal_id AND d.workspace_id = c.workspace_id
+         WHERE c.workspace_id = $1
+           AND d.stage IS NOT NULL
+           AND ((c.custom_fields->>'is_internal')::boolean = FALSE OR c.custom_fields->>'is_internal' IS NULL)
+         ORDER BY d.stage`,
+        [workspaceId]
+      ),
+    ]);
+
+    res.json({
+      owners: ownersResult.rows.map(r => r.owner),
+      stages: stagesResult.rows.map(r => r.stage),
+    });
+  } catch (err) {
+    console.error('[Conversations Filter Options]', err);
     res.status(500).json({ error: (err as Error).message });
   }
 });
