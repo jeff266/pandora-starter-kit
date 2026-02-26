@@ -63,7 +63,7 @@ export default function ConversationsPage() {
       params.set('limit', '50');
 
       const [conversationsRes, gapsRes] = await Promise.all([
-        api.get(`/conversations?${params.toString()}`),
+        api.get(`/conversations/list?${params.toString()}`),
         api.get(`/conversations/next-action-gaps`),
       ]);
 

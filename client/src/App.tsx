@@ -153,7 +153,7 @@ export default function App() {
         api.get('/findings/summary'),
         api.get('/action-items/summary'),
         api.get('/targets/gap'),
-        api.get(`/workspaces/${currentWorkspace.id}/conversations/next-action-gaps`),
+        api.get('/conversations/next-action-gaps'),
       ]);
       const newBadges: Record<string, number> = {};
       if (skillsRes.status === 'fulfilled') {

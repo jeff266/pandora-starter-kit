@@ -473,10 +473,10 @@ router.post('/:id/conversations/without-deals/:conversationId/dismiss', async (r
 // ============================================================================
 
 /**
- * GET /api/workspaces/:workspaceId/conversations
+ * GET /api/workspaces/:workspaceId/conversations/list
  * Returns all conversations with optional filters
  */
-router.get('/:workspaceId/conversations', async (req: Request, res: Response) => {
+router.get('/:workspaceId/conversations/list', async (req: Request, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId;
     const {
