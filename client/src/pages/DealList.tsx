@@ -49,7 +49,6 @@ interface DealRow {
   mechanical_grade: string | null;
   active_source: 'skill' | 'health' | undefined;
   days_since_last_call?: number | null;
-  conversation_signals?: any[] | null;
   divergence_flag?: boolean;
 }
 
@@ -143,7 +142,6 @@ export default function DealList() {
         mechanical_grade: d.mechanical_grade ?? null,
         active_source: d.active_source ?? undefined,
         days_since_last_call: d.days_since_last_call ?? null,
-        conversation_signals: d.conversation_signals ?? null,
         divergence_flag: d.divergence_flag ?? false,
       }));
 
@@ -621,25 +619,7 @@ export default function DealList() {
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                   {(() => {
-                    // Most recent conversation signal
-                    if (deal.conversation_signals && Array.isArray(deal.conversation_signals) && deal.conversation_signals.length > 0) {
-                      const mostRecent = deal.conversation_signals[deal.conversation_signals.length - 1];
-                      const keyword = mostRecent.keyword || mostRecent.signal || mostRecent.label;
-                      const points = mostRecent.points ?? 0;
-                      const badgeColor = points > 0 ? colors.green : colors.red;
-                      const badgeBg = points > 0 ? '#f0fdf4' : '#fef2f2';
-
-                      return (
-                        <span style={{
-                          fontSize: 9, fontWeight: 600, padding: '2px 6px', borderRadius: 4,
-                          background: badgeBg, color: badgeColor,
-                        }}>
-                          {keyword}
-                        </span>
-                      );
-                    }
-
-                    // Fallback to highest severity finding
+                    // Show highest severity finding from signal_counts
                     if (deal.signal_counts.act > 0) {
                       return (
                         <span style={{

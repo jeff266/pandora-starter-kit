@@ -44,7 +44,6 @@ interface PipelineRiskSummary {
     mechanical_grade: string | null;
     active_source: 'skill' | 'health';
     days_since_last_call: number | null;
-    conversation_signals: any[] | null;
     divergence_flag: boolean;
   }>;
   filter: {
@@ -76,10 +75,21 @@ export async function getPipelineRiskSummary(
   }
 
   const dealsResult = await query(
-    `SELECT id, name, amount, stage, stage_normalized, owner, close_date, days_in_stage, source_id, source, pipeline, health_score, composite_score, days_since_last_call, conversation_signals
-     FROM deals
-     WHERE workspace_id = $1 AND stage_normalized NOT IN ('closed_won', 'closed_lost')${whereExtra}
-     ORDER BY amount DESC NULLS LAST`,
+    `SELECT
+       d.id, d.name, d.amount, d.stage, d.stage_normalized, d.owner, d.close_date,
+       d.days_in_stage, d.source_id, d.source, d.pipeline, d.health_score, d.composite_score,
+       (
+         SELECT ROUND(
+           EXTRACT(EPOCH FROM (NOW() - MAX(cv.call_date))) / 86400
+         )::int
+         FROM conversations cv
+         WHERE (cv.deal_id = d.id OR cv.account_id = d.account_id)
+           AND cv.is_internal = FALSE
+           AND cv.workspace_id = d.workspace_id
+       ) AS days_since_last_call
+     FROM deals d
+     WHERE d.workspace_id = $1 AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')${whereExtra}
+     ORDER BY d.amount DESC NULLS LAST`,
     params
   );
 
@@ -136,7 +146,6 @@ export async function getPipelineRiskSummary(
       mechanical_grade: dbCompositeScore != null ? computeGradeFromScore(dbCompositeScore) : null,
       active_source: ((risk?.score != null && (d.composite_score == null || risk.score <= Number(d.composite_score))) ? 'skill' : 'health') as 'skill' | 'health',
       days_since_last_call: d.days_since_last_call != null ? Number(d.days_since_last_call) : null,
-      conversation_signals: d.conversation_signals ?? null,
       divergence_flag,
     };
   });
