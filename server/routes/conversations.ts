@@ -534,11 +534,13 @@ router.get('/:id/conversations', async (req: Request, res: Response) => {
     if (is_internal === 'true') {
       whereConditions.push('c.is_internal = TRUE');
     } else if (is_internal === 'false') {
-      whereConditions.push('c.is_internal = FALSE');
+      whereConditions.push('(c.is_internal = FALSE OR c.is_internal IS NULL)');
     }
 
     const limitNum = parseInt(limit as string, 10);
     const offsetNum = parseInt(offset as string, 10);
+
+    console.log('[Conversations] query params:', req.query, 'workspace:', workspaceId);
 
     const result = await query(
       `SELECT
@@ -574,6 +576,8 @@ router.get('/:id/conversations', async (req: Request, res: Response) => {
        WHERE ${whereConditions.join(' AND ')}`,
       params
     );
+
+    console.log('[Conversations] result count:', result.rows.length, 'total:', countResult.rows[0]?.total);
 
     res.json({
       conversations: result.rows.map((row: any) => ({
