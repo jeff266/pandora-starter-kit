@@ -339,16 +339,21 @@ async function loadDealContext(
   const daysInStage = Math.floor((Date.now() - stageAnchor.getTime()) / (1000 * 60 * 60 * 24));
 
   // Get stage benchmark median
-  const benchmarkResult = await client.query<{ median_days: number }>(
-    `SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY duration_in_previous_stage_ms / 86400000.0) as median_days
-     FROM deal_stage_history
-     WHERE workspace_id = $1
-       AND from_stage_normalized = $2
-       AND duration_in_previous_stage_ms IS NOT NULL`,
-    [workspaceId, deal.stage_normalized]
-  );
-
-  const stageBenchmarkMedian = benchmarkResult.rows[0]?.median_days || null;
+  let stageBenchmarkMedian: number | null = null;
+  try {
+    const benchmarkResult = await client.query<{ median_days: number }>(
+      `SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY duration_in_previous_stage_ms / 86400000.0) as median_days
+       FROM deal_stage_history
+       WHERE workspace_id = $1
+         AND from_stage_normalized = $2
+         AND duration_in_previous_stage_ms IS NOT NULL`,
+      [workspaceId, deal.stage_normalized]
+    );
+    stageBenchmarkMedian = benchmarkResult.rows[0]?.median_days || null;
+  } catch (err) {
+    // Table or column may not exist yet, gracefully degrade
+    console.warn('[ConversationDossier] Could not load stage benchmark:', err instanceof Error ? err.message : String(err));
+  }
 
   // Count close date pushes (from stage history or field changes)
   // Simplified: check if current close_date is later than deal creation + 30 days
