@@ -190,8 +190,8 @@ async function computeDeals(
           const closeDateSuspect = conversationModifierResult.close_date_suspect;
 
           // Fetch conversations for phase inference (90-day window)
-          const conversationsForPhase = await query<{ summary: string | null; title: string | null }>(
-            `SELECT summary, title
+          const conversationsForPhase = await query<{ summary: string | null; title: string | null; transcript_text: string | null }>(
+            `SELECT summary, title, transcript_text
              FROM conversations
              WHERE (deal_id = $1 OR account_id = (
                SELECT account_id FROM deals WHERE id = $1 AND workspace_id = $2
@@ -203,9 +203,11 @@ async function computeDeals(
             [deal.id, workspaceId]
           );
 
-          const conversationSummaries = conversationsForPhase.rows.map(r =>
-            ((r.summary ?? '') + ' ' + (r.title ?? '')).trim()
-          ).filter(s => s.length > 0);
+          const conversationSummaries = conversationsForPhase.rows.map(r => {
+            const text = r.summary
+              ?? (r.transcript_text ? r.transcript_text.substring(0, 2000) : '');
+            return (text + ' ' + (r.title ?? '')).trim();
+          }).filter(s => s.length > 0);
 
           // Compute inferred phase
           const phaseResult = computeInferredPhase(conversationSummaries);
@@ -590,8 +592,8 @@ export async function computeFieldsForDeal(workspaceId: string, dealId: string):
   const closeDateSuspect = conversationModifierResult.close_date_suspect;
 
   // Fetch conversations for phase inference (90-day window)
-  const conversationsForPhase = await query<{ summary: string | null; title: string | null }>(
-    `SELECT summary, title
+  const conversationsForPhase = await query<{ summary: string | null; title: string | null; transcript_text: string | null }>(
+    `SELECT summary, title, transcript_text
      FROM conversations
      WHERE (deal_id = $1 OR account_id = (
        SELECT account_id FROM deals WHERE id = $1 AND workspace_id = $2
@@ -603,9 +605,11 @@ export async function computeFieldsForDeal(workspaceId: string, dealId: string):
     [deal.id, workspaceId]
   );
 
-  const conversationSummaries = conversationsForPhase.rows.map(r =>
-    ((r.summary ?? '') + ' ' + (r.title ?? '')).trim()
-  ).filter(s => s.length > 0);
+  const conversationSummaries = conversationsForPhase.rows.map(r => {
+    const text = r.summary
+      ?? (r.transcript_text ? r.transcript_text.substring(0, 2000) : '');
+    return (text + ' ' + (r.title ?? '')).trim();
+  }).filter(s => s.length > 0);
 
   // Compute inferred phase
   const phaseResult = computeInferredPhase(conversationSummaries);
