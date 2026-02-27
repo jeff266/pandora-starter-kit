@@ -79,7 +79,7 @@ router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response)
            AND d.stage_normalized IN ('closed_won', 'closed_lost')
            AND dsh.stage_normalized NOT IN ('closed_won', 'closed_lost', 'unknown', 'awareness')
            AND dsh.duration_days IS NOT NULL
-           AND dsh.stage ~ '[A-Za-z]'
+           AND dsh.stage ~ '^[A-Z]'
          GROUP BY dsh.stage, dsh.stage_normalized, outcome
          HAVING COUNT(*) >= 3
          ORDER BY dsh.stage_normalized, dsh.stage, outcome`,
