@@ -5,6 +5,7 @@ import { colors, fonts } from '../styles/theme';
 import { useWorkspace } from '../context/WorkspaceContext';
 import LinkDealModal from '../components/LinkDealModal';
 import Toast from '../components/Toast';
+import { useDemoMode } from '../contexts/DemoModeContext';
 
 const CONVERSATIONS_THRESHOLD = 500;
 
@@ -59,6 +60,7 @@ export default function ConversationsPage() {
   const navigate = useNavigate();
   const { currentWorkspace } = useWorkspace();
   const workspaceId = currentWorkspace?.id || '';
+  const { anon } = useDemoMode();
 
   // Core data
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -463,18 +465,18 @@ export default function ConversationsPage() {
                     >
                       <div>
                         <div style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>
-                          {gap.deal_name}
+                          {anon.deal(gap.deal_name)}
                         </div>
                         {gap.deal_amount != null && (
                           <div style={{ fontSize: 11, color: colors.textMuted }}>
-                            ${(gap.deal_amount / 1000).toFixed(0)}k
+                            ${(anon.amount(gap.deal_amount) / 1000).toFixed(0)}k
                           </div>
                         )}
                       </div>
-                      <div style={{ fontSize: 12, color: colors.textSecondary }}>{gap.deal_owner}</div>
+                      <div style={{ fontSize: 12, color: colors.textSecondary }}>{anon.person(gap.deal_owner)}</div>
                       <div style={{ fontSize: 12, color: colors.textSecondary }}>{gap.deal_stage}</div>
                       <div style={{ fontSize: 12, color: colors.textSecondary }}>
-                        {gap.last_call_title || formatDate(gap.last_call_date)}
+                        {gap.last_call_title ? anon.text(gap.last_call_title) : formatDate(gap.last_call_date)}
                       </div>
                       <div
                         style={{
@@ -714,7 +716,7 @@ export default function ConversationsPage() {
                     >
                       <div>
                         <div style={{ fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 2 }}>
-                          {conv.title}
+                          {anon.text(conv.title)}
                         </div>
                         {conv.call_disposition && (
                           <div
@@ -731,15 +733,16 @@ export default function ConversationsPage() {
                       </div>
 
                       <div style={{ fontSize: 12, color: colors.textSecondary }}>
-                        {conv.account_name || '—'}
+                        {conv.account_name ? anon.company(conv.account_name) : '—'}
                       </div>
 
                       <div>
                         {conv.deal_name ? (
                           <div style={{ fontSize: 12, color: colors.accent, fontWeight: 500 }}>
-                            {conv.deal_name.length > 20
-                              ? conv.deal_name.substring(0, 20) + '...'
-                              : conv.deal_name}
+                            {(() => {
+                              const anonName = anon.deal(conv.deal_name);
+                              return anonName.length > 20 ? anonName.substring(0, 20) + '...' : anonName;
+                            })()}
                           </div>
                         ) : (
                           <button
@@ -765,8 +768,8 @@ export default function ConversationsPage() {
 
                       <div style={{ fontSize: 12, color: colors.textSecondary }}>
                         {conv.deal_owner
-                          ? conv.deal_owner.split(' ')[0]
-                          : conv.rep_email?.split('@')[0] || '—'}
+                          ? anon.person(conv.deal_owner).split(' ')[0]
+                          : conv.rep_email ? anon.email(conv.rep_email).split('@')[0] : '—'}
                       </div>
 
                       <div style={{ fontSize: 12, color: colors.textSecondary }}>

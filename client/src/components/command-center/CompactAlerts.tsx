@@ -2,6 +2,7 @@ import React from 'react';
 import { useForecastAnnotations } from '../../hooks/useForecastAnnotations';
 import type { ForecastAnnotation } from '../../hooks/useForecastAnnotations';
 import { colors, fonts } from '../../styles/theme';
+import { useDemoMode } from '../../contexts/DemoModeContext';
 
 interface CompactAlertsProps {
   workspaceId: string;
@@ -42,6 +43,7 @@ function firstSentence(text: string): string {
 }
 
 function CompactAlertCard({ annotation }: { annotation: ForecastAnnotation }) {
+  const { anon } = useDemoMode();
   const config = SEVERITY_CONFIG[annotation.severity];
 
   return (
@@ -67,7 +69,7 @@ function CompactAlertCard({ annotation }: { annotation: ForecastAnnotation }) {
               fontFamily: fonts.sans,
             }}
           >
-            {annotation.title}
+            {anon.text(annotation.title)}
           </div>
           {annotation.body && (
             <div
@@ -82,7 +84,7 @@ function CompactAlertCard({ annotation }: { annotation: ForecastAnnotation }) {
                 whiteSpace: 'nowrap',
               }}
             >
-              {firstSentence(annotation.body)}
+              {anon.text(firstSentence(annotation.body))}
             </div>
           )}
           {annotation.severity === 'critical' && annotation.impact && (
@@ -95,7 +97,7 @@ function CompactAlertCard({ annotation }: { annotation: ForecastAnnotation }) {
                 fontWeight: 500,
               }}
             >
-              Impact: {annotation.impact}
+              Impact: {anon.text(annotation.impact)}
             </div>
           )}
         </div>

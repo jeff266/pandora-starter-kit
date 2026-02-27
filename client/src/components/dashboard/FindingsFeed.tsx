@@ -4,6 +4,7 @@ import { ArrowRight, Code2 } from 'lucide-react';
 import { colors, fonts } from '../../styles/theme';
 import { formatTimeAgo } from '../../lib/format';
 import { SeverityDot } from '../shared';
+import { useDemoMode } from '../../contexts/DemoModeContext';
 
 interface Finding {
   id: string;
@@ -24,6 +25,7 @@ interface FindingsFeedProps {
 
 export function FindingsFeed({ findings, loading = false, workspaceId }: FindingsFeedProps) {
   const navigate = useNavigate();
+  const { anon } = useDemoMode();
 
   const handleFindingClick = (finding: Finding) => {
     // Navigate to the deal or insights page
@@ -108,15 +110,15 @@ export function FindingsFeed({ findings, loading = false, workspaceId }: Finding
 
                 {/* Finding Message */}
                 <div style={{ fontSize: 13, color: colors.text, lineHeight: 1.5, fontFamily: fonts.body }}>
-                  {finding.message}
+                  {anon.text(finding.message)}
                 </div>
 
                 {/* Entity Context */}
                 {(finding.deal_name || finding.account_name) && (
                   <div style={{ fontSize: 11, color: colors.textSecondary, fontFamily: fonts.body }}>
-                    {finding.deal_name && <span>Deal: {finding.deal_name}</span>}
+                    {finding.deal_name && <span>Deal: {anon.deal(finding.deal_name)}</span>}
                     {finding.deal_name && finding.account_name && <span> • </span>}
-                    {finding.account_name && <span>Account: {finding.account_name}</span>}
+                    {finding.account_name && <span>Account: {anon.company(finding.account_name)}</span>}
                   </div>
                 )}
               </button>

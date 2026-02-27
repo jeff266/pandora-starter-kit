@@ -304,7 +304,7 @@ function GapCard({ gap, anon, onEdit }: { gap: GapCalculation; anon: any; onEdit
             {gap.period_label} Target
             {gap.pipeline_name && (
               <span style={{ fontSize: 14, fontWeight: 500, color: colors.textMuted, marginLeft: 8 }}>
-                • {gap.pipeline_name}
+                • {anon.pipeline(gap.pipeline_name)}
               </span>
             )}
           </div>
@@ -489,7 +489,7 @@ function QuarterlyBreakdown({ targets, anon }: { targets: Target[]; anon: any })
             <tr key={target.id} style={{ borderBottom: i < targets.length - 1 ? `1px solid ${colors.border}` : 'none' }}>
               <td style={{ padding: '12px 0', fontSize: 14, color: colors.text }}>{target.period_label}</td>
               <td style={{ padding: '12px 0', fontSize: 14, color: colors.textSecondary }}>
-                {target.pipeline_name || <span style={{ fontStyle: 'italic', color: colors.textMuted }}>All pipelines</span>}
+                {target.pipeline_name ? anon.pipeline(target.pipeline_name) : <span style={{ fontStyle: 'italic', color: colors.textMuted }}>All pipelines</span>}
               </td>
               <td style={{ padding: '12px 0', textAlign: 'right', fontSize: 14, fontFamily: fonts.mono, color: colors.text }}>
                 {formatCurrency(anon.amount(target.amount))}
@@ -732,7 +732,7 @@ function SetTargetModal({ existingTarget, revenueModel, onClose, onSave }: {
           >
             <option value="">All pipelines (workspace-wide)</option>
             {pipelines.map(p => (
-              <option key={p.id} value={p.id}>{p.name}</option>
+              <option key={p.id} value={p.id}>{anon.pipeline(p.name)}</option>
             ))}
           </select>
           <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 4 }}>

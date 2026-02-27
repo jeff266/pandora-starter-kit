@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
+import { useDemoMode } from '../contexts/DemoModeContext';
 
 // ============================================================================
 // Types
@@ -251,7 +252,7 @@ function ScopeInventoryPanel({
                     <td style={tdStyle}>
                       <span style={monoStyle}>{scope.scope_id}</span>
                     </td>
-                    <td style={tdStyle}>{scope.name}</td>
+                    <td style={tdStyle}>{anon.pipeline(scope.name)}</td>
                     <td style={{ ...tdStyle, maxWidth: 260 }}>
                       <span style={{ ...monoStyle, fontSize: 11 }}>
                         {formatFilter(scope.filter_field, scope.filter_values)}
@@ -386,7 +387,7 @@ function FilterPreviewPanel({
               transition: 'all 0.15s',
             }}
           >
-            {s.name}
+            {anon.pipeline(s.name)}
           </button>
         ))}
       </div>
@@ -448,13 +449,13 @@ function FilterPreviewPanel({
                       }}
                     >
                       <td style={{ ...tdStyle, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {deal.name || '—'}
+                        {deal.name ? anon.deal(deal.name) : '—'}
                       </td>
-                      <td style={tdStyle}>{formatAmount(deal.amount)}</td>
+                      <td style={tdStyle}>{formatAmount(anon.amount(deal.amount))}</td>
                       <td style={{ ...tdStyle, position: 'relative' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           <span style={{ fontSize: 12, color: colors.text }}>
-                            {getScopeName(deal.scope_id)}
+                            {anon.pipeline(getScopeName(deal.scope_id))}
                             {hasOverride && <span style={{ marginLeft: 4, fontSize: 14 }}>📌</span>}
                           </span>
                           <button
@@ -516,7 +517,7 @@ function FilterPreviewPanel({
                                   }
                                 }}
                               >
-                                {s.name}
+                                {anon.pipeline(s.name)}
                               </button>
                             ))}
                             {hasOverride && (
@@ -631,6 +632,7 @@ function ConfigStatusPanel({ data }: { data: ScopesResponse | null }) {
 // ============================================================================
 
 export default function AdminScopesPage() {
+  const { anon } = useDemoMode();
   const [data, setData] = useState<ScopesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

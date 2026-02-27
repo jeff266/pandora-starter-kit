@@ -1229,6 +1229,7 @@ function StageDrillDownPanel({
   onAskAboutDeal: (deal: DealSummaryFull) => void;
   onAskPandora: (prompt: string, scope?: any) => void;
 }) {
+  const { anon } = useDemoMode();
   const [sortBy, setSortBy] = useState<'amount' | 'days' | 'probability' | 'risk'>('amount');
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -1266,7 +1267,7 @@ function StageDrillDownPanel({
             <div style={{ fontSize: 12, color: '#5A6A80', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
               Pipeline Drilldown
             </div>
-            <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: '#E2E8F0' }}>{stage.stage}</h2>
+            <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: '#E2E8F0' }}>{anon.text(stage.stage)}</h2>
             <div style={{ display: 'flex', gap: 16, marginTop: 10 }}>
               {[
                 { label: 'Deals', value: stage.deal_count, color: '#E2E8F0' },
@@ -1311,7 +1312,7 @@ function StageDrillDownPanel({
                 display: 'flex', alignItems: 'center', gap: 6, transition: 'all 0.15s',
               }}
             >
-              &#x1F4AC; Ask Pandora about {stage.stage}
+              &#x1F4AC; Ask Pandora about {anon.text(stage.stage)}
             </button>
           )}
         </div>
@@ -1324,7 +1325,7 @@ function StageDrillDownPanel({
           background: 'rgba(59,130,246,0.04)', flexShrink: 0,
         }}>
           <div style={{ fontSize: 11, color: '#5A6A80', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-            {askingAbout === 'stage' ? `Questions about ${stage.stage}` : `Questions about ${(askingAbout as DealSummaryFull).name}`}
+            {askingAbout === 'stage' ? `Questions about ${anon.text(stage.stage)}` : `Questions about ${anon.deal((askingAbout as DealSummaryFull).name)}`}
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {prompts.map((p, i) => {

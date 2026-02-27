@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { colors, fonts } from '../../styles/theme';
 import { useWorkspace, WorkspaceInfo } from '../../context/WorkspaceContext';
 import Toast from '../Toast';
+import { useDemoMode } from '../../contexts/DemoModeContext';
 
 interface WorkspaceWithDetails extends WorkspaceInfo {
   last_login_at?: string | null;
@@ -53,6 +54,7 @@ function formatRelativeTime(dateString: string | null | undefined): string {
 export default function WorkspacesTab() {
   const navigate = useNavigate();
   const { currentWorkspace, workspaces, selectWorkspace } = useWorkspace();
+  const { anon } = useDemoMode();
   const [user, setUser] = useState<UserData | null>(null);
   const [workspaceList, setWorkspaceList] = useState<WorkspaceWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
@@ -86,7 +88,7 @@ export default function WorkspacesTab() {
   const handleSwitchWorkspace = (workspace: WorkspaceWithDetails) => {
     selectWorkspace(workspace);
     navigate('/');
-    setToast({ message: `Switched to ${workspace.name}`, type: 'success' });
+    setToast({ message: `Switched to ${anon.company(workspace.name)}`, type: 'success' });
   };
 
   const handleLeaveWorkspace = async (workspaceId: string, workspaceName: string) => {
@@ -111,7 +113,7 @@ export default function WorkspacesTab() {
       // Remove from local list
       setWorkspaceList(prev => prev.filter(w => w.id !== workspaceId));
       setLeaveConfirm(null);
-      setToast({ message: `Left ${workspaceName}`, type: 'success' });
+      setToast({ message: `Left ${anon.company(workspaceName)}`, type: 'success' });
     } catch (err) {
       console.error('Failed to leave workspace:', err);
       const errorMessage = err instanceof Error ? err.message : 'Failed to leave workspace';
@@ -218,13 +220,13 @@ export default function WorkspacesTab() {
                         flexShrink: 0,
                       }}
                     >
-                      {workspace.name.charAt(0).toUpperCase()}
+                      {anon.company(workspace.name).charAt(0).toUpperCase()}
                     </div>
 
                     {/* Workspace Info */}
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 16, fontWeight: 600, color: colors.text, marginBottom: 4 }}>
-                        {workspace.name}
+                        {anon.company(workspace.name)}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                         {/* Role Badge */}
@@ -301,7 +303,7 @@ export default function WorkspacesTab() {
                             textDecoration: 'underline',
                           }}
                         >
-                          Leave {workspace.name}
+                          Leave {anon.company(workspace.name)}
                         </button>
                       ) : (
                         <div
