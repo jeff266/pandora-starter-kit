@@ -1000,28 +1000,37 @@ export default function ConversationsPage() {
            .replace('Demo Scheduled', 'Demo Sched.')
            .replace('Contract Sent', 'Contract');
 
-        // Build chart data — pivot by stage
-        type StageEntry = { stalled: number; slowing: number; on_track: number; fast: number; stalled_count: number; slowing_count: number; on_track_count: number; fast_count: number; total: number; originalStage: string };
-        const stageMap = new Map<string, StageEntry>();
-        for (const row of coachingBreakdown) {
-          const key = shortenStage(row.stage);
-          if (!stageMap.has(key)) {
-            stageMap.set(key, { stalled: 0, slowing: 0, on_track: 0, fast: 0, stalled_count: 0, slowing_count: 0, on_track_count: 0, fast_count: 0, total: 0, originalStage: row.stage });
-          }
-          const entry = stageMap.get(key)!;
-          (entry as any)[row.signal_type] = (entry as any)[row.signal_type] + row.deal_value;
-          (entry as any)[`${row.signal_type}_count`] = row.deal_count;
-          entry.total += row.deal_value;
-        }
-        const chartData = [...stageMap.entries()]
-          .sort((a, b) => b[1].total - a[1].total)
-          .map(([stage, vals]) => ({ stage, ...vals }));
-
         // Conversations filtered to open deals only (via coachingConvMeta), then by selected filters
         const allCoachingConvs = conversations.filter(c => coachingConvMeta.has(c.id));
         const availableOwners = [...new Set(
           allCoachingConvs.map(c => c.deal_owner).filter(Boolean) as string[]
         )].sort();
+
+        // Owner-only subset drives the chart (stage + signal filters stay as list-only)
+        const ownerFilteredConvs = selectedOwner
+          ? allCoachingConvs.filter(c => c.deal_owner === selectedOwner)
+          : allCoachingConvs;
+
+        // Build chart data — pivot owner-filtered conversations by stage × signal
+        type StageEntry = { stalled: number; slowing: number; on_track: number; fast: number; stalled_count: number; slowing_count: number; on_track_count: number; fast_count: number; total: number; originalStage: string };
+        const stageMap = new Map<string, StageEntry>();
+        for (const conv of ownerFilteredConvs) {
+          const meta = coachingConvMeta.get(conv.id);
+          if (!meta) continue;
+          const key = shortenStage(meta.stage);
+          if (!stageMap.has(key)) {
+            stageMap.set(key, { stalled: 0, slowing: 0, on_track: 0, fast: 0, stalled_count: 0, slowing_count: 0, on_track_count: 0, fast_count: 0, total: 0, originalStage: meta.stage });
+          }
+          const entry = stageMap.get(key)!;
+          const val = conv.deal_amount ?? 0;
+          (entry as any)[meta.signal_type] = ((entry as any)[meta.signal_type] ?? 0) + val;
+          (entry as any)[`${meta.signal_type}_count`] = ((entry as any)[`${meta.signal_type}_count`] ?? 0) + 1;
+          entry.total += val;
+        }
+        const chartData = [...stageMap.entries()]
+          .sort((a, b) => b[1].total - a[1].total)
+          .map(([stage, vals]) => ({ stage, ...vals }));
+
         const filteredCoachingConvs = allCoachingConvs.filter(c => {
           const meta = coachingConvMeta.get(c.id);
           if (!meta) return false;
