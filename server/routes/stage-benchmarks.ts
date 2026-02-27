@@ -68,8 +68,8 @@ router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response)
         `SELECT DISTINCT pipeline FROM stage_velocity_benchmarks WHERE workspace_id = $1 AND pipeline != 'all' ORDER BY pipeline`,
         [workspaceId]
       ),
-      query<{ stage_name: string; stage_normalized: string; outcome: string; median_days: string; sample_size: string; display_order: string | null }>(
-        `SELECT sc.stage_name, dsh.stage_normalized,
+      query<{ stage_name: string; pipeline_name: string; stage_normalized: string; outcome: string; median_days: string; sample_size: string; display_order: string | null }>(
+        `SELECT sc.stage_name, sc.pipeline_name, dsh.stage_normalized,
                 CASE WHEN d.stage_normalized = 'closed_won' THEN 'won' ELSE 'lost' END AS outcome,
                 PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY dsh.duration_days)::numeric(10,2) AS median_days,
                 COUNT(*)::text AS sample_size,
@@ -83,10 +83,11 @@ router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response)
            AND dsh.stage_normalized NOT IN ('closed_won', 'closed_lost', 'unknown', 'awareness')
            AND dsh.duration_days IS NOT NULL
            AND sc.stage_name IS NOT NULL
-         GROUP BY sc.stage_name, dsh.stage_normalized, outcome
+           ${pipelineFilter ? 'AND sc.pipeline_name = $2' : ''}
+         GROUP BY sc.stage_name, sc.pipeline_name, dsh.stage_normalized, outcome
          HAVING COUNT(*) >= 1
          ORDER BY MIN(sc.display_order) ASC NULLS LAST, sc.stage_name, outcome`,
-        [workspaceId]
+        pipelineFilter ? [workspaceId, pipelineFilter] : [workspaceId]
       ),
     ]);
 
@@ -161,6 +162,7 @@ router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response)
     // Pivot raw-stage benchmark rows into flat objects
     const rawBenchMap: Record<string, {
       stage: string;
+      pipeline: string;
       stage_normalized: string;
       display_order: number | null;
       won_median: number | null;
@@ -169,10 +171,11 @@ router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response)
       lost_sample: number;
     }> = {};
     for (const r of rawBenchResult.rows) {
-      const key = r.stage_name;
+      const key = `${r.pipeline_name}||${r.stage_name}`;
       if (!rawBenchMap[key]) {
         rawBenchMap[key] = {
           stage: r.stage_name,
+          pipeline: r.pipeline_name,
           stage_normalized: r.stage_normalized,
           display_order: r.display_order !== null ? parseInt(r.display_order, 10) : null,
           won_median: null,

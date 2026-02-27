@@ -21,6 +21,7 @@ interface StageBenchmark {
 
 interface RawBenchmark {
   stage: string;
+  pipeline: string;
   stage_normalized: string;
   display_order: number | null;
   won_median: number | null;
@@ -218,6 +219,9 @@ export default function BenchmarksGrid() {
     return minA - minB || a.localeCompare(b);
   });
 
+  // Unique pipelines for pipeline-grouped view (grouped mode, all pipelines selected)
+  const uniquePipelines = [...new Set(benchmarks.map(b => b.pipeline))].filter(Boolean).sort();
+
   const hasGroupedData = stages.length > 0;
   const hasRawData = rawBenchmarks.length > 0;
   const hasAnyData = hasGroupedData || hasRawData;
@@ -252,7 +256,7 @@ export default function BenchmarksGrid() {
               Grouped
             </ToggleButton>
             <ToggleButton active={viewMode === 'raw'} onClick={() => setViewMode('raw')}>
-              Raw Stages
+              Deal Stages
             </ToggleButton>
           </div>
 
@@ -311,9 +315,163 @@ export default function BenchmarksGrid() {
         /* ── GROUPED VIEW ── */
         !hasGroupedData ? (
           <div style={{ padding: 32, textAlign: 'center', fontSize: 13, color: colors.textMuted }}>
-            No grouped benchmark data. Try clicking Refresh or switch to Raw Stages view.
+            No grouped benchmark data. Try clicking Refresh or switch to Deal Stages view.
+          </div>
+        ) : selectedPipeline === 'all' && uniquePipelines.length > 1 ? (
+          /* Pipeline-grouped layout (All Pipelines selected) */
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {uniquePipelines.map(pipelineName => {
+              const pipelineBenches = benchmarks.filter(b => b.pipeline === pipelineName);
+              const pipelineStages = [...new Map(
+                pipelineBenches.map(b => [b.stage_normalized, { stage: b.stage, stage_normalized: b.stage_normalized, display_order: b.display_order }])
+              ).values()].sort((a, b) => a.stage_normalized.localeCompare(b.stage_normalized));
+              const pipelineSegs = SEGMENTS.filter(seg => pipelineBenches.some(b => b.segment === seg));
+              const getPB = (stageNorm: string, seg: string) =>
+                pipelineBenches.find(b => b.stage_normalized === stageNorm && b.segment === seg);
+              const pipelineCollapsed = collapsedSegments.has(`pipeline_${pipelineName}`);
+
+              return (
+                <div key={pipelineName} style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, overflow: 'hidden' }}>
+                  <div
+                    onClick={() => setCollapsedSegments(prev => {
+                      const next = new Set(prev); const k = `pipeline_${pipelineName}`;
+                      next.has(k) ? next.delete(k) : next.add(k); return next;
+                    })}
+                    style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      padding: '12px 18px', cursor: 'pointer',
+                      borderBottom: pipelineCollapsed ? 'none' : `1px solid ${colors.border}`,
+                      background: colors.surfaceRaised,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>{pipelineName}</span>
+                      <span style={{ fontSize: 10, color: colors.textMuted, background: colors.surfaceHover, padding: '1px 6px', borderRadius: 10 }}>
+                        {pipelineStages.length} stage{pipelineStages.length !== 1 ? 's' : ''}
+                      </span>
+                    </div>
+                    <span style={{ fontSize: 11, color: colors.textMuted }}>{pipelineCollapsed ? '▼' : '▲'}</span>
+                  </div>
+
+                  {!pipelineCollapsed && (
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      {pipelineSegs.map((seg, segIdx) => {
+                        const segKey = `${pipelineName}_seg_${seg}`;
+                        const segCollapsed = collapsedSegments.has(segKey);
+                        return (
+                          <div key={seg} style={{ borderTop: segIdx > 0 ? `1px solid ${colors.border}` : undefined }}>
+                            <div
+                              onClick={() => setCollapsedSegments(prev => {
+                                const next = new Set(prev);
+                                next.has(segKey) ? next.delete(segKey) : next.add(segKey); return next;
+                              })}
+                              style={{
+                                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                padding: '9px 18px', cursor: 'pointer',
+                                borderBottom: segCollapsed ? 'none' : `1px solid ${colors.border}`,
+                                background: 'rgba(0,0,0,0.03)',
+                              }}
+                            >
+                              <span style={{ fontSize: 12, fontWeight: 500, color: colors.textSecondary }}>{SEGMENT_LABEL[seg] ?? seg}</span>
+                              <span style={{ fontSize: 10, color: colors.textMuted }}>{segCollapsed ? '▼' : '▲'}</span>
+                            </div>
+                            {!segCollapsed && (
+                              <div style={{ overflowX: 'auto' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                                  <thead>
+                                    <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
+                                      <th style={{ padding: '10px 16px', textAlign: 'left', color: colors.textMuted, fontWeight: 600, fontSize: 11, whiteSpace: 'nowrap', width: 140 }}>Metric</th>
+                                      {pipelineStages.map(s => (
+                                        <th key={s.stage_normalized} style={{ padding: '10px 12px', textAlign: 'center', color: colors.textMuted, fontWeight: 600, fontSize: 11, whiteSpace: 'nowrap', minWidth: 110 }}>
+                                          {s.stage}
+                                        </th>
+                                      ))}
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
+                                      <td style={{ padding: '10px 16px', color: colors.textSecondary, whiteSpace: 'nowrap' }}>
+                                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                                          <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#38A169', display: 'inline-block' }} />
+                                          Won median
+                                        </span>
+                                      </td>
+                                      {pipelineStages.map(s => {
+                                        const b = getPB(s.stage_normalized, seg);
+                                        return (
+                                          <td key={s.stage_normalized} style={{ padding: '10px 12px', textAlign: 'center', opacity: b?.won_confidence === 'insufficient' ? 0.4 : 1 }}>
+                                            <div style={{ fontWeight: 600, color: '#38A169' }}>{fmtDays(b?.won_median ?? null)}</div>
+                                            {b && <ConfidenceBadge tier={b.won_confidence} sample={b.won_sample} />}
+                                          </td>
+                                        );
+                                      })}
+                                    </tr>
+                                    <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
+                                      <td style={{ padding: '10px 16px', color: colors.textSecondary, whiteSpace: 'nowrap' }}>
+                                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                                          <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#E53E3E', display: 'inline-block' }} />
+                                          Lost median
+                                        </span>
+                                      </td>
+                                      {pipelineStages.map(s => {
+                                        const b = getPB(s.stage_normalized, seg);
+                                        return (
+                                          <td key={s.stage_normalized} style={{ padding: '10px 12px', textAlign: 'center', opacity: b?.lost_confidence === 'insufficient' ? 0.4 : 1 }}>
+                                            <div style={{ fontWeight: 600, color: '#E53E3E' }}>{fmtDays(b?.lost_median ?? null)}</div>
+                                            {b && <ConfidenceBadge tier={b.lost_confidence} sample={b.lost_sample} />}
+                                          </td>
+                                        );
+                                      })}
+                                    </tr>
+                                    <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
+                                      <td style={{ padding: '10px 16px', color: colors.textSecondary, whiteSpace: 'nowrap' }}>Signal gap</td>
+                                      {pipelineStages.map(s => {
+                                        const b = getPB(s.stage_normalized, seg);
+                                        const ratio = b?.won_median && b?.lost_median ? (b.lost_median / b.won_median) : null;
+                                        const gapColor = signalGapColor(b?.won_median ?? null, b?.lost_median ?? null);
+                                        return (
+                                          <td key={s.stage_normalized} style={{ padding: '10px 12px', textAlign: 'center' }}>
+                                            {b?.is_inverted ? (
+                                              <span style={{ fontSize: 10, color: '#805AD5', fontWeight: 600 }} title="Inverted: winners spend longer here">⚠ Inverted</span>
+                                            ) : ratio !== null ? (
+                                              <span style={{ fontWeight: 600, color: gapColor }}>{ratio.toFixed(1)}×</span>
+                                            ) : '—'}
+                                          </td>
+                                        );
+                                      })}
+                                    </tr>
+                                    <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
+                                      <td style={{ padding: '10px 16px', color: colors.textSecondary, whiteSpace: 'nowrap' }}>Open now (avg)</td>
+                                      {pipelineStages.map(s => {
+                                        const b = getPB(s.stage_normalized, seg);
+                                        const open = openAvg[s.stage_normalized];
+                                        if (!open) return <td key={s.stage_normalized} style={{ padding: '10px 12px', textAlign: 'center', color: colors.textMuted }}>—</td>;
+                                        const openColor = b?.lost_median && open.avg > b.lost_median ? '#E53E3E'
+                                          : b?.won_median && open.avg > b.won_median ? '#D69E2E'
+                                          : colors.textSecondary;
+                                        return (
+                                          <td key={s.stage_normalized} style={{ padding: '10px 12px', textAlign: 'center' }}>
+                                            <div style={{ fontWeight: 600, color: openColor }}>{fmtDays(open.avg)}</div>
+                                            <div style={{ fontSize: 10, color: colors.textMuted }}>{open.count} deal{open.count !== 1 ? 's' : ''}</div>
+                                          </td>
+                                        );
+                                      })}
+                                    </tr>
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         ) : (
+          /* Single-pipeline or single-pipeline-selected segment layout */
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             {availableSegs.map(seg => {
               const collapsed = collapsedSegments.has(seg);
@@ -531,7 +689,7 @@ export default function BenchmarksGrid() {
             <strong>Grouped view</strong>: Stages are collapsed into normalized categories (Evaluation, Qualification, etc.) across all matching CRM stage names. Useful for a high-level pipeline health snapshot.
           </p>
           <p style={{ margin: '0 0 8px' }}>
-            <strong>Raw Stages view</strong>: Shows each individual CRM stage name with its own won/lost benchmarks. Useful when you want to compare "Demo Conducted" vs "Presentation Scheduled" specifically. Requires ≥3 closed deals per outcome to appear.
+            <strong>Deal Stages view</strong>: Shows each individual CRM stage name with its own won/lost benchmarks. Useful when you want to compare "Demo Conducted" vs "Presentation Scheduled" specifically. Requires ≥1 closed deal per outcome to appear.
           </p>
           <p style={{ margin: '0 0 8px' }}>
             <strong>Signal gap</strong>: Lost median ÷ Won median. Higher = more diagnostic power. 5× means you can catch at-risk deals very early.
