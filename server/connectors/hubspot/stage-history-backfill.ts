@@ -1,6 +1,7 @@
 import { query, getClient } from '../../db.js';
 import { HubSpotClient } from './client.js';
 import type { PropertyHistoryEntry } from './client.js';
+import { normalizeStage } from './transform.js';
 
 export interface BackfillResult {
   total: number;
@@ -23,6 +24,17 @@ export async function backfillStageHistory(
 ): Promise<BackfillResult> {
   const hubspotClient = new HubSpotClient(accessToken, workspaceId);
   console.log(`[Stage History Backfill] Starting for workspace ${workspaceId}`);
+
+  // Build a stageId → displayName map from stage_configs for this workspace
+  // so numeric HubSpot stage IDs can be resolved to names before normalization
+  const stageConfigsResult = await query<{ stage_id: string; stage_name: string }>(
+    `SELECT stage_id, stage_name FROM stage_configs WHERE workspace_id = $1 AND stage_id IS NOT NULL`,
+    [workspaceId]
+  );
+  const stageIdToName: Record<string, string> = {};
+  for (const row of stageConfigsResult.rows) {
+    stageIdToName[row.stage_id] = row.stage_name;
+  }
 
   // Get all deals that need backfill
   const dealsResult = await query<{
@@ -111,7 +123,7 @@ export async function backfillStageHistory(
         updated++;
 
         // Store complete stage history
-        const entriesCreated = await storeStageHistory(workspaceId, deal.id, history, deal.stage_normalized);
+        const entriesCreated = await storeStageHistory(workspaceId, deal.id, history, deal.stage_normalized, stageIdToName);
         historyEntriesCreated += entriesCreated;
 
       } catch (err) {
@@ -148,7 +160,8 @@ async function storeStageHistory(
   workspaceId: string,
   dealId: string,
   history: PropertyHistoryEntry[],
-  currentStageNormalized: string | null
+  currentStageNormalized: string | null,
+  stageIdToName: Record<string, string> = {}
 ): Promise<number> {
   if (history.length === 0) return 0;
 
@@ -176,10 +189,16 @@ async function storeStageHistory(
         durationDays = (exitedAt.getTime() - enteredAt.getTime()) / (1000 * 60 * 60 * 24);
       }
 
-      // Use current stage normalized for the latest entry, otherwise try to normalize the stage value
-      const stageNormalized = isCurrentStage && currentStageNormalized
-        ? currentStageNormalized
-        : normalizeStageValue(entry.value);
+      // Use current stage normalized for the latest entry, otherwise resolve via stageIdToName
+      // then use the full normalizeStage from transform.ts so custom pipeline stages
+      // (e.g. Fellowship "Closed-Won/Lost" variants) are classified correctly.
+      let stageNormalized: string | null;
+      if (isCurrentStage && currentStageNormalized) {
+        stageNormalized = currentStageNormalized;
+      } else {
+        const displayName = stageIdToName[entry.value] || entry.value;
+        stageNormalized = normalizeStage(displayName);
+      }
 
       await client.query(
         `INSERT INTO deal_stage_history (
@@ -217,28 +236,6 @@ async function storeStageHistory(
   }
 }
 
-/**
- * Normalize HubSpot stage value to standard stage names
- * This is a simplified version - the full normalization is in transform.ts
- */
-function normalizeStageValue(stage: string): string | null {
-  if (!stage) return null;
-
-  const normalized = stage.toLowerCase().replace(/[^a-z0-9]/g, '');
-
-  // Map common HubSpot stages to normalized values
-  const stageMap: Record<string, string> = {
-    'appointmentscheduled': 'qualification',
-    'qualifiedtobuy': 'qualification',
-    'presentationscheduled': 'evaluation',
-    'decisionmakerboughtin': 'decision',
-    'contractsent': 'negotiation',
-    'closedwon': 'closed_won',
-    'closedlost': 'closed_lost',
-  };
-
-  return stageMap[normalized] || 'qualification';
-}
 
 /**
  * Get backfill statistics for a workspace
