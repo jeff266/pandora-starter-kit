@@ -14,6 +14,8 @@ import { query, getClient } from '../db.js';
 import type { PoolClient } from 'pg';
 import type { ResolvedParticipant } from '../conversations/resolve-participants.js';
 import type { PostCallCrmState } from '../conversations/post-call-tracker.js';
+import { generateCoachingSignals } from '../coaching/coaching-signals.js';
+import type { CoachingSignal } from '../coaching/coaching-signals.js';
 
 export interface ConversationDossier {
   conversation: {
@@ -111,11 +113,7 @@ export interface CrmGap {
   detail: string;
 }
 
-export interface CoachingSignal {
-  type: 'positive' | 'warning' | 'action';
-  label: string;
-  insight: string;
-}
+// CoachingSignal interface imported from coaching-signals module
 
 export interface ConversationArcEntry {
   id: string;
@@ -286,13 +284,17 @@ export async function assembleConversationDossier(
       workspaceId
     );
 
-    // Step 6: Generate coaching signals
-    const coachingSignals = await generateCoachingSignals(
-      conv,
-      dealContext,
-      workspaceId,
-      client
-    );
+    // Step 6: Generate coaching signals (pattern-based)
+    const coachingSignals = conv.deal_id && dealContext
+      ? await generateCoachingSignals(
+          conv.deal_id,
+          workspaceId,
+          dealContext.stage,
+          dealContext.amount,
+          null, // pipeline_name not yet tracked
+          client
+        )
+      : [];
 
     // Step 7: Load skill findings for this deal
     const skillFindings = await loadSkillFindings(conv.deal_id, workspaceId, client);
@@ -620,78 +622,7 @@ function buildConversationArc(
   });
 }
 
-/**
- * Generate coaching signals (benchmark-driven)
- */
-async function generateCoachingSignals(
-  conversation: any,
-  dealContext: NonNullable<ConversationDossier['deal_context']> | null,
-  workspaceId: string,
-  client: PoolClient
-): Promise<CoachingSignal[]> {
-  const signals: CoachingSignal[] = [];
-
-  const callMetrics = conversation.call_metrics;
-
-  // Talk ratio benchmark — only if native call metrics exist
-  if (callMetrics && callMetrics.talk_ratio_buyer !== null) {
-    const benchmarkResult = await client.query<{ avg_buyer_talk: number }>(
-      `SELECT AVG((c.call_metrics->>'talk_ratio_buyer')::numeric) as avg_buyer_talk
-       FROM conversations c
-       JOIN deals d ON d.id = c.deal_id
-       WHERE d.workspace_id = $1
-         AND d.stage_normalized = 'closed_won'
-         AND c.call_metrics->>'talk_ratio_buyer' IS NOT NULL`,
-      [workspaceId]
-    );
-
-    const avgBuyerTalk = benchmarkResult.rows[0]?.avg_buyer_talk;
-    if (avgBuyerTalk && callMetrics.talk_ratio_buyer < avgBuyerTalk * 0.5) {
-      signals.push({
-        type: 'warning',
-        label: `Talk ratio: ${callMetrics.talk_ratio_rep}%`,
-        insight: `Buyer spoke only ${callMetrics.talk_ratio_buyer}% of the call. In won deals, buyer talk ratio averages ${Math.round(avgBuyerTalk)}%. Consider more open-ended discovery.`,
-      });
-    } else if (avgBuyerTalk && callMetrics.talk_ratio_buyer >= avgBuyerTalk) {
-      signals.push({
-        type: 'positive',
-        label: `Strong buyer engagement`,
-        insight: `Buyer spoke ${callMetrics.talk_ratio_buyer}% of call, matching or exceeding won deal average of ${Math.round(avgBuyerTalk)}%.`,
-      });
-    }
-  }
-
-  // Multi-threading benchmark
-  const resolvedParticipants = conversation.resolved_participants || [];
-  const externalCount = resolvedParticipants.filter(
-    (p: ResolvedParticipant) => p.role === 'external' && p.confidence >= 0.7
-  ).length;
-
-  if (externalCount > 0) {
-    const mtBenchmarkResult = await client.query<{ avg_participants: number }>(
-      `SELECT AVG(
-         (SELECT COUNT(*) FROM jsonb_array_elements(c.resolved_participants) p
-          WHERE (p->>'role') = 'external' AND (p->>'confidence')::numeric >= 0.7)
-       ) as avg_participants
-       FROM conversations c
-       JOIN deals d ON d.id = c.deal_id
-       WHERE d.workspace_id = $1 AND d.stage_normalized = 'closed_won'
-         AND c.resolved_participants IS NOT NULL`,
-      [workspaceId]
-    );
-
-    const avgParticipants = mtBenchmarkResult.rows[0]?.avg_participants;
-    if (avgParticipants && externalCount < avgParticipants * 0.7) {
-      signals.push({
-        type: 'action',
-        label: 'Limited multi-threading',
-        insight: `Only ${externalCount} buyer contacts on call. Won deals average ${Math.round(avgParticipants)} external participants. Consider expanding the buying committee.`,
-      });
-    }
-  }
-
-  return signals;
-}
+// generateCoachingSignals moved to coaching-signals module (pattern-based discovery)
 
 /**
  * Load active skill findings for this deal

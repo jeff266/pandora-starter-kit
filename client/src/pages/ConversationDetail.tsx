@@ -45,6 +45,15 @@ interface CoachingSignal {
   type: 'positive' | 'warning' | 'action';
   label: string;
   insight: string;
+  separation_score?: number;
+  data?: {
+    dimension: string;
+    current_value: number;
+    won_median: number;
+    won_p25: number;
+    won_p75: number;
+    sample_size: number;
+  };
 }
 
 interface ConversationArcEntry {
@@ -713,11 +722,24 @@ function CoachingSignalsTab({
   coachingSignals: CoachingSignal[];
   callMetrics: CallMetrics | null;
 }) {
+  // Check if we have pattern-based signals (vs building benchmarks message)
+  const hasPatternData = coachingSignals.some(s => s.data != null);
+  const patternCount = hasPatternData ? coachingSignals.filter(s => s.data).length : 0;
+  const totalSampleSize = hasPatternData
+    ? Math.max(...coachingSignals.filter(s => s.data).map(s => s.data!.sample_size))
+    : 0;
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-      <div style={{ fontSize: 13, color: colors.textMuted, fontStyle: 'italic' }}>
-        Compared against your closed-won deal benchmarks
-      </div>
+      {hasPatternData ? (
+        <div style={{ fontSize: 13, color: colors.textMuted, fontStyle: 'italic' }}>
+          Compared against your closed-won deal benchmarks • Based on {totalSampleSize} closed deals
+        </div>
+      ) : (
+        <div style={{ fontSize: 13, color: colors.textMuted, fontStyle: 'italic' }}>
+          Pattern discovery analyzes your closed deals to identify what predicts winning
+        </div>
+      )}
 
       {/* Call metrics summary */}
       {callMetrics && (
@@ -781,9 +803,14 @@ function CoachingSignalsTab({
                 </div>
                 <span style={{ fontSize: 14, fontWeight: 600 }}>{signal.label}</span>
               </div>
-              <div style={{ fontSize: 13, color: colors.textSecondary, lineHeight: 1.5 }}>
+              <div style={{ fontSize: 13, color: colors.textSecondary, lineHeight: 1.5, marginBottom: signal.data ? 8 : 0 }}>
                 {signal.insight}
               </div>
+              {signal.data && (
+                <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 8, paddingTop: 8, borderTop: `1px solid ${colors.border}` }}>
+                  Based on {signal.data.sample_size} deals | Pattern strength: {signal.separation_score && signal.separation_score >= 0.7 ? 'Strong' : signal.separation_score && signal.separation_score >= 0.5 ? 'Moderate' : 'Emerging'} ({signal.separation_score ? (signal.separation_score * 100).toFixed(0) + '%' : 'N/A'})
+                </div>
+              )}
             </div>
           ))}
         </div>

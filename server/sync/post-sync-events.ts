@@ -11,6 +11,7 @@ import { extractConversationSignals } from '../conversations/signal-extractor.js
 import { extractConversationSignals as extractStructuredSignals } from '../signals/extract-conversation-signals.js';
 import { query } from '../db.js';
 import { captureCurrentSchema, detectNewFields, insertNewFieldsFinding } from './field-detector.js';
+import { discoverWinPatterns } from '../coaching/win-pattern-discovery.js';
 
 interface SyncResult {
   connector: string;
@@ -130,6 +131,11 @@ export async function emitSyncCompleted(
       console.error(`[Enrichment] Post-sync trigger failed:`, err instanceof Error ? err.message : err);
     });
 
+    // Win pattern discovery - check if we should run
+    maybeRunPatternDiscovery(workspaceId).catch(err => {
+      console.error(`[Coaching] Pattern discovery check failed:`, err instanceof Error ? err.message : err);
+    });
+
     // Field detection — cheap SQL diff, runs after every CRM sync
     for (const connectorType of connectorTypes.filter(c => ['hubspot', 'salesforce'].includes(c))) {
       (async () => {
@@ -220,4 +226,61 @@ async function triggerEnrichmentForNewlyClosedDeals(workspaceId: string): Promis
       console.error(`[Enrichment] Failed to enrich deal "${deal.name}":`, err instanceof Error ? err.message : err);
     }
   }
+}
+
+/**
+ * Check if win pattern discovery should run
+ * Runs when: 7+ days since last run, OR 5+ new closed deals, OR never run before
+ */
+async function maybeRunPatternDiscovery(workspaceId: string): Promise<void> {
+  // Check when discovery last ran
+  const lastRunResult = await query<{ last_discovery: string | null }>(
+    `SELECT MAX(discovered_at) as last_discovery
+     FROM win_patterns
+     WHERE workspace_id = $1`,
+    [workspaceId]
+  );
+
+  const lastDiscovery = lastRunResult.rows[0]?.last_discovery;
+  const daysSinceLastRun = lastDiscovery
+    ? daysBetween(new Date(lastDiscovery), new Date())
+    : Infinity;
+
+  // Check new closed deals since last run
+  const newClosedResult = await query<{ n: number }>(
+    `SELECT COUNT(*)::integer as n
+     FROM deals
+     WHERE workspace_id = $1
+       AND stage_normalized IN ('closed_won', 'closed_lost')
+       AND updated_at > COALESCE(
+         (SELECT MAX(discovered_at) FROM win_patterns WHERE workspace_id = $1),
+         '1970-01-01'::timestamptz
+       )`,
+    [workspaceId]
+  );
+
+  const newClosedCount = newClosedResult.rows[0]?.n || 0;
+
+  const shouldRun =
+    daysSinceLastRun >= 7 || // Weekly minimum
+    (daysSinceLastRun >= 1 && newClosedCount >= 5) || // 5+ new closes
+    daysSinceLastRun === Infinity; // Never run before
+
+  if (!shouldRun) {
+    console.log(
+      `[Coaching] Pattern discovery not needed (${daysSinceLastRun} days since last run, ${newClosedCount} new closed deals)`
+    );
+    return;
+  }
+
+  console.log(`[Coaching] Running win pattern discovery for workspace ${workspaceId}`);
+  const result = await discoverWinPatterns(workspaceId);
+  console.log(
+    `[Coaching] Discovery complete: ${result.patterns_found.length} patterns found across ${result.segments_analyzed} segments (${result.won_deals} won, ${result.lost_deals} lost)`
+  );
+}
+
+function daysBetween(date1: Date, date2: Date): number {
+  const diffMs = Math.abs(date2.getTime() - date1.getTime());
+  return Math.floor(diffMs / (1000 * 60 * 60 * 24));
 }
