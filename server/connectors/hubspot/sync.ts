@@ -31,13 +31,14 @@ async function buildStageMaps(client: HubSpotClient, workspaceId: string): Promi
         stageMap.set(stage.id, stage.label);
         stageUpserts.push(
           query(
-            `INSERT INTO stage_configs (workspace_id, pipeline_name, stage_name, display_order)
-             VALUES ($1, $2, $3, $4)
+            `INSERT INTO stage_configs (workspace_id, pipeline_name, stage_name, display_order, stage_id)
+             VALUES ($1, $2, $3, $4, $5)
              ON CONFLICT (workspace_id, stage_name) DO UPDATE SET
                display_order = EXCLUDED.display_order,
                pipeline_name = EXCLUDED.pipeline_name,
+               stage_id = EXCLUDED.stage_id,
                updated_at = NOW()`,
-            [workspaceId, pipeline.label, stage.label, stage.displayOrder]
+            [workspaceId, pipeline.label, stage.label, stage.displayOrder, stage.id]
           ).catch(err => {
             console.warn('[HubSpot Sync] Failed to upsert stage_config:', err instanceof Error ? err.message : err);
           })
