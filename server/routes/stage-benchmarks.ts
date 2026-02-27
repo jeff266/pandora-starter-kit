@@ -36,13 +36,14 @@ router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response)
       median_days: string;
       p75_days: string;
       p90_days: string;
+      avg_days: string | null;
       sample_size: string;
       confidence_tier: string;
       is_inverted: boolean;
       computed_at: string;
     }>(
       `SELECT pipeline, stage_normalized, segment, outcome,
-              median_days, p75_days, p90_days, sample_size, confidence_tier, is_inverted, computed_at
+              median_days, p75_days, p90_days, avg_days, sample_size, confidence_tier, is_inverted, computed_at
        FROM stage_velocity_benchmarks
        WHERE workspace_id = $1
          AND segment = 'all'
@@ -68,10 +69,11 @@ router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response)
         `SELECT DISTINCT pipeline FROM stage_velocity_benchmarks WHERE workspace_id = $1 AND pipeline != 'all' ORDER BY pipeline`,
         [workspaceId]
       ),
-      query<{ stage_name: string; pipeline_name: string; stage_normalized: string; outcome: string; median_days: string; sample_size: string; display_order: string | null }>(
+      query<{ stage_name: string; pipeline_name: string; stage_normalized: string; outcome: string; median_days: string; avg_days: string; sample_size: string; display_order: string | null }>(
         `SELECT sc.stage_name, sc.pipeline_name, dsh.stage_normalized,
                 CASE WHEN d.stage_normalized = 'closed_won' THEN 'won' ELSE 'lost' END AS outcome,
                 PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY dsh.duration_days)::numeric(10,2) AS median_days,
+                AVG(dsh.duration_days)::numeric(10,1) AS avg_days,
                 COUNT(*)::text AS sample_size,
                 MIN(sc.display_order)::text AS display_order
          FROM deal_stage_history dsh
@@ -91,10 +93,11 @@ router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response)
          ORDER BY MIN(sc.display_order) ASC NULLS LAST, sc.stage_name, outcome`,
         pipelineFilter ? [workspaceId, pipelineFilter] : [workspaceId]
       ),
-      query<{ outcome: string; median_total_days: string; sample_size: string }>(
+      query<{ outcome: string; median_total_days: string; avg_total_days: string; sample_size: string }>(
         `SELECT
            CASE WHEN d.stage_normalized = 'closed_won' THEN 'won' ELSE 'lost' END AS outcome,
            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY totals.total_days)::numeric(10,1) AS median_total_days,
+           AVG(totals.total_days)::numeric(10,1) AS avg_total_days,
            COUNT(*)::text AS sample_size
          FROM (
            SELECT dsh.deal_id, SUM(dsh.duration_days) AS total_days
@@ -134,10 +137,12 @@ router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response)
       pipeline: string;
       segment: string;
       won_median: number | null;
+      won_avg: number | null;
       won_p75: number | null;
       won_sample: number;
       won_confidence: string;
       lost_median: number | null;
+      lost_avg: number | null;
       lost_sample: number;
       lost_confidence: string;
       is_inverted: boolean;
@@ -154,10 +159,12 @@ router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response)
           pipeline: r.pipeline,
           segment: r.segment,
           won_median: null,
+          won_avg: null,
           won_p75: null,
           won_sample: 0,
           won_confidence: 'insufficient',
           lost_median: null,
+          lost_avg: null,
           lost_sample: 0,
           lost_confidence: 'insufficient',
           is_inverted: r.is_inverted,
@@ -166,11 +173,13 @@ router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response)
       }
       if (r.outcome === 'won') {
         benchMap[key].won_median = parseFloat(r.median_days);
+        benchMap[key].won_avg = r.avg_days ? parseFloat(r.avg_days) : null;
         benchMap[key].won_p75 = parseFloat(r.p75_days);
         benchMap[key].won_sample = parseInt(r.sample_size, 10);
         benchMap[key].won_confidence = r.confidence_tier;
       } else {
         benchMap[key].lost_median = parseFloat(r.median_days);
+        benchMap[key].lost_avg = r.avg_days ? parseFloat(r.avg_days) : null;
         benchMap[key].lost_sample = parseInt(r.sample_size, 10);
         benchMap[key].lost_confidence = r.confidence_tier;
       }
@@ -187,8 +196,10 @@ router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response)
       stage_normalized: string;
       display_order: number | null;
       won_median: number | null;
+      won_avg: number | null;
       won_sample: number;
       lost_median: number | null;
+      lost_avg: number | null;
       lost_sample: number;
     }> = {};
     for (const r of rawBenchResult.rows) {
@@ -200,16 +211,20 @@ router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response)
           stage_normalized: r.stage_normalized,
           display_order: r.display_order !== null ? parseInt(r.display_order, 10) : null,
           won_median: null,
+          won_avg: null,
           won_sample: 0,
           lost_median: null,
+          lost_avg: null,
           lost_sample: 0,
         };
       }
       if (r.outcome === 'won') {
         rawBenchMap[key].won_median = parseFloat(r.median_days);
+        rawBenchMap[key].won_avg = r.avg_days ? parseFloat(r.avg_days) : null;
         rawBenchMap[key].won_sample = parseInt(r.sample_size, 10);
       } else {
         rawBenchMap[key].lost_median = parseFloat(r.median_days);
+        rawBenchMap[key].lost_avg = r.avg_days ? parseFloat(r.avg_days) : null;
         rawBenchMap[key].lost_sample = parseInt(r.sample_size, 10);
       }
     }
@@ -219,15 +234,17 @@ router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response)
 
     const lastComputedAt = benchRows.rows.length > 0 ? benchRows.rows[0].computed_at : null;
 
-    const cycleTime: { won_median: number | null; won_sample: number; lost_median: number | null; lost_sample: number } = {
-      won_median: null, won_sample: 0, lost_median: null, lost_sample: 0,
+    const cycleTime: { won_median: number | null; won_avg: number | null; won_sample: number; lost_median: number | null; lost_avg: number | null; lost_sample: number } = {
+      won_median: null, won_avg: null, won_sample: 0, lost_median: null, lost_avg: null, lost_sample: 0,
     };
     for (const r of cycleTimeResult.rows) {
       if (r.outcome === 'won') {
         cycleTime.won_median = parseFloat(r.median_total_days);
+        cycleTime.won_avg = r.avg_total_days ? parseFloat(r.avg_total_days) : null;
         cycleTime.won_sample = parseInt(r.sample_size, 10);
       } else {
         cycleTime.lost_median = parseFloat(r.median_total_days);
+        cycleTime.lost_avg = r.avg_total_days ? parseFloat(r.avg_total_days) : null;
         cycleTime.lost_sample = parseInt(r.sample_size, 10);
       }
     }

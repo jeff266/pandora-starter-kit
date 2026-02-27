@@ -10,10 +10,12 @@ interface StageBenchmark {
   pipeline: string;
   segment: string;
   won_median: number | null;
+  won_avg: number | null;
   won_p75: number | null;
   won_sample: number;
   won_confidence: string;
   lost_median: number | null;
+  lost_avg: number | null;
   lost_sample: number;
   lost_confidence: string;
   is_inverted: boolean;
@@ -25,8 +27,10 @@ interface RawBenchmark {
   stage_normalized: string;
   display_order: number | null;
   won_median: number | null;
+  won_avg: number | null;
   won_sample: number;
   lost_median: number | null;
+  lost_avg: number | null;
   lost_sample: number;
 }
 
@@ -37,8 +41,10 @@ interface OpenAverage {
 
 interface CycleTime {
   won_median: number | null;
+  won_avg: number | null;
   won_sample: number;
   lost_median: number | null;
+  lost_avg: number | null;
   lost_sample: number;
 }
 
@@ -264,6 +270,7 @@ export default function BenchmarksGrid() {
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('grouped');
   const [showActualNames, setShowActualNames] = useState(false);
+  const [metricMode, setMetricMode] = useState<'median' | 'average'>('median');
   const [mathModal, setMathModal] = useState<MathModalState | null>(null);
 
   const load = useCallback(async () => {
@@ -377,37 +384,45 @@ export default function BenchmarksGrid() {
   const hasAnyData = hasGroupedData || hasRawData;
 
   // ── Shared cell renderers ─────────────────────────────────────────────────────
-  const wonCell = (b: StageBenchmark | undefined, stageNorm: string, seg: string, pipelineName?: string) => (
-    <td
-      key={stageNorm + '_won'}
-      onClick={() => b?.won_median != null ? openMath(stageNorm, 'won', stageHeaderLabel(stageNorm, b.stage), seg, b.won_median, pipelineName ?? selectedPipeline) : undefined}
-      style={{
-        padding: '10px 12px', textAlign: 'center',
-        opacity: b?.won_confidence === 'insufficient' ? 0.45 : 1,
-        cursor: b?.won_median != null ? 'pointer' : 'default',
-      }}
-      title={b?.won_median != null ? 'Click to see deals' : undefined}
-    >
-      <span style={{ fontWeight: 600, color: '#38A169' }}>{fmtDays(b?.won_median ?? null)}</span>
-      {b && <ConfidenceDot tier={b.won_confidence} sample={b.won_sample} />}
-    </td>
-  );
+  const wonCell = (b: StageBenchmark | undefined, stageNorm: string, seg: string, pipelineName?: string) => {
+    const val = metricMode === 'median' ? (b?.won_median ?? null) : (b?.won_avg ?? null);
+    return (
+      <td
+        key={`${stageNorm}_${seg}_won`}
+        onClick={() => b?.won_median != null ? openMath(stageNorm, 'won', stageHeaderLabel(stageNorm, b.stage), seg, b.won_median, pipelineName ?? selectedPipeline) : undefined}
+        style={{
+          padding: '10px 12px', textAlign: 'center',
+          opacity: b?.won_confidence === 'insufficient' ? 0.45 : 1,
+          cursor: b?.won_median != null ? 'pointer' : 'default',
+        }}
+        title={b?.won_median != null ? 'Click to see deals' : undefined}
+      >
+        <span style={{ fontWeight: 600, color: '#38A169' }}>{fmtDays(val)}</span>
+        {b && <ConfidenceDot tier={b.won_confidence} sample={b.won_sample} />}
+      </td>
+    );
+  };
 
-  const lostCell = (b: StageBenchmark | undefined, stageNorm: string, seg: string, pipelineName?: string) => (
-    <td
-      key={stageNorm + '_lost'}
-      onClick={() => b?.lost_median != null ? openMath(stageNorm, 'lost', stageHeaderLabel(stageNorm, b.stage), seg, b.lost_median, pipelineName ?? selectedPipeline) : undefined}
-      style={{
-        padding: '10px 12px', textAlign: 'center',
-        opacity: b?.lost_confidence === 'insufficient' ? 0.45 : 1,
-        cursor: b?.lost_median != null ? 'pointer' : 'default',
-      }}
-      title={b?.lost_median != null ? 'Click to see deals' : undefined}
-    >
-      <span style={{ fontWeight: 600, color: '#E53E3E' }}>{fmtDays(b?.lost_median ?? null)}</span>
-      {b && <ConfidenceDot tier={b.lost_confidence} sample={b.lost_sample} />}
-    </td>
-  );
+  const lostCell = (b: StageBenchmark | undefined, stageNorm: string, seg: string, pipelineName?: string) => {
+    const val = metricMode === 'median' ? (b?.lost_median ?? null) : (b?.lost_avg ?? null);
+    return (
+      <td
+        key={`${stageNorm}_${seg}_lost`}
+        onClick={() => b?.lost_median != null ? openMath(stageNorm, 'lost', stageHeaderLabel(stageNorm, b.stage), seg, b.lost_median, pipelineName ?? selectedPipeline) : undefined}
+        style={{
+          padding: '10px 12px', textAlign: 'center',
+          opacity: b?.lost_confidence === 'insufficient' ? 0.45 : 1,
+          cursor: b?.lost_median != null ? 'pointer' : 'default',
+        }}
+        title={b?.lost_median != null ? 'Click to see deals' : undefined}
+      >
+        <span style={{ fontWeight: 600, color: '#E53E3E' }}>{fmtDays(val)}</span>
+        {b && <ConfidenceDot tier={b.lost_confidence} sample={b.lost_sample} />}
+      </td>
+    );
+  };
+
+  const metricLabel = metricMode === 'median' ? 'median' : 'avg';
 
   const renderBenchmarkTable = (
     stageList: Array<{ stage: string; stage_normalized: string; display_order: number | null }>,
@@ -432,7 +447,7 @@ export default function BenchmarksGrid() {
             <td style={{ padding: '10px 16px', color: colors.textSecondary, whiteSpace: 'nowrap' }}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
                 <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#38A169', display: 'inline-block' }} />
-                Won median
+                Won {metricLabel}
               </span>
             </td>
             {stageList.map(s => wonCell(getBench(s.stage_normalized, seg), s.stage_normalized, seg, pipelineName))}
@@ -441,7 +456,7 @@ export default function BenchmarksGrid() {
             <td style={{ padding: '10px 16px', color: colors.textSecondary, whiteSpace: 'nowrap' }}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
                 <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#E53E3E', display: 'inline-block' }} />
-                Lost median
+                Lost {metricLabel}
               </span>
             </td>
             {stageList.map(s => lostCell(getBench(s.stage_normalized, seg), s.stage_normalized, seg, pipelineName))}
@@ -512,6 +527,17 @@ export default function BenchmarksGrid() {
             </ToggleButton>
             <ToggleButton active={viewMode === 'raw'} onClick={() => setViewMode('raw')}>
               Deal Stages
+            </ToggleButton>
+          </div>
+
+          {/* Metric mode toggle */}
+          <div style={{ width: 1, height: 20, background: colors.border, flexShrink: 0 }} />
+          <div style={{ display: 'flex', background: colors.surfaceHover, borderRadius: 7, padding: 2, border: `1px solid ${colors.border}` }}>
+            <ToggleButton active={metricMode === 'median'} onClick={() => setMetricMode('median')}>
+              Median
+            </ToggleButton>
+            <ToggleButton active={metricMode === 'average'} onClick={() => setMetricMode('average')}>
+              Average
             </ToggleButton>
           </div>
 
@@ -699,13 +725,15 @@ export default function BenchmarksGrid() {
                         <thead>
                           <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
                             <th style={{ padding: '10px 16px', textAlign: 'left', color: colors.textMuted, fontWeight: 600, fontSize: 11, width: 200 }}>Stage Name</th>
-                            <th style={{ padding: '10px 12px', textAlign: 'center', color: '#38A169', fontWeight: 600, fontSize: 11, minWidth: 100 }}>Won median</th>
-                            <th style={{ padding: '10px 12px', textAlign: 'center', color: '#E53E3E', fontWeight: 600, fontSize: 11, minWidth: 100 }}>Lost median</th>
+                            <th style={{ padding: '10px 12px', textAlign: 'center', color: '#38A169', fontWeight: 600, fontSize: 11, minWidth: 100 }}>Won {metricLabel}</th>
+                            <th style={{ padding: '10px 12px', textAlign: 'center', color: '#E53E3E', fontWeight: 600, fontSize: 11, minWidth: 100 }}>Lost {metricLabel}</th>
                             <th style={{ padding: '10px 12px', textAlign: 'center', color: colors.textMuted, fontWeight: 600, fontSize: 11, minWidth: 80 }}>Signal gap</th>
                           </tr>
                         </thead>
                         <tbody>
                           {groupStages.map(rb => {
+                            const wonVal = metricMode === 'median' ? rb.won_median : rb.won_avg;
+                            const lostVal = metricMode === 'median' ? rb.lost_median : rb.lost_avg;
                             const ratio = rb.won_median && rb.lost_median ? rb.lost_median / rb.won_median : null;
                             const gapColor = signalGapColor(rb.won_median, rb.lost_median);
                             return (
@@ -713,14 +741,14 @@ export default function BenchmarksGrid() {
                                 <td style={{ padding: '10px 16px', color: colors.text, fontWeight: 500 }}>{rb.stage}</td>
                                 <td style={{ padding: '10px 12px', textAlign: 'center', cursor: rb.won_median != null ? 'pointer' : 'default' }}
                                   onClick={() => rb.won_median != null ? openMath(rb.stage_normalized, 'won', rb.stage, 'all', rb.won_median, rb.pipeline || selectedPipeline) : undefined}>
-                                  {rb.won_median !== null ? (
-                                    <span><span style={{ fontWeight: 600, color: '#38A169' }}>{fmtDays(rb.won_median)}</span><ConfidenceDot tier={rb.won_sample >= 20 ? 'high' : rb.won_sample >= 5 ? 'directional' : 'insufficient'} sample={rb.won_sample} /></span>
+                                  {wonVal !== null && wonVal !== undefined ? (
+                                    <span><span style={{ fontWeight: 600, color: '#38A169' }}>{fmtDays(wonVal)}</span><ConfidenceDot tier={rb.won_sample >= 20 ? 'high' : rb.won_sample >= 5 ? 'directional' : 'insufficient'} sample={rb.won_sample} /></span>
                                   ) : <span style={{ color: colors.textMuted }}>—</span>}
                                 </td>
                                 <td style={{ padding: '10px 12px', textAlign: 'center', cursor: rb.lost_median != null ? 'pointer' : 'default' }}
                                   onClick={() => rb.lost_median != null ? openMath(rb.stage_normalized, 'lost', rb.stage, 'all', rb.lost_median, rb.pipeline || selectedPipeline) : undefined}>
-                                  {rb.lost_median !== null ? (
-                                    <span><span style={{ fontWeight: 600, color: '#E53E3E' }}>{fmtDays(rb.lost_median)}</span><ConfidenceDot tier={rb.lost_sample >= 20 ? 'high' : rb.lost_sample >= 5 ? 'directional' : 'insufficient'} sample={rb.lost_sample} /></span>
+                                  {lostVal !== null && lostVal !== undefined ? (
+                                    <span><span style={{ fontWeight: 600, color: '#E53E3E' }}>{fmtDays(lostVal)}</span><ConfidenceDot tier={rb.lost_sample >= 20 ? 'high' : rb.lost_sample >= 5 ? 'directional' : 'insufficient'} sample={rb.lost_sample} /></span>
                                   ) : <span style={{ color: colors.textMuted }}>—</span>}
                                 </td>
                                 <td style={{ padding: '10px 12px', textAlign: 'center' }}>
@@ -769,6 +797,8 @@ export default function BenchmarksGrid() {
       {/* Closed (total) — standalone summary card, rendered once regardless of view */}
       {data?.cycle_time && (data.cycle_time.won_median != null || data.cycle_time.lost_median != null) && (() => {
         const ct = data.cycle_time!;
+        const ctWonVal = metricMode === 'median' ? ct.won_median : ct.won_avg;
+        const ctLostVal = metricMode === 'median' ? ct.lost_median : ct.lost_avg;
         const ratio = ct.won_median && ct.lost_median ? ct.lost_median / ct.won_median : null;
         const gapColor = signalGapColor(ct.won_median, ct.lost_median);
         return (
@@ -782,8 +812,8 @@ export default function BenchmarksGrid() {
                 <thead>
                   <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
                     <th style={{ padding: '10px 16px', textAlign: 'left', color: colors.textMuted, fontWeight: 600, fontSize: 11, width: 200 }}>Metric</th>
-                    <th style={{ padding: '10px 12px', textAlign: 'center', color: '#38A169', fontWeight: 600, fontSize: 11, minWidth: 100 }}>Won median</th>
-                    <th style={{ padding: '10px 12px', textAlign: 'center', color: '#E53E3E', fontWeight: 600, fontSize: 11, minWidth: 100 }}>Lost median</th>
+                    <th style={{ padding: '10px 12px', textAlign: 'center', color: '#38A169', fontWeight: 600, fontSize: 11, minWidth: 100 }}>Won {metricLabel}</th>
+                    <th style={{ padding: '10px 12px', textAlign: 'center', color: '#E53E3E', fontWeight: 600, fontSize: 11, minWidth: 100 }}>Lost {metricLabel}</th>
                     <th style={{ padding: '10px 12px', textAlign: 'center', color: colors.textMuted, fontWeight: 600, fontSize: 11, minWidth: 80 }}>Signal gap</th>
                   </tr>
                 </thead>
@@ -794,9 +824,9 @@ export default function BenchmarksGrid() {
                       style={{ padding: '10px 12px', textAlign: 'center', cursor: ct.won_median != null ? 'pointer' : 'default' }}
                       onClick={() => ct.won_median != null ? openMath('_cycle_total', 'won', 'Closed (total)', 'all', ct.won_median, selectedPipeline !== 'all' ? selectedPipeline : undefined) : undefined}
                     >
-                      {ct.won_median != null ? (
+                      {ctWonVal != null ? (
                         <span>
-                          <span style={{ fontWeight: 700, color: '#38A169' }}>{fmtDays(ct.won_median)}</span>
+                          <span style={{ fontWeight: 700, color: '#38A169' }}>{fmtDays(ctWonVal)}</span>
                           <ConfidenceDot tier={ct.won_sample >= 20 ? 'high' : ct.won_sample >= 5 ? 'directional' : 'insufficient'} sample={ct.won_sample} />
                         </span>
                       ) : <span style={{ color: colors.textMuted }}>—</span>}
@@ -805,9 +835,9 @@ export default function BenchmarksGrid() {
                       style={{ padding: '10px 12px', textAlign: 'center', cursor: ct.lost_median != null ? 'pointer' : 'default' }}
                       onClick={() => ct.lost_median != null ? openMath('_cycle_total', 'lost', 'Closed (total)', 'all', ct.lost_median, selectedPipeline !== 'all' ? selectedPipeline : undefined) : undefined}
                     >
-                      {ct.lost_median != null ? (
+                      {ctLostVal != null ? (
                         <span>
-                          <span style={{ fontWeight: 700, color: '#E53E3E' }}>{fmtDays(ct.lost_median)}</span>
+                          <span style={{ fontWeight: 700, color: '#E53E3E' }}>{fmtDays(ctLostVal)}</span>
                           <ConfidenceDot tier={ct.lost_sample >= 20 ? 'high' : ct.lost_sample >= 5 ? 'directional' : 'insufficient'} sample={ct.lost_sample} />
                         </span>
                       ) : <span style={{ color: colors.textMuted }}>—</span>}

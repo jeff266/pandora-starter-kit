@@ -81,6 +81,7 @@ export async function computeAndStoreStageBenchmarks(workspaceId: string): Promi
     median_days: string;
     p75_days: string;
     p90_days: string;
+    avg_days: string;
     sample_size: string;
   }>(
     `WITH closed_deal_stages AS (
@@ -121,14 +122,15 @@ export async function computeAndStoreStageBenchmarks(workspaceId: string): Promi
          COUNT(*)::integer                                                       AS sample_size,
          PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY duration_days)::numeric   AS median_days,
          PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY duration_days)::numeric   AS p75_days,
-         PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY duration_days)::numeric   AS p90_days
+         PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY duration_days)::numeric   AS p90_days,
+         AVG(duration_days)::numeric(10,1)                                       AS avg_days
        FROM with_all_segment
        WHERE duration_days IS NOT NULL
        GROUP BY pipeline, stage_normalized, segment, outcome
        HAVING COUNT(*) >= 3
      )
      SELECT pipeline, stage_normalized, segment, outcome,
-            median_days::text, p75_days::text, p90_days::text, sample_size::text
+            median_days::text, p75_days::text, p90_days::text, avg_days::text, sample_size::text
      FROM aggregated
      ORDER BY stage_normalized, segment, outcome`,
     [workspaceId, lowCutoff, highCutoff]
@@ -164,13 +166,14 @@ export async function computeAndStoreStageBenchmarks(workspaceId: string): Promi
     await query(
       `INSERT INTO stage_velocity_benchmarks
          (workspace_id, pipeline, stage_normalized, segment, outcome,
-          median_days, p75_days, p90_days, sample_size, confidence_tier, is_inverted, computed_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now())
+          median_days, p75_days, p90_days, avg_days, sample_size, confidence_tier, is_inverted, computed_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now())
        ON CONFLICT (workspace_id, pipeline, stage_normalized, segment, outcome)
        DO UPDATE SET
          median_days      = EXCLUDED.median_days,
          p75_days         = EXCLUDED.p75_days,
          p90_days         = EXCLUDED.p90_days,
+         avg_days         = EXCLUDED.avg_days,
          sample_size      = EXCLUDED.sample_size,
          confidence_tier  = EXCLUDED.confidence_tier,
          is_inverted      = EXCLUDED.is_inverted,
@@ -184,6 +187,7 @@ export async function computeAndStoreStageBenchmarks(workspaceId: string): Promi
         parseFloat(row.median_days),
         parseFloat(row.p75_days),
         parseFloat(row.p90_days),
+        row.avg_days ? parseFloat(row.avg_days) : null,
         parseInt(row.sample_size, 10),
         tier,
         isInverted,
