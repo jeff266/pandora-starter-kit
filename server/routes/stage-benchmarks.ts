@@ -50,13 +50,8 @@ router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response)
       pipelineFilter ? [workspaceId, pipelineFilter] : [workspaceId]
     );
 
-    // Get display names and order for stages (run in parallel with open averages)
-    const [stageOrderResult, openAvgResult, pipelinesResult] = await Promise.all([
-      query<{ stage_name: string; stage_normalized: string; display_order: number }>(
-        `SELECT stage_name, COALESCE(stage_normalized, stage_name) AS stage_normalized, display_order
-         FROM stage_configs WHERE workspace_id = $1 ORDER BY display_order`,
-        [workspaceId]
-      ),
+    // Get open deal averages and distinct pipelines in parallel
+    const [openAvgResult, pipelinesResult] = await Promise.all([
       query<{ stage_normalized: string; open_avg: string; open_count: string }>(
         `SELECT stage_normalized,
                 AVG(COALESCE(days_in_stage, EXTRACT(days FROM NOW() - stage_changed_at)::integer))::numeric(10,1) AS open_avg,
@@ -74,12 +69,9 @@ router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response)
       ),
     ]);
 
-    const displayOrder: Record<string, number> = {};
-    const stageDisplayName: Record<string, string> = {};
-    for (const s of stageOrderResult.rows) {
-      displayOrder[s.stage_normalized] = s.display_order;
-      stageDisplayName[s.stage_normalized] = s.stage_name;
-    }
+    // Derive display name from stage_normalized (stage_configs uses raw names, not normalized codes)
+    const toDisplayName = (s: string) =>
+      s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
     const openAverages: Record<string, { avg: number; count: number }> = {};
     for (const r of openAvgResult.rows) {
@@ -113,9 +105,9 @@ router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response)
       const key = `${r.pipeline}||${r.stage_normalized}||${r.segment}`;
       if (!benchMap[key]) {
         benchMap[key] = {
-          stage: stageDisplayName[r.stage_normalized] ?? r.stage_normalized.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+          stage: toDisplayName(r.stage_normalized),
           stage_normalized: r.stage_normalized,
-          display_order: displayOrder[r.stage_normalized] ?? null,
+          display_order: null,
           pipeline: r.pipeline,
           segment: r.segment,
           won_median: null,
@@ -141,11 +133,9 @@ router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response)
       }
     }
 
-    const benchmarks = Object.values(benchMap).sort((a, b) => {
-      const oa = a.display_order ?? 999;
-      const ob = b.display_order ?? 999;
-      return oa - ob || a.stage_normalized.localeCompare(b.stage_normalized);
-    });
+    const benchmarks = Object.values(benchMap).sort((a, b) =>
+      a.stage_normalized.localeCompare(b.stage_normalized)
+    );
 
     const lastComputedAt = benchRows.rows.length > 0 ? benchRows.rows[0].computed_at : null;
 
