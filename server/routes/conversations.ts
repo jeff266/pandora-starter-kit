@@ -593,6 +593,19 @@ router.get('/:workspaceId/conversations/list', async (req: Request, res: Respons
       paramIndex++;
     }
 
+    const has_coaching = req.query.has_coaching as string | undefined;
+    if (has_coaching === 'true') {
+      whereConditions.push(
+        `(c.deal_id IS NOT NULL AND EXISTS (
+          SELECT 1 FROM win_patterns wp
+          WHERE wp.workspace_id = c.workspace_id
+            AND wp.superseded_at IS NULL
+            AND (wp.segment_size_min IS NULL OR COALESCE(d.amount, 0) >= wp.segment_size_min)
+            AND (wp.segment_size_max IS NULL OR COALESCE(d.amount, 0) < wp.segment_size_max)
+        ))`
+      );
+    }
+
     const limitNum = parseInt(limit as string, 10);
     const offsetNum = parseInt(offset as string, 10);
 
@@ -611,6 +624,13 @@ router.get('/:workspaceId/conversations/list', async (req: Request, res: Respons
          c.custom_fields,
          c.summary,
          (c.transcript_text IS NOT NULL) AS has_transcript,
+         (c.deal_id IS NOT NULL AND EXISTS (
+           SELECT 1 FROM win_patterns wp
+           WHERE wp.workspace_id = c.workspace_id
+             AND wp.superseded_at IS NULL
+             AND (wp.segment_size_min IS NULL OR COALESCE(d.amount, 0) >= wp.segment_size_min)
+             AND (wp.segment_size_max IS NULL OR COALESCE(d.amount, 0) < wp.segment_size_max)
+         )) AS has_coaching,
          a.name as account_name,
          d.name as deal_name,
          d.stage as deal_stage,
@@ -670,6 +690,7 @@ router.get('/:workspaceId/conversations/list', async (req: Request, res: Respons
           signals_extracted: row.summary != null && row.summary.length > 0,
           summary: row.summary || null,
           has_transcript: Boolean(row.has_transcript),
+          has_coaching: Boolean(row.has_coaching),
         };
       }),
       pagination: {

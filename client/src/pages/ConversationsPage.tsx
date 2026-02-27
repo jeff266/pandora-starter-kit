@@ -28,6 +28,7 @@ interface Conversation {
   signals_extracted: boolean;
   summary: string | null;
   has_transcript: boolean;
+  has_coaching: boolean;
 }
 
 interface ToastItem {
@@ -77,6 +78,7 @@ export default function ConversationsPage() {
   const [ownerFilter, setOwnerFilter] = useState('');
   const [stageFilter, setStageFilter] = useState('');
   const [linkedFilter, setLinkedFilter] = useState<'all' | 'linked' | 'unlinked'>('all');
+  const [coachingFilter, setCoachingFilter] = useState(false);
 
   // Server-mode specific
   const [filterOptions, setFilterOptions] = useState<FilterOptions>({ owners: [], stages: [] });
@@ -146,6 +148,7 @@ export default function ConversationsPage() {
     owner: string,
     stage: string,
     linked: 'all' | 'linked' | 'unlinked',
+    coaching: boolean,
   ) => {
     if (filterMode !== 'server') return;
     setServerLoading(true);
@@ -156,6 +159,7 @@ export default function ConversationsPage() {
       if (stage) params.set('deal_stage', stage);
       if (linked === 'linked') params.set('has_deal', 'true');
       if (linked === 'unlinked') params.set('has_deal', 'false');
+      if (coaching) params.set('has_coaching', 'true');
 
       const res = await api.get(`/conversations/list?${params}`);
       setConversations(res.conversations || []);
@@ -172,12 +176,12 @@ export default function ConversationsPage() {
     if (filterMode !== 'server') return;
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     searchDebounceRef.current = setTimeout(() => {
-      fetchServerFiltered(searchQuery, ownerFilter, stageFilter, linkedFilter);
+      fetchServerFiltered(searchQuery, ownerFilter, stageFilter, linkedFilter, coachingFilter);
     }, searchQuery ? 300 : 0);
     return () => {
       if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     };
-  }, [filterMode, searchQuery, ownerFilter, stageFilter, linkedFilter, fetchServerFiltered]);
+  }, [filterMode, searchQuery, ownerFilter, stageFilter, linkedFilter, coachingFilter, fetchServerFiltered]);
 
   // ─── Client-side filtering ────────────────────────────────────────────────
 
@@ -189,9 +193,10 @@ export default function ConversationsPage() {
       if (stageFilter && c.deal_stage !== stageFilter) return false;
       if (linkedFilter === 'linked' && !c.deal_id) return false;
       if (linkedFilter === 'unlinked' && c.deal_id) return false;
+      if (coachingFilter && !c.has_coaching) return false;
       return true;
     });
-  }, [filterMode, conversations, searchQuery, ownerFilter, stageFilter, linkedFilter]);
+  }, [filterMode, conversations, searchQuery, ownerFilter, stageFilter, linkedFilter, coachingFilter]);
 
   const displayedConversations = filterMode === 'client' ? filteredConversations : conversations;
 
@@ -220,13 +225,14 @@ export default function ConversationsPage() {
     [nextActionGaps, gapOwnerFilter]
   );
 
-  const anyFilterActive = searchQuery || ownerFilter || stageFilter || linkedFilter !== 'all';
+  const anyFilterActive = searchQuery || ownerFilter || stageFilter || linkedFilter !== 'all' || coachingFilter;
 
   function clearAllFilters() {
     setSearchQuery('');
     setOwnerFilter('');
     setStageFilter('');
     setLinkedFilter('all');
+    setCoachingFilter(false);
   }
 
   // ─── Utility functions ────────────────────────────────────────────────────
@@ -579,6 +585,25 @@ export default function ConversationsPage() {
               <option value="unlinked">Unlinked</option>
             </select>
 
+            {/* Coaching filter */}
+            <button
+              onClick={() => setCoachingFilter(v => !v)}
+              title="Show only calls with coaching patterns available"
+              style={{
+                padding: '4px 10px',
+                fontSize: 12,
+                borderRadius: 20,
+                border: `1px solid ${coachingFilter ? colors.accent : colors.border}`,
+                background: coachingFilter ? `${colors.accent}22` : 'transparent',
+                color: coachingFilter ? colors.accent : colors.textMuted,
+                cursor: 'pointer',
+                fontFamily: fonts.sans,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              C Coaching
+            </button>
+
             {/* Clear + count */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginLeft: 'auto' }}>
               {anyFilterActive && (
@@ -638,7 +663,7 @@ export default function ConversationsPage() {
               <div>Deal</div>
               <div>Owner</div>
               <div>Date</div>
-              <div style={{ textAlign: 'right' }}>Duration</div>
+              <div style={{ textAlign: 'right' }}>Intel</div>
             </div>
 
             {/* Rows */}
@@ -748,8 +773,42 @@ export default function ConversationsPage() {
                         {formatDate(conv.call_date)}
                       </div>
 
-                      <div style={{ fontSize: 12, color: colors.textSecondary, textAlign: 'right' }}>
-                        {formatDuration(conv.duration_seconds)}
+                      <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end', alignItems: 'center' }}>
+                        {conv.signals_extracted && (
+                          <span
+                            title="Conversation signals extracted"
+                            style={{
+                              fontSize: 10,
+                              fontWeight: 700,
+                              padding: '2px 5px',
+                              borderRadius: 4,
+                              background: '#1e40af22',
+                              color: '#60a5fa',
+                              border: '1px solid #1e40af44',
+                              fontFamily: fonts.sans,
+                              letterSpacing: '0.3px',
+                            }}
+                          >S</span>
+                        )}
+                        {conv.has_coaching && (
+                          <span
+                            title="Coaching patterns available"
+                            style={{
+                              fontSize: 10,
+                              fontWeight: 700,
+                              padding: '2px 5px',
+                              borderRadius: 4,
+                              background: `${colors.accent}22`,
+                              color: colors.accent,
+                              border: `1px solid ${colors.accent}44`,
+                              fontFamily: fonts.sans,
+                              letterSpacing: '0.3px',
+                            }}
+                          >C</span>
+                        )}
+                        {!conv.signals_extracted && !conv.has_coaching && (
+                          <span style={{ fontSize: 11, color: colors.textMuted }}>—</span>
+                        )}
                       </div>
                     </div>
 
