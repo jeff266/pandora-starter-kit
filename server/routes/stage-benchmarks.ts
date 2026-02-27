@@ -83,7 +83,7 @@ router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response)
            AND dsh.duration_days IS NOT NULL
            AND dsh.stage ~ '^[A-Z]'
          GROUP BY dsh.stage, dsh.stage_normalized, outcome
-         HAVING COUNT(*) >= 3
+         HAVING COUNT(*) >= 1
          ORDER BY MIN(sc.display_order) ASC NULLS LAST, dsh.stage_normalized, dsh.stage, outcome`,
         [workspaceId]
       ),

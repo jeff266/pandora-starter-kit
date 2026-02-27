@@ -427,7 +427,7 @@ export default function BenchmarksGrid() {
         /* ── RAW STAGES VIEW ── */
         !hasRawData ? (
           <div style={{ padding: 32, textAlign: 'center', fontSize: 13, color: colors.textMuted }}>
-            No raw stage data with sufficient sample size (min 3 deals per outcome).
+            No raw stage data found. Stage history may be recorded using internal API IDs rather than display names.
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
