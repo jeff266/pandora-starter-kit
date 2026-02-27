@@ -78,12 +78,13 @@ router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response)
          JOIN deals d ON d.id = dsh.deal_id
          LEFT JOIN stage_configs sc ON sc.workspace_id = dsh.workspace_id
            AND (sc.stage_id = dsh.stage OR sc.stage_name = dsh.stage)
+           AND sc.pipeline_name = d.pipeline
          WHERE dsh.workspace_id = $1
            AND d.stage_normalized IN ('closed_won', 'closed_lost')
            AND dsh.stage_normalized NOT IN ('closed_won', 'closed_lost', 'unknown', 'awareness')
            AND dsh.duration_days IS NOT NULL
            AND sc.stage_name IS NOT NULL
-           ${pipelineFilter ? 'AND sc.pipeline_name = $2' : ''}
+           ${pipelineFilter ? 'AND d.pipeline = $2' : ''}
          GROUP BY sc.stage_name, sc.pipeline_name, dsh.stage_normalized, outcome
          HAVING COUNT(*) >= 1
          ORDER BY MIN(sc.display_order) ASC NULLS LAST, sc.stage_name, outcome`,

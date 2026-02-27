@@ -33,9 +33,8 @@ async function buildStageMaps(client: HubSpotClient, workspaceId: string): Promi
           query(
             `INSERT INTO stage_configs (workspace_id, pipeline_name, stage_name, display_order, stage_id)
              VALUES ($1, $2, $3, $4, $5)
-             ON CONFLICT (workspace_id, stage_name) DO UPDATE SET
+             ON CONFLICT (workspace_id, pipeline_name, stage_name) DO UPDATE SET
                display_order = EXCLUDED.display_order,
-               pipeline_name = EXCLUDED.pipeline_name,
                stage_id = EXCLUDED.stage_id,
                updated_at = NOW()`,
             [workspaceId, pipeline.label, stage.label, stage.displayOrder, stage.id]
