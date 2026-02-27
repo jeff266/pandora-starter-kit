@@ -756,13 +756,9 @@ router.get('/:workspaceId/conversations/coaching-breakdown', async (req: Request
   try {
     const { workspaceId } = req.params;
 
-    const result = await query<{
-      stage: string;
-      signal_type: string;
-      deal_count: string;
-      deal_value: string;
-    }>(
-      `WITH coached_deals AS (
+    // Shared CTE: best-matching win pattern per open deal, with 4-bucket signal classification
+    const COACHED_DEALS_CTE = `
+      WITH coached_deals AS (
         SELECT DISTINCT ON (d.id)
           d.id                                                             AS deal_id,
           d.stage,
@@ -788,44 +784,81 @@ router.get('/:workspaceId/conversations/coaching-breakdown', async (req: Request
       ),
       signal_typed AS (
         SELECT
+          deal_id,
           stage,
           amount,
+          sales_cycle_days,
+          won_median,
+          won_p75,
           CASE
-            WHEN direction = 'lower_wins' AND sales_cycle_days > won_p75    THEN 'action'
-            WHEN direction = 'lower_wins' AND sales_cycle_days <= won_median THEN 'strength'
-            WHEN direction = 'higher_wins' AND sales_cycle_days < won_median THEN 'action'
-            WHEN direction = 'higher_wins' AND sales_cycle_days >= won_median THEN 'strength'
-            ELSE 'neutral'
+            WHEN direction = 'lower_wins' AND sales_cycle_days > (won_p75 * 2) THEN 'stalled'
+            WHEN direction = 'lower_wins' AND sales_cycle_days > won_p75       THEN 'slowing'
+            WHEN direction = 'lower_wins' AND sales_cycle_days <= won_median    THEN 'fast'
+            WHEN direction = 'higher_wins' AND sales_cycle_days < won_median    THEN 'stalled'
+            WHEN direction = 'higher_wins' AND sales_cycle_days >= (won_median * 2) THEN 'fast'
+            ELSE 'on_track'
           END AS signal_type
         FROM coached_deals
-      )
-      SELECT
-        stage,
-        signal_type,
-        COUNT(*)         AS deal_count,
-        SUM(amount)      AS deal_value
-      FROM signal_typed
-      GROUP BY stage, signal_type
-      ORDER BY SUM(amount) DESC NULLS LAST, stage, signal_type`,
-      [workspaceId]
-    );
+      )`;
 
-    const breakdown = result.rows.map(r => ({
+    const [breakdownResult, convsResult] = await Promise.all([
+      query<{ stage: string; signal_type: string; deal_count: string; deal_value: string }>(
+        `${COACHED_DEALS_CTE}
+        SELECT
+          stage,
+          signal_type,
+          COUNT(*)    AS deal_count,
+          SUM(amount) AS deal_value
+        FROM signal_typed
+        GROUP BY stage, signal_type
+        ORDER BY SUM(amount) DESC NULLS LAST, stage, signal_type`,
+        [workspaceId]
+      ),
+      query<{ id: string; stage: string; signal_type: string; days_old: string; won_median: string }>(
+        `${COACHED_DEALS_CTE}
+        SELECT
+          c.id,
+          st.stage,
+          st.signal_type,
+          st.sales_cycle_days AS days_old,
+          st.won_median
+        FROM signal_typed st
+        JOIN conversations c ON c.deal_id = st.deal_id
+                             AND c.workspace_id = $1
+                             AND c.is_internal = FALSE`,
+        [workspaceId]
+      ),
+    ]);
+
+    const breakdown = breakdownResult.rows.map(r => ({
       stage: r.stage,
       signal_type: r.signal_type,
       deal_count: parseInt(r.deal_count, 10),
       deal_value: parseFloat(r.deal_value),
     }));
 
+    const convSignals = convsResult.rows.map(r => ({
+      id: r.id,
+      stage: r.stage,
+      signal_type: r.signal_type,
+      days_old: parseInt(r.days_old, 10),
+      won_median: parseFloat(r.won_median),
+    }));
+
     const totalAtRisk = breakdown
-      .filter(r => r.signal_type === 'action')
+      .filter(r => r.signal_type === 'stalled' || r.signal_type === 'slowing')
       .reduce((sum, r) => sum + r.deal_value, 0);
 
     const totalAtRiskCount = breakdown
-      .filter(r => r.signal_type === 'action')
+      .filter(r => r.signal_type === 'stalled' || r.signal_type === 'slowing')
       .reduce((sum, r) => sum + r.deal_count, 0);
 
-    res.json({ breakdown, total_at_risk_value: totalAtRisk, total_at_risk_count: totalAtRiskCount });
+    res.json({
+      breakdown,
+      conversations: convSignals,
+      total_at_risk_value: totalAtRisk,
+      total_at_risk_count: totalAtRiskCount,
+    });
   } catch (err) {
     console.error('[Coaching Breakdown]', err);
     res.status(500).json({ error: (err as Error).message });

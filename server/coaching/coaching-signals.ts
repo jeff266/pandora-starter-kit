@@ -108,15 +108,15 @@ function getSignalCopy(
   const copies: Record<string, Record<string, SignalCopy>> = {
     sales_cycle_days: {
       action: {
-        label: `Sales cycle at ${Math.round(currentValue)} days`,
-        action_sentence: `Won deals at this size typically close in ${Math.round(wonMedian)} days. Identify what's stalling and whether this deal needs a forcing function.`,
+        label: `${Math.round(currentValue)} days in — ${Math.round(currentValue / Math.max(wonMedian, 1))}× your typical close pace`,
+        action_sentence: `Your wins at this price point close in ${Math.round(wonMedian)} days. At ${Math.round(currentValue)} days, this deal needs a direct conversation about timeline and next steps.`,
       },
       positive: {
-        label: `Fast sales cycle`,
+        label: `Closing fast — ${Math.round(currentValue)} days`,
         action_sentence:
           mode === 'retrospective'
-            ? `Closed in ${Math.round(currentValue)} days vs ${Math.round(wonMedian)}-day median. Worth studying what accelerated this deal.`
-            : `On pace at ${Math.round(currentValue)} days vs ${Math.round(wonMedian)}-day median for won deals.`,
+            ? `Closed in ${Math.round(currentValue)} days vs a ${Math.round(wonMedian)}-day pace. Worth capturing what drove this speed.`
+            : `Ahead of pace at ${Math.round(currentValue)} days — your wins at this size take ${Math.round(wonMedian)} days. Keep the momentum.`,
       },
     },
 
@@ -429,11 +429,18 @@ export async function generateCoachingSignals(
 
   // 4b. Neutral zone: patterns applied but all metrics fell between thresholds — show on-track signal
   if (applicablePatterns.length > 0 && signals.length === 0) {
+    const bestPattern = applicablePatterns[0];
+    const neutralLabel = bestPattern?.dimension === 'sales_cycle_days' && dealMetrics.sales_cycle_days != null
+      ? `On pace — ${Math.round(dealMetrics.sales_cycle_days)} days in`
+      : 'Moving at normal pace';
+    const neutralSentence = bestPattern?.dimension === 'sales_cycle_days' && dealMetrics.sales_cycle_days != null
+      ? `Within your normal close window. Your wins at this price range close in ${Math.round(bestPattern.won_median)}–${Math.round(bestPattern.won_p75)} days.`
+      : `Deal metrics are within the normal range. Keep momentum — benchmarked against ${wonCount} won and ${lostCount} deals.`;
     signals.push({
       type: 'positive',
-      label: 'Tracking within expected range',
-      insight: `This deal's metrics are within normal range for ${mode === 'retrospective' ? 'similar closed' : 'similar open'} deals.`,
-      action_sentence: `Keep momentum. Benchmarked against ${wonCount} won and ${lostCount} lost deals.`,
+      label: neutralLabel,
+      insight: neutralSentence,
+      action_sentence: neutralSentence,
     });
   }
 
