@@ -298,7 +298,8 @@ export async function assembleConversationDossier(
           dealContext.stage,
           dealContext.amount,
           null, // pipeline_name not yet tracked
-          client
+          client,
+          dealContext.stage_normalized
         )
       : { signals: [], mode: 'hidden' as CoachingMode, metadata: { won_count: 0, lost_count: 0, pattern_count: 0 } };
 

@@ -77,13 +77,14 @@ interface DealMetrics {
 /**
  * Determine coaching mode based on deal status
  */
-function getCoachingMode(currentStage: string | null): CoachingMode {
-  if (!currentStage) return 'hidden';
+function getCoachingMode(currentStage: string | null, stageNormalized?: string | null): CoachingMode {
+  if (!currentStage && !stageNormalized) return 'hidden';
 
-  const stage = currentStage.toLowerCase();
+  // Prefer normalized stage (e.g. 'closed_won') over raw CRM stage (e.g. 'Closed Won')
+  const normalized = (stageNormalized || currentStage || '').toLowerCase().replace(/\s+/g, '_');
 
   // Closed deals get retrospective view (what went right/wrong)
-  if (stage === 'closed_won' || stage === 'closed_lost') return 'retrospective';
+  if (normalized === 'closed_won' || normalized === 'closed_lost') return 'retrospective';
 
   // Open deals get active coaching
   return 'active';
@@ -258,12 +259,13 @@ export async function generateCoachingSignals(
   currentStage: string,
   amount: number,
   pipelineName: string | null,
-  client?: PoolClient
+  client?: PoolClient,
+  stageNormalized?: string | null
 ): Promise<CoachingSignalsResult> {
   const db = client || { query };
 
-  // Determine coaching mode
-  const mode = getCoachingMode(currentStage);
+  // Determine coaching mode — use stage_normalized to avoid CRM-specific stage name formats
+  const mode = getCoachingMode(currentStage, stageNormalized);
 
   if (mode === 'hidden') {
     return {
@@ -423,6 +425,16 @@ export async function generateCoachingSignals(
         },
       });
     }
+  }
+
+  // 4b. Neutral zone: patterns applied but all metrics fell between thresholds — show on-track signal
+  if (applicablePatterns.length > 0 && signals.length === 0) {
+    signals.push({
+      type: 'positive',
+      label: 'Tracking within expected range',
+      insight: `This deal's metrics are within normal range for ${mode === 'retrospective' ? 'similar closed' : 'similar open'} deals.`,
+      action_sentence: `Keep momentum. Benchmarked against ${wonCount} won and ${lostCount} lost deals.`,
+    });
   }
 
   // 5. Sort by separation score (most predictive first)
