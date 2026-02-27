@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import { useWorkspace } from '../context/WorkspaceContext';
@@ -70,7 +71,14 @@ export default function ConversationsPage() {
   const [totalConversations, setTotalConversations] = useState(0);
 
   // Tabs
-  const [activeTab, setActiveTab] = useState<'needs_attention' | 'all'>('needs_attention');
+  const [activeTab, setActiveTab] = useState<'needs_attention' | 'all' | 'coaching'>('needs_attention');
+
+  // Coaching breakdown state
+  interface CoachingBreakdownRow { stage: string; signal_type: string; deal_count: number; deal_value: number; }
+  const [coachingBreakdown, setCoachingBreakdown] = useState<CoachingBreakdownRow[]>([]);
+  const [breakdownTotalAtRisk, setBreakdownTotalAtRisk] = useState(0);
+  const [breakdownTotalAtRiskCount, setBreakdownTotalAtRiskCount] = useState(0);
+  const [breakdownLoading, setBreakdownLoading] = useState(false);
 
   // Needs Attention filter
   const [gapOwnerFilter, setGapOwnerFilter] = useState('');
@@ -142,6 +150,28 @@ export default function ConversationsPage() {
       setLoading(false);
     }
   }
+
+  // ─── Coaching breakdown fetch ──────────────────────────────────────────────
+
+  useEffect(() => {
+    if (activeTab !== 'coaching' || !workspaceId) return;
+    if (coachingBreakdown.length > 0) return; // already loaded
+    let cancelled = false;
+    setBreakdownLoading(true);
+    api.get('/conversations/coaching-breakdown')
+      .then((res: any) => {
+        if (cancelled) return;
+        setCoachingBreakdown(res.breakdown || []);
+        setBreakdownTotalAtRisk(res.total_at_risk_value || 0);
+        setBreakdownTotalAtRiskCount(res.total_at_risk_count || 0);
+      })
+      .catch((err: any) => {
+        if (cancelled) return;
+        console.error('[CoachingBreakdown] fetch failed:', err);
+      })
+      .finally(() => { if (!cancelled) setBreakdownLoading(false); });
+    return () => { cancelled = true; };
+  }, [activeTab, workspaceId]);
 
   // ─── Server-side re-fetch when filters change ─────────────────────────────
 
@@ -372,6 +402,11 @@ export default function ConversationsPage() {
           label="All Conversations"
           active={activeTab === 'all'}
           onClick={() => setActiveTab('all')}
+        />
+        <TabButton
+          label="Coaching Intelligence"
+          active={activeTab === 'coaching'}
+          onClick={() => setActiveTab('coaching')}
         />
       </div>
 
@@ -924,6 +959,226 @@ export default function ConversationsPage() {
           </div>
         </div>
       )}
+
+      {/* ── Coaching Intelligence tab ── */}
+      {activeTab === 'coaching' && (() => {
+        const fmt = (v: number) =>
+          v >= 1_000_000 ? `$${(v / 1_000_000).toFixed(1)}M`
+          : v >= 1_000   ? `$${Math.round(v / 1_000)}k`
+          : `$${Math.round(v)}`;
+
+        const SIGNAL_COLOR: Record<string, string> = {
+          action:   '#f59e0b',
+          neutral:  '#64748b',
+          strength: '#22c55e',
+        };
+        const SIGNAL_LABEL: Record<string, string> = {
+          action:   'At Risk',
+          neutral:  'On Track',
+          strength: 'Ahead',
+        };
+
+        const shortenStage = (s: string) =>
+          s.replace('Discovery and Alignment', 'Discovery')
+           .replace('Discovery/Qualification', 'Discovery')
+           .replace('Demo Conducted', 'Demo Done')
+           .replace('Demo Scheduled', 'Demo Sched.')
+           .replace('Contract Sent', 'Contract');
+
+        const stageMap = new Map<string, { action: number; neutral: number; strength: number; action_count: number; neutral_count: number; strength_count: number; total: number }>();
+        for (const row of coachingBreakdown) {
+          if (!stageMap.has(row.stage)) {
+            stageMap.set(row.stage, { action: 0, neutral: 0, strength: 0, action_count: 0, neutral_count: 0, strength_count: 0, total: 0 });
+          }
+          const entry = stageMap.get(row.stage)!;
+          (entry as any)[row.signal_type] = row.deal_value;
+          (entry as any)[`${row.signal_type}_count`] = row.deal_count;
+          entry.total += row.deal_value;
+        }
+        const chartData = [...stageMap.entries()]
+          .sort((a, b) => b[1].total - a[1].total)
+          .map(([stage, vals]) => ({ stage: shortenStage(stage), ...vals }));
+
+        const coachingConvs = conversations.filter(c => c.has_coaching);
+
+        const CustomTooltip = ({ active, payload, label }: any) => {
+          if (!active || !payload?.length) return null;
+          return (
+            <div style={{
+              background: colors.surfaceRaised,
+              border: `1px solid ${colors.border}`,
+              borderRadius: 8,
+              padding: '10px 14px',
+              fontSize: 12,
+              fontFamily: fonts.sans,
+              minWidth: 160,
+            }}>
+              <div style={{ fontWeight: 600, marginBottom: 6, color: colors.text }}>{label}</div>
+              {payload.map((p: any) => (
+                <div key={p.name} style={{ display: 'flex', justifyContent: 'space-between', gap: 16, color: p.fill, marginBottom: 3 }}>
+                  <span>{SIGNAL_LABEL[p.name] ?? p.name}</span>
+                  <span style={{ fontWeight: 600 }}>{fmt(p.value)} ({(p.payload as any)[`${p.name}_count`] ?? 0} deals)</span>
+                </div>
+              ))}
+            </div>
+          );
+        };
+
+        return (
+          <div>
+            {breakdownLoading ? (
+              <div style={{ padding: 64, textAlign: 'center', fontSize: 13, color: colors.textMuted }}>
+                Loading coaching data...
+              </div>
+            ) : coachingBreakdown.length === 0 ? (
+              <div style={{ padding: 64, textAlign: 'center', fontSize: 13, color: colors.textMuted }}>
+                No coaching patterns found. Run win pattern discovery to generate signals.
+              </div>
+            ) : (
+              <>
+                {/* Summary headline */}
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ fontSize: 22, fontWeight: 700, color: colors.text, fontFamily: fonts.sans }}>
+                    {fmt(breakdownTotalAtRisk)}
+                    <span style={{ fontSize: 14, fontWeight: 400, color: colors.textMuted, marginLeft: 8 }}>
+                      at risk of stalling · {breakdownTotalAtRiskCount} deal{breakdownTotalAtRiskCount !== 1 ? 's' : ''}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 4, fontFamily: fonts.sans }}>
+                    Benchmarked against your closed deals — not industry averages
+                  </div>
+                </div>
+
+                {/* Chart */}
+                <div style={{
+                  background: colors.surfaceRaised,
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: 8,
+                  padding: '20px 16px 12px',
+                  marginBottom: 32,
+                }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 16 }}>
+                    Pipeline by Stage · Coaching Signal
+                  </div>
+                  <ResponsiveContainer width="100%" height={Math.max(chartData.length * 52, 160)}>
+                    <BarChart
+                      layout="vertical"
+                      data={chartData}
+                      margin={{ top: 0, right: 20, left: 0, bottom: 0 }}
+                      barCategoryGap="28%"
+                    >
+                      <XAxis
+                        type="number"
+                        tickFormatter={fmt}
+                        tick={{ fontSize: 11, fill: colors.textMuted, fontFamily: fonts.sans }}
+                        axisLine={false}
+                        tickLine={false}
+                      />
+                      <YAxis
+                        type="category"
+                        dataKey="stage"
+                        width={100}
+                        tick={{ fontSize: 12, fill: colors.textSecondary, fontFamily: fonts.sans }}
+                        axisLine={false}
+                        tickLine={false}
+                      />
+                      <Tooltip content={<CustomTooltip />} cursor={{ fill: `${colors.accent}10` }} />
+                      <Bar dataKey="action"   stackId="s" fill={SIGNAL_COLOR.action}   radius={[0, 0, 0, 0]} />
+                      <Bar dataKey="neutral"  stackId="s" fill={SIGNAL_COLOR.neutral}  radius={[0, 0, 0, 0]} />
+                      <Bar dataKey="strength" stackId="s" fill={SIGNAL_COLOR.strength} radius={[0, 4, 4, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+
+                  {/* Legend */}
+                  <div style={{ display: 'flex', gap: 16, marginTop: 4, paddingLeft: 100 }}>
+                    {(['action', 'neutral', 'strength'] as const).map(sig => (
+                      <div key={sig} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: colors.textSecondary, fontFamily: fonts.sans }}>
+                        <div style={{ width: 8, height: 8, borderRadius: '50%', background: SIGNAL_COLOR[sig] }} />
+                        {SIGNAL_LABEL[sig]}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Coaching conversation list */}
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: colors.text, fontFamily: fonts.sans }}>
+                    Conversations with coaching signals
+                    <span style={{ fontSize: 12, fontWeight: 400, color: colors.textMuted, marginLeft: 8 }}>
+                      {coachingConvs.length} calls
+                    </span>
+                  </div>
+                </div>
+                <div style={{
+                  background: colors.surfaceRaised,
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: 8,
+                  overflow: 'hidden',
+                }}>
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: '2.5fr 1.5fr 1fr 1fr 100px',
+                    gap: 12,
+                    padding: '10px 16px',
+                    background: colors.surface,
+                    borderBottom: `1px solid ${colors.border}`,
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: colors.textMuted,
+                    textTransform: 'uppercase' as const,
+                    letterSpacing: '0.5px',
+                  }}>
+                    <div>Title</div>
+                    <div>Account</div>
+                    <div>Stage</div>
+                    <div>Owner</div>
+                    <div>Date</div>
+                  </div>
+                  {coachingConvs.length === 0 ? (
+                    <div style={{ padding: 32, textAlign: 'center', fontSize: 13, color: colors.textMuted }}>
+                      No coaching conversations loaded — visit All Conversations first.
+                    </div>
+                  ) : (
+                    coachingConvs.map(conv => (
+                      <div
+                        key={conv.id}
+                        onClick={() => navigate(`/conversations/${conv.id}`)}
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: '2.5fr 1.5fr 1fr 1fr 100px',
+                          gap: 12,
+                          padding: '12px 16px',
+                          borderBottom: `1px solid ${colors.border}`,
+                          cursor: 'pointer',
+                          transition: 'background 0.1s',
+                        }}
+                        onMouseEnter={e => (e.currentTarget.style.background = colors.surface)}
+                        onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                      >
+                        <div style={{ fontSize: 13, fontWeight: 500, color: colors.text, fontFamily: fonts.sans, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {anon.text(conv.title)}
+                        </div>
+                        <div style={{ fontSize: 12, color: colors.textSecondary, fontFamily: fonts.sans, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {conv.account_name ? anon.company(conv.account_name) : '—'}
+                        </div>
+                        <div style={{ fontSize: 12, color: colors.textSecondary, fontFamily: fonts.sans, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {conv.deal_stage ?? '—'}
+                        </div>
+                        <div style={{ fontSize: 12, color: colors.textSecondary, fontFamily: fonts.sans, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {conv.deal_owner ? anon.person(conv.deal_owner) : '—'}
+                        </div>
+                        <div style={{ fontSize: 12, color: colors.textMuted, fontFamily: fonts.sans, whiteSpace: 'nowrap' }}>
+                          {conv.call_date ? new Date(conv.call_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Link Deal Modal */}
       {showLinkModal && selectedConversation && workspaceId && (

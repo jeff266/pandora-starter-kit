@@ -748,6 +748,91 @@ router.get('/:workspaceId/conversations/filter-options', async (req: Request, re
 });
 
 /**
+ * GET /api/workspaces/:workspaceId/conversations/coaching-breakdown
+ * Returns open pipeline segmented by deal stage × coaching signal type.
+ * Signal types: action (lagging), neutral (on track), strength (ahead).
+ */
+router.get('/:workspaceId/conversations/coaching-breakdown', async (req: Request, res: Response) => {
+  try {
+    const { workspaceId } = req.params;
+
+    const result = await query<{
+      stage: string;
+      signal_type: string;
+      deal_count: string;
+      deal_value: string;
+    }>(
+      `WITH coached_deals AS (
+        SELECT DISTINCT ON (d.id)
+          d.id                                                             AS deal_id,
+          d.stage,
+          COALESCE(d.amount, 0)                                            AS amount,
+          EXTRACT(days FROM NOW() - d.created_at::timestamp)::integer      AS sales_cycle_days,
+          wp.won_median,
+          wp.won_p75,
+          wp.direction
+        FROM deals d
+        JOIN conversations c
+          ON c.deal_id = d.id
+         AND c.workspace_id = d.workspace_id
+         AND c.is_internal = FALSE
+        JOIN win_patterns wp
+          ON wp.workspace_id = d.workspace_id
+         AND wp.superseded_at IS NULL
+         AND (wp.segment_size_min IS NULL OR d.amount >= wp.segment_size_min)
+         AND (wp.segment_size_max IS NULL OR d.amount < wp.segment_size_max)
+         AND wp.separation_score >= 0.5
+        WHERE d.workspace_id = $1
+          AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+        ORDER BY d.id, wp.separation_score DESC
+      ),
+      signal_typed AS (
+        SELECT
+          stage,
+          amount,
+          CASE
+            WHEN direction = 'lower_wins' AND sales_cycle_days > won_p75    THEN 'action'
+            WHEN direction = 'lower_wins' AND sales_cycle_days <= won_median THEN 'strength'
+            WHEN direction = 'higher_wins' AND sales_cycle_days < won_median THEN 'action'
+            WHEN direction = 'higher_wins' AND sales_cycle_days >= won_median THEN 'strength'
+            ELSE 'neutral'
+          END AS signal_type
+        FROM coached_deals
+      )
+      SELECT
+        stage,
+        signal_type,
+        COUNT(*)         AS deal_count,
+        SUM(amount)      AS deal_value
+      FROM signal_typed
+      GROUP BY stage, signal_type
+      ORDER BY SUM(amount) DESC NULLS LAST, stage, signal_type`,
+      [workspaceId]
+    );
+
+    const breakdown = result.rows.map(r => ({
+      stage: r.stage,
+      signal_type: r.signal_type,
+      deal_count: parseInt(r.deal_count, 10),
+      deal_value: parseFloat(r.deal_value),
+    }));
+
+    const totalAtRisk = breakdown
+      .filter(r => r.signal_type === 'action')
+      .reduce((sum, r) => sum + r.deal_value, 0);
+
+    const totalAtRiskCount = breakdown
+      .filter(r => r.signal_type === 'action')
+      .reduce((sum, r) => sum + r.deal_count, 0);
+
+    res.json({ breakdown, total_at_risk_value: totalAtRisk, total_at_risk_count: totalAtRiskCount });
+  } catch (err) {
+    console.error('[Coaching Breakdown]', err);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+/**
  * GET /api/workspaces/:workspaceId/conversations/next-action-gaps
  * Returns deals with stale conversations (no follow-up within 3+ days)
  */
