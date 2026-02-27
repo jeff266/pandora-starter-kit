@@ -103,7 +103,7 @@ export async function computeAndStoreStageBenchmarks(workspaceId: string): Promi
        WHERE dsh.workspace_id = $1
          AND dsh.duration_days IS NOT NULL
          AND dsh.duration_days > 0
-         AND dsh.stage_normalized NOT IN ('closed_won', 'closed_lost', 'unknown')
+         AND dsh.stage_normalized NOT IN ('closed_won', 'closed_lost', 'unknown', 'pipeline')
          AND d.stage_normalized IN ('closed_won', 'closed_lost')
      ),
      with_all_segment AS (

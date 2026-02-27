@@ -871,8 +871,8 @@ export function normalizeSalesforceStageName(
   if (normalized.includes('qualified') || normalized.includes('discovery')) return 'qualification';
   if (normalized.includes('prospecting') || normalized.includes('lead')) return 'qualification';
 
-  // Default fallback
-  return 'pipeline';
+  // Default fallback — unknown stages are treated as early-funnel awareness
+  return 'awareness';
 }
 
 /**
