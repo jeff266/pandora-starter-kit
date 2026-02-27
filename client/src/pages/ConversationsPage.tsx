@@ -85,6 +85,7 @@ export default function ConversationsPage() {
   // Coaching tab filters
   const [selectedStage, setSelectedStage] = useState<string | null>(null);
   const [selectedSignal, setSelectedSignal] = useState<string | null>(null);
+  const [selectedOwner, setSelectedOwner] = useState<string | null>(null);
 
   // Needs Attention filter
   const [gapOwnerFilter, setGapOwnerFilter] = useState('');
@@ -1018,15 +1019,20 @@ export default function ConversationsPage() {
 
         // Conversations filtered to open deals only (via coachingConvMeta), then by selected filters
         const allCoachingConvs = conversations.filter(c => coachingConvMeta.has(c.id));
+        const availableOwners = [...new Set(
+          allCoachingConvs.map(c => c.deal_owner).filter(Boolean) as string[]
+        )].sort();
         const filteredCoachingConvs = allCoachingConvs.filter(c => {
           const meta = coachingConvMeta.get(c.id);
           if (!meta) return false;
           if (selectedStage && meta.stage !== selectedStage) return false;
           if (selectedSignal && meta.signal_type !== selectedSignal) return false;
+          if (selectedOwner && c.deal_owner !== selectedOwner) return false;
           return true;
         });
 
-        const hasFilter = selectedStage !== null || selectedSignal !== null;
+        const hasFilter = selectedStage !== null || selectedSignal !== null || selectedOwner !== null;
+        const clearAllFilters = () => { setSelectedStage(null); setSelectedSignal(null); setSelectedOwner(null); };
 
         const CustomTooltip = ({ active, payload, label }: any) => {
           if (!active || !payload?.length) return null;
@@ -1101,6 +1107,84 @@ export default function ConversationsPage() {
                   </div>
                 </div>
 
+                {/* Unified filter bar */}
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  marginBottom: 20,
+                  flexWrap: 'wrap',
+                  padding: '12px 14px',
+                  background: colors.surfaceRaised,
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: 8,
+                }}>
+                  {/* Owner dropdown */}
+                  {availableOwners.length > 0 && (
+                    <select
+                      value={selectedOwner ?? ''}
+                      onChange={e => setSelectedOwner(e.target.value || null)}
+                      style={selectStyle}
+                    >
+                      <option value="">All Owners</option>
+                      {availableOwners.map(o => (
+                        <option key={o} value={o}>{anon.person(o)}</option>
+                      ))}
+                    </select>
+                  )}
+
+                  {/* Divider */}
+                  {availableOwners.length > 0 && (
+                    <div style={{ width: 1, height: 20, background: colors.border, flexShrink: 0 }} />
+                  )}
+
+                  {/* Signal pills */}
+                  {SIGNAL_BUCKETS.map(sig => {
+                    const active = selectedSignal === sig;
+                    return (
+                      <button
+                        key={sig}
+                        onClick={() => setSelectedSignal(v => v === sig ? null : sig)}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 5,
+                          padding: '4px 10px', borderRadius: 20,
+                          border: `1px solid ${active ? SIGNAL_COLOR[sig] : colors.border}`,
+                          background: active ? `${SIGNAL_COLOR[sig]}22` : 'transparent',
+                          color: active ? SIGNAL_COLOR[sig] : colors.textMuted,
+                          fontSize: 12, cursor: 'pointer', fontFamily: fonts.sans,
+                          transition: 'all 0.15s',
+                        }}
+                      >
+                        <span style={{ width: 7, height: 7, borderRadius: '50%', background: SIGNAL_COLOR[sig], display: 'inline-block' }} />
+                        {SIGNAL_LABEL[sig]}
+                      </button>
+                    );
+                  })}
+
+                  {/* Stage badge (set by clicking chart) */}
+                  {selectedStage && (
+                    <span style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 4,
+                      padding: '4px 10px', borderRadius: 20, fontSize: 12,
+                      background: `${colors.accent}18`, color: colors.accent,
+                      border: `1px solid ${colors.accent}`, fontFamily: fonts.sans,
+                    }}>
+                      {shortenStage(selectedStage)}
+                      <span style={{ cursor: 'pointer', marginLeft: 2, fontSize: 14, lineHeight: 1 }} onClick={() => setSelectedStage(null)}>×</span>
+                    </span>
+                  )}
+
+                  {/* Clear all */}
+                  {hasFilter && (
+                    <button
+                      onClick={clearAllFilters}
+                      style={{ background: 'none', border: 'none', fontSize: 12, color: colors.accent, cursor: 'pointer', padding: 0, fontFamily: fonts.sans, marginLeft: 'auto' }}
+                    >
+                      Clear all
+                    </button>
+                  )}
+                </div>
+
                 {/* Chart */}
                 <div style={{
                   background: colors.surfaceRaised,
@@ -1154,75 +1238,23 @@ export default function ConversationsPage() {
                     </BarChart>
                   </ResponsiveContainer>
 
-                  {/* Legend pills — also act as signal filters */}
-                  <div style={{ display: 'flex', gap: 8, marginTop: 12, paddingLeft: 105, flexWrap: 'wrap' }}>
-                    {SIGNAL_BUCKETS.map(sig => {
-                      const active = selectedSignal === sig;
-                      return (
-                        <button
-                          key={sig}
-                          onClick={() => setSelectedSignal(v => v === sig ? null : sig)}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 5,
-                            padding: '4px 10px',
-                            borderRadius: 20,
-                            border: `1px solid ${active ? SIGNAL_COLOR[sig] : colors.border}`,
-                            background: active ? `${SIGNAL_COLOR[sig]}22` : 'transparent',
-                            color: active ? SIGNAL_COLOR[sig] : colors.textMuted,
-                            fontSize: 12,
-                            cursor: 'pointer',
-                            fontFamily: fonts.sans,
-                            transition: 'all 0.15s',
-                          }}
-                        >
-                          <span style={{ width: 7, height: 7, borderRadius: '50%', background: SIGNAL_COLOR[sig], display: 'inline-block' }} />
-                          {SIGNAL_LABEL[sig]}
-                        </button>
-                      );
-                    })}
+                  {/* Static color legend */}
+                  <div style={{ display: 'flex', gap: 16, marginTop: 12, paddingLeft: 105, flexWrap: 'wrap' }}>
+                    {SIGNAL_BUCKETS.map(sig => (
+                      <div key={sig} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: colors.textMuted, fontFamily: fonts.sans }}>
+                        <span style={{ width: 8, height: 8, borderRadius: '50%', background: SIGNAL_COLOR[sig], display: 'inline-block' }} />
+                        {SIGNAL_LABEL[sig]}
+                      </div>
+                    ))}
                   </div>
                 </div>
 
-                {/* Active filter bar + conversation list */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: colors.text, fontFamily: fonts.sans }}>
-                    Conversations with coaching signals
-                    <span style={{ fontSize: 12, fontWeight: 400, color: colors.textMuted, marginLeft: 8 }}>
-                      {filteredCoachingConvs.length} of {allCoachingConvs.length} calls
-                    </span>
-                  </div>
-                  {selectedStage && (
-                    <span style={{
-                      display: 'inline-flex', alignItems: 'center', gap: 4,
-                      padding: '3px 8px', borderRadius: 20, fontSize: 11,
-                      background: `${colors.accent}18`, color: colors.accent,
-                      border: `1px solid ${colors.accent}`, fontFamily: fonts.sans,
-                    }}>
-                      {shortenStage(selectedStage)}
-                      <span style={{ cursor: 'pointer', marginLeft: 2 }} onClick={() => setSelectedStage(null)}>×</span>
-                    </span>
-                  )}
-                  {selectedSignal && (
-                    <span style={{
-                      display: 'inline-flex', alignItems: 'center', gap: 4,
-                      padding: '3px 8px', borderRadius: 20, fontSize: 11,
-                      background: `${SIGNAL_COLOR[selectedSignal]}18`, color: SIGNAL_COLOR[selectedSignal],
-                      border: `1px solid ${SIGNAL_COLOR[selectedSignal]}`, fontFamily: fonts.sans,
-                    }}>
-                      {SIGNAL_LABEL[selectedSignal]}
-                      <span style={{ cursor: 'pointer', marginLeft: 2 }} onClick={() => setSelectedSignal(null)}>×</span>
-                    </span>
-                  )}
-                  {hasFilter && (
-                    <button
-                      onClick={() => { setSelectedStage(null); setSelectedSignal(null); }}
-                      style={{ background: 'none', border: 'none', fontSize: 12, color: colors.accent, cursor: 'pointer', padding: 0, fontFamily: fonts.sans }}
-                    >
-                      Clear all
-                    </button>
-                  )}
+                {/* Conversation list header */}
+                <div style={{ fontSize: 13, fontWeight: 600, color: colors.text, fontFamily: fonts.sans, marginBottom: 12 }}>
+                  Conversations with coaching signals
+                  <span style={{ fontSize: 12, fontWeight: 400, color: colors.textMuted, marginLeft: 8 }}>
+                    {filteredCoachingConvs.length}{hasFilter ? ` of ${allCoachingConvs.length}` : ''} calls
+                  </span>
                 </div>
 
                 <div style={{
@@ -1260,7 +1292,7 @@ export default function ConversationsPage() {
                   ) : filteredCoachingConvs.length === 0 ? (
                     <div style={{ padding: 32, textAlign: 'center', fontSize: 13, color: colors.textMuted }}>
                       No conversations match the selected filters.
-                      <button onClick={() => { setSelectedStage(null); setSelectedSignal(null); }} style={{ display: 'block', margin: '8px auto 0', background: 'none', border: 'none', fontSize: 12, color: colors.accent, cursor: 'pointer', fontFamily: fonts.sans }}>
+                      <button onClick={clearAllFilters} style={{ display: 'block', margin: '8px auto 0', background: 'none', border: 'none', fontSize: 12, color: colors.accent, cursor: 'pointer', fontFamily: fonts.sans }}>
                         Clear filters
                       </button>
                     </div>
