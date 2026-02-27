@@ -22,6 +22,7 @@ interface StageBenchmark {
 interface RawBenchmark {
   stage: string;
   stage_normalized: string;
+  display_order: number | null;
   won_median: number | null;
   won_sample: number;
   lost_median: number | null;
@@ -211,7 +212,11 @@ export default function BenchmarksGrid() {
     if (!rawGrouped[rb.stage_normalized]) rawGrouped[rb.stage_normalized] = [];
     rawGrouped[rb.stage_normalized].push(rb);
   }
-  const rawGroupKeys = Object.keys(rawGrouped).sort();
+  const rawGroupKeys = Object.keys(rawGrouped).sort((a, b) => {
+    const minA = Math.min(...rawGrouped[a].map(s => s.display_order ?? 999));
+    const minB = Math.min(...rawGrouped[b].map(s => s.display_order ?? 999));
+    return minA - minB || a.localeCompare(b);
+  });
 
   const hasGroupedData = stages.length > 0;
   const hasRawData = rawBenchmarks.length > 0;

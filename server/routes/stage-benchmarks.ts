@@ -68,13 +68,15 @@ router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response)
         `SELECT DISTINCT pipeline FROM stage_velocity_benchmarks WHERE workspace_id = $1 AND pipeline != 'all' ORDER BY pipeline`,
         [workspaceId]
       ),
-      query<{ stage: string; stage_normalized: string; outcome: string; median_days: string; sample_size: string }>(
+      query<{ stage: string; stage_normalized: string; outcome: string; median_days: string; sample_size: string; display_order: string | null }>(
         `SELECT dsh.stage, dsh.stage_normalized,
                 CASE WHEN d.stage_normalized = 'closed_won' THEN 'won' ELSE 'lost' END AS outcome,
                 PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY dsh.duration_days)::numeric(10,2) AS median_days,
-                COUNT(*)::text AS sample_size
+                COUNT(*)::text AS sample_size,
+                MIN(sc.display_order)::text AS display_order
          FROM deal_stage_history dsh
          JOIN deals d ON d.id = dsh.deal_id
+         LEFT JOIN stage_configs sc ON sc.workspace_id = dsh.workspace_id AND sc.stage_name = dsh.stage
          WHERE dsh.workspace_id = $1
            AND d.stage_normalized IN ('closed_won', 'closed_lost')
            AND dsh.stage_normalized NOT IN ('closed_won', 'closed_lost', 'unknown', 'awareness')
@@ -82,7 +84,7 @@ router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response)
            AND dsh.stage ~ '^[A-Z]'
          GROUP BY dsh.stage, dsh.stage_normalized, outcome
          HAVING COUNT(*) >= 3
-         ORDER BY dsh.stage_normalized, dsh.stage, outcome`,
+         ORDER BY MIN(sc.display_order) ASC NULLS LAST, dsh.stage_normalized, dsh.stage, outcome`,
         [workspaceId]
       ),
     ]);
@@ -159,6 +161,7 @@ router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response)
     const rawBenchMap: Record<string, {
       stage: string;
       stage_normalized: string;
+      display_order: number | null;
       won_median: number | null;
       won_sample: number;
       lost_median: number | null;
@@ -170,6 +173,7 @@ router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response)
         rawBenchMap[key] = {
           stage: r.stage,
           stage_normalized: r.stage_normalized,
+          display_order: r.display_order !== null ? parseInt(r.display_order, 10) : null,
           won_median: null,
           won_sample: 0,
           lost_median: null,
@@ -185,7 +189,7 @@ router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response)
       }
     }
     const rawBenchmarks = Object.values(rawBenchMap).sort((a, b) =>
-      a.stage_normalized.localeCompare(b.stage_normalized) || a.stage.localeCompare(b.stage)
+      (a.display_order ?? 999) - (b.display_order ?? 999) || a.stage.localeCompare(b.stage)
     );
 
     const lastComputedAt = benchRows.rows.length > 0 ? benchRows.rows[0].computed_at : null;
