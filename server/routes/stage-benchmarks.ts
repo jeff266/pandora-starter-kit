@@ -25,7 +25,8 @@ const router = Router();
 router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response): Promise<void> => {
   try {
     const { workspaceId } = req.params;
-    const pipelineFilter = req.query.pipeline as string | undefined;
+    const rawPipeline = req.query.pipeline as string | undefined;
+    const pipelineFilter = rawPipeline && rawPipeline !== 'all' ? rawPipeline : null;
 
     const benchRows = await query<{
       pipeline: string;
