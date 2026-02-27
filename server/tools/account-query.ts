@@ -264,7 +264,7 @@ export async function queryAccounts(workspaceId: string, filters: AccountFilters
      ) deal_stats ON true
      LEFT JOIN LATERAL (
        SELECT
-         MAX(c.started_at) as last_conversation_date,
+         MAX(c.call_date) as last_conversation_date,
          COUNT(*) as conversation_count
        FROM conversations c
        WHERE c.account_id = a.id AND c.workspace_id = a.workspace_id
