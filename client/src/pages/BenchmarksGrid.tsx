@@ -43,6 +43,29 @@ interface BenchmarksResponse {
   last_computed_at: string | null;
 }
 
+interface MathDeal {
+  id: string;
+  name: string;
+  amount: string | null;
+  outcome: string;
+  pipeline: string;
+  duration_days: string;
+  entered_at: string;
+  exited_at: string | null;
+  stage_display_name: string;
+}
+
+interface MathModalState {
+  stage_normalized: string;
+  label: string;
+  segment: string;
+  outcome: 'won' | 'lost';
+  pipeline: string | null;
+  median: number | null;
+  deals: MathDeal[] | null;
+  loading: boolean;
+}
+
 type ViewMode = 'grouped' | 'raw';
 
 const SEGMENTS = ['all', 'smb', 'mid_market', 'enterprise'] as const;
@@ -61,41 +84,24 @@ function signalGapColor(wonMedian: number | null, lostMedian: number | null): st
   return colors.textMuted;
 }
 
-function fmtDays(d: number | null): string {
-  if (d === null) return '—';
+function fmtDays(d: number | null | undefined): string {
+  if (d == null) return '—';
   if (d < 1) return '<1d';
   return `${Math.round(d)}d`;
 }
 
-function SampleBadge({ n, size = 9 }: { n: number; size?: number }) {
-  const tier = n >= 20 ? 'high' : n >= 5 ? 'dir' : 'low';
-  const style: React.CSSProperties = {
-    display: 'inline-block',
-    fontSize: size,
-    padding: '1px 5px',
-    borderRadius: 4,
-    fontWeight: 600,
-    textTransform: 'uppercase' as const,
-    letterSpacing: '0.3px',
-  };
-  if (tier === 'high') return <span style={{ ...style, background: '#38A16918', color: '#38A169' }}>n={n}</span>;
-  if (tier === 'dir') return <span style={{ ...style, background: '#D69E2E18', color: '#D69E2E' }}>n={n}</span>;
-  return <span style={{ ...style, background: '#94a3b818', color: '#94a3b8', opacity: 0.7 }}>n={n}</span>;
+function fmtAmount(a: string | null): string {
+  if (!a) return '—';
+  const n = parseFloat(a);
+  if (isNaN(n)) return '—';
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `$${Math.round(n / 1_000)}k`;
+  return `$${Math.round(n)}`;
 }
 
-function ConfidenceBadge({ tier, sample }: { tier: string; sample: number }) {
-  const style: React.CSSProperties = {
-    display: 'inline-block',
-    fontSize: 9,
-    padding: '1px 5px',
-    borderRadius: 4,
-    fontWeight: 600,
-    textTransform: 'uppercase' as const,
-    letterSpacing: '0.3px',
-  };
-  if (tier === 'high') return <span style={{ ...style, background: '#38A16918', color: '#38A169' }}>High · {sample}</span>;
-  if (tier === 'directional') return <span style={{ ...style, background: '#D69E2E18', color: '#D69E2E' }}>Dir · {sample}</span>;
-  return <span style={{ ...style, background: '#94a3b818', color: '#94a3b8', opacity: 0.7 }}>Low · {sample}</span>;
+function fmtDate(s: string | null): string {
+  if (!s) return '—';
+  return new Date(s).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' });
 }
 
 function ToggleButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
@@ -103,20 +109,138 @@ function ToggleButton({ active, onClick, children }: { active: boolean; onClick:
     <button
       onClick={onClick}
       style={{
-        padding: '5px 12px',
-        fontSize: 12,
-        fontFamily: fonts.sans,
-        fontWeight: active ? 600 : 400,
-        border: 'none',
-        borderRadius: 5,
-        cursor: 'pointer',
-        background: active ? colors.accent : 'transparent',
-        color: active ? '#fff' : colors.textMuted,
-        transition: 'all 0.15s',
+        padding: '5px 12px', fontSize: 12, fontFamily: fonts.sans,
+        fontWeight: active ? 600 : 400, border: 'none', borderRadius: 5,
+        cursor: 'pointer', background: active ? colors.accent : 'transparent',
+        color: active ? '#fff' : colors.textMuted, transition: 'all 0.15s',
       }}
     >
       {children}
     </button>
+  );
+}
+
+function ConfidenceDot({ tier, sample }: { tier: string; sample: number }) {
+  const [show, setShow] = useState(false);
+  const color = tier === 'high' ? '#38A169' : tier === 'directional' ? '#D69E2E' : '#94a3b8';
+  const label = tier === 'high'
+    ? `High confidence · N=${sample} deals`
+    : tier === 'directional'
+    ? `Directional · N=${sample} deals (treat as indicative)`
+    : `Insufficient data · N=${sample} deals`;
+
+  return (
+    <span
+      style={{ position: 'relative', display: 'inline-block', verticalAlign: 'middle', marginLeft: 4, cursor: 'default' }}
+      onMouseEnter={() => setShow(true)}
+      onMouseLeave={() => setShow(false)}
+    >
+      <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: color, opacity: 0.75 }} />
+      {show && (
+        <div style={{
+          position: 'absolute', bottom: '130%', left: '50%', transform: 'translateX(-50%)',
+          background: '#1e2433', color: '#e2e8f0', fontSize: 11, padding: '5px 9px', borderRadius: 5,
+          whiteSpace: 'nowrap', pointerEvents: 'none', zIndex: 200, marginBottom: 4,
+          boxShadow: '0 2px 8px rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.08)',
+        }}>
+          {label}
+        </div>
+      )}
+    </span>
+  );
+}
+
+function MathModal({ modal, onClose }: { modal: MathModalState; onClose: () => void }) {
+  const outcomeColor = modal.outcome === 'won' ? '#38A169' : '#E53E3E';
+  const outcomeLabel = modal.outcome === 'won' ? 'Closed-Won' : 'Closed-Lost';
+  const segLabel = SEGMENT_LABEL[modal.segment] ?? modal.segment;
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 1000,
+        display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: colors.surface, borderRadius: '12px 12px 0 0',
+          border: `1px solid ${colors.border}`, borderBottom: 'none',
+          width: '100%', maxWidth: 860, maxHeight: '72vh',
+          display: 'flex', flexDirection: 'column',
+          boxShadow: '0 -4px 32px rgba(0,0,0,0.3)',
+        }}
+      >
+        <div style={{ padding: '18px 24px', borderBottom: `1px solid ${colors.border}`, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexShrink: 0 }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: colors.text, marginBottom: 3 }}>
+              Show Math — <span style={{ color: outcomeColor }}>{outcomeLabel}</span> · {modal.label}
+            </div>
+            <div style={{ fontSize: 12, color: colors.textMuted }}>
+              {segLabel}{modal.pipeline ? ` · ${modal.pipeline}` : ''}{modal.median != null ? ` · median ${fmtDays(modal.median)}` : ''}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            style={{ background: 'none', border: 'none', color: colors.textMuted, cursor: 'pointer', fontSize: 18, lineHeight: 1, padding: 4 }}
+          >
+            ×
+          </button>
+        </div>
+
+        <div style={{ overflowY: 'auto', flex: 1 }}>
+          {modal.loading ? (
+            <div style={{ padding: 40, textAlign: 'center', color: colors.textMuted, fontSize: 13 }}>Loading deals…</div>
+          ) : !modal.deals || modal.deals.length === 0 ? (
+            <div style={{ padding: 40, textAlign: 'center', color: colors.textMuted, fontSize: 13 }}>No deals found for this filter.</div>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${colors.border}`, position: 'sticky', top: 0, background: colors.surface }}>
+                  <th style={{ padding: '10px 16px', textAlign: 'left', color: colors.textMuted, fontWeight: 600, fontSize: 11 }}>Deal</th>
+                  <th style={{ padding: '10px 12px', textAlign: 'right', color: colors.textMuted, fontWeight: 600, fontSize: 11 }}>Amount</th>
+                  <th style={{ padding: '10px 12px', textAlign: 'left', color: colors.textMuted, fontWeight: 600, fontSize: 11 }}>Stage</th>
+                  <th style={{ padding: '10px 12px', textAlign: 'center', color: colors.textMuted, fontWeight: 600, fontSize: 11 }}>Duration</th>
+                  <th style={{ padding: '10px 12px', textAlign: 'center', color: colors.textMuted, fontWeight: 600, fontSize: 11 }}>Entered</th>
+                  <th style={{ padding: '10px 12px', textAlign: 'center', color: colors.textMuted, fontWeight: 600, fontSize: 11 }}>Exited</th>
+                </tr>
+              </thead>
+              <tbody>
+                {modal.deals.map((deal, i) => {
+                  const dur = parseFloat(deal.duration_days);
+                  const isMedian = modal.median != null && Math.abs(dur - modal.median) < 0.5;
+                  return (
+                    <tr
+                      key={`${deal.id}-${i}`}
+                      style={{
+                        borderBottom: `1px solid ${colors.border}`,
+                        background: isMedian ? `${outcomeColor}10` : 'transparent',
+                      }}
+                    >
+                      <td style={{ padding: '9px 16px', color: colors.text, fontWeight: 500, maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {deal.name}
+                        {isMedian && <span style={{ marginLeft: 6, fontSize: 10, color: outcomeColor, fontWeight: 600 }}>← median</span>}
+                      </td>
+                      <td style={{ padding: '9px 12px', textAlign: 'right', color: colors.textSecondary }}>{fmtAmount(deal.amount)}</td>
+                      <td style={{ padding: '9px 12px', color: colors.textMuted, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{deal.stage_display_name}</td>
+                      <td style={{ padding: '9px 12px', textAlign: 'center', fontWeight: 600, color: outcomeColor }}>{fmtDays(dur)}</td>
+                      <td style={{ padding: '9px 12px', textAlign: 'center', color: colors.textMuted }}>{fmtDate(deal.entered_at)}</td>
+                      <td style={{ padding: '9px 12px', textAlign: 'center', color: colors.textMuted }}>{fmtDate(deal.exited_at)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        <div style={{ padding: '12px 24px', borderTop: `1px solid ${colors.border}`, fontSize: 11, color: colors.textMuted, flexShrink: 0 }}>
+          Showing deals sorted by time spent in stage · capped at 100 · highlighted row is closest to median
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -131,6 +255,8 @@ export default function BenchmarksGrid() {
   const [collapsedSegments, setCollapsedSegments] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('grouped');
+  const [showActualNames, setShowActualNames] = useState(false);
+  const [mathModal, setMathModal] = useState<MathModalState | null>(null);
 
   const load = useCallback(async () => {
     if (!workspaceId) return;
@@ -163,6 +289,25 @@ export default function BenchmarksGrid() {
     }
   };
 
+  const openMath = useCallback(async (
+    stage_normalized: string,
+    outcome: 'won' | 'lost',
+    label: string,
+    segment: string,
+    median: number | null,
+    pipeline?: string,
+  ) => {
+    setMathModal({ stage_normalized, label, segment, outcome, pipeline: pipeline ?? null, median, deals: null, loading: true });
+    try {
+      const params = new URLSearchParams({ stage_normalized, outcome, segment: segment || 'all' });
+      if (pipeline && pipeline !== 'all') params.set('pipeline', pipeline);
+      const result = await api.get(`/stage-benchmarks/math?${params}`);
+      setMathModal(prev => prev ? { ...prev, deals: result.deals, loading: false } : null);
+    } catch {
+      setMathModal(prev => prev ? { ...prev, deals: [], loading: false } : null);
+    }
+  }, []);
+
   const toggleSegment = (seg: string) => {
     setCollapsedSegments(prev => {
       const next = new Set(prev);
@@ -183,10 +328,7 @@ export default function BenchmarksGrid() {
     return (
       <div style={{ padding: 40, textAlign: 'center', fontSize: 13, color: colors.textMuted, fontFamily: fonts.sans }}>
         <div style={{ marginBottom: 12 }}>{error}</div>
-        <button
-          onClick={load}
-          style={{ padding: '8px 16px', borderRadius: 6, border: `1px solid ${colors.border}`, background: 'transparent', color: colors.accent, cursor: 'pointer', fontSize: 12, fontFamily: fonts.sans }}
-        >
+        <button onClick={load} style={{ padding: '8px 16px', borderRadius: 6, border: `1px solid ${colors.border}`, background: 'transparent', color: colors.accent, cursor: 'pointer', fontSize: 12, fontFamily: fonts.sans }}>
           Retry
         </button>
       </div>
@@ -206,8 +348,21 @@ export default function BenchmarksGrid() {
     benchmarks.find(b => b.stage_normalized === stageNorm && b.segment === segment);
   const openAvg = data?.open_averages ?? {};
 
+  // Build norm → actual stage names map for the "show actual names" toggle
+  const normToActualNames = new Map<string, string[]>();
+  for (const rb of rawBenchmarks) {
+    if (selectedPipeline === 'all' || rb.pipeline === selectedPipeline) {
+      const existing = normToActualNames.get(rb.stage_normalized) ?? [];
+      if (!existing.includes(rb.stage)) normToActualNames.set(rb.stage_normalized, [...existing, rb.stage]);
+    }
+  }
+
+  const stageHeaderLabel = (norm: string, fallback: string) =>
+    showActualNames && selectedPipeline !== 'all'
+      ? (normToActualNames.get(norm)?.join(' · ') || fallback)
+      : fallback;
+
   // ── Raw mode ──────────────────────────────────────────────────────────────────
-  // Group raw stages by their normalized parent for section headers
   const rawGrouped: Record<string, RawBenchmark[]> = {};
   for (const rb of rawBenchmarks) {
     if (!rawGrouped[rb.stage_normalized]) rawGrouped[rb.stage_normalized] = [];
@@ -219,15 +374,124 @@ export default function BenchmarksGrid() {
     return minA - minB || a.localeCompare(b);
   });
 
-  // Unique pipelines for pipeline-grouped view (grouped mode, all pipelines selected)
   const uniquePipelines = [...new Set(benchmarks.map(b => b.pipeline))].filter(Boolean).sort();
-
   const hasGroupedData = stages.length > 0;
   const hasRawData = rawBenchmarks.length > 0;
   const hasAnyData = hasGroupedData || hasRawData;
 
+  // ── Shared cell renderers ─────────────────────────────────────────────────────
+  const wonCell = (b: StageBenchmark | undefined, stageNorm: string, seg: string, pipelineName?: string) => (
+    <td
+      key={stageNorm + '_won'}
+      onClick={() => b?.won_median != null ? openMath(stageNorm, 'won', stageHeaderLabel(stageNorm, b.stage), seg, b.won_median, pipelineName ?? selectedPipeline) : undefined}
+      style={{
+        padding: '10px 12px', textAlign: 'center',
+        opacity: b?.won_confidence === 'insufficient' ? 0.45 : 1,
+        cursor: b?.won_median != null ? 'pointer' : 'default',
+      }}
+      title={b?.won_median != null ? 'Click to see deals' : undefined}
+    >
+      <span style={{ fontWeight: 600, color: '#38A169' }}>{fmtDays(b?.won_median ?? null)}</span>
+      {b && <ConfidenceDot tier={b.won_confidence} sample={b.won_sample} />}
+    </td>
+  );
+
+  const lostCell = (b: StageBenchmark | undefined, stageNorm: string, seg: string, pipelineName?: string) => (
+    <td
+      key={stageNorm + '_lost'}
+      onClick={() => b?.lost_median != null ? openMath(stageNorm, 'lost', stageHeaderLabel(stageNorm, b.stage), seg, b.lost_median, pipelineName ?? selectedPipeline) : undefined}
+      style={{
+        padding: '10px 12px', textAlign: 'center',
+        opacity: b?.lost_confidence === 'insufficient' ? 0.45 : 1,
+        cursor: b?.lost_median != null ? 'pointer' : 'default',
+      }}
+      title={b?.lost_median != null ? 'Click to see deals' : undefined}
+    >
+      <span style={{ fontWeight: 600, color: '#E53E3E' }}>{fmtDays(b?.lost_median ?? null)}</span>
+      {b && <ConfidenceDot tier={b.lost_confidence} sample={b.lost_sample} />}
+    </td>
+  );
+
+  const renderBenchmarkTable = (
+    stageList: Array<{ stage: string; stage_normalized: string; display_order: number | null }>,
+    seg: string,
+    getBench: (norm: string, s: string) => StageBenchmark | undefined,
+    pipelineName?: string,
+  ) => (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+        <thead>
+          <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
+            <th style={{ padding: '10px 16px', textAlign: 'left', color: colors.textMuted, fontWeight: 600, fontSize: 11, whiteSpace: 'nowrap', width: 140 }}>Metric</th>
+            {stageList.map(s => (
+              <th key={s.stage_normalized} style={{ padding: '10px 12px', textAlign: 'center', color: colors.textMuted, fontWeight: 600, fontSize: 11, whiteSpace: 'nowrap', minWidth: 110 }}>
+                {stageHeaderLabel(s.stage_normalized, s.stage)}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
+            <td style={{ padding: '10px 16px', color: colors.textSecondary, whiteSpace: 'nowrap' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#38A169', display: 'inline-block' }} />
+                Won median
+              </span>
+            </td>
+            {stageList.map(s => wonCell(getBench(s.stage_normalized, seg), s.stage_normalized, seg, pipelineName))}
+          </tr>
+          <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
+            <td style={{ padding: '10px 16px', color: colors.textSecondary, whiteSpace: 'nowrap' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#E53E3E', display: 'inline-block' }} />
+                Lost median
+              </span>
+            </td>
+            {stageList.map(s => lostCell(getBench(s.stage_normalized, seg), s.stage_normalized, seg, pipelineName))}
+          </tr>
+          <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
+            <td style={{ padding: '10px 16px', color: colors.textSecondary, whiteSpace: 'nowrap' }}>Signal gap</td>
+            {stageList.map(s => {
+              const b = getBench(s.stage_normalized, seg);
+              const ratio = b?.won_median && b?.lost_median ? (b.lost_median / b.won_median) : null;
+              const gapColor = signalGapColor(b?.won_median ?? null, b?.lost_median ?? null);
+              return (
+                <td key={s.stage_normalized} style={{ padding: '10px 12px', textAlign: 'center' }}>
+                  {b?.is_inverted ? (
+                    <span style={{ fontSize: 10, color: '#805AD5', fontWeight: 600 }} title="Winners spend longer here — rushing through may signal poor qualification">⚠ Inverted</span>
+                  ) : ratio !== null ? (
+                    <span style={{ fontWeight: 600, color: gapColor }}>{ratio.toFixed(1)}×</span>
+                  ) : '—'}
+                </td>
+              );
+            })}
+          </tr>
+          <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
+            <td style={{ padding: '10px 16px', color: colors.textSecondary, whiteSpace: 'nowrap' }}>Open now (avg)</td>
+            {stageList.map(s => {
+              const b = getBench(s.stage_normalized, seg);
+              const open = openAvg[s.stage_normalized];
+              if (!open) return <td key={s.stage_normalized} style={{ padding: '10px 12px', textAlign: 'center', color: colors.textMuted }}>—</td>;
+              const openColor = b?.lost_median && open.avg > b.lost_median ? '#E53E3E'
+                : b?.won_median && open.avg > b.won_median ? '#D69E2E'
+                : colors.textSecondary;
+              return (
+                <td key={s.stage_normalized} style={{ padding: '10px 12px', textAlign: 'center' }}>
+                  <div style={{ fontWeight: 600, color: openColor }}>{fmtDays(open.avg)}</div>
+                  <div style={{ fontSize: 10, color: colors.textMuted }}>{open.count} deal{open.count !== 1 ? 's' : ''}</div>
+                </td>
+              );
+            })}
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+
   return (
     <div style={{ padding: '24px 32px', fontFamily: fonts.sans }}>
+      {mathModal && <MathModal modal={mathModal} onClose={() => setMathModal(null)} />}
+
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
         <div>
@@ -245,13 +509,7 @@ export default function BenchmarksGrid() {
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           {/* View mode toggle */}
-          <div style={{
-            display: 'flex',
-            background: colors.surfaceHover,
-            borderRadius: 7,
-            padding: 2,
-            border: `1px solid ${colors.border}`,
-          }}>
+          <div style={{ display: 'flex', background: colors.surfaceHover, borderRadius: 7, padding: 2, border: `1px solid ${colors.border}` }}>
             <ToggleButton active={viewMode === 'grouped'} onClick={() => setViewMode('grouped')}>
               Grouped
             </ToggleButton>
@@ -260,28 +518,40 @@ export default function BenchmarksGrid() {
             </ToggleButton>
           </div>
 
+          {/* Show actual stage names toggle (Grouped mode only, single pipeline) */}
+          {viewMode === 'grouped' && selectedPipeline !== 'all' && (
+            <button
+              onClick={() => setShowActualNames(v => !v)}
+              style={{
+                padding: '5px 10px', fontSize: 11, fontFamily: fonts.sans, borderRadius: 5,
+                border: `1px solid ${colors.border}`, cursor: 'pointer',
+                background: showActualNames ? `${colors.accent}20` : 'transparent',
+                color: showActualNames ? colors.accent : colors.textMuted,
+              }}
+              title="Toggle between normalized stage categories and your actual CRM stage names"
+            >
+              {showActualNames ? '✓ ' : ''}CRM names
+            </button>
+          )}
+
           {data?.pipelines && data.pipelines.length > 1 && (
             <select
               value={selectedPipeline}
               onChange={e => setSelectedPipeline(e.target.value)}
-              style={{
-                padding: '6px 10px', borderRadius: 6, border: `1px solid ${colors.border}`,
-                background: colors.surface, color: colors.text, fontSize: 12, fontFamily: fonts.sans,
-              }}
+              style={{ padding: '6px 10px', borderRadius: 6, border: `1px solid ${colors.border}`, background: colors.surface, color: colors.text, fontSize: 12, fontFamily: fonts.sans }}
             >
               <option value="all">All Pipelines</option>
               {data.pipelines.map(p => <option key={p} value={p}>{p}</option>)}
             </select>
           )}
+
           <button
             onClick={handleRefresh}
             disabled={refreshing}
             style={{
-              padding: '7px 14px', borderRadius: 6,
-              border: `1px solid ${colors.border}`,
+              padding: '7px 14px', borderRadius: 6, border: `1px solid ${colors.border}`,
               background: refreshing ? colors.surfaceHover : colors.surface,
-              color: colors.text, fontSize: 12, cursor: refreshing ? 'wait' : 'pointer',
-              fontFamily: fonts.sans,
+              color: colors.text, fontSize: 12, cursor: refreshing ? 'wait' : 'pointer', fontFamily: fonts.sans,
             }}
           >
             {refreshing ? 'Refreshing…' : '↻ Refresh'}
@@ -290,10 +560,7 @@ export default function BenchmarksGrid() {
       </div>
 
       {!hasAnyData ? (
-        <div style={{
-          padding: 48, textAlign: 'center', background: colors.surface,
-          border: `1px solid ${colors.border}`, borderRadius: 10, color: colors.textMuted, fontSize: 13,
-        }}>
+        <div style={{ padding: 48, textAlign: 'center', background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, color: colors.textMuted, fontSize: 13 }}>
           <div style={{ marginBottom: 12, fontSize: 32 }}>📊</div>
           <div style={{ fontWeight: 600, marginBottom: 8, color: colors.text }}>No Benchmarks Yet</div>
           <div style={{ maxWidth: 400, margin: '0 auto', marginBottom: 20 }}>
@@ -302,11 +569,7 @@ export default function BenchmarksGrid() {
           <button
             onClick={handleRefresh}
             disabled={refreshing}
-            style={{
-              padding: '8px 20px', borderRadius: 6,
-              background: colors.accent, color: '#fff',
-              border: 'none', fontSize: 13, cursor: 'pointer', fontFamily: fonts.sans,
-            }}
+            style={{ padding: '8px 20px', borderRadius: 6, background: colors.accent, color: '#fff', border: 'none', fontSize: 13, cursor: 'pointer', fontFamily: fonts.sans }}
           >
             {refreshing ? 'Computing…' : 'Compute Now'}
           </button>
@@ -318,7 +581,7 @@ export default function BenchmarksGrid() {
             No grouped benchmark data. Try clicking Refresh or switch to Deal Stages view.
           </div>
         ) : selectedPipeline === 'all' && uniquePipelines.length > 1 ? (
-          /* Pipeline-grouped layout (All Pipelines selected) */
+          /* Pipeline-grouped layout */
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             {uniquePipelines.map(pipelineName => {
               const pipelineBenches = benchmarks.filter(b => b.pipeline === pipelineName);
@@ -337,12 +600,7 @@ export default function BenchmarksGrid() {
                       const next = new Set(prev); const k = `pipeline_${pipelineName}`;
                       next.has(k) ? next.delete(k) : next.add(k); return next;
                     })}
-                    style={{
-                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                      padding: '12px 18px', cursor: 'pointer',
-                      borderBottom: pipelineCollapsed ? 'none' : `1px solid ${colors.border}`,
-                      background: colors.surfaceRaised,
-                    }}
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 18px', cursor: 'pointer', borderBottom: pipelineCollapsed ? 'none' : `1px solid ${colors.border}`, background: colors.surfaceRaised }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                       <span style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>{pipelineName}</span>
@@ -361,106 +619,13 @@ export default function BenchmarksGrid() {
                         return (
                           <div key={seg} style={{ borderTop: segIdx > 0 ? `1px solid ${colors.border}` : undefined }}>
                             <div
-                              onClick={() => setCollapsedSegments(prev => {
-                                const next = new Set(prev);
-                                next.has(segKey) ? next.delete(segKey) : next.add(segKey); return next;
-                              })}
-                              style={{
-                                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                                padding: '9px 18px', cursor: 'pointer',
-                                borderBottom: segCollapsed ? 'none' : `1px solid ${colors.border}`,
-                                background: 'rgba(0,0,0,0.03)',
-                              }}
+                              onClick={() => setCollapsedSegments(prev => { const next = new Set(prev); next.has(segKey) ? next.delete(segKey) : next.add(segKey); return next; })}
+                              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 18px', cursor: 'pointer', borderBottom: segCollapsed ? 'none' : `1px solid ${colors.border}`, background: 'rgba(0,0,0,0.03)' }}
                             >
                               <span style={{ fontSize: 12, fontWeight: 500, color: colors.textSecondary }}>{SEGMENT_LABEL[seg] ?? seg}</span>
                               <span style={{ fontSize: 10, color: colors.textMuted }}>{segCollapsed ? '▼' : '▲'}</span>
                             </div>
-                            {!segCollapsed && (
-                              <div style={{ overflowX: 'auto' }}>
-                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                                  <thead>
-                                    <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
-                                      <th style={{ padding: '10px 16px', textAlign: 'left', color: colors.textMuted, fontWeight: 600, fontSize: 11, whiteSpace: 'nowrap', width: 140 }}>Metric</th>
-                                      {pipelineStages.map(s => (
-                                        <th key={s.stage_normalized} style={{ padding: '10px 12px', textAlign: 'center', color: colors.textMuted, fontWeight: 600, fontSize: 11, whiteSpace: 'nowrap', minWidth: 110 }}>
-                                          {s.stage}
-                                        </th>
-                                      ))}
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
-                                      <td style={{ padding: '10px 16px', color: colors.textSecondary, whiteSpace: 'nowrap' }}>
-                                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                                          <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#38A169', display: 'inline-block' }} />
-                                          Won median
-                                        </span>
-                                      </td>
-                                      {pipelineStages.map(s => {
-                                        const b = getPB(s.stage_normalized, seg);
-                                        return (
-                                          <td key={s.stage_normalized} style={{ padding: '10px 12px', textAlign: 'center', opacity: b?.won_confidence === 'insufficient' ? 0.4 : 1 }}>
-                                            <div style={{ fontWeight: 600, color: '#38A169' }}>{fmtDays(b?.won_median ?? null)}</div>
-                                            {b && <ConfidenceBadge tier={b.won_confidence} sample={b.won_sample} />}
-                                          </td>
-                                        );
-                                      })}
-                                    </tr>
-                                    <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
-                                      <td style={{ padding: '10px 16px', color: colors.textSecondary, whiteSpace: 'nowrap' }}>
-                                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                                          <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#E53E3E', display: 'inline-block' }} />
-                                          Lost median
-                                        </span>
-                                      </td>
-                                      {pipelineStages.map(s => {
-                                        const b = getPB(s.stage_normalized, seg);
-                                        return (
-                                          <td key={s.stage_normalized} style={{ padding: '10px 12px', textAlign: 'center', opacity: b?.lost_confidence === 'insufficient' ? 0.4 : 1 }}>
-                                            <div style={{ fontWeight: 600, color: '#E53E3E' }}>{fmtDays(b?.lost_median ?? null)}</div>
-                                            {b && <ConfidenceBadge tier={b.lost_confidence} sample={b.lost_sample} />}
-                                          </td>
-                                        );
-                                      })}
-                                    </tr>
-                                    <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
-                                      <td style={{ padding: '10px 16px', color: colors.textSecondary, whiteSpace: 'nowrap' }}>Signal gap</td>
-                                      {pipelineStages.map(s => {
-                                        const b = getPB(s.stage_normalized, seg);
-                                        const ratio = b?.won_median && b?.lost_median ? (b.lost_median / b.won_median) : null;
-                                        const gapColor = signalGapColor(b?.won_median ?? null, b?.lost_median ?? null);
-                                        return (
-                                          <td key={s.stage_normalized} style={{ padding: '10px 12px', textAlign: 'center' }}>
-                                            {b?.is_inverted ? (
-                                              <span style={{ fontSize: 10, color: '#805AD5', fontWeight: 600 }} title="Inverted: winners spend longer here">⚠ Inverted</span>
-                                            ) : ratio !== null ? (
-                                              <span style={{ fontWeight: 600, color: gapColor }}>{ratio.toFixed(1)}×</span>
-                                            ) : '—'}
-                                          </td>
-                                        );
-                                      })}
-                                    </tr>
-                                    <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
-                                      <td style={{ padding: '10px 16px', color: colors.textSecondary, whiteSpace: 'nowrap' }}>Open now (avg)</td>
-                                      {pipelineStages.map(s => {
-                                        const b = getPB(s.stage_normalized, seg);
-                                        const open = openAvg[s.stage_normalized];
-                                        if (!open) return <td key={s.stage_normalized} style={{ padding: '10px 12px', textAlign: 'center', color: colors.textMuted }}>—</td>;
-                                        const openColor = b?.lost_median && open.avg > b.lost_median ? '#E53E3E'
-                                          : b?.won_median && open.avg > b.won_median ? '#D69E2E'
-                                          : colors.textSecondary;
-                                        return (
-                                          <td key={s.stage_normalized} style={{ padding: '10px 12px', textAlign: 'center' }}>
-                                            <div style={{ fontWeight: 600, color: openColor }}>{fmtDays(open.avg)}</div>
-                                            <div style={{ fontSize: 10, color: colors.textMuted }}>{open.count} deal{open.count !== 1 ? 's' : ''}</div>
-                                          </td>
-                                        );
-                                      })}
-                                    </tr>
-                                  </tbody>
-                                </table>
-                              </div>
-                            )}
+                            {!segCollapsed && renderBenchmarkTable(pipelineStages, seg, getPB, pipelineName)}
                           </div>
                         );
                       })}
@@ -471,7 +636,7 @@ export default function BenchmarksGrid() {
             })}
           </div>
         ) : (
-          /* Single-pipeline or single-pipeline-selected segment layout */
+          /* Single-pipeline segment layout */
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             {availableSegs.map(seg => {
               const collapsed = collapsedSegments.has(seg);
@@ -479,110 +644,19 @@ export default function BenchmarksGrid() {
                 <div key={seg} style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, overflow: 'hidden' }}>
                   <div
                     onClick={() => toggleSegment(seg)}
-                    style={{
-                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                      padding: '12px 18px', cursor: 'pointer',
-                      borderBottom: collapsed ? 'none' : `1px solid ${colors.border}`,
-                      background: colors.surfaceRaised,
-                    }}
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 18px', cursor: 'pointer', borderBottom: collapsed ? 'none' : `1px solid ${colors.border}`, background: colors.surfaceRaised }}
                   >
                     <span style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>{SEGMENT_LABEL[seg] ?? seg}</span>
                     <span style={{ fontSize: 11, color: colors.textMuted }}>{collapsed ? '▼' : '▲'}</span>
                   </div>
-
-                  {!collapsed && (
-                    <div style={{ overflowX: 'auto' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                        <thead>
-                          <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
-                            <th style={{ padding: '10px 16px', textAlign: 'left', color: colors.textMuted, fontWeight: 600, fontSize: 11, whiteSpace: 'nowrap', width: 140 }}>Metric</th>
-                            {stages.map(s => (
-                              <th key={s.stage_normalized} style={{ padding: '10px 12px', textAlign: 'center', color: colors.textMuted, fontWeight: 600, fontSize: 11, whiteSpace: 'nowrap', minWidth: 110 }}>
-                                {s.stage}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
-                            <td style={{ padding: '10px 16px', color: colors.textSecondary, whiteSpace: 'nowrap' }}>
-                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                                <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#38A169', display: 'inline-block' }} />
-                                Won median
-                              </span>
-                            </td>
-                            {stages.map(s => {
-                              const b = getBenchmark(s.stage_normalized, seg);
-                              return (
-                                <td key={s.stage_normalized} style={{ padding: '10px 12px', textAlign: 'center', opacity: b?.won_confidence === 'insufficient' ? 0.4 : 1 }}>
-                                  <div style={{ fontWeight: 600, color: '#38A169' }}>{fmtDays(b?.won_median ?? null)}</div>
-                                  {b && <ConfidenceBadge tier={b.won_confidence} sample={b.won_sample} />}
-                                </td>
-                              );
-                            })}
-                          </tr>
-                          <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
-                            <td style={{ padding: '10px 16px', color: colors.textSecondary, whiteSpace: 'nowrap' }}>
-                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                                <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#E53E3E', display: 'inline-block' }} />
-                                Lost median
-                              </span>
-                            </td>
-                            {stages.map(s => {
-                              const b = getBenchmark(s.stage_normalized, seg);
-                              return (
-                                <td key={s.stage_normalized} style={{ padding: '10px 12px', textAlign: 'center', opacity: b?.lost_confidence === 'insufficient' ? 0.4 : 1 }}>
-                                  <div style={{ fontWeight: 600, color: '#E53E3E' }}>{fmtDays(b?.lost_median ?? null)}</div>
-                                  {b && <ConfidenceBadge tier={b.lost_confidence} sample={b.lost_sample} />}
-                                </td>
-                              );
-                            })}
-                          </tr>
-                          <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
-                            <td style={{ padding: '10px 16px', color: colors.textSecondary, whiteSpace: 'nowrap' }}>Signal gap</td>
-                            {stages.map(s => {
-                              const b = getBenchmark(s.stage_normalized, seg);
-                              const ratio = b?.won_median && b?.lost_median ? (b.lost_median / b.won_median) : null;
-                              const gapColor = signalGapColor(b?.won_median ?? null, b?.lost_median ?? null);
-                              return (
-                                <td key={s.stage_normalized} style={{ padding: '10px 12px', textAlign: 'center' }}>
-                                  {b?.is_inverted ? (
-                                    <span style={{ fontSize: 10, color: '#805AD5', fontWeight: 600 }} title="Inverted: winners spend longer here">⚠ Inverted</span>
-                                  ) : ratio !== null ? (
-                                    <span style={{ fontWeight: 600, color: gapColor }}>{ratio.toFixed(1)}×</span>
-                                  ) : '—'}
-                                </td>
-                              );
-                            })}
-                          </tr>
-                          <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
-                            <td style={{ padding: '10px 16px', color: colors.textSecondary, whiteSpace: 'nowrap' }}>Open now (avg)</td>
-                            {stages.map(s => {
-                              const b = getBenchmark(s.stage_normalized, seg);
-                              const open = openAvg[s.stage_normalized];
-                              if (!open) return <td key={s.stage_normalized} style={{ padding: '10px 12px', textAlign: 'center', color: colors.textMuted }}>—</td>;
-                              const openColor = b?.lost_median && open.avg > b.lost_median ? '#E53E3E'
-                                : b?.won_median && open.avg > b.won_median ? '#D69E2E'
-                                : colors.textSecondary;
-                              return (
-                                <td key={s.stage_normalized} style={{ padding: '10px 12px', textAlign: 'center' }}>
-                                  <div style={{ fontWeight: 600, color: openColor }}>{fmtDays(open.avg)}</div>
-                                  <div style={{ fontSize: 10, color: colors.textMuted }}>{open.count} deal{open.count !== 1 ? 's' : ''}</div>
-                                </td>
-                              );
-                            })}
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
+                  {!collapsed && renderBenchmarkTable(stages, seg, getBenchmark)}
                 </div>
               );
             })}
           </div>
         )
       ) : (
-        /* ── RAW STAGES VIEW ── */
+        /* ── DEAL STAGES VIEW ── */
         !hasRawData ? (
           <div style={{ padding: 32, textAlign: 'center', fontSize: 13, color: colors.textMuted }}>
             No raw stage data found. Stage history may be recorded using internal API IDs rather than display names.
@@ -597,19 +671,12 @@ export default function BenchmarksGrid() {
               return (
                 <div key={normKey} style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, overflow: 'hidden' }}>
                   <div
-                    onClick={() => {
-                      setCollapsedSegments(prev => {
-                        const next = new Set(prev);
-                        next.has(`raw_${normKey}`) ? next.delete(`raw_${normKey}`) : next.add(`raw_${normKey}`);
-                        return next;
-                      });
-                    }}
-                    style={{
-                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                      padding: '12px 18px', cursor: 'pointer',
-                      borderBottom: collapsed ? 'none' : `1px solid ${colors.border}`,
-                      background: colors.surfaceRaised,
-                    }}
+                    onClick={() => setCollapsedSegments(prev => {
+                      const next = new Set(prev);
+                      next.has(`raw_${normKey}`) ? next.delete(`raw_${normKey}`) : next.add(`raw_${normKey}`);
+                      return next;
+                    })}
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 18px', cursor: 'pointer', borderBottom: collapsed ? 'none' : `1px solid ${colors.border}`, background: colors.surfaceRaised }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                       <span style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>{groupLabel}</span>
@@ -635,26 +702,29 @@ export default function BenchmarksGrid() {
                           {groupStages.map(rb => {
                             const ratio = rb.won_median && rb.lost_median ? rb.lost_median / rb.won_median : null;
                             const gapColor = signalGapColor(rb.won_median, rb.lost_median);
-                            const openForNorm = openAvg[rb.stage_normalized];
                             return (
-                              <tr key={rb.stage} style={{ borderBottom: `1px solid ${colors.border}` }}>
+                              <tr key={`${rb.pipeline}-${rb.stage}`} style={{ borderBottom: `1px solid ${colors.border}` }}>
                                 <td style={{ padding: '10px 16px', color: colors.text, fontWeight: 500 }}>{rb.stage}</td>
-                                <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                                <td
+                                  style={{ padding: '10px 12px', textAlign: 'center', cursor: rb.won_median != null ? 'pointer' : 'default' }}
+                                  onClick={() => rb.won_median != null ? openMath(rb.stage_normalized, 'won', rb.stage, 'all', rb.won_median, rb.pipeline || selectedPipeline) : undefined}
+                                >
                                   {rb.won_median !== null ? (
-                                    <div>
+                                    <span>
                                       <span style={{ fontWeight: 600, color: '#38A169' }}>{fmtDays(rb.won_median)}</span>
-                                      {' '}
-                                      <SampleBadge n={rb.won_sample} />
-                                    </div>
+                                      <ConfidenceDot tier={rb.won_sample >= 20 ? 'high' : rb.won_sample >= 5 ? 'directional' : 'insufficient'} sample={rb.won_sample} />
+                                    </span>
                                   ) : <span style={{ color: colors.textMuted }}>—</span>}
                                 </td>
-                                <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                                <td
+                                  style={{ padding: '10px 12px', textAlign: 'center', cursor: rb.lost_median != null ? 'pointer' : 'default' }}
+                                  onClick={() => rb.lost_median != null ? openMath(rb.stage_normalized, 'lost', rb.stage, 'all', rb.lost_median, rb.pipeline || selectedPipeline) : undefined}
+                                >
                                   {rb.lost_median !== null ? (
-                                    <div>
+                                    <span>
                                       <span style={{ fontWeight: 600, color: '#E53E3E' }}>{fmtDays(rb.lost_median)}</span>
-                                      {' '}
-                                      <SampleBadge n={rb.lost_sample} />
-                                    </div>
+                                      <ConfidenceDot tier={rb.lost_sample >= 20 ? 'high' : rb.lost_sample >= 5 ? 'directional' : 'insufficient'} sample={rb.lost_sample} />
+                                    </span>
                                   ) : <span style={{ color: colors.textMuted }}>—</span>}
                                 </td>
                                 <td style={{ padding: '10px 12px', textAlign: 'center' }}>
@@ -681,15 +751,12 @@ export default function BenchmarksGrid() {
         <summary style={{ fontSize: 12, color: colors.textMuted, cursor: 'pointer', padding: '8px 0' }}>
           How to read this grid
         </summary>
-        <div style={{
-          marginTop: 10, background: colors.surface, border: `1px solid ${colors.border}`,
-          borderRadius: 8, padding: 16, fontSize: 12, color: colors.textSecondary, lineHeight: 1.7,
-        }}>
+        <div style={{ marginTop: 10, background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 8, padding: 16, fontSize: 12, color: colors.textSecondary, lineHeight: 1.7 }}>
           <p style={{ margin: '0 0 8px' }}>
-            <strong>Grouped view</strong>: Stages are collapsed into normalized categories (Evaluation, Qualification, etc.) across all matching CRM stage names. Useful for a high-level pipeline health snapshot.
+            <strong>Grouped view</strong>: Stages are collapsed into normalized categories (Evaluation, Qualification, etc.) across all matching CRM stage names. Toggle "CRM names" to see your actual stage names in the column headers.
           </p>
           <p style={{ margin: '0 0 8px' }}>
-            <strong>Deal Stages view</strong>: Shows each individual CRM stage name with its own won/lost benchmarks. Useful when you want to compare "Demo Conducted" vs "Presentation Scheduled" specifically. Requires ≥1 closed deal per outcome to appear.
+            <strong>Deal Stages view</strong>: Shows each individual CRM stage name with its own won/lost benchmarks. Click any number to see the deals behind the calculation.
           </p>
           <p style={{ margin: '0 0 8px' }}>
             <strong>Signal gap</strong>: Lost median ÷ Won median. Higher = more diagnostic power. 5× means you can catch at-risk deals very early.
@@ -697,8 +764,11 @@ export default function BenchmarksGrid() {
           <p style={{ margin: '0 0 8px' }}>
             <strong>⚠ Inverted</strong>: Won deals spend <em>longer</em> in this stage than lost deals — rushing through may signal poor qualification.
           </p>
+          <p style={{ margin: '0 0 8px' }}>
+            <strong>Confidence dot</strong>: Hover the small colored dot next to any number to see sample size and confidence level. Green = high (≥20 deals), amber = directional (5–19), grey = insufficient (&lt;5).
+          </p>
           <p style={{ margin: 0 }}>
-            <strong>Confidence</strong>: High (≥20 deals), Directional (5–19), Insufficient (&lt;5). Treat low-confidence data as directional only.
+            <strong>Show math</strong>: Click any Won or Lost median number to see the individual deals that make up that calculation.
           </p>
         </div>
       </details>

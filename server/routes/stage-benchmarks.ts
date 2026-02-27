@@ -206,6 +206,81 @@ router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response)
   }
 });
 
+// ─── GET /:workspaceId/stage-benchmarks/math ─────────────────────────────────
+
+router.get('/:workspaceId/stage-benchmarks/math', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { workspaceId } = req.params;
+    const { stage_normalized, segment, outcome, pipeline } = req.query as Record<string, string>;
+
+    if (!stage_normalized || !outcome) {
+      res.status(400).json({ error: 'stage_normalized and outcome are required' });
+      return;
+    }
+
+    const [lowCutoff, highCutoff] = await autoDetectSegmentBoundaries(workspaceId);
+
+    const params: (string | number)[] = [workspaceId, stage_normalized];
+    let paramIdx = 3;
+
+    let segFilter = '';
+    if (segment === 'smb') segFilter = `AND COALESCE(d.amount::numeric, 0) < ${lowCutoff}`;
+    else if (segment === 'mid_market') segFilter = `AND COALESCE(d.amount::numeric, 0) >= ${lowCutoff} AND COALESCE(d.amount::numeric, 0) < ${highCutoff}`;
+    else if (segment === 'enterprise') segFilter = `AND COALESCE(d.amount::numeric, 0) >= ${highCutoff}`;
+
+    const outcomeVal = outcome === 'won' ? 'closed_won' : 'closed_lost';
+    params.push(outcomeVal);
+    const outcomeFilter = `AND d.stage_normalized = $${paramIdx++}`;
+
+    let pipelineFilter = '';
+    if (pipeline && pipeline !== 'all') {
+      params.push(pipeline);
+      pipelineFilter = `AND d.pipeline = $${paramIdx++}`;
+    }
+
+    const result = await query<{
+      id: string;
+      name: string;
+      amount: string | null;
+      outcome: string;
+      pipeline: string;
+      duration_days: string;
+      entered_at: string;
+      exited_at: string | null;
+      stage_display_name: string;
+    }>(
+      `SELECT d.id,
+              COALESCE(d.name, 'Unnamed deal') AS name,
+              d.amount,
+              d.stage_normalized AS outcome,
+              COALESCE(d.pipeline, '') AS pipeline,
+              dsh.duration_days::text,
+              dsh.entered_at::text,
+              dsh.exited_at::text,
+              COALESCE(sc.stage_name, dsh.stage) AS stage_display_name
+       FROM deal_stage_history dsh
+       JOIN deals d ON d.id = dsh.deal_id
+       LEFT JOIN stage_configs sc ON sc.workspace_id = dsh.workspace_id
+         AND (sc.stage_id = dsh.stage OR sc.stage_name = dsh.stage)
+         AND sc.pipeline_name = d.pipeline
+       WHERE dsh.workspace_id = $1
+         AND dsh.stage_normalized = $2
+         AND dsh.duration_days IS NOT NULL
+         ${outcomeFilter}
+         ${segFilter}
+         ${pipelineFilter}
+       ORDER BY dsh.duration_days ASC
+       LIMIT 100`,
+      params
+    );
+
+    res.json({ deals: result.rows });
+  } catch (err) {
+    console.error('[StageBenchmarks] Math error:', err);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 // ─── POST /:workspaceId/stage-benchmarks/refresh ─────────────────────────────
 
 router.post('/:workspaceId/stage-benchmarks/refresh', async (req: Request, res: Response): Promise<void> => {
