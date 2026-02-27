@@ -78,7 +78,7 @@ router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response)
          JOIN deals d ON d.id = dsh.deal_id
          LEFT JOIN stage_configs sc ON sc.workspace_id = dsh.workspace_id
            AND (sc.stage_id = dsh.stage OR sc.stage_name = dsh.stage)
-           AND (sc.pipeline_name = d.pipeline OR (sc.pipeline_name IS NULL AND d.pipeline IS NULL))
+           AND COALESCE(sc.pipeline_name, '') = COALESCE(d.pipeline, '')
          WHERE dsh.workspace_id = $1
            AND d.stage_normalized IN ('closed_won', 'closed_lost')
            AND dsh.stage_normalized NOT IN ('closed_won', 'closed_lost', 'unknown')
