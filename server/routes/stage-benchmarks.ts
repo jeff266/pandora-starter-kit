@@ -269,6 +269,42 @@ router.get('/:workspaceId/stage-benchmarks/math', async (req: Request, res: Resp
     }
 
     const [lowCutoff, highCutoff] = await autoDetectSegmentBoundaries(workspaceId);
+
+    // Special case: outcome=open returns currently open deals in a stage_normalized bucket
+    if (outcome === 'open') {
+      const params: (string | number)[] = [workspaceId, stage_normalized];
+      let paramIdx = 3;
+      let pipelineFilter = '';
+      if (pipeline && pipeline !== 'all') {
+        params.push(pipeline);
+        pipelineFilter = `AND d.pipeline = $${paramIdx++}`;
+      }
+      const result = await query<{
+        id: string; name: string; amount: string | null; outcome: string;
+        pipeline: string; duration_days: string; entered_at: string; exited_at: null; stage_display_name: string;
+      }>(
+        `SELECT d.id,
+                COALESCE(d.name, 'Unnamed deal') AS name,
+                d.amount,
+                'open' AS outcome,
+                COALESCE(d.pipeline, '') AS pipeline,
+                COALESCE(d.days_in_stage, EXTRACT(days FROM NOW() - d.stage_changed_at)::integer)::text AS duration_days,
+                d.stage_changed_at::text AS entered_at,
+                NULL::text AS exited_at,
+                COALESCE(d.stage, d.stage_normalized) AS stage_display_name
+         FROM deals d
+         WHERE d.workspace_id = $1
+           AND d.stage_normalized = $2
+           AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+           ${pipelineFilter}
+         ORDER BY COALESCE(d.days_in_stage, EXTRACT(days FROM NOW() - d.stage_changed_at)::integer) DESC NULLS LAST
+         LIMIT 100`,
+        params
+      );
+      res.json({ deals: result.rows });
+      return;
+    }
+
     const outcomeVal = outcome === 'won' ? 'closed_won' : 'closed_lost';
 
     // Special case: _cycle_total returns per-deal total cycle time (SUM of all stages)

@@ -73,9 +73,10 @@ interface MathModalState {
   stage_normalized: string;
   label: string;
   segment: string;
-  outcome: 'won' | 'lost';
+  outcome: 'won' | 'lost' | 'open';
   pipeline: string | null;
   median: number | null;
+  avg: number | null;
   deals: MathDeal[] | null;
   loading: boolean;
 }
@@ -165,8 +166,9 @@ function ConfidenceDot({ tier, sample }: { tier: string; sample: number }) {
 }
 
 function MathModal({ modal, onClose }: { modal: MathModalState; onClose: () => void }) {
-  const outcomeColor = modal.outcome === 'won' ? '#38A169' : '#E53E3E';
-  const outcomeLabel = modal.outcome === 'won' ? 'Closed-Won' : 'Closed-Lost';
+  const isOpen = modal.outcome === 'open';
+  const outcomeColor = isOpen ? '#D69E2E' : modal.outcome === 'won' ? '#38A169' : '#E53E3E';
+  const outcomeLabel = isOpen ? 'Open Now' : modal.outcome === 'won' ? 'Closed-Won' : 'Closed-Lost';
   const segLabel = SEGMENT_LABEL[modal.segment] ?? modal.segment;
 
   return (
@@ -193,7 +195,10 @@ function MathModal({ modal, onClose }: { modal: MathModalState; onClose: () => v
               Show Math — <span style={{ color: outcomeColor }}>{outcomeLabel}</span> · {modal.label}
             </div>
             <div style={{ fontSize: 12, color: colors.textMuted }}>
-              {segLabel}{modal.pipeline ? ` · ${modal.pipeline}` : ''}{modal.median != null ? ` · median ${fmtDays(modal.median)}` : ''}
+              {isOpen
+                ? <>Deals currently in this stage{modal.avg != null ? <> · avg <strong style={{ color: outcomeColor }}>{fmtDays(modal.avg)}</strong></> : ''}</>
+                : <>{segLabel}{modal.pipeline ? ` · ${modal.pipeline}` : ''}{modal.median != null ? ` · median ${fmtDays(modal.median)}` : ''}</>
+              }
             </div>
           </div>
           <button
@@ -216,15 +221,15 @@ function MathModal({ modal, onClose }: { modal: MathModalState; onClose: () => v
                   <th style={{ padding: '10px 16px', textAlign: 'left', color: colors.textMuted, fontWeight: 600, fontSize: 11 }}>Deal</th>
                   <th style={{ padding: '10px 12px', textAlign: 'right', color: colors.textMuted, fontWeight: 600, fontSize: 11 }}>Amount</th>
                   <th style={{ padding: '10px 12px', textAlign: 'left', color: colors.textMuted, fontWeight: 600, fontSize: 11 }}>Stage</th>
-                  <th style={{ padding: '10px 12px', textAlign: 'center', color: colors.textMuted, fontWeight: 600, fontSize: 11 }}>Duration</th>
-                  <th style={{ padding: '10px 12px', textAlign: 'center', color: colors.textMuted, fontWeight: 600, fontSize: 11 }}>Entered</th>
-                  <th style={{ padding: '10px 12px', textAlign: 'center', color: colors.textMuted, fontWeight: 600, fontSize: 11 }}>Exited</th>
+                  <th style={{ padding: '10px 12px', textAlign: 'center', color: colors.textMuted, fontWeight: 600, fontSize: 11 }}>{isOpen ? 'Days in Stage' : 'Duration'}</th>
+                  <th style={{ padding: '10px 12px', textAlign: 'center', color: colors.textMuted, fontWeight: 600, fontSize: 11 }}>{isOpen ? 'In Stage Since' : 'Entered'}</th>
+                  {!isOpen && <th style={{ padding: '10px 12px', textAlign: 'center', color: colors.textMuted, fontWeight: 600, fontSize: 11 }}>Exited</th>}
                 </tr>
               </thead>
               <tbody>
                 {modal.deals.map((deal, i) => {
                   const dur = parseFloat(deal.duration_days);
-                  const isMedian = modal.median != null && Math.abs(dur - modal.median) < 0.5;
+                  const isMedian = !isOpen && modal.median != null && Math.abs(dur - modal.median) < 0.5;
                   return (
                     <tr
                       key={`${deal.id}-${i}`}
@@ -241,7 +246,7 @@ function MathModal({ modal, onClose }: { modal: MathModalState; onClose: () => v
                       <td style={{ padding: '9px 12px', color: colors.textMuted, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{deal.stage_display_name}</td>
                       <td style={{ padding: '9px 12px', textAlign: 'center', fontWeight: 600, color: outcomeColor }}>{fmtDays(dur)}</td>
                       <td style={{ padding: '9px 12px', textAlign: 'center', color: colors.textMuted }}>{fmtDate(deal.entered_at)}</td>
-                      <td style={{ padding: '9px 12px', textAlign: 'center', color: colors.textMuted }}>{fmtDate(deal.exited_at)}</td>
+                      {!isOpen && <td style={{ padding: '9px 12px', textAlign: 'center', color: colors.textMuted }}>{fmtDate(deal.exited_at)}</td>}
                     </tr>
                   );
                 })}
@@ -312,9 +317,21 @@ export default function BenchmarksGrid() {
     median: number | null,
     pipeline?: string,
   ) => {
-    setMathModal({ stage_normalized, label, segment, outcome, pipeline: pipeline ?? null, median, deals: null, loading: true });
+    setMathModal({ stage_normalized, label, segment, outcome, pipeline: pipeline ?? null, median, avg: null, deals: null, loading: true });
     try {
       const params = new URLSearchParams({ stage_normalized, outcome, segment: segment || 'all' });
+      if (pipeline && pipeline !== 'all') params.set('pipeline', pipeline);
+      const result = await api.get(`/stage-benchmarks/math?${params}`);
+      setMathModal(prev => prev ? { ...prev, deals: result.deals, loading: false } : null);
+    } catch {
+      setMathModal(prev => prev ? { ...prev, deals: [], loading: false } : null);
+    }
+  }, []);
+
+  const openOpenMath = useCallback(async (stageNorm: string, label: string, avg: number, pipeline?: string) => {
+    setMathModal({ stage_normalized: stageNorm, label, segment: 'all', outcome: 'open', pipeline: pipeline ?? null, median: null, avg, deals: null, loading: true });
+    try {
+      const params = new URLSearchParams({ stage_normalized: stageNorm, outcome: 'open', segment: 'all' });
       if (pipeline && pipeline !== 'all') params.set('pipeline', pipeline);
       const result = await api.get(`/stage-benchmarks/math?${params}`);
       setMathModal(prev => prev ? { ...prev, deals: result.deals, loading: false } : null);
@@ -488,7 +505,12 @@ export default function BenchmarksGrid() {
                 : b?.won_median && open.avg > b.won_median ? '#D69E2E'
                 : colors.textSecondary;
               return (
-                <td key={s.stage_normalized} style={{ padding: '10px 12px', textAlign: 'center' }}>
+                <td
+                  key={s.stage_normalized}
+                  style={{ padding: '10px 12px', textAlign: 'center', cursor: 'pointer' }}
+                  onClick={() => openOpenMath(s.stage_normalized, s.stage, open.avg, pipelineName)}
+                  title="Click to see open deals"
+                >
                   <div style={{ fontWeight: 600, color: openColor }}>{fmtDays(open.avg)}</div>
                   <div style={{ fontSize: 10, color: colors.textMuted }}>{open.count} deal{open.count !== 1 ? 's' : ''}</div>
                 </td>
