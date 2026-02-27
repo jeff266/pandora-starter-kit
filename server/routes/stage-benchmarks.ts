@@ -62,7 +62,7 @@ router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response)
       computed_at: string;
     }> = {};
 
-    for (const r of benchRows) {
+    for (const r of benchRows.rows) {
       const key = `${r.pipeline}||${r.stage_normalized}||${r.segment}`;
       if (!benchMap[key]) {
         benchMap[key] = {
@@ -129,7 +129,7 @@ router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response)
       return oa - ob || a.stage_normalized.localeCompare(b.stage_normalized);
     });
 
-    const lastComputedAt = benchRows.length > 0 ? benchRows[0].computed_at : null;
+    const lastComputedAt = benchRows.rows.length > 0 ? benchRows.rows[0].computed_at : null;
 
     res.json({ benchmarks, open_averages: openAverages, pipelines, last_computed_at: lastComputedAt });
   } catch (err) {
