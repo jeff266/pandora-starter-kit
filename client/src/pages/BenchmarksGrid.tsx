@@ -35,12 +35,20 @@ interface OpenAverage {
   count: number;
 }
 
+interface CycleTime {
+  won_median: number | null;
+  won_sample: number;
+  lost_median: number | null;
+  lost_sample: number;
+}
+
 interface BenchmarksResponse {
   benchmarks: StageBenchmark[];
   raw_benchmarks: RawBenchmark[];
   open_averages: Record<string, OpenAverage>;
   pipelines: string[];
   last_computed_at: string | null;
+  cycle_time?: CycleTime;
 }
 
 interface MathDeal {
@@ -483,6 +491,44 @@ export default function BenchmarksGrid() {
               );
             })}
           </tr>
+          {/* Closed / Total sales cycle footer row — single colspan summary */}
+          {data?.cycle_time && (data.cycle_time.won_median != null || data.cycle_time.lost_median != null) && (() => {
+            const ct = data.cycle_time!;
+            const ratio = ct.won_median && ct.lost_median ? ct.lost_median / ct.won_median : null;
+            const gapColor = signalGapColor(ct.won_median, ct.lost_median);
+            return (
+              <tr style={{ borderTop: `2px solid ${colors.border}`, background: 'rgba(0,0,0,0.04)' }}>
+                <td style={{ padding: '10px 16px', color: colors.text, fontWeight: 600, whiteSpace: 'nowrap' }}>
+                  Closed (total)
+                </td>
+                <td colSpan={stageList.length} style={{ padding: '10px 12px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
+                    {ct.won_median != null && (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#38A169', display: 'inline-block' }} />
+                        <span style={{ fontWeight: 700, color: '#38A169' }}>{fmtDays(ct.won_median)}</span>
+                        <span style={{ fontSize: 10, color: colors.textMuted }}>won</span>
+                        <ConfidenceDot tier={ct.won_sample >= 20 ? 'high' : ct.won_sample >= 5 ? 'directional' : 'insufficient'} sample={ct.won_sample} />
+                      </span>
+                    )}
+                    {ct.lost_median != null && (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#E53E3E', display: 'inline-block' }} />
+                        <span style={{ fontWeight: 700, color: '#E53E3E' }}>{fmtDays(ct.lost_median)}</span>
+                        <span style={{ fontSize: 10, color: colors.textMuted }}>lost</span>
+                        <ConfidenceDot tier={ct.lost_sample >= 20 ? 'high' : ct.lost_sample >= 5 ? 'directional' : 'insufficient'} sample={ct.lost_sample} />
+                      </span>
+                    )}
+                    {ratio != null && (
+                      <span style={{ fontSize: 11, color: colors.textMuted }}>
+                        gap: <span style={{ fontWeight: 600, color: gapColor }}>{ratio.toFixed(1)}×</span>
+                      </span>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            );
+          })()}
         </tbody>
       </table>
     </div>
@@ -735,6 +781,36 @@ export default function BenchmarksGrid() {
                               </tr>
                             );
                           })}
+                          {/* Closed / Total sales cycle footer row */}
+                          {data?.cycle_time && (data.cycle_time.won_median != null || data.cycle_time.lost_median != null) && (() => {
+                            const ct = data.cycle_time!;
+                            const ratio = ct.won_median && ct.lost_median ? ct.lost_median / ct.won_median : null;
+                            const gapColor = signalGapColor(ct.won_median, ct.lost_median);
+                            return (
+                              <tr style={{ borderTop: `2px solid ${colors.border}`, background: 'rgba(0,0,0,0.04)' }}>
+                                <td style={{ padding: '10px 16px', color: colors.text, fontWeight: 600 }}>Closed (total)</td>
+                                <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                                  {ct.won_median != null ? (
+                                    <span>
+                                      <span style={{ fontWeight: 700, color: '#38A169' }}>{fmtDays(ct.won_median)}</span>
+                                      <ConfidenceDot tier={ct.won_sample >= 20 ? 'high' : ct.won_sample >= 5 ? 'directional' : 'insufficient'} sample={ct.won_sample} />
+                                    </span>
+                                  ) : <span style={{ color: colors.textMuted }}>—</span>}
+                                </td>
+                                <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                                  {ct.lost_median != null ? (
+                                    <span>
+                                      <span style={{ fontWeight: 700, color: '#E53E3E' }}>{fmtDays(ct.lost_median)}</span>
+                                      <ConfidenceDot tier={ct.lost_sample >= 20 ? 'high' : ct.lost_sample >= 5 ? 'directional' : 'insufficient'} sample={ct.lost_sample} />
+                                    </span>
+                                  ) : <span style={{ color: colors.textMuted }}>—</span>}
+                                </td>
+                                <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                                  {ratio != null ? <span style={{ fontWeight: 600, color: gapColor }}>{ratio.toFixed(1)}×</span> : '—'}
+                                </td>
+                              </tr>
+                            );
+                          })()}
                         </tbody>
                       </table>
                     </div>
