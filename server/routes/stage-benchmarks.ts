@@ -252,6 +252,44 @@ router.get('/:workspaceId/stage-benchmarks/math', async (req: Request, res: Resp
     }
 
     const [lowCutoff, highCutoff] = await autoDetectSegmentBoundaries(workspaceId);
+    const outcomeVal = outcome === 'won' ? 'closed_won' : 'closed_lost';
+
+    // Special case: _cycle_total returns per-deal total cycle time (SUM of all stages)
+    if (stage_normalized === '_cycle_total') {
+      const params: (string | number)[] = [workspaceId, outcomeVal];
+      let paramIdx = 3;
+      let pipelineFilter = '';
+      if (pipeline && pipeline !== 'all') {
+        params.push(pipeline);
+        pipelineFilter = `AND d.pipeline = $${paramIdx++}`;
+      }
+      const result = await query<{
+        id: string; name: string; amount: string | null; outcome: string;
+        pipeline: string; duration_days: string; entered_at: string; exited_at: string | null; stage_display_name: string;
+      }>(
+        `SELECT d.id,
+                COALESCE(d.name, 'Unnamed deal') AS name,
+                d.amount,
+                d.stage_normalized AS outcome,
+                COALESCE(d.pipeline, '') AS pipeline,
+                SUM(dsh.duration_days)::text AS duration_days,
+                MIN(dsh.entered_at)::text AS entered_at,
+                MAX(dsh.exited_at)::text AS exited_at,
+                'Total Sales Cycle' AS stage_display_name
+         FROM deals d
+         JOIN deal_stage_history dsh ON dsh.deal_id = d.id AND dsh.workspace_id = d.workspace_id
+         WHERE d.workspace_id = $1
+           AND d.stage_normalized = $2
+           AND dsh.duration_days > 0
+           ${pipelineFilter}
+         GROUP BY d.id, d.name, d.amount, d.stage_normalized, d.pipeline
+         ORDER BY SUM(dsh.duration_days) ASC
+         LIMIT 100`,
+        params
+      );
+      res.json({ deals: result.rows });
+      return;
+    }
 
     const params: (string | number)[] = [workspaceId, stage_normalized];
     let paramIdx = 3;
@@ -261,7 +299,6 @@ router.get('/:workspaceId/stage-benchmarks/math', async (req: Request, res: Resp
     else if (segment === 'mid_market') segFilter = `AND COALESCE(d.amount::numeric, 0) >= ${lowCutoff} AND COALESCE(d.amount::numeric, 0) < ${highCutoff}`;
     else if (segment === 'enterprise') segFilter = `AND COALESCE(d.amount::numeric, 0) >= ${highCutoff}`;
 
-    const outcomeVal = outcome === 'won' ? 'closed_won' : 'closed_lost';
     params.push(outcomeVal);
     const outcomeFilter = `AND d.stage_normalized = $${paramIdx++}`;
 

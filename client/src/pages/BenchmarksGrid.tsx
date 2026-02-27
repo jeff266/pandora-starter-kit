@@ -371,17 +371,6 @@ export default function BenchmarksGrid() {
       : fallback;
 
   // ── Raw mode ──────────────────────────────────────────────────────────────────
-  const rawGrouped: Record<string, RawBenchmark[]> = {};
-  for (const rb of rawBenchmarks) {
-    if (!rawGrouped[rb.stage_normalized]) rawGrouped[rb.stage_normalized] = [];
-    rawGrouped[rb.stage_normalized].push(rb);
-  }
-  const rawGroupKeys = Object.keys(rawGrouped).sort((a, b) => {
-    const minA = Math.min(...rawGrouped[a].map(s => s.display_order ?? 999));
-    const minB = Math.min(...rawGrouped[b].map(s => s.display_order ?? 999));
-    return minA - minB || a.localeCompare(b);
-  });
-
   const uniquePipelines = [...new Set(benchmarks.map(b => b.pipeline))].filter(Boolean).sort();
   const hasGroupedData = stages.length > 0;
   const hasRawData = rawBenchmarks.length > 0;
@@ -491,44 +480,6 @@ export default function BenchmarksGrid() {
               );
             })}
           </tr>
-          {/* Closed / Total sales cycle footer row — single colspan summary */}
-          {data?.cycle_time && (data.cycle_time.won_median != null || data.cycle_time.lost_median != null) && (() => {
-            const ct = data.cycle_time!;
-            const ratio = ct.won_median && ct.lost_median ? ct.lost_median / ct.won_median : null;
-            const gapColor = signalGapColor(ct.won_median, ct.lost_median);
-            return (
-              <tr style={{ borderTop: `2px solid ${colors.border}`, background: 'rgba(0,0,0,0.04)' }}>
-                <td style={{ padding: '10px 16px', color: colors.text, fontWeight: 600, whiteSpace: 'nowrap' }}>
-                  Closed (total)
-                </td>
-                <td colSpan={stageList.length} style={{ padding: '10px 12px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
-                    {ct.won_median != null && (
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                        <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#38A169', display: 'inline-block' }} />
-                        <span style={{ fontWeight: 700, color: '#38A169' }}>{fmtDays(ct.won_median)}</span>
-                        <span style={{ fontSize: 10, color: colors.textMuted }}>won</span>
-                        <ConfidenceDot tier={ct.won_sample >= 20 ? 'high' : ct.won_sample >= 5 ? 'directional' : 'insufficient'} sample={ct.won_sample} />
-                      </span>
-                    )}
-                    {ct.lost_median != null && (
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                        <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#E53E3E', display: 'inline-block' }} />
-                        <span style={{ fontWeight: 700, color: '#E53E3E' }}>{fmtDays(ct.lost_median)}</span>
-                        <span style={{ fontSize: 10, color: colors.textMuted }}>lost</span>
-                        <ConfidenceDot tier={ct.lost_sample >= 20 ? 'high' : ct.lost_sample >= 5 ? 'directional' : 'insufficient'} sample={ct.lost_sample} />
-                      </span>
-                    )}
-                    {ratio != null && (
-                      <span style={{ fontSize: 11, color: colors.textMuted }}>
-                        gap: <span style={{ fontWeight: 600, color: gapColor }}>{ratio.toFixed(1)}×</span>
-                      </span>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            );
-          })()}
         </tbody>
       </table>
     </div>
@@ -707,21 +658,31 @@ export default function BenchmarksGrid() {
           <div style={{ padding: 32, textAlign: 'center', fontSize: 13, color: colors.textMuted }}>
             No raw stage data found. Stage history may be recorded using internal API IDs rather than display names.
           </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {rawGroupKeys.map(normKey => {
-              const collapsed = collapsedSegments.has(`raw_${normKey}`);
-              const groupLabel = normKey.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-              const groupStages = rawGrouped[normKey];
+        ) : (() => {
+          // Group by pipeline first when multiple pipelines exist, then by stage_normalized
+          const pipelineNames = [...new Set(rawBenchmarks.map(rb => rb.pipeline ?? ''))].sort();
+          const multiPipeline = pipelineNames.length > 1;
 
+          const renderNormGroups = (stagesForPipeline: RawBenchmark[]) => {
+            const grouped: Record<string, RawBenchmark[]> = {};
+            for (const rb of stagesForPipeline) {
+              if (!grouped[rb.stage_normalized]) grouped[rb.stage_normalized] = [];
+              grouped[rb.stage_normalized].push(rb);
+            }
+            const normKeys = Object.keys(grouped).sort((a, b) => {
+              const minA = Math.min(...grouped[a].map(s => s.display_order ?? 999));
+              const minB = Math.min(...grouped[b].map(s => s.display_order ?? 999));
+              return minA - minB || a.localeCompare(b);
+            });
+            return normKeys.map(normKey => {
+              const cKey = `raw_${normKey}`;
+              const collapsed = collapsedSegments.has(cKey);
+              const groupLabel = normKey.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+              const groupStages = grouped[normKey];
               return (
                 <div key={normKey} style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, overflow: 'hidden' }}>
                   <div
-                    onClick={() => setCollapsedSegments(prev => {
-                      const next = new Set(prev);
-                      next.has(`raw_${normKey}`) ? next.delete(`raw_${normKey}`) : next.add(`raw_${normKey}`);
-                      return next;
-                    })}
+                    onClick={() => setCollapsedSegments(prev => { const next = new Set(prev); next.has(cKey) ? next.delete(cKey) : next.add(cKey); return next; })}
                     style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 18px', cursor: 'pointer', borderBottom: collapsed ? 'none' : `1px solid ${colors.border}`, background: colors.surfaceRaised }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -732,7 +693,6 @@ export default function BenchmarksGrid() {
                     </div>
                     <span style={{ fontSize: 11, color: colors.textMuted }}>{collapsed ? '▼' : '▲'}</span>
                   </div>
-
                   {!collapsed && (
                     <div style={{ overflowX: 'auto' }}>
                       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
@@ -751,76 +711,117 @@ export default function BenchmarksGrid() {
                             return (
                               <tr key={`${rb.pipeline}-${rb.stage}`} style={{ borderBottom: `1px solid ${colors.border}` }}>
                                 <td style={{ padding: '10px 16px', color: colors.text, fontWeight: 500 }}>{rb.stage}</td>
-                                <td
-                                  style={{ padding: '10px 12px', textAlign: 'center', cursor: rb.won_median != null ? 'pointer' : 'default' }}
-                                  onClick={() => rb.won_median != null ? openMath(rb.stage_normalized, 'won', rb.stage, 'all', rb.won_median, rb.pipeline || selectedPipeline) : undefined}
-                                >
+                                <td style={{ padding: '10px 12px', textAlign: 'center', cursor: rb.won_median != null ? 'pointer' : 'default' }}
+                                  onClick={() => rb.won_median != null ? openMath(rb.stage_normalized, 'won', rb.stage, 'all', rb.won_median, rb.pipeline || selectedPipeline) : undefined}>
                                   {rb.won_median !== null ? (
-                                    <span>
-                                      <span style={{ fontWeight: 600, color: '#38A169' }}>{fmtDays(rb.won_median)}</span>
-                                      <ConfidenceDot tier={rb.won_sample >= 20 ? 'high' : rb.won_sample >= 5 ? 'directional' : 'insufficient'} sample={rb.won_sample} />
-                                    </span>
+                                    <span><span style={{ fontWeight: 600, color: '#38A169' }}>{fmtDays(rb.won_median)}</span><ConfidenceDot tier={rb.won_sample >= 20 ? 'high' : rb.won_sample >= 5 ? 'directional' : 'insufficient'} sample={rb.won_sample} /></span>
                                   ) : <span style={{ color: colors.textMuted }}>—</span>}
                                 </td>
-                                <td
-                                  style={{ padding: '10px 12px', textAlign: 'center', cursor: rb.lost_median != null ? 'pointer' : 'default' }}
-                                  onClick={() => rb.lost_median != null ? openMath(rb.stage_normalized, 'lost', rb.stage, 'all', rb.lost_median, rb.pipeline || selectedPipeline) : undefined}
-                                >
+                                <td style={{ padding: '10px 12px', textAlign: 'center', cursor: rb.lost_median != null ? 'pointer' : 'default' }}
+                                  onClick={() => rb.lost_median != null ? openMath(rb.stage_normalized, 'lost', rb.stage, 'all', rb.lost_median, rb.pipeline || selectedPipeline) : undefined}>
                                   {rb.lost_median !== null ? (
-                                    <span>
-                                      <span style={{ fontWeight: 600, color: '#E53E3E' }}>{fmtDays(rb.lost_median)}</span>
-                                      <ConfidenceDot tier={rb.lost_sample >= 20 ? 'high' : rb.lost_sample >= 5 ? 'directional' : 'insufficient'} sample={rb.lost_sample} />
-                                    </span>
+                                    <span><span style={{ fontWeight: 600, color: '#E53E3E' }}>{fmtDays(rb.lost_median)}</span><ConfidenceDot tier={rb.lost_sample >= 20 ? 'high' : rb.lost_sample >= 5 ? 'directional' : 'insufficient'} sample={rb.lost_sample} /></span>
                                   ) : <span style={{ color: colors.textMuted }}>—</span>}
                                 </td>
                                 <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                                  {ratio !== null ? (
-                                    <span style={{ fontWeight: 600, color: gapColor }}>{ratio.toFixed(1)}×</span>
-                                  ) : '—'}
+                                  {ratio !== null ? <span style={{ fontWeight: 600, color: gapColor }}>{ratio.toFixed(1)}×</span> : '—'}
                                 </td>
                               </tr>
                             );
                           })}
-                          {/* Closed / Total sales cycle footer row */}
-                          {data?.cycle_time && (data.cycle_time.won_median != null || data.cycle_time.lost_median != null) && (() => {
-                            const ct = data.cycle_time!;
-                            const ratio = ct.won_median && ct.lost_median ? ct.lost_median / ct.won_median : null;
-                            const gapColor = signalGapColor(ct.won_median, ct.lost_median);
-                            return (
-                              <tr style={{ borderTop: `2px solid ${colors.border}`, background: 'rgba(0,0,0,0.04)' }}>
-                                <td style={{ padding: '10px 16px', color: colors.text, fontWeight: 600 }}>Closed (total)</td>
-                                <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                                  {ct.won_median != null ? (
-                                    <span>
-                                      <span style={{ fontWeight: 700, color: '#38A169' }}>{fmtDays(ct.won_median)}</span>
-                                      <ConfidenceDot tier={ct.won_sample >= 20 ? 'high' : ct.won_sample >= 5 ? 'directional' : 'insufficient'} sample={ct.won_sample} />
-                                    </span>
-                                  ) : <span style={{ color: colors.textMuted }}>—</span>}
-                                </td>
-                                <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                                  {ct.lost_median != null ? (
-                                    <span>
-                                      <span style={{ fontWeight: 700, color: '#E53E3E' }}>{fmtDays(ct.lost_median)}</span>
-                                      <ConfidenceDot tier={ct.lost_sample >= 20 ? 'high' : ct.lost_sample >= 5 ? 'directional' : 'insufficient'} sample={ct.lost_sample} />
-                                    </span>
-                                  ) : <span style={{ color: colors.textMuted }}>—</span>}
-                                </td>
-                                <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                                  {ratio != null ? <span style={{ fontWeight: 600, color: gapColor }}>{ratio.toFixed(1)}×</span> : '—'}
-                                </td>
-                              </tr>
-                            );
-                          })()}
                         </tbody>
                       </table>
                     </div>
                   )}
                 </div>
               );
-            })}
-          </div>
-        )
+            });
+          };
+
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {multiPipeline ? pipelineNames.map(pName => {
+                const pStages = rawBenchmarks.filter(rb => (rb.pipeline ?? '') === pName);
+                const pKey = `pipeline_raw_${pName}`;
+                const pCollapsed = collapsedSegments.has(pKey);
+                return (
+                  <div key={pName} style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, overflow: 'hidden' }}>
+                    <div
+                      onClick={() => setCollapsedSegments(prev => { const next = new Set(prev); next.has(pKey) ? next.delete(pKey) : next.add(pKey); return next; })}
+                      style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 18px', cursor: 'pointer', borderBottom: pCollapsed ? 'none' : `1px solid ${colors.border}`, background: colors.surfaceRaised }}
+                    >
+                      <span style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>{pName || 'Default Pipeline'}</span>
+                      <span style={{ fontSize: 11, color: colors.textMuted }}>{pCollapsed ? '▼' : '▲'}</span>
+                    </div>
+                    {!pCollapsed && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '12px 16px' }}>
+                        {renderNormGroups(pStages)}
+                      </div>
+                    )}
+                  </div>
+                );
+              }) : renderNormGroups(rawBenchmarks)}
+            </div>
+          );
+        })()
       )}
+
+      {/* Closed (total) — standalone summary card, rendered once regardless of view */}
+      {data?.cycle_time && (data.cycle_time.won_median != null || data.cycle_time.lost_median != null) && (() => {
+        const ct = data.cycle_time!;
+        const ratio = ct.won_median && ct.lost_median ? ct.lost_median / ct.won_median : null;
+        const gapColor = signalGapColor(ct.won_median, ct.lost_median);
+        return (
+          <div style={{ marginTop: 16, background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, overflow: 'hidden' }}>
+            <div style={{ padding: '12px 18px', background: colors.surfaceRaised, borderBottom: `1px solid ${colors.border}`, display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>Closed</span>
+              <span style={{ fontSize: 10, color: colors.textMuted, background: colors.surfaceHover, padding: '1px 6px', borderRadius: 10 }}>total sales cycle</span>
+            </div>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead>
+                  <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
+                    <th style={{ padding: '10px 16px', textAlign: 'left', color: colors.textMuted, fontWeight: 600, fontSize: 11, width: 200 }}>Metric</th>
+                    <th style={{ padding: '10px 12px', textAlign: 'center', color: '#38A169', fontWeight: 600, fontSize: 11, minWidth: 100 }}>Won median</th>
+                    <th style={{ padding: '10px 12px', textAlign: 'center', color: '#E53E3E', fontWeight: 600, fontSize: 11, minWidth: 100 }}>Lost median</th>
+                    <th style={{ padding: '10px 12px', textAlign: 'center', color: colors.textMuted, fontWeight: 600, fontSize: 11, minWidth: 80 }}>Signal gap</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td style={{ padding: '10px 16px', color: colors.text, fontWeight: 500 }}>Total sales cycle</td>
+                    <td
+                      style={{ padding: '10px 12px', textAlign: 'center', cursor: ct.won_median != null ? 'pointer' : 'default' }}
+                      onClick={() => ct.won_median != null ? openMath('_cycle_total', 'won', 'Closed (total)', 'all', ct.won_median, selectedPipeline !== 'all' ? selectedPipeline : undefined) : undefined}
+                    >
+                      {ct.won_median != null ? (
+                        <span>
+                          <span style={{ fontWeight: 700, color: '#38A169' }}>{fmtDays(ct.won_median)}</span>
+                          <ConfidenceDot tier={ct.won_sample >= 20 ? 'high' : ct.won_sample >= 5 ? 'directional' : 'insufficient'} sample={ct.won_sample} />
+                        </span>
+                      ) : <span style={{ color: colors.textMuted }}>—</span>}
+                    </td>
+                    <td
+                      style={{ padding: '10px 12px', textAlign: 'center', cursor: ct.lost_median != null ? 'pointer' : 'default' }}
+                      onClick={() => ct.lost_median != null ? openMath('_cycle_total', 'lost', 'Closed (total)', 'all', ct.lost_median, selectedPipeline !== 'all' ? selectedPipeline : undefined) : undefined}
+                    >
+                      {ct.lost_median != null ? (
+                        <span>
+                          <span style={{ fontWeight: 700, color: '#E53E3E' }}>{fmtDays(ct.lost_median)}</span>
+                          <ConfidenceDot tier={ct.lost_sample >= 20 ? 'high' : ct.lost_sample >= 5 ? 'directional' : 'insufficient'} sample={ct.lost_sample} />
+                        </span>
+                      ) : <span style={{ color: colors.textMuted }}>—</span>}
+                    </td>
+                    <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                      {ratio != null ? <span style={{ fontWeight: 600, color: gapColor }}>{ratio.toFixed(1)}×</span> : '—'}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Reading guide */}
       <details style={{ marginTop: 28 }}>
