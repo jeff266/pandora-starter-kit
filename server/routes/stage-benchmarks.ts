@@ -51,8 +51,8 @@ router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response)
       pipelineFilter ? [workspaceId, pipelineFilter] : [workspaceId]
     );
 
-    // Get open deal averages and distinct pipelines in parallel
-    const [openAvgResult, pipelinesResult] = await Promise.all([
+    // Get open deal averages, distinct pipelines, and raw-stage benchmarks in parallel
+    const [openAvgResult, pipelinesResult, rawBenchResult] = await Promise.all([
       query<{ stage_normalized: string; open_avg: string; open_count: string }>(
         `SELECT stage_normalized,
                 AVG(COALESCE(days_in_stage, EXTRACT(days FROM NOW() - stage_changed_at)::integer))::numeric(10,1) AS open_avg,
@@ -66,6 +66,23 @@ router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response)
       ),
       query<{ pipeline: string }>(
         `SELECT DISTINCT pipeline FROM stage_velocity_benchmarks WHERE workspace_id = $1 AND pipeline != 'all' ORDER BY pipeline`,
+        [workspaceId]
+      ),
+      query<{ stage: string; stage_normalized: string; outcome: string; median_days: string; sample_size: string }>(
+        `SELECT dsh.stage, dsh.stage_normalized,
+                CASE WHEN d.stage_normalized = 'closed_won' THEN 'won' ELSE 'lost' END AS outcome,
+                PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY dsh.duration_days)::numeric(10,2) AS median_days,
+                COUNT(*)::text AS sample_size
+         FROM deal_stage_history dsh
+         JOIN deals d ON d.id = dsh.deal_id
+         WHERE dsh.workspace_id = $1
+           AND d.stage_normalized IN ('closed_won', 'closed_lost')
+           AND dsh.stage_normalized NOT IN ('closed_won', 'closed_lost', 'unknown', 'awareness')
+           AND dsh.duration_days IS NOT NULL
+           AND dsh.stage ~ '[A-Za-z]'
+         GROUP BY dsh.stage, dsh.stage_normalized, outcome
+         HAVING COUNT(*) >= 3
+         ORDER BY dsh.stage_normalized, dsh.stage, outcome`,
         [workspaceId]
       ),
     ]);
@@ -138,9 +155,42 @@ router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response)
       a.stage_normalized.localeCompare(b.stage_normalized)
     );
 
+    // Pivot raw-stage benchmark rows into flat objects
+    const rawBenchMap: Record<string, {
+      stage: string;
+      stage_normalized: string;
+      won_median: number | null;
+      won_sample: number;
+      lost_median: number | null;
+      lost_sample: number;
+    }> = {};
+    for (const r of rawBenchResult.rows) {
+      const key = r.stage;
+      if (!rawBenchMap[key]) {
+        rawBenchMap[key] = {
+          stage: r.stage,
+          stage_normalized: r.stage_normalized,
+          won_median: null,
+          won_sample: 0,
+          lost_median: null,
+          lost_sample: 0,
+        };
+      }
+      if (r.outcome === 'won') {
+        rawBenchMap[key].won_median = parseFloat(r.median_days);
+        rawBenchMap[key].won_sample = parseInt(r.sample_size, 10);
+      } else {
+        rawBenchMap[key].lost_median = parseFloat(r.median_days);
+        rawBenchMap[key].lost_sample = parseInt(r.sample_size, 10);
+      }
+    }
+    const rawBenchmarks = Object.values(rawBenchMap).sort((a, b) =>
+      a.stage_normalized.localeCompare(b.stage_normalized) || a.stage.localeCompare(b.stage)
+    );
+
     const lastComputedAt = benchRows.rows.length > 0 ? benchRows.rows[0].computed_at : null;
 
-    res.json({ benchmarks, open_averages: openAverages, pipelines, last_computed_at: lastComputedAt });
+    res.json({ benchmarks, raw_benchmarks: rawBenchmarks, open_averages: openAverages, pipelines, last_computed_at: lastComputedAt });
   } catch (err) {
     console.error('[StageBenchmarks] GET error:', err);
     res.status(500).json({ error: (err as Error).message });
