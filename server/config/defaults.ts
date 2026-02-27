@@ -41,7 +41,7 @@ export function getDefaultConfig(workspaceId: string): WorkspaceConfig & { _meta
     },
     cadence: {
       quota_period: 'monthly',
-      fiscal_year_start_month: 1,
+      fiscal_year_start_month: 2,
       planning_cadence: 'weekly',
       week_start_day: 1,
       timezone: 'America/New_York',

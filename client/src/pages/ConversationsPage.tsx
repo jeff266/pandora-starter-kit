@@ -74,18 +74,23 @@ export default function ConversationsPage() {
   const [activeTab, setActiveTab] = useState<'needs_attention' | 'all' | 'coaching'>('needs_attention');
 
   // Coaching breakdown state
-  interface CoachingBreakdownRow { stage: string; signal_type: string; deal_count: number; deal_value: number; }
+  interface CoachingBreakdownRow { stage: string; signal_type: string; deal_count: number; deal_value: number; display_order: number | null; }
   interface CoachingConvMeta { signal_type: string; stage: string; days_old: number; won_median: number; }
+  interface AnalysisScope { scope_id: string; name: string; }
   const [coachingBreakdown, setCoachingBreakdown] = useState<CoachingBreakdownRow[]>([]);
   const [coachingConvMeta, setCoachingConvMeta] = useState<Map<string, CoachingConvMeta>>(new Map());
   const [breakdownTotalAtRisk, setBreakdownTotalAtRisk] = useState(0);
   const [breakdownTotalAtRiskCount, setBreakdownTotalAtRiskCount] = useState(0);
   const [breakdownLoading, setBreakdownLoading] = useState(false);
+  const [fiscalYearStartMonth, setFiscalYearStartMonth] = useState<number | null>(null);
+  const [availableScopes, setAvailableScopes] = useState<AnalysisScope[]>([]);
 
   // Coaching tab filters
   const [selectedStage, setSelectedStage] = useState<string | null>(null);
   const [selectedSignal, setSelectedSignal] = useState<string | null>(null);
   const [selectedOwner, setSelectedOwner] = useState<string | null>(null);
+  const [selectedScope, setSelectedScope] = useState<string | null>(null);
+  const [selectedQuarter, setSelectedQuarter] = useState<string | null>(null);
 
   // Needs Attention filter
   const [gapOwnerFilter, setGapOwnerFilter] = useState('');
@@ -158,19 +163,20 @@ export default function ConversationsPage() {
     }
   }
 
-  // ─── Coaching breakdown fetch ──────────────────────────────────────────────
+  // ─── Coaching breakdown fetch (re-runs when scope changes) ───────────────
 
   useEffect(() => {
     if (activeTab !== 'coaching' || !workspaceId) return;
-    if (coachingBreakdown.length > 0) return; // already loaded
     let cancelled = false;
     setBreakdownLoading(true);
-    api.get('/conversations/coaching-breakdown')
+    const qs = selectedScope ? `?scope_id=${encodeURIComponent(selectedScope)}` : '';
+    api.get(`/conversations/coaching-breakdown${qs}`)
       .then((res: any) => {
         if (cancelled) return;
         setCoachingBreakdown(res.breakdown || []);
         setBreakdownTotalAtRisk(res.total_at_risk_value || 0);
         setBreakdownTotalAtRiskCount(res.total_at_risk_count || 0);
+        if (res.fiscal_year_start_month) setFiscalYearStartMonth(res.fiscal_year_start_month);
         const meta = new Map<string, CoachingConvMeta>();
         for (const c of (res.conversations || [])) {
           meta.set(c.id, { signal_type: c.signal_type, stage: c.stage, days_old: c.days_old, won_median: c.won_median });
@@ -183,6 +189,18 @@ export default function ConversationsPage() {
       })
       .finally(() => { if (!cancelled) setBreakdownLoading(false); });
     return () => { cancelled = true; };
+  }, [activeTab, workspaceId, selectedScope]);
+
+  // ─── Fetch analysis scopes for pipeline filter ────────────────────────────
+
+  useEffect(() => {
+    if (activeTab !== 'coaching' || !workspaceId || availableScopes.length > 0) return;
+    api.get('/admin/scopes')
+      .then((data: any) => {
+        const scopes: AnalysisScope[] = (data.scopes || []).map((s: any) => ({ scope_id: s.scope_id, name: s.name }));
+        setAvailableScopes(scopes);
+      })
+      .catch(() => {});
   }, [activeTab, workspaceId]);
 
   // ─── Server-side re-fetch when filters change ─────────────────────────────
@@ -1000,18 +1018,60 @@ export default function ConversationsPage() {
            .replace('Demo Scheduled', 'Demo Sched.')
            .replace('Contract Sent', 'Contract');
 
+        // Stage display order from backend breakdown data
+        const stageDisplayOrder = new Map<string, number>(
+          coachingBreakdown
+            .filter(r => r.display_order !== null)
+            .map(r => [r.stage, r.display_order as number])
+        );
+
+        // Compute fiscal quarters from fiscalYearStartMonth (prev 2, current, next 2)
+        type FiscalQuarter = { label: string; start: Date; end: Date; isCurrent: boolean };
+        const fiscalQuarters: FiscalQuarter[] = [];
+        if (fiscalYearStartMonth !== null) {
+          const now = new Date();
+          const fyStart0 = fiscalYearStartMonth - 1;
+          const nowM = now.getMonth();
+          const nowY = now.getFullYear();
+          const fyBaseYear = nowM >= fyStart0 ? nowY : nowY - 1;
+          const currentQIdx = Math.floor(((nowM - fyStart0 + 12) % 12) / 3);
+          for (let i = currentQIdx - 2; i <= currentQIdx + 2; i++) {
+            const absQ = ((i % 4) + 4) % 4;
+            const fyYearOffset = Math.floor(i / 4);
+            const qFyYear = fyBaseYear + fyYearOffset;
+            const startCalMonth0 = (fyStart0 + absQ * 3) % 12;
+            let startCalYear = qFyYear;
+            if (fyStart0 + absQ * 3 >= 12) startCalYear += 1;
+            const start = new Date(startCalYear, startCalMonth0, 1);
+            const end = new Date(startCalYear, startCalMonth0 + 3, 1);
+            fiscalQuarters.push({ label: `Q${absQ + 1} FY${qFyYear}`, start, end, isCurrent: i === currentQIdx });
+          }
+        }
+
+        // Resolve selected quarter date range (null = all time)
+        const quarterRange = selectedQuarter
+          ? fiscalQuarters.find(q => q.label === selectedQuarter) ?? null
+          : null;
+
         // Conversations filtered to open deals only (via coachingConvMeta), then by selected filters
         const allCoachingConvs = conversations.filter(c => coachingConvMeta.has(c.id));
         const availableOwners = [...new Set(
           allCoachingConvs.map(c => c.deal_owner).filter(Boolean) as string[]
         )].sort();
 
-        // Owner-only subset drives the chart (stage + signal filters stay as list-only)
-        const ownerFilteredConvs = selectedOwner
-          ? allCoachingConvs.filter(c => c.deal_owner === selectedOwner)
-          : allCoachingConvs;
+        // Owner + quarter subset drives the chart (stage + signal filters stay as list-only)
+        const ownerFilteredConvs = allCoachingConvs.filter(c => {
+          if (selectedOwner && c.deal_owner !== selectedOwner) return false;
+          if (quarterRange && c.call_date) {
+            const d = new Date(c.call_date);
+            if (d < quarterRange.start || d >= quarterRange.end) return false;
+          } else if (quarterRange && !c.call_date) {
+            return false;
+          }
+          return true;
+        });
 
-        // Build chart data — pivot owner-filtered conversations by stage × signal
+        // Build chart data — pivot owner+quarter-filtered conversations by stage × signal
         type StageEntry = { stalled: number; slowing: number; on_track: number; fast: number; stalled_count: number; slowing_count: number; on_track_count: number; fast_count: number; total: number; originalStage: string };
         const stageMap = new Map<string, StageEntry>();
         for (const conv of ownerFilteredConvs) {
@@ -1028,7 +1088,11 @@ export default function ConversationsPage() {
           entry.total += val;
         }
         const chartData = [...stageMap.entries()]
-          .sort((a, b) => b[1].total - a[1].total)
+          .sort((a, b) => {
+            const orderA = stageDisplayOrder.get(a[1].originalStage) ?? 999;
+            const orderB = stageDisplayOrder.get(b[1].originalStage) ?? 999;
+            return orderA !== orderB ? orderA - orderB : a[0].localeCompare(b[0]);
+          })
           .map(([stage, vals]) => ({ stage, ...vals }));
 
         const filteredCoachingConvs = allCoachingConvs.filter(c => {
@@ -1037,11 +1101,17 @@ export default function ConversationsPage() {
           if (selectedStage && meta.stage !== selectedStage) return false;
           if (selectedSignal && meta.signal_type !== selectedSignal) return false;
           if (selectedOwner && c.deal_owner !== selectedOwner) return false;
+          if (quarterRange && c.call_date) {
+            const d = new Date(c.call_date);
+            if (d < quarterRange.start || d >= quarterRange.end) return false;
+          } else if (quarterRange && !c.call_date) {
+            return false;
+          }
           return true;
         });
 
-        const hasFilter = selectedStage !== null || selectedSignal !== null || selectedOwner !== null;
-        const clearAllFilters = () => { setSelectedStage(null); setSelectedSignal(null); setSelectedOwner(null); };
+        const hasFilter = selectedStage !== null || selectedSignal !== null || selectedOwner !== null || selectedQuarter !== null;
+        const clearAllFilters = () => { setSelectedStage(null); setSelectedSignal(null); setSelectedOwner(null); setSelectedQuarter(null); };
 
         const CustomTooltip = ({ active, payload, label }: any) => {
           if (!active || !payload?.length) return null;
@@ -1128,6 +1198,36 @@ export default function ConversationsPage() {
                   border: `1px solid ${colors.border}`,
                   borderRadius: 8,
                 }}>
+                  {/* Pipeline dropdown */}
+                  {availableScopes.length > 1 && (
+                    <select
+                      value={selectedScope ?? ''}
+                      onChange={e => { setSelectedScope(e.target.value || null); setSelectedStage(null); }}
+                      style={selectStyle}
+                    >
+                      <option value="">All Pipelines</option>
+                      {availableScopes.map(s => (
+                        <option key={s.scope_id} value={s.scope_id}>{s.name}</option>
+                      ))}
+                    </select>
+                  )}
+
+                  {/* Quarter dropdown */}
+                  {fiscalQuarters.length > 0 && (
+                    <select
+                      value={selectedQuarter ?? ''}
+                      onChange={e => setSelectedQuarter(e.target.value || null)}
+                      style={selectStyle}
+                    >
+                      <option value="">All Time</option>
+                      {fiscalQuarters.map(q => (
+                        <option key={q.label} value={q.label}>
+                          {q.label}{q.isCurrent ? ' (current)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+
                   {/* Owner dropdown */}
                   {availableOwners.length > 0 && (
                     <select
@@ -1143,7 +1243,7 @@ export default function ConversationsPage() {
                   )}
 
                   {/* Divider */}
-                  {availableOwners.length > 0 && (
+                  {(availableScopes.length > 1 || fiscalQuarters.length > 0 || availableOwners.length > 0) && (
                     <div style={{ width: 1, height: 20, background: colors.border, flexShrink: 0 }} />
                   )}
 

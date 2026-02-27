@@ -755,6 +755,39 @@ router.get('/:workspaceId/conversations/filter-options', async (req: Request, re
 router.get('/:workspaceId/conversations/coaching-breakdown', async (req: Request, res: Response) => {
   try {
     const { workspaceId } = req.params;
+    const scopeId = req.query.scope_id as string | undefined;
+
+    // Read fiscal year start month from workspace config (defaults to 2 = February)
+    let fiscalYearStartMonth = 2;
+    try {
+      const cfgRes = await query<{ v: string }>(
+        `SELECT definitions->'workspace_config'->'cadence'->>'fiscal_year_start_month' AS v
+         FROM context_layer WHERE workspace_id = $1 LIMIT 1`,
+        [workspaceId]
+      );
+      const parsed = parseInt(cfgRes.rows[0]?.v ?? '', 10);
+      if (!isNaN(parsed) && parsed >= 1 && parsed <= 12) fiscalYearStartMonth = parsed;
+    } catch (_) { /* table may not exist in older migrations — fall back to default */ }
+
+    // Build optional scope WHERE clause — filter_values come from admin-configured DB rows, not raw user input
+    let scopeWhereClause = '';
+    if (scopeId && scopeId !== 'default') {
+      try {
+        const scopeRes = await query<{ filter_field: string; filter_values: string[] }>(
+          `SELECT filter_field, filter_values FROM analysis_scopes WHERE workspace_id = $1 AND scope_id = $2`,
+          [workspaceId, scopeId]
+        );
+        if (scopeRes.rows.length > 0) {
+          const { filter_field, filter_values } = scopeRes.rows[0];
+          if (filter_field !== '1=1' && filter_values.length > 0) {
+            const escaped = filter_values.map(v => `'${v.replace(/'/g, "''")}'`).join(', ');
+            // filter_field may be a plain column ('pipeline_id') or JSONB path expression
+            const col = filter_field.includes('->') ? filter_field : `d.${filter_field}`;
+            scopeWhereClause = `AND ${col} IN (${escaped})`;
+          }
+        }
+      } catch (_) { /* analysis_scopes table missing — ignore scope filter */ }
+    }
 
     // Shared CTE: best-matching win pattern per open deal, with 4-bucket signal classification
     const COACHED_DEALS_CTE = `
@@ -780,6 +813,7 @@ router.get('/:workspaceId/conversations/coaching-breakdown', async (req: Request
          AND wp.separation_score >= 0.5
         WHERE d.workspace_id = $1
           AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+          ${scopeWhereClause}
         ORDER BY d.id, wp.separation_score DESC
       ),
       signal_typed AS (
@@ -802,16 +836,18 @@ router.get('/:workspaceId/conversations/coaching-breakdown', async (req: Request
       )`;
 
     const [breakdownResult, convsResult] = await Promise.all([
-      query<{ stage: string; signal_type: string; deal_count: string; deal_value: string }>(
+      query<{ stage: string; signal_type: string; deal_count: string; deal_value: string; display_order: string | null }>(
         `${COACHED_DEALS_CTE}
         SELECT
-          stage,
-          signal_type,
-          COUNT(*)    AS deal_count,
-          SUM(amount) AS deal_value
-        FROM signal_typed
-        GROUP BY stage, signal_type
-        ORDER BY SUM(amount) DESC NULLS LAST, stage, signal_type`,
+          st.stage,
+          st.signal_type,
+          COUNT(*)          AS deal_count,
+          SUM(st.amount)    AS deal_value,
+          MIN(sc.display_order) AS display_order
+        FROM signal_typed st
+        LEFT JOIN stage_configs sc ON sc.workspace_id = $1 AND sc.stage_name = st.stage
+        GROUP BY st.stage, st.signal_type
+        ORDER BY MIN(sc.display_order) ASC NULLS LAST, st.stage, st.signal_type`,
         [workspaceId]
       ),
       query<{ id: string; stage: string; signal_type: string; days_old: string; won_median: string }>(
@@ -835,6 +871,7 @@ router.get('/:workspaceId/conversations/coaching-breakdown', async (req: Request
       signal_type: r.signal_type,
       deal_count: parseInt(r.deal_count, 10),
       deal_value: parseFloat(r.deal_value),
+      display_order: r.display_order !== null ? parseInt(r.display_order, 10) : null,
     }));
 
     const convSignals = convsResult.rows.map(r => ({
@@ -858,6 +895,7 @@ router.get('/:workspaceId/conversations/coaching-breakdown', async (req: Request
       conversations: convSignals,
       total_at_risk_value: totalAtRisk,
       total_at_risk_count: totalAtRiskCount,
+      fiscal_year_start_month: fiscalYearStartMonth,
     });
   } catch (err) {
     console.error('[Coaching Breakdown]', err);
