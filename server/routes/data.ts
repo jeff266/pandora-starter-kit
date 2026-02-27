@@ -509,9 +509,22 @@ router.get('/:id/accounts', async (req: Request, res: Response): Promise<void> =
       sortDir: q.sortDir as any,
       limit: parseNum(q.limit),
       offset: parseNum(q.offset),
+      hasOpenDeals: parseBool(q.hasOpenDeals),
       ...lens,
     });
-    res.json({ data: result.accounts, total: result.total, limit: result.limit, offset: result.offset });
+    res.json({
+      data: result.accounts,
+      total: result.total,
+      limit: result.limit,
+      offset: result.offset,
+      summary: result.summary,
+      pagination: {
+        total: result.total,
+        limit: result.limit,
+        offset: result.offset,
+        has_more: result.offset + result.accounts.length < result.total,
+      },
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: msg });

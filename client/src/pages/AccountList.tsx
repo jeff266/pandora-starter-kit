@@ -454,7 +454,11 @@ export default function AccountList() {
   const { crmInfo } = useCrmInfo();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
+  const [totalCount, setTotalCount] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [summary, setSummary] = useState<{ total_accounts: number; with_open_deals: number; with_conversations: number } | null>(null);
 
   const [search, setSearch] = useState('');
   const [industryFilter, setIndustryFilter] = useState<string[]>([]);
@@ -462,10 +466,10 @@ export default function AccountList() {
   const [domainFilter, setDomainFilter] = useState('all');
   const [scoreFilter, setScoreFilter] = useState<string[]>([]);
   const [signalsFilter, setSignalsFilter] = useState<string[]>([]);
+  const [hasOpenDealsFilter, setHasOpenDealsFilter] = useState(true); // Default to showing only accounts with open deals
 
   const [sortField, setSortField] = useState<SortField>('name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
-  const [page, setPage] = useState(0);
   const [selectedAccount, setSelectedAccount] = useState<Account | null>(null);
   const [drawerWhy, setDrawerWhy] = useState<string | null>(null);
   const [drawerWhyLoading, setDrawerWhyLoading] = useState(false);
@@ -474,24 +478,39 @@ export default function AccountList() {
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
 
   useEffect(() => {
-    fetchAccounts();
-  }, [activeLens]);
+    fetchAccounts(true);
+  }, [activeLens, hasOpenDealsFilter, search, industryFilter, scoreFilter, signalsFilter, ownerFilter, domainFilter, sortField, sortDir]);
 
-  const fetchAccounts = async () => {
-    setLoading(true);
+  const fetchAccounts = async (reset = false) => {
+    if (reset) {
+      setLoading(true);
+    } else {
+      setLoadingMore(true);
+    }
+
     try {
-      const data = await api.get('/accounts');
+      const offset = reset ? 0 : accounts.length;
+      const params = new URLSearchParams();
+      params.set('limit', '50');
+      params.set('offset', offset.toString());
+      if (hasOpenDealsFilter) params.set('hasOpenDeals', 'true');
+      if (search) params.set('search', search);
+      if (sortField) params.set('sortBy', sortField);
+      if (sortDir) params.set('sortDir', sortDir);
+      // Note: industryFilter, scoreFilter, signalsFilter, ownerFilter, domainFilter are client-side only for now
+
+      const data = await api.get(`/accounts?${params.toString()}`);
       const raw = Array.isArray(data) ? data : data.data || data.accounts || [];
-      setAccounts(raw.map((a: any) => ({
+      const newAccounts = raw.map((a: any) => ({
         id: a.id,
         name: a.name || '',
         domain: a.domain || '',
         industry: a.industry || '',
         open_deal_count: a.open_deal_count || a.deal_count || 0,
-        total_pipeline: a.total_pipeline || 0,
+        total_pipeline: a.total_pipeline_value || a.total_pipeline || 0,
         contact_count: a.contact_count || 0,
         finding_count: a.finding_count || 0,
-        last_activity: a.last_activity || a.updated_at || '',
+        last_activity: a.last_conversation_date || a.last_activity || a.updated_at || '',
         owner: a.owner || a.owner_email || '',
         total_score: a.total_score ?? undefined,
         grade: a.grade ?? undefined,
@@ -504,12 +523,29 @@ export default function AccountList() {
         icp_fit_score: a.icp_fit_score ?? undefined,
         source: a.source ?? undefined,
         source_id: a.source_id ?? undefined,
-      })));
+      }));
+
+      if (reset) {
+        setAccounts(newAccounts);
+      } else {
+        setAccounts(prev => [...prev, ...newAccounts]);
+      }
+
+      setTotalCount(data.pagination?.total ?? data.total ?? newAccounts.length);
+      setHasMore(data.pagination?.has_more ?? false);
+      setSummary(data.summary ?? null);
       setError('');
     } catch (err: any) {
       setError(err.message);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
+    }
+  };
+
+  const loadMore = () => {
+    if (!loadingMore && hasMore) {
+      fetchAccounts(false);
     }
   };
 
@@ -550,6 +586,7 @@ export default function AccountList() {
   const hasContactData = accounts.some(a => a.contact_count > 0);
   const hasActivityData = accounts.some(a => a.last_activity);
 
+  // Client-side filtering for fields not yet supported by API
   const filtered = useMemo(() => {
     let result = accounts;
 
@@ -571,7 +608,7 @@ export default function AccountList() {
       });
     }
 
-    // Owner and domain filters stay the same (single select)
+    // Owner and domain filters (client-side for now)
     if (ownerFilter !== 'all') {
       result = result.filter(a => a.owner === ownerFilter);
     }
@@ -579,48 +616,8 @@ export default function AccountList() {
       result = result.filter(a => a.domain === domainFilter);
     }
 
-    // Search filter
-    if (search.trim()) {
-      const q = search.trim().toLowerCase();
-      result = result.filter(a =>
-        a.name.toLowerCase().includes(q) || a.domain.toLowerCase().includes(q)
-      );
-    }
-
     return result;
-  }, [accounts, industryFilter, scoreFilter, signalsFilter, ownerFilter, domainFilter, search]);
-
-  const sorted = useMemo(() => {
-    const arr = [...filtered];
-    arr.sort((a, b) => {
-      let cmp = 0;
-      switch (sortField) {
-        case 'name': cmp = a.name.localeCompare(b.name); break;
-        case 'domain': cmp = a.domain.localeCompare(b.domain); break;
-        case 'industry': cmp = a.industry.localeCompare(b.industry); break;
-        case 'open_deals': cmp = a.open_deal_count - b.open_deal_count; break;
-        case 'pipeline': cmp = a.total_pipeline - b.total_pipeline; break;
-        case 'contacts': cmp = a.contact_count - b.contact_count; break;
-        case 'last_activity': {
-          const da = a.last_activity ? new Date(a.last_activity).getTime() : 0;
-          const db = b.last_activity ? new Date(b.last_activity).getTime() : 0;
-          cmp = da - db;
-          break;
-        }
-        case 'score': cmp = (a.total_score ?? -1) - (b.total_score ?? -1); break;
-        case 'signals': cmp = (a.signals?.length ?? 0) - (b.signals?.length ?? 0); break;
-        case 'icp_fit': cmp = (a.icp_fit_score ?? -1) - (b.icp_fit_score ?? -1); break;
-      }
-      if (cmp === 0) cmp = a.name.localeCompare(b.name);
-      return sortDir === 'desc' ? -cmp : cmp;
-    });
-    return arr;
-  }, [filtered, sortField, sortDir]);
-
-  const totalPages = Math.ceil(sorted.length / PAGE_SIZE);
-  const pageAccounts = sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
-
-  useEffect(() => { setPage(0); }, [search, industryFilter, scoreFilter, signalsFilter, ownerFilter, domainFilter]);
+  }, [accounts, industryFilter, scoreFilter, signalsFilter, ownerFilter, domainFilter]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -631,7 +628,7 @@ export default function AccountList() {
     }
   };
 
-  const hasFilters = search || industryFilter.length > 0 || scoreFilter.length > 0 || signalsFilter.length > 0 || ownerFilter !== 'all' || domainFilter !== 'all';
+  const hasFilters = search || industryFilter.length > 0 || scoreFilter.length > 0 || signalsFilter.length > 0 || ownerFilter !== 'all' || domainFilter !== 'all' || !hasOpenDealsFilter;
   const clearFilters = () => {
     setSearch('');
     setIndustryFilter([]);
@@ -639,6 +636,7 @@ export default function AccountList() {
     setSignalsFilter([]);
     setOwnerFilter('all');
     setDomainFilter('all');
+    setHasOpenDealsFilter(true);
   };
 
   // New 5-column layout: Account | Score | Signals | Activity | Pipeline
@@ -697,7 +695,8 @@ export default function AccountList() {
       }}>
         <h2 style={{ fontSize: 16, fontWeight: 600, color: colors.text, margin: 0 }}>Accounts</h2>
         <p style={{ fontSize: 12, color: colors.textMuted, margin: '4px 0 0' }}>
-          Showing {filtered.length} of {accounts.length} accounts
+          Showing {accounts.length} of {totalCount} accounts
+          {hasOpenDealsFilter && summary && ` (${summary.with_open_deals} with open deals)`}
         </p>
       </div>
 
@@ -717,7 +716,7 @@ export default function AccountList() {
         <ScoringActiveBanner onRefresh={refreshIcp} activating={activating} />
       )}
 
-      {/* Filter Bar - Simplified: Score + Signals by default */}
+      {/* Filter Bar - Simplified: Has Open Deals + Score + Signals */}
       <div style={{
         display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap',
         background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, padding: '10px 16px',
@@ -733,6 +732,47 @@ export default function AccountList() {
             borderRadius: 6, color: colors.text, outline: 'none',
           }}
         />
+
+        {/* Has Open Deals Toggle */}
+        {summary && summary.with_open_deals > 0 && (
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <span style={{ fontSize: 11, color: colors.textMuted }}>Show:</span>
+            <div style={{ display: 'flex', gap: 4, background: colors.surfaceRaised, borderRadius: 6, padding: 2 }}>
+              <button
+                onClick={() => setHasOpenDealsFilter(true)}
+                style={{
+                  fontSize: 11,
+                  padding: '4px 10px',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  border: 'none',
+                  background: hasOpenDealsFilter ? colors.accent : 'transparent',
+                  color: hasOpenDealsFilter ? '#fff' : colors.textSecondary,
+                  fontWeight: hasOpenDealsFilter ? 600 : 400,
+                  transition: 'all 0.15s',
+                }}
+              >
+                With open deals ({summary.with_open_deals})
+              </button>
+              <button
+                onClick={() => setHasOpenDealsFilter(false)}
+                style={{
+                  fontSize: 11,
+                  padding: '4px 10px',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  border: 'none',
+                  background: !hasOpenDealsFilter ? colors.accent : 'transparent',
+                  color: !hasOpenDealsFilter ? '#fff' : colors.textSecondary,
+                  fontWeight: !hasOpenDealsFilter ? 600 : 400,
+                  transition: 'all 0.15s',
+                }}
+              >
+                All accounts
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Default filters: Score + Signals */}
         {accounts.some(a => a.grade) && (
@@ -836,7 +876,7 @@ export default function AccountList() {
         )}
 
         {/* Data rows */}
-        {pageAccounts.length === 0 ? (
+        {filtered.length === 0 ? (
           <div style={{ padding: 32, textAlign: 'center' }}>
             <p style={{ fontSize: 13, color: colors.textMuted }}>No accounts match your filters.</p>
             <button onClick={clearFilters} style={{
@@ -846,7 +886,7 @@ export default function AccountList() {
             </button>
           </div>
         ) : (
-          pageAccounts.map(account => {
+          filtered.map(account => {
             const openDrawer = () => {
               if (!scoringActive) return;
               setSelectedAccount(account);
@@ -1093,42 +1133,33 @@ export default function AccountList() {
         )}
       </div>
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div style={{
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          padding: '8px 16px', background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10,
-        }}>
-          <span style={{ fontSize: 12, color: colors.textMuted }}>
-            Showing {page * PAGE_SIZE + 1}\u2013{Math.min((page + 1) * PAGE_SIZE, sorted.length)} of {sorted.length}
-          </span>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button
-              disabled={page === 0}
-              onClick={() => setPage(p => p - 1)}
-              style={{
-                fontSize: 12, padding: '4px 12px', borderRadius: 4,
-                background: page === 0 ? colors.surfaceRaised : colors.accentSoft,
-                color: page === 0 ? colors.textDim : colors.accent,
-                border: 'none', cursor: page === 0 ? 'default' : 'pointer',
-              }}
-            >
-              Previous
-            </button>
-            <button
-              disabled={page >= totalPages - 1}
-              onClick={() => setPage(p => p + 1)}
-              style={{
-                fontSize: 12, padding: '4px 12px', borderRadius: 4,
-                background: page >= totalPages - 1 ? colors.surfaceRaised : colors.accentSoft,
-                color: page >= totalPages - 1 ? colors.textDim : colors.accent,
-                border: 'none', cursor: page >= totalPages - 1 ? 'default' : 'pointer',
-              }}
-            >
-              Next
-            </button>
-          </div>
-        </div>
+      {/* Load More Button */}
+      {hasMore && (
+        <button
+          onClick={loadMore}
+          disabled={loadingMore}
+          style={{
+            width: '100%',
+            padding: '12px',
+            fontSize: 13,
+            fontWeight: 500,
+            color: loadingMore ? colors.textMuted : colors.accent,
+            background: colors.surface,
+            border: `1px solid ${colors.border}`,
+            borderRadius: 10,
+            cursor: loadingMore ? 'default' : 'pointer',
+            transition: 'all 0.15s',
+            opacity: loadingMore ? 0.7 : 1,
+          }}
+          onMouseEnter={(e) => {
+            if (!loadingMore) e.currentTarget.style.background = colors.surfaceHover;
+          }}
+          onMouseLeave={(e) => {
+            if (!loadingMore) e.currentTarget.style.background = colors.surface;
+          }}
+        >
+          {loadingMore ? 'Loading...' : `Load more (${totalCount - accounts.length} remaining)`}
+        </button>
       )}
 
       {/* Score Drawer */}

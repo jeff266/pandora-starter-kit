@@ -12,11 +12,16 @@ export interface Account {
   employee_count: number;
   annual_revenue: number;
   health_score: number;
-  open_deal_count: number;
+  open_deal_count: number; // Now computed live via LATERAL JOIN
   owner: string;
   custom_fields: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+  // Live-computed deal stats (from LATERAL JOIN)
+  total_pipeline_value?: number;
+  total_deal_count?: number;
+  last_conversation_date?: string;
+  conversation_count?: number;
   // Account scoring fields (joined from account_scores + account_signals)
   total_score?: number;
   grade?: string;
@@ -48,13 +53,14 @@ export interface AccountFilters {
   revenueMin?: number;
   revenueMax?: number;
   search?: string;
-  sortBy?: 'name' | 'annual_revenue' | 'employee_count' | 'health_score' | 'created_at' | 'total_score';
+  sortBy?: 'name' | 'annual_revenue' | 'employee_count' | 'health_score' | 'created_at' | 'total_score' | 'open_deals' | 'pipeline_value' | 'last_activity';
   sortDir?: 'asc' | 'desc';
   limit?: number;
   offset?: number;
   additionalWhere?: string;
   additionalParams?: unknown[];
   properties?: string[]; // Additional custom field internal_names to extract from custom_fields JSONB
+  hasOpenDeals?: boolean; // Filter to accounts with open deals only
 }
 
 function buildWhereClause(workspaceId: string, filters: AccountFilters) {
@@ -123,7 +129,7 @@ function buildWhereClause(workspaceId: string, filters: AccountFilters) {
   return { where: conditions.join(' AND '), params, idx };
 }
 
-const VALID_SORT_COLUMNS = new Set(['name', 'annual_revenue', 'employee_count', 'health_score', 'created_at', 'total_score']);
+const VALID_SORT_COLUMNS = new Set(['name', 'annual_revenue', 'employee_count', 'health_score', 'created_at', 'total_score', 'open_deals', 'pipeline_value', 'last_activity']);
 
 /**
  * Extract requested custom fields from the custom_fields JSONB column
@@ -148,34 +154,124 @@ function extractCustomFields<T extends { custom_fields?: Record<string, unknown>
   return extracted;
 }
 
-export async function queryAccounts(workspaceId: string, filters: AccountFilters): Promise<{ accounts: Account[]; total: number; limit: number; offset: number }> {
+export async function queryAccounts(workspaceId: string, filters: AccountFilters): Promise<{
+  accounts: Account[];
+  total: number;
+  limit: number;
+  offset: number;
+  summary?: {
+    total_accounts: number;
+    with_open_deals: number;
+    with_conversations: number;
+  };
+}> {
   const { where, params, idx } = buildWhereClause(workspaceId, filters);
 
-  const rawSort = filters.sortBy && VALID_SORT_COLUMNS.has(filters.sortBy) ? filters.sortBy : 'name';
+  // Build has_open_deals filter if specified
+  let hasOpenDealsWhere = '';
+  if (filters.hasOpenDeals) {
+    hasOpenDealsWhere = ` AND EXISTS (
+      SELECT 1 FROM deals d
+      WHERE d.account_id = a.id
+        AND d.workspace_id = a.workspace_id
+        AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+    )`;
+  }
+
+  // Default sort: accounts with open deals first, then by recent conversation activity
+  const rawSort = filters.sortBy && VALID_SORT_COLUMNS.has(filters.sortBy) ? filters.sortBy : 'open_deals';
   const sortDir = filters.sortDir === 'desc' ? 'DESC' : 'ASC';
-  // Score sort uses joined column; others use accounts table prefix
-  const sortExpr = rawSort === 'total_score'
-    ? `acs.total_score ${sortDir} NULLS LAST`
-    : `a.${rawSort} ${sortDir}`;
+
+  // Map sort field to SQL expression
+  let sortExpr: string;
+  if (rawSort === 'total_score') {
+    sortExpr = `acs.total_score ${sortDir} NULLS LAST`;
+  } else if (rawSort === 'open_deals') {
+    // Default: open deals DESC, recent activity DESC, name ASC
+    sortExpr = `COALESCE(deal_stats.open_deal_count, 0) DESC, COALESCE(conv_stats.last_conversation_date, '1970-01-01'::date) DESC, a.name ASC`;
+  } else if (rawSort === 'pipeline_value') {
+    sortExpr = `COALESCE(deal_stats.total_pipeline_value, 0) ${sortDir}`;
+  } else if (rawSort === 'last_activity') {
+    sortExpr = `COALESCE(conv_stats.last_conversation_date, '1970-01-01'::date) ${sortDir}`;
+  } else {
+    sortExpr = `a.${rawSort} ${sortDir}`;
+  }
+
   const limit = Math.min(Math.max(filters.limit ?? 50, 1), 500);
   const offset = Math.max(filters.offset ?? 0, 0);
 
-  const countResult = await query<{ count: string }>(
-    `SELECT COUNT(*) AS count FROM accounts a WHERE ${where.replace('workspace_id', 'a.workspace_id')}`,
-    params,
-  );
+  // Run count query and summary query in parallel
+  const [countResult, summaryResult] = await Promise.all([
+    query<{ count: string }>(
+      `SELECT COUNT(*) AS count FROM accounts a WHERE ${where.replace('workspace_id', 'a.workspace_id')}${hasOpenDealsWhere}`,
+      params,
+    ),
+    query<{ total_accounts: string; with_open_deals: string; with_conversations: string }>(
+      `SELECT
+         COUNT(*) as total_accounts,
+         COUNT(*) FILTER (
+           WHERE EXISTS (
+             SELECT 1 FROM deals d
+             WHERE d.account_id = a.id
+               AND d.workspace_id = a.workspace_id
+               AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+           )
+         ) as with_open_deals,
+         COUNT(*) FILTER (
+           WHERE EXISTS (
+             SELECT 1 FROM conversations c
+             WHERE c.account_id = a.id
+               AND c.workspace_id = a.workspace_id
+           )
+         ) as with_conversations
+       FROM accounts a
+       WHERE ${where.replace('workspace_id', 'a.workspace_id')}`,
+      params,
+    ),
+  ]);
+
   const total = parseInt(countResult.rows[0].count, 10);
+  const summary = summaryResult.rows[0] ? {
+    total_accounts: parseInt(summaryResult.rows[0].total_accounts, 10),
+    with_open_deals: parseInt(summaryResult.rows[0].with_open_deals, 10),
+    with_conversations: parseInt(summaryResult.rows[0].with_conversations, 10),
+  } : undefined;
 
   const dataParams = [...params, limit, offset];
   const dataResult = await query<Account>(
-    `SELECT a.*,
+    `SELECT
+       a.*,
+       COALESCE(deal_stats.open_deal_count, 0) as open_deal_count,
+       COALESCE(deal_stats.total_pipeline_value, 0) as total_pipeline_value,
+       COALESCE(deal_stats.total_deal_count, 0) as total_deal_count,
+       conv_stats.last_conversation_date,
+       conv_stats.conversation_count,
        acs.total_score, acs.grade, acs.score_delta, acs.data_confidence,
        asig.signals, asig.signal_score, asig.industry AS signal_industry,
        asig.growth_stage, asig.classification_confidence
      FROM accounts a
+     LEFT JOIN LATERAL (
+       SELECT
+         COUNT(*) FILTER (
+           WHERE d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+         ) as open_deal_count,
+         SUM(d.amount) FILTER (
+           WHERE d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+         ) as total_pipeline_value,
+         COUNT(*) as total_deal_count
+       FROM deals d
+       WHERE d.account_id = a.id AND d.workspace_id = a.workspace_id
+     ) deal_stats ON true
+     LEFT JOIN LATERAL (
+       SELECT
+         MAX(c.started_at) as last_conversation_date,
+         COUNT(*) as conversation_count
+       FROM conversations c
+       WHERE c.account_id = a.id AND c.workspace_id = a.workspace_id
+     ) conv_stats ON true
      LEFT JOIN account_scores acs ON acs.account_id = a.id AND acs.workspace_id = a.workspace_id
      LEFT JOIN account_signals asig ON asig.account_id = a.id AND asig.workspace_id = a.workspace_id
-     WHERE ${where.replace(/\bworkspace_id\b/g, 'a.workspace_id')}
+     WHERE ${where.replace(/\bworkspace_id\b/g, 'a.workspace_id')}${hasOpenDealsWhere}
      ORDER BY ${sortExpr}
      LIMIT $${idx} OFFSET $${idx + 1}`,
     dataParams,
@@ -184,7 +280,7 @@ export async function queryAccounts(workspaceId: string, filters: AccountFilters
   // Extract custom fields if properties parameter provided
   const accounts = dataResult.rows.map(account => extractCustomFields(account, filters.properties));
 
-  return { accounts, total, limit, offset };
+  return { accounts, total, limit, offset, summary };
 }
 
 export async function getAccount(workspaceId: string, accountId: string): Promise<(Account & { openDealCount: number; openDealValue: number; contactCount: number; recentActivityCount: number }) | null> {
