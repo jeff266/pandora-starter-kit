@@ -34,6 +34,7 @@ import ToolsPage from './pages/ToolsPage';
 import PushPage from './pages/PushPage';
 import ConsultantDashboard from './pages/ConsultantDashboard';
 import IcpProfilePage from './pages/IcpProfilePage';
+import BenchmarksGrid from './pages/BenchmarksGrid';
 import AdminScopesPage from './pages/AdminScopesPage';
 import TokenUsagePage from './pages/admin/TokenUsagePage';
 import Targets from './pages/Targets';
@@ -73,6 +74,7 @@ const pageTitles: Record<string, string> = {
   '/marketplace': 'Marketplace',
   '/settings': 'Settings',
   '/icp-profile': 'ICP Profile',
+  '/stage-velocity': 'Stage Velocity',
   '/admin/scopes': 'Workspace Scopes',
   '/admin/token-usage': 'Token Usage',
   '/forecast': 'Forecast',
@@ -280,6 +282,7 @@ export default function App() {
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/settings/:tab" element={<SettingsPage />} />
             <Route path="/icp-profile" element={<IcpProfilePage />} />
+            <Route path="/stage-velocity" element={<BenchmarksGrid />} />
             <Route path="/admin/scopes" element={<AdminScopesPage />} />
             <Route path="/admin/token-usage" element={<TokenUsagePage />} />
             <Route path="/reports" element={<ReportsPage />} />

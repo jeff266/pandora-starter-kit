@@ -118,6 +118,7 @@ export default function DealDetail() {
   const [coverageGapsExpanded, setCoverageGapsExpanded] = useState(true);
   const [expandedSummaries, setExpandedSummaries] = useState<Set<string>>(new Set());
   const pipelineDropdownRef = useRef<HTMLDivElement>(null);
+  const [dealComposite, setDealComposite] = useState<{ label: string; color: string } | null>(null);
 
   useEffect(() => {
     if (!pipelineEditing) return;
@@ -154,6 +155,15 @@ export default function DealDetail() {
       }
     }
   };
+
+  useEffect(() => {
+    if (!dealId) return;
+    api.get(`/deals/${dealId}/coaching`)
+      .then((data: any) => {
+        if (data?.composite?.label) setDealComposite({ label: data.composite.label, color: data.composite.color });
+      })
+      .catch(() => {});
+  }, [dealId]);
 
   useEffect(() => {
     fetchDossier();
@@ -365,10 +375,10 @@ export default function DealDetail() {
     { label: 'Activity', value: signalLabel('activity_recency', health.activity_recency), color: statusColor(health.activity_recency), tooltip: undefined },
     { label: 'Threading', value: signalLabel('threading', health.threading), color: statusColor(health.threading), tooltip: undefined },
     {
-      label: 'Velocity',
-      value: health.velocity_suspect ? 'Check velocity' : signalLabel('stage_velocity', health.stage_velocity),
-      color: health.velocity_suspect ? colors.yellow : statusColor(health.stage_velocity),
-      tooltip: health.velocity_suspect ? 'Recent call activity suggests this deal may be moving — stage data may be stale.' : undefined
+      label: 'Health',
+      value: dealComposite ? dealComposite.label : (health.velocity_suspect ? 'Check velocity' : signalLabel('stage_velocity', health.stage_velocity)),
+      color: dealComposite ? dealComposite.color : (health.velocity_suspect ? colors.yellow : statusColor(health.stage_velocity)),
+      tooltip: dealComposite ? `Stage-specific velocity benchmark · ${dealComposite.label}` : (health.velocity_suspect ? 'Recent call activity suggests this deal may be moving — stage data may be stale.' : undefined)
     },
     { label: 'Data', value: health.data_completeness != null ? `${health.data_completeness}% complete` : null, color: (health.data_completeness || 0) > 60 ? colors.green : colors.yellow, tooltip: undefined },
   ];

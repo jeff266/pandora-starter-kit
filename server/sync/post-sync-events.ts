@@ -12,6 +12,7 @@ import { extractConversationSignals as extractStructuredSignals } from '../signa
 import { query } from '../db.js';
 import { captureCurrentSchema, detectNewFields, insertNewFieldsFinding } from './field-detector.js';
 import { discoverWinPatterns } from '../coaching/win-pattern-discovery.js';
+import { computeAndStoreStageBenchmarks } from '../coaching/stage-benchmarks.js';
 
 interface SyncResult {
   connector: string;
@@ -134,6 +135,11 @@ export async function emitSyncCompleted(
     // Win pattern discovery - check if we should run
     maybeRunPatternDiscovery(workspaceId).catch(err => {
       console.error(`[Coaching] Pattern discovery check failed:`, err instanceof Error ? err.message : err);
+    });
+
+    // Stage velocity benchmarks - recompute if stale or never run
+    maybeRecomputeStageBenchmarks(workspaceId).catch(err => {
+      console.error(`[StageBenchmarks] Recompute check failed:`, err instanceof Error ? err.message : err);
     });
 
     // Field detection — cheap SQL diff, runs after every CRM sync
@@ -278,6 +284,40 @@ async function maybeRunPatternDiscovery(workspaceId: string): Promise<void> {
   console.log(
     `[Coaching] Discovery complete: ${result.patterns_found.length} patterns found across ${result.segments_analyzed} segments (${result.won_deals} won, ${result.lost_deals} lost)`
   );
+}
+
+/**
+ * Check if stage velocity benchmarks should be recomputed.
+ * Runs when: never computed, or 7+ days since last compute, or 3+ new closed deals.
+ */
+async function maybeRecomputeStageBenchmarks(workspaceId: string): Promise<void> {
+  const lastComputedResult = await query<{ last_computed: string | null }>(
+    `SELECT MAX(computed_at) AS last_computed FROM stage_velocity_benchmarks WHERE workspace_id = $1`,
+    [workspaceId]
+  );
+  const lastComputed = lastComputedResult.rows[0]?.last_computed;
+  const daysSinceLast = lastComputed
+    ? daysBetween(new Date(lastComputed), new Date())
+    : Infinity;
+
+  const newClosedResult = await query<{ n: number }>(
+    `SELECT COUNT(*)::integer AS n FROM deals
+     WHERE workspace_id = $1
+       AND stage_normalized IN ('closed_won', 'closed_lost')
+       AND updated_at > COALESCE($2::timestamptz, '1970-01-01'::timestamptz)`,
+    [workspaceId, lastComputed ?? null]
+  );
+  const newClosedCount = newClosedResult.rows[0]?.n ?? 0;
+
+  const shouldRun = daysSinceLast === Infinity || daysSinceLast >= 7 || (daysSinceLast >= 1 && newClosedCount >= 3);
+  if (!shouldRun) {
+    console.log(`[StageBenchmarks] Recompute not needed (${daysSinceLast}d since last, ${newClosedCount} new closed)`);
+    return;
+  }
+
+  console.log(`[StageBenchmarks] Recomputing for workspace ${workspaceId}`);
+  const result = await computeAndStoreStageBenchmarks(workspaceId);
+  console.log(`[StageBenchmarks] Done: ${result.rows_updated} rows updated`);
 }
 
 function daysBetween(date1: Date, date2: Date): number {

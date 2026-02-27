@@ -1,0 +1,478 @@
+/**
+ * Stage Velocity Benchmarks API Routes
+ *
+ * GET  /:workspaceId/stage-benchmarks         — full benchmark grid data
+ * GET  /:workspaceId/deals/:dealId/coaching   — per-deal coaching payload
+ * POST /:workspaceId/stage-benchmarks/refresh — trigger recompute
+ * POST /:workspaceId/deals/:dealId/coaching-script — generate Claude coaching script
+ */
+
+import { Router, type Request, type Response } from 'express';
+import { query } from '../db.js';
+import {
+  computeAndStoreStageBenchmarks,
+  lookupBenchmark,
+  computeVelocitySignal,
+  computeCompositeLabel,
+  autoDetectSegmentBoundaries,
+} from '../coaching/stage-benchmarks.js';
+import Anthropic from '@anthropic-ai/sdk';
+
+const router = Router();
+
+// ─── GET /:workspaceId/stage-benchmarks ──────────────────────────────────────
+
+router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { workspaceId } = req.params;
+    const pipelineFilter = req.query.pipeline as string | undefined;
+
+    const benchRows = await query<{
+      pipeline: string;
+      stage_normalized: string;
+      segment: string;
+      outcome: string;
+      median_days: string;
+      p75_days: string;
+      p90_days: string;
+      sample_size: string;
+      confidence_tier: string;
+      is_inverted: boolean;
+      computed_at: string;
+    }>(
+      `SELECT pipeline, stage_normalized, segment, outcome,
+              median_days, p75_days, p90_days, sample_size, confidence_tier, is_inverted, computed_at
+       FROM stage_velocity_benchmarks
+       WHERE workspace_id = $1
+         AND segment = 'all'
+         ${pipelineFilter ? 'AND pipeline = $2' : ''}
+       ORDER BY stage_normalized, segment, outcome`,
+      pipelineFilter ? [workspaceId, pipelineFilter] : [workspaceId]
+    );
+
+    // Pivot won/lost rows into StageBenchmark objects
+    const benchMap: Record<string, {
+      stage_normalized: string;
+      pipeline: string;
+      segment: string;
+      won: null | { median_days: number; p75_days: number; p90_days: number; sample_size: number };
+      lost: null | { median_days: number; p75_days: number; p90_days: number; sample_size: number };
+      confidence_tier: string;
+      is_inverted: boolean;
+      computed_at: string;
+    }> = {};
+
+    for (const r of benchRows) {
+      const key = `${r.pipeline}||${r.stage_normalized}||${r.segment}`;
+      if (!benchMap[key]) {
+        benchMap[key] = {
+          stage_normalized: r.stage_normalized,
+          pipeline: r.pipeline,
+          segment: r.segment,
+          won: null,
+          lost: null,
+          confidence_tier: r.confidence_tier,
+          is_inverted: r.is_inverted,
+          computed_at: r.computed_at,
+        };
+      }
+      const entry = {
+        median_days: parseFloat(r.median_days),
+        p75_days: parseFloat(r.p75_days),
+        p90_days: parseFloat(r.p90_days),
+        sample_size: parseInt(r.sample_size, 10),
+      };
+      if (r.outcome === 'won') benchMap[key].won = entry;
+      else benchMap[key].lost = entry;
+    }
+
+    // Get display order for stages
+    const stageOrderResult = await query<{ stage_name: string; display_order: number }>(
+      `SELECT stage_name, display_order FROM stage_configs WHERE workspace_id = $1 ORDER BY display_order`,
+      [workspaceId]
+    );
+    const displayOrder: Record<string, number> = {};
+    for (const s of stageOrderResult.rows) {
+      displayOrder[s.stage_name] = s.display_order;
+    }
+
+    // Get open deal averages per stage
+    const openAvgResult = await query<{ stage_normalized: string; open_avg: string; open_count: string }>(
+      `SELECT stage_normalized,
+              AVG(COALESCE(days_in_stage, EXTRACT(days FROM NOW() - stage_changed_at)::integer))::numeric(10,1) AS open_avg,
+              COUNT(*) AS open_count
+       FROM deals
+       WHERE workspace_id = $1
+         AND stage_normalized NOT IN ('closed_won', 'closed_lost')
+         AND stage_normalized IS NOT NULL
+       GROUP BY stage_normalized`,
+      [workspaceId]
+    );
+    const openAverages: Record<string, { avg: number; count: number }> = {};
+    for (const r of openAvgResult.rows) {
+      openAverages[r.stage_normalized] = {
+        avg: parseFloat(r.open_avg),
+        count: parseInt(r.open_count, 10),
+      };
+    }
+
+    // Get distinct pipelines
+    const pipelinesResult = await query<{ pipeline: string }>(
+      `SELECT DISTINCT pipeline FROM stage_velocity_benchmarks WHERE workspace_id = $1 AND pipeline != 'all' ORDER BY pipeline`,
+      [workspaceId]
+    );
+    const pipelines = pipelinesResult.rows.map(r => r.pipeline);
+
+    const benchmarks = Object.values(benchMap).sort((a, b) => {
+      const oa = displayOrder[a.stage_normalized] ?? 999;
+      const ob = displayOrder[b.stage_normalized] ?? 999;
+      return oa - ob || a.stage_normalized.localeCompare(b.stage_normalized);
+    });
+
+    const lastComputedAt = benchRows.length > 0 ? benchRows[0].computed_at : null;
+
+    res.json({ benchmarks, open_averages: openAverages, pipelines, last_computed_at: lastComputedAt });
+  } catch (err) {
+    console.error('[StageBenchmarks] GET error:', err);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ─── POST /:workspaceId/stage-benchmarks/refresh ─────────────────────────────
+
+router.post('/:workspaceId/stage-benchmarks/refresh', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { workspaceId } = req.params;
+    const result = await computeAndStoreStageBenchmarks(workspaceId);
+    res.json({ ...result, computed_at: new Date().toISOString() });
+  } catch (err) {
+    console.error('[StageBenchmarks] Refresh error:', err);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ─── GET /:workspaceId/deals/:dealId/coaching ─────────────────────────────────
+
+router.get('/:workspaceId/deals/:dealId/coaching', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { workspaceId, dealId } = req.params;
+
+    // Fetch deal basics
+    const dealResult = await query<{
+      stage: string;
+      stage_normalized: string;
+      stage_changed_at: string | null;
+      amount: string | null;
+      days_in_stage: number | null;
+      pipeline: string | null;
+      owner: string | null;
+    }>(
+      `SELECT stage, stage_normalized, stage_changed_at, amount, days_in_stage, pipeline, owner
+       FROM deals WHERE id = $1 AND workspace_id = $2`,
+      [dealId, workspaceId]
+    );
+    if (dealResult.rows.length === 0) {
+      res.status(404).json({ error: 'Deal not found' });
+      return;
+    }
+    const deal = dealResult.rows[0];
+    const amount = parseFloat(deal.amount ?? '0') || 0;
+
+    // Determine segment
+    const [lowCutoff, highCutoff] = await autoDetectSegmentBoundaries(workspaceId);
+    const segment = amount <= 0 ? 'all' : amount < lowCutoff ? 'smb' : amount < highCutoff ? 'mid_market' : 'enterprise';
+
+    // Fetch stage history
+    const historyResult = await query<{
+      stage: string;
+      stage_normalized: string;
+      entered_at: string;
+      exited_at: string | null;
+      duration_days: number | null;
+    }>(
+      `SELECT stage, stage_normalized, entered_at, exited_at, duration_days
+       FROM deal_stage_history
+       WHERE deal_id = $1 AND workspace_id = $2
+         AND stage_normalized NOT IN ('closed_won', 'closed_lost', 'unknown')
+       ORDER BY entered_at ASC`,
+      [dealId, workspaceId]
+    );
+
+    // Compute current stage days
+    const currentDaysInStage = deal.days_in_stage ??
+      (deal.stage_changed_at
+        ? Math.floor((Date.now() - new Date(deal.stage_changed_at).getTime()) / 86400000)
+        : null);
+
+    // Build stage journey
+    const stageJourney = await Promise.all(
+      historyResult.rows.map(async (h, i) => {
+        const isCurrentStage = !h.exited_at || i === historyResult.rows.length - 1;
+        const daysInStage = isCurrentStage
+          ? (currentDaysInStage ?? h.duration_days ?? 0)
+          : (h.duration_days ?? 0);
+        const benchmark = await lookupBenchmark(workspaceId, h.stage_normalized, segment, deal.pipeline ?? 'all');
+        const velocitySignal = computeVelocitySignal(daysInStage, h.stage, benchmark, undefined);
+        return {
+          stage: h.stage,
+          stage_normalized: h.stage_normalized,
+          entered_at: h.entered_at,
+          exited_at: h.exited_at,
+          duration_days: daysInStage,
+          is_current: isCurrentStage,
+          benchmark: benchmark ? {
+            won_median: benchmark.won?.median_days ?? null,
+            won_p75: benchmark.won?.p75_days ?? null,
+            lost_median: benchmark.lost?.median_days ?? null,
+            confidence_tier: benchmark.confidence_tier,
+            is_inverted: benchmark.is_inverted,
+            inversion_note: benchmark.inversion_note,
+            won_sample_size: benchmark.won?.sample_size ?? 0,
+          } : null,
+          signal: velocitySignal.signal,
+          ratio: velocitySignal.ratio,
+          explanation: velocitySignal.explanation,
+          countdown_days: velocitySignal.countdown_days,
+        };
+      })
+    );
+
+    // Current velocity (current stage)
+    const currentStageHistory = historyResult.rows[historyResult.rows.length - 1];
+    const currentBenchmark = currentStageHistory
+      ? await lookupBenchmark(workspaceId, currentStageHistory.stage_normalized, segment, deal.pipeline ?? 'all')
+      : null;
+    const currentVelocity = currentBenchmark && currentDaysInStage !== null
+      ? computeVelocitySignal(currentDaysInStage, deal.stage, currentBenchmark)
+      : { signal: 'watch' as const, ratio: null, explanation: 'No benchmark data for current stage.', countdown_days: null };
+
+    // Engagement signals
+    const lastCallResult = await query<{ call_date: string }>(
+      `SELECT call_date FROM conversations
+       WHERE deal_id = $1 AND workspace_id = $2 AND is_internal = FALSE AND call_date IS NOT NULL
+       ORDER BY call_date DESC LIMIT 1`,
+      [dealId, workspaceId]
+    );
+    const lastCallAt = lastCallResult.rows[0]?.call_date ?? null;
+    const daysSinceCall = lastCallAt
+      ? Math.floor((Date.now() - new Date(lastCallAt).getTime()) / 86400000)
+      : null;
+
+    const engagementSignal: 'active' | 'cooling' | 'dark' | 'no_data' =
+      daysSinceCall === null ? 'no_data'
+        : daysSinceCall <= 14 ? 'active'
+          : daysSinceCall <= 30 ? 'cooling'
+            : 'dark';
+
+    // Multi-threading: unique participants from last 60 days
+    const participantsResult = await query<{ cnt: string }>(
+      `SELECT COUNT(DISTINCT part->>'email') AS cnt
+       FROM conversations c,
+            jsonb_array_elements(
+              CASE jsonb_typeof(c.participants) WHEN 'array' THEN c.participants ELSE '[]'::jsonb END
+            ) AS part
+       WHERE c.deal_id = $1 AND c.workspace_id = $2
+         AND c.call_date > NOW() - INTERVAL '60 days'`,
+      [dealId, workspaceId]
+    );
+    const contactCount = parseInt(participantsResult.rows[0]?.cnt ?? '0', 10);
+
+    // Missing stakeholders
+    const missingResult = await query<{ name: string; title: string | null; role: string | null }>(
+      `SELECT c.name, c.title, COALESCE(dc.buying_role, 'unknown') AS role
+       FROM contacts c
+       JOIN deal_contacts dc ON dc.contact_id = c.id AND dc.deal_id = $1
+       WHERE c.workspace_id = $2
+         AND c.email IS NOT NULL
+         AND c.email NOT IN (
+           SELECT DISTINCT part->>'email'
+           FROM conversations conv,
+                jsonb_array_elements(
+                  CASE jsonb_typeof(conv.participants) WHEN 'array' THEN conv.participants ELSE '[]'::jsonb END
+                ) AS part
+           WHERE conv.deal_id = $1 AND conv.workspace_id = $2
+         )`,
+      [dealId, workspaceId]
+    );
+    const missingStakeholders = missingResult.rows.map(r => ({
+      name: r.name,
+      title: r.title,
+      role: r.role ?? 'unknown',
+      is_critical: ['decision_maker', 'executive_sponsor'].includes(r.role ?? ''),
+    }));
+
+    // Recent conversations
+    const recentConvsResult = await query<{ id: string; title: string; call_date: string | null; duration: number | null }>(
+      `SELECT id, title, call_date, duration_seconds / 60.0 AS duration
+       FROM conversations
+       WHERE deal_id = $1 AND workspace_id = $2 AND is_internal = FALSE AND call_date IS NOT NULL
+       ORDER BY call_date DESC LIMIT 3`,
+      [dealId, workspaceId]
+    );
+
+    // Action items from Fireflies
+    const actionItemsResult = await query<{ source_title: string; source_date: string | null; item: unknown }>(
+      `SELECT c.title AS source_title, c.call_date AS source_date,
+              jsonb_array_elements(c.action_items) AS item
+       FROM conversations c
+       WHERE c.deal_id = $1 AND c.workspace_id = $2
+         AND c.action_items IS NOT NULL AND jsonb_typeof(c.action_items) = 'array'
+       ORDER BY c.call_date DESC`,
+      [dealId, workspaceId]
+    );
+
+    const actionItems = actionItemsResult.rows.map(r => {
+      const item = r.item as Record<string, unknown>;
+      const daysSinceSource = Math.floor(
+        (Date.now() - new Date(r.source_date).getTime()) / 86400000
+      );
+      return {
+        text: String(item.text ?? item.action_item ?? item.description ?? ''),
+        owner: String(item.owner ?? item.assignee ?? deal.owner ?? ''),
+        source_conversation_title: r.source_title,
+        source_date: r.source_date,
+        context: String(item.context ?? item.transcript_context ?? ''),
+        status: daysSinceSource > 14 ? 'overdue' : 'open',
+        days_overdue: daysSinceSource > 14 ? daysSinceSource - 14 : 0,
+      };
+    });
+
+    // Composite health
+    const composite = computeCompositeLabel(currentVelocity.signal, engagementSignal);
+    const compositeNextStep =
+      composite.label === 'Healthy' ? 'Keep momentum — maintain call cadence.'
+        : composite.label === 'Running Long, But Active' ? 'Schedule a timeline conversation. Acknowledge the length and set a mutual close plan.'
+          : composite.label === 'Watch Closely' ? 'Re-engage the buyer with a specific next step in the next 7 days.'
+            : composite.label === 'At Risk' || composite.label === 'At Risk (But Active)' ? 'Bring in a second voice — manager or executive — to reset momentum.'
+              : 'Qualify or disqualify. Holding a stalled deal costs more than losing it cleanly.';
+
+    res.json({
+      stage_journey: stageJourney,
+      current_velocity: currentVelocity,
+      engagement: {
+        last_call_at: lastCallAt,
+        last_call_days_ago: daysSinceCall,
+        signal: engagementSignal,
+        contact_count: contactCount,
+        missing_stakeholders: missingStakeholders,
+      },
+      composite: {
+        label: composite.label,
+        color: composite.color,
+        summary: currentVelocity.explanation,
+        next_step: compositeNextStep,
+      },
+      action_items: actionItems,
+      benchmarks_confidence: currentBenchmark?.confidence_tier ?? 'insufficient',
+      recent_conversations: recentConvsResult.rows,
+    });
+  } catch (err) {
+    console.error('[StageBenchmarks] Coaching endpoint error:', err);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ─── POST /:workspaceId/deals/:dealId/coaching-script ────────────────────────
+
+router.post('/:workspaceId/deals/:dealId/coaching-script', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { workspaceId, dealId } = req.params;
+
+    // Fetch deal basics
+    const dealResult = await query<{ name: string; stage: string; amount: string | null; owner: string | null; days_in_stage: number | null }>(
+      `SELECT name, stage, amount, owner, days_in_stage FROM deals WHERE id = $1 AND workspace_id = $2`,
+      [dealId, workspaceId]
+    );
+    if (dealResult.rows.length === 0) {
+      res.status(404).json({ error: 'Deal not found' });
+      return;
+    }
+    const deal = dealResult.rows[0];
+
+    // Fetch coaching data (reuse the coaching endpoint logic inline)
+    const coachingRes = await fetch(
+      `http://localhost:3001/api/workspaces/${workspaceId}/deals/${dealId}/coaching`
+    );
+    const coaching = coachingRes.ok ? await coachingRes.json() as Record<string, unknown> : null;
+
+    // Build compact context (~2K tokens)
+    const stageJourney = (coaching?.stage_journey as Array<Record<string, unknown>> | undefined) ?? [];
+    const actionItems = (coaching?.action_items as Array<Record<string, unknown>> | undefined) ?? [];
+    const overdueItems = actionItems.filter(a => a.status === 'overdue');
+    const missing = (coaching?.engagement as Record<string, unknown> | undefined)?.missing_stakeholders as Array<Record<string, unknown>> | undefined ?? [];
+
+    const context = `DEAL: ${deal.name}
+Stage: ${deal.stage} (${deal.days_in_stage ?? '?'}d in stage)
+Amount: $${deal.amount ? Number(deal.amount).toLocaleString() : '?'}
+Owner: ${deal.owner ?? 'Unknown'}
+Health: ${(coaching?.composite as Record<string, unknown> | undefined)?.label ?? 'Unknown'}
+
+STAGE JOURNEY:
+${stageJourney.map((s: Record<string, unknown>) =>
+  `  ${s.stage}: ${s.duration_days}d — ${s.signal} (${s.explanation})`
+).join('\n')}
+
+OPEN/OVERDUE ACTION ITEMS (${overdueItems.length} overdue):
+${overdueItems.slice(0, 5).map((a: Record<string, unknown>) =>
+  `  - ${a.text} [${a.days_overdue}d overdue] — owner: ${a.owner}, from: ${a.source_conversation_title}`
+).join('\n') || '  None'}
+
+MISSING STAKEHOLDERS:
+${missing.slice(0, 5).map((s: Record<string, unknown>) =>
+  `  - ${s.name} (${s.title ?? s.role})${s.is_critical ? ' ⚠️ Critical' : ''}`
+).join('\n') || '  None'}
+
+RECENT CONVERSATIONS:
+${((coaching?.recent_conversations as Array<Record<string, unknown>> | undefined) ?? []).map((c: Record<string, unknown>) =>
+  `  - ${c.title} (${new Date(c.started_at as string).toLocaleDateString()})`
+).join('\n') || '  None recorded'}`;
+
+    const client = new Anthropic();
+    const message = await client.messages.create({
+      model: 'claude-opus-4-5',
+      max_tokens: 800,
+      messages: [{
+        role: 'user',
+        content: `You are a sales manager preparing for a 1:1 coaching conversation about a deal.
+
+${context}
+
+Generate a coaching script with:
+1. An opener (2 sentences) that acknowledges what's working before addressing concerns
+2. Three numbered coaching points, each with:
+   - focus: the specific area to address (e.g., "Executive access", "Overdue follow-up")
+   - evidence: the specific data point from the context (use names, dates, numbers)
+   - question: a coaching question for the rep — not a directive, a question that prompts self-reflection
+3. A closing note (1 sentence) reinforcing confidence in the rep
+
+Respond ONLY with valid JSON in this exact shape:
+{
+  "opener": "string",
+  "points": [
+    { "focus": "string", "evidence": "string", "question": "string" },
+    { "focus": "string", "evidence": "string", "question": "string" },
+    { "focus": "string", "evidence": "string", "question": "string" }
+  ],
+  "closing_note": "string"
+}
+
+Be specific. Never be generic. Every sentence must reference the actual deal data above.`,
+      }],
+    });
+
+    const responseText = message.content[0].type === 'text' ? message.content[0].text : '{}';
+    let script: unknown;
+    try {
+      script = JSON.parse(responseText);
+    } catch {
+      script = { opener: responseText, points: [], closing_note: '' };
+    }
+
+    res.json({ script });
+  } catch (err) {
+    console.error('[StageBenchmarks] Coaching script error:', err);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+export default router;

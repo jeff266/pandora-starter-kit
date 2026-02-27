@@ -998,18 +998,18 @@ export default function ConversationsPage() {
           : `$${Math.round(v)}`;
 
         const SIGNAL_COLOR: Record<string, string> = {
-          stalled:  '#ef4444',
-          slowing:  '#f59e0b',
-          on_track: '#64748b',
-          fast:     '#22c55e',
+          critical: '#E53E3E',
+          at_risk:  '#DD6B20',
+          watch:    '#D69E2E',
+          healthy:  '#38A169',
         };
         const SIGNAL_LABEL: Record<string, string> = {
-          stalled:  'Stalled',
-          slowing:  'Slowing',
-          on_track: 'On Track',
-          fast:     'Closing Fast',
+          critical: 'Critical',
+          at_risk:  'At Risk',
+          watch:    'Watch',
+          healthy:  'Healthy',
         };
-        const SIGNAL_BUCKETS = ['stalled', 'slowing', 'on_track', 'fast'] as const;
+        const SIGNAL_BUCKETS = ['critical', 'at_risk', 'watch', 'healthy'] as const;
 
         const shortenStage = (s: string) =>
           s.replace('Discovery and Alignment', 'Discovery')
@@ -1072,14 +1072,14 @@ export default function ConversationsPage() {
         });
 
         // Build chart data — pivot owner+quarter-filtered conversations by stage × signal
-        type StageEntry = { stalled: number; slowing: number; on_track: number; fast: number; stalled_count: number; slowing_count: number; on_track_count: number; fast_count: number; total: number; originalStage: string };
+        type StageEntry = { critical: number; at_risk: number; watch: number; healthy: number; critical_count: number; at_risk_count: number; watch_count: number; healthy_count: number; total: number; originalStage: string };
         const stageMap = new Map<string, StageEntry>();
         for (const conv of ownerFilteredConvs) {
           const meta = coachingConvMeta.get(conv.id);
           if (!meta) continue;
           const key = shortenStage(meta.stage);
           if (!stageMap.has(key)) {
-            stageMap.set(key, { stalled: 0, slowing: 0, on_track: 0, fast: 0, stalled_count: 0, slowing_count: 0, on_track_count: 0, fast_count: 0, total: 0, originalStage: meta.stage });
+            stageMap.set(key, { critical: 0, at_risk: 0, watch: 0, healthy: 0, critical_count: 0, at_risk_count: 0, watch_count: 0, healthy_count: 0, total: 0, originalStage: meta.stage });
           }
           const entry = stageMap.get(key)!;
           const val = conv.deal_amount ?? 0;
@@ -1178,11 +1178,11 @@ export default function ConversationsPage() {
                   <div style={{ fontSize: 22, fontWeight: 700, color: colors.text, fontFamily: fonts.sans }}>
                     {fmt(breakdownTotalAtRisk)}
                     <span style={{ fontSize: 14, fontWeight: 400, color: colors.textMuted, marginLeft: 8 }}>
-                      stalled or slowing · {breakdownTotalAtRiskCount} deal{breakdownTotalAtRiskCount !== 1 ? 's' : ''}
+                      critical or at-risk · {breakdownTotalAtRiskCount} deal{breakdownTotalAtRiskCount !== 1 ? 's' : ''}
                     </span>
                   </div>
                   <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 4, fontFamily: fonts.sans }}>
-                    Benchmarked against your own closed deals — click a bar segment to filter the list below
+                    Benchmarked against time in each stage for your own closed deals — click a bar to filter
                   </div>
                 </div>
 
@@ -1390,7 +1390,7 @@ export default function ConversationsPage() {
                     <div>Account</div>
                     <div>Stage</div>
                     <div>Owner</div>
-                    <div>Urgency</div>
+                    <div>Health</div>
                     <div>Date</div>
                   </div>
 

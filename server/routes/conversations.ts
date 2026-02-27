@@ -789,14 +789,39 @@ router.get('/:workspaceId/conversations/coaching-breakdown', async (req: Request
       } catch (_) { /* analysis_scopes table missing — ignore scope filter */ }
     }
 
-    // Shared CTE: best-matching win pattern per open deal, with 4-bucket signal classification
+    // Fetch segment boundaries for deal size classification
+    let segLow = 10000;
+    let segHigh = 50000;
+    try {
+      const segResult = await query<{ low_cutoff: string | null; high_cutoff: string | null }>(
+        `SELECT PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY amount) AS low_cutoff,
+                PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY amount) AS high_cutoff
+         FROM deals WHERE workspace_id = $1 AND amount > 0 AND amount IS NOT NULL`,
+        [workspaceId]
+      );
+      const low = parseFloat(segResult.rows[0]?.low_cutoff ?? '');
+      const high = parseFloat(segResult.rows[0]?.high_cutoff ?? '');
+      if (!isNaN(low) && !isNaN(high) && low > 0 && high > low) { segLow = low; segHigh = high; }
+    } catch (_) { /* use defaults */ }
+
+    // Shared CTE: stage-specific velocity signal per open deal with composite health classification.
+    // Falls back to legacy global sales_cycle_days signal when no stage benchmark exists.
     const COACHED_DEALS_CTE = `
       WITH coached_deals AS (
         SELECT DISTINCT ON (d.id)
-          d.id                                                             AS deal_id,
+          d.id                                                                    AS deal_id,
           d.stage,
-          COALESCE(d.amount, 0)                                            AS amount,
-          EXTRACT(days FROM NOW() - d.created_at::timestamp)::integer      AS sales_cycle_days,
+          d.stage_normalized,
+          COALESCE(d.amount, 0)                                                   AS amount,
+          COALESCE(d.days_in_stage,
+            EXTRACT(days FROM NOW() - d.stage_changed_at)::integer, 0)           AS days_in_stage,
+          EXTRACT(days FROM NOW() - d.created_at::timestamp)::integer             AS sales_cycle_days,
+          CASE
+            WHEN COALESCE(d.amount, 0) <= 0 THEN 'all'
+            WHEN d.amount < ${segLow} THEN 'smb'
+            WHEN d.amount < ${segHigh} THEN 'mid_market'
+            ELSE 'enterprise'
+          END                                                                     AS segment,
           wp.won_median,
           wp.won_p75,
           wp.direction
@@ -805,7 +830,7 @@ router.get('/:workspaceId/conversations/coaching-breakdown', async (req: Request
           ON c.deal_id = d.id
          AND c.workspace_id = d.workspace_id
          AND c.is_internal = FALSE
-        JOIN win_patterns wp
+        LEFT JOIN win_patterns wp
           ON wp.workspace_id = d.workspace_id
          AND wp.superseded_at IS NULL
          AND (wp.segment_size_min IS NULL OR d.amount >= wp.segment_size_min)
@@ -818,21 +843,77 @@ router.get('/:workspaceId/conversations/coaching-breakdown', async (req: Request
       ),
       signal_typed AS (
         SELECT
-          deal_id,
-          stage,
-          amount,
-          sales_cycle_days,
-          won_median,
-          won_p75,
+          cd.deal_id,
+          cd.stage,
+          cd.amount,
+          cd.days_in_stage,
+          cd.sales_cycle_days,
+          cd.won_median,
+          cd.won_p75,
           CASE
-            WHEN direction = 'lower_wins' AND sales_cycle_days > (won_p75 * 2) THEN 'stalled'
-            WHEN direction = 'lower_wins' AND sales_cycle_days > won_p75       THEN 'slowing'
-            WHEN direction = 'lower_wins' AND sales_cycle_days <= won_median    THEN 'fast'
-            WHEN direction = 'higher_wins' AND sales_cycle_days < won_median    THEN 'stalled'
-            WHEN direction = 'higher_wins' AND sales_cycle_days >= (won_median * 2) THEN 'fast'
-            ELSE 'on_track'
+            -- Stage-specific benchmark available (specific segment match)
+            WHEN svb_won_seg.median_days IS NOT NULL THEN
+              CASE
+                WHEN svb_won_seg.is_inverted AND cd.days_in_stage < svb_won_seg.median_days * 0.5
+                  THEN 'at_risk'
+                WHEN svb_lost_seg.median_days IS NOT NULL AND cd.days_in_stage > svb_lost_seg.median_days
+                  THEN 'critical'
+                WHEN cd.days_in_stage > svb_won_seg.median_days * 2.0
+                  THEN 'at_risk'
+                WHEN cd.days_in_stage > svb_won_seg.median_days * 1.2
+                  THEN 'watch'
+                ELSE 'healthy'
+              END
+            -- Stage-specific benchmark available ('all' segment fallback)
+            WHEN svb_won_all.median_days IS NOT NULL THEN
+              CASE
+                WHEN svb_won_all.is_inverted AND cd.days_in_stage < svb_won_all.median_days * 0.5
+                  THEN 'at_risk'
+                WHEN svb_lost_all.median_days IS NOT NULL AND cd.days_in_stage > svb_lost_all.median_days
+                  THEN 'critical'
+                WHEN cd.days_in_stage > svb_won_all.median_days * 2.0
+                  THEN 'at_risk'
+                WHEN cd.days_in_stage > svb_won_all.median_days * 1.2
+                  THEN 'watch'
+                ELSE 'healthy'
+              END
+            -- No stage benchmark: fall back to legacy global signal, mapped to new category names
+            WHEN cd.won_median IS NOT NULL THEN
+              CASE
+                WHEN cd.direction = 'lower_wins' AND cd.sales_cycle_days > (cd.won_p75 * 2) THEN 'critical'
+                WHEN cd.direction = 'lower_wins' AND cd.sales_cycle_days > cd.won_p75        THEN 'at_risk'
+                WHEN cd.direction = 'lower_wins' AND cd.sales_cycle_days <= cd.won_median    THEN 'healthy'
+                WHEN cd.direction = 'higher_wins' AND cd.sales_cycle_days < cd.won_median    THEN 'critical'
+                WHEN cd.direction = 'higher_wins' AND cd.sales_cycle_days >= (cd.won_median * 2) THEN 'healthy'
+                ELSE 'watch'
+              END
+            ELSE 'watch'
           END AS signal_type
-        FROM coached_deals
+        FROM coached_deals cd
+        LEFT JOIN stage_velocity_benchmarks svb_won_seg
+          ON svb_won_seg.workspace_id = $1
+         AND svb_won_seg.stage_normalized = cd.stage_normalized
+         AND svb_won_seg.segment = cd.segment
+         AND svb_won_seg.outcome = 'won'
+         AND svb_won_seg.pipeline = 'all'
+        LEFT JOIN stage_velocity_benchmarks svb_lost_seg
+          ON svb_lost_seg.workspace_id = $1
+         AND svb_lost_seg.stage_normalized = cd.stage_normalized
+         AND svb_lost_seg.segment = cd.segment
+         AND svb_lost_seg.outcome = 'lost'
+         AND svb_lost_seg.pipeline = 'all'
+        LEFT JOIN stage_velocity_benchmarks svb_won_all
+          ON svb_won_all.workspace_id = $1
+         AND svb_won_all.stage_normalized = cd.stage_normalized
+         AND svb_won_all.segment = 'all'
+         AND svb_won_all.outcome = 'won'
+         AND svb_won_all.pipeline = 'all'
+        LEFT JOIN stage_velocity_benchmarks svb_lost_all
+          ON svb_lost_all.workspace_id = $1
+         AND svb_lost_all.stage_normalized = cd.stage_normalized
+         AND svb_lost_all.segment = 'all'
+         AND svb_lost_all.outcome = 'lost'
+         AND svb_lost_all.pipeline = 'all'
       )`;
 
     const [breakdownResult, convsResult] = await Promise.all([
@@ -856,8 +937,8 @@ router.get('/:workspaceId/conversations/coaching-breakdown', async (req: Request
           c.id,
           st.stage,
           st.signal_type,
-          st.sales_cycle_days AS days_old,
-          st.won_median
+          st.days_in_stage AS days_old,
+          COALESCE(st.won_median, 0) AS won_median
         FROM signal_typed st
         JOIN conversations c ON c.deal_id = st.deal_id
                              AND c.workspace_id = $1
@@ -883,11 +964,11 @@ router.get('/:workspaceId/conversations/coaching-breakdown', async (req: Request
     }));
 
     const totalAtRisk = breakdown
-      .filter(r => r.signal_type === 'stalled' || r.signal_type === 'slowing')
+      .filter(r => r.signal_type === 'critical' || r.signal_type === 'at_risk')
       .reduce((sum, r) => sum + r.deal_value, 0);
 
     const totalAtRiskCount = breakdown
-      .filter(r => r.signal_type === 'stalled' || r.signal_type === 'slowing')
+      .filter(r => r.signal_type === 'critical' || r.signal_type === 'at_risk')
       .reduce((sum, r) => sum + r.deal_count, 0);
 
     res.json({
