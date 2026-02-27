@@ -322,10 +322,12 @@ async function computeAllDealMetrics(
         SELECT COUNT(*)::integer
         FROM deal_stage_history dsh
         WHERE dsh.deal_id = d.id
-          AND dsh.to_stage_normalized IN (
-            SELECT from_stage_normalized
-            FROM deal_stage_history
-            WHERE deal_id = d.id AND changed_at < dsh.changed_at
+          AND EXISTS (
+            SELECT 1 FROM deal_stage_history prev
+            WHERE prev.deal_id = d.id
+              AND prev.stage_normalized = dsh.stage_normalized
+              AND prev.entered_at < dsh.entered_at
+              AND prev.exited_at IS NOT NULL
           )
       ), 0) as stage_regression_count,
       COALESCE((

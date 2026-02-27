@@ -225,35 +225,33 @@ async function computeDealMetrics(
       FROM conversations c
       WHERE c.deal_id = $1 AND c.workspace_id = $2
     ),
-    external_participants AS (
-      SELECT
-        dc.conv_id,
-        p->>'email' as email
+    all_external AS (
+      SELECT DISTINCT p->>'email' as email
       FROM deal_convs dc,
       LATERAL jsonb_array_elements(COALESCE(dc.resolved_participants, '[]'::jsonb)) p
       WHERE p->>'role' = 'external'
         AND (p->>'confidence')::numeric >= 0.7
+    ),
+    per_call_ext AS (
+      SELECT dc.conv_id, COUNT(*)::integer as ext_count
+      FROM deal_convs dc,
+      LATERAL jsonb_array_elements(COALESCE(dc.resolved_participants, '[]'::jsonb)) p
+      WHERE p->>'role' = 'external' AND (p->>'confidence')::numeric >= 0.7
+      GROUP BY dc.conv_id
     )
     SELECT
       COUNT(DISTINCT dc.conv_id)::integer as call_count,
       COALESCE(SUM(dc.duration_seconds) / 60.0, 0) as total_call_minutes,
       COALESCE(AVG(dc.duration_seconds) / 60.0, 0) as avg_call_duration_minutes,
-      COUNT(DISTINCT ep.email)::integer as unique_external_participants,
-      COALESCE(AVG(ep_per_call.ext_count), 0) as avg_external_per_call,
+      (SELECT COUNT(*) FROM all_external)::integer as unique_external_participants,
+      COALESCE((SELECT AVG(ext_count) FROM per_call_ext), 0) as avg_external_per_call,
       AVG((dc.call_metrics->>'talk_ratio_rep')::numeric) as avg_talk_ratio_rep,
       AVG((dc.call_metrics->>'talk_ratio_buyer')::numeric) as avg_talk_ratio_buyer,
       AVG((dc.call_metrics->>'question_count')::numeric) as avg_questions_per_call,
       AVG(jsonb_array_length(COALESCE(dc.action_items, '[]'::jsonb))) as avg_action_items_per_call,
       MIN(dc.call_date) as first_call_date,
       MAX(dc.call_date) as last_call_date
-    FROM deal_convs dc
-    LEFT JOIN external_participants ep ON true
-    LEFT JOIN LATERAL (
-      SELECT COUNT(*)::integer as ext_count
-      FROM jsonb_array_elements(COALESCE(dc.resolved_participants, '[]'::jsonb)) p
-      WHERE p->>'role' = 'external' AND (p->>'confidence')::numeric >= 0.7
-    ) ep_per_call ON true
-    GROUP BY true`,
+    FROM deal_convs dc`,
     [dealId, workspaceId]
   );
 
@@ -270,10 +268,12 @@ async function computeDealMetrics(
         SELECT COUNT(*)::integer
         FROM deal_stage_history dsh
         WHERE dsh.deal_id = d.id
-          AND dsh.to_stage_normalized IN (
-            SELECT from_stage_normalized
-            FROM deal_stage_history
-            WHERE deal_id = d.id AND changed_at < dsh.changed_at
+          AND EXISTS (
+            SELECT 1 FROM deal_stage_history prev
+            WHERE prev.deal_id = d.id
+              AND prev.stage_normalized = dsh.stage_normalized
+              AND prev.entered_at < dsh.entered_at
+              AND prev.exited_at IS NOT NULL
           )
       ), 0) as stage_regression_count,
       COALESCE((

@@ -7,6 +7,7 @@ import { getGoals } from '../context/index.js';
 import { computeFields } from '../computed-fields/engine.js';
 import { refreshComputedFields } from '../tools/computed-fields-refresh.js';
 import { resolveConversationParticipants } from '../conversations/resolve-participants.js';
+import { discoverWinPatterns } from '../coaching/win-pattern-discovery.js';
 
 const router = Router();
 
@@ -221,6 +222,44 @@ router.post('/:workspaceId/actions/resolve-participants', async (req: Request<Wo
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.error('[Actions] Resolve participants error:', message);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.post('/:workspaceId/actions/discover-win-patterns', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    const { workspaceId } = req.params;
+
+    console.log(`[Actions] Starting win pattern discovery for workspace ${workspaceId}`);
+    const result = await discoverWinPatterns(workspaceId);
+
+    console.log(`[Actions] Win pattern discovery complete: ${result.patterns_found.length} patterns found`);
+    res.json({
+      success: true,
+      workspace_id: result.workspace_id,
+      discovered_at: result.discovered_at,
+      total_closed_deals: result.total_closed_deals,
+      won_deals: result.won_deals,
+      lost_deals: result.lost_deals,
+      segments_analyzed: result.segments_analyzed,
+      dimensions_checked: result.dimensions_checked,
+      patterns_found: result.patterns_found.map(p => ({
+        dimension: p.dimension,
+        direction: p.direction,
+        separation_score: p.separation_score,
+        won_median: p.won_median,
+        lost_median: p.lost_median,
+        sample_size_won: p.sample_size_won,
+        sample_size_lost: p.sample_size_lost,
+        segment_size_min: p.segment.size_band_min,
+        segment_size_max: p.segment.size_band_max,
+        relevant_stages: p.relevant_stages,
+      })),
+      insufficient_data: result.insufficient_data,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[Actions] Win pattern discovery error:', message);
     res.status(500).json({ error: message });
   }
 });
