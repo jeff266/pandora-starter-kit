@@ -50,64 +50,37 @@ router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response)
       pipelineFilter ? [workspaceId, pipelineFilter] : [workspaceId]
     );
 
-    // Pivot won/lost rows into StageBenchmark objects
-    const benchMap: Record<string, {
-      stage_normalized: string;
-      pipeline: string;
-      segment: string;
-      won: null | { median_days: number; p75_days: number; p90_days: number; sample_size: number };
-      lost: null | { median_days: number; p75_days: number; p90_days: number; sample_size: number };
-      confidence_tier: string;
-      is_inverted: boolean;
-      computed_at: string;
-    }> = {};
+    // Get display names and order for stages (run in parallel with open averages)
+    const [stageOrderResult, openAvgResult, pipelinesResult] = await Promise.all([
+      query<{ stage_name: string; stage_normalized: string; display_order: number }>(
+        `SELECT stage_name, COALESCE(stage_normalized, stage_name) AS stage_normalized, display_order
+         FROM stage_configs WHERE workspace_id = $1 ORDER BY display_order`,
+        [workspaceId]
+      ),
+      query<{ stage_normalized: string; open_avg: string; open_count: string }>(
+        `SELECT stage_normalized,
+                AVG(COALESCE(days_in_stage, EXTRACT(days FROM NOW() - stage_changed_at)::integer))::numeric(10,1) AS open_avg,
+                COUNT(*) AS open_count
+         FROM deals
+         WHERE workspace_id = $1
+           AND stage_normalized NOT IN ('closed_won', 'closed_lost')
+           AND stage_normalized IS NOT NULL
+         GROUP BY stage_normalized`,
+        [workspaceId]
+      ),
+      query<{ pipeline: string }>(
+        `SELECT DISTINCT pipeline FROM stage_velocity_benchmarks WHERE workspace_id = $1 AND pipeline != 'all' ORDER BY pipeline`,
+        [workspaceId]
+      ),
+    ]);
 
-    for (const r of benchRows.rows) {
-      const key = `${r.pipeline}||${r.stage_normalized}||${r.segment}`;
-      if (!benchMap[key]) {
-        benchMap[key] = {
-          stage_normalized: r.stage_normalized,
-          pipeline: r.pipeline,
-          segment: r.segment,
-          won: null,
-          lost: null,
-          confidence_tier: r.confidence_tier,
-          is_inverted: r.is_inverted,
-          computed_at: r.computed_at,
-        };
-      }
-      const entry = {
-        median_days: parseFloat(r.median_days),
-        p75_days: parseFloat(r.p75_days),
-        p90_days: parseFloat(r.p90_days),
-        sample_size: parseInt(r.sample_size, 10),
-      };
-      if (r.outcome === 'won') benchMap[key].won = entry;
-      else benchMap[key].lost = entry;
-    }
-
-    // Get display order for stages
-    const stageOrderResult = await query<{ stage_name: string; display_order: number }>(
-      `SELECT stage_name, display_order FROM stage_configs WHERE workspace_id = $1 ORDER BY display_order`,
-      [workspaceId]
-    );
     const displayOrder: Record<string, number> = {};
+    const stageDisplayName: Record<string, string> = {};
     for (const s of stageOrderResult.rows) {
-      displayOrder[s.stage_name] = s.display_order;
+      displayOrder[s.stage_normalized] = s.display_order;
+      stageDisplayName[s.stage_normalized] = s.stage_name;
     }
 
-    // Get open deal averages per stage
-    const openAvgResult = await query<{ stage_normalized: string; open_avg: string; open_count: string }>(
-      `SELECT stage_normalized,
-              AVG(COALESCE(days_in_stage, EXTRACT(days FROM NOW() - stage_changed_at)::integer))::numeric(10,1) AS open_avg,
-              COUNT(*) AS open_count
-       FROM deals
-       WHERE workspace_id = $1
-         AND stage_normalized NOT IN ('closed_won', 'closed_lost')
-         AND stage_normalized IS NOT NULL
-       GROUP BY stage_normalized`,
-      [workspaceId]
-    );
     const openAverages: Record<string, { avg: number; count: number }> = {};
     for (const r of openAvgResult.rows) {
       openAverages[r.stage_normalized] = {
@@ -116,16 +89,61 @@ router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response)
       };
     }
 
-    // Get distinct pipelines
-    const pipelinesResult = await query<{ pipeline: string }>(
-      `SELECT DISTINCT pipeline FROM stage_velocity_benchmarks WHERE workspace_id = $1 AND pipeline != 'all' ORDER BY pipeline`,
-      [workspaceId]
-    );
     const pipelines = pipelinesResult.rows.map(r => r.pipeline);
 
+    // Pivot won/lost rows into flat StageBenchmark objects matching the frontend interface
+    const benchMap: Record<string, {
+      stage: string;
+      stage_normalized: string;
+      display_order: number | null;
+      pipeline: string;
+      segment: string;
+      won_median: number | null;
+      won_p75: number | null;
+      won_sample: number;
+      won_confidence: string;
+      lost_median: number | null;
+      lost_sample: number;
+      lost_confidence: string;
+      is_inverted: boolean;
+      computed_at: string;
+    }> = {};
+
+    for (const r of benchRows.rows) {
+      const key = `${r.pipeline}||${r.stage_normalized}||${r.segment}`;
+      if (!benchMap[key]) {
+        benchMap[key] = {
+          stage: stageDisplayName[r.stage_normalized] ?? r.stage_normalized.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+          stage_normalized: r.stage_normalized,
+          display_order: displayOrder[r.stage_normalized] ?? null,
+          pipeline: r.pipeline,
+          segment: r.segment,
+          won_median: null,
+          won_p75: null,
+          won_sample: 0,
+          won_confidence: 'insufficient',
+          lost_median: null,
+          lost_sample: 0,
+          lost_confidence: 'insufficient',
+          is_inverted: r.is_inverted,
+          computed_at: r.computed_at,
+        };
+      }
+      if (r.outcome === 'won') {
+        benchMap[key].won_median = parseFloat(r.median_days);
+        benchMap[key].won_p75 = parseFloat(r.p75_days);
+        benchMap[key].won_sample = parseInt(r.sample_size, 10);
+        benchMap[key].won_confidence = r.confidence_tier;
+      } else {
+        benchMap[key].lost_median = parseFloat(r.median_days);
+        benchMap[key].lost_sample = parseInt(r.sample_size, 10);
+        benchMap[key].lost_confidence = r.confidence_tier;
+      }
+    }
+
     const benchmarks = Object.values(benchMap).sort((a, b) => {
-      const oa = displayOrder[a.stage_normalized] ?? 999;
-      const ob = displayOrder[b.stage_normalized] ?? 999;
+      const oa = a.display_order ?? 999;
+      const ob = b.display_order ?? 999;
       return oa - ob || a.stage_normalized.localeCompare(b.stage_normalized);
     });
 
