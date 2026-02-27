@@ -41,10 +41,13 @@ interface CrmGap {
   detail: string;
 }
 
+type CoachingMode = 'active' | 'retrospective' | 'hidden';
+
 interface CoachingSignal {
   type: 'positive' | 'warning' | 'action';
   label: string;
   insight: string;
+  action_sentence: string;
   separation_score?: number;
   data?: {
     dimension: string;
@@ -119,6 +122,12 @@ interface ConversationDossier {
   } | null;
   conversation_arc: ConversationArcEntry[];
   coaching_signals: CoachingSignal[];
+  coaching_mode: CoachingMode;
+  coaching_metadata: {
+    won_count: number;
+    lost_count: number;
+    pattern_count: number;
+  };
   skill_findings: {
     skill_id: string;
     severity: string;
@@ -209,7 +218,7 @@ export default function ConversationDetail() {
     );
   }
 
-  const { conversation, deal_context, health_impact, crm_follow_through, conversation_arc, coaching_signals, contacts_absent } = dossier;
+  const { conversation, deal_context, health_impact, crm_follow_through, conversation_arc, coaching_signals, coaching_mode, coaching_metadata, contacts_absent } = dossier;
 
   return (
     <div style={{ background: colors.background, minHeight: '100vh' }}>
@@ -397,6 +406,8 @@ export default function ConversationDetail() {
           {activeTab === 'coaching' && (
             <CoachingSignalsTab
               coachingSignals={coaching_signals}
+              coachingMode={coaching_mode}
+              coachingMetadata={coaching_metadata}
               callMetrics={conversation.call_metrics}
             />
           )}
@@ -717,27 +728,67 @@ function ActionTrackerTab({
 
 function CoachingSignalsTab({
   coachingSignals,
+  coachingMode,
+  coachingMetadata,
   callMetrics,
 }: {
   coachingSignals: CoachingSignal[];
+  coachingMode: CoachingMode;
+  coachingMetadata: { won_count: number; lost_count: number; pattern_count: number };
   callMetrics: CallMetrics | null;
 }) {
   // Check if we have pattern-based signals (vs building benchmarks message)
   const hasPatternData = coachingSignals.some(s => s.data != null);
-  const patternCount = hasPatternData ? coachingSignals.filter(s => s.data).length : 0;
-  const totalSampleSize = hasPatternData
-    ? Math.max(...coachingSignals.filter(s => s.data).map(s => s.data!.sample_size))
-    : 0;
+
+  // Badge configuration by mode
+  function getBadgeConfig(type: string) {
+    if (coachingMode === 'retrospective') {
+      return {
+        action: { text: 'RISK FACTOR', bg: colors.yellowSoft, color: colors.yellow, border: colors.yellow },
+        positive: { text: 'WIN FACTOR', bg: colors.greenSoft, color: colors.green, border: colors.green },
+        warning: { text: 'NOTABLE', bg: colors.blueSoft, color: colors.accent, border: colors.accent },
+      }[type] || { text: 'NOTABLE', bg: colors.surfaceHover, color: colors.textMuted, border: colors.border };
+    }
+
+    // Active mode
+    return {
+      action: { text: 'ACTION NEEDED', bg: colors.redSoft, color: colors.red, border: colors.red },
+      positive: { text: 'ON TRACK', bg: colors.greenSoft, color: colors.green, border: colors.green },
+      warning: { text: 'WATCH', bg: colors.yellowSoft, color: colors.yellow, border: colors.yellow },
+    }[type] || { text: 'INFO', bg: colors.surfaceHover, color: colors.textMuted, border: colors.border };
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-      {hasPatternData ? (
+      {/* Subtitle with mode-aware messaging */}
+      {coachingMode === 'retrospective' && hasPatternData && (
         <div style={{ fontSize: 13, color: colors.textMuted, fontStyle: 'italic' }}>
-          Compared against your closed-won deal benchmarks • Based on {totalSampleSize} closed deals
+          What patterns showed up on this deal • Based on {coachingMetadata.won_count + coachingMetadata.lost_count} closed deals
         </div>
-      ) : (
+      )}
+      {coachingMode === 'active' && hasPatternData && (
+        <div style={{ fontSize: 13, color: colors.textMuted, fontStyle: 'italic' }}>
+          Compared against your closed-won deal benchmarks • Based on {coachingMetadata.won_count + coachingMetadata.lost_count} closed deals
+        </div>
+      )}
+      {!hasPatternData && (
         <div style={{ fontSize: 13, color: colors.textMuted, fontStyle: 'italic' }}>
           Pattern discovery analyzes your closed deals to identify what predicts winning
+        </div>
+      )}
+
+      {/* Retrospective mode disclaimer */}
+      {coachingMode === 'retrospective' && hasPatternData && (
+        <div style={{
+          background: colors.surfaceHover,
+          border: `1px solid ${colors.border}`,
+          borderRadius: 6,
+          padding: 12,
+          fontSize: 13,
+          color: colors.textSecondary,
+          fontStyle: 'italic',
+        }}>
+          This deal is closed. Signals below show what patterns were present — useful for coaching reviews, not current action.
         </div>
       )}
 
@@ -779,39 +830,44 @@ function CoachingSignalsTab({
       {/* Coaching signals */}
       {coachingSignals.length > 0 ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {coachingSignals.map((signal, i) => (
-            <div
-              key={i}
-              style={{
-                background: colors.surface,
-                border: `1px solid ${signal.type === 'positive' ? colors.green : signal.type === 'warning' ? colors.yellow : colors.red}`,
-                borderRadius: 8,
-                padding: 16,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                <div style={{
-                  background: signal.type === 'positive' ? colors.greenSoft : signal.type === 'warning' ? colors.yellowSoft : colors.redSoft,
-                  color: signal.type === 'positive' ? colors.green : signal.type === 'warning' ? colors.yellow : colors.red,
-                  padding: '4px 8px',
-                  borderRadius: 4,
-                  fontSize: 10,
-                  fontWeight: 600,
-                  textTransform: 'uppercase',
-                }}>
-                  {signal.type === 'positive' ? 'STRENGTH' : signal.type === 'warning' ? 'RISK' : 'ACTION NEEDED'}
+          {coachingSignals.map((signal, i) => {
+            const badgeConfig = getBadgeConfig(signal.type);
+            return (
+              <div
+                key={i}
+                style={{
+                  background: colors.surface,
+                  border: `1px solid ${badgeConfig.border}`,
+                  borderLeft: `4px solid ${badgeConfig.border}`,
+                  borderRadius: 8,
+                  padding: 16,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <div style={{
+                    background: badgeConfig.bg,
+                    color: badgeConfig.color,
+                    padding: '4px 8px',
+                    borderRadius: 4,
+                    fontSize: 10,
+                    fontWeight: 600,
+                    textTransform: 'uppercase',
+                  }}>
+                    {badgeConfig.text}
+                  </div>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>{signal.label}</span>
                 </div>
-                <span style={{ fontSize: 14, fontWeight: 600 }}>{signal.label}</span>
-              </div>
-              <div style={{ fontSize: 13, color: colors.textSecondary, lineHeight: 1.5, marginBottom: signal.data ? 8 : 0 }}>
-                {signal.insight}
-              </div>
-              {signal.data && (
-                <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 8, paddingTop: 8, borderTop: `1px solid ${colors.border}` }}>
-                  Based on {signal.data.sample_size} deals | Pattern strength: {signal.separation_score && signal.separation_score >= 0.7 ? 'Strong' : signal.separation_score && signal.separation_score >= 0.5 ? 'Moderate' : 'Emerging'} ({signal.separation_score ? (signal.separation_score * 100).toFixed(0) + '%' : 'N/A'})
+                <div style={{ fontSize: 13, color: colors.textSecondary, lineHeight: 1.5, marginBottom: 8 }}>
+                  {signal.action_sentence || signal.insight}
                 </div>
-              )}
-            </div>
+                {signal.data && (
+                  <div style={{ fontSize: 11, color: colors.textMuted, paddingTop: 8, borderTop: `1px solid ${colors.border}` }}>
+                    Based on {signal.data.sample_size} deals | Pattern strength: {signal.separation_score && signal.separation_score >= 0.7 ? 'Strong' : signal.separation_score && signal.separation_score >= 0.5 ? 'Moderate' : 'Emerging'} ({signal.separation_score ? (signal.separation_score * 100).toFixed(0) + '%' : 'N/A'})
+                  </div>
+                )}
+              </div>
+            );
+          })}
           ))}
         </div>
       ) : (

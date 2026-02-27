@@ -8,10 +8,13 @@
 import { query } from '../db';
 import type { PoolClient } from 'pg';
 
+export type CoachingMode = 'active' | 'retrospective' | 'hidden';
+
 export interface CoachingSignal {
   type: 'positive' | 'warning' | 'action';
   label: string;
   insight: string;
+  action_sentence: string;
   separation_score?: number;
   data?: {
     dimension: string;
@@ -20,6 +23,16 @@ export interface CoachingSignal {
     won_p25: number;
     won_p75: number;
     sample_size: number;
+  };
+}
+
+export interface CoachingSignalsResult {
+  signals: CoachingSignal[];
+  mode: CoachingMode;
+  metadata: {
+    won_count: number;
+    lost_count: number;
+    pattern_count: number;
   };
 }
 
@@ -61,6 +74,181 @@ interface DealMetrics {
 }
 
 /**
+ * Determine coaching mode based on deal status
+ */
+function getCoachingMode(currentStage: string | null): CoachingMode {
+  if (!currentStage) return 'hidden';
+
+  const stage = currentStage.toLowerCase();
+
+  // Closed deals get retrospective view (what went right/wrong)
+  if (stage === 'closed_won' || stage === 'closed_lost') return 'retrospective';
+
+  // Open deals get active coaching
+  return 'active';
+}
+
+/**
+ * Get signal copy (label + action sentence) for a dimension
+ */
+interface SignalCopy {
+  label: string;
+  action_sentence: string;
+}
+
+function getSignalCopy(
+  dimension: string,
+  type: 'action' | 'positive',
+  mode: CoachingMode,
+  currentValue: number,
+  wonMedian: number
+): SignalCopy {
+  const copies: Record<string, Record<string, SignalCopy>> = {
+    sales_cycle_days: {
+      action: {
+        label: `Sales cycle at ${Math.round(currentValue)} days`,
+        action_sentence: `Won deals at this size typically close in ${Math.round(wonMedian)} days. Identify what's stalling and whether this deal needs a forcing function.`,
+      },
+      positive: {
+        label: `Fast sales cycle`,
+        action_sentence:
+          mode === 'retrospective'
+            ? `Closed in ${Math.round(currentValue)} days vs ${Math.round(wonMedian)}-day median. Worth studying what accelerated this deal.`
+            : `On pace at ${Math.round(currentValue)} days vs ${Math.round(wonMedian)}-day median for won deals.`,
+      },
+    },
+
+    stage_regression_count: {
+      action: {
+        label: `${currentValue} stage regressions`,
+        action_sentence: `Deals that win at this size typically have ${Math.round(wonMedian)} or fewer regressions. Multiple setbacks may signal qualification issues.`,
+      },
+      positive: {
+        label: `Clean stage progression`,
+        action_sentence:
+          mode === 'retrospective'
+            ? `Deal moved forward without unusual setbacks (${currentValue} regression vs ${Math.round(wonMedian)} median).`
+            : `Stage progression tracking normally. No unusual regression pattern.`,
+      },
+    },
+
+    unique_external_participants: {
+      action: {
+        label: `Single-threaded — ${currentValue} buyer contact${currentValue === 1 ? '' : 's'}`,
+        action_sentence: `Won deals at this size typically involve ${Math.round(wonMedian)} buyer contacts. Identify additional stakeholders who influence the decision.`,
+      },
+      positive: {
+        label: `Multi-threaded — ${currentValue} buyer contacts`,
+        action_sentence:
+          mode === 'retrospective'
+            ? `Strong stakeholder coverage. ${currentValue} contacts engaged vs ${Math.round(wonMedian)} median.`
+            : `Good stakeholder coverage at ${currentValue} contacts. On par with winning pattern.`,
+      },
+    },
+
+    call_count: {
+      action: {
+        label: `Low engagement — ${currentValue} calls`,
+        action_sentence: `Won deals at this size average ${Math.round(wonMedian)} calls. This deal may need more direct engagement to advance.`,
+      },
+      positive: {
+        label: `Strong engagement — ${currentValue} calls`,
+        action_sentence: `Call volume tracking with the winning pattern (${Math.round(wonMedian)} median).`,
+      },
+    },
+
+    days_between_calls_avg: {
+      action: {
+        label: `${Math.round(currentValue)}-day gaps between calls`,
+        action_sentence: `Won deals maintain a ${Math.round(wonMedian)}-day cadence. Tighten the engagement rhythm to avoid deal drift.`,
+      },
+      positive: {
+        label: `Tight call cadence`,
+        action_sentence: `${Math.round(currentValue)}-day average between calls, in line with the ${Math.round(wonMedian)}-day winning pattern.`,
+      },
+    },
+
+    avg_talk_ratio_rep: {
+      action: {
+        label: `Rep talk time at ${Math.round(currentValue)}%`,
+        action_sentence: `On won deals, reps average ${Math.round(wonMedian)}% talk time. More open-ended discovery could shift the ratio.`,
+      },
+      positive: {
+        label: `Balanced conversation`,
+        action_sentence: `Rep talk time at ${Math.round(currentValue)}% tracks the ${Math.round(wonMedian)}% winning pattern.`,
+      },
+    },
+
+    contact_count: {
+      action: {
+        label: `${currentValue} contacts on deal`,
+        action_sentence: `Won deals at this size typically have ${Math.round(wonMedian)} contacts. Map additional stakeholders in the buying process.`,
+      },
+      positive: {
+        label: `Good contact coverage`,
+        action_sentence: `${currentValue} contacts on deal, aligned with the ${Math.round(wonMedian)}-contact winning pattern.`,
+      },
+    },
+
+    avg_action_items_per_call: {
+      action: {
+        label: `${currentValue.toFixed(1)} action items per call`,
+        action_sentence: `Won deals average ${wonMedian.toFixed(1)} action items per call. More specific commitments during calls may improve follow-through.`,
+      },
+      positive: {
+        label: `Good call-to-action cadence`,
+        action_sentence: `${currentValue.toFixed(1)} action items per call, tracking the winning pattern.`,
+      },
+    },
+
+    total_call_minutes: {
+      action: {
+        label: `${Math.round(currentValue)} total call minutes`,
+        action_sentence: `Won deals accumulate ${Math.round(wonMedian)} minutes of call time. This deal may need deeper conversations to progress.`,
+      },
+      positive: {
+        label: `Sufficient call investment`,
+        action_sentence: `${Math.round(currentValue)} total minutes of conversation, aligned with the winning pattern.`,
+      },
+    },
+  };
+
+  const dimCopy = copies[dimension];
+  if (!dimCopy) {
+    // Fallback for dimensions without custom copy
+    return {
+      label: `${formatDimensionName(dimension)}: ${formatValue(dimension, currentValue)}`,
+      action_sentence:
+        type === 'action'
+          ? `Won deals ${wonMedian > currentValue ? 'typically score higher' : 'typically score lower'} on this metric (median: ${formatValue(dimension, wonMedian)}).`
+          : `Tracking with the winning pattern (median: ${formatValue(dimension, wonMedian)}).`,
+    };
+  }
+
+  return dimCopy[type];
+}
+
+function formatDimensionName(dimension: string): string {
+  return dimension
+    .split('_')
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
+function formatValue(dimension: string, value: number): string {
+  if (dimension.includes('ratio') || dimension.includes('pct')) {
+    return `${Math.round(value)}%`;
+  }
+  if (dimension.includes('days')) {
+    return `${Math.round(value)} days`;
+  }
+  if (dimension.includes('count') || dimension.includes('participants')) {
+    return Math.round(value).toString();
+  }
+  return value.toFixed(1);
+}
+
+/**
  * Generate coaching signals based on discovered win patterns
  */
 export async function generateCoachingSignals(
@@ -70,8 +258,39 @@ export async function generateCoachingSignals(
   amount: number,
   pipelineName: string | null,
   client?: PoolClient
-): Promise<CoachingSignal[]> {
+): Promise<CoachingSignalsResult> {
   const db = client || { query };
+
+  // Determine coaching mode
+  const mode = getCoachingMode(currentStage);
+
+  if (mode === 'hidden') {
+    return {
+      signals: [],
+      mode: 'hidden',
+      metadata: { won_count: 0, lost_count: 0, pattern_count: 0 },
+    };
+  }
+
+  // Display thresholds by coaching mode
+  const MIN_DISPLAY_THRESHOLD = {
+    active: 0.5, // Only show Moderate+ patterns on open deals
+    retrospective: 0.4, // Slightly lower bar for learning context
+  };
+
+  // Get closed deal counts for metadata
+  const closedDealsResult = await db.query<{ won: number; lost: number }>(
+    `SELECT
+      SUM(CASE WHEN stage_normalized = 'closed_won' THEN 1 ELSE 0 END)::integer as won,
+      SUM(CASE WHEN stage_normalized = 'closed_lost' THEN 1 ELSE 0 END)::integer as lost
+     FROM deals
+     WHERE workspace_id = $1
+       AND stage_normalized IN ('closed_won', 'closed_lost')`,
+    [workspaceId]
+  );
+
+  const wonCount = closedDealsResult.rows[0]?.won || 0;
+  const lostCount = closedDealsResult.rows[0]?.lost || 0;
 
   // 1. Load current win patterns for this workspace
   const patternsResult = await db.query<StoredPattern>(
@@ -83,26 +302,18 @@ export async function generateCoachingSignals(
 
   if (patternsResult.rows.length === 0) {
     // No patterns discovered yet - show building benchmarks message
-    const closedDealsResult = await db.query<{ won: number; lost: number }>(
-      `SELECT
-        SUM(CASE WHEN stage_normalized = 'closed_won' THEN 1 ELSE 0 END)::integer as won,
-        SUM(CASE WHEN stage_normalized = 'closed_lost' THEN 1 ELSE 0 END)::integer as lost
-       FROM deals
-       WHERE workspace_id = $1
-         AND stage_normalized IN ('closed_won', 'closed_lost')`,
-      [workspaceId]
-    );
-
-    const wonCount = closedDealsResult.rows[0]?.won || 0;
-    const lostCount = closedDealsResult.rows[0]?.lost || 0;
-
-    return [
-      {
-        type: 'warning',
-        label: 'Building your benchmarks',
-        insight: `Pandora is analyzing your closed deals to discover what winning looks like for your team. Coaching signals will appear once you have 15+ closed-won and 10+ closed-lost deals. Current: ${wonCount} won, ${lostCount} lost.`,
-      },
-    ];
+    return {
+      signals: [
+        {
+          type: 'warning',
+          label: 'Building your benchmarks',
+          insight: `Pandora is analyzing your closed deals to discover what winning looks like for your team. Coaching signals will appear once you have 15+ closed-won and 10+ closed-lost deals.`,
+          action_sentence: `Current: ${wonCount} won, ${lostCount} lost deals in your pipeline.`,
+        },
+      ],
+      mode,
+      metadata: { won_count: wonCount, lost_count: lostCount, pattern_count: 0 },
+    };
   }
 
   // 2. Find patterns applicable to THIS deal
@@ -115,17 +326,45 @@ export async function generateCoachingSignals(
     // Stage relevance
     if (!p.relevant_stages.includes('all') && !p.relevant_stages.includes(currentStage)) return false;
 
+    // Minimum display threshold
+    if (p.separation_score < MIN_DISPLAY_THRESHOLD[mode]) return false;
+
     return true;
   });
 
   if (applicablePatterns.length === 0) {
-    return [
-      {
-        type: 'warning',
-        label: 'No patterns for this segment',
-        insight: 'Not enough closed deals in this deal size range to generate coaching signals yet.',
-      },
-    ];
+    // Patterns exist but none meet threshold or segment
+    const hasWeakPatterns = patternsResult.rows.some(
+      p => p.separation_score >= 0.3 && p.separation_score < MIN_DISPLAY_THRESHOLD[mode]
+    );
+
+    if (hasWeakPatterns) {
+      return {
+        signals: [
+          {
+            type: 'warning',
+            label: 'No strong coaching patterns detected',
+            insight: 'Pandora has identified some emerging patterns in your pipeline data, but they haven't reached the confidence level needed to provide reliable coaching.',
+            action_sentence: `As more deals close, patterns will strengthen. ${wonCount} won and ${lostCount} lost deals analyzed.`,
+          },
+        ],
+        mode,
+        metadata: { won_count: wonCount, lost_count: lostCount, pattern_count: patternsResult.rows.length },
+      };
+    }
+
+    return {
+      signals: [
+        {
+          type: 'warning',
+          label: 'No patterns for this segment',
+          insight: 'Not enough closed deals in this deal size range to generate coaching signals yet.',
+          action_sentence: 'Patterns will appear as similar deals close.',
+        },
+      ],
+      mode,
+      metadata: { won_count: wonCount, lost_count: lostCount, pattern_count: patternsResult.rows.length },
+    };
   }
 
   // 3. Compute current deal metrics
@@ -149,10 +388,12 @@ export async function generateCoachingSignals(
         : currentValue <= pattern.won_median;
 
     if (isOnWrongSide) {
+      const copy = getSignalCopy(pattern.dimension, 'action', mode, currentValue, pattern.won_median);
       signals.push({
         type: 'action',
-        label: dimensionToLabel(pattern.dimension),
-        insight: buildInsightText(pattern, currentValue),
+        label: copy.label,
+        insight: copy.action_sentence, // Keep for backward compat
+        action_sentence: copy.action_sentence,
         separation_score: pattern.separation_score,
         data: {
           dimension: pattern.dimension,
@@ -164,11 +405,12 @@ export async function generateCoachingSignals(
         },
       });
     } else if (isOnRightSide) {
-      // Surface strengths (but limit these to avoid clutter)
+      const copy = getSignalCopy(pattern.dimension, 'positive', mode, currentValue, pattern.won_median);
       signals.push({
         type: 'positive',
-        label: dimensionToLabel(pattern.dimension),
-        insight: buildStrengthText(pattern, currentValue),
+        label: copy.label,
+        insight: copy.action_sentence, // Keep for backward compat
+        action_sentence: copy.action_sentence,
         separation_score: pattern.separation_score,
         data: {
           dimension: pattern.dimension,
@@ -182,14 +424,33 @@ export async function generateCoachingSignals(
     }
   }
 
-  // 5. Sort by separation score (most predictive first), limit output
+  // 5. Sort by separation score (most predictive first)
   signals.sort((a, b) => (b.separation_score || 0) - (a.separation_score || 0));
 
-  // Return max 3 action signals + 2 positive signals
-  const actions = signals.filter(s => s.type === 'action').slice(0, 3);
-  const strengths = signals.filter(s => s.type === 'positive').slice(0, 2);
+  // 6. Cap signals by mode
+  const maxSignals = {
+    active: { action: 3, positive: 2 },
+    retrospective: { total: 3 },
+  };
 
-  return [...actions, ...strengths];
+  let finalSignals: CoachingSignal[];
+  if (mode === 'retrospective') {
+    finalSignals = signals.slice(0, maxSignals.retrospective.total);
+  } else {
+    const actions = signals.filter(s => s.type === 'action').slice(0, maxSignals.active.action);
+    const strengths = signals.filter(s => s.type === 'positive').slice(0, maxSignals.active.positive);
+    finalSignals = [...actions, ...strengths];
+  }
+
+  return {
+    signals: finalSignals,
+    mode,
+    metadata: {
+      won_count: wonCount,
+      lost_count: lostCount,
+      pattern_count: applicablePatterns.length,
+    },
+  };
 }
 
 /**
@@ -318,81 +579,4 @@ async function computeDealMetrics(
   };
 }
 
-/**
- * Convert dimension key to human-readable label
- */
-function dimensionToLabel(dimension: string): string {
-  const labels: Record<string, string> = {
-    unique_external_participants: 'Limited buyer engagement',
-    call_count: 'Call frequency below winning pattern',
-    avg_talk_ratio_rep: 'Rep talk time high',
-    avg_talk_ratio_buyer: 'Buyer talk time low',
-    avg_call_duration_minutes: 'Call duration off-pattern',
-    days_between_calls_avg: 'Call cadence too slow',
-    sales_cycle_days: 'Sales cycle dragging',
-    stage_regression_count: 'Stage regressions detected',
-    contact_count: 'Limited multi-threading',
-    avg_action_items_per_call: 'Low action item generation',
-    avg_questions_per_call: 'Low question count',
-    first_call_days_from_creation: 'Delayed first engagement',
-    total_call_minutes: 'Total engagement time low',
-    avg_external_per_call: 'Low buyer attendance per call',
-  };
-
-  return labels[dimension] || dimension;
-}
-
-/**
- * Build insight text for an action signal
- */
-function buildInsightText(pattern: StoredPattern, currentValue: number): string {
-  const wonMed = Math.round(pattern.won_median * 10) / 10;
-  const sizeContext =
-    pattern.segment_size_min != null
-      ? ` for ${formatCurrency(pattern.segment_size_min)}-${formatCurrency(pattern.segment_size_max)} deals`
-      : '';
-
-  const templates: Record<string, string> = {
-    unique_external_participants: `${currentValue} unique buyer contacts engaged. Won deals${sizeContext} typically have ${wonMed}. Consider broadening stakeholder involvement.`,
-    call_count: `${currentValue} calls on this deal. Won deals${sizeContext} average ${wonMed} calls. Engagement volume is below the winning pattern.`,
-    avg_talk_ratio_rep: `Rep talk time at ${Math.round(currentValue)}%. On won deals${sizeContext}, reps average ${Math.round(wonMed)}%. More buyer-led conversation may help.`,
-    avg_talk_ratio_buyer: `Buyer talk time at ${Math.round(currentValue)}%. Won deals${sizeContext} have buyers at ${Math.round(wonMed)}%. Encourage more buyer participation.`,
-    avg_call_duration_minutes: `Calls averaging ${Math.round(currentValue)} minutes. Won deals${sizeContext} average ${Math.round(wonMed)} minute calls.`,
-    days_between_calls_avg: `${Math.round(currentValue)} days between calls on average. Won deals${sizeContext} maintain ${Math.round(wonMed)}-day cadence.`,
-    sales_cycle_days: `Deal at day ${Math.round(currentValue)} of sales cycle. Won deals${sizeContext} close in a median of ${Math.round(wonMed)} days.`,
-    stage_regression_count: `${currentValue} stage regressions. Won deals${sizeContext} average ${wonMed}. Stage movement should be forward.`,
-    contact_count: `${currentValue} contacts on deal. Won deals${sizeContext} typically have ${Math.round(wonMed)}.`,
-    avg_action_items_per_call: `${currentValue.toFixed(1)} action items per call. Won deals${sizeContext} average ${wonMed.toFixed(1)}.`,
-  };
-
-  return (
-    templates[pattern.dimension] ||
-    `${dimensionToLabel(pattern.dimension)}: ${currentValue} vs ${wonMed} median on won deals${sizeContext}.`
-  );
-}
-
-/**
- * Build insight text for a positive signal
- */
-function buildStrengthText(pattern: StoredPattern, currentValue: number): string {
-  const wonMed = Math.round(pattern.won_median * 10) / 10;
-  const sizeContext =
-    pattern.segment_size_min != null
-      ? ` for ${formatCurrency(pattern.segment_size_min)}-${formatCurrency(pattern.segment_size_max)} deals`
-      : '';
-
-  return `${dimensionToLabel(pattern.dimension)}: ${currentValue} (won deals${sizeContext} median: ${wonMed}). Tracking well.`;
-}
-
-// Helper functions
-
-function formatCurrency(value: number): string {
-  if (value >= 1000000) return `$${Math.round(value / 1000000)}M`;
-  if (value >= 1000) return `$${Math.round(value / 1000)}k`;
-  return `$${value}`;
-}
-
-function daysBetween(date1: Date, date2: Date): number {
-  const diffMs = Math.abs(date2.getTime() - date1.getTime());
-  return Math.floor(diffMs / (1000 * 60 * 60 * 24));
-}
+// Old helper functions removed - replaced by getSignalCopy()

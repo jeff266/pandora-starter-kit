@@ -15,7 +15,7 @@ import type { PoolClient } from 'pg';
 import type { ResolvedParticipant } from '../conversations/resolve-participants.js';
 import type { PostCallCrmState } from '../conversations/post-call-tracker.js';
 import { generateCoachingSignals } from '../coaching/coaching-signals.js';
-import type { CoachingSignal } from '../coaching/coaching-signals.js';
+import type { CoachingSignal, CoachingMode } from '../coaching/coaching-signals.js';
 
 export interface ConversationDossier {
   conversation: {
@@ -73,6 +73,12 @@ export interface ConversationDossier {
   conversation_arc: ConversationArcEntry[];
 
   coaching_signals: CoachingSignal[];
+  coaching_mode: CoachingMode;
+  coaching_metadata: {
+    won_count: number;
+    lost_count: number;
+    pattern_count: number;
+  };
 
   skill_findings: {
     skill_id: string;
@@ -285,7 +291,7 @@ export async function assembleConversationDossier(
     );
 
     // Step 6: Generate coaching signals (pattern-based)
-    const coachingSignals = conv.deal_id && dealContext
+    const coachingResult = conv.deal_id && dealContext
       ? await generateCoachingSignals(
           conv.deal_id,
           workspaceId,
@@ -294,7 +300,7 @@ export async function assembleConversationDossier(
           null, // pipeline_name not yet tracked
           client
         )
-      : [];
+      : { signals: [], mode: 'hidden' as CoachingMode, metadata: { won_count: 0, lost_count: 0, pattern_count: 0 } };
 
     // Step 7: Load skill findings for this deal
     const skillFindings = await loadSkillFindings(conv.deal_id, workspaceId, client);
@@ -323,7 +329,9 @@ export async function assembleConversationDossier(
       health_impact: healthImpact,
       crm_follow_through: crmFollowThrough,
       conversation_arc: conversationArc,
-      coaching_signals: coachingSignals,
+      coaching_signals: coachingResult.signals,
+      coaching_mode: coachingResult.mode,
+      coaching_metadata: coachingResult.metadata,
       skill_findings: skillFindings,
       contacts_absent: contactsAbsent,
     };
