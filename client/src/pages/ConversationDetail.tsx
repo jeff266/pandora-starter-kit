@@ -868,7 +868,6 @@ function CoachingSignalsTab({
               </div>
             );
           })}
-          ))}
         </div>
       ) : (
         <div style={{
