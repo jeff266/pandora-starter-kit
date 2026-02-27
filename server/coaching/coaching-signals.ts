@@ -303,7 +303,23 @@ export async function generateCoachingSignals(
     [workspaceId]
   );
 
-  if (patternsResult.rows.length === 0) {
+  // Coerce numeric columns (node-postgres returns all columns as strings with SELECT *)
+  const patterns: StoredPattern[] = patternsResult.rows.map(r => ({
+    ...r,
+    won_median:        Number(r.won_median),
+    won_p25:           Number(r.won_p25),
+    won_p75:           Number(r.won_p75),
+    lost_median:       Number(r.lost_median),
+    lost_p25:          Number(r.lost_p25),
+    lost_p75:          Number(r.lost_p75),
+    separation_score:  Number(r.separation_score),
+    sample_size_won:   Number(r.sample_size_won),
+    sample_size_lost:  Number(r.sample_size_lost),
+    segment_size_min:  r.segment_size_min != null ? Number(r.segment_size_min) : null,
+    segment_size_max:  r.segment_size_max != null ? Number(r.segment_size_max) : null,
+  }));
+
+  if (patterns.length === 0) {
     // No patterns discovered yet - show building benchmarks message
     return {
       signals: [
@@ -320,7 +336,7 @@ export async function generateCoachingSignals(
   }
 
   // 2. Find patterns applicable to THIS deal
-  const applicablePatterns = patternsResult.rows.filter(p => {
+  const applicablePatterns = patterns.filter(p => {
     // Segment match
     if (p.segment_size_min != null && amount < p.segment_size_min) return false;
     if (p.segment_size_max != null && amount > p.segment_size_max) return false;
@@ -337,7 +353,7 @@ export async function generateCoachingSignals(
 
   if (applicablePatterns.length === 0) {
     // Patterns exist but none meet threshold or segment
-    const hasWeakPatterns = patternsResult.rows.some(
+    const hasWeakPatterns = patterns.some(
       p => p.separation_score >= 0.3 && p.separation_score < MIN_DISPLAY_THRESHOLD[mode]
     );
 
@@ -352,7 +368,7 @@ export async function generateCoachingSignals(
           },
         ],
         mode,
-        metadata: { won_count: wonCount, lost_count: lostCount, pattern_count: patternsResult.rows.length },
+        metadata: { won_count: wonCount, lost_count: lostCount, pattern_count: patterns.length },
       };
     }
 
@@ -366,7 +382,7 @@ export async function generateCoachingSignals(
         },
       ],
       mode,
-      metadata: { won_count: wonCount, lost_count: lostCount, pattern_count: patternsResult.rows.length },
+      metadata: { won_count: wonCount, lost_count: lostCount, pattern_count: patterns.length },
     };
   }
 

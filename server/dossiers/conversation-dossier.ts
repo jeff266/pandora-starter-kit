@@ -404,7 +404,7 @@ async function loadDealContext(
       `SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY duration_in_previous_stage_ms / 86400000.0) as median_days
        FROM deal_stage_history
        WHERE workspace_id = $1
-         AND from_stage_normalized = $2
+         AND stage_normalized = $2
          AND duration_in_previous_stage_ms IS NOT NULL`,
       [workspaceId, deal.stage_normalized]
     );
