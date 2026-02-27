@@ -13,6 +13,7 @@ interface DemoModeContextType {
     amount: (value: number) => number;
     workspace: (name: string) => string;
     text: (text: string) => string;
+    pipeline: (name: string) => string;
   };
 }
 
@@ -24,6 +25,7 @@ const passthrough = {
   amount: (v: number) => v,
   workspace: (n: string) => n,
   text: (t: string) => t,
+  pipeline: (n: string) => n,
 };
 
 const DemoModeContext = createContext<DemoModeContextType>({
@@ -76,6 +78,7 @@ export function DemoModeProvider({ children }: { children: React.ReactNode }) {
       amount: (v: number) => anonymizer.anonymizeAmount(v),
       workspace: (n: string) => anonymizer.anonymizeWorkspace(n),
       text: (t: string) => anonymizer.anonymizeText(t),
+      pipeline: (n: string) => anonymizer.anonymizeCompany(n),
     };
   }, [isDemoMode]);
 
