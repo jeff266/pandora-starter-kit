@@ -7,6 +7,7 @@
 
 import { query } from '../db';
 import type { PoolClient } from 'pg';
+import { daysBetween } from '../utils/date-helpers.js';
 
 export type CoachingMode = 'active' | 'retrospective' | 'hidden';
 
