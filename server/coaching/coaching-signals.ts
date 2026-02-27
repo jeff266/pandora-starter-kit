@@ -344,7 +344,7 @@ export async function generateCoachingSignals(
           {
             type: 'warning',
             label: 'No strong coaching patterns detected',
-            insight: 'Pandora has identified some emerging patterns in your pipeline data, but they haven't reached the confidence level needed to provide reliable coaching.',
+            insight: `Pandora has identified some emerging patterns in your pipeline data, but they haven't reached the confidence level needed to provide reliable coaching.`,
             action_sentence: `As more deals close, patterns will strengthen. ${wonCount} won and ${lostCount} lost deals analyzed.`,
           },
         ],
