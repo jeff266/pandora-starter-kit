@@ -677,36 +677,42 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
     const win_trend = trailing_90d > prev_rate + 0.02 ? 'up' : trailing_90d < prev_rate - 0.02 ? 'down' : 'stable';
 
     // --- Enhanced Dashboard Data (Phase 1) ---
-    // Fetch actions summary, signals summary, recent findings, and metric evidence in parallel
-    const [actionsSummaryResult, signalsSummaryResult, recentFindingsResult] = await Promise.all([
-      // Actions summary
-      query(
-        `SELECT
-           count(*) FILTER (WHERE execution_status = 'open')::int as total_open,
-           count(*) FILTER (WHERE execution_status = 'open' AND severity = 'critical')::int as critical,
-           COALESCE(sum(impact_amount) FILTER (WHERE execution_status = 'open' AND severity = 'critical'), 0)::float as critical_amount,
-           count(*) FILTER (WHERE execution_status = 'open' AND severity = 'high')::int as warning,
-           COALESCE(sum(impact_amount) FILTER (WHERE execution_status = 'open' AND severity = 'high'), 0)::float as warning_amount,
-           count(*) FILTER (WHERE execution_status = 'open' AND severity IN ('medium', 'low'))::int as info
-         FROM action_items
-         WHERE workspace_id = $1`,
-        [workspaceId]
-      ).catch(() => ({ rows: [{ total_open: 0, critical: 0, critical_amount: 0, warning: 0, warning_amount: 0, info: 0 }] })),
-
-      // Signals summary (last 7 days)
+    // Fetch findings summary, skill activity summary, recent findings, and metric evidence in parallel
+    const [findingsSummaryResult, skillActivityResult, recentFindingsResult] = await Promise.all([
+      // Findings summary (last 7 days)
       query(
         `SELECT
            count(*)::int as total_this_week,
-           jsonb_object_agg(signal_type, cnt) as by_type
-         FROM (
-           SELECT signal_type, count(*)::int as cnt
-           FROM account_signals
-           WHERE workspace_id = $1
-             AND created_at >= now() - interval '7 days'
-           GROUP BY signal_type
-         ) s`,
+           count(*) FILTER (WHERE severity = 'act')::int as act_count,
+           count(*) FILTER (WHERE severity = 'watch')::int as watch_count,
+           count(*) FILTER (WHERE severity = 'notable')::int as notable_count,
+           count(*) FILTER (WHERE severity = 'info')::int as info_count
+         FROM findings
+         WHERE workspace_id = $1
+           AND resolved_at IS NULL
+           AND found_at >= now() - interval '7 days'`,
         [workspaceId]
-      ).catch(() => ({ rows: [{ total_this_week: 0, by_type: {} }] })),
+      ).catch(() => ({ rows: [{ total_this_week: 0, act_count: 0, watch_count: 0, notable_count: 0, info_count: 0 }] })),
+
+      // Skill activity summary (last 7 days)
+      query(
+        `SELECT
+           (SELECT count(*)::int FROM skill_runs
+            WHERE workspace_id = $1
+              AND status = 'completed'
+              AND completed_at >= now() - interval '7 days') as total_runs,
+           (SELECT count(*)::int FROM findings
+            WHERE workspace_id = $1
+              AND found_at >= now() - interval '7 days') as total_findings,
+           (SELECT jsonb_object_agg(skill_id, cnt) FROM (
+             SELECT skill_id, count(*)::int as cnt
+             FROM findings
+             WHERE workspace_id = $1
+               AND found_at >= now() - interval '7 days'
+             GROUP BY skill_id
+           ) s) as by_skill`,
+        [workspaceId]
+      ).catch(() => ({ rows: [{ total_runs: 0, total_findings: 0, by_skill: {} }] })),
 
       // Recent findings (top 10)
       query(
@@ -732,24 +738,22 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
       ).catch(() => ({ rows: [] })),
     ]);
 
-    // Build actions summary
-    const actionsRow = actionsSummaryResult.rows[0] || {};
-    const actions_summary = {
-      total_open: actionsRow.total_open || 0,
-      critical: actionsRow.critical || 0,
-      critical_amount: actionsRow.critical_amount || 0,
-      warning: actionsRow.warning || 0,
-      warning_amount: actionsRow.warning_amount || 0,
-      info: actionsRow.info || 0,
-      top_actions: [], // Would need a separate query to get top 5 actions
+    // Build widget findings summary (replaces actions_summary)
+    const widgetFindingsRow = findingsSummaryResult.rows[0] || {};
+    const widget_findings_summary = {
+      total_this_week: widgetFindingsRow.total_this_week || 0,
+      act_count: widgetFindingsRow.act_count || 0,
+      watch_count: widgetFindingsRow.watch_count || 0,
+      notable_count: widgetFindingsRow.notable_count || 0,
+      info_count: widgetFindingsRow.info_count || 0,
     };
 
-    // Build signals summary
-    const signalsRow = signalsSummaryResult.rows[0] || {};
-    const signals_summary = {
-      total_this_week: signalsRow.total_this_week || 0,
-      by_type: signalsRow.by_type || {},
-      hot_accounts: [], // Would need a separate query to get hot accounts
+    // Build skill activity summary (replaces signals_summary)
+    const skillActivityRow = skillActivityResult.rows[0] || {};
+    const widget_skill_activity_summary = {
+      total_runs: skillActivityRow.total_runs || 0,
+      total_findings: skillActivityRow.total_findings || 0,
+      by_skill: skillActivityRow.by_skill || {},
     };
 
     // Recent findings
@@ -936,8 +940,8 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
         time_range: timeRangeParam,
         date_range: dateRange,
         metric_evidence,
-        actions_summary,
-        signals_summary,
+        findings_summary: widget_findings_summary,
+        skill_activity_summary: widget_skill_activity_summary,
         recent_findings,
       });
       return;
@@ -955,13 +959,12 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
         trailing_90d: Math.round(trailing_90d * 1000) / 1000,
         trend: win_trend,
       },
-      findings_summary,
-      // Enhanced dashboard data (Phase 1)
+      // Enhanced dashboard data (Phase 1) - widget summaries
       time_range: timeRangeParam,
       date_range: dateRange,
       metric_evidence,
-      actions_summary,
-      signals_summary,
+      findings_summary: widget_findings_summary,
+      skill_activity_summary: widget_skill_activity_summary,
       recent_findings,
     });
   } catch (err) {

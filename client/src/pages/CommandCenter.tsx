@@ -787,15 +787,15 @@ export default function CommandCenter() {
             )}
           </div>
 
-          {/* Right: Actions + Signals stacked */}
+          {/* Right: Critical Findings + Skill Activity stacked */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <ActionsWidget
-              summary={pipeline?.actions_summary}
+              summary={pipeline?.findings_summary}
               loading={loading.pipeline}
               workspaceId={wsId}
             />
             <SignalsWidget
-              summary={pipeline?.signals_summary}
+              summary={pipeline?.skill_activity_summary}
               loading={loading.pipeline}
               workspaceId={wsId}
             />

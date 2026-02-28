@@ -1,169 +1,179 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertCircle, AlertTriangle, Info, ArrowRight } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import { colors, fonts } from '../../styles/theme';
-import { formatCurrency } from '../../lib/format';
-import { SeverityDot } from '../shared';
 
-interface ActionsSummary {
-  total_open: number;
-  critical: number;
-  critical_amount: number;
-  warning: number;
-  warning_amount: number;
-  info: number;
-  top_actions?: Array<{
-    id: string;
-    title: string;
-    severity: string;
-    target_entity_name?: string;
-    impact_amount?: number;
-  }>;
+interface FindingsSummary {
+  total_this_week: number;
+  act_count: number;
+  watch_count: number;
+  notable_count: number;
+  info_count: number;
 }
 
-interface ActionsWidgetProps {
-  summary?: ActionsSummary;
-  loading?: boolean;
+interface FindingsWidgetProps {
+  summary?: FindingsSummary;
+  loading: boolean;
   workspaceId: string;
 }
 
-export function ActionsWidget({ summary, loading = false, workspaceId }: ActionsWidgetProps) {
+export function ActionsWidget({ summary, loading, workspaceId }: FindingsWidgetProps) {
   const navigate = useNavigate();
 
-  const handleSeverityClick = (severity: string) => {
-    navigate(`/workspaces/${workspaceId}/actions?severity=${severity}`);
-  };
-
   const handleViewAll = () => {
-    navigate(`/workspaces/${workspaceId}/actions`);
+    navigate(`/workspaces/${workspaceId}/insights`);
   };
 
-  return (
-    <div
-      style={{
+  if (loading) {
+    return (
+      <div style={{
         background: colors.surface,
         border: `1px solid ${colors.border}`,
-        borderRadius: 10,
+        borderRadius: 8,
         padding: 16,
-      }}
-    >
+      }}>
+        <div style={{ height: 14, background: colors.surfaceHover, borderRadius: 4, width: '60%', marginBottom: 12 }} />
+        <div style={{ height: 40, background: colors.surfaceRaised, borderRadius: 6 }} />
+      </div>
+    );
+  }
+
+  const totalFindings = summary?.total_this_week ?? 0;
+  const actCount = summary?.act_count ?? 0;
+  const watchCount = summary?.watch_count ?? 0;
+
+  return (
+    <div style={{
+      background: colors.surface,
+      border: `1px solid ${colors.border}`,
+      borderRadius: 8,
+      overflow: 'hidden',
+    }}>
       {/* Header */}
-      <h4 style={{ margin: '0 0 16px 0', fontSize: 16, fontWeight: 600, color: colors.text, fontFamily: fonts.body }}>
-        Actions Needing Attention
-      </h4>
-
-      {loading ? (
-        <div style={{ padding: 20, textAlign: 'center', color: colors.textSecondary }}>Loading...</div>
-      ) : (
-        <>
-          {/* Severity Counts */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16 }}>
-            {/* Critical */}
-            <button
-              onClick={() => handleSeverityClick('critical')}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: 12,
-                borderRadius: 8,
-                border: 'none',
-                background: `${colors.red}11`,
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = `${colors.red}22`)}
-              onMouseLeave={(e) => (e.currentTarget.style.background = `${colors.red}11`)}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <AlertCircle size={18} color={colors.red} />
-                <span style={{ fontSize: 14, fontWeight: 500, color: colors.red, fontFamily: fonts.body }}>
-                  {summary?.critical || 0} Critical
-                </span>
-              </div>
-              {summary && summary.critical_amount > 0 && (
-                <span style={{ fontSize: 13, color: colors.red, fontFamily: fonts.body }}>
-                  {formatCurrency(summary.critical_amount)} at risk
-                </span>
-              )}
-            </button>
-
-            {/* Warning */}
-            <button
-              onClick={() => handleSeverityClick('high')}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: 12,
-                borderRadius: 8,
-                border: 'none',
-                background: `${colors.yellow}11`,
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = `${colors.yellow}22`)}
-              onMouseLeave={(e) => (e.currentTarget.style.background = `${colors.yellow}11`)}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <AlertTriangle size={18} color={colors.yellow} />
-                <span style={{ fontSize: 14, fontWeight: 500, color: colors.yellow, fontFamily: fonts.body }}>
-                  {summary?.warning || 0} Warning
-                </span>
-              </div>
-              {summary && summary.warning_amount > 0 && (
-                <span style={{ fontSize: 13, color: colors.yellow, fontFamily: fonts.body }}>
-                  {formatCurrency(summary.warning_amount)} at risk
-                </span>
-              )}
-            </button>
-
-            {/* Info */}
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                padding: 12,
-                borderRadius: 8,
-                background: `${colors.accent}11`,
-              }}
-            >
-              <Info size={18} color={colors.accent} />
-              <span style={{ fontSize: 14, color: colors.textSecondary, fontFamily: fonts.body }}>
-                {summary?.info || 0} Info
-              </span>
-            </div>
-          </div>
-
-          {/* View All Button */}
-          <button
-            onClick={handleViewAll}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 8,
-              width: '100%',
-              padding: '10px 16px',
-              borderRadius: 8,
-              border: `1px solid ${colors.border}`,
-              background: colors.bg,
-              color: colors.accent,
-              fontSize: 14,
+      <div style={{
+        padding: '10px 16px',
+        borderBottom: `1px solid ${colors.border}`,
+        background: colors.surfaceRaised,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 15 }}>🎯</span>
+          <span style={{
+            fontSize: 13,
+            fontWeight: 600,
+            color: colors.text,
+            fontFamily: fonts.sans,
+          }}>
+            Critical Findings
+          </span>
+          {totalFindings > 0 && (
+            <span style={{
+              fontSize: 11,
+              padding: '2px 8px',
+              background: colors.surfaceHover,
+              color: colors.textSecondary,
+              borderRadius: 10,
               fontWeight: 500,
-              cursor: 'pointer',
-              transition: 'all 0.15s ease',
-              fontFamily: fonts.body,
-            }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = colors.surfaceHover)}
-            onMouseLeave={(e) => (e.currentTarget.style.background = colors.bg)}
-          >
-            View All {summary?.total_open || 0} Actions
-            <ArrowRight size={16} />
-          </button>
-        </>
-      )}
+              fontFamily: fonts.sans,
+            }}>
+              {totalFindings} this week
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Body */}
+      <div style={{ padding: 16 }}>
+        {totalFindings === 0 ? (
+          <div style={{
+            textAlign: 'center',
+            padding: '20px 0',
+            color: colors.textMuted,
+            fontSize: 13,
+            fontFamily: fonts.sans,
+          }}>
+            No critical findings this week
+          </div>
+        ) : (
+          <>
+            {/* Severity Breakdown */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+              {actCount > 0 && (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: 8,
+                  borderRadius: 6,
+                  background: colors.redSoft,
+                  border: `1px solid ${colors.red}`,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontSize: 12 }}>🔴</span>
+                    <span style={{ fontSize: 12, fontWeight: 500, color: colors.text, fontFamily: fonts.sans }}>
+                      Requires Action
+                    </span>
+                  </div>
+                  <span style={{ fontSize: 14, fontWeight: 700, fontFamily: fonts.mono, color: colors.red }}>
+                    {actCount}
+                  </span>
+                </div>
+              )}
+
+              {watchCount > 0 && (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: 8,
+                  borderRadius: 6,
+                  background: colors.yellowSoft,
+                  border: `1px solid ${colors.yellow}`,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontSize: 12 }}>⚠️</span>
+                    <span style={{ fontSize: 12, fontWeight: 500, color: colors.text, fontFamily: fonts.sans }}>
+                      Watch Closely
+                    </span>
+                  </div>
+                  <span style={{ fontSize: 14, fontWeight: 700, fontFamily: fonts.mono, color: colors.yellow }}>
+                    {watchCount}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* View All Button */}
+            <button
+              onClick={handleViewAll}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 6,
+                width: '100%',
+                padding: '8px 12px',
+                borderRadius: 6,
+                border: `1px solid ${colors.border}`,
+                background: colors.bg,
+                color: colors.accent,
+                fontSize: 12,
+                fontWeight: 500,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+                fontFamily: fonts.sans,
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = colors.surfaceHover)}
+              onMouseLeave={(e) => (e.currentTarget.style.background = colors.bg)}
+            >
+              View All Findings
+              <ArrowRight size={14} />
+            </button>
+          </>
+        )}
+      </div>
     </div>
   );
 }
