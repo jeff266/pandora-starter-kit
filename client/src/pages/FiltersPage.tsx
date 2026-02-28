@@ -80,6 +80,44 @@ const entityColors: Record<string, string> = {
   conversations: '#f59e0b',
 };
 
+function formatPreviewValue(key: string, value: any): string {
+  if (value === null || value === undefined) return '—';
+
+  // Format currency amounts
+  if (key.includes('amount') || key.includes('value') || key.includes('quota')) {
+    const num = parseFloat(value);
+    if (!isNaN(num)) {
+      return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(num);
+    }
+  }
+
+  // Format dates
+  if (key.includes('date') || key.includes('_at')) {
+    try {
+      const date = new Date(value);
+      if (!isNaN(date.getTime())) {
+        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      }
+    } catch {}
+  }
+
+  // Format percentages
+  if (key.includes('percent') || key.includes('pct') || key.includes('rate')) {
+    const num = parseFloat(value);
+    if (!isNaN(num)) {
+      return `${(num * 100).toFixed(1)}%`;
+    }
+  }
+
+  // Truncate long strings
+  const str = String(value);
+  if (str.length > 60) {
+    return str.substring(0, 57) + '...';
+  }
+
+  return str;
+}
+
 export default function FiltersPage() {
   const isMobile = useIsMobile();
   const { refreshFilters } = useLens();
@@ -720,16 +758,64 @@ function FilterModal({ filter, onClose, onSave }: {
               padding: '12px 16px', background: colors.surfaceRaised,
               border: `1px solid ${colors.border}`, borderRadius: 8,
             }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 6, fontFamily: fonts.sans }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 8, fontFamily: fonts.sans }}>
                 Preview: <span style={{ color: colors.accent }}>{preview.record_count}</span> matching records
               </div>
               {preview.sample_records.length > 0 && (
-                <div style={{ fontSize: 11, color: colors.textMuted, fontFamily: fonts.mono }}>
-                  {preview.sample_records.map((r: any, i: number) => (
-                    <div key={i} style={{ padding: '2px 0', borderBottom: i < preview.sample_records.length - 1 ? `1px solid ${colors.border}` : 'none' }}>
-                      {Object.entries(r).filter(([k]) => k !== 'id').map(([k, v]) => `${k}: ${v}`).join(' | ')}
-                    </div>
-                  ))}
+                <div style={{ maxHeight: 300, overflowY: 'auto', overflowX: 'auto' }}>
+                  <table style={{
+                    width: '100%',
+                    fontSize: 11,
+                    fontFamily: fonts.sans,
+                    borderCollapse: 'collapse',
+                  }}>
+                    <thead>
+                      <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
+                        {Object.keys(preview.sample_records[0])
+                          .filter(k => k !== 'id' && k !== 'workspace_id')
+                          .map(key => (
+                            <th key={key} style={{
+                              padding: '6px 8px',
+                              textAlign: 'left',
+                              fontWeight: 600,
+                              color: colors.textSecondary,
+                              fontSize: 10,
+                              textTransform: 'uppercase',
+                              letterSpacing: '0.05em',
+                              position: 'sticky',
+                              top: 0,
+                              background: colors.surfaceRaised,
+                              whiteSpace: 'nowrap',
+                            }}>
+                              {key.replace(/_/g, ' ')}
+                            </th>
+                          ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {preview.sample_records.map((record: any, i: number) => (
+                        <tr key={i} style={{
+                          borderBottom: i < preview.sample_records.length - 1 ? `1px solid ${colors.border}` : 'none',
+                        }}>
+                          {Object.entries(record)
+                            .filter(([k]) => k !== 'id' && k !== 'workspace_id')
+                            .map(([key, value]) => (
+                              <td key={key} style={{
+                                padding: '8px',
+                                color: colors.text,
+                                fontFamily: key === 'amount' ? fonts.mono : fonts.sans,
+                                whiteSpace: 'nowrap',
+                                maxWidth: 250,
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                              }}>
+                                {formatPreviewValue(key, value)}
+                              </td>
+                            ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </div>
