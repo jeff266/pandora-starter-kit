@@ -36,7 +36,8 @@ interface CRMProperty {
 }
 
 export function CRMSyncTab() {
-  const { workspaceId } = useWorkspace();
+  const { currentWorkspace } = useWorkspace();
+  const workspaceId = currentWorkspace?.id;
   const [mappings, setMappings] = useState<Mapping[]>([]);
   const [showAddPanel, setShowAddPanel] = useState(false);
   const [loading, setLoading] = useState(true);

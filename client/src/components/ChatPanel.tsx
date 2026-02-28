@@ -657,7 +657,7 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
                 ...styles.sendBtn,
                 ...((!input.trim() || loading) ? styles.sendBtnDisabled : {}),
               }}
-              onClick={sendMessage}
+              onClick={() => sendMessage()}
               disabled={!input.trim() || loading}
             >
               →
@@ -1038,7 +1038,7 @@ function parseTableCells(line: string): string[] {
   return cleaned.split('|').map(c => c.trim());
 }
 
-function renderTable(tableLines: string[], keyBase: number): JSX.Element {
+function renderTable(tableLines: string[], keyBase: number): React.ReactElement {
   const headerLine = tableLines[0];
   const hasSeparator = tableLines.length > 1 && isSeparatorRow(tableLines[1]);
   const dataStartIdx = hasSeparator ? 2 : 1;
@@ -1077,9 +1077,9 @@ function renderTable(tableLines: string[], keyBase: number): JSX.Element {
   );
 }
 
-function formatMarkdown(text: string): JSX.Element[] {
+function formatMarkdown(text: string): React.ReactElement[] {
   const lines = text.split('\n');
-  const elements: JSX.Element[] = [];
+  const elements: React.ReactElement[] = [];
   let i = 0;
 
   while (i < lines.length) {
@@ -1105,7 +1105,7 @@ function formatMarkdown(text: string): JSX.Element[] {
       continue;
     }
 
-    let content: JSX.Element;
+    let content: React.ReactElement;
 
     if (line.startsWith('#### ')) {
       content = <div key={i} style={{ fontSize: 14, fontWeight: 600, color: '#cbd5e1', marginTop: 8, marginBottom: 4 }}>{formatInlineMarkdown(line.slice(5))}</div>;
@@ -1134,8 +1134,8 @@ function formatMarkdown(text: string): JSX.Element[] {
   return elements;
 }
 
-function formatInlineMarkdown(text: string): (string | JSX.Element)[] {
-  const parts: (string | JSX.Element)[] = [];
+function formatInlineMarkdown(text: string): (string | React.ReactElement)[] {
+  const parts: (string | React.ReactElement)[] = [];
   const regex = /\*\*(.*?)\*\*|\[([^\]]+)\]\(([^)]+)\)/g;
   let last = 0;
   let match;

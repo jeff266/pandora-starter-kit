@@ -32,7 +32,7 @@ export default function ApolloConnector({ onToast }: ApolloConnectorProps) {
 
   async function loadStats() {
     try {
-      const data = await api.get<ApolloStats>(`/enrichment/apollo/stats`);
+      const data = await api.get(`/enrichment/apollo/stats`) as ApolloStats;
       setStats(data);
       setConnected(data.apollo_connected);
     } catch (error) {
@@ -78,13 +78,13 @@ export default function ApolloConnector({ onToast }: ApolloConnectorProps) {
   async function handleRunEnrichment() {
     setRunning(true);
     try {
-      const result = await api.post<{
+      const result = await api.post(`/enrichment/apollo/run`) as {
         success: boolean;
         total_accounts: number;
         enriched_count: number;
         failed_count: number;
         average_confidence: number;
-      }>(`/enrichment/apollo/run`);
+      };
 
       if (result.success) {
         onToast({
@@ -265,7 +265,7 @@ export default function ApolloConnector({ onToast }: ApolloConnectorProps) {
 
           {stats?.last_enrichment && (
             <div style={{ fontSize: 12, color: colors.textSecondary }}>
-              Last enrichment: {formatTimeAgo(new Date(stats.last_enrichment))}
+              Last enrichment: {formatTimeAgo(stats.last_enrichment)}
             </div>
           )}
 

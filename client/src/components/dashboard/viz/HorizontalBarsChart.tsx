@@ -100,7 +100,7 @@ export function HorizontalBarsChart({ stages, loading = false, workspaceId }: Ho
         >
           <XAxis
             type="number"
-            tickFormatter={(value) => formatCurrency(value, 0)}
+            tickFormatter={(value) => formatCurrency(value)}
             stroke={colors.textSecondary}
             style={{ fontSize: 12, fontFamily: fonts.body }}
           />
@@ -121,10 +121,10 @@ export function HorizontalBarsChart({ stages, loading = false, workspaceId }: Ho
               fontSize: 12,
               fontFamily: fonts.body,
             }}
-            formatter={(value: any, name: string) => {
+            formatter={((value: any, name: string) => {
               if (name === 'total_value') return [formatCurrency(value), 'Total Value'];
               return [value, name];
-            }}
+            }) as any}
           />
           <Bar
             dataKey="total_value"

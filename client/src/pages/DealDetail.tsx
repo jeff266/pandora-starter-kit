@@ -899,7 +899,7 @@ export default function DealDetail() {
                         <div style={{ borderTop: pipelines.length > 0 ? `1px solid ${colors.border}` : 'none', padding: '6px 8px' }}>
                           <form onSubmit={e => { e.preventDefault(); const input = (e.target as HTMLFormElement).elements.namedItem('heroPipeline') as HTMLInputElement; const val = input?.value?.trim(); if (val) handlePipelineChange(val); }}>
                             <input name="heroPipeline" placeholder="Type custom pipeline..." disabled={pipelineSaving}
-                              style={{ width: '100%', padding: '6px 8px', fontSize: 12, background: colors.background, border: `1px solid ${colors.border}`, borderRadius: 4, color: colors.text, outline: 'none', boxSizing: 'border-box' }}
+                              style={{ width: '100%', padding: '6px 8px', fontSize: 12, background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: 4, color: colors.text, outline: 'none', boxSizing: 'border-box' }}
                               onFocus={e => { e.target.style.borderColor = colors.accent; }}
                               onBlur={e => { e.target.style.borderColor = colors.border; }}
                             />
@@ -1336,7 +1336,7 @@ export default function DealDetail() {
                         ))}
                         <div style={{ borderTop: pipelines.length > 0 ? `1px solid ${colors.border}` : 'none', padding: '6px 8px' }}>
                           <form onSubmit={e => { e.preventDefault(); const input = (e.target as HTMLFormElement).elements.namedItem('metaPipeline') as HTMLInputElement; if (input?.value?.trim()) handlePipelineChange(input.value.trim()); }}>
-                            <input name="metaPipeline" placeholder="Custom pipeline…" disabled={pipelineSaving} style={{ width: '100%', padding: '6px 8px', fontSize: 12, background: colors.background, border: `1px solid ${colors.border}`, borderRadius: 4, color: colors.text, outline: 'none', boxSizing: 'border-box' }} onFocus={e => { e.target.style.borderColor = colors.accent; }} onBlur={e => { e.target.style.borderColor = colors.border; }} />
+                            <input name="metaPipeline" placeholder="Custom pipeline…" disabled={pipelineSaving} style={{ width: '100%', padding: '6px 8px', fontSize: 12, background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: 4, color: colors.text, outline: 'none', boxSizing: 'border-box' }} onFocus={e => { e.target.style.borderColor = colors.accent; }} onBlur={e => { e.target.style.borderColor = colors.border; }} />
                           </form>
                         </div>
                       </div>

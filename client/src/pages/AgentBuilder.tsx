@@ -831,7 +831,7 @@ export default function AgentBuilder() {
                       <div style={{ font: `500 13px ${fonts.sans}`, color: colors.text, display: 'flex', alignItems: 'center', gap: 6 }}>
                         {f.label}
                         {!f.confirmed && (
-                          <span style={{ font: `400 10px ${fonts.sans}`, color: colors.warning, background: `${colors.warning}15`, padding: '1px 6px', borderRadius: 4 }}>
+                          <span style={{ font: `400 10px ${fonts.sans}`, color: colors.yellow, background: `${colors.yellow}15`, padding: '1px 6px', borderRadius: 4 }}>
                             unconfirmed
                           </span>
                         )}

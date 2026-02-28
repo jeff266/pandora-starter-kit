@@ -604,6 +604,7 @@ function SetTargetModal({ existingTarget, revenueModel, onClose, onSave }: {
   onClose: () => void;
   onSave: () => void;
 }) {
+  const { anon } = useDemoMode();
   const [amount, setAmount] = useState(existingTarget?.amount.toString() || '');
   const [periodType, setPeriodType] = useState<'annual' | 'quarterly' | 'monthly'>(
     existingTarget?.period_type as any || 'quarterly'

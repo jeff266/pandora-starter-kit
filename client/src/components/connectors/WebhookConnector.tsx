@@ -53,10 +53,10 @@ export default function WebhookConnector({ onToast }: WebhookConnectorProps) {
   async function loadData() {
     try {
       const [outbound, inbound, history, dlq] = await Promise.all([
-        api.get<OutboundConfig>(`/enrichment/webhook/outbound/config`),
-        api.get<InboundUrl>(`/enrichment/webhook/inbound/url`),
-        api.get<{ history: InboundHistory[] }>(`/enrichment/webhook/inbound/history?limit=5`),
-        api.get<{ items: DLQItem[] }>(`/enrichment/webhook/dlq`),
+        api.get(`/enrichment/webhook/outbound/config`) as Promise<OutboundConfig>,
+        api.get(`/enrichment/webhook/inbound/url`) as Promise<InboundUrl>,
+        api.get(`/enrichment/webhook/inbound/history?limit=5`) as Promise<{ history: InboundHistory[] }>,
+        api.get(`/enrichment/webhook/dlq`) as Promise<{ items: DLQItem[] }>,
       ]);
 
       setOutboundConfig(outbound);
@@ -65,7 +65,7 @@ export default function WebhookConnector({ onToast }: WebhookConnectorProps) {
       }
       setInboundUrl(inbound);
       setInboundHistory(history.history);
-      setDLQItems(dlq.items.filter(item => !item.replayed));
+      setDLQItems(dlq.items.filter((item: DLQItem) => !item.replayed));
     } catch (error) {
       console.error('Failed to load webhook data:', error);
     } finally {
@@ -120,7 +120,7 @@ export default function WebhookConnector({ onToast }: WebhookConnectorProps) {
 
     setRotating(true);
     try {
-      const result = await api.post<InboundUrl>(`/enrichment/webhook/inbound/rotate`);
+      const result = await api.post(`/enrichment/webhook/inbound/rotate`) as InboundUrl;
       setInboundUrl(result);
       onToast({ message: 'Token rotated. Update your workflow!', type: 'success' });
     } catch (error: any) {
@@ -344,7 +344,7 @@ export default function WebhookConnector({ onToast }: WebhookConnectorProps) {
           {/* Last Inbound */}
           {inboundHistory.length > 0 && (
             <div style={{ fontSize: 12, color: colors.textSecondary }}>
-              Last inbound: {formatTimeAgo(new Date(inboundHistory[0].received_at))} (
+              Last inbound: {formatTimeAgo(inboundHistory[0].received_at)} (
               {inboundHistory[0].records_matched} matched)
             </div>
           )}

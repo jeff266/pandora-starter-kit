@@ -441,7 +441,7 @@ export default function ConversationDetail() {
           {error || 'Conversation not found'}
         </div>
         <button
-          onClick={() => navigate(isWorkspaceError ? '/' : -1)}
+          onClick={() => { if (isWorkspaceError) { navigate('/'); } else { navigate(-1); } }}
           style={{
             background: colors.accent,
             color: '#fff',
@@ -987,8 +987,8 @@ function DealImpactTab({
                   fontWeight: 700,
                   fontFamily: fonts.mono,
                   color: coachingData?.engagement.last_call_days_ago === null ? colors.textMuted
-                    : coachingData.engagement.last_call_days_ago > 14 ? colors.yellow
-                    : coachingData.engagement.last_call_days_ago <= 7 ? colors.green
+                    : (coachingData?.engagement.last_call_days_ago ?? -1) > 14 ? colors.yellow
+                    : (coachingData?.engagement.last_call_days_ago ?? -1) <= 7 ? colors.green
                     : colors.text,
                 }}>
                   {coachingData?.engagement.last_call_days_ago !== null && coachingData?.engagement.last_call_days_ago !== undefined

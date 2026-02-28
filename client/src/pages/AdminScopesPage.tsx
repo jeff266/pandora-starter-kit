@@ -207,6 +207,7 @@ function ScopeInventoryPanel({
   onReInfer,
   confirmingId,
   reInferring,
+  anon,
 }: {
   data: ScopesResponse | null;
   loading: boolean;
@@ -214,6 +215,7 @@ function ScopeInventoryPanel({
   onReInfer: () => void;
   confirmingId: string | null;
   reInferring: boolean;
+  anon: ReturnType<typeof useDemoMode>['anon'];
 }) {
   return (
     <div style={panelStyle}>
@@ -332,6 +334,7 @@ function FilterPreviewPanel({
   onOverrideDeal,
   onClearOverride,
   overridingDealId,
+  anon,
 }: {
   scopes: ScopeRow[];
   selectedScopeId: string | null;
@@ -345,6 +348,7 @@ function FilterPreviewPanel({
   onOverrideDeal: (dealId: string, scopeId: string) => Promise<void>;
   onClearOverride: (dealId: string) => Promise<void>;
   overridingDealId: string | null;
+  anon: ReturnType<typeof useDemoMode>['anon'];
 }) {
   const [expandedDealId, setExpandedDealId] = useState<string | null>(null);
   const previewScopes = scopes.filter(s => s.scope_id !== 'default');
@@ -833,6 +837,7 @@ export default function AdminScopesPage() {
         onReInfer={handleReInfer}
         confirmingId={confirmingId}
         reInferring={reInferring}
+        anon={anon}
       />
 
       {/* Panel 2 */}
@@ -849,6 +854,7 @@ export default function AdminScopesPage() {
         onOverrideDeal={handleOverrideDeal}
         onClearOverride={handleClearOverride}
         overridingDealId={overridingDealId}
+        anon={anon}
       />
 
       {/* Panel 3 */}

@@ -35,7 +35,7 @@ export function SignalsSummaryWidget({
           padding: 12,
           background: colors.surface,
           borderRadius: 8,
-          border: `1px solid ${colors.border}`,
+          border: `1px solid ${signalStyle.border}`,
         }}
         className={className}
       >
@@ -51,7 +51,7 @@ export function SignalsSummaryWidget({
     COLD: { bg: '#f3f4f6', text: '#6b7280', border: '#d1d5db' },
   };
 
-  const colors = strengthColors[summary.signal_strength];
+  const signalStyle = strengthColors[summary.signal_strength];
 
   if (compact) {
     return (
@@ -62,18 +62,18 @@ export function SignalsSummaryWidget({
           gap: 8,
           padding: '4px 8px',
           borderRadius: 8,
-          border: `1px solid ${colors.border}`,
-          backgroundColor: colors.bg,
-          borderColor: colors.border,
+          border: `1px solid ${signalStyle.border}`,
+          backgroundColor: signalStyle.bg,
+          borderColor: signalStyle.border,
         }}
         className={className}
       >
-        <Zap style={{ width: 12, height: 12, color: colors.text }} />
-        <span style={{ fontSize: 11, fontWeight: 500, color: colors.text }}>
+        <Zap style={{ width: 12, height: 12, color: signalStyle.text }} />
+        <span style={{ fontSize: 11, fontWeight: 500, color: signalStyle.text }}>
           {summary.signal_strength}
         </span>
         {summary.buying_triggers > 0 && (
-          <span style={{ fontSize: 11, color: colors.text }}>
+          <span style={{ fontSize: 11, color: signalStyle.text }}>
             • {summary.buying_triggers} trigger{summary.buying_triggers !== 1 ? 's' : ''}
           </span>
         )}
@@ -88,17 +88,17 @@ export function SignalsSummaryWidget({
       style={{
         padding: 16,
         borderRadius: 8,
-        border: `1px solid ${colors.border}`,
-        backgroundColor: colors.bg,
-        borderColor: colors.border,
+        border: `1px solid ${signalStyle.border}`,
+        backgroundColor: signalStyle.bg,
+        borderColor: signalStyle.border,
       }}
       className={className}
     >
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <TrendingUp style={{ width: 16, height: 16, color: colors.text }} />
-          <span style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>
+          <TrendingUp style={{ width: 16, height: 16, color: signalStyle.text }} />
+          <span style={{ fontSize: 13, fontWeight: 600, color: signalStyle.text }}>
             Market Signals
           </span>
         </div>
@@ -108,7 +108,7 @@ export function SignalsSummaryWidget({
             borderRadius: 4,
             fontSize: 11,
             fontWeight: 700,
-            backgroundColor: colors.text,
+            backgroundColor: signalStyle.text,
             color: 'white',
           }}
         >
@@ -119,26 +119,26 @@ export function SignalsSummaryWidget({
       {/* Stats Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 12 }}>
         <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 18, fontWeight: 700, color: colors.text }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: signalStyle.text }}>
             {summary.total_signals}
           </div>
-          <div style={{ fontSize: 11, color: colors.text, opacity: 0.8 }}>
+          <div style={{ fontSize: 11, color: signalStyle.text, opacity: 0.8 }}>
             Total
           </div>
         </div>
         <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 18, fontWeight: 700, color: colors.text }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: signalStyle.text }}>
             {summary.high_priority}
           </div>
-          <div style={{ fontSize: 11, color: colors.text, opacity: 0.8 }}>
+          <div style={{ fontSize: 11, color: signalStyle.text, opacity: 0.8 }}>
             High Priority
           </div>
         </div>
         <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 18, fontWeight: 700, color: colors.text }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: signalStyle.text }}>
             {summary.buying_triggers}
           </div>
-          <div style={{ fontSize: 11, color: colors.text, opacity: 0.8 }}>
+          <div style={{ fontSize: 11, color: signalStyle.text, opacity: 0.8 }}>
             Buying Triggers
           </div>
         </div>
@@ -146,16 +146,16 @@ export function SignalsSummaryWidget({
 
       {/* Recent Signals */}
       {showDetails && recentSignals.length > 0 && (
-        <div style={{ paddingTop: 12, marginTop: 12, borderTop: `1px solid ${colors.border}` }}>
-          <div style={{ fontSize: 11, fontWeight: 500, color: colors.text, marginBottom: 8 }}>
+        <div style={{ paddingTop: 12, marginTop: 12, borderTop: `1px solid ${signalStyle.border}` }}>
+          <div style={{ fontSize: 11, fontWeight: 500, color: signalStyle.text, marginBottom: 8 }}>
             Recent Signals:
           </div>
           {recentSignals.map((signal, idx) => (
             <div key={signal.id || idx} style={{ fontSize: 11, marginBottom: 8 }}>
-              <div style={{ fontWeight: 500, color: colors.text, marginBottom: 2 }}>
+              <div style={{ fontWeight: 500, color: signalStyle.text, marginBottom: 2 }}>
                 {signal.headline}
               </div>
-              <div style={{ color: colors.text, opacity: 0.7 }}>
+              <div style={{ color: signalStyle.text, opacity: 0.7 }}>
                 <TimeAgo date={signal.signal_date} />
                 {signal.buying_trigger && (
                   <span style={{ marginLeft: 8, fontWeight: 500 }}>• Buying Trigger</span>
@@ -168,7 +168,7 @@ export function SignalsSummaryWidget({
 
       {/* Signal Categories */}
       {showDetails && summary.by_category && summary.by_category.length > 0 && (
-        <div style={{ paddingTop: 8, marginTop: 8, borderTop: `1px solid ${colors.border}` }}>
+        <div style={{ paddingTop: 8, marginTop: 8, borderTop: `1px solid ${signalStyle.border}` }}>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
             {summary.by_category.slice(0, 4).map(({ category, count }) => (
               <span
@@ -177,7 +177,7 @@ export function SignalsSummaryWidget({
                   padding: '2px 6px',
                   borderRadius: 4,
                   fontSize: 11,
-                  backgroundColor: colors.text,
+                  backgroundColor: signalStyle.text,
                   color: 'white',
                   opacity: 0.9,
                 }}

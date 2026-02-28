@@ -235,7 +235,7 @@ export default function CommandCenter() {
       } else {
         // Response contains pipeline names - use name for filtering
         const pipelines: Array<{ name: string }> = data.pipelines || [];
-        setAvailablePipelines(pipelines);
+        setAvailablePipelines(pipelines.map(p => ({ ...p, deal_count: 0, total_value: 0 })));
         const stored = localStorage.getItem(`pandora_selected_pipeline_${wsId}`) || 'all';
         if (stored !== 'all' && !pipelines.some(p => p.name === stored)) {
           localStorage.setItem(`pandora_selected_pipeline_${wsId}`, 'all');
@@ -1927,7 +1927,7 @@ function MetricBreakdownModal({ metric, scopeId, onClose }: { metric: string; sc
 
     const csvContent = [
       headers.join(','),
-      ...rows.map(row => row.map(cell => {
+      ...(rows as any[][]).map(row => row.map((cell: any) => {
         const str = String(cell);
         // Escape quotes and wrap in quotes if contains comma
         return str.includes(',') || str.includes('"') ? `"${str.replace(/"/g, '""')}"` : str;

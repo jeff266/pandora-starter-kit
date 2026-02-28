@@ -81,7 +81,7 @@ export function MathBreakdown({ metric, value, context, deals, workspaceId, onCl
                 display: 'flex',
                 justifyContent: 'space-between',
                 padding: '5px 0',
-                borderBottom: i < breakdown.inputs.length - 1 ? `1px solid ${colors.border}` : 'none',
+                borderBottom: i < (breakdown.inputs?.length ?? 0) - 1 ? `1px solid ${colors.border}` : 'none',
               }}>
                 <span style={{ fontSize: 12, color: colors.textMuted }}>{input.label}</span>
                 <span style={{ fontSize: 12, fontWeight: 600, fontFamily: fonts.mono }}>{input.value}</span>

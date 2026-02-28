@@ -883,8 +883,8 @@ function RulesTab({ rules, verifiedChannels, onToggle, onTrigger, onEdit, onDele
         {rules.map(rule => {
           const autoDisabled = rule.consecutive_failures >= 5;
           const failed = rule.consecutive_failures > 0;
-          let statusBg = colors.surfaceRaised;
-          let statusColor = colors.textMuted;
+          let statusBg: string = colors.surfaceRaised;
+          let statusColor: string = colors.textMuted;
           let statusLabel = 'Inactive';
           if (autoDisabled) {
             statusBg = colors.redSoft; statusColor = colors.red; statusLabel = 'Auto-disabled';
@@ -959,8 +959,8 @@ function RulesTab({ rules, verifiedChannels, onToggle, onTrigger, onEdit, onDele
       {rules.map(rule => {
         const autoDisabled = rule.consecutive_failures >= 5;
         const failed = rule.consecutive_failures > 0;
-        let statusBg = colors.surfaceRaised;
-        let statusColor = colors.textMuted;
+        let statusBg: string = colors.surfaceRaised;
+        let statusColor: string = colors.textMuted;
         let statusLabel = 'Inactive';
         if (autoDisabled) {
           statusBg = colors.redSoft; statusColor = colors.red; statusLabel = '🔒 Auto-disabled';

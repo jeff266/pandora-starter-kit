@@ -157,7 +157,7 @@ export default function ReportViewer() {
 
   async function downloadFormat(format: string) {
     if (!generation) return;
-    const fileInfo = generation.formats_generated[format];
+    const fileInfo = generation.formats_generated?.[format];
     if (!fileInfo?.download_url) {
       console.error('No download URL found for format:', format);
       alert(`No download URL available for ${format.toUpperCase()}`);

@@ -81,7 +81,7 @@ export function MetricsRow({ metrics, evidence, visibleCards, onToggleCard, onSh
     {
       id: 'coverage_ratio',
       label: 'Coverage Ratio',
-      getValue: () => `${formatNumber(metrics?.coverage_ratio?.value || 0, 1)}x`,
+      getValue: () => `${formatNumber(metrics?.coverage_ratio?.value || 0)}x`,
       getSubtitle: () =>
         metrics?.coverage_ratio?.quota ? `vs ${formatCurrency(metrics.coverage_ratio.quota)} quota` : undefined,
       getTrend: () => metrics?.coverage_ratio?.trend,

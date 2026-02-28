@@ -101,7 +101,7 @@ export default function ForecastPage() {
   const weeklySnapshots = useMemo(() => {
     if (snapshots.length === 0) return [];
 
-    const weekMap = new Map<string, ForecastSnapshot>();
+    const weekMap = new Map<string, SnapshotData>();
     for (const snap of snapshots) {
       const date = new Date(snap.snapshot_date);
       // Get week key as YYYY-WW format

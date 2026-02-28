@@ -522,7 +522,7 @@ export default function ReportBuilder() {
       {editingSectionIndex !== null && (
         <SectionSettingsModal
           section={template.sections[editingSectionIndex]}
-          onSave={(updatedConfig) => {
+          onSave={(updatedConfig: Record<string, unknown>) => {
             setTemplate((prev) => ({
               ...prev,
               sections: prev.sections.map((s, i) =>

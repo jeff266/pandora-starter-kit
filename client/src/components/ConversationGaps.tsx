@@ -19,7 +19,8 @@ interface ConversationWithoutDeal {
 }
 
 export function ConversationGaps() {
-  const { workspaceId } = useWorkspace();
+  const { currentWorkspace } = useWorkspace();
+  const workspaceId = currentWorkspace?.id;
   const [conversations, setConversations] = useState<ConversationWithoutDeal[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateDeal, setShowCreateDeal] = useState<string | null>(null);

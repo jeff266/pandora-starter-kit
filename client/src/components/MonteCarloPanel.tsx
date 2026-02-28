@@ -664,9 +664,9 @@ export default function MonteCarloPanel({ wsId, activePipeline }: { wsId?: strin
                     </div>
                   )}
                   {/* Follow-up chips only after the last answer */}
-                  {i === arr.length - 1 && queryAnswer?.followUps?.length > 0 && (
+                  {i === arr.length - 1 && (queryAnswer?.followUps?.length ?? 0) > 0 && (
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
-                      {queryAnswer.followUps.map((fq, fi) => (
+                      {queryAnswer?.followUps?.map((fq, fi) => (
                         <button
                           key={fi}
                           onClick={() => submitQuestion(fq)}

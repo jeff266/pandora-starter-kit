@@ -668,7 +668,7 @@ export default function AccountList() {
     return (
       <div style={{ textAlign: 'center', padding: 60 }}>
         <p style={{ fontSize: 15, color: colors.red }}>{error}</p>
-        <button onClick={fetchAccounts} style={{ fontSize: 12, color: colors.accent, background: 'none', border: 'none', cursor: 'pointer', marginTop: 12 }}>
+        <button onClick={() => fetchAccounts()} style={{ fontSize: 12, color: colors.accent, background: 'none', border: 'none', cursor: 'pointer', marginTop: 12 }}>
           Retry
         </button>
       </div>
