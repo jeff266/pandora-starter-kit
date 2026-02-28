@@ -165,6 +165,41 @@ function ConfidenceDot({ tier, sample }: { tier: string; sample: number }) {
   );
 }
 
+function csvEscape(val: string | null | undefined): string {
+  const s = val ?? '';
+  return `"${s.replace(/"/g, '""')}"`;
+}
+
+function exportModalCsv(modal: MathModalState): void {
+  if (!modal.deals || modal.deals.length === 0) return;
+  const isOpen = modal.outcome === 'open';
+
+  const headers = isOpen
+    ? ['Deal', 'Amount', 'Stage', 'Days in Stage', 'In Stage Since']
+    : ['Deal', 'Amount', 'Stage', 'Duration (days)', 'Entered', 'Exited'];
+
+  const rows = modal.deals.map(d => {
+    const dur = d.duration_days != null ? String(Math.round(parseFloat(d.duration_days))) : '';
+    const entered = d.entered_at ? new Date(d.entered_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' }) : '';
+    const exited = d.exited_at ? new Date(d.exited_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' }) : '';
+    const amount = d.amount ? String(Math.round(parseFloat(d.amount))) : '';
+    return isOpen
+      ? [csvEscape(d.name), csvEscape(amount), csvEscape(d.stage_display_name), dur, entered]
+      : [csvEscape(d.name), csvEscape(amount), csvEscape(d.stage_display_name), dur, entered, exited];
+  });
+
+  const slug = modal.stage_normalized.replace(/_/g, '-');
+  const filename = `${slug}-${modal.outcome}-math.csv`;
+  const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 function MathModal({ modal, onClose }: { modal: MathModalState; onClose: () => void }) {
   const isOpen = modal.outcome === 'open';
   const outcomeColor = isOpen ? '#D69E2E' : modal.outcome === 'won' ? '#38A169' : '#E53E3E';
@@ -201,12 +236,26 @@ function MathModal({ modal, onClose }: { modal: MathModalState; onClose: () => v
               }
             </div>
           </div>
-          <button
-            onClick={onClose}
-            style={{ background: 'none', border: 'none', color: colors.textMuted, cursor: 'pointer', fontSize: 18, lineHeight: 1, padding: 4 }}
-          >
-            ×
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+            {modal.deals && modal.deals.length > 0 && (
+              <button
+                onClick={() => exportModalCsv(modal)}
+                style={{
+                  padding: '5px 11px', fontSize: 11, fontFamily: fonts.sans, fontWeight: 500,
+                  border: `1px solid ${colors.border}`, borderRadius: 5, background: 'transparent',
+                  color: colors.textSecondary, cursor: 'pointer',
+                }}
+              >
+                Export CSV
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              style={{ background: 'none', border: 'none', color: colors.textMuted, cursor: 'pointer', fontSize: 18, lineHeight: 1, padding: 4 }}
+            >
+              ×
+            </button>
+          </div>
         </div>
 
         <div style={{ overflowY: 'auto', flex: 1 }}>
