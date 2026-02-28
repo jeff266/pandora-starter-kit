@@ -678,7 +678,7 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
 
     // --- Enhanced Dashboard Data (Phase 1) ---
     // Fetch findings summary, skill activity summary, recent findings, and metric evidence in parallel
-    const [findingsSummaryResult, skillActivityResult, recentFindingsResult] = await Promise.all([
+    const [widgetFindingsResult, skillActivityResult, recentFindingsResult] = await Promise.all([
       // Findings summary (last 7 days)
       query(
         `SELECT
@@ -739,7 +739,7 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
     ]);
 
     // Build widget findings summary (replaces actions_summary)
-    const widgetFindingsRow = findingsSummaryResult.rows[0] || {};
+    const widgetFindingsRow = widgetFindingsResult.rows[0] || {};
     const widget_findings_summary = {
       total_this_week: widgetFindingsRow.total_this_week || 0,
       act_count: widgetFindingsRow.act_count || 0,
