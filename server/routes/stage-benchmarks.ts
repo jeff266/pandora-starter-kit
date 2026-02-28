@@ -291,7 +291,16 @@ router.get('/:workspaceId/stage-benchmarks/math', async (req: Request, res: Resp
                 COALESCE(d.days_in_stage, EXTRACT(days FROM NOW() - d.stage_changed_at)::integer)::text AS duration_days,
                 d.stage_changed_at::text AS entered_at,
                 NULL::text AS exited_at,
-                COALESCE(d.stage, d.stage_normalized) AS stage_display_name
+                COALESCE(
+                  (SELECT sc2.stage_name FROM stage_configs sc2
+                   WHERE sc2.workspace_id = d.workspace_id
+                     AND (sc2.stage_id = d.stage OR sc2.stage_name = d.stage)
+                     AND COALESCE(sc2.pipeline_name, '') = COALESCE(d.pipeline, '')
+                   ORDER BY sc2.display_order NULLS LAST
+                   LIMIT 1),
+                  d.stage,
+                  d.stage_normalized
+                ) AS stage_display_name
          FROM deals d
          WHERE d.workspace_id = $1
            AND d.stage_normalized = $2
@@ -385,7 +394,7 @@ router.get('/:workspaceId/stage-benchmarks/math', async (req: Request, res: Resp
        JOIN deals d ON d.id = dsh.deal_id
        LEFT JOIN stage_configs sc ON sc.workspace_id = dsh.workspace_id
          AND (sc.stage_id = dsh.stage OR sc.stage_name = dsh.stage)
-         AND sc.pipeline_name = d.pipeline
+         AND COALESCE(sc.pipeline_name, '') = COALESCE(d.pipeline, '')
        WHERE dsh.workspace_id = $1
          AND dsh.stage_normalized = $2
          AND dsh.duration_days IS NOT NULL
