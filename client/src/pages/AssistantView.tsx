@@ -34,7 +34,7 @@ export default function AssistantView() {
     setOperatorsLoading(true);
 
     const [greetRes, briefRes, opsRes] = await Promise.allSettled([
-      api.get('/briefing/greeting'),
+      api.get(`/briefing/greeting?localHour=${new Date().getHours()}`),
       api.get('/briefing/brief'),
       api.get('/briefing/operators'),
     ]);

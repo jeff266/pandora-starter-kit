@@ -51,7 +51,7 @@ function formatCurrency(val: number): string {
 }
 
 export default function ForecastPage() {
-  const { currentWorkspace } = useWorkspace();
+  const { currentWorkspace, user } = useWorkspace();
   const { anon } = useDemoMode();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
@@ -61,6 +61,8 @@ export default function ForecastPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showAI, setShowAI] = useState(true);
+  const [forecastView, setForecastView] = useState<'company' | 'reps'>('company');
+  const [viewInitialized, setViewInitialized] = useState(false);
   const [drillDown, setDrillDown] = useState<{ open: boolean; title: string; deals: any[] }>({ open: false, title: '', deals: [] });
   const [fiscalYearStartMonth, setFiscalYearStartMonth] = useState(1);
   const [mathPanel, setMathPanel] = useState<{ metric: string; value: number; context: MathContext } | null>(null);
@@ -173,6 +175,28 @@ export default function ForecastPage() {
     }));
   }, [latest, anon]);
 
+  const isAdmin = currentWorkspace?.role === 'admin';
+  const userEmail = user?.email || '';
+  const hasRepRow = repRows.some(r => r.rep_email === userEmail);
+  const showViewTabs = repRows.length > 0 && (isAdmin || hasRepRow);
+
+  useEffect(() => {
+    if (viewInitialized || repRows.length === 0) return;
+    if (isAdmin) {
+      setForecastView('company');
+    } else if (hasRepRow) {
+      setForecastView('reps');
+    } else {
+      setForecastView('company');
+    }
+    setViewInitialized(true);
+  }, [repRows, isAdmin, hasRepRow, viewInitialized]);
+
+  const visibleRepRows = useMemo(() => {
+    if (isAdmin) return repRows;
+    return repRows.filter(r => r.rep_email === userEmail);
+  }, [repRows, isAdmin, userEmail]);
+
   const weekInfo = useMemo(() => {
     if (!latest) return { label: '', weekNum: 0, totalWeeks: 13 };
     const now = new Date();
@@ -275,6 +299,75 @@ export default function ForecastPage() {
     );
   }
 
+  const dealRiskPanel = (
+    <div style={{
+      background: colors.surface,
+      border: `1px solid ${colors.border}`,
+      borderRadius: 10,
+      padding: 16,
+    }}>
+      <h3 style={{ fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 12, fontFamily: fonts.sans }}>
+        Deal Risk Alerts
+      </h3>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {grouped.deals.map(a => (
+          <div
+            key={a.id}
+            style={{
+              padding: '10px 12px',
+              background: colors.surfaceRaised,
+              border: `1px solid ${colors.border}`,
+              borderLeft: `3px solid ${a.severity === 'critical' ? colors.red : colors.yellow}`,
+              borderRadius: 6,
+            }}
+          >
+            <div style={{ fontSize: 12, fontWeight: 600, color: a.severity === 'critical' ? '#fca5a5' : '#fde68a', fontFamily: fonts.sans }}>
+              {a.title}
+            </div>
+            <div style={{ fontSize: 11, color: colors.textSecondary, marginTop: 4, fontFamily: fonts.sans }}>
+              {a.body}
+            </div>
+            {a.impact && (
+              <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 4, fontFamily: fonts.sans }}>
+                Impact: {a.impact}
+              </div>
+            )}
+            {a.anchor.type === 'deal' && (
+              <button
+                onClick={() => navigate(`/deals/${a.anchor.type === 'deal' ? (a.anchor as any).deal_id : ''}`)}
+                style={{
+                  fontSize: 11,
+                  color: colors.accent,
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: 0,
+                  marginTop: 6,
+                  fontFamily: fonts.sans,
+                }}
+              >
+                View deal →
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  const tabStyle = (active: boolean): React.CSSProperties => ({
+    padding: '5px 14px',
+    fontSize: 12,
+    fontWeight: 500,
+    fontFamily: fonts.sans,
+    borderRadius: 6,
+    border: `1px solid ${active ? colors.accent : colors.border}`,
+    background: active ? colors.accent : 'transparent',
+    color: active ? '#fff' : colors.textSecondary,
+    cursor: 'pointer',
+    transition: 'all 0.15s',
+  });
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
@@ -285,6 +378,12 @@ export default function ForecastPage() {
           </span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {showViewTabs && (
+            <div style={{ display: 'flex', gap: 4 }}>
+              <button style={tabStyle(forecastView === 'company')} onClick={() => setForecastView('company')}>Company</button>
+              <button style={tabStyle(forecastView === 'reps')} onClick={() => setForecastView('reps')}>By Rep</button>
+            </div>
+          )}
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12, color: colors.textSecondary, fontFamily: fonts.sans }}>
             <span>✨ AI Insights</span>
             <div
@@ -322,105 +421,52 @@ export default function ForecastPage() {
         />
       </SectionErrorBoundary>
 
-      <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 16, alignItems: 'flex-start' }}>
-        <div style={{ flex: 1, minWidth: 0, width: isMobile ? '100%' : 'auto' }}>
-          <SectionErrorBoundary fallbackMessage="Failed to load forecast chart.">
-            <ForecastChart
-              snapshots={weeklySnapshots}
-              quota={quota}
-              onPointClick={(snapshot, metric) => {
-                console.log('Chart point clicked:', metric, snapshot.snapshot_date);
-              }}
-            />
-          </SectionErrorBoundary>
-        </div>
+      {forecastView === 'company' && (
+        <>
+          <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 16, alignItems: 'flex-start' }}>
+            <div style={{ flex: 1, minWidth: 0, width: isMobile ? '100%' : 'auto' }}>
+              <SectionErrorBoundary fallbackMessage="Failed to load forecast chart.">
+                <ForecastChart
+                  snapshots={weeklySnapshots}
+                  quota={quota}
+                  onPointClick={(snapshot, metric) => {
+                    console.log('Chart point clicked:', metric, snapshot.snapshot_date);
+                  }}
+                />
+              </SectionErrorBoundary>
+            </div>
 
-        {showAI && grouped.chart.length > 0 && (
-          <div style={{ width: isMobile ? '100%' : 300, flexShrink: 0 }}>
-            <SectionErrorBoundary fallbackMessage="Failed to load chart insights.">
-              <ChartInsightsSidebar
-                annotations={[...grouped.chart, ...grouped.global]}
-                onDismiss={dismiss}
-                onSnooze={snooze}
-              />
-            </SectionErrorBoundary>
-          </div>
-        )}
-      </div>
-
-      {showAI && (grouped.deals.length > 0 || repRows.length > 0) && (
-        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : (repRows.length > 0 ? '1fr 320px' : '1fr'), gap: 16 }}>
-          {repRows.length > 0 && (
-            <SectionErrorBoundary fallbackMessage="Failed to load rep table.">
-              <RepTable
-                reps={repRows}
-                annotations={showAI ? grouped.reps : []}
-              />
-            </SectionErrorBoundary>
-          )}
-
-          {grouped.deals.length > 0 && (
-            <div style={{
-              background: colors.surface,
-              border: `1px solid ${colors.border}`,
-              borderRadius: 10,
-              padding: 16,
-            }}>
-              <h3 style={{ fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 12, fontFamily: fonts.sans }}>
-                Deal Risk Alerts
-              </h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {grouped.deals.map(a => (
-                  <div
-                    key={a.id}
-                    style={{
-                      padding: '10px 12px',
-                      background: colors.surfaceRaised,
-                      border: `1px solid ${colors.border}`,
-                      borderLeft: `3px solid ${a.severity === 'critical' ? colors.red : colors.yellow}`,
-                      borderRadius: 6,
-                    }}
-                  >
-                    <div style={{ fontSize: 12, fontWeight: 600, color: a.severity === 'critical' ? '#fca5a5' : '#fde68a', fontFamily: fonts.sans }}>
-                      {a.title}
-                    </div>
-                    <div style={{ fontSize: 11, color: colors.textSecondary, marginTop: 4, fontFamily: fonts.sans }}>
-                      {a.body}
-                    </div>
-                    {a.impact && (
-                      <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 4, fontFamily: fonts.sans }}>
-                        Impact: {a.impact}
-                      </div>
-                    )}
-                    {a.anchor.type === 'deal' && (
-                      <button
-                        onClick={() => navigate(`/deals/${a.anchor.type === 'deal' ? (a.anchor as any).deal_id : ''}`)}
-                        style={{
-                          fontSize: 11,
-                          color: colors.accent,
-                          background: 'none',
-                          border: 'none',
-                          cursor: 'pointer',
-                          padding: 0,
-                          marginTop: 6,
-                          fontFamily: fonts.sans,
-                        }}
-                      >
-                        View deal →
-                      </button>
-                    )}
-                  </div>
-                ))}
+            {showAI && grouped.chart.length > 0 && (
+              <div style={{ width: isMobile ? '100%' : 300, flexShrink: 0 }}>
+                <SectionErrorBoundary fallbackMessage="Failed to load chart insights.">
+                  <ChartInsightsSidebar
+                    annotations={[...grouped.chart, ...grouped.global]}
+                    onDismiss={dismiss}
+                    onSnooze={snooze}
+                  />
+                </SectionErrorBoundary>
               </div>
+            )}
+          </div>
+
+          {showAI && grouped.deals.length > 0 && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 16 }}>
+              {dealRiskPanel}
             </div>
           )}
-        </div>
+        </>
       )}
 
-      {!showAI && repRows.length > 0 && (
-        <SectionErrorBoundary fallbackMessage="Failed to load rep table.">
-          <RepTable reps={repRows} annotations={[]} />
-        </SectionErrorBoundary>
+      {forecastView === 'reps' && visibleRepRows.length > 0 && (
+        <>
+          <SectionErrorBoundary fallbackMessage="Failed to load rep table.">
+            <RepTable
+              reps={visibleRepRows}
+              annotations={showAI ? grouped.reps : []}
+            />
+          </SectionErrorBoundary>
+          {showAI && grouped.deals.length > 0 && dealRiskPanel}
+        </>
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 16 }}>

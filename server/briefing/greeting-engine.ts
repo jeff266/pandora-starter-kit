@@ -14,8 +14,8 @@ export interface GreetingPayload {
   };
 }
 
-function getTimeOfDay(): 'morning' | 'afternoon' | 'evening' {
-  const hour = new Date().getUTCHours();
+function getTimeOfDay(localHour?: number): 'morning' | 'afternoon' | 'evening' {
+  const hour = localHour ?? new Date().getUTCHours();
   if (hour < 12) return 'morning';
   if (hour < 17) return 'afternoon';
   return 'evening';
@@ -34,8 +34,8 @@ function formatCurrencyShort(n: number): string {
   return `$${n.toFixed(0)}`;
 }
 
-export async function generateGreeting(workspaceId: string, userName?: string): Promise<GreetingPayload> {
-  const timeOfDay = getTimeOfDay();
+export async function generateGreeting(workspaceId: string, userName?: string, localHour?: number): Promise<GreetingPayload> {
+  const timeOfDay = getTimeOfDay(localHour);
 
   const [findingsResult, pipelineResult, dealsMovedResult] = await Promise.allSettled([
     query<{ severity: string; count: string }>(

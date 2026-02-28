@@ -358,7 +358,7 @@ export default function CommandCenter() {
 
   useEffect(() => {
     if (!wsId) return;
-    api.get('/briefing/greeting').then(setGreetingData).catch(() => {});
+    api.get(`/briefing/greeting?localHour=${new Date().getHours()}`).then(setGreetingData).catch(() => {});
   }, [wsId]);
 
   const stageData: PipelineStage[] = pipeline?.by_stage || [];

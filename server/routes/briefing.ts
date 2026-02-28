@@ -26,7 +26,9 @@ router.get('/:workspaceId/briefing/greeting', async (req: Request, res: Response
     const workspaceId = req.params.workspaceId as string;
     const userId = (req as any).user?.user_id;
     const firstName = await getUserFirstName(workspaceId, userId);
-    const payload = await generateGreeting(workspaceId, firstName);
+    const rawHour = parseInt(req.query.localHour as string, 10);
+    const localHour = (!isNaN(rawHour) && rawHour >= 0 && rawHour <= 23) ? rawHour : undefined;
+    const payload = await generateGreeting(workspaceId, firstName, localHour);
     res.json(payload);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
