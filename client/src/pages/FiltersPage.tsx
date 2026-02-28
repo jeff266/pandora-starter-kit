@@ -20,15 +20,20 @@ interface NamedFilter {
   last_used_at?: string;
 }
 
-interface FilterConditionGroup {
-  operator: 'AND' | 'OR';
-  conditions: FilterCondition[];
-}
-
 interface FilterCondition {
   field: string;
   operator: string;
   value: any;
+}
+
+interface FilterConditionGroup {
+  operator: 'AND' | 'OR';
+  conditions: (FilterCondition | FilterConditionGroup)[];
+}
+
+// Type guard to check if an item is a group
+function isGroup(item: FilterCondition | FilterConditionGroup): item is FilterConditionGroup {
+  return 'conditions' in item && Array.isArray((item as any).conditions);
 }
 
 interface FieldOption {
@@ -425,6 +430,316 @@ function ActionBtn({ label, onClick, color }: { label: string; onClick: () => vo
   );
 }
 
+// Component to render a single condition row
+function ConditionRow({
+  condition,
+  onChange,
+  onRemove,
+  fieldOptions,
+  standardFields,
+  customFields,
+  fieldLoading,
+}: {
+  condition: FilterCondition;
+  onChange: (updated: FilterCondition) => void;
+  onRemove: () => void;
+  fieldOptions: FieldOption[];
+  standardFields: FieldOption[];
+  customFields: FieldOption[];
+  fieldLoading: boolean;
+}) {
+  const getFieldType = (field: string) => fieldOptions.find(f => f.field === field)?.type || 'text';
+  const getFieldValues = (field: string) => fieldOptions.find(f => f.field === field)?.values;
+
+  const fType = getFieldType(condition.field);
+  const fValues = getFieldValues(condition.field);
+  const operators = getOperatorsForType(fType);
+  const needsValue = !['is_null', 'is_not_null', 'is_true', 'is_false'].includes(condition.operator);
+
+  const selectStyle = {
+    padding: '8px 12px',
+    fontSize: 13,
+    background: colors.surfaceRaised,
+    color: colors.text,
+    border: `1px solid ${colors.border}`,
+    borderRadius: 6,
+    fontFamily: fonts.sans,
+  };
+
+  const inputStyle = {
+    padding: '8px 12px',
+    fontSize: 13,
+    background: colors.surfaceRaised,
+    color: colors.text,
+    border: `1px solid ${colors.border}`,
+    borderRadius: 6,
+    fontFamily: fonts.sans,
+  };
+
+  return (
+    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+      <select
+        value={condition.field}
+        onChange={(e) => {
+          const newField = e.target.value;
+          const newType = fieldOptions.find(fo => fo.field === newField)?.type || 'text';
+          const defaultOp = newType === 'boolean' ? 'is_true' : 'eq';
+          onChange({ field: newField, operator: defaultOp, value: '' });
+        }}
+        style={{ ...selectStyle, flex: 1 }}
+      >
+        <option value="">{fieldLoading ? 'Loading...' : 'Field...'}</option>
+        {standardFields.length > 0 && (
+          <optgroup label="Standard Fields">
+            {standardFields.map(f => <option key={f.field} value={f.field}>{f.label}</option>)}
+          </optgroup>
+        )}
+        {customFields.length > 0 && (
+          <optgroup label="Custom Fields">
+            {customFields.map(f => <option key={f.field} value={f.field}>{f.label}</option>)}
+          </optgroup>
+        )}
+      </select>
+
+      <select
+        value={condition.operator}
+        onChange={(e) => onChange({ ...condition, operator: e.target.value })}
+        style={{ ...selectStyle, flex: 1, maxWidth: 160 }}
+        disabled={!condition.field}
+      >
+        {operators.map(op => <option key={op.value} value={op.value}>{op.label}</option>)}
+      </select>
+
+      {needsValue && (
+        fType === 'boolean' ? (
+          <select
+            value={condition.value ?? ''}
+            onChange={(e) => onChange({ ...condition, value: e.target.value === 'true' })}
+            style={{ ...selectStyle, flex: 1 }}
+          >
+            <option value="">Select...</option>
+            <option value="true">True</option>
+            <option value="false">False</option>
+          </select>
+        ) : fValues && fValues.length > 0 ? (
+          <select
+            value={condition.value ?? ''}
+            onChange={(e) => onChange({ ...condition, value: e.target.value })}
+            style={{ ...selectStyle, flex: 1 }}
+          >
+            <option value="">Value...</option>
+            {fValues.map(v => <option key={v} value={v}>{v}</option>)}
+          </select>
+        ) : (
+          <input
+            type={fType === 'number' ? 'number' : fType === 'date' ? 'date' : 'text'}
+            value={condition.value ?? ''}
+            onChange={(e) => {
+              const val = fType === 'number' ? (e.target.value === '' ? '' : Number(e.target.value)) : e.target.value;
+              onChange({ ...condition, value: val });
+            }}
+            placeholder={fType === 'date' ? 'YYYY-MM-DD' : 'Value...'}
+            style={{ ...inputStyle, flex: 1 }}
+          />
+        )
+      )}
+
+      <button
+        onClick={onRemove}
+        style={{
+          padding: '8px',
+          fontSize: 18,
+          background: 'transparent',
+          color: colors.red,
+          border: 'none',
+          cursor: 'pointer',
+          lineHeight: 1,
+        }}
+        title="Remove condition"
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
+// Recursive component to render and edit condition groups
+function ConditionGroupEditor({
+  group,
+  onChange,
+  onRemove,
+  depth = 0,
+  fieldOptions,
+  standardFields,
+  customFields,
+  fieldLoading,
+}: {
+  group: FilterConditionGroup;
+  onChange: (updated: FilterConditionGroup) => void;
+  onRemove?: () => void;
+  depth?: number;
+  fieldOptions: FieldOption[];
+  standardFields: FieldOption[];
+  customFields: FieldOption[];
+  fieldLoading: boolean;
+}) {
+  const updateItem = (idx: number, updated: FilterCondition | FilterConditionGroup) => {
+    const newConditions = [...group.conditions];
+    newConditions[idx] = updated;
+    onChange({ ...group, conditions: newConditions });
+  };
+
+  const removeItem = (idx: number) => {
+    onChange({ ...group, conditions: group.conditions.filter((_, i) => i !== idx) });
+  };
+
+  const addCondition = () => {
+    onChange({ ...group, conditions: [...group.conditions, { field: '', operator: 'eq', value: '' }] });
+  };
+
+  const addGroup = () => {
+    onChange({
+      ...group,
+      conditions: [...group.conditions, { operator: 'AND', conditions: [{ field: '', operator: 'eq', value: '' }] }]
+    });
+  };
+
+  const toggleOperator = () => {
+    onChange({ ...group, operator: group.operator === 'AND' ? 'OR' : 'AND' });
+  };
+
+  const isRoot = depth === 0;
+  const hasItems = group.conditions.length > 0;
+
+  return (
+    <div style={{ marginLeft: depth * 16 }}>
+      {/* Group header with AND/OR toggle */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        marginBottom: 12,
+        padding: depth > 0 ? '8px 12px' : '8px 0',
+        background: depth > 0 ? colors.surfaceHover : 'transparent',
+        borderRadius: depth > 0 ? 6 : 0,
+        border: depth > 0 ? `1px solid ${colors.border}` : 'none',
+      }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', fontFamily: fonts.sans }}>
+          Match
+        </div>
+        <div style={{ display: 'flex', gap: 4 }}>
+          {(['AND', 'OR'] as const).map(op => (
+            <button
+              key={op}
+              onClick={toggleOperator}
+              style={{
+                padding: '4px 12px',
+                fontSize: 11,
+                fontWeight: 600,
+                background: group.operator === op ? colors.accent : colors.surfaceRaised,
+                color: group.operator === op ? '#fff' : colors.textSecondary,
+                border: `1px solid ${group.operator === op ? colors.accent : colors.border}`,
+                borderRadius: 4,
+                cursor: 'pointer',
+                fontFamily: fonts.sans,
+                transition: 'all 0.15s',
+              }}
+            >
+              {op}
+            </button>
+          ))}
+        </div>
+        {!isRoot && onRemove && (
+          <button
+            onClick={onRemove}
+            style={{
+              marginLeft: 'auto',
+              padding: '4px 10px',
+              fontSize: 11,
+              background: 'transparent',
+              color: colors.red,
+              border: `1px solid ${colors.red}`,
+              borderRadius: 4,
+              cursor: 'pointer',
+              fontFamily: fonts.sans,
+            }}
+          >
+            Remove Group
+          </button>
+        )}
+      </div>
+
+      {/* Render conditions and nested groups */}
+      {hasItems && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 12 }}>
+          {group.conditions.map((item, idx) => (
+            <div key={idx}>
+              {isGroup(item) ? (
+                <ConditionGroupEditor
+                  group={item}
+                  onChange={(updated) => updateItem(idx, updated)}
+                  onRemove={() => removeItem(idx)}
+                  depth={depth + 1}
+                  fieldOptions={fieldOptions}
+                  standardFields={standardFields}
+                  customFields={customFields}
+                  fieldLoading={fieldLoading}
+                />
+              ) : (
+                <ConditionRow
+                  condition={item}
+                  onChange={(updated) => updateItem(idx, updated)}
+                  onRemove={() => removeItem(idx)}
+                  fieldOptions={fieldOptions}
+                  standardFields={standardFields}
+                  customFields={customFields}
+                  fieldLoading={fieldLoading}
+                />
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Add buttons */}
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button
+          onClick={addCondition}
+          style={{
+            padding: '6px 14px',
+            fontSize: 12,
+            background: colors.surfaceRaised,
+            color: colors.text,
+            border: `1px dashed ${colors.border}`,
+            borderRadius: 6,
+            cursor: 'pointer',
+            fontFamily: fonts.sans,
+            transition: 'all 0.15s',
+          }}
+        >
+          + Add Condition
+        </button>
+        <button
+          onClick={addGroup}
+          style={{
+            padding: '6px 14px',
+            fontSize: 12,
+            background: colors.surfaceRaised,
+            color: colors.accent,
+            border: `1px dashed ${colors.accent}60`,
+            borderRadius: 6,
+            cursor: 'pointer',
+            fontFamily: fonts.sans,
+            transition: 'all 0.15s',
+          }}
+        >
+          + Add Group
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function FilterModal({ filter, onClose, onSave }: {
   filter: NamedFilter | null;
   onClose: () => void;
@@ -435,10 +750,12 @@ function FilterModal({ filter, onClose, onSave }: {
   const [label, setLabel] = useState(filter?.label || '');
   const [description, setDescription] = useState(filter?.description || '');
   const [object, setObject] = useState(filter?.object || 'deals');
-  const [conditions, setConditions] = useState<FilterCondition[]>(
-    filter?.conditions?.conditions || [{ field: '', operator: 'eq', value: '' }]
+  const [rootGroup, setRootGroup] = useState<FilterConditionGroup>(
+    filter?.conditions || {
+      operator: 'AND',
+      conditions: [{ field: '', operator: 'eq', value: '' }]
+    }
   );
-  const [groupOp, setGroupOp] = useState<'AND' | 'OR'>(filter?.conditions?.operator || 'AND');
   const [standardFields, setStandardFields] = useState<FieldOption[]>([]);
   const [customFields, setCustomFields] = useState<FieldOption[]>([]);
   const [fieldOptions, setFieldOptions] = useState<FieldOption[]>([]);
@@ -469,79 +786,71 @@ function FilterModal({ filter, onClose, onSave }: {
     if (!isEdit) setId(autoId(val));
   };
 
-  const addCondition = () => setConditions([...conditions, { field: '', operator: 'eq', value: '' }]);
-  const removeCondition = (idx: number) => setConditions(conditions.filter((_, i) => i !== idx));
-  const updateCondition = (idx: number, patch: Partial<FilterCondition>) => {
-    setConditions(conditions.map((c, i) => i === idx ? { ...c, ...patch } : c));
+  // Helper to count valid conditions recursively
+  const countValidConditions = (group: FilterConditionGroup): number => {
+    return group.conditions.reduce((count, item) => {
+      if (isGroup(item)) {
+        return count + countValidConditions(item);
+      }
+      return count + (item.field ? 1 : 0);
+    }, 0);
   };
 
-  const handlePreview = async () => {
-    const validConditions = conditions.filter(c => c.field && c.operator);
-    if (validConditions.length === 0) return;
-    setPreviewLoading(true);
-    try {
-      const res = await api.post('/filters/preview-inline', {
-        object,
-        conditions: { operator: groupOp, conditions: validConditions },
-      });
-      setPreview(res);
-    } catch (err: any) {
-      setError(err.message || 'Preview failed');
-    } finally {
-      setPreviewLoading(false);
-    }
+  // Helper to filter out invalid conditions recursively
+  const filterValidConditions = (group: FilterConditionGroup): FilterConditionGroup => {
+    return {
+      operator: group.operator,
+      conditions: group.conditions
+        .map(item => isGroup(item) ? filterValidConditions(item) : item)
+        .filter(item => {
+          if (isGroup(item)) {
+            return item.conditions.length > 0;
+          }
+          return (item as FilterCondition).field && (item as FilterCondition).operator;
+        })
+    };
   };
 
   const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     setPreview(null);
-    const noValueOps = ['is_null', 'is_not_null', 'is_true', 'is_false'];
-    const ready = conditions.filter(c => c.field && c.operator && (noValueOps.includes(c.operator) || (c.value !== '' && c.value !== undefined)));
-    if (ready.length === 0) return;
+    const validCount = countValidConditions(rootGroup);
+    if (validCount === 0) return;
+
     if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
     previewTimerRef.current = setTimeout(() => {
       setPreviewLoading(true);
       api.post('/filters/preview-inline', {
         object,
-        conditions: { operator: groupOp, conditions: ready },
+        conditions: filterValidConditions(rootGroup),
       }).then(res => setPreview(res))
         .catch(() => {})
         .finally(() => setPreviewLoading(false));
     }, 500);
     return () => { if (previewTimerRef.current) clearTimeout(previewTimerRef.current); };
-  }, [conditions, groupOp, object]);
+  }, [rootGroup, object]);
 
   const handleSubmit = async () => {
-    if (!id || !label || conditions.filter(c => c.field).length === 0) {
+    const validCount = countValidConditions(rootGroup);
+    if (!id || !label || validCount === 0) {
       setError('Name and at least one condition are required');
       return;
     }
     setSaving(true);
     setError(null);
     try {
-      const validConditions = conditions.filter(c => c.field && c.operator);
       await onSave({
         id,
         label,
         description,
         object,
-        conditions: { operator: groupOp, conditions: validConditions },
+        conditions: filterValidConditions(rootGroup),
       });
     } catch (err: any) {
       setError(err.message || 'Failed to save');
     } finally {
       setSaving(false);
     }
-  };
-
-  const getFieldType = (fieldName: string) => {
-    const f = fieldOptions.find(fo => fo.field === fieldName);
-    return f?.type || 'text';
-  };
-
-  const getFieldValues = (fieldName: string) => {
-    const f = fieldOptions.find(fo => fo.field === fieldName);
-    return f?.values || [];
   };
 
   return (
@@ -625,132 +934,15 @@ function FilterModal({ filter, onClose, onSave }: {
           </div>
 
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-              <FieldLabel style={{ marginBottom: 0 }}>Conditions</FieldLabel>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                <span style={{ fontSize: 11, color: colors.textMuted }}>Match</span>
-                {(['AND', 'OR'] as const).map(op => (
-                  <button
-                    key={op}
-                    onClick={() => setGroupOp(op)}
-                    style={{
-                      padding: '2px 10px', borderRadius: 4, fontSize: 11, fontWeight: 600,
-                      border: `1px solid ${groupOp === op ? colors.accent : colors.border}`,
-                      background: groupOp === op ? 'rgba(99,102,241,0.12)' : 'transparent',
-                      color: groupOp === op ? colors.accent : colors.textMuted,
-                      cursor: 'pointer', fontFamily: fonts.mono,
-                    }}
-                  >
-                    {op}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {conditions.map((cond, idx) => {
-                const fType = getFieldType(cond.field);
-                const fValues = getFieldValues(cond.field);
-                const operators = getOperatorsForType(fType);
-                const needsValue = !['is_null', 'is_not_null', 'is_true', 'is_false'].includes(cond.operator);
-
-                return (
-                  <div key={idx} style={{
-                    display: 'flex', alignItems: 'center', gap: 8,
-                    padding: '8px 12px', background: colors.surfaceRaised,
-                    border: `1px solid ${colors.border}`, borderRadius: 8,
-                  }}>
-                    <select
-                      value={cond.field}
-                      onChange={e => {
-                        const newField = e.target.value;
-                        const newType = fieldOptions.find(fo => fo.field === newField)?.type || 'text';
-                        const defaultOp = newType === 'boolean' ? 'is_true' : 'eq';
-                        updateCondition(idx, { field: newField, operator: defaultOp, value: '' });
-                      }}
-                      style={selectStyle}
-                    >
-                      <option value="">{fieldLoading ? 'Loading...' : 'Field...'}</option>
-                      {standardFields.length > 0 && (
-                        <optgroup label="Standard Fields">
-                          {standardFields.map(f => <option key={f.field} value={f.field}>{f.label}</option>)}
-                        </optgroup>
-                      )}
-                      {customFields.length > 0 && (
-                        <optgroup label="Custom Fields">
-                          {customFields.map(f => <option key={f.field} value={f.field}>{f.label}</option>)}
-                        </optgroup>
-                      )}
-                    </select>
-
-                    <select
-                      value={cond.operator}
-                      onChange={e => updateCondition(idx, { operator: e.target.value })}
-                      style={{ ...selectStyle, maxWidth: 140 }}
-                    >
-                      {operators.map(op => <option key={op.value} value={op.value}>{op.label}</option>)}
-                    </select>
-
-                    {needsValue && (
-                      fType === 'boolean' ? (
-                        <select
-                          value={cond.value ?? ''}
-                          onChange={e => updateCondition(idx, { value: e.target.value })}
-                          style={selectStyle}
-                        >
-                          <option value="true">true</option>
-                          <option value="false">false</option>
-                        </select>
-                      ) : fValues.length > 0 ? (
-                        <select
-                          value={cond.value}
-                          onChange={e => updateCondition(idx, { value: e.target.value })}
-                          style={selectStyle}
-                        >
-                          <option value="">Value...</option>
-                          {fValues.map(v => <option key={v} value={v}>{v}</option>)}
-                        </select>
-                      ) : (
-                        <input
-                          value={cond.value ?? ''}
-                          onChange={e => {
-                            const val = fType === 'number' ? (e.target.value === '' ? '' : Number(e.target.value)) : e.target.value;
-                            updateCondition(idx, { value: val });
-                          }}
-                          placeholder={fType === 'date' ? 'YYYY-MM-DD' : 'Value...'}
-                          type={fType === 'number' ? 'number' : 'text'}
-                          style={{ ...inputStyle, flex: 1, marginBottom: 0 }}
-                        />
-                      )
-                    )}
-
-                    {conditions.length > 1 && (
-                      <button
-                        onClick={() => removeCondition(idx)}
-                        style={{
-                          background: 'none', border: 'none', color: '#ef4444',
-                          fontSize: 16, cursor: 'pointer', padding: '0 4px', flexShrink: 0,
-                        }}
-                      >
-                        &times;
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            <button
-              onClick={addCondition}
-              style={{
-                marginTop: 8, padding: '6px 14px', borderRadius: 6,
-                border: `1px dashed ${colors.border}`, background: 'transparent',
-                color: colors.textSecondary, fontSize: 12, fontFamily: fonts.sans,
-                cursor: 'pointer',
-              }}
-            >
-              + Add Condition
-            </button>
+            <FieldLabel>Conditions</FieldLabel>
+            <ConditionGroupEditor
+              group={rootGroup}
+              onChange={setRootGroup}
+              fieldOptions={fieldOptions}
+              standardFields={standardFields}
+              customFields={customFields}
+              fieldLoading={fieldLoading}
+            />
           </div>
 
           {preview && (
