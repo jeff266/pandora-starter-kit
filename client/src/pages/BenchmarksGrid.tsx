@@ -444,7 +444,10 @@ export default function BenchmarksGrid() {
       : fallback;
 
   // ── Raw mode ──────────────────────────────────────────────────────────────────
-  const uniquePipelines = [...new Set(benchmarks.map(b => b.pipeline))].filter(Boolean).sort();
+  const uniquePipelines = [...new Set(benchmarks.map(b => b.pipeline))].filter(p => Boolean(p) && p !== 'all').sort();
+
+  const formatPipelineName = (p: string) =>
+    p.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
   const hasGroupedData = stages.length > 0;
   const hasRawData = rawBenchmarks.length > 0;
   const hasAnyData = hasGroupedData || hasRawData;
@@ -635,7 +638,7 @@ export default function BenchmarksGrid() {
               style={{ padding: '6px 10px', borderRadius: 6, border: `1px solid ${colors.border}`, background: colors.surface, color: colors.text, fontSize: 12, fontFamily: fonts.sans }}
             >
               <option value="all">All Pipelines</option>
-              {data.pipelines.map(p => <option key={p} value={p}>{p}</option>)}
+              {data.pipelines.map(p => <option key={p} value={p}>{formatPipelineName(p)}</option>)}
             </select>
           )}
 
@@ -697,7 +700,7 @@ export default function BenchmarksGrid() {
                     style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 18px', cursor: 'pointer', borderBottom: pipelineCollapsed ? 'none' : `1px solid ${colors.border}`, background: colors.surfaceRaised }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <span style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>{pipelineName}</span>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>{formatPipelineName(pipelineName)}</span>
                       <span style={{ fontSize: 10, color: colors.textMuted, background: colors.surfaceHover, padding: '1px 6px', borderRadius: 10 }}>
                         {pipelineStages.length} stage{pipelineStages.length !== 1 ? 's' : ''}
                       </span>

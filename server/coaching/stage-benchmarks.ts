@@ -86,7 +86,12 @@ export async function computeAndStoreStageBenchmarks(workspaceId: string): Promi
   }>(
     `WITH closed_deal_stages AS (
        SELECT
-         COALESCE(d.pipeline, 'all')                                           AS pipeline,
+         CASE
+           WHEN d.pipeline IS NOT NULL AND d.pipeline != ''     THEN d.pipeline
+           WHEN d.scope_id IS NOT NULL
+                AND d.scope_id NOT IN ('default', 'all')        THEN d.scope_id
+           ELSE 'all'
+         END                                                                    AS pipeline,
          dsh.stage_normalized,
          CASE
            WHEN COALESCE(d.amount, 0) <= 0          THEN 'all'
@@ -111,6 +116,12 @@ export async function computeAndStoreStageBenchmarks(workspaceId: string): Promi
        SELECT * FROM closed_deal_stages
        UNION ALL
        SELECT pipeline, stage_normalized, 'all', outcome, duration_days
+       FROM closed_deal_stages
+       UNION ALL
+       SELECT 'all', stage_normalized, segment, outcome, duration_days
+       FROM closed_deal_stages
+       UNION ALL
+       SELECT 'all', stage_normalized, 'all', outcome, duration_days
        FROM closed_deal_stages
      ),
      aggregated AS (
