@@ -7,7 +7,8 @@ interface DossierNarrativeProps {
   recommended_actions?: string[];
   narrative_generated_at?: string | null;
   loading?: boolean;
-  onGenerate: () => void;
+  onGenerate?: () => void;
+  fallbackSummary?: string | null;
 }
 
 function formatTimeAgo(dateStr: string): string {
@@ -21,79 +22,78 @@ function formatTimeAgo(dateStr: string): string {
   return `${days}d ago`;
 }
 
+function ShimmerLine({ width }: { width: string }) {
+  return (
+    <div style={{
+      height: 14,
+      width,
+      borderRadius: 4,
+      background: `linear-gradient(90deg, ${colors.surfaceHover} 25%, ${colors.surfaceActive || colors.border} 50%, ${colors.surfaceHover} 75%)`,
+      backgroundSize: '200% 100%',
+      animation: 'pandora-shimmer 1.4s ease-in-out infinite',
+      marginBottom: 8,
+    }} />
+  );
+}
+
 export default function DossierNarrative({
   narrative,
   recommended_actions = [],
   narrative_generated_at,
   loading = false,
   onGenerate,
+  fallbackSummary,
 }: DossierNarrativeProps) {
-  if (!narrative && !loading) {
-    return (
-      <div
-        style={{
-          background: colors.surface,
-          border: `1px solid ${colors.border}`,
-          borderRadius: 10,
-          padding: 16,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}
-      >
-        <span style={{ fontSize: 13, color: colors.textSecondary }}>
-          Generate an AI summary of this dossier
-        </span>
-        <button
-          onClick={onGenerate}
-          disabled={loading}
-          style={{
-            fontSize: 12,
-            fontWeight: 500,
-            color: loading ? colors.textMuted : colors.accent,
-            background: colors.accentSoft,
-            border: 'none',
-            padding: '6px 12px',
-            borderRadius: 6,
-            cursor: loading ? 'not-allowed' : 'pointer',
-          }}
-        >
-          Generate Summary
-        </button>
-      </div>
-    );
-  }
-
   return (
-    <div
-      style={{
-        background: colors.surface,
-        border: `2px solid ${colors.accent}33`,
-        borderRadius: 10,
-        padding: 20,
-      }}
-    >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+    <div style={{
+      background: colors.surface,
+      border: `1px solid ${colors.border}`,
+      borderRadius: 10,
+      padding: '20px 24px',
+      position: 'relative',
+      overflow: 'hidden',
+    }}>
+      {/* Accent gradient strip */}
+      <div style={{
+        position: 'absolute',
+        top: 0, left: 0, right: 0,
+        height: 2,
+        background: `linear-gradient(90deg, ${colors.accent}, ${colors.purple || '#a78bfa'})`,
+        opacity: 0.7,
+      }} />
+
+      <style>{`
+        @keyframes pandora-shimmer {
+          0% { background-position: 200% 0; }
+          100% { background-position: -200% 0; }
+        }
+      `}</style>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <h3 style={{ fontSize: 13, fontWeight: 600, color: colors.accent, margin: 0 }}>
-            AI Summary
-          </h3>
+          <span style={{ fontSize: 12 }}>✦</span>
+          <span style={{
+            fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
+            letterSpacing: '0.1em', color: colors.textMuted,
+          }}>
+            AI Deal Intelligence
+          </span>
           {narrative_generated_at && !loading && (
-            <span style={{ fontSize: 10, color: colors.textMuted }}>
-              {formatTimeAgo(narrative_generated_at)}
+            <span style={{ fontSize: 10, color: colors.textDim }}>
+              · {formatTimeAgo(narrative_generated_at)}
             </span>
           )}
         </div>
-        {!loading && (
+        {!loading && narrative && onGenerate && (
           <button
             onClick={onGenerate}
             style={{
-              fontSize: 11,
-              color: colors.accent,
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
+              fontSize: 11, color: colors.textMuted,
+              background: 'none', border: 'none', cursor: 'pointer',
+              padding: '2px 6px', borderRadius: 4,
             }}
+            onMouseEnter={e => { e.currentTarget.style.color = colors.accent; }}
+            onMouseLeave={e => { e.currentTarget.style.color = colors.textMuted; }}
           >
             Regenerate
           </button>
@@ -101,50 +101,30 @@ export default function DossierNarrative({
       </div>
 
       {loading ? (
-        <div style={{ padding: 20, textAlign: 'center' }}>
-          <div
-            style={{
-              width: 24,
-              height: 24,
-              border: `2px solid ${colors.border}`,
-              borderTopColor: colors.accent,
-              borderRadius: '50%',
-              animation: 'spin 0.8s linear infinite',
-              margin: '0 auto',
-            }}
-          />
+        <div style={{ paddingTop: 4 }}>
+          <ShimmerLine width="95%" />
+          <ShimmerLine width="80%" />
+          <ShimmerLine width="90%" />
+          <ShimmerLine width="60%" />
         </div>
       ) : narrative ? (
         <>
-          <div
-            style={{
-              fontSize: 14,
-              lineHeight: 1.6,
-              color: colors.text,
-              margin: 0,
-              marginBottom: recommended_actions.length > 0 ? 16 : 0,
-              whiteSpace: 'pre-wrap',
-            }}
-          >
+          <div style={{
+            fontSize: 14, lineHeight: 1.75, color: colors.text,
+            margin: 0,
+            marginBottom: recommended_actions.length > 0 ? 16 : 0,
+            whiteSpace: 'pre-wrap',
+          }}>
             {renderMarkdown(narrative)}
           </div>
           {recommended_actions.length > 0 && (
-            <div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: colors.textSecondary, marginBottom: 8 }}>
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
                 Recommended Actions
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {recommended_actions.map((action, idx) => (
-                  <div
-                    key={idx}
-                    style={{
-                      fontSize: 13,
-                      color: colors.text,
-                      display: 'flex',
-                      alignItems: 'flex-start',
-                      gap: 8,
-                    }}
-                  >
+                  <div key={idx} style={{ fontSize: 13, color: colors.text, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
                     <span style={{ color: colors.accent, flexShrink: 0 }}>→</span>
                     <span>{action}</span>
                   </div>
@@ -153,9 +133,13 @@ export default function DossierNarrative({
             </div>
           )}
         </>
+      ) : fallbackSummary ? (
+        <p style={{ fontSize: 14, lineHeight: 1.75, color: colors.textSecondary, margin: 0, fontStyle: 'italic' }}>
+          {fallbackSummary}
+        </p>
       ) : (
-        <p style={{ fontSize: 13, color: colors.textMuted, textAlign: 'center' }}>
-          Failed to generate narrative. Please try again.
+        <p style={{ fontSize: 13, color: colors.textMuted, margin: 0, fontStyle: 'italic' }}>
+          Generating deal intelligence...
         </p>
       )}
     </div>

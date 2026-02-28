@@ -16,6 +16,191 @@ const SEVERITY_LABELS: Record<string, string> = {
   act: 'Critical', watch: 'Warning', notable: 'Notable', info: 'Info',
 };
 
+function Accordion({
+  title,
+  badge,
+  children,
+  defaultOpen = false,
+}: {
+  title: string;
+  badge?: number | null;
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = React.useState(defaultOpen);
+  return (
+    <div style={{
+      background: colors.surface,
+      border: `1px solid ${colors.border}`,
+      borderRadius: 10,
+      overflow: 'hidden',
+    }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{
+          width: '100%', display: 'flex', alignItems: 'center',
+          justifyContent: 'space-between', padding: '12px 16px',
+          background: 'none', border: 'none', cursor: 'pointer',
+          textAlign: 'left',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>{title}</span>
+          {badge != null && badge > 0 && (
+            <span style={{
+              fontSize: 10, fontWeight: 600, color: colors.textMuted,
+              background: colors.surfaceHover, padding: '1px 7px', borderRadius: 10,
+            }}>{badge}</span>
+          )}
+        </div>
+        <ChevronDown
+          size={14}
+          color={colors.textMuted}
+          style={{ transition: 'transform 0.2s', transform: open ? 'rotate(180deg)' : 'rotate(0deg)' }}
+        />
+      </button>
+      {open && (
+        <div style={{ padding: '0 16px 16px', borderTop: `1px solid ${colors.border}` }}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BScoreRing({
+  score,
+  grade,
+  onClick,
+}: {
+  score: number;
+  grade: string;
+  onClick?: () => void;
+}) {
+  const radius = 28;
+  const circumference = 2 * Math.PI * radius;
+  const color = score >= 80 ? colors.green : score >= 60 ? colors.yellow : colors.red;
+  const progress = Math.max(0, Math.min(1, score / 100)) * circumference;
+  return (
+    <button
+      onClick={onClick}
+      title="Click to see score breakdown"
+      style={{
+        background: 'none', border: 'none', cursor: onClick ? 'pointer' : 'default',
+        padding: 0, position: 'relative', width: 72, height: 72, flexShrink: 0,
+      }}
+    >
+      <svg width="72" height="72" viewBox="0 0 72 72">
+        <circle cx="36" cy="36" r={radius} fill="none" stroke={colors.border} strokeWidth="4" />
+        <circle
+          cx="36" cy="36" r={radius} fill="none"
+          stroke={color} strokeWidth="4"
+          strokeDasharray={circumference}
+          strokeDashoffset={circumference - progress}
+          strokeLinecap="round"
+          transform="rotate(-90 36 36)"
+          style={{ transition: 'stroke-dashoffset 0.8s ease' }}
+        />
+      </svg>
+      <div style={{
+        position: 'absolute', inset: 0,
+        display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center',
+      }}>
+        <span style={{ fontSize: 9, color: colors.textMuted, fontWeight: 600, letterSpacing: 1, textTransform: 'uppercase' }}>B</span>
+        <span style={{ fontSize: 17, fontWeight: 700, color, lineHeight: 1 }}>{Math.round(score)}</span>
+        <span style={{ fontSize: 9, fontWeight: 700, color, letterSpacing: 0.5 }}>{grade}</span>
+      </div>
+    </button>
+  );
+}
+
+function InsightCard({
+  severity,
+  title,
+  children,
+}: {
+  severity: 'critical' | 'warning' | 'info' | 'ok';
+  title: string;
+  children: React.ReactNode;
+}) {
+  const map = {
+    critical: { bg: `${colors.red}08`, border: `${colors.red}30`, dot: colors.red },
+    warning: { bg: `${colors.yellow}08`, border: `${colors.yellow}30`, dot: colors.yellow },
+    info: { bg: `${colors.accent}08`, border: `${colors.accent}25`, dot: colors.accent },
+    ok: { bg: `${colors.green}08`, border: `${colors.green}25`, dot: colors.green },
+  };
+  const s = map[severity];
+  return (
+    <div style={{
+      background: s.bg, border: `1px solid ${s.border}`, borderRadius: 10,
+      padding: '14px 16px', flex: 1, minWidth: 0,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8 }}>
+        <div style={{
+          width: 6, height: 6, borderRadius: '50%',
+          background: s.dot, boxShadow: `0 0 7px ${s.dot}`,
+          flexShrink: 0,
+        }} />
+        <span style={{
+          fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
+          letterSpacing: '0.08em', color: s.dot,
+        }}>{title}</span>
+      </div>
+      <div style={{ fontSize: 13, lineHeight: 1.6, color: colors.text }}>{children}</div>
+    </div>
+  );
+}
+
+function StakeholderRing({
+  label,
+  engaged,
+  total,
+  color,
+}: {
+  label: string;
+  engaged: number;
+  total: number;
+  color: string;
+}) {
+  const radius = 18;
+  const circumference = 2 * Math.PI * radius;
+  const progress = total > 0 ? (engaged / total) * circumference : 0;
+  const isEmpty = total === 0 || engaged === 0;
+  const ringColor = isEmpty ? colors.red : (engaged === total ? color : colors.yellow);
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div style={{ position: 'relative', width: 44, height: 44, flexShrink: 0 }}>
+        <svg width="44" height="44" viewBox="0 0 44 44">
+          <circle cx="22" cy="22" r={radius} fill="none" stroke={colors.border} strokeWidth="3" />
+          <circle
+            cx="22" cy="22" r={radius} fill="none"
+            stroke={ringColor} strokeWidth="3"
+            strokeDasharray={circumference}
+            strokeDashoffset={total > 0 ? circumference - progress : 0}
+            strokeLinecap="round"
+            transform="rotate(-90 22 22)"
+            opacity={total === 0 ? 0.3 : 1}
+          />
+        </svg>
+        <div style={{
+          position: 'absolute', inset: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 11, fontWeight: 700, color: ringColor,
+        }}>
+          {total === 0 ? '—' : `${engaged}/${total}`}
+        </div>
+      </div>
+      <div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: colors.text }}>{label}</div>
+        <div style={{ fontSize: 11, color: isEmpty ? colors.red : colors.textMuted }}>
+          {total === 0 ? 'None identified' : isEmpty ? 'None engaged' : `${engaged} engaged`}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const SNOOZE_OPTIONS = [
   { label: '1d', days: 1 },
   { label: '3d', days: 3 },
@@ -181,7 +366,7 @@ export default function DealDetail() {
   }, [dealId]);
 
   useEffect(() => {
-    fetchDossier();
+    fetchDossier(true);
     if (dealId) {
       api.get(`/deals/${dealId}/score-history`).then((res: any) => {
         setScoreHistory(res.snapshots || []);
@@ -294,11 +479,17 @@ export default function DealDetail() {
   if (loading) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <Skeleton height={80} />
-        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr', gap: 16 }}>
-          <Skeleton height={300} />
-          <Skeleton height={300} />
+        <Skeleton height={120} />
+        <Skeleton height={100} />
+        <div style={{ display: 'flex', gap: 12 }}>
+          <Skeleton height={80} />
+          <Skeleton height={80} />
+          <Skeleton height={80} />
         </div>
+        <Skeleton height={60} />
+        <Skeleton height={48} />
+        <Skeleton height={48} />
+        <Skeleton height={48} />
       </div>
     );
   }
@@ -459,8 +650,101 @@ export default function DealDetail() {
     }
   };
 
+  // ── Tier 2 derivations ──────────────────────────────────────────────────────
+
+  // Stakeholder coverage rings
+  const dmContacts = contactsList.filter((c: any) => ['decision_maker', 'executive_sponsor'].includes((c.buying_role || '').toLowerCase().replace(/ /g, '_')));
+  const ebContacts = contactsList.filter((c: any) => (c.buying_role || '').toLowerCase().replace(/ /g, '_') === 'economic_buyer');
+  const infContacts = contactsList.filter((c: any) => ['influencer', 'champion'].includes((c.buying_role || '').toLowerCase().replace(/ /g, '_')));
+  const isEngaged = (c: any) => c.last_activity_date != null && c.engagement_level !== 'unengaged';
+
+  // Insight card generation (max 3, priority order)
+  const insightCards: Array<{ severity: 'critical' | 'warning' | 'info' | 'ok'; title: string; body: React.ReactNode }> = [];
+  {
+    const unengagedDMs = dmContacts.filter((c: any) => !isEngaged(c));
+    const eb = ebContacts[0];
+    if (unengagedDMs.length > 0) {
+      insightCards.push({
+        severity: 'critical',
+        title: 'Single-Thread Risk',
+        body: (
+          <>
+            <strong>{unengagedDMs.length} of {dmContacts.length}</strong> decision maker{dmContacts.length !== 1 ? 's' : ''} have had zero touchpoints.
+            {eb && !isEngaged(eb) && (
+              <> The economic buyer ({eb.name ? anon.person(eb.name) : eb.email}, {eb.title}) has not been engaged.</>
+            )}
+          </>
+        ),
+      });
+    }
+
+    if (insightCards.length < 3 && timeline.length === 0 && (coverageGapsData.days_since_last_call == null || coverageGapsData.days_since_last_call > (coverageGapsData.days_threshold || 10))) {
+      insightCards.push({
+        severity: 'warning',
+        title: 'Activity Gap',
+        body: 'No activity or conversations recorded in CRM or connected conversation tools. Unable to assess deal momentum.',
+      });
+    }
+
+    if (insightCards.length < 3 && daysInStage != null && daysInStage > 14 && !['closed_won', 'closed_lost', 'closed'].includes((deal.stage_normalized || '').toLowerCase())) {
+      insightCards.push({
+        severity: 'warning',
+        title: 'Stalled Deal',
+        body: <>This deal has been in <strong>{deal.stage_normalized?.replace(/_/g, ' ') || deal.stage}</strong> for <strong>{daysInStage} days</strong> without stage progression.</>,
+      });
+    }
+
+    if (insightCards.length < 3 && coverageGapsData.unlinked_calls > 0) {
+      insightCards.push({
+        severity: 'info',
+        title: 'Unlinked Conversations',
+        body: <><strong>{coverageGapsData.unlinked_calls}</strong> conversation{coverageGapsData.unlinked_calls > 1 ? 's' : ''} with matching domain participants are not linked to this deal.</>,
+      });
+    }
+
+    if (insightCards.length < 3) {
+      const critFinding = findingsList.find((f: any) => f.severity === 'act');
+      if (critFinding) {
+        insightCards.push({
+          severity: 'critical',
+          title: 'Critical Finding',
+          body: anon.text(critFinding.message),
+        });
+      }
+    }
+  }
+
+  // Recommended next steps
+  const nextSteps: Array<{ priority: 'P0' | 'P1' | 'P2'; action: string }> = [];
+  if (recommended_actions.length > 0) {
+    recommended_actions.slice(0, 3).forEach((a: string) => nextSteps.push({ priority: 'P1', action: a }));
+  } else {
+    const eb0 = ebContacts.find((c: any) => !isEngaged(c));
+    if (eb0) nextSteps.push({ priority: 'P0', action: `Multi-thread into ${eb0.name ? anon.person(eb0.name) : eb0.email || 'the economic buyer'}${eb0.title ? ` (${eb0.title})` : ''} — schedule introductory meeting.` });
+    if (timeline.length === 0 && conversations.length === 0) nextSteps.push({ priority: 'P0', action: `Confirm deal is active with owner${deal.owner_email ? ` (${anon.email(deal.owner_email)})` : ''} — zero CRM activity recorded.` });
+    if (coverageGapsData.unlinked_calls > 0) nextSteps.push({ priority: 'P1', action: `Review ${coverageGapsData.unlinked_calls} unlinked conversation${coverageGapsData.unlinked_calls > 1 ? 's' : ''} for potential deal intelligence.` });
+    if (stageHistory.length === 0) nextSteps.push({ priority: 'P1', action: 'Request CRM stage history tracking to be enabled in your CRM.' });
+    const unknownRoles = contactsList.filter((c: any) => !c.buying_role || c.buying_role === 'unknown');
+    if (unknownRoles.length > 0) nextSteps.push({ priority: 'P2', action: `Classify ${unknownRoles.length} contact${unknownRoles.length > 1 ? 's' : ''} with unknown buying roles.` });
+  }
+  const priorityMeta = {
+    P0: { color: colors.red, bg: `${colors.red}15` },
+    P1: { color: colors.yellow, bg: `${colors.yellow}12` },
+    P2: { color: colors.accent, bg: colors.accentSoft },
+  };
+
+  // Client-side narrative fallback
+  const fallbackSummary = (() => {
+    const parts: string[] = [];
+    if (deal.amount) parts.push(`${formatCurrency(Number(deal.amount) || 0)} ${deal.stage || 'deal'}.`);
+    if (contactsList.length > 0) parts.push(`${contactsList.length} contact${contactsList.length !== 1 ? 's' : ''} identified, ${contactsList.filter(isEngaged).length} engaged.`);
+    if (timeline.length > 0) parts.push(`Last activity: ${formatTimeAgo(timeline[0].date)}.`);
+    else parts.push('No activity records found.');
+    return parts.join(' ');
+  })();
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       {/* Breadcrumbs */}
       <nav style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
         <Link to="/" style={{ color: colors.accent, textDecoration: 'none' }}>Command Center</Link>
@@ -483,6 +767,10 @@ export default function DealDetail() {
         </div>
       )}
 
+      {/* ══════════════════════════════════════════════════════════════════════
+          TIER 1: Executive Summary
+          ══════════════════════════════════════════════════════════════════════ */}
+
       {/* Deal Header */}
       <SectionErrorBoundary fallbackMessage="Unable to load deal header.">
       <div style={{
@@ -491,7 +779,7 @@ export default function DealDetail() {
         borderRadius: 10,
         padding: 20,
       }}>
-        <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: isMobile ? 'stretch' : 'flex-start', gap: isMobile ? 12 : 0 }}>
+        <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: isMobile ? 'stretch' : 'flex-start', gap: isMobile ? 12 : 16 }}>
           <div style={{ flex: 1 }}>
             <h2 style={{ fontSize: 17, fontWeight: 700, color: colors.text }}>
               {anon.deal(deal.name || 'Unnamed Deal')}
@@ -565,63 +853,6 @@ export default function DealDetail() {
                   </button>
                 </>
               )}
-              {(activeScore || (riskScore && riskScore.grade)) && (() => {
-                const displayGrade = activeScore ? activeScore.grade : riskScore.grade;
-                const displayScore = activeScore ? activeScore.score : riskScore.score;
-                const isProvisional = activeScore && (activeScore as any).degradation_state === 'crm_only';
-                return (
-                  <div style={{ position: 'relative' }}>
-                    <div
-                      onClick={() => setShowScoreBreakdown(v => !v)}
-                      style={{
-                        display: 'inline-flex', alignItems: 'center', gap: 4,
-                        padding: '2px 8px', borderRadius: 4,
-                        background: gradeBg(displayGrade),
-                        border: `1px solid ${gradeColor(displayGrade)}30`,
-                        cursor: 'pointer',
-                        userSelect: 'none',
-                      }}
-                      title="Click to see score breakdown"
-                    >
-                      <span style={{
-                        fontSize: 11, fontWeight: 700,
-                        color: gradeColor(displayGrade),
-                        fontFamily: fonts.mono,
-                      }}>
-                        {displayGrade}
-                      </span>
-                      <span style={{ fontSize: 11, fontWeight: 600, fontFamily: fonts.mono, color: colors.text }}>
-                        {displayScore}
-                      </span>
-                      {isProvisional && (
-                        <span
-                          title="Score based on CRM data only"
-                          style={{
-                            fontSize: 8,
-                            fontWeight: 600,
-                            color: colors.accent,
-                            background: `${colors.accent}15`,
-                            padding: '1px 3px',
-                            borderRadius: 2,
-                            textTransform: 'uppercase',
-                          }}
-                        >
-                          P
-                        </span>
-                      )}
-                    </div>
-                    {showScoreBreakdown && riskScore && activeScore && (
-                      <ScoreBreakdownPanel
-                        riskScore={riskScore}
-                        mechanicalScore={mechanicalScore}
-                        activeScore={activeScore}
-                        coverageGaps={coverageGapsData}
-                        onClose={() => setShowScoreBreakdown(false)}
-                      />
-                    )}
-                  </div>
-                );
-              })()}
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: isMobile ? 8 : 16, marginTop: 8, fontSize: 12, color: colors.textMuted }}>
               <span>Owner: {deal.owner_name ? anon.person(deal.owner_name) : deal.owner_email ? anon.email(deal.owner_email) : deal.owner ? anon.person(deal.owner) : '--'}</span>
@@ -753,39 +984,37 @@ export default function DealDetail() {
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <button
-              onClick={() => setAnalysisOpen(true)}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 6,
-                fontSize: 11, fontWeight: 500, padding: '6px 12px',
-                borderRadius: 6, border: `1px solid ${colors.accent}30`,
-                background: colors.accentSoft, color: colors.accent,
-                cursor: 'pointer', transition: 'all 0.15s',
-              }}
-              onMouseEnter={e => { e.currentTarget.style.background = `${colors.accent}25`; }}
-              onMouseLeave={e => { e.currentTarget.style.background = colors.accentSoft; }}
-            >
-              Ask about this deal
-            </button>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 10 }}>
+            {/* B-Score Ring */}
+            {activeScore ? (
+              <div style={{ position: 'relative' }}>
+                <BScoreRing
+                  score={activeScore.score}
+                  grade={activeScore.grade}
+                  onClick={() => setShowScoreBreakdown(true)}
+                />
+                {showScoreBreakdown && activeScore && riskScore && (
+                  <ScoreBreakdownPanel
+                    riskScore={riskScore}
+                    mechanicalScore={mechanicalScore}
+                    activeScore={activeScore}
+                    coverageGaps={coverageGapsData}
+                    onClose={() => setShowScoreBreakdown(false)}
+                  />
+                )}
+              </div>
+            ) : mechanicalScore?.score != null ? (
+              <BScoreRing score={mechanicalScore.score} grade={mechanicalScore.grade} />
+            ) : null}
 
+            {/* CRM Link */}
             {(() => {
               const crmUrl = buildDealCrmUrl(crmInfo.crm, crmInfo.portalId ?? null, crmInfo.instanceUrl ?? null, deal.source_id, deal.source);
               if (!crmUrl) return null;
               const label = crmInfo.crm === 'hubspot' ? 'Open in HubSpot' : 'Open in Salesforce';
               return (
-                <a
-                  href={crmUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 6,
-                    fontSize: 11, fontWeight: 500, padding: '6px 12px',
-                    borderRadius: 6, textDecoration: 'none',
-                    background: colors.accentSoft, color: colors.accent,
-                    border: `1px solid ${colors.accent}30`,
-                    transition: 'all 0.15s',
-                  }}
+                <a href={crmUrl} target="_blank" rel="noopener noreferrer"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 500, padding: '6px 12px', borderRadius: 6, textDecoration: 'none', background: colors.accentSoft, color: colors.accent, border: `1px solid ${colors.accent}30`, transition: 'all 0.15s' }}
                   onMouseEnter={e => { e.currentTarget.style.background = `${colors.accent}25`; }}
                   onMouseLeave={e => { e.currentTarget.style.background = colors.accentSoft; }}
                 >
@@ -797,517 +1026,323 @@ export default function DealDetail() {
           </div>
         </div>
 
-        {/* Deal Signals */}
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: isMobile ? 10 : 16, marginTop: 16 }}>
-          {healthItems.map((h, i) => (
-            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }} title={h.tooltip}>
-              <span style={{
-                width: 7,
-                height: 7,
-                borderRadius: '50%',
-                background: h.color,
-                boxShadow: `0 0 6px ${h.color}40`,
-              }} />
-              <span style={{ fontSize: 11, color: colors.textMuted }}>{h.label}:</span>
-              <span style={{ fontSize: 11, fontWeight: 500, color: colors.textSecondary, textTransform: 'capitalize' }}>
-                {h.value || 'N/A'}
-              </span>
-            </div>
-          ))}
-        </div>
       </div>
       </SectionErrorBoundary>
 
-      {/* AI Narrative */}
+      {/* AI Narrative (Tier 1 continued) */}
       <SectionErrorBoundary fallbackMessage="Unable to load AI narrative.">
       {dealId && (
         <DossierNarrative
           narrative={narrative}
-          recommended_actions={recommended_actions}
+          recommended_actions={[]}
           narrative_generated_at={dossier?.narrative_generated_at}
           loading={narrativeLoading}
           onGenerate={() => fetchDossier(true)}
+          fallbackSummary={fallbackSummary}
         />
       )}
       </SectionErrorBoundary>
 
-      {/* Coverage Gaps */}
-      <SectionErrorBoundary fallbackMessage="Unable to load coverage gaps.">
-      {hasCoverageGaps && (
+      {/* ══════════════════════════════════════════════════════════════════════
+          TIER 2: Key Insights
+          ══════════════════════════════════════════════════════════════════════ */}
+
+      {/* Insight Cards */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+        {insightCards.length === 0 ? (
+          <InsightCard severity="ok" title="No Issues Detected">
+            No significant risk signals found. Deal appears healthy based on available data.
+          </InsightCard>
+        ) : (
+          insightCards.slice(0, 3).map((card, i) => (
+            <InsightCard key={i} severity={card.severity} title={card.title}>
+              {card.body}
+            </InsightCard>
+          ))
+        )}
+      </div>
+
+      {/* Stakeholder Coverage Rings */}
+      {contactsList.length > 0 && (
         <div style={{
           background: colors.surface,
           border: `1px solid ${colors.border}`,
-          borderLeft: `3px solid ${colors.yellow}`,
           borderRadius: 10,
-          padding: 16,
+          padding: '14px 20px',
         }}>
-          <div
-            onClick={() => setCoverageGapsExpanded(!coverageGapsExpanded)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              cursor: 'pointer',
-              marginBottom: coverageGapsExpanded ? 12 : 0,
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <h3 style={{ fontSize: 13, fontWeight: 600, color: colors.text, margin: 0 }}>
-                ⚠ Coverage Gaps
-              </h3>
-              <span style={{ fontSize: 11, color: colors.textMuted }}>
-                {[
-                  coverageGapsData.total_contacts === 0 ? 'no contacts' : null,
-                  coverageGapsData.days_since_last_call != null && coverageGapsData.days_since_last_call > (coverageGapsData.days_threshold || 10) ? `${coverageGapsData.days_since_last_call}d since call` : null,
-                  keyContactsNeverCalled.length > 0 ? `${keyContactsNeverCalled.length} key contact${keyContactsNeverCalled.length > 1 ? 's' : ''}` : null,
-                  coverageGapsData.unlinked_calls > 0 ? `${coverageGapsData.unlinked_calls} unlinked` : null,
-                ].filter(Boolean).join(' · ')}
-              </span>
-            </div>
-            <span style={{ fontSize: 12, color: colors.textMuted }}>
-              {coverageGapsExpanded ? '▼' : '▶'}
-            </span>
+          <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', color: colors.textMuted, marginBottom: 14 }}>
+            Stakeholder Coverage
           </div>
-
-          {coverageGapsExpanded && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {/* Phase Divergence Warning */}
-              {deal.phase_divergence && deal.phase_confidence >= 0.6 && (
-                <div style={{
-                  background: colors.yellowSoft,
-                  border: `1px solid ${colors.yellow}`,
-                  borderRadius: 8,
-                  padding: 12,
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 6 }}>
-                    <span style={{ fontSize: 16, flexShrink: 0 }}>⚡</span>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: colors.yellow }}>
-                      Stage Likely Stale
-                    </span>
-                  </div>
-                  <div style={{ fontSize: 12, color: colors.textSecondary, marginBottom: 4, lineHeight: 1.4 }}>
-                    Conversations suggest this deal is in <strong>{deal.inferred_phase}</strong> phase
-                    but CRM shows <strong>{deal.stage_normalized || deal.stage}</strong> stage.
-                  </div>
-                  <div style={{ fontSize: 11, color: colors.textMuted, lineHeight: 1.4 }}>
-                    Consider updating the stage to unlock accurate benchmarking.
-                  </div>
-                  {deal.phase_signals && deal.phase_signals.length > 0 && (
-                    <div style={{ fontSize: 10, color: colors.textMuted, marginTop: 6, fontStyle: 'italic' }}>
-                      Signals: {deal.phase_signals.map((s: any) => `${s.keyword} (${s.count})`).join(', ')}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {coverageGapsData.total_contacts === 0 && (
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                  <span style={{ color: colors.yellow, fontSize: 14, marginTop: 1, flexShrink: 0 }}>&#9888;</span>
-                  <p style={{ fontSize: 13, color: colors.text, lineHeight: 1.4 }}>No contacts linked to this deal</p>
-                </div>
-              )}
-
-              {coverageGapsData.days_since_last_call != null && coverageGapsData.days_since_last_call > (coverageGapsData.days_threshold || 10) && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <span style={{ color: colors.yellow, fontSize: 14, flexShrink: 0 }}>&#9888;</span>
-                  <span style={{ fontSize: 13, color: colors.text }}>Days Since Last Call</span>
-                  <span style={{
-                    fontSize: 18, fontWeight: 700, fontFamily: fonts.mono,
-                    color: coverageGapsData.days_since_last_call > (coverageGapsData.days_threshold || 10) ? colors.red : colors.yellow,
-                  }}>
-                    {coverageGapsData.days_since_last_call}
-                  </span>
-                  <span style={{ fontSize: 11, color: colors.textMuted }}>
-                    (threshold: {coverageGapsData.days_threshold || 10}d)
-                  </span>
-                </div>
-              )}
-
-              {keyContactsNeverCalled.length > 0 && (
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 6 }}>
-                    <span style={{ color: colors.yellow, fontSize: 14, marginTop: 1, flexShrink: 0 }}>&#9888;</span>
-                    <span style={{ fontSize: 13, fontWeight: 500, color: colors.text }}>
-                      Key Contacts Never Engaged
-                    </span>
-                  </div>
-                  <div style={{ paddingLeft: 22, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    {keyContactsNeverCalled.slice(0, 5).map((c: any, i: number) => (
-                      <div key={i} style={{ fontSize: 12, color: colors.textSecondary }}>
-                        {c.name ? anon.person(c.name) : c.email ? anon.email(c.email) : 'Unknown'}
-                        {c.title && <span style={{ color: colors.textMuted }}> — {c.title}</span>}
-                        {c.buying_role && <span style={{ color: colors.accent, marginLeft: 4 }}>({c.buying_role.replace(/_/g, ' ')})</span>}
-                      </div>
-                    ))}
-                    {keyContactsNeverCalled.length > 5 && (
-                      <div style={{ fontSize: 11, color: colors.textMuted, fontStyle: 'italic' }}>
-                        and {keyContactsNeverCalled.length - 5} other{keyContactsNeverCalled.length - 5 > 1 ? 's' : ''}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {coverageGapsData.unlinked_calls > 0 && (
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                  <span style={{ color: colors.yellow, fontSize: 14, marginTop: 1, flexShrink: 0 }}>&#9888;</span>
-                  <p style={{ fontSize: 13, color: colors.text, lineHeight: 1.4 }}>
-                    {coverageGapsData.unlinked_calls} call{coverageGapsData.unlinked_calls > 1 ? 's' : ''} match this account's domain but aren't linked to this deal
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: isMobile ? 16 : 32 }}>
+            <StakeholderRing
+              label="Decision Makers"
+              engaged={dmContacts.filter(isEngaged).length}
+              total={dmContacts.length}
+              color={colors.red}
+            />
+            <StakeholderRing
+              label="Economic Buyers"
+              engaged={ebContacts.filter(isEngaged).length}
+              total={ebContacts.length}
+              color={colors.yellow}
+            />
+            <StakeholderRing
+              label="Influencers"
+              engaged={infContacts.filter(isEngaged).length}
+              total={infContacts.length}
+              color={colors.accent}
+            />
+          </div>
         </div>
       )}
-      </SectionErrorBoundary>
 
-      {/* Two Column Layout */}
-      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.8fr 1fr', gap: 16, alignItems: 'start' }}>
-        {/* Left Column */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {/* Findings */}
-          {findingsList.length > 0 && (
-          <SectionErrorBoundary fallbackMessage="Something went wrong loading findings.">
-          <Card title="Findings" count={findingsList.length}>
-            {findingsList.map((f: any, i: number) => {
-                const isProcessing = dismissingId === f.id || snoozingId === f.id;
-                return (
-                  <div key={f.id || i} style={{
-                    display: 'flex', gap: 8, padding: '8px 0',
-                    borderBottom: `1px solid ${colors.border}`,
-                    opacity: isProcessing ? 0.4 : 1,
-                    transition: 'opacity 0.3s',
-                  }}>
-                    <span style={{
-                      width: 7, height: 7, borderRadius: '50%',
-                      background: severityColor(f.severity), marginTop: 5, flexShrink: 0,
-                      boxShadow: `0 0 6px ${severityColor(f.severity)}40`,
-                    }} />
-                    <div style={{ flex: 1 }}>
-                      <p style={{ fontSize: 13, color: colors.text }}>{anon.text(f.message)}</p>
-                      <div style={{ display: 'flex', gap: 8, marginTop: 4, alignItems: 'center' }}>
-                        <span style={{
-                          fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 3,
-                          background: `${severityColor(f.severity)}15`,
-                          color: severityColor(f.severity),
-                          textTransform: 'capitalize',
-                        }}>
-                          {SEVERITY_LABELS[f.severity] || f.severity}
-                        </span>
-                        <span style={{ fontSize: 11, color: colors.textMuted }}>
-                          {f.skill_id} · {formatTimeAgo(f.found_at)}
-                        </span>
-                      </div>
-                    </div>
-                    <div style={{ display: 'flex', gap: 4, alignSelf: 'center', flexShrink: 0, position: 'relative' }}>
-                      <button
-                        onClick={() => setSnoozeDropdownId(snoozeDropdownId === f.id ? null : f.id)}
-                        disabled={isProcessing}
-                        style={{
-                          fontSize: 11, fontWeight: 500, padding: '4px 10px',
-                          borderRadius: 4, border: `1px solid ${colors.border}`,
-                          background: 'transparent', color: colors.textMuted,
-                          cursor: isProcessing ? 'not-allowed' : 'pointer',
-                          transition: 'all 0.15s',
-                        }}
-                        onMouseEnter={e => { if (!isProcessing) { e.currentTarget.style.borderColor = colors.yellow; e.currentTarget.style.color = colors.yellow; } }}
-                        onMouseLeave={e => { e.currentTarget.style.borderColor = colors.border; e.currentTarget.style.color = colors.textMuted; }}
-                      >
-                        Snooze
-                      </button>
-                      {snoozeDropdownId === f.id && (
-                        <div style={{
-                          position: 'absolute', top: '100%', right: 0, marginTop: 4,
-                          background: colors.surfaceRaised, border: `1px solid ${colors.border}`,
-                          borderRadius: 6, padding: 4, zIndex: 100,
-                          display: 'flex', flexDirection: 'column', gap: 2,
-                          boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-                          minWidth: 80,
-                        }}>
-                          {SNOOZE_OPTIONS.map(opt => (
-                            <button
-                              key={opt.days}
-                              onClick={() => snoozeFinding(f.id, opt.days)}
-                              style={{
-                                fontSize: 11, padding: '4px 8px', borderRadius: 4,
-                                background: 'transparent', border: 'none',
-                                color: colors.textSecondary, cursor: 'pointer',
-                                textAlign: 'left', transition: 'all 0.1s',
-                              }}
-                              onMouseEnter={e => { e.currentTarget.style.background = colors.surfaceHover; e.currentTarget.style.color = colors.yellow; }}
-                              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = colors.textSecondary; }}
-                            >
-                              {opt.label}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                      <button
-                        onClick={() => dismissFinding(f.id)}
-                        disabled={isProcessing}
-                        style={{
-                          fontSize: 11, fontWeight: 500, padding: '4px 10px',
-                          borderRadius: 4, border: `1px solid ${colors.border}`,
-                          background: 'transparent', color: colors.textMuted,
-                          cursor: isProcessing ? 'not-allowed' : 'pointer',
-                          transition: 'all 0.15s',
-                        }}
-                        onMouseEnter={e => { if (!isProcessing) { e.currentTarget.style.borderColor = colors.red; e.currentTarget.style.color = colors.red; } }}
-                        onMouseLeave={e => { e.currentTarget.style.borderColor = colors.border; e.currentTarget.style.color = colors.textMuted; }}
-                      >
-                        {dismissingId === f.id ? '...' : 'Dismiss'}
-                      </button>
-                    </div>
-                  </div>
-                );
-              })
-            }
-          </Card>
-          </SectionErrorBoundary>
-          )}
-
-          {/* Stage History */}
-          <SectionErrorBoundary fallbackMessage="Unable to load stage history.">
-          <Card title="Stage History">
-            {stageHistory.length === 0 ? (
-              <EmptyText>Stage history not available</EmptyText>
-            ) : (
-              <div style={{ paddingLeft: 12 }}>
-                {stageHistory.map((s: any, i: number) => (
-                  <div key={i} style={{
-                    display: 'flex', gap: 12, paddingBottom: 12, position: 'relative',
-                    borderLeft: i < stageHistory.length - 1 ? `2px solid ${colors.border}` : `2px solid ${colors.accent}`,
-                    paddingLeft: 16,
-                  }}>
-                    <div style={{
-                      position: 'absolute', left: -5, top: 0,
-                      width: 8, height: 8, borderRadius: '50%',
-                      background: i === stageHistory.length - 1 ? colors.accent : colors.border,
-                    }} />
-                    <div>
-                      <span style={{ fontSize: 13, fontWeight: 500, color: colors.text }}>
-                        {s.stage_label || s.stage?.replace(/_/g, ' ') || 'Unknown'}
-                      </span>
-                      <div style={{ fontSize: 11, color: colors.textMuted }}>
-                        {s.entered_at ? formatDate(s.entered_at) : ''} {s.days_in_stage ? `· ${Math.round(s.days_in_stage)}d` : ''}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
-          </SectionErrorBoundary>
-
-          {/* Activity Timeline */}
-          <SectionErrorBoundary fallbackMessage="Unable to load recent activity.">
-          <Card title="Timeline" count={timeline.length}>
-            {timeline.length === 0 ? (
-              <EmptyText>No activity or conversation records</EmptyText>
-            ) : (
-              timeline.slice(0, 30).map((item: any) => {
-                const badge = sourceBadge(item.source);
-                const isExpanded = expandedSummaries.has(item.id);
-
-                return (
-                  <div key={item.id} style={{ padding: '8px 0', borderBottom: `1px solid ${colors.border}` }}>
-                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-                      {item.type === 'activity' && (
-                        <span style={{ fontSize: 12, width: 20, textAlign: 'center', flexShrink: 0, marginTop: 2 }}>
-                          {item.icon}
-                        </span>
-                      )}
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                          <p style={{
-                            fontSize: item.type === 'conversation' ? 13 : 12,
-                            fontWeight: item.type === 'conversation' ? 500 : 400,
-                            color: colors.text,
-                            margin: 0,
-                            flex: 1,
-                            minWidth: 0,
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          }}>
-                            {anon.text(item.label)}
-                          </p>
-                          <span style={{
-                            fontSize: 9,
-                            fontWeight: 600,
-                            padding: '1px 6px',
-                            borderRadius: 4,
-                            background: badge.bg,
-                            color: badge.color,
-                            flexShrink: 0,
-                          }}>
-                            {badge.label}
-                          </span>
-                          {item.type === 'conversation' && (() => {
-                            const conversationUrl = buildConversationUrl(
-                              item.source,
-                              item.source_id,
-                              item.source_data,
-                              item.custom_fields
-                            );
-                            return conversationUrl ? (
-                              <a
-                                href={conversationUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                title={`Open in ${item.source}`}
-                                style={{ color: colors.accent, lineHeight: 0, flexShrink: 0 }}
-                              >
-                                <ExternalLink size={14} />
-                              </a>
-                            ) : null;
-                          })()}
-                        </div>
-                        <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>
-                          {item.date ? formatTimeAgo(item.date) : ''}
-                          {item.meta && ` · ${anon.text(item.meta)}`}
-                        </div>
-                        {item.summary && (
-                          <div style={{ marginTop: 4 }}>
-                            <button
-                              onClick={() => {
-                                const newExpanded = new Set(expandedSummaries);
-                                if (isExpanded) {
-                                  newExpanded.delete(item.id);
-                                } else {
-                                  newExpanded.add(item.id);
-                                }
-                                setExpandedSummaries(newExpanded);
-                              }}
-                              style={{
-                                background: 'none',
-                                border: 'none',
-                                color: colors.accent,
-                                fontSize: 11,
-                                cursor: 'pointer',
-                                padding: 0,
-                                textDecoration: 'underline',
-                              }}
-                            >
-                              {isExpanded ? 'Hide summary' : 'Show summary'}
-                            </button>
-                            {isExpanded && (
-                              <p style={{ fontSize: 12, color: colors.textSecondary, marginTop: 4, lineHeight: 1.4 }}>
-                                {anon.text(item.summary)}
-                              </p>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </Card>
-          </SectionErrorBoundary>
+      {/* Recommended Next Steps */}
+      {nextSteps.length > 0 && (
+        <div style={{
+          background: colors.surface,
+          border: `1px solid ${colors.border}`,
+          borderRadius: 10,
+          padding: '14px 20px',
+        }}>
+          <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', color: colors.textMuted, marginBottom: 12 }}>
+            Recommended Next Steps
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {nextSteps.slice(0, 3).map((step, i) => {
+              const pm = priorityMeta[step.priority];
+              return (
+                <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 4,
+                    background: pm.bg, color: pm.color,
+                    flexShrink: 0, marginTop: 1,
+                  }}>{step.priority}</span>
+                  <span style={{ fontSize: 13, color: colors.text, lineHeight: 1.5 }}>{step.action}</span>
+                </div>
+              );
+            })}
+          </div>
         </div>
+      )}
 
-        {/* Right Column */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {/* Contacts */}
-          <SectionErrorBoundary fallbackMessage="Unable to load deal contacts.">
-          <Card title="Contacts" count={contactsList.length}>
-            {contactsList.length === 0 ? (
-              <EmptyText>No contacts linked — this deal is single-threaded</EmptyText>
-            ) : (
-              contactsList.map((c: any, i: number) => {
-                const eng = engagementDot(c.engagement_level);
-                // Add visual separator between engaged and unengaged contacts
-                const prevContact = i > 0 ? contactsList[i - 1] : null;
-                const showUnengagedSeparator = prevContact && prevContact.engagement_level !== 'unengaged' && c.engagement_level === 'unengaged';
-                return (
-                  <React.Fragment key={i}>
-                    {showUnengagedSeparator && (
-                      <div style={{
-                        borderTop: `1px solid ${colors.border}`,
-                        padding: '8px 0',
-                        fontSize: 10,
-                        color: colors.textMuted,
-                        textTransform: 'uppercase',
-                        letterSpacing: 0.5,
-                        fontWeight: 600,
-                      }}>
-                        Not yet engaged
-                      </div>
-                    )}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: `1px solid ${colors.border}` }}>
-                    <div style={{
-                      width: 26, height: 26, borderRadius: '50%',
-                      background: colors.surfaceHover,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: 10, fontWeight: 600, color: colors.textSecondary, flexShrink: 0,
-                    }}>
+      {/* ══════════════════════════════════════════════════════════════════════
+          TIER 3: Drill-Down Details
+          ══════════════════════════════════════════════════════════════════════ */}
+
+      <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: colors.textMuted, paddingTop: 4 }}>
+        Details
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+
+        {/* Contacts accordion */}
+        <Accordion title="All Contacts" badge={contactsList.length}>
+          <div style={{ paddingTop: 12 }}>
+          {contactsList.length === 0 ? (
+            <p style={{ fontSize: 13, color: colors.textMuted, padding: '8px 0' }}>No contacts linked — this deal is single-threaded.</p>
+          ) : (
+            contactsList.map((c: any, i: number) => {
+              const eng = engagementDot(c.engagement_level);
+              const prevContact = i > 0 ? contactsList[i - 1] : null;
+              const showUnengagedSeparator = prevContact && prevContact.engagement_level !== 'unengaged' && c.engagement_level === 'unengaged';
+              return (
+                <React.Fragment key={i}>
+                  {showUnengagedSeparator && (
+                    <div style={{ borderTop: `1px solid ${colors.border}`, padding: '8px 0', fontSize: 10, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600 }}>
+                      Not yet engaged
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: `1px solid ${colors.border}` }}>
+                    <div style={{ width: 26, height: 26, borderRadius: '50%', background: colors.surfaceHover, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 600, color: colors.textSecondary, flexShrink: 0 }}>
                       {(c.name ? anon.person(c.name) : c.email ? anon.email(c.email) : '?').charAt(0).toUpperCase()}
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <span style={{ fontSize: 12, fontWeight: 500, color: colors.text }}>
-                        {c.name ? anon.person(c.name) : c.email ? anon.email(c.email) : 'Unknown'}
-                      </span>
+                      <span style={{ fontSize: 12, fontWeight: 500, color: colors.text }}>{c.name ? anon.person(c.name) : c.email ? anon.email(c.email) : 'Unknown'}</span>
                       {c.title && <span style={{ fontSize: 11, color: colors.textMuted, display: 'block' }}>{c.title}</span>}
-                      {c.last_activity_date && (
-                        <span style={{ fontSize: 10, color: colors.textDim, display: 'block' }}>
-                          Last active {formatTimeAgo(c.last_activity_date)}
-                        </span>
-                      )}
+                      {c.last_activity_date && <span style={{ fontSize: 10, color: colors.textDim, display: 'block' }}>Last active {formatTimeAgo(c.last_activity_date)}</span>}
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flexShrink: 0 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <span style={{
-                          width: 6, height: 6, borderRadius: '50%',
-                          background: eng.color,
-                          boxShadow: `0 0 4px ${eng.color}40`,
-                        }} />
+                        <span style={{ width: 6, height: 6, borderRadius: '50%', background: eng.color, boxShadow: `0 0 4px ${eng.color}40` }} />
                         <span style={{ fontSize: 10, color: eng.color }}>{eng.label}</span>
                       </div>
                       <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                         {c.role && (
-                          <span
-                            title={c.role_confidence ? `Confidence: ${c.role_confidence}` : undefined}
-                            style={{
-                              fontSize: 9, fontWeight: 600, padding: '1px 6px', borderRadius: 4,
-                              background: colors.accentSoft, color: colors.accent, textTransform: 'capitalize',
-                            }}
-                          >
+                          <span title={c.role_confidence ? `Confidence: ${c.role_confidence}` : undefined} style={{ fontSize: 9, fontWeight: 600, padding: '1px 6px', borderRadius: 4, background: colors.accentSoft, color: colors.accent, textTransform: 'capitalize' }}>
                             {c.role}
                           </span>
                         )}
                         {c.buying_role && c.buying_role !== c.role && (
-                          <span style={{
-                            fontSize: 9, fontWeight: 600, padding: '1px 6px', borderRadius: 4,
-                            background: `${colors.purple}15`, color: colors.purple, textTransform: 'capitalize',
-                          }}>
+                          <span style={{ fontSize: 9, fontWeight: 600, padding: '1px 6px', borderRadius: 4, background: `${colors.purple}15`, color: colors.purple, textTransform: 'capitalize' }}>
                             {c.buying_role}
                           </span>
                         )}
+                        {(() => {
+                          const pill = linkMethodPill(c.link_method);
+                          return pill ? (
+                            <span style={{ fontSize: 9, fontWeight: 600, padding: '1px 6px', borderRadius: 4, background: pill.bg, color: pill.color }}>{pill.label}</span>
+                          ) : null;
+                        })()}
                       </div>
                     </div>
                   </div>
-                  </React.Fragment>
-                );
-              })
-            )}
-          </Card>
-          </SectionErrorBoundary>
+                </React.Fragment>
+              );
+            })
+          )}
+          </div>
+        </Accordion>
 
-          {/* Deal Details */}
-          <Card title="Deal Details">
-            {/* ── Section: CRM ── */}
-            <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', color: colors.textMuted, paddingBottom: 6, marginBottom: 2 }}>CRM</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 12px', marginBottom: 14 }}>
-              {/* Pipeline */}
+        {/* Findings accordion — only show if there are findings */}
+        {findingsList.length > 0 && (
+          <SectionErrorBoundary fallbackMessage="Something went wrong loading findings.">
+          <Accordion title="Findings" badge={findingsList.length}>
+            <div style={{ paddingTop: 12 }}>
+            {findingsList.map((f: any, i: number) => {
+              const isProcessing = dismissingId === f.id || snoozingId === f.id;
+              return (
+                <div key={f.id || i} style={{ display: 'flex', gap: 8, padding: '8px 0', borderBottom: `1px solid ${colors.border}`, opacity: isProcessing ? 0.4 : 1, transition: 'opacity 0.3s' }}>
+                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: severityColor(f.severity), marginTop: 5, flexShrink: 0, boxShadow: `0 0 6px ${severityColor(f.severity)}40` }} />
+                  <div style={{ flex: 1 }}>
+                    <p style={{ fontSize: 13, color: colors.text }}>{anon.text(f.message)}</p>
+                    <div style={{ display: 'flex', gap: 8, marginTop: 4, alignItems: 'center' }}>
+                      <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 3, background: `${severityColor(f.severity)}15`, color: severityColor(f.severity), textTransform: 'capitalize' }}>
+                        {SEVERITY_LABELS[f.severity] || f.severity}
+                      </span>
+                      <span style={{ fontSize: 11, color: colors.textMuted }}>{f.skill_id} · {formatTimeAgo(f.found_at)}</span>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 4, alignSelf: 'center', flexShrink: 0, position: 'relative' }}>
+                    <button onClick={() => setSnoozeDropdownId(snoozeDropdownId === f.id ? null : f.id)} disabled={isProcessing}
+                      style={{ fontSize: 11, fontWeight: 500, padding: '4px 10px', borderRadius: 4, border: `1px solid ${colors.border}`, background: 'transparent', color: colors.textMuted, cursor: isProcessing ? 'not-allowed' : 'pointer' }}
+                      onMouseEnter={e => { if (!isProcessing) { e.currentTarget.style.borderColor = colors.yellow; e.currentTarget.style.color = colors.yellow; } }}
+                      onMouseLeave={e => { e.currentTarget.style.borderColor = colors.border; e.currentTarget.style.color = colors.textMuted; }}
+                    >Snooze</button>
+                    {snoozeDropdownId === f.id && (
+                      <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 4, background: colors.surfaceRaised, border: `1px solid ${colors.border}`, borderRadius: 6, padding: 4, zIndex: 100, display: 'flex', flexDirection: 'column', gap: 2, boxShadow: '0 4px 12px rgba(0,0,0,0.3)', minWidth: 80 }}>
+                        {SNOOZE_OPTIONS.map(opt => (
+                          <button key={opt.days} onClick={() => snoozeFinding(f.id, opt.days)}
+                            style={{ fontSize: 11, padding: '4px 8px', borderRadius: 4, background: 'transparent', border: 'none', color: colors.textSecondary, cursor: 'pointer', textAlign: 'left' }}
+                            onMouseEnter={e => { e.currentTarget.style.background = colors.surfaceHover; e.currentTarget.style.color = colors.yellow; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = colors.textSecondary; }}
+                          >{opt.label}</button>
+                        ))}
+                      </div>
+                    )}
+                    <button onClick={() => dismissFinding(f.id)} disabled={isProcessing}
+                      style={{ fontSize: 11, fontWeight: 500, padding: '4px 10px', borderRadius: 4, border: `1px solid ${colors.border}`, background: 'transparent', color: colors.textMuted, cursor: isProcessing ? 'not-allowed' : 'pointer' }}
+                      onMouseEnter={e => { if (!isProcessing) { e.currentTarget.style.borderColor = colors.red; e.currentTarget.style.color = colors.red; } }}
+                      onMouseLeave={e => { e.currentTarget.style.borderColor = colors.border; e.currentTarget.style.color = colors.textMuted; }}
+                    >{dismissingId === f.id ? '...' : 'Dismiss'}</button>
+                  </div>
+                </div>
+              );
+            })}
+            </div>
+          </Accordion>
+          </SectionErrorBoundary>
+        )}
+
+        {/* Stage History accordion */}
+        <Accordion title="Stage History">
+          <div style={{ paddingTop: 12 }}>
+          {stageHistory.length === 0 ? (
+            <p style={{ fontSize: 13, color: colors.textMuted, lineHeight: 1.6 }}>
+              Stage history not available — requires CRM field history tracking to be enabled in Salesforce/HubSpot.
+            </p>
+          ) : (
+            <div style={{ paddingLeft: 12 }}>
+              {stageHistory.map((s: any, i: number) => (
+                <div key={i} style={{ display: 'flex', gap: 12, paddingBottom: 12, position: 'relative', borderLeft: i < stageHistory.length - 1 ? `2px solid ${colors.border}` : `2px solid ${colors.accent}`, paddingLeft: 16 }}>
+                  <div style={{ position: 'absolute', left: -5, top: 0, width: 8, height: 8, borderRadius: '50%', background: i === stageHistory.length - 1 ? colors.accent : colors.border }} />
+                  <div>
+                    <span style={{ fontSize: 13, fontWeight: 500, color: colors.text }}>{s.stage_label || s.stage?.replace(/_/g, ' ') || 'Unknown'}</span>
+                    <div style={{ fontSize: 11, color: colors.textMuted }}>{s.entered_at ? formatDate(s.entered_at) : ''}{s.days_in_stage ? ` · ${Math.round(s.days_in_stage)}d` : ''}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          </div>
+        </Accordion>
+
+        {/* Timeline accordion */}
+        <Accordion title="Timeline" badge={timeline.length}>
+          <div style={{ paddingTop: 12 }}>
+          {timeline.length === 0 ? (
+            <p style={{ fontSize: 13, color: colors.textMuted, lineHeight: 1.6 }}>
+              No activity or conversation records found. Connect a conversation intelligence tool (Gong, Fireflies) for richer deal context.
+            </p>
+          ) : (
+            timeline.slice(0, 30).map((item: any) => {
+              const badge = sourceBadge(item.source);
+              const isExpanded = expandedSummaries.has(item.id);
+              return (
+                <div key={item.id} style={{ padding: '8px 0', borderBottom: `1px solid ${colors.border}` }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                    {item.type === 'activity' && <span style={{ fontSize: 12, width: 20, textAlign: 'center', flexShrink: 0, marginTop: 2 }}>{item.icon}</span>}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <p style={{ fontSize: item.type === 'conversation' ? 13 : 12, fontWeight: item.type === 'conversation' ? 500 : 400, color: colors.text, margin: 0, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {anon.text(item.label)}
+                        </p>
+                        <span style={{ fontSize: 9, fontWeight: 600, padding: '1px 6px', borderRadius: 4, background: badge.bg, color: badge.color, flexShrink: 0 }}>{badge.label}</span>
+                        {item.type === 'conversation' && (() => {
+                          const url = buildConversationUrl(item.source, item.source_id, item.source_data, item.custom_fields);
+                          return url ? <a href={url} target="_blank" rel="noopener noreferrer" title={`Open in ${item.source}`} style={{ color: colors.accent, lineHeight: 0, flexShrink: 0 }}><ExternalLink size={14} /></a> : null;
+                        })()}
+                      </div>
+                      <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>
+                        {item.date ? formatTimeAgo(item.date) : ''}{item.meta && ` · ${anon.text(item.meta)}`}
+                      </div>
+                      {item.summary && (
+                        <div style={{ marginTop: 4 }}>
+                          <button onClick={() => { const n = new Set(expandedSummaries); isExpanded ? n.delete(item.id) : n.add(item.id); setExpandedSummaries(n); }}
+                            style={{ background: 'none', border: 'none', color: colors.accent, fontSize: 11, cursor: 'pointer', padding: 0, textDecoration: 'underline' }}>
+                            {isExpanded ? 'Hide summary' : 'Show summary'}
+                          </button>
+                          {isExpanded && <p style={{ fontSize: 12, color: colors.textSecondary, marginTop: 4, lineHeight: 1.4 }}>{anon.text(item.summary)}</p>}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+          </div>
+        </Accordion>
+
+        {/* Deal Metadata accordion */}
+        <Accordion title="Deal Metadata">
+          <div style={{ paddingTop: 12 }}>
+            {/* CRM section */}
+            <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', color: colors.textMuted, marginBottom: 8 }}>CRM</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px', marginBottom: 14 }}>
               <div>
                 <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: colors.textMuted, marginBottom: 3 }}>Pipeline</div>
                 {canEditPipeline ? (
-                  <div style={{ position: 'relative' }}>
-                    <button onClick={() => setPipelineEditing(!pipelineEditing)}
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: 3, background: 'transparent', border: `1px solid ${colors.border}`, borderRadius: 5, padding: '3px 8px', cursor: 'pointer', color: colors.text, fontSize: 12 }}>
+                  <div ref={pipelineDropdownRef} style={{ position: 'relative' }}>
+                    {pipelineEditing && (
+                      <div style={{ position: 'absolute', left: 0, top: 'calc(100% + 4px)', zIndex: 20, background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.25)', minWidth: 200, maxHeight: 240, overflowY: 'auto' }}>
+                        {pipelines.map(p => (
+                          <button key={p} onClick={() => handlePipelineChange(p)} disabled={pipelineSaving}
+                            style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 12px', border: 'none', background: p === deal.pipeline ? `${colors.accent}15` : 'transparent', color: colors.text, fontSize: 13, cursor: 'pointer', textAlign: 'left' }}
+                            onMouseEnter={e => { (e.target as HTMLElement).style.background = `${colors.accent}15`; }}
+                            onMouseLeave={e => { (e.target as HTMLElement).style.background = p === deal.pipeline ? `${colors.accent}15` : 'transparent'; }}
+                          >
+                            {p === deal.pipeline && <Check size={14} color={colors.accent} />}
+                            <span style={{ marginLeft: p === deal.pipeline ? 0 : 22 }}>{p}</span>
+                          </button>
+                        ))}
+                        <div style={{ borderTop: pipelines.length > 0 ? `1px solid ${colors.border}` : 'none', padding: '6px 8px' }}>
+                          <form onSubmit={e => { e.preventDefault(); const input = (e.target as HTMLFormElement).elements.namedItem('metaPipeline') as HTMLInputElement; if (input?.value?.trim()) handlePipelineChange(input.value.trim()); }}>
+                            <input name="metaPipeline" placeholder="Custom pipeline…" disabled={pipelineSaving} style={{ width: '100%', padding: '6px 8px', fontSize: 12, background: colors.background, border: `1px solid ${colors.border}`, borderRadius: 4, color: colors.text, outline: 'none', boxSizing: 'border-box' }} onFocus={e => { e.target.style.borderColor = colors.accent; }} onBlur={e => { e.target.style.borderColor = colors.border; }} />
+                          </form>
+                        </div>
+                      </div>
+                    )}
+                    <button onClick={() => setPipelineEditing(!pipelineEditing)} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, background: 'transparent', border: `1px solid ${colors.border}`, borderRadius: 5, padding: '3px 8px', cursor: 'pointer', color: colors.text, fontSize: 12 }}>
                       {pipelineSaving ? 'Saving…' : (deal.pipeline_name || deal.pipeline || '—')}
                       <ChevronDown size={11} color={colors.textMuted} />
                     </button>
@@ -1316,22 +1351,18 @@ export default function DealDetail() {
                   <div style={{ fontSize: 12, color: colors.text }}>{deal.pipeline_name || deal.pipeline || '—'}</div>
                 )}
               </div>
-              {/* Source */}
               <div>
                 <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: colors.textMuted, marginBottom: 3 }}>Source</div>
                 <div style={{ fontSize: 12, color: colors.text }}>{deal.source || '—'}</div>
               </div>
-              {/* Probability */}
               <div>
                 <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: colors.textMuted, marginBottom: 3 }}>Probability</div>
                 <div style={{ fontSize: 12, color: colors.text }}>{deal.probability != null ? `${deal.probability}%` : '—'}</div>
               </div>
-              {/* Forecast */}
               <div>
                 <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: colors.textMuted, marginBottom: 3 }}>Forecast</div>
                 <div style={{ fontSize: 12, color: colors.text }}>{deal.forecast_category || '—'}</div>
               </div>
-              {/* Lead Source */}
               {deal.lead_source && (
                 <div style={{ gridColumn: '1 / -1' }}>
                   <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: colors.textMuted, marginBottom: 3 }}>Lead Source</div>
@@ -1339,33 +1370,49 @@ export default function DealDetail() {
                 </div>
               )}
             </div>
-
-            {/* ── Section: Pandora ── */}
+            {/* Pandora section */}
             {scopes.length > 0 && (
               <>
-                <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', color: colors.textMuted, paddingBottom: 6, marginBottom: 2, borderTop: `1px solid ${colors.border}`, paddingTop: 10 }}>Pandora</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 12px', marginBottom: 14 }}>
-                  <div style={{ gridColumn: '1 / -1' }}>
-                    <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: colors.textMuted, marginBottom: 3 }}>Pipeline</div>
-                    {canEditPipeline ? (
-                      <div style={{ position: 'relative' }}>
-                        <button onClick={() => setScopeEditing(!scopeEditing)}
-                          style={{ display: 'inline-flex', alignItems: 'center', gap: 3, background: 'transparent', border: `1px solid ${colors.border}`, borderRadius: 5, padding: '3px 8px', cursor: 'pointer', color: colors.text, fontSize: 12 }}>
-                          {scopeSaving ? 'Saving…' : (scopes.find(s => s.scope_id === deal.scope_id)?.name || deal.scope_id || 'Unassigned')}
-                          <ChevronDown size={11} color={colors.textMuted} />
-                        </button>
-                      </div>
-                    ) : (
-                      <div style={{ fontSize: 12, color: colors.text }}>{scopes.find(s => s.scope_id === deal.scope_id)?.name || deal.scope_id || '—'}</div>
-                    )}
-                  </div>
+                <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', color: colors.textMuted, marginBottom: 8, borderTop: `1px solid ${colors.border}`, paddingTop: 10 }}>Pandora</div>
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: colors.textMuted, marginBottom: 3 }}>Pipeline</div>
+                  {canEditPipeline ? (
+                    <div ref={scopeDropdownRef} style={{ position: 'relative' }}>
+                      {scopeEditing && (
+                        <div style={{ position: 'absolute', left: 0, top: 'calc(100% + 4px)', zIndex: 20, background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.25)', minWidth: 200, maxHeight: 240, overflowY: 'auto' }}>
+                          {scopes.map(s => (
+                            <button key={s.scope_id} onClick={() => handleScopeChange(s.scope_id)} disabled={scopeSaving}
+                              style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 12px', border: 'none', background: s.scope_id === deal.scope_id ? `${colors.accent}15` : 'transparent', color: colors.text, fontSize: 13, cursor: 'pointer', textAlign: 'left' }}
+                              onMouseEnter={e => { (e.target as HTMLElement).style.background = `${colors.accent}15`; }}
+                              onMouseLeave={e => { (e.target as HTMLElement).style.background = s.scope_id === deal.scope_id ? `${colors.accent}15` : 'transparent'; }}
+                            >
+                              {s.scope_id === deal.scope_id && <Check size={14} color={colors.accent} />}
+                              <span style={{ marginLeft: s.scope_id === deal.scope_id ? 0 : 22 }}>{s.name}</span>
+                            </button>
+                          ))}
+                          {deal.scope_id && (
+                            <div style={{ borderTop: `1px solid ${colors.border}`, padding: '6px 8px' }}>
+                              <button onClick={() => handleScopeChange(null)} disabled={scopeSaving} style={{ width: '100%', padding: '6px 8px', border: 'none', background: 'transparent', color: colors.textMuted, fontSize: 12, cursor: 'pointer', textAlign: 'left', borderRadius: 4 }} onMouseEnter={e => { (e.target as HTMLElement).style.background = colors.surfaceHover; }} onMouseLeave={e => { (e.target as HTMLElement).style.background = 'transparent'; }}>
+                                ↩ Reset to inferred
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      <button onClick={() => setScopeEditing(!scopeEditing)} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, background: 'transparent', border: `1px solid ${colors.border}`, borderRadius: 5, padding: '3px 8px', cursor: 'pointer', color: colors.text, fontSize: 12 }}>
+                        {scopeSaving ? 'Saving…' : (scopes.find(s => s.scope_id === deal.scope_id)?.name || deal.scope_id || 'Unassigned')}
+                        <ChevronDown size={11} color={colors.textMuted} />
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 12, color: colors.text }}>{scopes.find(s => s.scope_id === deal.scope_id)?.name || deal.scope_id || '—'}</div>
+                  )}
                 </div>
               </>
             )}
-
-            {/* ── Section: Dates ── */}
-            <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', color: colors.textMuted, paddingBottom: 6, marginBottom: 2, borderTop: `1px solid ${colors.border}`, paddingTop: 10 }}>Dates</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 12px' }}>
+            {/* Dates section */}
+            <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', color: colors.textMuted, marginBottom: 8, borderTop: `1px solid ${colors.border}`, paddingTop: 10 }}>Dates</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px' }}>
               <div>
                 <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: colors.textMuted, marginBottom: 3 }}>Close Date</div>
                 <div style={{ fontSize: 12, color: colors.text }}>
@@ -1382,94 +1429,70 @@ export default function DealDetail() {
                 <div style={{ fontSize: 12, color: colors.text }}>{deal.updated_at ? formatDate(deal.updated_at) : '—'}</div>
               </div>
             </div>
-          </Card>
-
-        </div>
-      </div>
-
-      {/* Score History */}
-      <SectionErrorBoundary fallbackMessage="Unable to load score history.">
-      <div style={{
-        background: colors.surface,
-        border: `1px solid ${colors.border}`,
-        borderRadius: 10,
-        padding: 16,
-      }}>
-        <h3 style={{ fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 12 }}>Score History</h3>
-        {scoreHistory.length === 0 ? (
-          <p style={{ fontSize: 12, color: colors.textMuted, padding: '8px 0' }}>
-            No score history yet — history builds weekly.
-          </p>
-        ) : (
-          <div style={{ overflowX: 'auto', maxWidth: '100%', WebkitOverflowScrolling: 'touch' as any }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: isMobile ? 500 : undefined }}>
-              <thead>
-                <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
-                  {['Week', 'Score', 'Grade', 'Change', 'Notes'].map(h => (
-                    <th key={h} style={{
-                      padding: '6px 10px', textAlign: 'left',
-                      fontSize: 10, fontWeight: 600, textTransform: 'uppercase',
-                      letterSpacing: '0.05em', color: colors.textMuted,
-                    }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {scoreHistory.slice(0, 8).map((s: any, i: number) => {
-                  const delta = s.score_delta;
-                  const deltaEl = delta == null ? (
-                    <span style={{ color: colors.textMuted }}>—</span>
-                  ) : delta > 0 ? (
-                    <span style={{ color: colors.green }}>\u2191{delta}</span>
-                  ) : delta < 0 ? (
-                    <span style={{ color: colors.red }}>\u2193{Math.abs(delta)}</span>
-                  ) : (
-                    <span style={{ color: colors.textMuted }}>—</span>
-                  );
-
-                  const weekLabel = s.snapshot_date
-                    ? new Date(s.snapshot_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-                    : '—';
-
-                  const commentary = s.commentary
-                    ? s.commentary.length > 100
-                      ? s.commentary.slice(0, 100) + '...'
-                      : s.commentary
-                    : '';
-
-                  return (
-                    <tr key={i} style={{ borderBottom: `1px solid ${colors.border}` }}>
-                      <td style={{ padding: '8px 10px', color: colors.textSecondary, fontFamily: fonts.mono, fontSize: 11 }}>
-                        {weekLabel}
-                      </td>
-                      <td style={{ padding: '8px 10px', color: colors.text, fontFamily: fonts.mono, fontWeight: 600 }}>
-                        {s.active_score ?? s.health_score ?? '—'}
-                      </td>
-                      <td style={{ padding: '8px 10px' }}>
-                        <span style={{
-                          fontSize: 11, fontWeight: 700, fontFamily: fonts.mono,
-                          padding: '1px 6px', borderRadius: 4,
-                          background: `${gradeColor(s.grade || '—')}20`,
-                          color: gradeColor(s.grade || '—'),
-                        }}>
-                          {s.grade || '—'}
-                        </span>
-                      </td>
-                      <td style={{ padding: '8px 10px', fontFamily: fonts.mono, fontWeight: 600 }}>
-                        {deltaEl}
-                      </td>
-                      <td style={{ padding: '8px 10px', color: colors.textMuted, fontStyle: 'italic', maxWidth: isMobile ? '100%' : 320 }}>
-                        {commentary}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
           </div>
+        </Accordion>
+
+        {/* Score History accordion — hidden if no data */}
+        {scoreHistory.length > 0 && (
+          <SectionErrorBoundary fallbackMessage="Unable to load score history.">
+          <Accordion title="Score History">
+            <div style={{ paddingTop: 12, overflowX: 'auto', maxWidth: '100%', WebkitOverflowScrolling: 'touch' as any }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: isMobile ? 500 : undefined }}>
+                <thead>
+                  <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
+                    {['Week', 'Score', 'Grade', 'Change', 'Notes'].map(h => (
+                      <th key={h} style={{ padding: '6px 10px', textAlign: 'left', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: colors.textMuted }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {scoreHistory.slice(0, 8).map((s: any, i: number) => {
+                    const delta = s.score_delta;
+                    const deltaEl = delta == null ? <span style={{ color: colors.textMuted }}>—</span>
+                      : delta > 0 ? <span style={{ color: colors.green }}>↑{delta}</span>
+                      : delta < 0 ? <span style={{ color: colors.red }}>↓{Math.abs(delta)}</span>
+                      : <span style={{ color: colors.textMuted }}>—</span>;
+                    const weekLabel = s.snapshot_date ? new Date(s.snapshot_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—';
+                    const commentary = s.commentary ? (s.commentary.length > 100 ? s.commentary.slice(0, 100) + '...' : s.commentary) : '';
+                    return (
+                      <tr key={i} style={{ borderBottom: `1px solid ${colors.border}` }}>
+                        <td style={{ padding: '8px 10px', color: colors.textSecondary, fontFamily: fonts.mono, fontSize: 11 }}>{weekLabel}</td>
+                        <td style={{ padding: '8px 10px', color: colors.text, fontFamily: fonts.mono, fontWeight: 600 }}>{s.active_score ?? s.health_score ?? '—'}</td>
+                        <td style={{ padding: '8px 10px' }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, fontFamily: fonts.mono, padding: '1px 6px', borderRadius: 4, background: `${gradeColor(s.grade || '—')}20`, color: gradeColor(s.grade || '—') }}>{s.grade || '—'}</span>
+                        </td>
+                        <td style={{ padding: '8px 10px', fontFamily: fonts.mono, fontWeight: 600 }}>{deltaEl}</td>
+                        <td style={{ padding: '8px 10px', color: colors.textMuted, fontStyle: 'italic', maxWidth: isMobile ? '100%' : 320 }}>{commentary}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </Accordion>
+          </SectionErrorBoundary>
         )}
-      </div>
-      </SectionErrorBoundary>
+
+      </div>{/* end Tier 3 accordions */}
+
+      {/* Floating Ask button */}
+      <button
+        onClick={() => setAnalysisOpen(true)}
+        style={{
+          position: 'fixed', bottom: 24, right: 24, zIndex: 50,
+          display: 'inline-flex', alignItems: 'center', gap: 8,
+          padding: '12px 20px', borderRadius: 100,
+          background: colors.accent, color: '#fff',
+          border: 'none', cursor: 'pointer',
+          fontSize: 13, fontWeight: 600,
+          boxShadow: `0 4px 20px ${colors.accent}50`,
+          transition: 'transform 0.15s, box-shadow 0.15s',
+        }}
+        onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.05)'; e.currentTarget.style.boxShadow = `0 6px 28px ${colors.accent}70`; }}
+        onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = `0 4px 20px ${colors.accent}50`; }}
+      >
+        ✦ Ask about this deal
+      </button>
 
       {dealId && (
         <AnalysisModal
@@ -1481,7 +1504,6 @@ export default function DealDetail() {
     </div>
   );
 }
-
 function ScoreBreakdownPanel({
   riskScore,
   mechanicalScore,
