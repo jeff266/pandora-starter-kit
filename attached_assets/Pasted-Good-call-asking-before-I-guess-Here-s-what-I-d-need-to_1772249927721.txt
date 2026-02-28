@@ -1,0 +1,27 @@
+Good call asking before I guess. Here's what I'd need to see:
+
+**1. The existing Conversation Detail page component**
+
+Whatever file renders the current page in your screenshots. I need to understand the current component structure, what data it's already fetching, what props/state it manages, and what child components it imports. The file path and any related sub-components (the Stage Journey chart, the Coaching Signals panel, the Deal Health section).
+
+**2. The API endpoint(s) that power it**
+
+The backend route that serves conversation detail data. I need to know the exact response shape — what fields come back, how contacts/participants are structured, whether the AI summary is already generated server-side or triggered client-side, and how the coaching signals/patterns are computed. Likely something like `GET /api/workspaces/:id/conversations/:conversationId`.
+
+**3. The routing setup**
+
+How does the app route to this page? Is it React Router, Next.js file-based routing, or something else? What URL pattern does it use? This tells me how to reference the page in the prompt without breaking navigation.
+
+**4. The styling approach**
+
+Your current page clearly has a consistent dark theme. Is that Tailwind? CSS modules? Styled-components? A shared theme object? I need to know so the prompt says "use the existing approach" rather than introducing inline styles.
+
+**5. The conversation data model**
+
+The database schema or TypeScript types for conversations, conversation participants, and how conversations link to deals. Specifically: how does the page know which deal this conversation belongs to? Is it a direct foreign key, or does it go through the cross-entity linker?
+
+**6. How the coaching signals are generated**
+
+Is that a skill run result? A separate endpoint? Real-time computation? The pattern cards ("Closing fast — 2 days", pattern strength, deal count) need specific data — I need to know where that comes from so the prompt wires correctly.
+
+If you can screenshot or paste the main component file, the API route handler, and the conversation schema/types, that would cover most of it. The rest I can infer from patterns in the codebase.
