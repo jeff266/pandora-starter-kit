@@ -348,7 +348,7 @@ export default function CommandCenter() {
   const totalPipeline = Number(pipeline?.total_pipeline) || 0;
   const weightedPipeline = Number(pipeline?.weighted_pipeline) || 0;
   const totalActive = summary?.total_active || 0;
-  const openDealsCount = Number(pipeline?.total_deals) || 0;
+  const openDealsCount = Number(pipeline?.total_open_deals ?? pipeline?.total_deals) || 0;
   const actCount = summary?.by_severity?.act || 0;
   const watchCount = summary?.by_severity?.watch || 0;
   const notableCount = summary?.by_severity?.notable || 0;
@@ -756,7 +756,7 @@ export default function CommandCenter() {
             <div style={{ marginBottom: 16 }}>
               <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>Pipeline by Stage</h3>
               <p style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
-                {formatCurrency(anon.amount(totalPipeline))} total {'·'} {stageData.reduce((sum, s) => sum + s.deal_count, 0)} deals across {stageData.length} stages
+                {formatCurrency(anon.amount(totalPipeline))} total {'·'} {pipeline?.total_open_deals ?? stageData.reduce((sum, s) => sum + s.deal_count, 0)} deals across {stageData.length} stages
               </p>
             </div>
             {authLoading || loading.pipeline ? (

@@ -11,16 +11,16 @@ html, body, #root {
 }
 
 body {
-  font-family: 'IBM Plex Sans', -apple-system, sans-serif;
+  font-family: 'Outfit', -apple-system, sans-serif;
   font-size: 13px;
-  color: #e8ecf4;
-  background: #06080c;
+  color: #e0ece9;
+  background: #0b1014;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
 a {
-  color: #3b82f6;
+  color: #48af9b;
   text-decoration: none;
 }
 
@@ -50,12 +50,12 @@ input, textarea, select {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #1a1f2b;
+  background: #253541;
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #242b3a;
+  background: #2a3a47;
 }
 
 /* Mobile responsive overrides */

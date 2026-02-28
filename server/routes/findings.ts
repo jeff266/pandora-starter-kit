@@ -538,21 +538,20 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
       [...params, ...excludeParams]
     );
 
+    const total_pipeline = stageResult.rows.reduce((s, r) => s + r.total_value, 0);
+    const total_deals = stageResult.rows.reduce((s, r) => s + r.deal_count, 0);
+    const weighted_pipeline = stageResult.rows.reduce((s, r) => s + r.weighted_value, 0);
+
     // Run separate unfiltered count to get authoritative total_open_deals (fixes mismatch with pipeline dropdown)
-    const totalDealsResult = await query<{ count: string }>(
+    const totalOpenDealsResult = await query<{ count: string }>(
       `SELECT count(*)::int as count
        FROM deals d
        WHERE d.workspace_id = $1
          AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
-         ${scopeFilterClause}
-         ${timeRangeFilter}
-         ${excludeStagesClause}`,
-      [...params, ...excludeParams]
+         ${scopeFilterClause}`,
+      [workspaceId]
     );
-
-    const total_pipeline = stageResult.rows.reduce((s, r) => s + r.total_value, 0);
-    const total_deals = parseInt(totalDealsResult.rows[0]?.count || '0', 10); // Use unfiltered count
-    const weighted_pipeline = stageResult.rows.reduce((s, r) => s + r.weighted_value, 0);
+    const total_open_deals = parseInt(totalOpenDealsResult.rows[0]?.count || '0', 10);
 
     // Findings queries use the same scope filter (scopeFilterClause uses literals, not params)
     const findingsParams: any[] = [workspaceId];
@@ -939,6 +938,7 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
         snapshot,
         total_pipeline,
         total_deals,
+        total_open_deals,
         weighted_pipeline,
         by_stage: by_stage_with_deals,
         deals_by_stage: dealsByStage,
@@ -964,6 +964,7 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
       snapshot,
       total_pipeline,
       total_deals,
+      total_open_deals,
       weighted_pipeline,
       by_stage,
       coverage: { ratio: snapshot.coverageRatio, quota, pipeline: total_pipeline },
