@@ -538,8 +538,20 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
       [...params, ...excludeParams]
     );
 
+    // Run separate unfiltered count to get authoritative total_open_deals (fixes mismatch with pipeline dropdown)
+    const totalDealsResult = await query<{ count: string }>(
+      `SELECT count(*)::int as count
+       FROM deals d
+       WHERE d.workspace_id = $1
+         AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+         ${scopeFilterClause}
+         ${timeRangeFilter}
+         ${excludeStagesClause}`,
+      [...params, ...excludeParams]
+    );
+
     const total_pipeline = stageResult.rows.reduce((s, r) => s + r.total_value, 0);
-    const total_deals = stageResult.rows.reduce((s, r) => s + r.deal_count, 0);
+    const total_deals = parseInt(totalDealsResult.rows[0]?.count || '0', 10); // Use unfiltered count
     const weighted_pipeline = stageResult.rows.reduce((s, r) => s + r.weighted_value, 0);
 
     // Findings queries use the same scope filter (scopeFilterClause uses literals, not params)

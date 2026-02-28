@@ -667,7 +667,7 @@ export default function DealList() {
           padding: '8px 16px', background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10,
         }}>
           <span style={{ fontSize: 12, color: colors.textMuted }}>
-            Showing {page * PAGE_SIZE + 1}\u2013{Math.min((page + 1) * PAGE_SIZE, sorted.length)} of {sorted.length}
+            Showing {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, sorted.length)} of {sorted.length}
           </span>
           <div style={{ display: 'flex', gap: 8 }}>
             <button
