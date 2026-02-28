@@ -389,9 +389,9 @@ router.get('/:workspaceId/action-items/:actionId/preview-execution', async (req:
       try {
         let currentValues: Record<string, any> | null = null;
         if (crmSource === 'hubspot') {
-          currentValues = await client.getDealProperties(externalId, fieldNames);
+          currentValues = await (client as any).getDealProperties(externalId, fieldNames);
         } else if (crmSource === 'salesforce') {
-          currentValues = await client.getOpportunityFields(externalId, fieldNames);
+          currentValues = await (client as any).getOpportunityFields(externalId, fieldNames);
         }
 
         if (currentValues) {
@@ -407,7 +407,7 @@ router.get('/:workspaceId/action-items/:actionId/preview-execution', async (req:
     // Build CRM deep link
     let crmUrl = '';
     if (crmSource === 'hubspot') {
-      const portalId = await client.getPortalId();
+      const portalId = await (client as any).getPortalId();
       if (portalId) {
         crmUrl = `https://app.hubspot.com/contacts/${portalId}/deal/${externalId}`;
       }

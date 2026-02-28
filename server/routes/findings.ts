@@ -59,7 +59,7 @@ function calculateTimeRange(timeRange: string): { start: Date; end: Date } | nul
 
 router.get('/:workspaceId/crm/link-info', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     const connResult = await query(
       `SELECT connector_name, metadata FROM connections
        WHERE workspace_id = $1 AND connector_name IN ('hubspot', 'salesforce') AND status IN ('active', 'healthy')
@@ -126,7 +126,7 @@ const SEVERITY_ORDER: Record<string, number> = { act: 1, watch: 2, notable: 3, i
 
 router.get('/:workspaceId/findings/summary', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
 
     const groupedResult = await query(
       `SELECT severity, skill_id, category, count(*)::int as count
@@ -185,7 +185,7 @@ router.get('/:workspaceId/findings/summary', async (req: Request, res: Response)
 
 router.get('/:workspaceId/findings', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     const q = req.query;
 
     const conditions: string[] = ['f.workspace_id = $1'];
@@ -308,7 +308,7 @@ router.get('/:workspaceId/findings', async (req: Request, res: Response): Promis
 
 router.get('/:workspaceId/pipeline/pipelines', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
 
     // First, check if workspace has confirmed analysis scopes
     let hasScopes = false;
@@ -389,7 +389,7 @@ router.get('/:workspaceId/pipeline/pipelines', async (req: Request, res: Respons
 
 router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
 
     // Support both legacy 'pipeline' and new 'scopeId' query params
     const scopeId = req.query.scopeId as string | undefined;
@@ -973,7 +973,7 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
 
 router.get('/:workspaceId/pipeline/metric-breakdown', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     const metric = req.query.metric as string;
     const scopeId = req.query.scopeId as string | undefined;
 
@@ -1094,7 +1094,8 @@ function normalizeSeverities(input: string): string[] {
 
 router.patch('/:workspaceId/findings/:findingId/resolve', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId, findingId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
+    const findingId = req.params.findingId as string;
     const { resolution_method } = req.body || {};
 
     const validMethods = ['user_dismissed', 'action_taken', 'auto_cleared'];
@@ -1135,7 +1136,8 @@ router.patch('/:workspaceId/findings/:findingId/resolve', async (req: Request, r
 
 router.post('/:workspaceId/findings/:findingId/snooze', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId, findingId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
+    const findingId = req.params.findingId as string;
     const { days } = req.body || {};
     const snoozeDays = typeof days === 'number' && days > 0 ? days : 7;
 
@@ -1163,7 +1165,8 @@ router.post('/:workspaceId/findings/:findingId/snooze', async (req: Request, res
 
 router.patch('/:workspaceId/findings/:findingId', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId, findingId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
+    const findingId = req.params.findingId as string;
     const body = req.body || {};
 
     const setClauses: string[] = [];
@@ -1218,7 +1221,7 @@ router.patch('/:workspaceId/findings/:findingId', async (req: Request, res: Resp
 
 router.post('/:workspaceId/admin/backfill-findings', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
 
     const runsResult = await query(
       `SELECT sr.run_id, sr.skill_id, sr.result, sr.created_at

@@ -380,7 +380,7 @@ async function discoverStages(
     is_open: r.stage_normalized !== 'closed_won' && r.stage_normalized !== 'closed_lost',
     probability: null,
     forecast_category: null,
-  }));
+  })) as unknown as DiscoveredStage[];
 }
 
 async function evaluateDimension(

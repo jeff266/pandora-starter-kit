@@ -158,8 +158,9 @@ Keep it under 600 words. This is for the Monday ops review.
   outputFormat: {
     type: 'narrative',
     sections: ['funnel_headline', 'bottleneck_fix', 'volume_vs_conversion', 'activity_prescription', 'metric_to_watch'],
-  },
+  } as any,
 
+  estimatedDuration: '300 seconds',
   evidenceSchema: {
     entity_type: 'stage',
     columns: [

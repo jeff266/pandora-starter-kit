@@ -189,7 +189,7 @@ export class AgentRuntime {
         if (hasMultiChannelConfig && synthesizedOutput) {
           const deliveryConfig = agent.delivery as any;
           await deliverToChannels(
-            { ...result, runId, agentId, workspaceId } as any,
+            { runId, agentId, workspaceId, skillResults, synthesizedOutput, skillEvidence: Object.keys(skillEvidence).length > 0 ? skillEvidence : undefined } as any,
             workspaceId,
             agent.name,
             {

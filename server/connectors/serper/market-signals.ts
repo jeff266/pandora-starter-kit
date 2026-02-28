@@ -223,7 +223,7 @@ export class MarketSignalsCollector {
         throw new Error(`Serper API error: ${response.status}`);
       }
 
-      const result = await response.json();
+      const result = await response.json() as any;
 
       // Extract news articles
       const news: SerperNewsResult[] = (result.news || []).map((article: any) => ({

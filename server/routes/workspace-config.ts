@@ -465,7 +465,7 @@ router.post(
         config.win_rate.minimum_stage = item.suggested_value;
       }
 
-      config._meta[`${item.section}.confirmed`] = {
+      config._meta![`${item.section}.confirmed`] = {
         source: 'confirmed',
         confidence: 1.0,
         evidence: 'User confirmed',

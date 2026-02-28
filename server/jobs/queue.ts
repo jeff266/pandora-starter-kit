@@ -173,7 +173,7 @@ export class JobQueue {
        WHERE id = $1 AND status IN ('pending', 'running')`,
       [jobId]
     );
-    return result.rowCount > 0;
+    return (result.rowCount ?? 0) > 0;
   }
 
   // --------------------------------------------------------------------------
@@ -245,11 +245,11 @@ export class JobQueue {
           {
             retries: job.max_attempts - 1,
             onFailedAttempt: (error) => {
-              console.warn(`[JobQueue] Job ${job.id} attempt ${error.attemptNumber} failed:`, error.message);
+              console.warn(`[JobQueue] Job ${job.id} attempt ${error.attemptNumber} failed:`, (error as any).message);
               this.updateProgress(job.id, {
                 current: 0,
                 total: 0,
-                message: `Retry ${error.attemptNumber}/${job.max_attempts}: ${error.message}`,
+                message: `Retry ${error.attemptNumber}/${job.max_attempts}: ${(error as any).message}`,
               }).catch(() => {});
             },
           }

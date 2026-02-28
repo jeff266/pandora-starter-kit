@@ -38,7 +38,7 @@ const upload = multer({
 // POST /api/workspaces/:id/import/upload
 router.post('/:id/import/upload', upload.single('file'), async (req, res) => {
   try {
-    const workspaceId = req.params.id;
+    const workspaceId = req.params.id as string;
     const entityType = req.query.entityType as string;
 
     if (!['deal', 'contact', 'account'].includes(entityType)) {
@@ -71,7 +71,7 @@ router.post('/:id/import/upload', upload.single('file'), async (req, res) => {
 
     // Use AI classification if available, otherwise heuristic
     const classification = aiClassification
-      ? convertAIClassificationToMapping(aiClassification, entityType)
+      ? convertAIClassificationToMapping(aiClassification, entityType as 'deal' | 'contact' | 'account')
       : heuristicMapColumns(
           entityType as 'deal' | 'contact' | 'account',
           parsed.headers,
@@ -80,7 +80,7 @@ router.post('/:id/import/upload', upload.single('file'), async (req, res) => {
 
     // Add confidence warnings for low-confidence AI mappings
     if (aiClassification && classificationSource === 'ai') {
-      const confWarnings = buildConfidenceWarnings(aiClassification, entityType);
+      const confWarnings = buildConfidenceWarnings(aiClassification, entityType as 'deal' | 'contact' | 'account');
       warnings.push(...confWarnings);
     }
 
@@ -126,7 +126,7 @@ router.post('/:id/import/upload', upload.single('file'), async (req, res) => {
         JSON.stringify({
           mapping: classification.mapping,
           unmappedColumns: classification.unmappedColumns || [],
-          dateFormat: aiClassification?.['date_format'] || parsed.detectedDateFormat,
+          dateFormat: (aiClassification as any)?.['date_format'] || parsed.detectedDateFormat,
           delimiter: parsed.detectedDelimiter,
           fileType: parsed.fileType,
           selectedSheet: parsed.selectedSheet,
@@ -134,7 +134,7 @@ router.post('/:id/import/upload', upload.single('file'), async (req, res) => {
           source: classificationSource,
           aiMetadata: aiClassification ? {
             source_crm: aiClassification['source_crm'],
-            currency: aiClassification['currency'],
+            currency: (aiClassification as any)['currency'],
             has_header_row: aiClassification['has_header_row'],
             stage_values: (aiClassification as any).stage_values,
             notes: aiClassification['notes'],
@@ -295,7 +295,7 @@ router.post('/:id/import/upload', upload.single('file'), async (req, res) => {
 // POST /api/workspaces/:id/import/confirm
 router.post('/:id/import/confirm', async (req, res) => {
   try {
-    const workspaceId = req.params.id;
+    const workspaceId = req.params.id as string;
     const { batchId, overrides, strategy } = req.body;
 
     if (!batchId) {
@@ -343,9 +343,9 @@ router.post('/:id/import/confirm', async (req, res) => {
       stageMapping = overrides.stageMapping;
       // Persist stage mappings with is_open and display_order
       for (const [rawStage, mappingData] of Object.entries(stageMapping!)) {
-        const normalized = typeof mappingData === 'string' ? mappingData : mappingData.normalized;
-        const isOpen = typeof mappingData === 'object' ? mappingData.is_open : true;
-        const displayOrder = typeof mappingData === 'object' ? mappingData.display_order : 0;
+        const normalized = typeof mappingData === 'string' ? mappingData : (mappingData as any).normalized;
+        const isOpen = typeof mappingData === 'object' ? (mappingData as any).is_open : true;
+        const displayOrder = typeof mappingData === 'object' ? (mappingData as any).display_order : 0;
 
         await query(
           `INSERT INTO stage_mappings (workspace_id, source, raw_stage, normalized_stage, is_open, display_order)
@@ -358,7 +358,7 @@ router.post('/:id/import/confirm', async (req, res) => {
           [workspaceId, rawStage, normalized, isOpen, displayOrder]
         );
       }
-      console.log(`[Import] Persisted ${Object.keys(stageMapping).length} stage mappings`);
+      console.log(`[Import] Persisted ${Object.keys(stageMapping!).length} stage mappings`);
     }
 
     const excludeRows = new Set<number>(overrides?.excludeRows || []);
@@ -394,8 +394,8 @@ router.post('/:id/import/confirm', async (req, res) => {
 // DELETE /api/workspaces/:id/import/batch/:batchId
 router.delete('/:id/import/batch/:batchId', async (req, res) => {
   try {
-    const workspaceId = req.params.id;
-    const batchId = req.params.batchId;
+    const workspaceId = req.params.id as string;
+    const batchId = req.params.batchId as string;
 
     const batch = await query<{ entity_type: string; status: string; filename: string }>(
       `SELECT entity_type, status, filename FROM import_batches WHERE id = $1 AND workspace_id = $2`,
@@ -454,8 +454,8 @@ router.delete('/:id/import/batch/:batchId', async (req, res) => {
 // POST /api/workspaces/:id/import/cancel/:batchId
 router.post('/:id/import/cancel/:batchId', async (req, res) => {
   try {
-    const workspaceId = req.params.id;
-    const batchId = req.params.batchId;
+    const workspaceId = req.params.id as string;
+    const batchId = req.params.batchId as string;
 
     const batch = await query<{ status: string; filename: string }>(
       `SELECT status, filename FROM import_batches WHERE id = $1 AND workspace_id = $2`,
@@ -489,7 +489,7 @@ router.post('/:id/import/cancel/:batchId', async (req, res) => {
 // GET /api/workspaces/:id/import/history
 router.get('/:id/import/history', async (req, res) => {
   try {
-    const workspaceId = req.params.id;
+    const workspaceId = req.params.id as string;
     const result = await query(
       `SELECT id, entity_type, filename, source_crm, row_count,
               records_inserted, records_updated, records_skipped,
@@ -510,7 +510,7 @@ router.get('/:id/import/history', async (req, res) => {
 // GET /api/workspaces/:id/import/freshness
 router.get('/:id/import/freshness', async (req, res) => {
   try {
-    const workspaceId = req.params.id;
+    const workspaceId = req.params.id as string;
     const result = await query<{
       entity_type: string; last_import: string; total_records: string;
     }>(
@@ -546,7 +546,7 @@ router.get('/:id/import/freshness', async (req, res) => {
 // OLD relink endpoint - replaced by improved domain-first linking below
 // router.post('/:id/import/relink', async (req, res) => {
 //   try {
-//     const workspaceId = req.params.id;
+//     const workspaceId = req.params.id as string;
 //     console.log(`[Import] Running full re-link for workspace ${workspaceId}`);
 //     const result = await relinkAll(workspaceId);
 //     console.log(`[Import] Re-link complete:`, result);
@@ -666,7 +666,7 @@ function transformDealRows(
       created_date: getFieldValue(row, mapping, 'created_date'),
       owner: normalizeText(getFieldValue(row, mapping, 'owner')) || defaults.owner,
       pipeline: normalizeText(getFieldValue(row, mapping, 'pipeline')) || defaults.pipeline,
-      account_name: normalizeText(getFieldValue(row, mapping, 'account_name')),
+      account_name: normalizeText(getFieldValue(row, mapping, 'account_name')) ?? undefined,
       external_id: normalizeText(getFieldValue(row, mapping, 'external_id')) || undefined,
       probability: getFieldValue(row, mapping, 'probability'),
       unmappedFields,
@@ -870,7 +870,7 @@ export function cleanupTempFiles(): void {
 // GET /api/workspaces/:id/import/stage-mapping
 router.get('/:id/import/stage-mapping', async (req, res) => {
   try {
-    const workspaceId = req.params.id;
+    const workspaceId = req.params.id as string;
 
     const mappings = await query<{
       id: string;
@@ -916,7 +916,7 @@ router.get('/:id/import/stage-mapping', async (req, res) => {
 // PUT /api/workspaces/:id/import/stage-mapping
 router.put('/:id/import/stage-mapping', async (req, res) => {
   try {
-    const workspaceId = req.params.id;
+    const workspaceId = req.params.id as string;
     const { mappings, source } = req.body;
 
     if (!Array.isArray(mappings)) {
@@ -964,8 +964,8 @@ router.put('/:id/import/stage-mapping', async (req, res) => {
 // DELETE /api/workspaces/:id/import/stage-mapping/:rawStage
 router.delete('/:id/import/stage-mapping/:rawStage', async (req, res) => {
   try {
-    const workspaceId = req.params.id;
-    const rawStage = decodeURIComponent(req.params.rawStage);
+    const workspaceId = req.params.id as string;
+    const rawStage = decodeURIComponent(req.params.rawStage as string);
     const source = req.query.source as string || 'csv_import';
 
     const result = await query(
@@ -1028,7 +1028,7 @@ router.get('/:workspaceId/import/upgrade-status', async (req, res) => {
 // Re-link unlinked deals and contacts to accounts using improved domain-first matching
 router.post('/:id/import/relink', async (req, res) => {
   try {
-    const workspaceId = req.params.id;
+    const workspaceId = req.params.id as string;
 
     console.log(`[Import] Re-linking deals and contacts for workspace ${workspaceId}`);
 

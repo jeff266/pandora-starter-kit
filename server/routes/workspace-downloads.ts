@@ -18,7 +18,7 @@ const router = Router({ mergeParams: true });
  */
 router.get('/', async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = (req.params as any).workspaceId as string;
     const limit = parseInt(req.query.limit as string) || 50;
     const offset = parseInt(req.query.offset as string) || 0;
 
@@ -58,7 +58,7 @@ router.get('/', async (req, res) => {
  */
 router.get('/:downloadId', async (req, res) => {
   try {
-    const { workspaceId, downloadId } = req.params;
+    const workspaceId = (req.params as any).workspaceId as string; const downloadId = (req.params as any).downloadId as string;
 
     const result = await query(
       `SELECT id, agent_run_id, deliverable_id, filename, format,
@@ -93,7 +93,7 @@ router.get('/:downloadId', async (req, res) => {
  */
 router.get('/:downloadId/file', async (req, res) => {
   try {
-    const { workspaceId, downloadId } = req.params;
+    const workspaceId = (req.params as any).workspaceId as string; const downloadId = (req.params as any).downloadId as string;
 
     const result = await query(
       `SELECT id, filename, format, file_path, expires_at
@@ -166,7 +166,7 @@ router.get('/:downloadId/file', async (req, res) => {
  */
 router.delete('/:downloadId', async (req, res) => {
   try {
-    const { workspaceId, downloadId } = req.params;
+    const workspaceId = (req.params as any).workspaceId as string; const downloadId = (req.params as any).downloadId as string;
 
     const result = await query(
       'SELECT file_path FROM workspace_downloads WHERE id = $1 AND workspace_id = $2',
@@ -209,7 +209,7 @@ router.delete('/:downloadId', async (req, res) => {
  */
 router.delete('/', async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = (req.params as any).workspaceId as string;
 
     // Find expired downloads
     const result = await query(

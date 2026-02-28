@@ -174,7 +174,7 @@ async function getSkillComputeTools(workspaceId: string): Promise<ToolManifestEn
       // For now, we'll skip skills without explicit SQL in their definitions
 
       // Check if this is a well-known compute function we can represent
-      const sqlRepresentation = getComputeFunctionSQL(step.computeFn, skill.id);
+      const sqlRepresentation = getComputeFunctionSQL(step.computeFn!, skill.id!);
       if (!sqlRepresentation) continue;
 
       // Get last run data from skill_runs table
@@ -298,7 +298,7 @@ async function getSkillLastRun(
  * GET /api/workspaces/:workspaceId/tools/manifest
  */
 router.get('/:workspaceId/tools/manifest', async (req: Request, res: Response) => {
-  const { workspaceId } = req.params;
+  const workspaceId = req.params.workspaceId as string;
 
   try {
     const manifest = await getToolManifest(workspaceId);

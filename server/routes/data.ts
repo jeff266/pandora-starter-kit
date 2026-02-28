@@ -47,7 +47,7 @@ async function resolveLens(
   const lensId = req.activeLens;
   if (!lensId) return {};
   try {
-    const workspaceId = req.params.id;
+    const workspaceId = req.params.id as string;
     const config = await configLoader.getConfig(workspaceId);
     const filters = config.named_filters || [];
     const filter = filters.find(f => f.id === lensId);
@@ -82,7 +82,7 @@ function parseBool(val: unknown): boolean | undefined {
 
 router.get('/:id/deals/by-stage', async (req: Request, res: Response): Promise<void> => {
   try {
-    const result = await getDealsByStage(req.params.id);
+    const result = await getDealsByStage(req.params.id as string);
     res.json({ data: result.stages });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -93,7 +93,7 @@ router.get('/:id/deals/by-stage', async (req: Request, res: Response): Promise<v
 router.get('/:id/deals/stale', async (req: Request, res: Response): Promise<void> => {
   try {
     const days = parseNum(req.query.days);
-    const result = await getStaleDeals(req.params.id, days);
+    const result = await getStaleDeals(req.params.id as string, days);
     res.json({ data: result });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -109,7 +109,7 @@ router.get('/:id/deals/closing-in-range', async (req: Request, res: Response): P
       res.status(400).json({ error: 'startDate and endDate are required' });
       return;
     }
-    const result = await getDealsClosingInRange(req.params.id, startDate, endDate);
+    const result = await getDealsClosingInRange(req.params.id as string, startDate, endDate);
     res.json({ data: result });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -119,7 +119,7 @@ router.get('/:id/deals/closing-in-range', async (req: Request, res: Response): P
 
 router.get('/:id/deals/pipeline-summary', async (req: Request, res: Response): Promise<void> => {
   try {
-    const result = await getPipelineSummary(req.params.id);
+    const result = await getPipelineSummary(req.params.id as string);
     res.json({ data: result });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -131,7 +131,7 @@ router.get('/:id/deals/pipelines', async (req: Request, res: Response): Promise<
   try {
     const result = await query<{ pipeline: string }>(
       `SELECT DISTINCT pipeline FROM deals WHERE workspace_id = $1 AND pipeline IS NOT NULL AND pipeline != '' ORDER BY pipeline`,
-      [req.params.id]
+      [req.params.id as string]
     );
     res.json({ data: result.rows.map(r => r.pipeline) });
   } catch (err) {
@@ -142,7 +142,7 @@ router.get('/:id/deals/pipelines', async (req: Request, res: Response): Promise<
 
 router.get('/:id/deals/:dealId', async (req: Request, res: Response): Promise<void> => {
   try {
-    const deal = await getDeal(req.params.id, req.params.dealId);
+    const deal = await getDeal(req.params.id as string, req.params.dealId as string);
     if (!deal) {
       res.status(404).json({ error: 'Deal not found' });
       return;
@@ -162,8 +162,8 @@ router.patch('/:id/deals/:dealId/pipeline', async (req: Request, res: Response):
       return;
     }
 
-    const workspaceId = req.params.id;
-    const dealId = req.params.dealId;
+    const workspaceId = req.params.id as string;
+    const dealId = req.params.dealId as string;
 
     const dealResult = await query<{ owner: string | null }>(
       `SELECT owner FROM deals WHERE id = $1 AND workspace_id = $2`,
@@ -202,8 +202,8 @@ router.patch('/:id/deals/:dealId/pipeline', async (req: Request, res: Response):
 
 router.patch('/:id/deals/:dealId/scope', async (req: Request, res: Response): Promise<void> => {
   try {
-    const workspaceId = req.params.id;
-    const dealId = req.params.dealId;
+    const workspaceId = req.params.id as string;
+    const dealId = req.params.dealId as string;
     const { scope_id } = req.body;
 
     if (scope_id !== null && typeof scope_id !== 'string') {
@@ -247,7 +247,7 @@ router.get('/:id/deals', async (req: Request, res: Response): Promise<void> => {
   try {
     const q = req.query;
     const lens = await resolveLens(req, 'deals');
-    const result = await queryDeals(req.params.id, {
+    const result = await queryDeals(req.params.id as string, {
       stage: q.stage as string | string[] | undefined,
       stageNormalized: q.stageNormalized as string | string[] | undefined,
       owner: q.owner as string | undefined,
@@ -276,7 +276,7 @@ router.get('/:id/deals', async (req: Request, res: Response): Promise<void> => {
 
 router.get('/:id/contacts/for-deal/:dealId', async (req: Request, res: Response): Promise<void> => {
   try {
-    const result = await getContactsForDeal(req.params.id, req.params.dealId);
+    const result = await getContactsForDeal(req.params.id as string, req.params.dealId as string);
     res.json({ data: result });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -286,7 +286,7 @@ router.get('/:id/contacts/for-deal/:dealId', async (req: Request, res: Response)
 
 router.get('/:id/contacts/stakeholder-map/:accountId', async (req: Request, res: Response): Promise<void> => {
   try {
-    const result = await getStakeholderMap(req.params.id, req.params.accountId);
+    const result = await getStakeholderMap(req.params.id as string, req.params.accountId as string);
     if (!result) {
       res.status(404).json({ error: 'Account not found' });
       return;
@@ -300,7 +300,7 @@ router.get('/:id/contacts/stakeholder-map/:accountId', async (req: Request, res:
 
 router.get('/:id/contacts/:contactId', async (req: Request, res: Response): Promise<void> => {
   try {
-    const contact = await getContact(req.params.id, req.params.contactId);
+    const contact = await getContact(req.params.id as string, req.params.contactId as string);
     if (!contact) {
       res.status(404).json({ error: 'Contact not found' });
       return;
@@ -316,7 +316,7 @@ router.get('/:id/contacts', async (req: Request, res: Response): Promise<void> =
   try {
     const q = req.query;
     const lens = await resolveLens(req, 'contacts');
-    const result = await queryContacts(req.params.id, {
+    const result = await queryContacts(req.params.id as string, {
       email: q.email as string | undefined,
       accountId: q.accountId as string | undefined,
       seniority: q.seniority as string | undefined,
@@ -338,7 +338,7 @@ router.get('/:id/contacts', async (req: Request, res: Response): Promise<void> =
 
 router.get('/:id/accounts/:accountId/health', async (req: Request, res: Response): Promise<void> => {
   try {
-    const result = await getAccountHealth(req.params.id, req.params.accountId);
+    const result = await getAccountHealth(req.params.id as string, req.params.accountId as string);
     if (!result) {
       res.status(404).json({ error: 'Account not found' });
       return;
@@ -352,8 +352,8 @@ router.get('/:id/accounts/:accountId/health', async (req: Request, res: Response
 
 router.get('/:id/accounts/:accountId/signals', async (req: Request, res: Response): Promise<void> => {
   try {
-    const workspaceId = req.params.id;
-    const accountId = req.params.accountId;
+    const workspaceId = req.params.id as string;
+    const accountId = req.params.accountId as string;
 
     const signalsResult = await query(
       `SELECT id, signals, signal_summary, enrichment_source, created_at, updated_at
@@ -429,8 +429,8 @@ router.get('/:id/accounts/:accountId/signals', async (req: Request, res: Respons
 
 router.get('/:id/accounts/:accountId/signals/summary', async (req: Request, res: Response): Promise<void> => {
   try {
-    const workspaceId = req.params.id;
-    const accountId = req.params.accountId;
+    const workspaceId = req.params.id as string;
+    const accountId = req.params.accountId as string;
 
     const result = await query(
       `SELECT signals, COALESCE(updated_at, created_at) as last_date
@@ -478,8 +478,8 @@ router.get('/:id/accounts/:accountId/signals/summary', async (req: Request, res:
 
 router.get('/:id/accounts/:accountId/scores', async (req: Request, res: Response): Promise<void> => {
   try {
-    const workspaceId = req.params.id;
-    const accountId = req.params.accountId;
+    const workspaceId = req.params.id as string;
+    const accountId = req.params.accountId as string;
 
     const result = await query(
       `SELECT
@@ -519,8 +519,8 @@ router.get('/:id/accounts/:accountId/scores', async (req: Request, res: Response
 
 router.post('/:id/accounts/:accountId/scores/recalculate', async (req: Request, res: Response): Promise<void> => {
   try {
-    const workspaceId = req.params.id;
-    const accountId = req.params.accountId;
+    const workspaceId = req.params.id as string;
+    const accountId = req.params.accountId as string;
 
     // Trigger score recalculation
     // This would call the scoring system - for now just return success
@@ -533,7 +533,7 @@ router.post('/:id/accounts/:accountId/scores/recalculate', async (req: Request, 
 
 router.get('/:id/accounts/:accountId', async (req: Request, res: Response): Promise<void> => {
   try {
-    const account = await getAccount(req.params.id, req.params.accountId);
+    const account = await getAccount(req.params.id as string, req.params.accountId as string);
     if (!account) {
       res.status(404).json({ error: 'Account not found' });
       return;
@@ -549,7 +549,7 @@ router.get('/:id/accounts', async (req: Request, res: Response): Promise<void> =
   try {
     const q = req.query;
     const lens = await resolveLens(req, 'accounts');
-    const result = await queryAccounts(req.params.id, {
+    const result = await queryAccounts(req.params.id as string, {
       domain: q.domain as string | undefined,
       industry: q.industry as string | undefined,
       owner: q.owner as string | undefined,
@@ -586,7 +586,7 @@ router.get('/:id/accounts', async (req: Request, res: Response): Promise<void> =
 
 router.get('/:id/activities/timeline/:dealId', async (req: Request, res: Response): Promise<void> => {
   try {
-    const result = await getActivityTimeline(req.params.id, req.params.dealId);
+    const result = await getActivityTimeline(req.params.id as string, req.params.dealId as string);
     res.json({ data: result });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -602,7 +602,7 @@ router.get('/:id/activities/summary', async (req: Request, res: Response): Promi
       res.status(400).json({ error: 'dateFrom and dateTo are required' });
       return;
     }
-    const result = await getActivitySummary(req.params.id, dateFrom, dateTo);
+    const result = await getActivitySummary(req.params.id as string, dateFrom, dateTo);
     res.json({ data: result });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -613,7 +613,7 @@ router.get('/:id/activities/summary', async (req: Request, res: Response): Promi
 router.get('/:id/activities', async (req: Request, res: Response): Promise<void> => {
   try {
     const q = req.query;
-    const result = await queryActivities(req.params.id, {
+    const result = await queryActivities(req.params.id as string, {
       activityType: q.activityType as string | undefined,
       dealId: q.dealId as string | undefined,
       contactId: q.contactId as string | undefined,
@@ -636,7 +636,7 @@ router.get('/:id/activities', async (req: Request, res: Response): Promise<void>
 router.get('/:id/conversations/for-deal/:dealId', async (req: Request, res: Response): Promise<void> => {
   try {
     const limit = parseNum(req.query.limit);
-    const result = await getRecentCallsForDeal(req.params.id, req.params.dealId, limit);
+    const result = await getRecentCallsForDeal(req.params.id as string, req.params.dealId as string, limit);
     res.json({ data: result });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -652,7 +652,7 @@ router.get('/:id/conversations/insights', async (req: Request, res: Response): P
       res.status(400).json({ error: 'dateFrom and dateTo are required' });
       return;
     }
-    const result = await getCallInsights(req.params.id, dateFrom, dateTo);
+    const result = await getCallInsights(req.params.id as string, dateFrom, dateTo);
     res.json({ data: result });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -662,7 +662,7 @@ router.get('/:id/conversations/insights', async (req: Request, res: Response): P
 
 router.get('/:id/conversations/:conversationId', async (req: Request, res: Response): Promise<void> => {
   try {
-    const conversation = await getConversation(req.params.id, req.params.conversationId);
+    const conversation = await getConversation(req.params.id as string, req.params.conversationId as string);
     if (!conversation) {
       res.status(404).json({ error: 'Conversation not found' });
       return;
@@ -678,7 +678,7 @@ router.get('/:id/conversations', async (req: Request, res: Response): Promise<vo
   try {
     const q = req.query;
     const lens = await resolveLens(req, 'conversations');
-    const result = await queryConversations(req.params.id, {
+    const result = await queryConversations(req.params.id as string, {
       dealId: q.dealId as string | undefined,
       accountId: q.accountId as string | undefined,
       dateFrom: parseDate(q.dateFrom),
@@ -700,7 +700,7 @@ router.get('/:id/conversations', async (req: Request, res: Response): Promise<vo
 
 router.get('/:id/tasks/overdue', async (req: Request, res: Response): Promise<void> => {
   try {
-    const result = await getOverdueTasks(req.params.id);
+    const result = await getOverdueTasks(req.params.id as string);
     res.json({ data: result });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -710,7 +710,7 @@ router.get('/:id/tasks/overdue', async (req: Request, res: Response): Promise<vo
 
 router.get('/:id/tasks/summary', async (req: Request, res: Response): Promise<void> => {
   try {
-    const result = await getTaskSummary(req.params.id);
+    const result = await getTaskSummary(req.params.id as string);
     res.json({ data: result });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -721,7 +721,7 @@ router.get('/:id/tasks/summary', async (req: Request, res: Response): Promise<vo
 router.get('/:id/tasks', async (req: Request, res: Response): Promise<void> => {
   try {
     const q = req.query;
-    const result = await queryTasks(req.params.id, {
+    const result = await queryTasks(req.params.id as string, {
       status: q.status as string | undefined,
       assignee: q.assignee as string | undefined,
       dealId: q.dealId as string | undefined,
@@ -745,7 +745,7 @@ router.get('/:id/tasks', async (req: Request, res: Response): Promise<void> => {
 
 router.get('/:id/documents/for-deal/:dealId', async (req: Request, res: Response): Promise<void> => {
   try {
-    const result = await getDocumentsForDeal(req.params.id, req.params.dealId);
+    const result = await getDocumentsForDeal(req.params.id as string, req.params.dealId as string);
     res.json({ data: result });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -755,7 +755,7 @@ router.get('/:id/documents/for-deal/:dealId', async (req: Request, res: Response
 
 router.get('/:id/documents/:documentId', async (req: Request, res: Response): Promise<void> => {
   try {
-    const doc = await getDocument(req.params.id, req.params.documentId);
+    const doc = await getDocument(req.params.id as string, req.params.documentId as string);
     if (!doc) {
       res.status(404).json({ error: 'Document not found' });
       return;
@@ -770,7 +770,7 @@ router.get('/:id/documents/:documentId', async (req: Request, res: Response): Pr
 router.get('/:id/documents', async (req: Request, res: Response): Promise<void> => {
   try {
     const q = req.query;
-    const result = await queryDocuments(req.params.id, {
+    const result = await queryDocuments(req.params.id as string, {
       docType: q.docType as string | undefined,
       dealId: q.dealId as string | undefined,
       accountId: q.accountId as string | undefined,
@@ -806,14 +806,14 @@ router.post('/:id/accounts/:accountId/scan-signals', async (req: Request, res: R
     }
 
     const result = await collector.getSignalsForAccount(
-      req.params.id,
-      req.params.accountId,
+      req.params.id as string,
+      req.params.accountId as string,
       { force_check: true } // Force check even for lower-tier accounts
     );
 
     // Store signals if any were found
     if (result.signals.length > 0) {
-      await collector.storeSignals(req.params.id, req.params.accountId, result.signals);
+      await collector.storeSignals(req.params.id as string, req.params.accountId as string, result.signals);
     }
 
     res.json({
@@ -865,7 +865,7 @@ router.post('/:id/signals/batch-scan', async (req: Request, res: Response): Prom
        GROUP BY a.id, a.name
        ORDER BY max_deal_amount DESC
        LIMIT $4`,
-      [req.params.id, minAmount, daysSince, limit]
+      [req.params.id as string, minAmount, daysSince, limit]
     );
 
     const results = [];
@@ -879,14 +879,14 @@ router.post('/:id/signals/batch-scan', async (req: Request, res: Response): Prom
         await new Promise(r => setTimeout(r, 500));
 
         const result = await collector.getSignalsForAccount(
-          req.params.id,
+          req.params.id as string,
           account.id,
           { force_check: false } // Respect ICP tier filtering
         );
 
         // Store signals
         if (result.signals.length > 0) {
-          await collector.storeSignals(req.params.id, account.id, result.signals);
+          await collector.storeSignals(req.params.id as string, account.id, result.signals);
         }
 
         results.push({
@@ -940,7 +940,7 @@ router.get('/:id/signals/scan-status', async (req: Request, res: Response): Prom
          ) as accounts_scanned_this_week
        FROM account_signals
        WHERE workspace_id = $1 AND signals IS NOT NULL AND jsonb_array_length(COALESCE(signals, '[]'::jsonb)) > 0`,
-      [req.params.id]
+      [req.params.id as string]
     );
 
     res.json(status.rows[0] || {

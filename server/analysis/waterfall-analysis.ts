@@ -144,7 +144,7 @@ async function getDealsAtTimestamp(
       d.amount,
       COALESCE(lt.stage_at_time, d.stage_normalized) as stage_at_time
     FROM deals d
-    LEFT JOIN latest_transition lt ON lt.deal_id = d.id
+    LEFT JOIN latest_transition lt ON lt.dealId = d.id
     WHERE d.workspace_id = $1
       AND d.created_at < $2
       AND (d.close_date IS NULL OR d.close_date >= $2)
@@ -186,10 +186,10 @@ export async function waterfallAnalysis(
   // 4. Build transition maps
   const transitionsByDeal = new Map<string, typeof transitions>();
   for (const t of transitions) {
-    if (!transitionsByDeal.has(t.deal_id)) {
-      transitionsByDeal.set(t.deal_id, []);
+    if (!transitionsByDeal.has(t.dealId)) {
+      transitionsByDeal.set(t.dealId, []);
     }
-    transitionsByDeal.get(t.deal_id)!.push(t);
+    transitionsByDeal.get(t.dealId)!.push(t);
   }
 
   // 5. Get deal amounts for value calculations
@@ -248,15 +248,15 @@ export async function waterfallAnalysis(
   let closedLostValue = 0;
 
   for (const t of transitions) {
-    const amount = dealAmounts.get(t.deal_id) || 0;
-    const fromStage = t.from_stage_normalized;
-    const toStage = t.to_stage_normalized;
+    const amount = dealAmounts.get(t.dealId) || 0;
+    const fromStage = t.fromStageNormalized;
+    const toStage = t.toStageNormalized;
 
     // New pipeline created
     if (!fromStage) {
       newPipelineCount++;
       newPipelineValue += amount;
-      const toFlow = stageFlows.get(toStage);
+      const toFlow = stageFlows.get(toStage!);
       if (toFlow) {
         toFlow.entered++;
         toFlow.enteredValue += amount;
@@ -290,10 +290,10 @@ export async function waterfallAnalysis(
 
     // Stage progression
     const fromIndex = stageIndex.get(fromStage);
-    const toIndex = stageIndex.get(toStage);
+    const toIndex = stageIndex.get(toStage!);
 
     if (fromIndex !== undefined && toIndex !== undefined) {
-      const toFlow = stageFlows.get(toStage);
+      const toFlow = stageFlows.get(toStage!);
       const fromFlow = stageFlows.get(fromStage);
 
       if (toFlow) {

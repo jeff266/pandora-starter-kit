@@ -37,7 +37,7 @@ const downloadStore = new Map<string, {
  */
 router.post('/render', async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = (req.params as any).workspaceId as string;
     const { format, source, options, document_type } = req.body;
 
     if (!format) {
@@ -124,7 +124,7 @@ router.post('/render', async (req, res) => {
  */
 router.post('/render-multiple', async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = (req.params as any).workspaceId as string;
     const { formats, source, options } = req.body;
 
     if (!formats || !Array.isArray(formats) || formats.length === 0) {

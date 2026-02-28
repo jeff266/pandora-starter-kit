@@ -7,7 +7,7 @@ const router = Router();
 
 router.get('/:id/llm/config', async (req: Request, res: Response) => {
   try {
-    const config = await getLLMConfig(req.params.id);
+    const config = await getLLMConfig(req.params.id as string);
     res.json(config);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -18,7 +18,7 @@ router.get('/:id/llm/config', async (req: Request, res: Response) => {
 
 router.post('/:id/llm/config', async (req: Request, res: Response) => {
   try {
-    const workspaceId = req.params.id;
+    const workspaceId = req.params.id as string;
     const { routing, providers, default_token_budget } = req.body;
 
     if (routing) {
@@ -79,7 +79,7 @@ router.post('/:id/llm/config', async (req: Request, res: Response) => {
 
 router.get('/:id/llm/usage', async (req: Request, res: Response) => {
   try {
-    const usage = await getLLMUsage(req.params.id);
+    const usage = await getLLMUsage(req.params.id as string);
     res.json(usage);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

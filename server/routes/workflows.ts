@@ -32,7 +32,7 @@ router.get('/:workspaceId/workflows/meta/templates', async (req: Request, res: R
 
 router.get('/:workspaceId/workflows/meta/templates/:templateId', async (req: Request, res: Response) => {
   try {
-    const { templateId } = req.params;
+    const templateId = req.params.templateId as string;
     const result = await pool.query(
       `SELECT * FROM workflow_templates WHERE id = $1`,
       [templateId]
@@ -48,7 +48,7 @@ router.get('/:workspaceId/workflows/meta/templates/:templateId', async (req: Req
 
 router.get('/:workspaceId/workflows/meta/connectors', async (req: Request, res: Response) => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     const pieces = await getAvailablePieces(pool, workspaceId);
     res.json(pieces);
   } catch (error: any) {
@@ -58,7 +58,7 @@ router.get('/:workspaceId/workflows/meta/connectors', async (req: Request, res: 
 
 router.get('/:workspaceId/workflows/meta/connectors/connected', async (req: Request, res: Response) => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     const pieces = await getConnectedPieces(pool, workspaceId);
     res.json(pieces);
   } catch (error: any) {
@@ -68,7 +68,7 @@ router.get('/:workspaceId/workflows/meta/connectors/connected', async (req: Requ
 
 router.get('/:workspaceId/workflows', async (req: Request, res: Response) => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     const svc = getWorkflowService();
     const filters: any = {};
     if (req.query.status) filters.status = req.query.status as string;
@@ -85,7 +85,7 @@ router.get('/:workspaceId/workflows', async (req: Request, res: Response) => {
 
 router.post('/:workspaceId/workflows/from-template', async (req: Request, res: Response) => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     const { templateId, name, description } = req.body;
     const svc = getWorkflowService();
     const overrides: any = {};
@@ -103,7 +103,7 @@ router.post('/:workspaceId/workflows/from-template', async (req: Request, res: R
 
 router.post('/:workspaceId/workflows', async (req: Request, res: Response) => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     const svc = getWorkflowService();
     const workflow = await svc.create(workspaceId, req.body);
     res.status(201).json(workflow);
@@ -117,7 +117,8 @@ router.post('/:workspaceId/workflows', async (req: Request, res: Response) => {
 
 router.get('/:workspaceId/workflows/:workflowId', async (req: Request, res: Response) => {
   try {
-    const { workspaceId, workflowId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
+    const workflowId = req.params.workflowId as string;
     const svc = getWorkflowService();
     const workflow = await svc.get(workspaceId, workflowId);
     res.json(workflow);
@@ -128,7 +129,8 @@ router.get('/:workspaceId/workflows/:workflowId', async (req: Request, res: Resp
 
 router.put('/:workspaceId/workflows/:workflowId', async (req: Request, res: Response) => {
   try {
-    const { workspaceId, workflowId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
+    const workflowId = req.params.workflowId as string;
     const svc = getWorkflowService();
     const workflow = await svc.update(workspaceId, workflowId, req.body);
     res.json(workflow);
@@ -142,7 +144,8 @@ router.put('/:workspaceId/workflows/:workflowId', async (req: Request, res: Resp
 
 router.delete('/:workspaceId/workflows/:workflowId', async (req: Request, res: Response) => {
   try {
-    const { workspaceId, workflowId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
+    const workflowId = req.params.workflowId as string;
     const svc = getWorkflowService();
     await svc.delete(workspaceId, workflowId);
     res.json({ success: true });
@@ -153,7 +156,7 @@ router.delete('/:workspaceId/workflows/:workflowId', async (req: Request, res: R
 
 router.post('/:workspaceId/workflows/:workflowId/activate', async (req: Request, res: Response) => {
   try {
-    const { workflowId } = req.params;
+    const workflowId = req.params.workflowId as string;
     const svc = getWorkflowService();
     const result = await svc.activate(workflowId);
     res.json(result);
@@ -167,7 +170,7 @@ router.post('/:workspaceId/workflows/:workflowId/activate', async (req: Request,
 
 router.post('/:workspaceId/workflows/:workflowId/pause', async (req: Request, res: Response) => {
   try {
-    const { workflowId } = req.params;
+    const workflowId = req.params.workflowId as string;
     const svc = getWorkflowService();
     const result = await svc.pause(workflowId);
     res.json(result);
@@ -178,7 +181,7 @@ router.post('/:workspaceId/workflows/:workflowId/pause', async (req: Request, re
 
 router.post('/:workspaceId/workflows/:workflowId/execute', async (req: Request, res: Response) => {
   try {
-    const { workflowId } = req.params;
+    const workflowId = req.params.workflowId as string;
     const { payload } = req.body;
     const svc = getWorkflowService();
     const run = await svc.execute(workflowId, payload || {});
@@ -190,7 +193,8 @@ router.post('/:workspaceId/workflows/:workflowId/execute', async (req: Request, 
 
 router.get('/:workspaceId/workflows/:workflowId/runs', async (req: Request, res: Response) => {
   try {
-    const { workspaceId, workflowId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
+    const workflowId = req.params.workflowId as string;
     const limit = parseInt(req.query.limit as string, 10) || 50;
     const offset = parseInt(req.query.offset as string, 10) || 0;
     const result = await pool.query(
@@ -205,7 +209,9 @@ router.get('/:workspaceId/workflows/:workflowId/runs', async (req: Request, res:
 
 router.get('/:workspaceId/workflows/:workflowId/runs/:runId', async (req: Request, res: Response) => {
   try {
-    const { workspaceId, workflowId, runId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
+    const workflowId = req.params.workflowId as string;
+    const runId = req.params.runId as string;
     const result = await pool.query(
       `SELECT * FROM workflow_runs WHERE id = $1 AND workflow_id = $2 AND workspace_id = $3`,
       [runId, workflowId, workspaceId]
@@ -221,7 +227,7 @@ router.get('/:workspaceId/workflows/:workflowId/runs/:runId', async (req: Reques
 
 router.post('/:workspaceId/workflows/:workflowId/runs/:runId/sync', async (req: Request, res: Response) => {
   try {
-    const { runId } = req.params;
+    const runId = req.params.runId as string;
     const svc = getWorkflowService();
     const run = await svc.syncRunStatus(runId);
     res.json(run);
@@ -232,7 +238,7 @@ router.post('/:workspaceId/workflows/:workflowId/runs/:runId/sync', async (req: 
 
 router.post('/:workspaceId/workflows/:workflowId/validate', async (req: Request, res: Response) => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     const { tree } = req.body;
     const svc = getWorkflowService();
     const context = await svc.getCompilerContext(workspaceId);

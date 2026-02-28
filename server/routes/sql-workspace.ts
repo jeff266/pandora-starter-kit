@@ -107,7 +107,7 @@ router.post('/:workspaceId/sql/execute', async (req: Request, res: Response) => 
       totalRows: result.rowCount || 0,
       truncated,
       executionTime,
-      fields: result.fields.map((f) => ({
+      fields: result.fields.map((f: any) => ({
         name: f.name,
         dataTypeID: f.dataTypeID,
       })),
@@ -398,7 +398,7 @@ router.post('/:workspaceId/sql/saved/:queryId/run', async (req: Request, res: Re
         totalRows: result.rowCount || 0,
         truncated,
         executionTime,
-        fields: result.fields.map((f) => ({
+        fields: result.fields.map((f: any) => ({
           name: f.name,
           dataTypeID: f.dataTypeID,
         })),

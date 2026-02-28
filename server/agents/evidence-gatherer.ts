@@ -185,7 +185,7 @@ async function runSkill(
     });
 
     return {
-      id: result.id,
+      id: (result as any).id,
       status: result.status,
       output: result.output || null,
     };

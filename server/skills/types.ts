@@ -157,6 +157,7 @@ export interface SkillExecutionContext {
   workspaceId: string;
   skillId: string;
   runId: string;
+  scopeId?: string;
   businessContext: Record<string, any>;
   stepResults: Record<string, any>;
   params?: Record<string, any>;

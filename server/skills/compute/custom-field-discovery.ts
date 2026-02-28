@@ -1391,7 +1391,7 @@ export async function discoverCustomFields(
   // Optional: Classify top fields with DeepSeek
   if (options.enableClassification && topFields.length > 0) {
     try {
-      const classifications = await classifyFieldsWithDeepSeek(topFields);
+      const classifications = await classifyFieldsWithDeepSeek(topFields as any) as any;
 
       // Merge classifications back into field analysis
       for (const field of topFields) {

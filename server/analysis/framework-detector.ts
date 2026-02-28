@@ -239,7 +239,7 @@ export function detectFramework(
       confidence: 0,
       matched_fields: [],
       unmatched_framework_fields: [],
-      unmapped_custom_fields: customFields,
+      unmapped_custom_fields: customFields as any,
     };
   }
 
@@ -300,7 +300,7 @@ export function detectFramework(
       confidence: 0,
       matched_fields: [],
       unmatched_framework_fields: [],
-      unmapped_custom_fields: opportunityFields,
+      unmapped_custom_fields: opportunityFields as any,
     };
   }
 

@@ -25,8 +25,9 @@ export const projectRecapSkill: SkillDefinition = {
   outputFormat: {
     type: 'narrative',
     sections: ['project_updates', 'cross_workspace_summary'],
-  },
+  } as any,
 
+  estimatedDuration: '300 seconds',
   evidenceSchema: {
     entity_type: 'workspace',
     columns: [

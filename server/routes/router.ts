@@ -22,7 +22,7 @@ const router = Router();
 const routerLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 30,
-  keyGenerator: (req) => req.params.workspaceId,
+  keyGenerator: (req) => req.params.workspaceId as string,
   message: { error: 'Router rate limit exceeded. Try again in a minute.' },
 });
 
@@ -32,7 +32,7 @@ const routerLimiter = rateLimit({
 
 router.post('/:workspaceId/router/classify', routerLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     const { input, context } = req.body;
 
     if (!input || typeof input !== 'string') {
@@ -54,7 +54,7 @@ router.post('/:workspaceId/router/classify', routerLimiter, async (req: Request,
 
 router.post('/:workspaceId/router/dispatch', routerLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     const { input, context } = req.body;
 
     if (!input || typeof input !== 'string') {
@@ -84,7 +84,7 @@ router.post('/:workspaceId/router/dispatch', routerLimiter, async (req: Request,
 
 router.get('/:workspaceId/state', routerLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     const state = await getWorkspaceState(workspaceId);
     res.json(state);
   } catch (err) {
@@ -95,7 +95,7 @@ router.get('/:workspaceId/state', routerLimiter, async (req: Request, res: Respo
 
 router.get('/:workspaceId/state/templates', routerLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     const state = await getWorkspaceState(workspaceId);
     res.json(state.template_readiness);
   } catch (err) {
@@ -109,7 +109,7 @@ router.get('/:workspaceId/state/templates', routerLimiter, async (req: Request, 
 
 router.post('/:workspaceId/discovery/run', routerLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     const { templateType, customDimensions } = req.body;
 
     const result = await runDimensionDiscovery({
@@ -135,7 +135,7 @@ router.post('/:workspaceId/discovery/run', routerLimiter, async (req: Request, r
 
 router.get('/:workspaceId/discovery/latest', routerLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     const { templateType = 'sales_process_map' } = req.query;
 
     const cached = await query(`

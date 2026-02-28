@@ -165,6 +165,7 @@ export interface WorkspaceConfig {
   experimental_skills?: {
     enabled_skill_ids: string[];
   };
+  _meta?: Record<string, any>;
 }
 
 // ===== VOICE CONFIG =====

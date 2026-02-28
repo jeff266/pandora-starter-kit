@@ -204,7 +204,7 @@ export async function repScorecard(
   // Rank reps
   scoredReps.sort((a, b) => b.overallScore - a.overallScore);
   scoredReps.forEach((rep, index) => {
-    rep.rank = index + 1;
+    rep.rank = (index + 1) as unknown as null;
   });
 
   return {

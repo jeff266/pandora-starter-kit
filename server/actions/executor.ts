@@ -98,7 +98,7 @@ export async function executeAction(
     return {
       success: true,
       dry_run: true,
-      operations: operations.map(op => ({ ...op, result: 'DRY RUN — would execute' })),
+      operations: operations.map(op => ({ ...op, result: 'DRY RUN — would execute' })) as any,
     };
   }
 
@@ -108,9 +108,9 @@ export async function executeAction(
   for (const op of operations) {
     try {
       const result = await executeOperation(db, workspaceId, op, crmSource);
-      results.push({ ...op, result });
+      results.push({ ...op, result } as any);
     } catch (err) {
-      results.push({ ...op, result: null, error: (err as Error).message });
+      results.push({ ...op, result: null, error: (err as Error).message } as any);
     }
   }
 

@@ -17,7 +17,7 @@ const router = express.Router({ mergeParams: true });
  * Generates a fully populated deliverable matrix.
  */
 router.post('/deliverables/generate', async (req, res) => {
-  const { workspaceId } = req.params;
+  const workspaceId = (req.params as any).workspaceId as string;
   const { templateType, customDimensions, voiceConfig } = req.body;
 
   try {
@@ -59,7 +59,7 @@ router.post('/deliverables/generate', async (req, res) => {
  * Shows what the deliverable will look like without spending tokens on synthesis.
  */
 router.post('/deliverables/preview', async (req, res) => {
-  const { workspaceId } = req.params;
+  const workspaceId = (req.params as any).workspaceId as string;
   const { templateType, customDimensions } = req.body;
 
   try {
@@ -102,7 +102,7 @@ router.post('/deliverables/preview', async (req, res) => {
  * without regenerating.
  */
 router.get('/deliverables/latest', async (req, res) => {
-  const { workspaceId } = req.params;
+  const workspaceId = (req.params as any).workspaceId as string;
   const { templateType = 'sales_process_map' } = req.query;
 
   try {

@@ -115,7 +115,7 @@ export async function inferWorkspaceConfig(
 
   // Mark as inferred
   config.confirmed = false;
-  config.updated_at = new Date().toISOString();
+  config.updated_at = new Date().toISOString() as unknown as Date;
 
   // Store the config
   await storeConfig(workspaceId, config, signals);
@@ -683,7 +683,7 @@ function applyFiscalYearSignals(
     config.cadence.quota_period = topSignal.value.quota_period;
   }
 
-  config._meta['cadence.fiscal_year_start_month'] = {
+  config._meta!['cadence.fiscal_year_start_month'] = {
     source: 'inferred',
     confidence: topSignal.confidence,
     evidence: topSignal.evidence,
@@ -718,9 +718,9 @@ function applyStage0Signals(
   config.win_rate.minimum_stage_field = 'stage_normalized';
 
   // Add to pipeline config as stage_0_stages
-  config.pipelines[0].stage_0_stages = [value.stage];
+  (config.pipelines[0] as any).stage_0_stages = [value.stage];
 
-  config._meta['win_rate.minimum_stage'] = {
+  config._meta!['win_rate.minimum_stage'] = {
     source: 'inferred',
     confidence: topSignal.confidence,
     evidence: topSignal.evidence,
@@ -746,7 +746,7 @@ function applyParkingLotSignals(
   if (signals.length === 0) return;
 
   const parkingStages = signals.map(s => s.value.stage);
-  config.pipelines[0].parking_lot_stages = parkingStages;
+  (config.pipelines[0] as any).parking_lot_stages = parkingStages;
 
   const totalDeals = signals.reduce((sum, s) => sum + s.value.deal_count, 0);
 
@@ -760,7 +760,7 @@ function applyParkingLotSignals(
   });
 
   for (const signal of signals) {
-    config._meta[`pipelines.0.parking_lot_stages.${signal.value.stage}`] = {
+    config._meta![`pipelines.0.parking_lot_stages.${signal.value.stage}`] = {
       source: 'inferred',
       confidence: signal.confidence,
       evidence: signal.evidence,
@@ -779,7 +779,7 @@ function applyDealDistributionSignals(
 
   config.win_rate.deal_size_buckets = signal.value.suggested_buckets;
 
-  config._meta['win_rate.deal_size_buckets'] = {
+  config._meta!['win_rate.deal_size_buckets'] = {
     source: 'inferred',
     confidence: signal.confidence,
     evidence: signal.evidence,
@@ -810,7 +810,7 @@ function applyFillRateSignals(
     label: f.field,
   }));
 
-  config._meta['thresholds.required_fields'] = {
+  config._meta!['thresholds.required_fields'] = {
     source: 'inferred',
     confidence: signal.confidence,
     evidence: signal.evidence,
@@ -827,7 +827,7 @@ function applyLossReasonSignals(
     if (signal.value.excluded_values) {
       config.win_rate.excluded_values.push(...signal.value.excluded_values);
 
-      config._meta['win_rate.excluded_values'] = {
+      config._meta!['win_rate.excluded_values'] = {
         source: 'inferred',
         confidence: signal.confidence,
         evidence: signal.evidence,
@@ -847,7 +847,7 @@ function applyRepPatternSignals(
 
   config.teams.excluded_owners = signal.value.excluded;
 
-  config._meta['teams.excluded_owners'] = {
+  config._meta!['teams.excluded_owners'] = {
     source: 'inferred',
     confidence: signal.confidence,
     evidence: signal.evidence,
@@ -922,7 +922,7 @@ function buildDetectionSummary(signals: Record<string, InferenceSignal[]>, confi
     } : { detected: false },
     fiscal_year: {
       start_month: config.cadence.fiscal_year_start_month,
-      source: config._meta['cadence.fiscal_year_start_month']?.source || 'default',
+      source: config._meta!['cadence.fiscal_year_start_month']?.source || 'default',
     },
     quota_period: config.cadence.quota_period,
     reps: repSignal ? {

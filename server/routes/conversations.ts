@@ -53,7 +53,7 @@ function checkRateLimit(workspaceId: string): boolean {
 
 router.post('/:id/conversations/extract-signals', async (req: Request, res: Response) => {
   try {
-    const workspaceId = req.params.workspaceId;
+    const workspaceId = req.params.workspaceId as string;
     const force = req.body.force === true;
     const limit = typeof req.body.limit === 'number' ? req.body.limit : 100;
 
@@ -71,7 +71,7 @@ router.post('/:id/conversations/extract-signals', async (req: Request, res: Resp
 
 router.get('/:id/conversations/signal-status', async (req: Request, res: Response) => {
   try {
-    const workspaceId = req.params.workspaceId;
+    const workspaceId = req.params.workspaceId as string;
 
     const [countRow, statsRow, lastExtractionRow] = await Promise.all([
       query<{
@@ -161,7 +161,7 @@ router.get('/:id/conversations/signal-status', async (req: Request, res: Respons
  */
 router.post('/:id/signals/extract', async (req: Request, res: Response) => {
   try {
-    const workspaceId = req.params.workspaceId;
+    const workspaceId = req.params.workspaceId as string;
     const force = req.body.force === true;
     const limit = typeof req.body.limit === 'number' ? req.body.limit : 50;
 
@@ -183,7 +183,7 @@ router.post('/:id/signals/extract', async (req: Request, res: Response) => {
  */
 router.get('/:id/signals', async (req: Request, res: Response) => {
   try {
-    const workspaceId = req.params.workspaceId;
+    const workspaceId = req.params.workspaceId as string;
     const {
       signal_type,
       signal_value,
@@ -225,7 +225,7 @@ router.get('/:id/signals', async (req: Request, res: Response) => {
  */
 router.get('/:id/signals/status', async (req: Request, res: Response) => {
   try {
-    const workspaceId = req.params.workspaceId;
+    const workspaceId = req.params.workspaceId as string;
 
     const [runsResult, signalsResult] = await Promise.all([
       query<{ status: string; count: string }>(
@@ -286,7 +286,7 @@ router.get('/:id/signals/status', async (req: Request, res: Response) => {
  */
 router.get('/:id/conversations/without-deals', async (req: Request, res: Response) => {
   try {
-    const workspaceId = req.params.workspaceId;
+    const workspaceId = req.params.workspaceId as string;
     const { status = 'pending', severity = 'all', limit = '25', offset = '0' } = req.query;
 
     const { findConversationsWithoutDeals } = await import('../analysis/conversation-without-deals.js');
@@ -327,7 +327,7 @@ router.get('/:id/conversations/without-deals', async (req: Request, res: Respons
  */
 router.get('/:id/conversations/without-deals/summary', async (req: Request, res: Response) => {
   try {
-    const workspaceId = req.params.workspaceId;
+    const workspaceId = req.params.workspaceId as string;
 
     const { findConversationsWithoutDeals } = await import('../analysis/conversation-without-deals.js');
 
@@ -361,7 +361,8 @@ router.get('/:id/conversations/without-deals/summary', async (req: Request, res:
  */
 router.post('/:id/conversations/without-deals/:conversationId/create-deal', async (req: Request, res: Response) => {
   try {
-    const { id: workspaceId, conversationId } = req.params;
+    const workspaceId = req.params.id as string;
+    const conversationId = req.params.conversationId as string;
     const {
       deal_name,
       amount,
@@ -470,7 +471,8 @@ router.post('/:id/conversations/without-deals/:conversationId/create-deal', asyn
  */
 router.post('/:id/conversations/without-deals/:conversationId/dismiss', async (req: Request, res: Response) => {
   try {
-    const { id: workspaceId, conversationId } = req.params;
+    const workspaceId = req.params.id as string;
+    const conversationId = req.params.conversationId as string;
     const { reason } = req.body;
 
     // For now, we'll add a flag to the conversation
@@ -513,7 +515,7 @@ router.post('/:id/conversations/without-deals/:conversationId/dismiss', async (r
  */
 router.get('/:workspaceId/conversations/list', async (req: Request, res: Response) => {
   try {
-    const workspaceId = req.params.workspaceId;
+    const workspaceId = req.params.workspaceId as string;
     const {
       deal_id,
       account_id,
@@ -712,7 +714,7 @@ router.get('/:workspaceId/conversations/list', async (req: Request, res: Respons
  */
 router.get('/:workspaceId/conversations/filter-options', async (req: Request, res: Response) => {
   try {
-    const workspaceId = req.params.workspaceId;
+    const workspaceId = req.params.workspaceId as string;
 
     const [ownersResult, stagesResult] = await Promise.all([
       query<{ owner: string }>(
@@ -754,7 +756,7 @@ router.get('/:workspaceId/conversations/filter-options', async (req: Request, re
  */
 router.get('/:workspaceId/conversations/coaching-breakdown', async (req: Request, res: Response) => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     const scopeId = req.query.scope_id as string | undefined;
 
     // Read fiscal year start month from workspace config (defaults to 2 = February)
@@ -990,7 +992,7 @@ router.get('/:workspaceId/conversations/coaching-breakdown', async (req: Request
  */
 router.get('/:workspaceId/conversations/next-action-gaps', async (req: Request, res: Response) => {
   try {
-    const workspaceId = req.params.workspaceId;
+    const workspaceId = req.params.workspaceId as string;
     const { min_days = '3' } = req.query;
 
     const { detectNextActionGaps } = await import('../analysis/next-action-gaps.js');
@@ -1012,7 +1014,8 @@ router.get('/:workspaceId/conversations/next-action-gaps', async (req: Request, 
  */
 router.post('/:id/conversations/:conversationId/link', async (req: Request, res: Response) => {
   try {
-    const { id: workspaceId, conversationId } = req.params;
+    const workspaceId = req.params.id as string;
+    const conversationId = req.params.conversationId as string;
     const { deal_id, link_method = 'manual', action = 'link' } = req.body;
 
     if (action === 'dismiss') {
@@ -1071,7 +1074,8 @@ router.post('/:id/conversations/:conversationId/link', async (req: Request, res:
  */
 router.post('/:id/conversations/:conversationId/summarize', async (req: Request, res: Response) => {
   try {
-    const { id: workspaceId, conversationId } = req.params;
+    const workspaceId = req.params.id as string;
+    const conversationId = req.params.conversationId as string;
     const force = req.query.force === 'true';
 
     // 1. Fetch conversation
@@ -1168,8 +1172,8 @@ router.post('/:id/conversations/:conversationId/summarize', async (req: Request,
 
 router.get('/:id/conversations/:conversationId/dossier', async (req: Request, res: Response) => {
   try {
-    const workspaceId = req.params.id;
-    const conversationId = req.params.conversationId;
+    const workspaceId = req.params.id as string;
+    const conversationId = req.params.conversationId as string;
 
     const dossier = await assembleConversationDossier(workspaceId, conversationId);
 
@@ -1192,8 +1196,8 @@ router.get('/:id/conversations/:conversationId/dossier', async (req: Request, re
 
 router.get('/:id/deals/:dealId/conversation-arc', async (req: Request, res: Response) => {
   try {
-    const workspaceId = req.params.id;
-    const dealId = req.params.dealId;
+    const workspaceId = req.params.id as string;
+    const dealId = req.params.dealId as string;
 
     // Load all conversations for this deal
     const result = await query<{
@@ -1233,7 +1237,7 @@ router.get('/:id/deals/:dealId/conversation-arc', async (req: Request, res: Resp
       return {
         id: c.id,
         title: c.title || 'Untitled conversation',
-        call_date: c.call_date,
+        call_date: (c as any).call_date,
         duration_seconds: c.duration_seconds || 0,
         health_delta: healthDelta,
         participant_count_external: externalCount,

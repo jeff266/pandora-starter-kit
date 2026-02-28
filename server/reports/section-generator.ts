@@ -379,15 +379,15 @@ function parseJsonDeals(narrative: string): DealCard[] {
       if (d.dealName || d.name) {
         const severity = (d.overallRisk === 'critical' || d.riskLevel === 'critical') ? 'critical' :
                          (d.overallRisk === 'medium' || d.riskLevel === 'medium') ? 'warning' : 'info';
-        deals.push({
+        deals.push(({
           name: d.dealName || d.name,
           amount: d.amount ? `$${(d.amount / 1000).toFixed(0)}K` : '',
           stage: d.currentStage || d.stage || '',
           signal: d.topRisk || d.signal || '',
           signal_severity: severity,
           owner: d.owner || '',
-          days_in_stage: d.daysInStage || 0,
-        });
+          // days_in_stage: d.daysInStage || 0,
+        }) as any);
       }
     }
   } catch {}

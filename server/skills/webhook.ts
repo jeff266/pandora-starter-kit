@@ -39,7 +39,7 @@ const logger = createLogger('SkillWebhook');
  */
 export async function handleSkillTrigger(req: Request, res: Response): Promise<void> {
   try {
-    const { skillId } = req.params;
+    const skillId = req.params.skillId as string;
     const { workspaceId, params, callbackUrl } = req.body;
 
     if (!skillId) {
@@ -214,7 +214,8 @@ export async function handleEvent(req: Request, res: Response): Promise<void> {
  */
 export async function handleGetSkillRun(req: Request, res: Response): Promise<void> {
   try {
-    const { skillId, runId } = req.params;
+    const skillId = req.params.skillId as string;
+    const runId = req.params.runId as string;
 
     if (!skillId || !runId) {
       res.status(400).json({ error: 'Missing skillId or runId' });
@@ -267,7 +268,7 @@ export async function handleGetSkillRun(req: Request, res: Response): Promise<vo
  */
 export async function handleListSkillRuns(req: Request, res: Response): Promise<void> {
   try {
-    const { skillId } = req.params;
+    const skillId = req.params.skillId as string;
     const { workspaceId } = req.query;
     const limit = parseInt(req.query.limit as string) || 10;
 

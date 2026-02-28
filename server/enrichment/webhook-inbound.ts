@@ -113,7 +113,7 @@ export async function processInboundWebhook(
         }
 
         // Match to CRM account
-        const match = await matchEnrichedAccount(workspaceId, data.domain, data.company_name);
+        const match = await matchEnrichedAccount(workspaceId, data.domain ?? null, data.company_name ?? null);
 
         if (match.match_type === 'none' || !match.crm_account_id) {
           result.errors.push({

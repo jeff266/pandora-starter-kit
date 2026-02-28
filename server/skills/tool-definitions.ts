@@ -603,7 +603,7 @@ const getCallInsights: ToolDefinition = {
   },
   execute: async (params, context) => {
     return safeExecute('getCallInsights', () =>
-      conversationTools.getCallInsights(context.workspaceId, params.days), params);
+      conversationTools.getCallInsights(context.workspaceId, params.days, undefined as any), params);
   },
 };
 
@@ -1958,7 +1958,7 @@ Required weekly pipeline gen: ${weeklyGenStr}`;
         const earlyHeavyReps = coverageData.reps
           .filter((r: any) => {
             const q = qualityMap.get(r.email);
-            return q && q.qualityFlag === 'early_heavy';
+            return q && (q as any).qualityFlag === 'early_heavy';
           })
           .map((r: any) => r.name);
 
@@ -1974,11 +1974,11 @@ Required weekly pipeline gen: ${weeklyGenStr}`;
           trendStr = 'No significant changes since last week';
         } else {
           const topChanges = trend.repDeltas
-            .sort((a: any, b: any) => Math.abs(b.coverageChange || 0) - Math.abs(a.coverageChange || 0))
+            .sort((a: any, b: any) => Math.abs(b?.coverageChange || 0) - Math.abs(a?.coverageChange || 0))
             .slice(0, 5);
           const changeLines = topChanges.map((d: any) => {
-            const coverageChange = d.coverageChange !== null ? `${d.coverageChange > 0 ? '+' : ''}${d.coverageChange.toFixed(1)}x` : '';
-            const pipelineChange = formatCurrency(d.pipelineChange);
+            const coverageChange = d?.coverageChange !== null ? `${d?.coverageChange > 0 ? '+' : ''}${d?.coverageChange.toFixed(1)}x` : '';
+            const pipelineChange = formatCurrency(d?.pipelineChange);
             return `${d.name}: ${coverageChange} coverage, ${pipelineChange} pipeline`;
           });
           trendStr = 'Week-over-week changes:\n' + changeLines.join('\n');
@@ -2521,12 +2521,12 @@ const prepareAtRiskReps: ToolDefinition = {
             staleDeals: r.staleDeals,
             staleDealValue: r.staleDealValue,
             dealCount: r.dealCount,
-            qualityFlag: q?.qualityFlag || 'balanced',
-            earlyPct: q?.earlyPct || 0,
-            coverageChange: t?.coverageChange || null,
-            pipelineChange: t?.pipelineChange || 0,
-            conversations_without_deals_count: cwd?.cwd_count || 0,
-            cwd_accounts: cwd?.cwd_accounts || [],
+            qualityFlag: (q as any).qualityFlag || 'balanced',
+            earlyPct: (q as any).earlyPct || 0,
+            coverageChange: (t as any).coverageChange || null,
+            pipelineChange: (t as any).pipelineChange || 0,
+            conversations_without_deals_count: (cwd as any).cwd_count || 0,
+            cwd_accounts: (cwd as any).cwd_accounts || [],
           };
         });
 
@@ -2605,7 +2605,7 @@ const getCWDByRepTool: ToolDefinition = {
       return Array.from(byRepMap.entries()).map(([email, data]) => ({
         email,
         rep_name: data.rep_name,
-        cwd_count: data.cwd_count,
+        cwd_count: data?.cwd_count,
         high_severity_count: data.high_severity_count,
         cwd_accounts: data.conversations.map(c => c.account_name),
       }));

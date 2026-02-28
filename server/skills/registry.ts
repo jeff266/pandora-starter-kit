@@ -66,7 +66,7 @@ export class SkillRegistry {
       name: skill.name,
       category: skill.category,
       tier: skill.tier,
-      schedule: skill.schedule,
+      schedule: skill.schedule as any,
     }));
   }
 

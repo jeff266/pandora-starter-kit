@@ -1254,7 +1254,7 @@ export async function dataQualityAudit(workspaceId: string, scopeId?: string): P
 // Pipeline Coverage by Rep
 // ============================================================================
 
-interface RepCoverage {
+export interface RepCoverage {
   name: string;
   email: string;
   quota: number | null;
@@ -1483,14 +1483,15 @@ export async function coverageTrend(
       };
     }
 
-    const coverageChange = curr.coverageRatio !== null && prev.coverageRatio !== null
-      ? curr.coverageRatio - prev.coverageRatio
+    const prevAny = prev as any;
+    const coverageChange = curr.coverageRatio !== null && prevAny.coverageRatio !== null
+      ? curr.coverageRatio - prevAny.coverageRatio
       : null;
 
-    const pipelineChange = curr.pipeline - (prev.pipeline || 0);
+    const pipelineChange = curr.pipeline - (prevAny.pipeline || 0);
 
-    const statusChange = prev.status !== curr.status
-      ? `${prev.status} → ${curr.status}`
+    const statusChange = prevAny.status !== curr.status
+      ? `${prevAny.status} → ${curr.status}`
       : null;
 
     return {

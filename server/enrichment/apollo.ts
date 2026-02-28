@@ -78,7 +78,7 @@ async function callApolloAPI(
       return null;
     }
 
-    const data = await response.json();
+    const data = await response.json() as any;
     return data;
   } catch (error) {
     logger.error('Failed to call Apollo API', error instanceof Error ? error : new Error(String(error)), { email });
@@ -128,7 +128,7 @@ async function callApolloBulkAPI(
       return null;
     }
 
-    const data = await response.json();
+    const data = await response.json() as any;
     return data;
   } catch (error) {
     logger.error('Failed to call Apollo bulk API', error instanceof Error ? error : new Error(String(error)), {

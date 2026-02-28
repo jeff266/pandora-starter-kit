@@ -71,7 +71,7 @@ export async function createChatSession(
     [workspaceId, userId, options?.entityType || null, options?.entityId || null, title]
   );
 
-  return result.rows[0];
+  return result.rows[0] as any;
 }
 
 /**
@@ -199,7 +199,7 @@ export async function getChatSessions(
   }
 
   const result = await query(sqlQuery, params);
-  return result.rows;
+  return result.rows as any;
 }
 
 /**
@@ -277,7 +277,7 @@ export async function getChatSessionWithMessages(
     [sessionId]
   );
 
-  return {
+  return ({
     ...sessionResult.rows[0],
     messages: messagesResult.rows.map((row: any) => ({
       id: row.id,
@@ -286,7 +286,7 @@ export async function getChatSessionWithMessages(
       created_at: row.created_at,
       metadata: row.metadata,
     })),
-  };
+  }) as any;
 }
 
 /**

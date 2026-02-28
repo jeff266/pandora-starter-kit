@@ -55,7 +55,7 @@ export class WorkbookGenerator implements Renderer {
     const filename = this.generateFilename(input);
     const filepath = path.join(os.tmpdir(), filename);
     await workbook.xlsx.writeFile(filepath);
-    const buffer = await workbook.xlsx.writeBuffer() as Buffer;
+    const buffer = await workbook.xlsx.writeBuffer() as unknown as Buffer;
 
     return {
       format: 'xlsx',
@@ -216,14 +216,14 @@ export class WorkbookGenerator implements Renderer {
     const ws = workbook.addWorksheet(tabName);
 
     const records = evidence.evaluated_records || [];
-    const schema = evidence.column_schema || [];
+    const schema = (evidence as any).column_schema || [];
 
     if (records.length === 0) return;
 
     // Determine columns: use column_schema if available, else infer from first record
     const columns: { key: string; label: string; width: number; type?: string }[] =
       schema.length > 0
-        ? schema.map(col => ({
+        ? schema.map((col: any) => ({
             key: col.key,
             label: col.display || col.key,
             width: this.inferColumnWidth(col.key, col.format),

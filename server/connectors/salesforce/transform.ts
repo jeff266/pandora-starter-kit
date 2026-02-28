@@ -5,6 +5,7 @@
  */
 
 import { createLogger } from '../../utils/logger.js';
+import type { SalesforceOpportunityFieldHistory } from './client.js';
 const logger = createLogger('Salesforce');
 import {
   sanitizeDate as sanitizeDateField,

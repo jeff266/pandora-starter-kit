@@ -120,6 +120,8 @@ Keep the report under 400 words. Use specific numbers from the data. No generic 
     },
   ],
 
+  outputFormat: { type: 'sections', sections: [] } as any,
+  estimatedDuration: '300 seconds',
   evidenceSchema: {
     entity_type: 'workspace',
     columns: [

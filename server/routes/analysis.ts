@@ -152,7 +152,7 @@ router.post('/:workspaceId/analyze', async (req: Request, res: Response): Promis
               data_consulted: result.data_consulted,
               tokens_used: result.tokens_used,
               latency_ms: result.latency_ms,
-              follow_up_questions: result.follow_up_questions || [],
+              follow_up_questions: (result as any).follow_up_questions || [],
             }
           );
         })
@@ -258,7 +258,9 @@ router.get('/:workspaceId/analyze/suggestions', async (req: Request, res: Respon
  */
 router.get('/:workspaceId/analyze/history/:entityType/:entityId', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId, entityType, entityId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
+    const entityType = req.params.entityType as string;
+    const entityId = req.params.entityId as string;
 
     if (!VALID_SCOPE_TYPES.includes(entityType)) {
       res.status(400).json({ error: `Invalid entity type. Must be one of: ${VALID_SCOPE_TYPES.join(', ')}` });

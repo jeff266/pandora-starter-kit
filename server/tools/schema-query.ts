@@ -147,7 +147,7 @@ async function fetchHubSpotSchema(
           const fillRateResult = await hubspotClient.calculatePropertyFillRate(objectType, prop.name);
           populationRate = fillRateResult.fillRate / 100; // normalize to 0-1
         } catch (error) {
-          logger.warn(`[fetchHubSpotSchema] Failed to get fill rate for ${prop.name}:`, error);
+          logger.warn(`[fetchHubSpotSchema] Failed to get fill rate for ${prop.name}:`, error as any);
           populationRate = 0; // Default to 0 if check fails
         }
       }

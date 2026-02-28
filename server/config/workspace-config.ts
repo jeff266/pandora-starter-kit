@@ -93,6 +93,7 @@ export interface WorkspaceConfig {
   // Legacy fields (already in use)
   qualified_definition?: string[];
   terminology_map?: Record<string, string>;
+  _meta?: Record<string, any>;
 }
 
 // ============================================================================
@@ -354,7 +355,7 @@ export async function updateWorkspaceConfig(
   };
 
   // Save to database
-  await updateContext(workspaceId, 'definitions', newConfig, updatedBy);
+  await updateContext(workspaceId, 'definitions', newConfig as unknown as Record<string, unknown>, updatedBy);
 
   logger.info('[Config] Updated workspace configuration', {
     workspaceId,

@@ -91,8 +91,9 @@ Keep it under 500 words. This is the "so what?" layer.
   outputFormat: {
     type: 'narrative',
     sections: ['big_picture', 'patterns', 'leading_indicators', 'contradictions', 'recommendations', 'stop_doing'],
-  },
+  } as any,
 
+  estimatedDuration: '300 seconds',
   evidenceSchema: {
     entity_type: 'workspace',
     columns: [

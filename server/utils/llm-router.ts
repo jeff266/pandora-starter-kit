@@ -246,7 +246,7 @@ function messagesToAnthropic(
       result.push({ role: 'assistant', content: msg.content });
     } else {
       result.push({
-        role: msg.role === 'tool' ? 'user' : msg.role,
+        role: msg.role === ('tool' as any) ? 'user' : msg.role,
         content: msg.content,
       });
     }

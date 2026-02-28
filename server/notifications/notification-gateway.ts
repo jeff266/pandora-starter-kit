@@ -188,7 +188,7 @@ async function dispatchToSlack(
           workspaceId,
           payload.target_channel,
           blocks,
-          payload.bot_metadata ? { metadata: payload.bot_metadata } : undefined
+          payload.bot_metadata ? { metadata: payload.bot_metadata } as any : undefined
         );
         if (msgRef.ok) {
           return {

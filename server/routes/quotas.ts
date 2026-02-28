@@ -62,7 +62,7 @@ interface BatchIdParams extends WorkspaceParams {
 router.post(
   '/workspaces/:workspaceId/quotas/upload',
   upload.single('file'),
-  async (req: Request<WorkspaceParams>, res: Response) => {
+  async (req: Request<any>, res: Response) => {
     try {
       const { workspaceId } = req.params;
 
@@ -102,7 +102,7 @@ router.post(
  */
 router.post(
   '/workspaces/:workspaceId/quotas/confirm',
-  async (req: Request<WorkspaceParams>, res: Response) => {
+  async (req: Request<any>, res: Response) => {
     try {
       const { workspaceId } = req.params;
       const { uploadId, preview, overrides } = req.body as {
@@ -138,7 +138,7 @@ router.post(
  */
 router.get(
   '/workspaces/:workspaceId/quotas',
-  async (req: Request<WorkspaceParams>, res: Response) => {
+  async (req: Request<any>, res: Response) => {
     try {
       const { workspaceId } = req.params;
       const { period_start, period_end } = req.query;
@@ -314,7 +314,7 @@ router.delete(
 
 router.post(
   '/workspaces/:workspaceId/quotas/sync-hubspot',
-  async (req: Request<WorkspaceParams>, res: Response) => {
+  async (req: Request<any>, res: Response) => {
     try {
       const { workspaceId } = req.params;
 
@@ -362,7 +362,7 @@ router.post(
 
 router.post(
   '/workspaces/:workspaceId/quotas/sync-hubspot/confirm',
-  async (req: Request<WorkspaceParams>, res: Response) => {
+  async (req: Request<any>, res: Response) => {
     try {
       const { workspaceId } = req.params;
       const { goals } = req.body as { goals: ResolvedQuota[] };
@@ -490,7 +490,7 @@ router.delete(
 
 router.get(
   '/workspaces/:workspaceId/quotas/reps',
-  async (req: Request<WorkspaceParams>, res: Response) => {
+  async (req: Request<any>, res: Response) => {
     try {
       const { workspaceId } = req.params;
       // Pull distinct reps from existing quotas (best name+email source)
@@ -523,7 +523,7 @@ router.get(
 
 router.get(
   '/workspaces/:workspaceId/quotas/periods',
-  async (req: Request<WorkspaceParams>, res: Response) => {
+  async (req: Request<any>, res: Response) => {
     try {
       const { workspaceId } = req.params;
 
@@ -553,7 +553,7 @@ router.get(
 
 router.post(
   '/workspaces/:workspaceId/quotas/add',
-  async (req: Request<WorkspaceParams>, res: Response) => {
+  async (req: Request<any>, res: Response) => {
     try {
       const { workspaceId } = req.params;
       const { rep_name, rep_email, quota_amount, period_start, period_end, period_type, period_label } = req.body;
@@ -626,7 +626,7 @@ router.post(
 
 router.get(
   '/workspaces/:workspaceId/quotas/pending-goals',
-  async (req: Request<WorkspaceParams>, res: Response) => {
+  async (req: Request<any>, res: Response) => {
     try {
       const { workspaceId } = req.params;
       const preview = await getPendingGoalsPreview(workspaceId);
@@ -645,7 +645,7 @@ router.get(
 
 router.post(
   '/workspaces/:workspaceId/quotas/dismiss-pending-goals',
-  async (req: Request<WorkspaceParams>, res: Response) => {
+  async (req: Request<any>, res: Response) => {
     try {
       const { workspaceId } = req.params;
       await clearPendingGoalsPreview(workspaceId);
@@ -660,7 +660,7 @@ router.post(
 
 router.post(
   '/workspaces/:workspaceId/quotas/dismiss-no-quotas-banner',
-  async (req: Request<WorkspaceParams>, res: Response) => {
+  async (req: Request<any>, res: Response) => {
     try {
       const { workspaceId } = req.params;
 

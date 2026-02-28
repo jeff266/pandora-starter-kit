@@ -47,7 +47,7 @@ export async function mergeAnnotationsWithUserState(
     if (s.id) synthesizedById.set(s.id, s);
   }
 
-  const snapshotDate = context.metadata?.snapshotDate || new Date().toISOString().split('T')[0];
+  const snapshotDate = (context.metadata as any)?.snapshotDate || new Date().toISOString().split('T')[0];
 
   const annotations: ForecastAnnotation[] = raw.map((r: RawAnnotation, i: number) => {
     const rawData = r.raw_data || {};
@@ -155,10 +155,10 @@ export async function mergeAnnotationsWithUserState(
   console.log(`[AnnotationMerge] Filtered to ${active.length} active annotations`);
 
   if (!context.metadata) {
-    context.metadata = {};
+    (context as any).metadata = {};
   }
-  context.metadata.totalAnnotationsBeforeFilter = annotations.length;
-  context.metadata.totalAnnotationsActive = active.length;
+  (context.metadata as any).totalAnnotationsBeforeFilter = annotations.length;
+  (context.metadata as any).totalAnnotationsActive = active.length;
 
   return active;
 }

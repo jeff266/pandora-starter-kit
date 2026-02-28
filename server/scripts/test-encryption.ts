@@ -44,10 +44,10 @@ function testEncryptionRoundTrip() {
     );
 
     logger.info('  Original:', original);
-    logger.info('  Encrypted (first 50 chars):', encrypted.substring(0, 50) + '...');
+    logger.info('  Encrypted (first 50 chars):', { encrypted: encrypted.substring(0, 50) + '...' });
     logger.info('  Decrypted:', decrypted);
   } catch (err) {
-    logger.error('  Test failed:', err);
+    logger.error('  Test failed:', err as any);
     failed++;
   }
 }
@@ -67,7 +67,7 @@ function testPlaintextFallback() {
     assert(!isEncrypted('plain text'), 'Plain text is not detected as encrypted');
     assert(!isEncrypted('short'), 'Short string is not detected as encrypted');
   } catch (err) {
-    logger.error('  Test failed:', err);
+    logger.error('  Test failed:', err as any);
     failed++;
   }
 }
@@ -91,7 +91,7 @@ function testTamperDetection() {
 
     assert(errorThrown, 'Tampered data throws error (GCM auth tag verification)');
   } catch (err) {
-    logger.error('  Test failed:', err);
+    logger.error('  Test failed:', err as any);
     failed++;
   }
 }
@@ -119,7 +119,7 @@ function testDifferentIVs() {
       'Second encryption decrypts correctly'
     );
   } catch (err) {
-    logger.error('  Test failed:', err);
+    logger.error('  Test failed:', err as any);
     failed++;
   }
 }
@@ -151,7 +151,7 @@ function testMissingKey() {
       process.env.CREDENTIAL_ENCRYPTION_KEY = originalKey;
     }
   } catch (err) {
-    logger.error('  Test failed:', err);
+    logger.error('  Test failed:', err as any);
     failed++;
   }
 }
@@ -177,7 +177,7 @@ function testLegacyFormatCompatibility() {
     assert(isEncrypted(base64Only), 'Legacy format is detected as encrypted');
     assert(isEncrypted(withPrefix), 'New format with prefix is detected as encrypted');
   } catch (err) {
-    logger.error('  Test failed:', err);
+    logger.error('  Test failed:', err as any);
     failed++;
   }
 }
@@ -211,6 +211,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  logger.error('Test suite failed:', err);
+  logger.error('Test suite failed:', err as any);
   process.exit(1);
 });

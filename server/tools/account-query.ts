@@ -151,7 +151,7 @@ function extractCustomFields<T extends { custom_fields?: Record<string, unknown>
     }
   }
 
-  return extracted;
+  return (extracted) as any;
 }
 
 export async function queryAccounts(workspaceId: string, filters: AccountFilters): Promise<{

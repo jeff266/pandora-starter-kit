@@ -102,7 +102,7 @@ export function parseImportFile(
     throw new Error('Unsupported file type. Please upload .xlsx, .xls, or .csv files.');
   }
 
-  const fileType = ext === 'csv' ? 'csv' : (ext === '.xlsx' ? 'xlsx' : 'xls');
+  const fileType = ext === 'csv' ? 'csv' : ((ext as string) === '.xlsx' ? 'xlsx' : 'xls');
 
   // Normalize encoding BEFORE parsing
   const { buffer: normalizedBuffer, detected: detectedEncoding, converted: encodingConverted } = normalizeEncoding(buffer, fileType);

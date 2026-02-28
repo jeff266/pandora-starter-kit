@@ -298,5 +298,5 @@ export async function getContactsForDeal(
     [workspaceId, dealId]
   );
 
-  return result.rows;
+  return result.rows as any;
 }

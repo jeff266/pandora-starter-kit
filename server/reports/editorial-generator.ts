@@ -100,8 +100,8 @@ export async function generateEditorialReport(
   }
 
   // 5. Gather fresh evidence for all skills
-  logger.info('[EditorialGenerator] Gathering skill evidence', { skills: agent.skill_ids });
-  const skillEvidence = await gatherFreshEvidence(agent.skill_ids, workspace_id);
+  logger.info('[EditorialGenerator] Gathering skill evidence', { skills: agent.skills });
+  const skillEvidence = await gatherFreshEvidence(agent.skills.map(s => s.skillId), workspace_id);
 
   logger.info('[EditorialGenerator] Evidence gathered', {
     skill_count: Object.keys(skillEvidence).length,
@@ -121,10 +121,10 @@ export async function generateEditorialReport(
         vocabulary_prefer: agentAudience.vocabulary_prefer,
       }
     : {
-        role: (agent.focus_config as any)?.audience_role || 'Revenue Operations',
+        role: (agent as any).focus_config?.audience_role || 'Revenue Operations',
         detail_preference: template.voice_config?.detail_level || 'analyst',
-        vocabulary_avoid: (agent.focus_config as any)?.vocabulary_avoid,
-        vocabulary_prefer: (agent.focus_config as any)?.vocabulary_prefer,
+        vocabulary_avoid: (agent as any).focus_config?.vocabulary_avoid,
+        vocabulary_prefer: (agent as any).focus_config?.vocabulary_prefer,
       };
 
   // Read focus questions and data window from agent
@@ -259,7 +259,7 @@ export async function generateEditorialReport(
         JSON.stringify(editorial.sections),
         JSON.stringify(editorial.editorial_decisions),
         editorial.opening_narrative,
-        JSON.stringify(agent.skill_ids),
+        JSON.stringify(agent.skills.map(s => s.skillId)),
         editorial.tokens_used,
         generationDuration,
         renderDuration,
@@ -328,7 +328,7 @@ export async function generateEditorialReport(
     sections_content: editorial.sections,
     opening_narrative: editorial.opening_narrative,
     editorial_decisions: editorial.editorial_decisions,
-    skills_run: agent.skill_ids,
+    skills_run: agent.skills.map(s => s.skillId),
     total_tokens: editorial.tokens_used,
     generation_duration_ms: generationDuration,
     render_duration_ms: renderDuration,

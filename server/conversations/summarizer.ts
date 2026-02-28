@@ -55,7 +55,7 @@ Write a concise factual summary. No bullet points — prose only.`;
       _tracking: {
         feature: 'conversation_summary',
         subFeature: 'generate',
-      },
+      } as any,
     });
 
     return response.content.trim();

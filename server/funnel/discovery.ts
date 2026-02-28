@@ -12,7 +12,7 @@ import { getTemplate, getAllTemplates } from './templates.js';
 
 // Wrapper for LLM completion
 async function llmComplete(options: any) {
-  const response = await callLLM({
+  const response = await (callLLM as any)({
     messages: [
       { role: 'system', content: options.systemPrompt || '' },
       { role: 'user', content: options.userPrompt }
@@ -286,9 +286,9 @@ RESPOND WITH ONLY VALID JSON:
 
   let recommendation: any;
   try {
-    recommendation = JSON.parse(classification.text);
+    recommendation = JSON.parse(classification.content);
   } catch (error) {
-    console.error('[Funnel Discovery] Failed to parse DeepSeek response:', classification.text);
+    console.error('[Funnel Discovery] Failed to parse DeepSeek response:', classification.content);
     throw new Error('Failed to parse AI recommendation');
   }
 

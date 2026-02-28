@@ -5,7 +5,7 @@
  * No assumptions. Only patterns backed by data.
  */
 
-import { query } from '../db';
+import { query } from '../db.js';
 import type { PoolClient } from 'pg';
 
 export interface WinPattern {
@@ -108,8 +108,8 @@ export async function discoverWinPatterns(
   );
 
   const closedDeals = closedDealsResult.rows;
-  const wonDeals = closedDeals.filter(d => d.outcome === 'won');
-  const lostDeals = closedDeals.filter(d => d.outcome === 'lost');
+  const wonDeals = closedDeals.filter((d: any) => d.outcome === 'won');
+  const lostDeals = closedDeals.filter((d: any) => d.outcome === 'lost');
 
   console.log(`[Coaching] Found ${wonDeals.length} won, ${lostDeals.length} lost deals`);
 
@@ -134,7 +134,7 @@ export async function discoverWinPatterns(
   console.log(`[Coaching] Created ${segments.length} size-based segments`);
 
   // Step 3: Compute metrics for all closed deals
-  const dealMetrics = await computeAllDealMetrics(workspaceId, closedDeals.map(d => d.id));
+  const dealMetrics = await computeAllDealMetrics(workspaceId, closedDeals.map((d: any) => d.id));
   console.log(`[Coaching] Computed metrics for ${dealMetrics.length} deals`);
 
   // Step 4: Find patterns for each segment
@@ -342,13 +342,13 @@ async function computeAllDealMetrics(
   );
 
   // Merge conversation and CRM metrics
-  const convMap = new Map(convMetrics.rows.map(c => [c.deal_id, c]));
-  const crmMap = new Map(crmMetrics.rows.map(c => [c.deal_id, c]));
+  const convMap = new Map(convMetrics.rows.map((c: any) => [c.deal_id, c]));
+  const crmMap = new Map(crmMetrics.rows.map((c: any) => [c.deal_id, c]));
 
   const combined: DealMetrics[] = [];
   for (const dealId of dealIds) {
-    const conv = convMap.get(dealId);
-    const crm = crmMap.get(dealId);
+    const conv = convMap.get(dealId) as any;
+    const crm = crmMap.get(dealId) as any;
     if (!crm) continue;
 
     const firstCallDaysFromCreation = conv?.first_call_date && crm.created_at

@@ -90,8 +90,8 @@ router.post('/:workspaceId/connectors/salesforce/sync', async (req, res) => {
 
     // Get fresh credentials (auto-refresh if needed)
     const credentials = await getFreshCredentials(workspaceId);
-    credentials.clientId = process.env.SALESFORCE_CLIENT_ID;
-    credentials.clientSecret = process.env.SALESFORCE_CLIENT_SECRET;
+    (credentials as any).clientId = process.env.SALESFORCE_CLIENT_ID;
+    (credentials as any).clientSecret = process.env.SALESFORCE_CLIENT_SECRET;
 
     // Auto-detect sync mode based on last_sync_at watermark
     const lastSyncResult = await query<{ last_sync_at: Date | null }>(
@@ -196,10 +196,10 @@ router.post('/:workspaceId/connectors/salesforce/discover-schema', async (req, r
     const schema = await salesforceAdapter.discoverSchema(credentials);
 
     const summary = {
-      objectTypes: schema.objectTypes.map(ot => ({
+      objectTypes: (schema as any).objectTypes?.map((ot: any) => ({
         name: ot.name,
         totalFields: ot.fields.length,
-        customFields: ot.fields.filter(f => f.custom).length,
+        customFields: ot.fields?.filter((f: any) => f.custom)?.length,
       })),
     };
 

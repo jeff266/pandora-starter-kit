@@ -97,14 +97,14 @@ export class ApolloClient {
 
       const data = await response.json();
 
-      if (!data.organization) {
+      if (!(data as any).organization) {
         logger.warn('[Apollo] No organization data returned', { domain });
         return { organization: null };
       }
 
       logger.info('[Apollo] Organization enriched successfully', {
         domain,
-        name: data.organization.name,
+        name: (data as any).organization.name,
       });
 
       return data as ApolloEnrichResponse;

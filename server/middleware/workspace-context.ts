@@ -10,13 +10,7 @@ import { query } from '../db.js';
 declare global {
   namespace Express {
     interface Request {
-      workspace?: {
-        id: string;
-        name: string;
-        slug?: string;
-        plan?: string;
-        createdAt?: Date;
-      };
+      workspace?: { id: string; name: string; };
     }
   }
 }
@@ -73,13 +67,7 @@ export async function attachWorkspaceContext(
     const workspace = workspaceResult.rows[0];
 
     // Attach to request
-    req.workspace = {
-      id: workspace.id,
-      name: workspace.name,
-      slug: workspace.slug,
-      plan: workspace.plan,
-      createdAt: workspace.created_at,
-    };
+    req.workspace = { id: workspace.id, name: workspace.name } as any;
 
     // If user is authenticated, check if they're a member (any status)
     // This is informational only - doesn't block access

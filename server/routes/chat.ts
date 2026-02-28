@@ -32,7 +32,7 @@ async function getUserRole(workspaceId: string, userId: string): Promise<string>
 
 router.post('/:workspaceId/chat', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     const { message, thread_id, scope, session_id } = req.body;
 
     if (!message || typeof message !== 'string' || message.trim().length === 0) {
@@ -145,7 +145,8 @@ router.post('/:workspaceId/chat', async (req: Request, res: Response): Promise<v
 
 router.get('/:workspaceId/chat/:threadId/history', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId, threadId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
+    const threadId = req.params.threadId as string;
 
     const state = await getConversationState(workspaceId, 'web', threadId);
     if (!state) {
@@ -173,7 +174,7 @@ router.get('/:workspaceId/chat/:threadId/history', async (req: Request, res: Res
  */
 router.get('/:workspaceId/chat/sessions', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     const userId = req.user?.user_id;
 
     if (!userId) {
@@ -225,7 +226,8 @@ router.get('/:workspaceId/chat/sessions', async (req: Request, res: Response): P
  */
 router.get('/:workspaceId/chat/sessions/:sessionId', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId, sessionId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
+    const sessionId = req.params.sessionId as string;
     const userId = req.user?.user_id;
 
     if (!userId) {
@@ -254,7 +256,7 @@ router.get('/:workspaceId/chat/sessions/:sessionId', async (req: Request, res: R
  */
 router.post('/:workspaceId/chat/sessions', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     const { first_message } = req.body;
     const userId = req.user?.user_id;
 
@@ -286,7 +288,8 @@ router.post('/:workspaceId/chat/sessions', async (req: Request, res: Response): 
  */
 router.delete('/:workspaceId/chat/sessions/:sessionId', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId, sessionId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
+    const sessionId = req.params.sessionId as string;
     const userId = req.user?.user_id;
 
     if (!userId) {

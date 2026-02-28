@@ -88,7 +88,7 @@ export async function getWorkspaceMember(
  */
 export function requirePermission(permission: keyof PermissionSet) {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    const workspaceId = req.params.workspaceId;
+    const workspaceId = req.params.workspaceId as string;
     
     if (!workspaceId) {
       res.status(400).json({ error: 'Missing workspaceId parameter' });
@@ -172,7 +172,7 @@ export function requirePermission(permission: keyof PermissionSet) {
  */
 export function requireAnyPermission(...permissions: Array<keyof PermissionSet>) {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    const workspaceId = req.params.workspaceId;
+    const workspaceId = req.params.workspaceId as string;
     
     if (!workspaceId) {
       res.status(400).json({ error: 'Missing workspaceId parameter' });
@@ -252,7 +252,7 @@ export function requireAnyPermission(...permissions: Array<keyof PermissionSet>)
  */
 export function requireFeature(flagKey: string) {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    const workspaceId = req.params.workspaceId;
+    const workspaceId = req.params.workspaceId as string;
     
     if (!workspaceId) {
       res.status(400).json({ error: 'Missing workspaceId parameter' });

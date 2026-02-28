@@ -29,19 +29,20 @@ export class PPTXRenderer implements Renderer {
     if (input.agentOutput) {
       const agent = input.agentOutput;
       for (const [skillId, evidence] of Object.entries(agent.skill_evidence || {})) {
+        const ev = evidence as any;
         sections_content.push({
-          title: evidence.skill_name || skillId,
-          narrative: evidence.output_text || '',
-          confidence: evidence.confidence ?? 0.8,
-          data_freshness: evidence.run_started_at || new Date().toISOString(),
-          metrics: (evidence.metrics || []).map((m: any) => ({
+          title: ev.skill_name || skillId,
+          narrative: ev.output_text || '',
+          confidence: ev.confidence ?? 0.8,
+          data_freshness: ev.run_started_at || new Date().toISOString(),
+          metrics: (ev.metrics || []).map((m: any) => ({
             label: m.label || m.name,
             value: String(m.value ?? ''),
             severity: m.severity,
             delta: m.delta,
             delta_direction: m.delta_direction,
           })),
-          deal_cards: (evidence.evaluated_records || []).slice(0, 10).map((r: any) => ({
+          deal_cards: (ev.evaluated_records || []).slice(0, 10).map((r: any) => ({
             name: r.name || r.deal_name || 'Unknown Deal',
             amount: r.amount ? `$${Number(r.amount).toLocaleString()}` : undefined,
             stage: r.stage,
@@ -49,7 +50,7 @@ export class PPTXRenderer implements Renderer {
             signal_severity: r.severity || 'info',
             action: r.recommendation || r.action,
           })),
-          action_items: (evidence.actions || []).map((a: any) => ({
+          action_items: (ev.actions || []).map((a: any) => ({
             action: a.action || a.text || a.message,
             owner: a.owner,
             urgency: a.urgency || 'this_week',
@@ -94,7 +95,7 @@ export class PPTXRenderer implements Renderer {
         });
       }
     } else if (input.skillEvidence) {
-      const ev = input.skillEvidence;
+      const ev = input.skillEvidence as any;
       sections_content.push({
         title: ev.skill_name || 'Analysis',
         narrative: ev.output_text || '',
@@ -111,7 +112,7 @@ export class PPTXRenderer implements Renderer {
       workspace_id: input.workspace.id,
       template: {
         id: 'registry-render',
-        name: input.agentOutput?.agent_name || input.skillEvidence?.skill_name || 'Pandora Report',
+        name: input.agentOutput?.agent_name || (input.skillEvidence as any)?.skill_name || 'Pandora Report',
         description: '',
       },
       sections_content,

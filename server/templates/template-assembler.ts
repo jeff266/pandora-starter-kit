@@ -143,7 +143,7 @@ export function assembleTemplate(discovery: DiscoveryOutput): TemplateMatrix {
       switch (dim.source_type) {
         case 'static':
           // Static cells can be populated immediately during assembly
-          cell.static_value = resolveStaticValue(dim, stage);
+          cell.static_value = resolveStaticValue(dim, stage) ?? undefined;
           cell.content = cell.static_value || null;
           cell.status = cell.content ? 'populated' : 'degraded';
           staticCells++;

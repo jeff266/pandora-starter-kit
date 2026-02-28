@@ -22,15 +22,17 @@ export class Logger {
     this.log("warn", message, context);
   }
 
-  error(message: string, error?: Error, context?: LogContext) {
-    const errorContext = error
-      ? {
-          error: error.message,
-          stack: error.stack,
-          ...context,
-        }
-      : context;
-    this.log("error", message, errorContext);
+  error(message: string, errorOrContext?: Error | LogContext, context?: LogContext) {
+    if (errorOrContext instanceof Error) {
+      const merged: LogContext = { error: errorOrContext.message, ...context };
+      this.log("error", message, merged);
+    } else {
+      const merged: LogContext | undefined =
+        errorOrContext && context
+          ? { ...errorOrContext, ...context }
+          : errorOrContext ?? context;
+      this.log("error", message, merged);
+    }
   }
 
   private log(level: LogLevel, message: string, context?: LogContext) {

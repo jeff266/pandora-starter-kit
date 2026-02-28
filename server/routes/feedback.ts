@@ -22,7 +22,7 @@ const router = Router();
 
 router.post('/:workspaceId/feedback', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     const { targetType, targetId, signalType, metadata, source } = req.body;
 
     if (!targetType || !targetId || !signalType) {
@@ -65,7 +65,7 @@ router.post('/:workspaceId/feedback', async (req: Request, res: Response): Promi
 
 router.post('/:workspaceId/annotations', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     const {
       entityType, entityId, entityName, annotationType, content, source,
       sourceThreadId, referencesFindingId, referencesSkillRunId,
@@ -98,7 +98,7 @@ router.post('/:workspaceId/annotations', async (req: Request, res: Response): Pr
 
 router.get('/:workspaceId/annotations', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     const { entityType, entityId, annotationType, active, limit, offset } = req.query;
 
     const result = await getAnnotationsForWorkspace(workspaceId, {
@@ -119,7 +119,9 @@ router.get('/:workspaceId/annotations', async (req: Request, res: Response): Pro
 
 router.get('/:workspaceId/annotations/entity/:entityType/:entityId', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId, entityType, entityId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
+    const entityType = req.params.entityType as string;
+    const entityId = req.params.entityId as string;
     const annotations = await getActiveAnnotations(workspaceId, entityType, entityId);
     res.json({ annotations });
   } catch (err) {
@@ -130,7 +132,7 @@ router.get('/:workspaceId/annotations/entity/:entityType/:entityId', async (req:
 
 router.get('/:workspaceId/feedback/summary', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     const sinceParam = req.query.since as string | undefined;
     const since = sinceParam ? new Date(sinceParam) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
@@ -144,7 +146,7 @@ router.get('/:workspaceId/feedback/summary', async (req: Request, res: Response)
 
 router.get('/:workspaceId/learning/summary', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
     const [
@@ -261,7 +263,7 @@ router.get('/:workspaceId/learning/summary', async (req: Request, res: Response)
 
 router.get('/:workspaceId/config/suggestions', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     const status = (req.query.status as string) || 'pending';
     const suggestions = await getSuggestions(workspaceId, status as any);
     res.json({ suggestions });
@@ -273,7 +275,8 @@ router.get('/:workspaceId/config/suggestions', async (req: Request, res: Respons
 
 router.post('/:workspaceId/config/suggestions/:suggestionId/accept', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId, suggestionId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
+    const suggestionId = req.params.suggestionId as string;
     const ok = await resolveSuggestion(workspaceId, suggestionId, 'accepted');
     if (!ok) {
       res.status(404).json({ error: 'Suggestion not found' });
@@ -288,7 +291,8 @@ router.post('/:workspaceId/config/suggestions/:suggestionId/accept', async (req:
 
 router.post('/:workspaceId/config/suggestions/:suggestionId/dismiss', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId, suggestionId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
+    const suggestionId = req.params.suggestionId as string;
     const ok = await resolveSuggestion(workspaceId, suggestionId, 'dismissed');
     if (!ok) {
       res.status(404).json({ error: 'Suggestion not found' });

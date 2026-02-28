@@ -95,7 +95,7 @@ export class CommandCenterRenderer implements Renderer {
         threshold_applied: claim.threshold_applied,
       })),
       records: evidence.evaluated_records || [],
-      column_schema: evidence.column_schema || [],
+      column_schema: (evidence as any).column_schema || [],
       data_sources: evidence.data_sources || [],
       parameters: evidence.parameters || [],
       generated_at: new Date().toISOString(),

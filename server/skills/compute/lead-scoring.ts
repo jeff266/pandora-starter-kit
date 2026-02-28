@@ -792,7 +792,7 @@ function mapICPToScoringWeights(profile: ICPProfile): ICPWeights {
   if (profile.scoring_weights?.enrichment) {
     weights.enrichmentWeights = profile.scoring_weights.enrichment;
     logger.info('[Lead Scoring] Loaded enrichment weights from ICP profile', {
-      enrichmentWeights: Object.keys(weights.enrichmentWeights).length,
+      enrichmentWeights: Object.keys((weights as any).enrichmentWeights).length,
     });
   }
 

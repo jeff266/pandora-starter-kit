@@ -1,4 +1,4 @@
-import { RawAnnotation, AnnotationType } from './annotation-types';
+import { RawAnnotation, AnnotationType } from './annotation-types.js';
 
 interface Deal {
   id: string;
@@ -292,7 +292,7 @@ export function analyzeConfidenceBand(
 
   if (Math.abs(spread_change_pct) < 0.10) return null; // Not significant
 
-  const direction = latest.mc_p50 > snapshots[snapshots.length - 2]?.mc_p50 ? 'up' : 'down';
+  const direction = latest.mc_p50 > (snapshots[snapshots.length - 2]?.mc_p50 ?? 0) ? 'up' : 'down';
 
   return {
     type: 'confidence_band_shift',

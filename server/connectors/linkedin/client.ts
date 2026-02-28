@@ -135,7 +135,7 @@ export class LinkedInClient {
         throw new Error(`LinkedIn API error: ${response.status}`);
       }
 
-      const result: LinkedInAPIResponse = await response.json();
+      const result: LinkedInAPIResponse = await response.json() as unknown as LinkedInAPIResponse;
 
       if (result.message !== 'ok' && result.message !== 'success') {
         console.warn(`[LinkedInClient] Unexpected API message: ${result.message}`);

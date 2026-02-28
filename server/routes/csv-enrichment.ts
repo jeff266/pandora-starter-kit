@@ -51,7 +51,7 @@ interface ImportParams {
 router.post(
   '/:workspaceId/enrichment/csv/upload',
   upload.single('file'),
-  async (req: Request<WorkspaceParams>, res: Response) => {
+  async (req: Request<any>, res: Response) => {
     try {
       const { workspaceId } = req.params;
 
@@ -129,7 +129,7 @@ router.post(
 router.post(
   '/:workspaceId/enrichment/csv/import',
   upload.single('file'),
-  async (req: Request<WorkspaceParams>, res: Response) => {
+  async (req: Request<any>, res: Response) => {
     try {
       const { workspaceId } = req.params;
 
@@ -224,7 +224,7 @@ router.post(
 /**
  * Get CSV import history for a workspace.
  */
-router.get('/:workspaceId/enrichment/csv/imports', async (req: Request<WorkspaceParams>, res: Response) => {
+router.get('/:workspaceId/enrichment/csv/imports', async (req: Request<any>, res: Response) => {
   try {
     const { workspaceId } = req.params;
     const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);

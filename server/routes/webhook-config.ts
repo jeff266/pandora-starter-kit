@@ -9,7 +9,7 @@ const router = Router();
  * Get webhook configuration for a workspace
  */
 router.get('/:id/webhook', async (req: Request, res: Response): Promise<void> => {
-  const workspaceId = req.params.id;
+  const workspaceId = req.params.id as string;
 
   try {
     const result = await query<{ webhook_url: string | null; webhook_secret: string | null }>(
@@ -39,7 +39,7 @@ router.get('/:id/webhook', async (req: Request, res: Response): Promise<void> =>
  * Configure webhook for a workspace
  */
 router.put('/:id/webhook', async (req: Request, res: Response): Promise<void> => {
-  const workspaceId = req.params.id;
+  const workspaceId = req.params.id as string;
   const { webhookUrl, webhookSecret } = req.body;
 
   // Validate webhook URL if provided
@@ -81,7 +81,7 @@ router.put('/:id/webhook', async (req: Request, res: Response): Promise<void> =>
  * Remove webhook configuration from a workspace
  */
 router.delete('/:id/webhook', async (req: Request, res: Response): Promise<void> => {
-  const workspaceId = req.params.id;
+  const workspaceId = req.params.id as string;
 
   try {
     await query(
@@ -104,7 +104,7 @@ router.delete('/:id/webhook', async (req: Request, res: Response): Promise<void>
  * Send a test webhook to verify configuration
  */
 router.post('/:id/webhook/test', async (req: Request, res: Response): Promise<void> => {
-  const workspaceId = req.params.id;
+  const workspaceId = req.params.id as string;
 
   try {
     const { sendWebhook } = await import('../utils/webhook-notifier.js');

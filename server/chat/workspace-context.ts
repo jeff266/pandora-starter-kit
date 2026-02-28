@@ -109,13 +109,13 @@ async function loadWorkspaceConfig(workspaceId: string): Promise<{
   industry: string | null;
 }> {
   try {
-    const { getConfig } = await import('../config/configLoader.js');
-    const config = await getConfig(workspaceId);
+    const { configLoader } = await import('../config/workspace-config-loader.js');
+    const config = await configLoader.getConfig(workspaceId);
 
     return {
-      gtm_motion: config?.business_model?.gtm_motion || null,
-      segment: config?.business_model?.segment || null,
-      industry: config?.business_model?.industry || null,
+      gtm_motion: (config as any)?.business_model?.gtm_motion || null,
+      segment: (config as any)?.business_model?.segment || null,
+      industry: (config as any)?.business_model?.industry || null,
     };
   } catch (err) {
     return { gtm_motion: null, segment: null, industry: null };

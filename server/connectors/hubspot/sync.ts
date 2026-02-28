@@ -687,7 +687,7 @@ export async function initialSync(
           sourceId: d.source_id,
           stage: d.stage,
           stage_normalized: d.stage_normalized,
-        }))
+        })) as any
       );
 
       if (stageChanges.length > 0) {

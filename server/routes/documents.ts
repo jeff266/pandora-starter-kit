@@ -16,7 +16,8 @@ const router = Router();
  */
 router.get('/:workspaceId/generated-docs/:filename', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId, filename } = req.params;
+    const workspaceId = req.params.workspaceId as string;
+    const filename = req.params.filename as string;
 
     const safeName = path.basename(filename);
     if (!safeName.startsWith(workspaceId)) {
@@ -62,7 +63,7 @@ router.get('/:workspaceId/generated-docs/:filename', async (req: Request, res: R
  */
 router.post('/:workspaceId/generated-docs/test-generate', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     const { messageId } = req.body;
 
     let chatContent: string;

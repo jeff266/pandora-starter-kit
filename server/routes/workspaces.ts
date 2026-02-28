@@ -28,7 +28,7 @@ router.get('/', requireAdmin, async (req, res) => {
 
 router.get('/:workspaceId/api-key', requireAdmin, async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     const result = await query(
       'SELECT id, name, api_key FROM workspaces WHERE id = $1',
       [workspaceId]
@@ -83,7 +83,7 @@ router.post('/', requireAdmin, async (req, res) => {
 
 router.get('/:workspaceId', requireWorkspaceAccess, async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     const result = await query(
       'SELECT id, name, slug, plan, settings, created_at, updated_at FROM workspaces WHERE id = $1',
       [workspaceId]
@@ -103,7 +103,7 @@ router.get('/:workspaceId', requireWorkspaceAccess, async (req, res) => {
 
 router.post('/:workspaceId/rotate-key', requireWorkspaceAccess, async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
 
     const oldKeyResult = await query(
       'SELECT api_key FROM workspaces WHERE id = $1',
@@ -142,7 +142,7 @@ router.post('/:workspaceId/rotate-key', requireWorkspaceAccess, async (req, res)
  */
 router.get('/:workspaceId/branding', requireWorkspaceAccess, async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     const result = await query(
       'SELECT branding FROM workspaces WHERE id = $1',
       [workspaceId]
@@ -166,7 +166,7 @@ router.get('/:workspaceId/branding', requireWorkspaceAccess, async (req, res) =>
  */
 router.put('/:workspaceId/branding', requireWorkspaceAccess, async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     const branding = req.body;
 
     // Validate required fields
@@ -212,7 +212,7 @@ router.put('/:workspaceId/branding', requireWorkspaceAccess, async (req, res) =>
  */
 router.delete('/:workspaceId/branding', requireWorkspaceAccess, async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
 
     await query(
       'UPDATE workspaces SET branding = NULL, updated_at = NOW() WHERE id = $1',
@@ -231,7 +231,7 @@ router.delete('/:workspaceId/branding', requireWorkspaceAccess, async (req, res)
 // Clear schema cache for workspace (optionally scoped to object_type)
 router.post('/:id/schema/refresh', requireWorkspaceAccess, async (req, res) => {
   try {
-    const { id: workspaceId } = req.params;
+    const workspaceId = req.params.id as string;
     const { object_type } = req.body;
 
     const objectType = object_type as ObjectType | undefined;
@@ -258,7 +258,7 @@ router.post('/:id/schema/refresh', requireWorkspaceAccess, async (req, res) => {
 // Returns entity names for Demo Mode pre-seeding
 router.get('/:id/demo/entity-names', requireWorkspaceAccess, async (req, res) => {
   try {
-    const { id: workspaceId } = req.params;
+    const workspaceId = req.params.id as string;
 
     // Query company names
     const companiesResult = await query(
@@ -308,7 +308,7 @@ router.get('/:id/demo/entity-names', requireWorkspaceAccess, async (req, res) =>
  * 2. CASCADE delete all associated data
  */
 router.delete('/:workspaceId', requireAdmin, async (req, res) => {
-  const { workspaceId } = req.params;
+  const workspaceId = req.params.workspaceId as string;
 
   try {
     console.log(`[workspaces] Starting deletion for workspace ${workspaceId}`);

@@ -317,7 +317,7 @@ export async function assembleConversationDossier(
       conversation: {
         id: conv.id,
         title: conv.title || 'Untitled conversation',
-        call_date: conv.call_date,
+        call_date: (conv as any).call_date,
         duration_seconds: conv.duration_seconds || 0,
         source: conv.source,
         source_url: sourceUrl,
@@ -325,7 +325,7 @@ export async function assembleConversationDossier(
         action_items: conv.action_items || [],
         resolved_participants: conv.resolved_participants || [],
         call_metrics: conv.call_metrics,
-      },
+      } as any,
       deal_context: dealContext,
       health_impact: healthImpact,
       crm_follow_through: crmFollowThrough,
@@ -628,7 +628,7 @@ function buildConversationArc(
       participant_count_external: externalCount,
       summary_one_liner: summaryOneLiner,
     };
-  });
+  }) as any;
 }
 
 // generateCoachingSignals moved to coaching-signals module (pattern-based discovery)

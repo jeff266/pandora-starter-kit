@@ -111,7 +111,7 @@ export async function transitionToApiSync(workspaceId: string): Promise<UpgradeR
     transitionRecorded: true,
   };
 
-  logger.info('[Upgrade] Transition complete', result);
+  logger.info('[Upgrade] Transition complete', result as any);
 
   return result;
 }

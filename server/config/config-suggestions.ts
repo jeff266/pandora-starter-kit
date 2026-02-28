@@ -128,7 +128,7 @@ async function applyConfigSuggestion(workspaceId: string, suggestion: ConfigSugg
     config.thresholds.stale_deal_days = suggestion.suggested_value;
   } else if (suggestion.section === 'pipelines' && suggestion.path.includes('parking_lot_stages')) {
     if (config.pipelines[0]) {
-      config.pipelines[0].parking_lot_stages = suggestion.suggested_value;
+      (config.pipelines[0] as any).parking_lot_stages = suggestion.suggested_value;
     }
   } else if (suggestion.section === 'teams' && suggestion.path.includes('excluded_owners')) {
     config.teams.excluded_owners = suggestion.suggested_value;
@@ -136,14 +136,14 @@ async function applyConfigSuggestion(workspaceId: string, suggestion: ConfigSugg
     config.thresholds.coverage_target = suggestion.suggested_value;
   }
 
-  config._meta[suggestion.path] = {
+  config._meta![suggestion.path] = {
     source: 'confirmed',
     confidence: 1.0,
     evidence: `Accepted suggestion from ${suggestion.source_skill}`,
     last_validated: new Date().toISOString(),
   };
 
-  config.updated_at = new Date().toISOString();
+  config.updated_at = new Date().toISOString() as unknown as Date;
 
   await query(
     `UPDATE context_layer

@@ -24,7 +24,7 @@ const router = Router();
 
 router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     const rawPipeline = req.query.pipeline as string | undefined;
     const pipelineFilter = rawPipeline && rawPipeline !== 'all' ? rawPipeline : null;
 
@@ -260,7 +260,7 @@ router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response)
 
 router.get('/:workspaceId/stage-benchmarks/math', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     const { stage_normalized, segment, outcome, pipeline } = req.query as Record<string, string>;
 
     if (!stage_normalized || !outcome) {
@@ -408,7 +408,7 @@ router.get('/:workspaceId/stage-benchmarks/math', async (req: Request, res: Resp
 
 router.post('/:workspaceId/stage-benchmarks/refresh', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     const result = await computeAndStoreStageBenchmarks(workspaceId);
     res.json({ ...result, computed_at: new Date().toISOString() });
   } catch (err) {
@@ -421,7 +421,8 @@ router.post('/:workspaceId/stage-benchmarks/refresh', async (req: Request, res: 
 
 router.get('/:workspaceId/deals/:dealId/coaching', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId, dealId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
+    const dealId = req.params.dealId as string;
 
     // Fetch deal basics
     const dealResult = await query<{
@@ -590,7 +591,7 @@ router.get('/:workspaceId/deals/:dealId/coaching', async (req: Request, res: Res
     const actionItems = actionItemsResult.rows.map(r => {
       const item = r.item as Record<string, unknown>;
       const daysSinceSource = Math.floor(
-        (Date.now() - new Date(r.source_date).getTime()) / 86400000
+        (Date.now() - new Date(r.source_date as string).getTime()) / 86400000
       );
       return {
         text: String(item.text ?? item.action_item ?? item.description ?? ''),
@@ -642,7 +643,8 @@ router.get('/:workspaceId/deals/:dealId/coaching', async (req: Request, res: Res
 
 router.post('/:workspaceId/deals/:dealId/coaching-script', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspaceId, dealId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
+    const dealId = req.params.dealId as string;
 
     // Fetch deal basics
     const dealResult = await query<{ name: string; stage: string; amount: string | null; owner: string | null; days_in_stage: number | null }>(

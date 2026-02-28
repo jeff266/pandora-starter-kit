@@ -154,14 +154,14 @@ User request: "${userInput}"`;
 
   // Step 7: Apply pre-set scope from UI context
   if (context?.scope_type && !enriched.scope_type) {
-    enriched.scope_type = context.scope_type;
-    enriched.scope_entity = context.scope_entity || enriched.scope_entity;
+    (enriched as any).scope_type = context.scope_type;
+    (enriched as any).scope_entity = context.scope_entity || enriched.scope_entity;
   }
 
-  return {
+  return ({
     ...enriched,
     workspace_state: state,
-  };
+  } as RouterDecision);
 }
 
 function checkPreRoutedPatterns(

@@ -188,7 +188,7 @@ async function syncForTrackedUsers(
     errors.push(`${transformResult.failed.length} transform failures`);
     if (transformResult.failed.length <= 5) {
       for (const f of transformResult.failed) {
-        console.error(`[Gong Sync] Transform failure: ${f.id} — ${f.error}`);
+        console.error(`[Gong Sync] Transform failure: ${f.recordId ?? f.error}`);
       }
     }
   }

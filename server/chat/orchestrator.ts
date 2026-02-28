@@ -365,7 +365,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
           if (intentClassification.is_followup_doc) {
             // Follow-up doc request: reuse the last assistant message instead of re-mining
             const msgs = state.messages || [];
-            const lastAssistant = [...msgs].reverse().find((m: any) => m.role === 'assistant');
+            const lastAssistant = [...msgs].reverse().find((m: any) => m.role === 'assistant') as any;
             if (lastAssistant) {
               chatResponse = lastAssistant.content || '';
               toolResults = (lastAssistant.tool_trace || []).map((tc: any) => ({
@@ -411,7 +411,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
               toolResults,
               toolCalls,
             },
-            workspaceContext,
+            workspaceContext: workspaceContext as WorkspaceContext,
             workspaceId,
           });
 

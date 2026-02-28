@@ -153,7 +153,7 @@ export class SkillRuntime {
           claude: 0,
           claudeCacheCreation: 0,
           claudeCacheRead: 0,
-        },
+        } as any,
         toolCallCount: 0,
         errors: [],
       },
@@ -237,7 +237,7 @@ export class SkillRuntime {
       const annotations = context.stepResults.final_annotations;
       const annotationsList = Array.isArray(annotations) && annotations.length > 0 ? annotations : null;
       const annotationsMetadata = annotationsList ? {
-        total_before_filter: context.metadata.totalAnnotationsBeforeFilter || 0,
+        total_before_filter: (context.metadata as any).totalAnnotationsBeforeFilter || 0,
         total_active: annotationsList.length,
       } : null;
 
@@ -330,7 +330,7 @@ export class SkillRuntime {
         evidence,
         annotations: annotationsList || undefined,
         annotationsMetadata: annotationsMetadata || undefined,
-      };
+      } as any;
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       console.error(`[Skill Runtime] Skill ${skill.id} failed:`, errorMsg);
@@ -675,8 +675,8 @@ export class SkillRuntime {
     const totalTokens = usage.input + usage.output;
     if (tier === 'claude') {
       context.metadata.tokenUsage.claude += totalTokens;
-      context.metadata.tokenUsage.claudeCacheCreation += usage.cacheCreation || 0;
-      context.metadata.tokenUsage.claudeCacheRead += usage.cacheRead || 0;
+      (context.metadata.tokenUsage as any).claudeCacheCreation += usage.cacheCreation || 0;
+      (context.metadata.tokenUsage as any).claudeCacheRead += usage.cacheRead || 0;
     } else if (tier === 'deepseek') {
       context.metadata.tokenUsage.deepseek += totalTokens;
     }

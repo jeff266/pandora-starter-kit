@@ -123,13 +123,13 @@ export async function getBatchDealRiskScores(workspaceId: string, dealIds?: stri
       'SELECT id, name FROM deals WHERE workspace_id = $1 AND id = ANY($2)',
       [workspaceId, dealIds]
     );
-    deals = result.rows;
+    deals = result.rows as any;
   } else {
     const result = await query(
       `SELECT id, name FROM deals WHERE workspace_id = $1 AND stage_normalized NOT IN ('closed_won', 'closed_lost')`,
       [workspaceId]
     );
-    deals = result.rows;
+    deals = result.rows as any;
   }
 
   if (deals.length === 0) return [];

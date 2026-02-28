@@ -138,8 +138,9 @@ Keep it under 500 words. This is a manager's playbook for the week.
   outputFormat: {
     type: 'narrative',
     sections: ['headline', 'reverse_math', 'weekly_targets', 'rep_prescriptions', 'biggest_lever'],
-  },
+  } as any,
 
+  estimatedDuration: '300 seconds',
   evidenceSchema: {
     entity_type: 'rep',
     columns: [

@@ -184,7 +184,7 @@ export async function synthesizeDealNarrative(
     _tracking: {
       feature: 'dossier_narrative',
       subFeature: 'deal',
-    },
+    } as any,
   });
 
   const content = response.content || '';
@@ -232,7 +232,7 @@ export async function synthesizeAccountNarrative(
     _tracking: {
       feature: 'dossier_narrative',
       subFeature: 'account',
-    },
+    } as any,
   });
 
   return response.content || '';

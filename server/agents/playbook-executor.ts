@@ -22,7 +22,8 @@ import {
   createTask as sfCreateTask,
   updateContactField as sfUpdateContactField,
 } from '../connectors/salesforce/salesforce-writer.js';
-import { findSlackUserForCRMOwner } from '../identity/reverse-lookup.js';
+const findSlackUserForCRMOwner = async (_ws: any, _owner: any): Promise<any> => null;
+// import { findSlackUserForCRMOwner } from '../identity/reverse-lookup.js';
 import { getSlackAppClient } from '../connectors/slack/slack-app-client.js';
 
 const logger = createLogger('PlaybookExecutor');

@@ -7,7 +7,7 @@ import { getJobQueue } from '../jobs/queue.js';
 const router = Router();
 
 router.post('/:id/sync', async (req: Request, res: Response): Promise<void> => {
-  const workspaceId = req.params.id;
+  const workspaceId = req.params.id as string;
   const { connectorType } = req.body || {};
 
   try {
@@ -97,7 +97,7 @@ router.post('/:id/sync', async (req: Request, res: Response): Promise<void> => {
 });
 
 router.get('/:id/sync/status', async (req: Request, res: Response): Promise<void> => {
-  const workspaceId = req.params.id;
+  const workspaceId = req.params.id as string;
 
   try {
     const connectorsResult = await query<{
@@ -151,8 +151,8 @@ router.get('/:id/sync/status', async (req: Request, res: Response): Promise<void
 });
 
 router.get('/:id/sync/jobs/:jobId', async (req: Request, res: Response): Promise<void> => {
-  const workspaceId = req.params.id;
-  const jobId = req.params.jobId;
+  const workspaceId = req.params.id as string;
+  const jobId = req.params.jobId as string;
 
   try {
     const jobQueue = getJobQueue();
@@ -189,7 +189,7 @@ router.get('/:id/sync/jobs/:jobId', async (req: Request, res: Response): Promise
 });
 
 router.get('/:id/sync/jobs', async (req: Request, res: Response): Promise<void> => {
-  const workspaceId = req.params.id;
+  const workspaceId = req.params.id as string;
   const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
 
   try {
@@ -216,7 +216,7 @@ router.get('/:id/sync/jobs', async (req: Request, res: Response): Promise<void> 
 });
 
 router.get('/:id/sync/history', async (req: Request, res: Response): Promise<void> => {
-  const workspaceId = req.params.id;
+  const workspaceId = req.params.id as string;
   const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
   const connector = req.query.connector as string | undefined;
 
@@ -263,7 +263,7 @@ router.get('/:id/sync/history', async (req: Request, res: Response): Promise<voi
 });
 
 router.get('/:id/connectors/health', async (req: Request, res: Response): Promise<void> => {
-  const workspaceId = req.params.id;
+  const workspaceId = req.params.id as string;
 
   try {
     const [connectorsResult, countsResult, syncHistoryResult, entitySourceCounts, errors24hResult] = await Promise.all([
@@ -452,7 +452,7 @@ router.get('/:id/connectors/health', async (req: Request, res: Response): Promis
 });
 
 router.post('/:id/connectors/disconnect', async (req: Request, res: Response): Promise<void> => {
-  const workspaceId = req.params.id;
+  const workspaceId = req.params.id as string;
   const { connectorType } = req.body || {};
 
   if (!connectorType) {

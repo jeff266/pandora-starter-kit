@@ -109,7 +109,7 @@ export class MondayClient {
       throw new Error(`Monday.com HTTP error: ${response.status} ${response.statusText}`);
     }
 
-    const data = await response.json();
+    const data = await response.json() as any;
 
     if (data.errors && data.errors.length > 0) {
       throw new Error(`Monday.com API error: ${JSON.stringify(data.errors)}`);

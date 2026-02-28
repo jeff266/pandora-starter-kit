@@ -1,19 +1,12 @@
 import { Router, type Request, type Response } from 'express';
 import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { getAgentRegistry } from '../agents/registry.js';
-import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { getAgentRuntime } from '../agents/runtime.js';
-import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { query } from '../db.js';
-import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { generateWorkbook } from '../delivery/workbook-generator.js';
-import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { getSkillRegistry } from '../skills/registry.js';
-import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import type { AgentDefinition } from '../agents/types.js';
-import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { requireAdmin } from '../middleware/auth.js';
-import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 
 const agentsGlobalRouter = Router();
 const agentsWorkspaceRouter = Router();
@@ -37,9 +30,9 @@ agentsGlobalRouter.get('/agents', (_req: Request, res: Response) => {
 
 agentsGlobalRouter.get('/agents/:agentId', (req: Request, res: Response) => {
   const registry = getAgentRegistry();
-  const agent = registry.get(req.params.agentId);
+  const agent = registry.get(req.params.agentId as string);
   if (!agent) {
-    return res.status(404).json({ error: `Agent '${req.params.agentId}' not found` });
+    return res.status(404).json({ error: `Agent '${req.params.agentId as string}' not found` });
   }
   res.json(agent);
 });
@@ -76,9 +69,9 @@ agentsGlobalRouter.post('/agents', requireAdmin, (req: Request, res: Response) =
 
 agentsGlobalRouter.put('/agents/:agentId', requireAdmin, (req: Request, res: Response) => {
   const registry = getAgentRegistry();
-  const existing = registry.get(req.params.agentId);
+  const existing = registry.get(req.params.agentId as string);
   if (!existing) {
-    return res.status(404).json({ error: `Agent '${req.params.agentId}' not found` });
+    return res.status(404).json({ error: `Agent '${req.params.agentId as string}' not found` });
   }
 
   const updates = req.body;
@@ -96,15 +89,16 @@ agentsGlobalRouter.put('/agents/:agentId', requireAdmin, (req: Request, res: Res
 
 agentsGlobalRouter.delete('/agents/:agentId', requireAdmin, (req: Request, res: Response) => {
   const registry = getAgentRegistry();
-  const removed = registry.remove(req.params.agentId);
+  const removed = registry.remove(req.params.agentId as string);
   if (!removed) {
-    return res.status(404).json({ error: `Agent '${req.params.agentId}' not found` });
+    return res.status(404).json({ error: `Agent '${req.params.agentId as string}' not found` });
   }
   res.json({ ok: true });
 });
 
 agentsWorkspaceRouter.post('/:workspaceId/agents/:agentId/run', async (req: Request, res: Response) => {
-  const { workspaceId, agentId } = req.params;
+  const workspaceId = req.params.workspaceId as string;
+  const agentId = req.params.agentId as string;
   const { dryRun } = req.body || {};
 
   try {
@@ -122,7 +116,8 @@ agentsWorkspaceRouter.post('/:workspaceId/agents/:agentId/run', async (req: Requ
 });
 
 agentsWorkspaceRouter.get('/:workspaceId/agents/:agentId/runs', async (req: Request, res: Response) => {
-  const { workspaceId, agentId } = req.params;
+  const workspaceId = req.params.workspaceId as string;
+  const agentId = req.params.agentId as string;
   const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
 
   const result = await query(
@@ -140,7 +135,7 @@ agentsWorkspaceRouter.get('/:workspaceId/agents/:agentId/runs', async (req: Requ
 });
 
 agentsWorkspaceRouter.get('/:workspaceId/agents/runs/all', async (req: Request, res: Response) => {
-  const { workspaceId } = req.params;
+  const workspaceId = req.params.workspaceId as string;
   const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
 
   const result = await query(
@@ -159,7 +154,9 @@ agentsWorkspaceRouter.get('/:workspaceId/agents/runs/all', async (req: Request, 
 
 agentsWorkspaceRouter.get('/:workspaceId/agents/:agentId/runs/:runId/export', async (req: Request, res: Response) => {
   try {
-    const { workspaceId, agentId, runId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
+    const agentId = req.params.agentId as string;
+    const runId = req.params.runId as string;
 
     const ws = await query('SELECT id, name FROM workspaces WHERE id = $1', [workspaceId]);
     if (ws.rows.length === 0) {

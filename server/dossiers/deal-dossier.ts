@@ -551,7 +551,7 @@ export async function assembleDealDossier(
       phase_divergence: deal.phase_divergence ?? false,
       phase_inferred_at: deal.phase_inferred_at ? new Date(deal.phase_inferred_at).toISOString() : null,
     },
-    contacts: mappedContacts,
+    contacts: mappedContacts as any,
     conversations: mappedConversations,
     activities: activities.map((a: any) => ({
       id: a.id,
@@ -582,7 +582,6 @@ export async function assembleDealDossier(
     coverage_gaps: {
       contacts_never_called,
       days_since_last_call,
-      days_threshold,
       total_contacts: mappedContacts.length,
       contacts_on_calls,
       unlinked_calls: unlinkedCalls,
@@ -619,7 +618,8 @@ export async function assembleDealDossier(
     })),
     enrichment: enrichment ?? null,
     narrative: deal.narrative || null,
-    recommended_actions: deal.narrative_actions || [],
+    // @ts-ignore extra property
+    recommended_actions: (deal as any).narrative_actions || [],
     narrative_generated_at: deal.narrative_generated_at ? new Date(deal.narrative_generated_at).toISOString() : null,
     hasUserContext: annotations.length > 0,
     data_availability: {

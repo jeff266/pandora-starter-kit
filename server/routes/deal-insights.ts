@@ -22,7 +22,7 @@ const logger = createLogger('DealInsightsAPI');
 
 router.get('/api/workspaces/:workspaceId/insights/config', requireWorkspaceAccess, async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
 
     const result = await query<{ definitions: any }>(
       `SELECT definitions FROM context_layer
@@ -65,7 +65,7 @@ router.get('/api/workspaces/:workspaceId/insights/config', requireWorkspaceAcces
 
 router.put('/api/workspaces/:workspaceId/insights/config', requireWorkspaceAccess, async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     const config = req.body;
 
     // Validate
@@ -137,7 +137,7 @@ router.put('/api/workspaces/:workspaceId/insights/config', requireWorkspaceAcces
 
 router.post('/api/workspaces/:workspaceId/insights/config/auto-detect', requireWorkspaceAccess, async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
 
     // Get custom fields from discovery result
     const discoveryResult = await query<{ output: any }>(
@@ -207,7 +207,7 @@ router.post('/api/workspaces/:workspaceId/insights/config/auto-detect', requireW
 
 router.get('/api/workspaces/:workspaceId/insights/config/available-fields', requireWorkspaceAccess, async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
 
     // Get custom fields from discovery result
     const discoveryResult = await query<{ output: any }>(
@@ -250,7 +250,7 @@ router.get('/api/workspaces/:workspaceId/insights/config/available-fields', requ
 
 router.post('/api/workspaces/:workspaceId/insights/extract', requireWorkspaceAccess, async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
     const { conversation_ids, batch_size } = req.body;
 
     const result = await extractInsightsFromConversations(workspaceId, {
@@ -271,7 +271,7 @@ router.post('/api/workspaces/:workspaceId/insights/extract', requireWorkspaceAcc
 
 router.get('/api/workspaces/:workspaceId/insights/status', requireWorkspaceAccess, async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
 
     const insightCounts = await query<{
       total_insights: string;
@@ -358,7 +358,8 @@ router.get('/api/workspaces/:workspaceId/insights/status', requireWorkspaceAcces
 
 router.get('/api/workspaces/:workspaceId/deals/:dealId/insights', requireWorkspaceAccess, async (req, res) => {
   try {
-    const { workspaceId, dealId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
+    const dealId = req.params.dealId as string;
 
     const result = await query<{
       insight_type: string;
@@ -390,7 +391,8 @@ router.get('/api/workspaces/:workspaceId/deals/:dealId/insights', requireWorkspa
 
 router.get('/api/workspaces/:workspaceId/deals/:dealId/insights/history', requireWorkspaceAccess, async (req, res) => {
   try {
-    const { workspaceId, dealId } = req.params;
+    const workspaceId = req.params.workspaceId as string;
+    const dealId = req.params.dealId as string;
 
     const result = await query<{
       id: string;

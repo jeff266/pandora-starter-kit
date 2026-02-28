@@ -98,7 +98,7 @@ function buildSystemPrompt(input: EditorialInput): string {
   const parts: string[] = [];
 
   // Role and goal
-  parts.push(`You are the ${input.agent.name} for ${input.agent.workspaceId || 'this workspace'}.`);
+  parts.push(`You are the ${input.agent.name} for ${(input.agent as any).workspaceId || 'this workspace'}.`);
   parts.push(`Your goal: ${input.agent.description}`);
   parts.push('');
 

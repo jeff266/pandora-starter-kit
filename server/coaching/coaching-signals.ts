@@ -5,7 +5,7 @@
  * Only surfaces signals where discovered patterns show meaningful separation.
  */
 
-import { query } from '../db';
+import { query } from '../db.js';
 import type { PoolClient } from 'pg';
 import { daysBetween } from '../utils/date-helpers.js';
 
@@ -262,7 +262,7 @@ export async function generateCoachingSignals(
   client?: PoolClient,
   stageNormalized?: string | null
 ): Promise<CoachingSignalsResult> {
-  const db = client || { query };
+  const db = (client ?? { query }) as any;
 
   // Determine coaching mode — use stage_normalized to avoid CRM-specific stage name formats
   const mode = getCoachingMode(currentStage, stageNormalized);
@@ -282,7 +282,7 @@ export async function generateCoachingSignals(
   };
 
   // Get closed deal counts for metadata
-  const closedDealsResult = await db.query<{ won: number; lost: number }>(
+  const closedDealsResult = await (db as any).query(
     `SELECT
       SUM(CASE WHEN stage_normalized = 'closed_won' THEN 1 ELSE 0 END)::integer as won,
       SUM(CASE WHEN stage_normalized = 'closed_lost' THEN 1 ELSE 0 END)::integer as lost
@@ -296,7 +296,7 @@ export async function generateCoachingSignals(
   const lostCount = closedDealsResult.rows[0]?.lost || 0;
 
   // 1. Load current win patterns for this workspace
-  const patternsResult = await db.query<StoredPattern>(
+  const patternsResult = await (db as any).query(
     `SELECT * FROM win_patterns
      WHERE workspace_id = $1 AND superseded_at IS NULL
      ORDER BY separation_score DESC`,
@@ -304,7 +304,7 @@ export async function generateCoachingSignals(
   );
 
   // Coerce numeric columns (node-postgres returns all columns as strings with SELECT *)
-  const patterns: StoredPattern[] = patternsResult.rows.map(r => ({
+  const patterns: StoredPattern[] = patternsResult.rows.map((r: any) => ({
     ...r,
     won_median:        Number(r.won_median),
     won_p25:           Number(r.won_p25),
@@ -498,19 +498,7 @@ async function computeDealMetrics(
   db: any
 ): Promise<DealMetrics> {
   // Conversation metrics
-  const convResult = await db.query<{
-    call_count: number;
-    total_call_minutes: number;
-    avg_call_duration_minutes: number;
-    unique_external_participants: number;
-    avg_external_per_call: number;
-    avg_talk_ratio_rep: number;
-    avg_talk_ratio_buyer: number;
-    avg_questions_per_call: number;
-    avg_action_items_per_call: number;
-    first_call_date: string;
-    last_call_date: string;
-  }>(
+  const convResult = await (db as any).query(
     `WITH deal_convs AS (
       SELECT
         c.id as conv_id,
@@ -553,12 +541,7 @@ async function computeDealMetrics(
   );
 
   // CRM metrics
-  const crmResult = await db.query<{
-    sales_cycle_days: number;
-    stage_regression_count: number;
-    contact_count: number;
-    created_at: string;
-  }>(
+  const crmResult = await (db as any).query(
     `SELECT
       EXTRACT(days FROM NOW() - d.created_at::timestamp)::integer as sales_cycle_days,
       COALESCE((

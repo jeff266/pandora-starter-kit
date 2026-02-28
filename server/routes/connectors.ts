@@ -512,7 +512,7 @@ router.get('/:workspaceId/connectors/status', async (req: Request<WorkspaceParam
   }
 });
 
-router.delete('/:workspaceId/connectors/:connectorType', requirePermission('admin'), async (req: Request<{ workspaceId: string; connectorType: string }>, res: Response) => {
+router.delete('/:workspaceId/connectors/:connectorType', requirePermission('admin' as any), async (req: Request<{ workspaceId: string; connectorType: string }>, res: Response) => {
   try {
     const { workspaceId, connectorType } = req.params;
 

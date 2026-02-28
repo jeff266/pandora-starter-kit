@@ -657,11 +657,11 @@ async function resolveTitleBasedInference(workspaceId: string, dealId?: string):
   let resolved = 0;
 
   for (const row of result.rows) {
-    let roleMatch: { role: string; confidence: number; source: string } | null = null;
+    let roleMatch: { role: string; confidence: number; source?: string } | null = null;
 
     // Task 3b: Prefer Apollo-verified seniority + department for role inference
     if (row.seniority_verified && row.department_verified) {
-      roleMatch = inferRoleFromEnrichment(row.seniority_verified, row.department_verified);
+      roleMatch = inferRoleFromEnrichment(row.seniority_verified, row.department_verified as any as any);
       if (roleMatch) {
         roleMatch.source = 'enrichment_inference';
         // Higher confidence (0.65) because Apollo verified the data

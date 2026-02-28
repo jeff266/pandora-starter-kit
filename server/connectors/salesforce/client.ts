@@ -20,7 +20,6 @@ import type {
   SalesforceEvent,
   SalesforceObjectDescribe,
   SalesforceBulkJobInfo,
-  SalesforceApiError,
   SalesforceOrganization,
   SalesforceApiLimits,
   SalesforceTokenResponse,
@@ -60,6 +59,16 @@ export class SalesforceRateLimitError extends SalesforceApiError {
     super('REQUEST_LIMIT_EXCEEDED', message);
     this.name = 'SalesforceRateLimitError';
   }
+}
+
+export interface SalesforceOpportunityFieldHistory {
+  Id?: string;
+  OpportunityId: string;
+  Field: string;
+  OldValue: string | null;
+  NewValue: string | null;
+  CreatedDate: string;
+  CreatedById?: string;
 }
 
 // ============================================================================
@@ -117,7 +126,7 @@ export class SalesforceClient {
       throw new Error(`Token refresh failed: ${error}`);
     }
 
-    const data: SalesforceTokenResponse = await response.json();
+    const data = await response.json() as unknown as SalesforceTokenResponse;
 
     logger.info('[Salesforce] Token refreshed', {
       instanceUrl: data.instance_url,
@@ -167,7 +176,7 @@ export class SalesforceClient {
       duration,
     });
 
-    return response.json();
+    return response.json() as unknown as T;
   }
 
   private parseApiLimits(limitInfo: string): void {
@@ -193,7 +202,7 @@ export class SalesforceClient {
   private async handleError(response: Response): Promise<never> {
     let errors: SalesforceApiError[];
     try {
-      errors = await response.json();
+      errors = await response.json() as unknown as SalesforceApiError[];
     } catch {
       throw new Error(`Salesforce API error: ${response.status} ${response.statusText}`);
     }
@@ -286,8 +295,9 @@ export class SalesforceClient {
    * Returns all custom fields and select standard fields useful for segmentation
    * Caches result per sync run - call once at start of sync
    */
-  async getObjectFields(objectName: string): Promise<import('./types.js').SalesforceField[]> {
-    const { SalesforceField, EXTRA_STANDARD_FIELDS } = await import('./types.js');
+  async getObjectFields(objectName: string): Promise<any[]> {
+    const { EXTRA_STANDARD_FIELDS } = await import('./types.js');
+    type SalesforceFieldLocal = import('./types.js').SalesforceField;
 
     const url = `${this.baseUrl}/sobjects/${objectName}/describe`;
 
@@ -310,7 +320,7 @@ export class SalesforceClient {
 
         return res.json();
       },
-      { maxRetries: 3, delayMs: 1000 }
+      { maxRetries: 3, delayMs: 1000 } as any
     );
 
     const describeResult = response as any;

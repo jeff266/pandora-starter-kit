@@ -181,7 +181,7 @@ function extractCustomFields<T extends { custom_fields?: Record<string, unknown>
     }
   }
 
-  return extracted;
+  return (extracted) as any;
 }
 
 export async function queryDeals(workspaceId: string, filters: DealFilters): Promise<{ deals: Deal[]; total: number; limit: number; offset: number }> {

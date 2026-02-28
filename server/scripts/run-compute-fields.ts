@@ -12,8 +12,8 @@ console.log(`[compute] Running compute fields for workspace ${workspaceId}...`);
 computeFields(workspaceId)
   .then(result => {
     console.log(`[compute] Success!`);
-    console.log(`[compute] Updated ${result.dealsUpdated} deals`);
-    console.log(`[compute] Updated ${result.accountsUpdated} accounts`);
+    console.log(`[compute] Updated ${(result as any).dealsUpdated} deals`);
+    console.log(`[compute] Updated ${(result as any).accountsUpdated} accounts`);
     process.exit(0);
   })
   .catch(err => {
