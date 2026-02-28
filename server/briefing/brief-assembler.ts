@@ -31,10 +31,14 @@ const OPERATOR_META: Record<string, { name: string; icon: string; color: string 
   'conversation-intelligence': { name: 'Coaching Analyst', icon: '🏋️', color: '#34D399' },
   'single-thread-alert': { name: 'Deal Analyst', icon: '🔍', color: '#FB923C' },
   'data-quality-audit': { name: 'Data Steward', icon: '🧹', color: '#FBBF24' },
+  'pipeline-waterfall': { name: 'Pipeline Analyst', icon: '📊', color: '#22D3EE' },
+  'pipeline-goals': { name: 'Pipeline Analyst', icon: '📊', color: '#22D3EE' },
+  'bowtie-analysis': { name: 'Funnel Analyst', icon: '🔁', color: '#34D399' },
+  'weekly-recap': { name: 'Recap Analyst', icon: '📋', color: '#A78BFA' },
+  'stage-velocity-benchmarks': { name: 'Pipeline Analyst', icon: '📊', color: '#22D3EE' },
 };
 
-function getOperatorMeta(agentId?: string | null, skillId?: string | null): { name: string; icon: string; color: string } {
-  if (agentId && OPERATOR_META[agentId]) return OPERATOR_META[agentId];
+function getOperatorMeta(skillId?: string | null): { name: string; icon: string; color: string } {
   if (skillId && OPERATOR_META[skillId]) return OPERATOR_META[skillId];
   return { name: 'Pandora', icon: '✦', color: '#6488EA' };
 }
@@ -60,8 +64,6 @@ export async function assembleBrief(
     skill_id: string | null;
     skill_run_id: string | null;
     found_at: string;
-    agent_id: string | null;
-    agent_name: string | null;
   }>(
     `SELECT
        f.id,
@@ -70,12 +72,8 @@ export async function assembleBrief(
        f.category,
        f.skill_id,
        f.skill_run_id,
-       f.found_at,
-       sr.agent_id,
-       a.name as agent_name
+       f.found_at
      FROM findings f
-     LEFT JOIN skill_runs sr ON sr.run_id = f.skill_run_id
-     LEFT JOIN agents a ON a.id = sr.agent_id
      WHERE f.workspace_id = $1
        AND f.resolved_at IS NULL
        AND f.found_at > $2
@@ -87,7 +85,7 @@ export async function assembleBrief(
   );
 
   return result.rows.map(row => {
-    const meta = getOperatorMeta(row.agent_id, row.skill_id);
+    const meta = getOperatorMeta(row.skill_id);
     const severity = mapSeverity(row.severity);
 
     const headline = row.message.length > 80
@@ -97,7 +95,7 @@ export async function assembleBrief(
 
     return {
       id: row.id,
-      operator_name: row.agent_name || meta.name,
+      operator_name: meta.name,
       operator_icon: meta.icon,
       operator_color: meta.color,
       severity,
