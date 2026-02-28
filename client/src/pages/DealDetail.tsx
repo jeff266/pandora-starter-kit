@@ -348,10 +348,9 @@ export default function DealDetail() {
     } catch (err: any) {
       setError(err.message);
     } finally {
+      setLoading(false);
       if (withNarrative) {
         setNarrativeLoading(false);
-      } else {
-        setLoading(false);
       }
     }
   };
