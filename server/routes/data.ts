@@ -30,6 +30,16 @@ import { setDealScopeOverride } from '../config/scope-stamper.js';
 const router = Router();
 const filterResolver = new FilterResolver();
 
+async function resolveIsAdmin(req: Request, workspaceId: string): Promise<boolean> {
+  if (req.authMethod === 'api_key') return true;
+  if (!req.user?.user_id) return false;
+  const result = await query<{ role: string }>(
+    'SELECT role FROM user_workspaces WHERE user_id = $1 AND workspace_id = $2',
+    [req.user.user_id, workspaceId]
+  );
+  return result.rows.length > 0 && result.rows[0].role === 'admin';
+}
+
 async function resolveLens(
   req: Request,
   entityType: 'deals' | 'contacts' | 'accounts' | 'conversations'
@@ -167,9 +177,8 @@ router.patch('/:id/deals/:dealId/pipeline', async (req: Request, res: Response):
     const dealOwner = dealResult.rows[0].owner || '';
     const userEmail = req.user?.email || '';
     const userName = req.user?.name || '';
-    const userRole = req.userWorkspaceRole || '';
 
-    const isAdmin = userRole === 'admin';
+    const isAdmin = await resolveIsAdmin(req, workspaceId);
     const isOwner = dealOwner &&
       (dealOwner.toLowerCase() === userEmail.toLowerCase() ||
        dealOwner.toLowerCase() === userName.toLowerCase());
@@ -214,8 +223,8 @@ router.patch('/:id/deals/:dealId/scope', async (req: Request, res: Response): Pr
     const dealOwner = dealResult.rows[0].owner || '';
     const userEmail = req.user?.email || '';
     const userName = req.user?.name || '';
-    const userRole = req.userWorkspaceRole || '';
-    const isAdmin = userRole === 'admin';
+
+    const isAdmin = await resolveIsAdmin(req, workspaceId);
     const isOwner = dealOwner &&
       (dealOwner.toLowerCase() === userEmail.toLowerCase() ||
        dealOwner.toLowerCase() === userName.toLowerCase());
