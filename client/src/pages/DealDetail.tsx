@@ -642,6 +642,115 @@ export default function DealDetail() {
                 </span>
               )}
             </div>
+
+            {/* Metadata strip — pipeline, probability, forecast */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
+              {/* CRM Pipeline chip */}
+              {(deal.pipeline || deal.pipeline_name) && (
+                canEditPipeline ? (
+                  <div ref={pipelineDropdownRef} style={{ position: 'relative' }}>
+                    {pipelineEditing && (
+                      <div style={{
+                        position: 'absolute', left: 0, top: 'calc(100% + 4px)', zIndex: 20,
+                        background: colors.surface, border: `1px solid ${colors.border}`,
+                        borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
+                        minWidth: 200, maxHeight: 240, overflowY: 'auto',
+                      }}>
+                        {pipelines.map(p => (
+                          <button key={p} onClick={() => handlePipelineChange(p)} disabled={pipelineSaving}
+                            style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 12px', border: 'none', background: p === deal.pipeline ? `${colors.accent}15` : 'transparent', color: colors.text, fontSize: 13, cursor: 'pointer', textAlign: 'left' }}
+                            onMouseEnter={e => { (e.target as HTMLElement).style.background = `${colors.accent}15`; }}
+                            onMouseLeave={e => { (e.target as HTMLElement).style.background = p === deal.pipeline ? `${colors.accent}15` : 'transparent'; }}
+                          >
+                            {p === deal.pipeline && <Check size={14} color={colors.accent} />}
+                            <span style={{ marginLeft: p === deal.pipeline ? 0 : 22 }}>{p}</span>
+                          </button>
+                        ))}
+                        <div style={{ borderTop: pipelines.length > 0 ? `1px solid ${colors.border}` : 'none', padding: '6px 8px' }}>
+                          <form onSubmit={e => { e.preventDefault(); const input = (e.target as HTMLFormElement).elements.namedItem('heroPipeline') as HTMLInputElement; const val = input?.value?.trim(); if (val) handlePipelineChange(val); }}>
+                            <input name="heroPipeline" placeholder="Type custom pipeline..." disabled={pipelineSaving}
+                              style={{ width: '100%', padding: '6px 8px', fontSize: 12, background: colors.background, border: `1px solid ${colors.border}`, borderRadius: 4, color: colors.text, outline: 'none', boxSizing: 'border-box' }}
+                              onFocus={e => { e.target.style.borderColor = colors.accent; }}
+                              onBlur={e => { e.target.style.borderColor = colors.border; }}
+                            />
+                          </form>
+                        </div>
+                      </div>
+                    )}
+                    <button onClick={() => setPipelineEditing(!pipelineEditing)}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 9px', borderRadius: 20, border: `1px solid ${colors.border}`, background: colors.surfaceHover, cursor: 'pointer', fontSize: 11, color: colors.text }}>
+                      <span style={{ color: colors.textMuted, marginRight: 2 }}>Pipeline:</span>
+                      {pipelineSaving ? 'Saving…' : (deal.pipeline_name || deal.pipeline)}
+                      <ChevronDown size={11} color={colors.textMuted} />
+                    </button>
+                  </div>
+                ) : (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 9px', borderRadius: 20, background: colors.surfaceHover, fontSize: 11, color: colors.text }}>
+                    <span style={{ color: colors.textMuted }}>Pipeline:</span> {deal.pipeline_name || deal.pipeline}
+                  </span>
+                )
+              )}
+
+              {/* Pandora Pipeline chip */}
+              {scopes.length > 0 && (deal.scope_id || canEditPipeline) && (
+                canEditPipeline ? (
+                  <div ref={scopeDropdownRef} style={{ position: 'relative' }}>
+                    {scopeEditing && (
+                      <div style={{
+                        position: 'absolute', left: 0, top: 'calc(100% + 4px)', zIndex: 20,
+                        background: colors.surface, border: `1px solid ${colors.border}`,
+                        borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
+                        minWidth: 200, maxHeight: 240, overflowY: 'auto',
+                      }}>
+                        {scopes.map(s => (
+                          <button key={s.scope_id} onClick={() => handleScopeChange(s.scope_id)} disabled={scopeSaving}
+                            style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 12px', border: 'none', background: s.scope_id === deal.scope_id ? `${colors.accent}15` : 'transparent', color: colors.text, fontSize: 13, cursor: 'pointer', textAlign: 'left' }}
+                            onMouseEnter={e => { (e.target as HTMLElement).style.background = `${colors.accent}15`; }}
+                            onMouseLeave={e => { (e.target as HTMLElement).style.background = s.scope_id === deal.scope_id ? `${colors.accent}15` : 'transparent'; }}
+                          >
+                            {s.scope_id === deal.scope_id && <Check size={14} color={colors.accent} />}
+                            <span style={{ marginLeft: s.scope_id === deal.scope_id ? 0 : 22 }}>{s.name}</span>
+                          </button>
+                        ))}
+                        {deal.scope_id && (
+                          <div style={{ borderTop: `1px solid ${colors.border}`, padding: '6px 8px' }}>
+                            <button onClick={() => handleScopeChange(null)} disabled={scopeSaving}
+                              style={{ width: '100%', padding: '6px 8px', border: 'none', background: 'transparent', color: colors.textMuted, fontSize: 12, cursor: 'pointer', textAlign: 'left', borderRadius: 4 }}
+                              onMouseEnter={e => { (e.target as HTMLElement).style.background = colors.surfaceHover; }}
+                              onMouseLeave={e => { (e.target as HTMLElement).style.background = 'transparent'; }}
+                            >↩ Reset to inferred</button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    <button onClick={() => setScopeEditing(!scopeEditing)}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 9px', borderRadius: 20, border: `1px solid ${colors.accent}30`, background: `${colors.accent}08`, cursor: 'pointer', fontSize: 11, color: colors.text }}>
+                      <span style={{ color: colors.textMuted, marginRight: 2 }}>Pandora:</span>
+                      {scopeSaving ? 'Saving…' : (scopes.find(s => s.scope_id === deal.scope_id)?.name || deal.scope_id || 'Unassigned')}
+                      <ChevronDown size={11} color={colors.textMuted} />
+                    </button>
+                  </div>
+                ) : deal.scope_id ? (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 9px', borderRadius: 20, background: `${colors.accent}08`, border: `1px solid ${colors.accent}20`, fontSize: 11, color: colors.text }}>
+                    <span style={{ color: colors.textMuted }}>Pandora:</span> {scopes.find(s => s.scope_id === deal.scope_id)?.name || deal.scope_id}
+                  </span>
+                ) : null
+              )}
+
+              {/* Probability chip */}
+              {deal.probability != null && deal.probability !== '' && (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 9px', borderRadius: 20, background: colors.surfaceHover, fontSize: 11, color: colors.text }}>
+                  <span style={{ color: colors.textMuted }}>Prob:</span> {deal.probability}%
+                </span>
+              )}
+
+              {/* Forecast chip */}
+              {deal.forecast_category && (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 9px', borderRadius: 20, background: colors.surfaceHover, fontSize: 11, color: colors.text }}>
+                  <span style={{ color: colors.textMuted }}>Forecast:</span> {deal.forecast_category}
+                </span>
+              )}
+            </div>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -1189,149 +1298,90 @@ export default function DealDetail() {
 
           {/* Deal Details */}
           <Card title="Deal Details">
-            <DetailRow label="Source" value={deal.source} />
-            {canEditPipeline ? (
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: `1px solid ${colors.border}` }}>
-                <span style={{ fontSize: 12, color: colors.textMuted, minWidth: 110 }}>Pipeline</span>
-                <div ref={pipelineDropdownRef} style={{ position: 'relative' }}>
-                  {pipelineEditing ? (
-                    <div style={{
-                      position: 'absolute', right: 0, top: -4, zIndex: 20,
-                      background: colors.surface, border: `1px solid ${colors.border}`,
-                      borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
-                      minWidth: 200, maxHeight: 240, overflowY: 'auto',
-                    }}>
-                      {pipelines.map(p => (
-                        <button
-                          key={p}
-                          onClick={() => handlePipelineChange(p)}
-                          disabled={pipelineSaving}
-                          style={{
-                            display: 'flex', alignItems: 'center', gap: 8,
-                            width: '100%', padding: '8px 12px', border: 'none',
-                            background: p === deal.pipeline ? `${colors.accent}15` : 'transparent',
-                            color: colors.text, fontSize: 13, cursor: 'pointer',
-                            textAlign: 'left',
-                          }}
-                          onMouseEnter={e => { (e.target as HTMLElement).style.background = `${colors.accent}15`; }}
-                          onMouseLeave={e => { (e.target as HTMLElement).style.background = p === deal.pipeline ? `${colors.accent}15` : 'transparent'; }}
-                        >
-                          {p === deal.pipeline && <Check size={14} color={colors.accent} />}
-                          <span style={{ marginLeft: p === deal.pipeline ? 0 : 22 }}>{p}</span>
+            {/* ── Section: CRM ── */}
+            <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', color: colors.textMuted, paddingBottom: 6, marginBottom: 2 }}>CRM</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 12px', marginBottom: 14 }}>
+              {/* Pipeline */}
+              <div>
+                <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: colors.textMuted, marginBottom: 3 }}>Pipeline</div>
+                {canEditPipeline ? (
+                  <div style={{ position: 'relative' }}>
+                    <button onClick={() => setPipelineEditing(!pipelineEditing)}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 3, background: 'transparent', border: `1px solid ${colors.border}`, borderRadius: 5, padding: '3px 8px', cursor: 'pointer', color: colors.text, fontSize: 12 }}>
+                      {pipelineSaving ? 'Saving…' : (deal.pipeline_name || deal.pipeline || '—')}
+                      <ChevronDown size={11} color={colors.textMuted} />
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 12, color: colors.text }}>{deal.pipeline_name || deal.pipeline || '—'}</div>
+                )}
+              </div>
+              {/* Source */}
+              <div>
+                <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: colors.textMuted, marginBottom: 3 }}>Source</div>
+                <div style={{ fontSize: 12, color: colors.text }}>{deal.source || '—'}</div>
+              </div>
+              {/* Probability */}
+              <div>
+                <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: colors.textMuted, marginBottom: 3 }}>Probability</div>
+                <div style={{ fontSize: 12, color: colors.text }}>{deal.probability != null ? `${deal.probability}%` : '—'}</div>
+              </div>
+              {/* Forecast */}
+              <div>
+                <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: colors.textMuted, marginBottom: 3 }}>Forecast</div>
+                <div style={{ fontSize: 12, color: colors.text }}>{deal.forecast_category || '—'}</div>
+              </div>
+              {/* Lead Source */}
+              {deal.lead_source && (
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: colors.textMuted, marginBottom: 3 }}>Lead Source</div>
+                  <div style={{ fontSize: 12, color: colors.text }}>{deal.lead_source}</div>
+                </div>
+              )}
+            </div>
+
+            {/* ── Section: Pandora ── */}
+            {scopes.length > 0 && (
+              <>
+                <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', color: colors.textMuted, paddingBottom: 6, marginBottom: 2, borderTop: `1px solid ${colors.border}`, paddingTop: 10 }}>Pandora</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 12px', marginBottom: 14 }}>
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: colors.textMuted, marginBottom: 3 }}>Pipeline</div>
+                    {canEditPipeline ? (
+                      <div style={{ position: 'relative' }}>
+                        <button onClick={() => setScopeEditing(!scopeEditing)}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 3, background: 'transparent', border: `1px solid ${colors.border}`, borderRadius: 5, padding: '3px 8px', cursor: 'pointer', color: colors.text, fontSize: 12 }}>
+                          {scopeSaving ? 'Saving…' : (scopes.find(s => s.scope_id === deal.scope_id)?.name || deal.scope_id || 'Unassigned')}
+                          <ChevronDown size={11} color={colors.textMuted} />
                         </button>
-                      ))}
-                      <div style={{ borderTop: pipelines.length > 0 ? `1px solid ${colors.border}` : 'none', padding: '6px 8px' }}>
-                        <form onSubmit={e => {
-                          e.preventDefault();
-                          const input = (e.target as HTMLFormElement).elements.namedItem('customPipeline') as HTMLInputElement;
-                          const val = input?.value?.trim();
-                          if (val) handlePipelineChange(val);
-                        }}>
-                          <input
-                            name="customPipeline"
-                            placeholder="Type custom pipeline..."
-                            autoFocus={pipelines.length === 0}
-                            disabled={pipelineSaving}
-                            style={{
-                              width: '100%', padding: '6px 8px', fontSize: 12,
-                              background: colors.background, border: `1px solid ${colors.border}`,
-                              borderRadius: 4, color: colors.text, outline: 'none',
-                              boxSizing: 'border-box',
-                            }}
-                            onFocus={e => { e.target.style.borderColor = colors.accent; }}
-                            onBlur={e => { e.target.style.borderColor = colors.border; }}
-                          />
-                        </form>
                       </div>
-                    </div>
-                  ) : null}
-                  <button
-                    onClick={() => setPipelineEditing(!pipelineEditing)}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 4,
-                      background: 'transparent', border: `1px solid ${colors.border}`,
-                      borderRadius: 6, padding: '4px 10px', cursor: 'pointer',
-                      color: colors.text, fontSize: 13,
-                    }}
-                  >
-                    {pipelineSaving ? 'Saving...' : (deal.pipeline_name || deal.pipeline || '—')}
-                    <ChevronDown size={14} color={colors.textMuted} />
-                  </button>
+                    ) : (
+                      <div style={{ fontSize: 12, color: colors.text }}>{scopes.find(s => s.scope_id === deal.scope_id)?.name || deal.scope_id || '—'}</div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <DetailRow label="Pipeline" value={deal.pipeline_name || deal.pipeline} />
+              </>
             )}
-            {canEditPipeline && scopes.length > 0 ? (
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: `1px solid ${colors.border}` }}>
-                <span style={{ fontSize: 12, color: colors.textMuted, minWidth: 110 }}>Pandora Pipeline</span>
-                <div ref={scopeDropdownRef} style={{ position: 'relative' }}>
-                  {scopeEditing && (
-                    <div style={{
-                      position: 'absolute', right: 0, top: -4, zIndex: 20,
-                      background: colors.surface, border: `1px solid ${colors.border}`,
-                      borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
-                      minWidth: 200, maxHeight: 240, overflowY: 'auto',
-                    }}>
-                      {scopes.map(s => (
-                        <button
-                          key={s.scope_id}
-                          onClick={() => handleScopeChange(s.scope_id)}
-                          disabled={scopeSaving}
-                          style={{
-                            display: 'flex', alignItems: 'center', gap: 8,
-                            width: '100%', padding: '8px 12px', border: 'none',
-                            background: s.scope_id === deal.scope_id ? `${colors.accent}15` : 'transparent',
-                            color: colors.text, fontSize: 13, cursor: 'pointer', textAlign: 'left',
-                          }}
-                          onMouseEnter={e => { (e.target as HTMLElement).style.background = `${colors.accent}15`; }}
-                          onMouseLeave={e => { (e.target as HTMLElement).style.background = s.scope_id === deal.scope_id ? `${colors.accent}15` : 'transparent'; }}
-                        >
-                          {s.scope_id === deal.scope_id && <Check size={14} color={colors.accent} />}
-                          <span style={{ marginLeft: s.scope_id === deal.scope_id ? 0 : 22 }}>{s.name}</span>
-                        </button>
-                      ))}
-                      {deal.scope_id && (
-                        <div style={{ borderTop: `1px solid ${colors.border}`, padding: '6px 8px' }}>
-                          <button
-                            onClick={() => handleScopeChange(null)}
-                            disabled={scopeSaving}
-                            style={{
-                              width: '100%', padding: '6px 8px', border: 'none',
-                              background: 'transparent', color: colors.textMuted,
-                              fontSize: 12, cursor: 'pointer', textAlign: 'left', borderRadius: 4,
-                            }}
-                            onMouseEnter={e => { (e.target as HTMLElement).style.background = colors.surfaceHover; }}
-                            onMouseLeave={e => { (e.target as HTMLElement).style.background = 'transparent'; }}
-                          >
-                            ↩ Reset to inferred
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  <button
-                    onClick={() => setScopeEditing(!scopeEditing)}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 4,
-                      background: 'transparent', border: `1px solid ${colors.border}`,
-                      borderRadius: 6, padding: '4px 10px', cursor: 'pointer',
-                      color: colors.text, fontSize: 13,
-                    }}
-                  >
-                    {scopeSaving ? 'Saving...' : (scopes.find(s => s.scope_id === deal.scope_id)?.name || deal.scope_id || '—')}
-                    <ChevronDown size={14} color={colors.textMuted} />
-                  </button>
+
+            {/* ── Section: Dates ── */}
+            <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', color: colors.textMuted, paddingBottom: 6, marginBottom: 2, borderTop: `1px solid ${colors.border}`, paddingTop: 10 }}>Dates</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 12px' }}>
+              <div>
+                <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: colors.textMuted, marginBottom: 3 }}>Close Date</div>
+                <div style={{ fontSize: 12, color: colors.text }}>
+                  {deal.close_date ? formatDate(deal.close_date) : '—'}
+                  {deal.close_date_suspect && <span style={{ color: colors.yellow, marginLeft: 4 }} title="May be stale">⚠</span>}
                 </div>
               </div>
-            ) : deal.scope_id ? (
-              <DetailRow label="Pandora Pipeline" value={scopes.find(s => s.scope_id === deal.scope_id)?.name || deal.scope_id} />
-            ) : null}
-            <DetailRow label="Probability" value={deal.probability ? `${deal.probability}%` : undefined} />
-            <DetailRow label="Forecast" value={deal.forecast_category} />
-            <DetailRow label="Created" value={deal.created_at ? formatDate(deal.created_at) : undefined} />
-            <DetailRow label="Close Date" value={deal.close_date ? formatDate(deal.close_date) : undefined} />
-            <DetailRow label="Last Modified" value={deal.updated_at ? formatDate(deal.updated_at) : undefined} />
+              <div>
+                <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: colors.textMuted, marginBottom: 3 }}>Created</div>
+                <div style={{ fontSize: 12, color: colors.text }}>{deal.created_at ? formatDate(deal.created_at) : '—'}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: colors.textMuted, marginBottom: 3 }}>Last Modified</div>
+                <div style={{ fontSize: 12, color: colors.text }}>{deal.updated_at ? formatDate(deal.updated_at) : '—'}</div>
+              </div>
+            </div>
           </Card>
 
         </div>

@@ -544,8 +544,8 @@ router.get('/:workspaceId/deals/:dealId/coaching', async (req: Request, res: Res
     const contactCount = parseInt(participantsResult.rows[0]?.cnt ?? '0', 10);
 
     // Missing stakeholders
-    const missingResult = await query<{ name: string; title: string | null; role: string | null }>(
-      `SELECT c.name, c.title, COALESCE(dc.buying_role, 'unknown') AS role
+    const missingResult = await query<{ contact_name: string; title: string | null; role: string | null }>(
+      `SELECT TRIM(CONCAT(c.first_name, ' ', c.last_name)) AS contact_name, c.title, COALESCE(dc.buying_role, 'unknown') AS role
        FROM contacts c
        JOIN deal_contacts dc ON dc.contact_id = c.id AND dc.deal_id = $1
        WHERE c.workspace_id = $2
@@ -561,7 +561,7 @@ router.get('/:workspaceId/deals/:dealId/coaching', async (req: Request, res: Res
       [dealId, workspaceId]
     );
     const missingStakeholders = missingResult.rows.map(r => ({
-      name: r.name,
+      name: r.contact_name,
       title: r.title,
       role: r.role ?? 'unknown',
       is_critical: ['decision_maker', 'executive_sponsor'].includes(r.role ?? ''),
