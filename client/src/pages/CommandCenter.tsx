@@ -26,6 +26,15 @@ import CompactAlerts from '../components/command-center/CompactAlerts';
 import AnnotatedPipelineChart from '../components/command-center/AnnotatedPipelineChart';
 import ConnectorStatusStrip from '../components/command-center/ConnectorStatusStrip';
 
+interface FindingAssumption {
+  label: string;
+  config_path: string;
+  current_value: string | number | string[] | null;
+  correctable: boolean;
+  correction_prompt: string | null;
+  correction_value: string | number | string[] | null;
+}
+
 interface Finding {
   id: string;
   severity: string;
@@ -39,6 +48,7 @@ interface Finding {
   owner_name?: string;
   found_at: string;
   status: string;
+  assumptions?: FindingAssumption[];
 }
 
 interface PipelineStage {
@@ -984,6 +994,7 @@ export default function CommandCenter() {
                 <FindingRow
                   key={f.id}
                   finding={f}
+                  workspaceId={wsId}
                   onSnooze={handleSnoozeFinding}
                   onResolve={handleResolveFinding}
                   onNavigate={navigate}
@@ -1567,16 +1578,76 @@ function InlineSpinner() {
   );
 }
 
-function FindingRow({ finding, onSnooze, onResolve, onNavigate }: {
+function FindingAssumptionRow({ assumption, findingId, workspaceId }: {
+  assumption: FindingAssumption;
+  findingId: string;
+  workspaceId: string;
+}) {
+  const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+
+  const handleCorrect = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!workspaceId || assumption.correction_value === null) return;
+    setStatus('saving');
+    try {
+      await api.post(`/workspaces/${workspaceId}/config/correct`, {
+        config_path: assumption.config_path,
+        new_value: assumption.correction_value,
+        finding_id: findingId,
+      });
+      setStatus('saved');
+    } catch {
+      setStatus('error');
+    }
+  };
+
+  if (status === 'saved') {
+    return (
+      <div style={{ fontSize: 11, color: colors.accent, padding: '2px 0' }}>
+        ✓ Updated — future analysis will reflect this.
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '2px 0' }}>
+      <span style={{ fontSize: 11, color: colors.textSecondary }}>· {assumption.label}</span>
+      {assumption.correctable && assumption.correction_prompt && assumption.correction_value !== null && (
+        <button
+          onClick={handleCorrect}
+          disabled={status === 'saving'}
+          style={{
+            fontSize: 11,
+            color: status === 'error' ? '#ff8c82' : colors.accent,
+            background: 'transparent',
+            border: `1px solid ${status === 'error' ? '#ff8c82' : colors.border}`,
+            borderRadius: 4,
+            padding: '1px 6px',
+            cursor: status === 'saving' ? 'not-allowed' : 'pointer',
+            flexShrink: 0,
+            opacity: status === 'saving' ? 0.5 : 1,
+          }}
+        >
+          {status === 'saving' ? 'Saving...' : status === 'error' ? 'Failed. Try again.' : assumption.correction_prompt}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function FindingRow({ finding, workspaceId, onSnooze, onResolve, onNavigate }: {
   finding: Finding;
+  workspaceId: string;
   onSnooze: (id: string, days: number) => void;
   onResolve: (id: string) => void;
   onNavigate: (path: string) => void;
 }) {
   const { anon } = useDemoMode();
   const [showSnooze, setShowSnooze] = useState(false);
+  const [showAssumes, setShowAssumes] = useState(false);
   const snoozeRef = useRef<HTMLDivElement>(null);
   const f = finding;
+  const hasAssumptions = Array.isArray(f.assumptions) && f.assumptions.length > 0;
 
   useEffect(() => {
     if (!showSnooze) return;
@@ -1623,7 +1694,40 @@ function FindingRow({ finding, onSnooze, onResolve, onNavigate }: {
             {f.account_name && <span>{anon.company(f.account_name)}</span>}
             {(f.owner_name || f.owner_email) && <span>{f.owner_name ? anon.person(f.owner_name) : anon.email(f.owner_email!)}</span>}
             <span>{formatTimeAgo(f.found_at)}</span>
+            {hasAssumptions && (
+              <button
+                onClick={e => { e.stopPropagation(); setShowAssumes(a => !a); }}
+                style={{
+                  fontSize: 10, color: colors.textMuted, background: 'transparent',
+                  border: `1px solid ${colors.border}`, borderRadius: 3,
+                  padding: '1px 5px', cursor: 'pointer',
+                }}
+              >
+                {showAssumes ? 'Hide assumes' : 'Show assumes'}
+              </button>
+            )}
           </div>
+          {showAssumes && hasAssumptions && (
+            <div
+              style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${colors.border}` }}
+              onClick={e => e.stopPropagation()}
+            >
+              <div style={{
+                fontSize: 10, fontWeight: 700, color: colors.textMuted,
+                letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 5,
+              }}>
+                ASSUMES
+              </div>
+              {f.assumptions!.map((a, i) => (
+                <FindingAssumptionRow
+                  key={i}
+                  assumption={a}
+                  findingId={f.id}
+                  workspaceId={workspaceId}
+                />
+              ))}
+            </div>
+          )}
         </div>
 
         <div

@@ -248,7 +248,7 @@ export class SkillRuntime {
       await this.logSkillRun(runId, skill.id, workspaceId, 'completed', finalOutput, undefined, context.metadata.tokenUsage, evidence, annotationsList, annotationsMetadata);
 
       try {
-        const findings = extractFindings(skill.id, runId, workspaceId, context.stepResults);
+        const findings = await extractFindings(skill.id, runId, workspaceId, context.stepResults);
         if (findings.length > 0) {
           await insertFindings(findings);
           console.log(`[Findings] Extracted ${findings.length} findings from ${skill.id} run ${runId}`);

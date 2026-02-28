@@ -947,12 +947,11 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
           trailing_90d: Math.round(trailing_90d * 1000) / 1000,
           trend: win_trend,
         },
-        findings_summary,
         // Enhanced dashboard data (Phase 1)
         time_range: timeRangeParam,
         date_range: dateRange,
         metric_evidence,
-        findings_summary: widget_findings_summary,
+        findings_summary: widget_findings_summary ?? findings_summary,
         skill_activity_summary: widget_skill_activity_summary,
         recent_findings,
       });
@@ -1259,7 +1258,7 @@ router.post('/:workspaceId/admin/backfill-findings', async (req: Request, res: R
     for (const run of runsResult.rows) {
       try {
         const resultData = typeof run.result === 'string' ? JSON.parse(run.result) : run.result;
-        const findings = extractFindings(run.skill_id, run.run_id, workspaceId, resultData);
+        const findings = await extractFindings(run.skill_id, run.run_id, workspaceId, resultData);
 
         if (findings.length === 0) {
           skippedRuns++;

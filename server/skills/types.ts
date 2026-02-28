@@ -198,6 +198,34 @@ export interface AppliedFilterEvidence {
   confirmed: boolean;
 }
 
+export interface FindingAssumption {
+  /** Methodology label — states the parameter, never hedges.
+   *  Format: "[Parameter]: [Value]"
+   *  e.g. "Stale threshold: 14 days without activity"
+   *       "Pipeline scope: new business only"
+   *       "Excluded owners: 8 accounts identified as non-reps" */
+  label: string;
+
+  /** Dot-notation path into WorkspaceConfig
+   *  e.g. "teams.excluded_owners", "pipelines.stale_threshold_days" */
+  config_path: string;
+
+  /** Value currently used in the analysis */
+  current_value: string | number | string[] | null;
+
+  /** Whether a one-click correction is available */
+  correctable: boolean;
+
+  /** Short text for correction button. Null if not correctable.
+   *  e.g. "Include these owners?" or "Change threshold?" */
+  correction_prompt: string | null;
+
+  /** For array configs: only the items this finding would remove (splice, not clear).
+   *  For scalar configs: the new scalar value.
+   *  Null = correction requires user input (opens a form/input). */
+  correction_value: string | number | string[] | null;
+}
+
 export interface SkillEvidence {
   /** Each claim the narrative makes gets an evidence entry */
   claims: EvidenceClaim[];

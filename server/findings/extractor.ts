@@ -1,5 +1,7 @@
 import { query } from '../db.js';
 import { formatCurrency } from '../utils/format-currency.js';
+import type { FindingAssumption } from '../skills/types.js';
+import { configLoader } from '../config/workspace-config-loader.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -18,13 +20,14 @@ export interface FindingRow {
   account_id?: string;
   owner_email?: string;
   metadata: Record<string, any>;
+  assumptions?: FindingAssumption[];
 }
 
 type SkillExtractor = (
   runId: string,
   workspaceId: string,
   result: Record<string, any>,
-) => FindingRow[];
+) => FindingRow[] | Promise<FindingRow[]>;
 
 const extractors: Record<string, SkillExtractor> = {
   'pipeline-hygiene': extractPipelineHygiene,
@@ -36,18 +39,18 @@ const extractors: Record<string, SkillExtractor> = {
   'rep-scorecard': extractRepScorecard,
 };
 
-export function extractFindings(
+export async function extractFindings(
   skillId: string,
   runId: string,
   workspaceId: string,
   resultData: Record<string, any>,
-): FindingRow[] {
+): Promise<FindingRow[]> {
   if (!resultData || typeof resultData !== 'object') return [];
 
   const extractor = extractors[skillId];
   try {
     const findings = extractor
-      ? extractor(runId, workspaceId, resultData)
+      ? await extractor(runId, workspaceId, resultData)
       : extractGenericFallback(skillId, runId, workspaceId, resultData);
     return findings.filter(f => f.message && f.severity && f.category);
   } catch (err) {
@@ -63,7 +66,7 @@ function makeFinding(
   severity: string,
   category: string,
   message: string,
-  opts: { deal_id?: string; account_id?: string; owner_email?: string; metadata?: Record<string, any> } = {},
+  opts: { deal_id?: string; account_id?: string; owner_email?: string; metadata?: Record<string, any>; assumptions?: FindingAssumption[] } = {},
 ): FindingRow {
   return {
     workspace_id: workspaceId,
@@ -76,12 +79,19 @@ function makeFinding(
     account_id: isValidUUID(opts.account_id) ? opts.account_id : undefined,
     owner_email: opts.owner_email || undefined,
     metadata: opts.metadata || {},
+    assumptions: opts.assumptions,
   };
 }
 
-function extractPipelineHygiene(runId: string, workspaceId: string, result: Record<string, any>): FindingRow[] {
+async function extractPipelineHygiene(runId: string, workspaceId: string, result: Record<string, any>): Promise<FindingRow[]> {
   const findings: FindingRow[] = [];
   const skillId = 'pipeline-hygiene';
+
+  const staleThresholds = await configLoader.getStaleThreshold(workspaceId);
+  const staleWarningDays = staleThresholds.warning;
+
+  const workspaceConfig = await configLoader.getConfig(workspaceId);
+  const excludedOwners: string[] = workspaceConfig.teams?.excluded_owners ?? [];
 
   const stale = result.stale_deals_agg;
   if (stale && typeof stale === 'object' && !stale.error) {
@@ -94,6 +104,7 @@ function extractPipelineHygiene(runId: string, workspaceId: string, result: Reco
       const amount = deal.amount || deal.value || 0;
       const days = deal.daysSinceActivity || deal.daysStale || deal.days_inactive || 0;
       const rawSev = (deal.severity || deal.staleSeverity || '').toLowerCase();
+      const ownerEmail: string = deal.owner || deal.ownerEmail || '';
 
       let severity = 'watch';
       if (rawSev === 'critical' || rawSev === 'serious') severity = 'act';
@@ -107,13 +118,37 @@ function extractPipelineHygiene(runId: string, workspaceId: string, result: Reco
       }
 
       const amountStr = amount ? ` (${formatCurrency(amount)})` : '';
+
+      const assumptions: FindingAssumption[] = [
+        {
+          label: `Stale threshold: ${staleWarningDays} days without activity`,
+          config_path: 'thresholds.stale_deal_days',
+          current_value: staleWarningDays,
+          correctable: true,
+          correction_prompt: 'Change threshold?',
+          correction_value: null,
+        },
+      ];
+
+      if (ownerEmail && excludedOwners.includes(ownerEmail)) {
+        assumptions.push({
+          label: `Excluded owners: ${ownerEmail} not identified as active seller`,
+          config_path: 'teams.excluded_owners',
+          current_value: [ownerEmail],
+          correctable: true,
+          correction_prompt: 'Include this owner?',
+          correction_value: excludedOwners.filter(o => o !== ownerEmail),
+        });
+      }
+
       findings.push(makeFinding(
         workspaceId, runId, skillId, severity, 'stale_deal',
         `${dealName}${amountStr} has had no activity for ${days} days`,
         {
           deal_id: deal.dealId || deal.id,
-          owner_email: deal.owner || deal.ownerEmail,
+          owner_email: ownerEmail || undefined,
           metadata: { days_inactive: days, amount, stage: deal.stage },
+          assumptions,
         },
       ));
     }
@@ -579,9 +614,9 @@ export async function insertFindings(findings: FindingRow[]): Promise<number> {
 
     for (let j = 0; j < batch.length; j++) {
       const f = batch[j];
-      const offset = j * 9;
+      const offset = j * 10;
       placeholders.push(
-        `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9})`,
+        `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9}, $${offset + 10})`,
       );
       values.push(
         f.workspace_id,
@@ -593,11 +628,12 @@ export async function insertFindings(findings: FindingRow[]): Promise<number> {
         f.deal_id || null,
         f.owner_email || null,
         JSON.stringify(f.metadata),
+        f.assumptions ? JSON.stringify(f.assumptions) : null,
       );
     }
 
     await query(
-      `INSERT INTO findings (workspace_id, skill_run_id, skill_id, severity, category, message, deal_id, owner_email, metadata)
+      `INSERT INTO findings (workspace_id, skill_run_id, skill_id, severity, category, message, deal_id, owner_email, metadata, assumptions)
        VALUES ${placeholders.join(', ')}`,
       values,
     );
