@@ -1,4 +1,6 @@
 import React, { useEffect, useRef } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { colors } from '../../styles/theme';
 import { useConversationStream } from './useConversationStream';
 import AgentChip from './AgentChip';
@@ -76,7 +78,19 @@ export default function ConversationView({ initialMessage, onBack }: Conversatio
               color: msg.role === 'user' ? colors.accent : colors.text,
               border: `1px solid ${msg.role === 'user' ? colors.accent + '40' : colors.border}`,
             }}>
-              {msg.content}
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  p: ({ children }) => <p style={{ margin: '0 0 8px 0' }}>{children}</p>,
+                  strong: ({ children }) => <strong style={{ fontWeight: 700 }}>{children}</strong>,
+                  em: ({ children }) => <em style={{ fontStyle: 'italic' }}>{children}</em>,
+                  ul: ({ children }) => <ul style={{ margin: '0 0 8px 0', paddingLeft: 20 }}>{children}</ul>,
+                  ol: ({ children }) => <ol style={{ margin: '0 0 8px 0', paddingLeft: 20 }}>{children}</ol>,
+                  li: ({ children }) => <li style={{ margin: '2px 0' }}>{children}</li>,
+                }}
+              >
+                {msg.content}
+              </ReactMarkdown>
             </div>
           </div>
         ))}
@@ -107,7 +121,19 @@ export default function ConversationView({ initialMessage, onBack }: Conversatio
               background: colors.surface, border: `1px solid ${colors.border}`,
               fontSize: 13, color: colors.text, lineHeight: 1.6,
             }}>
-              {state.synthesisText}
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  p: ({ children }) => <p style={{ margin: '0 0 8px 0' }}>{children}</p>,
+                  strong: ({ children }) => <strong style={{ fontWeight: 700 }}>{children}</strong>,
+                  em: ({ children }) => <em style={{ fontStyle: 'italic' }}>{children}</em>,
+                  ul: ({ children }) => <ul style={{ margin: '0 0 8px 0', paddingLeft: 20 }}>{children}</ul>,
+                  ol: ({ children }) => <ol style={{ margin: '0 0 8px 0', paddingLeft: 20 }}>{children}</ol>,
+                  li: ({ children }) => <li style={{ margin: '2px 0' }}>{children}</li>,
+                }}
+              >
+                {state.synthesisText}
+              </ReactMarkdown>
               {!state.synthesisComplete && <span style={{ color: colors.accent }}>▋</span>}
             </div>
           </div>

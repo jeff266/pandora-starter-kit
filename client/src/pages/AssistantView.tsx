@@ -87,7 +87,11 @@ export default function AssistantView() {
           loading={briefLoading}
           onItemClick={(item) => handleSend(item.headline)}
         />
-        <OperatorStrip operators={operators ?? undefined} loading={operatorsLoading} />
+        <OperatorStrip
+          operators={operators ?? undefined}
+          loading={operatorsLoading}
+          onOperatorClick={(operatorName) => handleSend(`Give me the latest ${operatorName}`)}
+        />
       </div>
       <StickyInput onSend={handleSend} />
     </div>

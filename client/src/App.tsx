@@ -306,7 +306,7 @@ export default function App() {
           </Routes>
         </div>
       </main>
-      {!chatOpen && (
+      {!chatOpen && activeView !== 'assistant' && (
         <button
           onClick={() => {
             if (pageContext) {

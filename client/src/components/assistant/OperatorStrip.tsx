@@ -15,6 +15,7 @@ interface OperatorStatus {
 interface OperatorStripProps {
   operators?: OperatorStatus[];
   loading?: boolean;
+  onOperatorClick?: (operatorName: string) => void;
 }
 
 const STATUS_COLOR: Record<string, string> = {
@@ -24,9 +25,7 @@ const STATUS_COLOR: Record<string, string> = {
   paused: '#6b8b84',
 };
 
-export default function OperatorStrip({ operators, loading }: OperatorStripProps) {
-  const navigate = useNavigate();
-
+export default function OperatorStrip({ operators, loading, onOperatorClick }: OperatorStripProps) {
   return (
     <div style={{ marginBottom: 24 }}>
       <div style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
@@ -45,7 +44,7 @@ export default function OperatorStrip({ operators, loading }: OperatorStripProps
             return (
               <div
                 key={op.id}
-                onClick={() => navigate('/agents')}
+                onClick={() => onOperatorClick?.(op.name)}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 8,
                   background: colors.surface, border: `1px solid ${colors.border}`,
