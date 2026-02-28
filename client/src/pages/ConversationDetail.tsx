@@ -6,6 +6,7 @@ import { colors, fonts } from '../styles/theme';
 import { formatCurrency, formatDate, formatTimeAgo } from '../lib/format';
 import Skeleton from '../components/Skeleton';
 import { useWorkspace } from '../context/WorkspaceContext';
+import { useDemoMode } from '../contexts/DemoModeContext';
 
 interface ResolvedParticipant {
   name: string;
@@ -67,12 +68,15 @@ interface CoachingJourneyEntry {
   ratio: number | null;
   explanation: string;
   countdown_days: number | null;
-  won_median: number | null;
-  lost_median: number | null;
-  sample_size: number;
-  confidence_tier: 'high' | 'directional' | 'insufficient';
-  is_inverted: boolean;
   is_current: boolean;
+  benchmark: {
+    won_median: number | null;
+    lost_median: number | null;
+    confidence_tier: string;
+    is_inverted: boolean;
+    won_sample_size: number;
+    won_p75?: number | null;
+  } | null;
 }
 
 interface CoachingData {
@@ -200,6 +204,17 @@ const SIGNAL_COLOR_MAP: Record<string, string> = {
   critical: colors.red,
   premature: colors.purple,
 };
+
+function formatStageNormalized(sn: string): string {
+  if (!sn) return sn;
+  return sn.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function formatDays(days: number | null): string {
+  if (days === null) return '—';
+  if (days < 1) return '< 1d';
+  return `${Math.round(days)}d`;
+}
 
 function signalDot(signal: string, size = 8) {
   return (
@@ -355,6 +370,7 @@ export default function ConversationDetail() {
   const { conversationId } = useParams<{ conversationId: string }>();
   const navigate = useNavigate();
   const { currentWorkspace } = useWorkspace();
+  const { anon } = useDemoMode();
   const workspaceId = currentWorkspace?.id;
   const [dossier, setDossier] = useState<ConversationDossier | null>(null);
   const [loading, setLoading] = useState(true);
@@ -571,7 +587,7 @@ export default function ConversationDetail() {
                 to={`/deals/${deal_context.deal_id}`}
                 style={{ fontSize: 13, fontWeight: 600, color: colors.text, textDecoration: 'none' }}
               >
-                {deal_context.deal_name}
+                {anon.deal(deal_context.deal_name)}
               </Link>
             </div>
             <div>
@@ -581,7 +597,7 @@ export default function ConversationDetail() {
             <div>
               <div style={{ fontSize: 10, color: colors.textMuted, marginBottom: 2, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Stage</div>
               <div style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>
-                {deal_context.stage}
+                {formatStageNormalized(deal_context.stage_normalized)}
                 <span style={{ fontSize: 11, color: colors.textMuted, fontWeight: 400 }}> · {deal_context.days_in_stage}d</span>
               </div>
             </div>
@@ -633,7 +649,7 @@ export default function ConversationDetail() {
             ✦ Call Intelligence
           </div>
           <div style={{ fontSize: 14, color: colors.textSecondary, lineHeight: 1.7 }}>
-            {narrative}
+            {anon.text(narrative)}
           </div>
           {!conversation.summary && (
             <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 8, fontStyle: 'italic' }}>
@@ -706,6 +722,7 @@ export default function ConversationDetail() {
             coachingLoading={coachingLoading}
             dealContext={deal_context}
             impactCards={impactCards}
+            anon={anon}
           />
         )}
 
@@ -757,6 +774,7 @@ export default function ConversationDetail() {
             <ParticipantsContent
               participants={conversation.resolved_participants}
               contactsAbsent={contacts_absent}
+              anon={anon}
             />
           </Accordion>
         )}
@@ -903,6 +921,7 @@ function DealImpactTab({
   coachingLoading,
   dealContext,
   impactCards,
+  anon,
 }: {
   conversation: ConversationDossier['conversation'];
   healthImpact: ConversationDossier['health_impact'];
@@ -912,6 +931,7 @@ function DealImpactTab({
   coachingLoading: boolean;
   dealContext: ConversationDossier['deal_context'];
   impactCards: ImpactCard[];
+  anon: ReturnType<typeof useDemoMode>['anon'];
 }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
@@ -1108,44 +1128,52 @@ function DealImpactTab({
         </div>
       )}
 
-      {/* Health impact */}
-      {healthImpact && (
+      {/* Health impact / Call Signals */}
+      {healthImpact && (healthImpact.health_before !== null || healthImpact.health_after !== null || healthImpact.factors.length > 0) && (
         <div style={{
           background: colors.surface,
           border: `1px solid ${colors.border}`,
           borderRadius: 8,
           padding: 20,
         }}>
-          <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 16, color: colors.text }}>Deal Health Impact</div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16 }}>
-            <div>
-              <div style={{ fontSize: 11, color: colors.textMuted }}>Before</div>
-              <div style={{ fontSize: 20, fontWeight: 600, fontFamily: fonts.mono, color: colors.text }}>
-                {healthImpact.health_before?.toFixed(1) || 'N/A'}
-              </div>
-            </div>
-            <div style={{ fontSize: 20, color: colors.textMuted }}>→</div>
-            <div>
-              <div style={{ fontSize: 11, color: colors.textMuted }}>After</div>
-              <div style={{ fontSize: 20, fontWeight: 600, fontFamily: fonts.mono, color: colors.text }}>
-                {healthImpact.health_after?.toFixed(1) || 'N/A'}
-              </div>
-            </div>
-            {healthImpact.health_delta !== null && (
-              <div style={{
-                background: healthImpact.health_delta >= 0 ? colors.greenSoft : colors.redSoft,
-                color: healthImpact.health_delta >= 0 ? colors.green : colors.red,
-                padding: '6px 12px',
-                borderRadius: 6,
-                fontSize: 14,
-                fontWeight: 600,
-                fontFamily: fonts.mono,
-              }}>
-                {healthImpact.health_delta >= 0 ? '+' : ''}{healthImpact.health_delta}
-              </div>
-            )}
+          {/* Title: "Deal Health Impact" only when we have real before/after scores */}
+          <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 16, color: colors.text }}>
+            {healthImpact.health_before !== null && healthImpact.health_after !== null
+              ? 'Deal Health Impact'
+              : 'Call Signals'}
           </div>
+
+          {/* Before → After row: only show when we have real scores */}
+          {healthImpact.health_before !== null && healthImpact.health_after !== null && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16 }}>
+              <div>
+                <div style={{ fontSize: 11, color: colors.textMuted }}>Before</div>
+                <div style={{ fontSize: 20, fontWeight: 600, fontFamily: fonts.mono, color: colors.text }}>
+                  {healthImpact.health_before.toFixed(1)}
+                </div>
+              </div>
+              <div style={{ fontSize: 20, color: colors.textMuted }}>→</div>
+              <div>
+                <div style={{ fontSize: 11, color: colors.textMuted }}>After</div>
+                <div style={{ fontSize: 20, fontWeight: 600, fontFamily: fonts.mono, color: colors.text }}>
+                  {healthImpact.health_after.toFixed(1)}
+                </div>
+              </div>
+              {healthImpact.health_delta !== null && (
+                <div style={{
+                  background: healthImpact.health_delta >= 0 ? colors.greenSoft : colors.redSoft,
+                  color: healthImpact.health_delta >= 0 ? colors.green : colors.red,
+                  padding: '6px 12px',
+                  borderRadius: 6,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  fontFamily: fonts.mono,
+                }}>
+                  {healthImpact.health_delta >= 0 ? '+' : ''}{healthImpact.health_delta}
+                </div>
+              )}
+            </div>
+          )}
 
           {healthImpact.factors.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -1161,9 +1189,6 @@ function DealImpactTab({
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                     <span style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>{factor.label}</span>
-                    <span style={{ fontSize: 12, color: factor.delta >= 0 ? colors.green : colors.red, fontWeight: 600 }}>
-                      {factor.delta >= 0 ? '+' : ''}{factor.delta}
-                    </span>
                   </div>
                   <div style={{ fontSize: 12, color: colors.textMuted }}>{factor.detail}</div>
                 </div>
@@ -1226,7 +1251,7 @@ function DealImpactTab({
                 }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>{entry.title}</span>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>{anon.deal(entry.title)}</span>
                   {entry.health_delta !== null && (
                     <span style={{
                       fontSize: 12,
@@ -1243,7 +1268,7 @@ function DealImpactTab({
                 </div>
                 {entry.summary_one_liner && (
                   <div style={{ fontSize: 11, color: colors.textSecondary, marginTop: 6, fontStyle: 'italic' }}>
-                    {entry.summary_one_liner}
+                    {anon.text(entry.summary_one_liner)}
                   </div>
                 )}
               </Link>
@@ -1482,10 +1507,14 @@ function CoachingSignalsTab({
           borderLeft: `4px solid ${colors.accent}`,
           borderRadius: 8,
           padding: '12px 16px',
-          fontSize: 13,
           color: colors.textSecondary,
         }}>
-          This deal is closed. Signals below show what patterns were present — useful for coaching reviews, not current action.
+          <div style={{ fontSize: 13, marginBottom: 4 }}>
+            This deal is closed. Signals below show what patterns were present — useful for coaching reviews, not current action.
+          </div>
+          <div style={{ fontSize: 12, color: colors.textMuted }}>
+            WIN FACTOR and RISK FACTOR signals show patterns that were present at close — not current predictions.
+          </div>
         </div>
       )}
 
@@ -1653,13 +1682,13 @@ function CoachingSignalsTab({
 
 function StageJourneyContent({ coachingData }: { coachingData: CoachingData }) {
   const [expandedStages, setExpandedStages] = React.useState<Set<string>>(
-    () => new Set(coachingData.stage_journey.filter(s => s.is_current).map(s => s.stage) ?? [])
+    () => new Set(coachingData.stage_journey.filter(s => s.is_current).map(s => s.stage_normalized) ?? [])
   );
 
-  const toggleStage = (stage: string) => {
+  const toggleStage = (key: string) => {
     setExpandedStages(prev => {
       const next = new Set(prev);
-      next.has(stage) ? next.delete(stage) : next.add(stage);
+      next.has(key) ? next.delete(key) : next.add(key);
       return next;
     });
   };
@@ -1667,11 +1696,18 @@ function StageJourneyContent({ coachingData }: { coachingData: CoachingData }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       {coachingData.stage_journey.map((s, i) => {
-        const expanded = expandedStages.has(s.stage) || s.is_current;
+        const stageKey = s.stage_normalized || s.stage;
+        const stageName = formatStageNormalized(s.stage_normalized || s.stage);
+        const expanded = expandedStages.has(stageKey) || s.is_current;
         const color = SIGNAL_COLOR_MAP[s.signal] ?? colors.textMuted;
+        const wonMedian = s.benchmark?.won_median ?? null;
+        const lostMedian = s.benchmark?.lost_median ?? null;
+        const confidenceTier = s.benchmark?.confidence_tier ?? 'insufficient';
+        const isInverted = s.benchmark?.is_inverted ?? false;
+        const sampleSize = s.benchmark?.won_sample_size ?? 0;
         const maxDays = Math.max(
-          s.won_median ?? 1,
-          s.lost_median ?? 1,
+          wonMedian ?? 1,
+          lostMedian ?? 1,
           s.duration_days ?? 1,
           1
         ) * 2;
@@ -1684,7 +1720,7 @@ function StageJourneyContent({ coachingData }: { coachingData: CoachingData }) {
           }}>
             <div
               style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', cursor: 'pointer' }}
-              onClick={() => toggleStage(s.stage)}
+              onClick={() => toggleStage(stageKey)}
             >
               {s.is_current ? (
                 <span style={{
@@ -1697,10 +1733,10 @@ function StageJourneyContent({ coachingData }: { coachingData: CoachingData }) {
                 <span style={{ color: colors.green, fontSize: 12, flexShrink: 0 }}>✓</span>
               )}
               <span style={{ flex: 1, fontSize: 13, fontWeight: s.is_current ? 600 : 400, color: colors.text }}>
-                {s.stage}
+                {stageName}
               </span>
               <span style={{ fontSize: 12, color: colors.textMuted, fontFamily: fonts.mono }}>
-                {s.duration_days !== null ? `${s.duration_days}d${s.is_current ? ' and counting' : ''}` : '—'}
+                {s.duration_days !== null ? `${formatDays(s.duration_days)}${s.is_current ? ' and counting' : ''}` : '—'}
               </span>
               {signalDot(s.signal)}
               <span style={{ fontSize: 11, color: colors.textMuted }}>{expanded ? '▲' : '▼'}</span>
@@ -1717,12 +1753,12 @@ function StageJourneyContent({ coachingData }: { coachingData: CoachingData }) {
                   )}
                 </div>
 
-                {(s.won_median !== null || s.lost_median !== null) && s.duration_days !== null && (
+                {(wonMedian !== null || lostMedian !== null) && s.duration_days !== null && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {[
                       { label: 'This deal', days: s.duration_days, color },
-                      { label: 'Won avg', days: s.won_median, color: colors.green },
-                      { label: 'Lost avg', days: s.lost_median, color: colors.red },
+                      { label: 'Won avg', days: wonMedian, color: colors.green },
+                      { label: 'Lost avg', days: lostMedian, color: colors.red },
                     ].map(bar => bar.days !== null && (
                       <div key={bar.label} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <span style={{ fontSize: 11, color: colors.textMuted, width: 60, flexShrink: 0 }}>{bar.label}</span>
@@ -1734,7 +1770,7 @@ function StageJourneyContent({ coachingData }: { coachingData: CoachingData }) {
                             borderRadius: 4,
                           }} />
                         </div>
-                        <span style={{ fontSize: 11, color: colors.textMuted, width: 28, flexShrink: 0, textAlign: 'right', fontFamily: fonts.mono }}>{bar.days}d</span>
+                        <span style={{ fontSize: 11, color: colors.textMuted, width: 32, flexShrink: 0, textAlign: 'right', fontFamily: fonts.mono }}>{formatDays(bar.days)}</span>
                       </div>
                     ))}
                   </div>
@@ -1745,14 +1781,14 @@ function StageJourneyContent({ coachingData }: { coachingData: CoachingData }) {
                     fontSize: 10,
                     padding: '2px 6px',
                     borderRadius: 4,
-                    background: s.confidence_tier === 'high' ? colors.greenSoft : s.confidence_tier === 'directional' ? colors.yellowSoft : colors.surfaceHover,
-                    color: s.confidence_tier === 'high' ? colors.green : s.confidence_tier === 'directional' ? colors.yellow : colors.textMuted,
+                    background: confidenceTier === 'high' ? colors.greenSoft : confidenceTier === 'directional' ? colors.yellowSoft : colors.surfaceHover,
+                    color: confidenceTier === 'high' ? colors.green : confidenceTier === 'directional' ? colors.yellow : colors.textMuted,
                   }}>
-                    {s.confidence_tier === 'high' ? `High confidence · ${s.sample_size} won deals`
-                      : s.confidence_tier === 'directional' ? `Directional · ${s.sample_size} deals`
+                    {confidenceTier === 'high' ? `High confidence · ${sampleSize} won deals`
+                      : confidenceTier === 'directional' ? `Directional · ${sampleSize} deals`
                       : 'Insufficient data'}
                   </span>
-                  {s.is_inverted && (
+                  {isInverted && (
                     <span style={{
                       fontSize: 10,
                       padding: '2px 6px',
@@ -1776,9 +1812,11 @@ function StageJourneyContent({ coachingData }: { coachingData: CoachingData }) {
 function ParticipantsContent({
   participants,
   contactsAbsent,
+  anon,
 }: {
   participants: ResolvedParticipant[];
   contactsAbsent: ConversationDossier['contacts_absent'];
+  anon: ReturnType<typeof useDemoMode>['anon'];
 }) {
   return (
     <div>
@@ -1786,6 +1824,7 @@ function ParticipantsContent({
         {participants.map((p, i) => {
           const isInternal = p.role === 'internal';
           const bg = isInternal ? colors.accent : colors.orange;
+          const displayName = anon.person(p.name);
           return (
             <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <div style={{
@@ -1803,11 +1842,11 @@ function ParticipantsContent({
                 fontFamily: fonts.mono,
                 flexShrink: 0,
               }}>
-                {getInitials(p.name)}
+                {getInitials(displayName)}
               </div>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>{p.name}</div>
-                {p.email && <div style={{ fontSize: 11, color: colors.textMuted }}>{p.email}</div>}
+                <div style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>{displayName}</div>
+                {p.email && <div style={{ fontSize: 11, color: colors.textMuted }}>{anon.email(p.email)}</div>}
               </div>
               <span style={{
                 fontSize: 10,
@@ -1831,7 +1870,9 @@ function ParticipantsContent({
             Not on this call
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {contactsAbsent.map(contact => (
+            {contactsAbsent.map(contact => {
+              const displayContactName = anon.person(contact.name);
+              return (
               <div key={contact.email} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <div style={{
                   width: 28,
@@ -1846,10 +1887,10 @@ function ParticipantsContent({
                   color: colors.textMuted,
                   flexShrink: 0,
                 }}>
-                  {getInitials(contact.name)}
+                  {getInitials(displayContactName)}
                 </div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 13, color: colors.textSecondary }}>{contact.name}</div>
+                  <div style={{ fontSize: 13, color: colors.textSecondary }}>{displayContactName}</div>
                   {contact.title && <div style={{ fontSize: 11, color: colors.textMuted }}>{contact.title}</div>}
                 </div>
                 {contact.buying_role && (
@@ -1861,7 +1902,7 @@ function ParticipantsContent({
                   </span>
                 )}
               </div>
-            ))}
+            )})}
           </div>
         </>
       )}
