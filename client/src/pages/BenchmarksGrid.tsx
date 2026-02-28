@@ -175,8 +175,8 @@ function exportModalCsv(modal: MathModalState): void {
   const isOpen = modal.outcome === 'open';
 
   const headers = isOpen
-    ? ['Deal', 'Amount', 'Stage', 'Days in Stage', 'In Stage Since']
-    : ['Deal', 'Amount', 'Stage', 'Duration (days)', 'Entered', 'Exited'];
+    ? ['Deal ID', 'Deal', 'Amount', 'Stage', 'Days in Stage', 'In Stage Since']
+    : ['Deal ID', 'Deal', 'Amount', 'Stage', 'Duration (days)', 'Entered', 'Exited'];
 
   const rows = modal.deals.map(d => {
     const dur = d.duration_days != null ? String(Math.round(parseFloat(d.duration_days))) : '';
@@ -184,8 +184,8 @@ function exportModalCsv(modal: MathModalState): void {
     const exited = d.exited_at ? new Date(d.exited_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' }) : '';
     const amount = d.amount ? String(Math.round(parseFloat(d.amount))) : '';
     return isOpen
-      ? [csvEscape(d.name), csvEscape(amount), csvEscape(d.stage_display_name), dur, entered]
-      : [csvEscape(d.name), csvEscape(amount), csvEscape(d.stage_display_name), dur, entered, exited];
+      ? [csvEscape(d.id), csvEscape(d.name), csvEscape(amount), csvEscape(d.stage_display_name), dur, entered]
+      : [csvEscape(d.id), csvEscape(d.name), csvEscape(amount), csvEscape(d.stage_display_name), dur, entered, exited];
   });
 
   const slug = modal.stage_normalized.replace(/_/g, '-');

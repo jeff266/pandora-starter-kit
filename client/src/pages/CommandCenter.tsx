@@ -1898,12 +1898,13 @@ function MetricBreakdownModal({ metric, scopeId, onClose }: { metric: string; sc
 
     const isWinRate = metric === 'win_rate';
     const headers = isWinRate
-      ? ['Deal', 'Owner', 'Amount', 'Stage', 'Outcome', 'Close Date']
-      : ['Deal', 'Owner', 'Amount', 'Probability', 'Weighted', 'Stage', 'Close Date'];
+      ? ['Deal ID', 'Deal', 'Owner', 'Amount', 'Stage', 'Outcome', 'Close Date']
+      : ['Deal ID', 'Deal', 'Owner', 'Amount', 'Probability', 'Weighted', 'Stage', 'Close Date'];
 
     const rows = data.deals.map((d: any) => {
       if (isWinRate) {
         return [
+          d.id || '',
           d.name,
           d.owner || '',
           d.amount || 0,
@@ -1913,6 +1914,7 @@ function MetricBreakdownModal({ metric, scopeId, onClose }: { metric: string; sc
         ];
       }
       return [
+        d.id || '',
         d.name,
         d.owner || '',
         d.amount || 0,
