@@ -25,6 +25,7 @@ import {
 import { FilterResolver } from '../tools/filter-resolver.js';
 import { configLoader } from '../config/workspace-config-loader.js';
 import { query } from '../db.js';
+import { setDealScopeOverride } from '../config/scope-stamper.js';
 
 const router = Router();
 const filterResolver = new FilterResolver();
@@ -184,6 +185,49 @@ router.patch('/:id/deals/:dealId/pipeline', async (req: Request, res: Response):
     );
 
     res.json({ success: true, pipeline: pipeline.trim() });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.patch('/:id/deals/:dealId/scope', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const workspaceId = req.params.id;
+    const dealId = req.params.dealId;
+    const { scope_id } = req.body;
+
+    if (scope_id !== null && typeof scope_id !== 'string') {
+      res.status(400).json({ error: 'scope_id must be a string or null' });
+      return;
+    }
+
+    const dealResult = await query<{ owner: string | null }>(
+      `SELECT owner FROM deals WHERE id = $1 AND workspace_id = $2`,
+      [dealId, workspaceId]
+    );
+    if (dealResult.rows.length === 0) {
+      res.status(404).json({ error: 'Deal not found' });
+      return;
+    }
+
+    const dealOwner = dealResult.rows[0].owner || '';
+    const userEmail = req.user?.email || '';
+    const userName = req.user?.name || '';
+    const userRole = req.userWorkspaceRole || '';
+    const isAdmin = userRole === 'admin';
+    const isOwner = dealOwner &&
+      (dealOwner.toLowerCase() === userEmail.toLowerCase() ||
+       dealOwner.toLowerCase() === userName.toLowerCase());
+
+    if (!isAdmin && !isOwner) {
+      res.status(403).json({ error: 'Only the deal owner or a workspace admin can reassign the pipeline' });
+      return;
+    }
+
+    await setDealScopeOverride(workspaceId, dealId, scope_id ?? null);
+
+    res.json({ success: true, scope_id: scope_id ?? null });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: msg });

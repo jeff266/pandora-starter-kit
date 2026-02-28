@@ -115,9 +115,13 @@ export default function DealDetail() {
   const [pipelines, setPipelines] = useState<string[]>([]);
   const [pipelineEditing, setPipelineEditing] = useState(false);
   const [pipelineSaving, setPipelineSaving] = useState(false);
+  const [scopes, setScopes] = useState<Array<{ scope_id: string; name: string }>>([]);
+  const [scopeEditing, setScopeEditing] = useState(false);
+  const [scopeSaving, setScopeSaving] = useState(false);
   const [coverageGapsExpanded, setCoverageGapsExpanded] = useState(true);
   const [expandedSummaries, setExpandedSummaries] = useState<Set<string>>(new Set());
   const pipelineDropdownRef = useRef<HTMLDivElement>(null);
+  const scopeDropdownRef = useRef<HTMLDivElement>(null);
   const [dealComposite, setDealComposite] = useState<{ label: string; color: string } | null>(null);
 
   useEffect(() => {
@@ -130,6 +134,17 @@ export default function DealDetail() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [pipelineEditing]);
+
+  useEffect(() => {
+    if (!scopeEditing) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (scopeDropdownRef.current && !scopeDropdownRef.current.contains(e.target as Node)) {
+        setScopeEditing(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [scopeEditing]);
 
   const fetchDossier = async (withNarrative = false) => {
     if (!dealId) return;
@@ -175,6 +190,10 @@ export default function DealDetail() {
     api.get('/deals/pipelines').then((res: any) => {
       setPipelines(res.data || []);
     }).catch(() => {});
+    api.get('/admin/scopes').then((res: any) => {
+      const confirmed = (res.scopes || []).filter((s: any) => s.scope_id !== 'default');
+      setScopes(confirmed.map((s: any) => ({ scope_id: s.scope_id, name: s.name || s.scope_id })));
+    }).catch(() => {});
   }, [dealId]);
 
   const canEditPipeline = (() => {
@@ -200,6 +219,24 @@ export default function DealDetail() {
     } finally {
       setPipelineSaving(false);
       setPipelineEditing(false);
+    }
+  };
+
+  const handleScopeChange = async (newScopeId: string | null) => {
+    if (!dealId || !dossier?.deal) return;
+    setScopeSaving(true);
+    try {
+      await api.patch(`/deals/${dealId}/scope`, { scope_id: newScopeId });
+      setDossier((prev: any) => ({
+        ...prev,
+        deal: { ...prev.deal, scope_id: newScopeId },
+      }));
+      setToast({ message: newScopeId ? 'Pandora Pipeline updated' : 'Pipeline reset to inferred', type: 'success' });
+    } catch (err: any) {
+      setToast({ message: err.message || 'Failed to update Pandora Pipeline', type: 'error' });
+    } finally {
+      setScopeSaving(false);
+      setScopeEditing(false);
     }
   };
 
@@ -1225,6 +1262,71 @@ export default function DealDetail() {
             ) : (
               <DetailRow label="Pipeline" value={deal.pipeline_name || deal.pipeline} />
             )}
+            {canEditPipeline && scopes.length > 0 ? (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: `1px solid ${colors.border}` }}>
+                <span style={{ fontSize: 12, color: colors.textMuted, minWidth: 110 }}>Pandora Pipeline</span>
+                <div ref={scopeDropdownRef} style={{ position: 'relative' }}>
+                  {scopeEditing && (
+                    <div style={{
+                      position: 'absolute', right: 0, top: -4, zIndex: 20,
+                      background: colors.surface, border: `1px solid ${colors.border}`,
+                      borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
+                      minWidth: 200, maxHeight: 240, overflowY: 'auto',
+                    }}>
+                      {scopes.map(s => (
+                        <button
+                          key={s.scope_id}
+                          onClick={() => handleScopeChange(s.scope_id)}
+                          disabled={scopeSaving}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 8,
+                            width: '100%', padding: '8px 12px', border: 'none',
+                            background: s.scope_id === deal.scope_id ? `${colors.accent}15` : 'transparent',
+                            color: colors.text, fontSize: 13, cursor: 'pointer', textAlign: 'left',
+                          }}
+                          onMouseEnter={e => { (e.target as HTMLElement).style.background = `${colors.accent}15`; }}
+                          onMouseLeave={e => { (e.target as HTMLElement).style.background = s.scope_id === deal.scope_id ? `${colors.accent}15` : 'transparent'; }}
+                        >
+                          {s.scope_id === deal.scope_id && <Check size={14} color={colors.accent} />}
+                          <span style={{ marginLeft: s.scope_id === deal.scope_id ? 0 : 22 }}>{s.name}</span>
+                        </button>
+                      ))}
+                      {deal.scope_id && (
+                        <div style={{ borderTop: `1px solid ${colors.border}`, padding: '6px 8px' }}>
+                          <button
+                            onClick={() => handleScopeChange(null)}
+                            disabled={scopeSaving}
+                            style={{
+                              width: '100%', padding: '6px 8px', border: 'none',
+                              background: 'transparent', color: colors.textMuted,
+                              fontSize: 12, cursor: 'pointer', textAlign: 'left', borderRadius: 4,
+                            }}
+                            onMouseEnter={e => { (e.target as HTMLElement).style.background = colors.surfaceHover; }}
+                            onMouseLeave={e => { (e.target as HTMLElement).style.background = 'transparent'; }}
+                          >
+                            ↩ Reset to inferred
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <button
+                    onClick={() => setScopeEditing(!scopeEditing)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 4,
+                      background: 'transparent', border: `1px solid ${colors.border}`,
+                      borderRadius: 6, padding: '4px 10px', cursor: 'pointer',
+                      color: colors.text, fontSize: 13,
+                    }}
+                  >
+                    {scopeSaving ? 'Saving...' : (scopes.find(s => s.scope_id === deal.scope_id)?.name || deal.scope_id || '—')}
+                    <ChevronDown size={14} color={colors.textMuted} />
+                  </button>
+                </div>
+              </div>
+            ) : deal.scope_id ? (
+              <DetailRow label="Pandora Pipeline" value={scopes.find(s => s.scope_id === deal.scope_id)?.name || deal.scope_id} />
+            ) : null}
             <DetailRow label="Probability" value={deal.probability ? `${deal.probability}%` : undefined} />
             <DetailRow label="Forecast" value={deal.forecast_category} />
             <DetailRow label="Created" value={deal.created_at ? formatDate(deal.created_at) : undefined} />
