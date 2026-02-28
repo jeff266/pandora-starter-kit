@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
@@ -198,6 +198,8 @@ export default function CommandCenter() {
   const [activeThread, setActiveThread] = useState<ThreadMessage[] | null>(null);
   const [threadLoading, setThreadLoading] = useState(false);
   const [metricBreakdown, setMetricBreakdown] = useState<string | null>(null);
+  const [activeMetric, setActiveMetric] = useState<string | null>(null);
+  const [greetingData, setGreetingData] = useState<any>(null);
 
   useEffect(() => {
     const tickInterval = setInterval(() => setTick(t => t + 1), 30000);
@@ -343,6 +345,11 @@ export default function CommandCenter() {
     }, 300000);
     return () => clearInterval(interval);
   }, [isAuthenticated, authLoading, fetchPipelines, fetchData, wsId, activeLens]);
+
+  useEffect(() => {
+    if (!wsId) return;
+    api.get('/briefing/greeting').then(setGreetingData).catch(() => {});
+  }, [wsId]);
 
   const stageData: PipelineStage[] = pipeline?.by_stage || [];
   const totalPipeline = Number(pipeline?.total_pipeline) || 0;
@@ -643,6 +650,47 @@ export default function CommandCenter() {
       <QuotaBanner />
       <PushBanner />
 
+      {greetingData && (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          background: colors.surface, border: `1px solid ${colors.border}`,
+          borderRadius: 8, padding: '8px 16px', gap: 12, flexWrap: 'wrap',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
+            <span style={{ fontSize: 13, fontWeight: 500, color: colors.text, whiteSpace: 'nowrap' }}>
+              {greetingData.headline}
+            </span>
+            <span style={{ color: colors.border }}>·</span>
+            <span style={{ fontSize: 12, color: colors.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {greetingData.state_summary}
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+            {['Walk me through', 'Week ahead'].map(label => (
+              <button
+                key={label}
+                onClick={() => handleAskPandora(label)}
+                style={{
+                  padding: '4px 10px', fontSize: 11, fontWeight: 500,
+                  border: `1px solid ${colors.border}`, borderRadius: 6,
+                  background: 'transparent', color: colors.textSecondary, cursor: 'pointer',
+                }}
+                onMouseEnter={e => {
+                  (e.currentTarget as HTMLButtonElement).style.borderColor = colors.accent;
+                  (e.currentTarget as HTMLButtonElement).style.color = colors.accent;
+                }}
+                onMouseLeave={e => {
+                  (e.currentTarget as HTMLButtonElement).style.borderColor = colors.border;
+                  (e.currentTarget as HTMLButtonElement).style.color = colors.textSecondary;
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <DashboardHeader
         timeRange={preferences?.default_time_range || 'this_week'}
         onTimeRangeChange={(range) => setTimeRange(range)}
@@ -730,6 +778,8 @@ export default function CommandCenter() {
             onToggleCard={(cardId, visible) => toggleMetricCard(cardId, visible)}
             onShowData={(metricId) => setMetricBreakdown(metricId)}
             loading={authLoading || loading.pipeline || loading.summary}
+            activeMetric={activeMetric}
+            onMetricToggle={setActiveMetric}
           />
         </CollapsibleSection>
       </SectionErrorBoundary>

@@ -84,9 +84,11 @@ interface SidebarProps {
   onToggleCollapse?: () => void;
   mobileOpen?: boolean;
   onMobileClose?: () => void;
+  mode?: 'command' | 'assistant';
+  onModeChange?: (m: 'command' | 'assistant') => void;
 }
 
-export default function Sidebar({ badges, showAllClients, collapsed = false, onToggleCollapse, mobileOpen = false, onMobileClose }: SidebarProps) {
+export default function Sidebar({ badges, showAllClients, collapsed = false, onToggleCollapse, mobileOpen = false, onMobileClose, mode = 'command', onModeChange }: SidebarProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
@@ -352,6 +354,29 @@ export default function Sidebar({ badges, showAllClients, collapsed = false, onT
           )}
         </div>
       </div>
+
+      {/* View mode toggle */}
+      {onModeChange && !collapsed && (
+        <div style={{ padding: '10px 14px', borderTop: `1px solid ${colors.border}` }}>
+          <div style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>View</div>
+          <div style={{ display: 'flex', background: colors.bg, borderRadius: 6, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>
+            {(['assistant', 'command'] as const).map(m => (
+              <button
+                key={m}
+                onClick={() => onModeChange(m)}
+                style={{
+                  flex: 1, padding: '5px 0', fontSize: 11, fontWeight: 500, border: 'none', cursor: 'pointer',
+                  background: mode === m ? colors.accentSoft : 'transparent',
+                  color: mode === m ? colors.accent : colors.textMuted,
+                  transition: 'all 0.15s',
+                }}
+              >
+                {m === 'assistant' ? '✦ Assistant' : '▦ Command'}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Collapse toggle button — hide on mobile since sidebar is an overlay */}
       {!isMobile && (

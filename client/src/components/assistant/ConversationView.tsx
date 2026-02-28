@@ -1,0 +1,154 @@
+import React, { useEffect, useRef } from 'react';
+import { colors } from '../../styles/theme';
+import { useConversationStream } from './useConversationStream';
+import AgentChip from './AgentChip';
+import EvidenceCard from './EvidenceCard';
+import ActionCard from './ActionCard';
+import DeliverablePicker from './DeliverablePicker';
+import StickyInput from './StickyInput';
+
+interface ConversationViewProps {
+  initialMessage?: string;
+  onBack: () => void;
+}
+
+export default function ConversationView({ initialMessage, onBack }: ConversationViewProps) {
+  const { state, sendMessage, reset, dismissAction } = useConversationStream();
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const sentRef = useRef(false);
+
+  useEffect(() => {
+    if (initialMessage && !sentRef.current) {
+      sentRef.current = true;
+      sendMessage(initialMessage);
+    }
+  }, [initialMessage, sendMessage]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [state.messages, state.synthesisText, state.evidenceCards, state.actions, state.deliverableOptions]);
+
+  const handleBack = () => {
+    reset();
+    onBack();
+  };
+
+  const inProgress = state.phase !== 'idle' && state.phase !== 'complete';
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+        <button
+          onClick={handleBack}
+          style={{
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            fontSize: 13, color: colors.textSecondary, padding: '4px 8px',
+            display: 'flex', alignItems: 'center', gap: 4,
+          }}
+          onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.color = colors.text}
+          onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.color = colors.textSecondary}
+        >
+          ← Back to brief
+        </button>
+      </div>
+
+      <div style={{ flex: 1, overflowY: 'auto' }}>
+        {state.messages.map(msg => (
+          <div
+            key={msg.id}
+            style={{
+              display: 'flex',
+              justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
+              marginBottom: 12,
+            }}
+          >
+            {msg.role === 'assistant' && (
+              <div style={{
+                width: 26, height: 26, borderRadius: '50%', flexShrink: 0, marginRight: 8, marginTop: 2,
+                background: 'linear-gradient(135deg, #48af9b 0%, #3a7fc1 100%)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 11, color: '#fff', fontWeight: 700,
+              }}>✦</div>
+            )}
+            <div style={{
+              maxWidth: '75%', padding: '10px 14px', borderRadius: 10, fontSize: 13, lineHeight: 1.6,
+              background: msg.role === 'user' ? colors.accentSoft : colors.surface,
+              color: msg.role === 'user' ? colors.accent : colors.text,
+              border: `1px solid ${msg.role === 'user' ? colors.accent + '40' : colors.border}`,
+            }}>
+              {msg.content}
+            </div>
+          </div>
+        ))}
+
+        {state.activeOperators.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
+              Consulting Operators
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {state.activeOperators.map(op => (
+                <AgentChip key={op.agent_id} operator={op} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {(state.phase === 'synthesis' || (state.synthesisComplete && state.synthesisText)) && state.messages.every(m => m.role !== 'assistant' || m.content !== state.synthesisText) && (
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 12 }}>
+            <div style={{
+              width: 26, height: 26, borderRadius: '50%', flexShrink: 0, marginTop: 2,
+              background: 'linear-gradient(135deg, #48af9b 0%, #3a7fc1 100%)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 11, color: '#fff', fontWeight: 700,
+            }}>✦</div>
+            <div style={{
+              maxWidth: '75%', padding: '10px 14px', borderRadius: 10,
+              background: colors.surface, border: `1px solid ${colors.border}`,
+              fontSize: 13, color: colors.text, lineHeight: 1.6,
+            }}>
+              {state.synthesisText}
+              {!state.synthesisComplete && <span style={{ color: colors.accent }}>▋</span>}
+            </div>
+          </div>
+        )}
+
+        {state.evidenceCards.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
+              Evidence
+            </div>
+            {state.evidenceCards.map(card => (
+              <EvidenceCard key={card.id} card={card} />
+            ))}
+          </div>
+        )}
+
+        {state.actions.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
+              Recommended Actions
+            </div>
+            {state.actions.map(action => (
+              <ActionCard key={action.id} action={action} onDismiss={dismissAction} />
+            ))}
+          </div>
+        )}
+
+        {state.deliverableOptions.length > 0 && state.phase === 'complete' && (
+          <DeliverablePicker options={state.deliverableOptions} />
+        )}
+
+        {state.error && (
+          <div style={{ padding: '10px 14px', background: '#ff8c8220', border: `1px solid #ff8c82`, borderRadius: 8, fontSize: 12, color: '#ff8c82', marginBottom: 12 }}>
+            {state.error}
+          </div>
+        )}
+
+        <div ref={bottomRef} />
+      </div>
+
+      <StickyInput onSend={sendMessage} disabled={inProgress} />
+    </div>
+  );
+}

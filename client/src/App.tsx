@@ -14,6 +14,7 @@ import WorkspacePicker from './pages/WorkspacePicker';
 import JoinWorkspace from './pages/JoinWorkspace';
 import MembersPage from './pages/MembersPage';
 import CommandCenter from './pages/CommandCenter';
+import AssistantView from './pages/AssistantView';
 import DealDetail from './pages/DealDetail';
 import AccountDetail from './pages/AccountDetail';
 import DealList from './pages/DealList';
@@ -121,6 +122,9 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try { return localStorage.getItem('sidebar_collapsed') === 'true'; } catch { return false; }
   });
+  const [activeView, setActiveView] = useState<'command' | 'assistant'>(() => {
+    try { return (localStorage.getItem('pandora_view') as 'command' | 'assistant') || 'command'; } catch { return 'command'; }
+  });
 
   const toggleSidebar = useCallback(() => {
     setSidebarCollapsed(prev => {
@@ -132,6 +136,14 @@ export default function App() {
 
   // Close mobile menu on route change
   useEffect(() => { setMobileMenuOpen(false); }, [location.pathname]);
+
+  const handleViewChange = useCallback((v: 'command' | 'assistant') => {
+    setActiveView(v);
+    try { localStorage.setItem('pandora_view', v); } catch {}
+    if (currentWorkspace?.id) {
+      api.put('/view-preference', { preferred_view: v }).catch(() => {});
+    }
+  }, [currentWorkspace?.id]);
 
   const pageContext = useMemo(() => {
     const path = location.pathname;
@@ -245,13 +257,13 @@ export default function App() {
 
   return (
     <div style={{ display: 'flex', height: '100vh', background: colors.bg }}>
-      <Sidebar badges={badges} showAllClients={hasMultipleWorkspaces} collapsed={sidebarCollapsed} onToggleCollapse={toggleSidebar} mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} />
+      <Sidebar badges={badges} showAllClients={hasMultipleWorkspaces} collapsed={sidebarCollapsed} onToggleCollapse={toggleSidebar} mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} mode={activeView} onModeChange={handleViewChange} />
       <main style={{ marginLeft: isMobile ? 0 : (sidebarCollapsed ? 56 : 220), flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', transition: 'margin-left 0.2s ease' }}>
         <DemoModeBanner />
         <TopBar title={title} lastRefreshed={lastRefreshed} onRefresh={fetchBadges} onMenuToggle={isMobile ? () => setMobileMenuOpen(true) : undefined} />
         <div style={{ flex: 1, overflow: 'auto', padding: isMobile ? '16px 12px' : '24px 28px' }}>
           <Routes>
-            <Route path="/" element={<CommandCenter />} />
+            <Route path="/" element={activeView === 'assistant' ? <AssistantView /> : <CommandCenter />} />
             <Route path="/portfolio" element={<ConsultantDashboard />} />
             <Route path="/deals" element={<DealList />} />
             <Route path="/deals/:dealId" element={<DealDetail />} />

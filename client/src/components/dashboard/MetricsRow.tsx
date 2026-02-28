@@ -28,9 +28,11 @@ interface MetricsRowProps {
   onToggleCard: (cardId: keyof DashboardPreferences['metric_cards'], visible: boolean) => void;
   onShowData?: (metricId: string) => void;
   loading?: boolean;
+  activeMetric?: string | null;
+  onMetricToggle?: (metricId: string | null) => void;
 }
 
-export function MetricsRow({ metrics, evidence, visibleCards, onToggleCard, onShowData, loading = false }: MetricsRowProps) {
+export function MetricsRow({ metrics, evidence, visibleCards, onToggleCard, onShowData, loading = false, activeMetric, onMetricToggle }: MetricsRowProps) {
   const [showConfigPopover, setShowConfigPopover] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
 
@@ -129,6 +131,8 @@ export function MetricsRow({ metrics, evidence, visibleCards, onToggleCard, onSh
               evidence={config.getEvidence()}
               loading={loading}
               onShowData={onShowData ? () => onShowData(config.id) : undefined}
+              isExpanded={activeMetric === config.id}
+              onToggle={onMetricToggle ? () => onMetricToggle(activeMetric === config.id ? null : config.id) : undefined}
             />
           ))}
       </div>

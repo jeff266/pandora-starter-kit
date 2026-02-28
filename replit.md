@@ -58,9 +58,27 @@ Pandora is built on Node.js 20 with TypeScript 5+, utilizing Express.js and Post
 -   **Forecast Page:** Longitudinal forecast tracking dashboard at `/forecast`. Header with AI toggle and week counter. 5 metric cards (MC P50, Closed Won, Gap to Quota, MC Range, Pipe Gen) with WoW delta. SVG line chart with 4 toggleable forecast lines (stage-weighted, category-weighted, MC P50, attainment), confidence band (P25-P75), and quota line. Chart insights sidebar for chart-anchored annotations. Rep breakdown table with sortable columns and inline rep annotations. Coverage bars by quarter with 3x target marker. Pipe gen trailing 8-week bar chart. Deal drill-down slide-out panel. Graceful degradation for 0/1/2+ snapshots. Data from `GET /api/workspaces/:id/forecast/snapshots` (extracts from `skill_runs.result` for forecast-rollup). Command Center shows compact AI Alerts (max 3 critical/warning) with "View all insights →" link to Forecast page.
 -   **Public Homepage & Waitlist:** Dark-themed landing page (`PandoraHomepage.tsx`) with animated SVG eye logo, hero, stats counters, before/after comparisons, integration flow diagram, cadence grid, practitioner credibility section, and waitlist CTA. Waitlist API (`/api/waitlist`) stores signups in `waitlist` table, adds to Resend audience (if `RESEND_AUDIENCE_ID` configured), and sends welcome email via Resend. Unauthenticated visitors see homepage; `/login` path shows login page; authenticated users see the app.
 
+-   **Coaching Intelligence V2 — Command Center Gap-Fills:**
+    - T001: `total_open_deals` unfiltered count added to pipeline snapshot; `openDealsCount` in CommandCenter uses `pipeline?.total_open_deals ?? pipeline?.total_deals`.
+    - T002: Unicode en-dash `–` in DealList.tsx pagination fixed (literal `–` char).
+    - T003: One-at-a-time Show Math enforcement — `MetricCard` uses `isExpanded`/`onToggle` props; `MetricsRow` forwards `activeMetric`/`onMetricToggle`; `CommandCenter` holds `activeMetric` state.
+    - T004: Skill filter pills dynamically fetched from `/api/workspaces/:id/skills`.
+
+-   **Coaching Intelligence V2 — Assistant View:**
+    - DB migration `121_view_preference.sql`: adds `workspace_members.preferred_view` and `workspaces.default_view` columns.
+    - New route `server/routes/view-preference.ts`: GET/PUT `/view-preference` (per-member) + PUT `/settings/default-view` (workspace-wide).
+    - New route `server/routes/briefing.ts`: three endpoints — `/briefing/greeting`, `/briefing/brief`, `/briefing/operators`.
+    - New `server/briefing/` module: `greeting-engine.ts` (SQL-only greeting + severity payload), `brief-assembler.ts` (findings → BriefItem[] with operator metadata), `operator-status.ts` (agent run health status).
+    - New route `server/routes/conversation-stream.ts`: POST `/conversation/stream` — SSE stream with recruiting events, agent_thinking/found/done, Anthropic synthesis streaming, evidence cards, deliverable options.
+    - Sidebar: `mode` + `onModeChange` props; segmented "VIEW" toggle (✦ Assistant / ▦ Command) rendered above collapse button when not collapsed.
+    - App.tsx: `activeView` state initialized from localStorage; `handleViewChange` saves to localStorage + calls PUT `/view-preference`; `<Sidebar>` receives mode props; `/` route renders `<AssistantView />` or `<CommandCenter />` based on `activeView`.
+    - `client/src/pages/AssistantView.tsx`: home/conversation view state; fetches greeting/brief/operators; renders `<Greeting>`, `<QuickActionPills>`, `<MorningBrief>`, `<OperatorStrip>`, `<StickyInput>`; transitions to `<ConversationView>` on send.
+    - `client/src/components/assistant/`: Greeting, QuickActionPills, MorningBrief, OperatorStrip, StickyInput, AgentChip, EvidenceCard, ActionCard, DeliverablePicker, useConversationStream, ConversationView.
+    - CommandCenter: slim greeting bar at top (fetches `/briefing/greeting`; shows headline + state_summary + two quick-action buttons that open Ask Pandora drawer).
+
 ## TypeScript Health
-- **Status (Feb 2026):** 0 non-test server errors (down from 885). All 120+ server files pass `tsc --noEmit`.
-- **Remaining:** 3 errors in `server/workflows/__tests__/` test mocks (`APClientInterface` missing `healthCheck` + stale mock shapes) — pre-existing, out of scope.
+- **Status (Feb 2026):** 0 non-test server errors maintained. All server files pass `tsc --noEmit`.
+- **Remaining:** 4 errors in `server/workflows/__tests__/` test mocks + 1 duplicate property in `server/routes/findings.ts` — all pre-existing, out of scope.
 - **Key patterns fixed:** Logger.error signature (LogContext not Error), Express 5 `req.params` cast as string, SkillExecutionContext/WorkspaceConfig interface gaps, SalesforceOpportunityFieldHistory type, duplicate imports (gong/hubspot), pptx-renderer docx type casts, replit_integrations `.js` import extensions, route handler `Request<any>` vs `Request<WorkspaceParams>`.
 
 ## External Dependencies

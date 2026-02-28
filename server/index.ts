@@ -110,6 +110,9 @@ import agentFeedbackRouter from './routes/agent-feedback.js';
 import waitlistRouter from './routes/waitlist.js';
 import forecastAnnotationsRouter from './routes/forecast-annotations.js';
 import forecastSnapshotsRouter from './routes/forecast-snapshots.js';
+import briefingRouter from './routes/briefing.js';
+import viewPreferenceRouter from './routes/view-preference.js';
+import conversationStreamRouter from './routes/conversation-stream.js';
 
 dotenv.config();
 
@@ -321,6 +324,9 @@ workspaceApiRouter.use(targetsRouter);
 workspaceApiRouter.use(reportsRouter);
 workspaceApiRouter.use(sqlWorkspaceRouter);
 workspaceApiRouter.use(toolManifestRouter);
+workspaceApiRouter.use(briefingRouter);
+workspaceApiRouter.use(viewPreferenceRouter);
+workspaceApiRouter.use(conversationStreamRouter);
 app.use("/api/workspaces", workspaceApiRouter);
 
 // Webhooks router - intentionally public with token validation in handlers

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { ChevronDown, ChevronUp, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { colors, fonts } from '../../styles/theme';
 
@@ -17,6 +17,8 @@ interface MetricCardProps {
   evidence?: MetricEvidence;
   loading?: boolean;
   onShowData?: () => void;
+  isExpanded?: boolean;
+  onToggle?: () => void;
 }
 
 export function MetricCard({
@@ -29,20 +31,23 @@ export function MetricCard({
   evidence,
   loading = false,
   onShowData,
+  isExpanded = false,
+  onToggle,
 }: MetricCardProps) {
-  const [showMath, setShowMath] = useState(false);
-
-  // Determine trend color based on direction and whether "up" is positive
   const getTrendColor = () => {
     if (trendDirection === 'flat') return colors.textSecondary;
     if (trendDirection === 'up') return trendPositive ? colors.green : colors.red;
-    return trendPositive ? colors.red : colors.green; // down
+    return trendPositive ? colors.red : colors.green;
   };
 
   const getTrendIcon = () => {
     if (trendDirection === 'up') return <TrendingUp size={16} />;
     if (trendDirection === 'down') return <TrendingDown size={16} />;
     return <Minus size={16} />;
+  };
+
+  const handleToggle = () => {
+    if (onToggle) onToggle();
   };
 
   return (
@@ -57,9 +62,7 @@ export function MetricCard({
         transition: 'all 0.15s ease',
       }}
     >
-      {/* Card Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-        {/* Value */}
         <div
           style={{
             fontSize: 28,
@@ -72,7 +75,6 @@ export function MetricCard({
           {loading ? '—' : value}
         </div>
 
-        {/* Trend Indicator */}
         {!loading && trend !== undefined && (
           <div
             style={{
@@ -90,7 +92,6 @@ export function MetricCard({
         )}
       </div>
 
-      {/* Label */}
       <div
         style={{
           fontSize: 13,
@@ -103,7 +104,6 @@ export function MetricCard({
         {label}
       </div>
 
-      {/* Subtitle */}
       {subtitle && (
         <div
           style={{
@@ -117,10 +117,9 @@ export function MetricCard({
         </div>
       )}
 
-      {/* Show Math Button */}
       {evidence && !loading && (
         <button
-          onClick={() => setShowMath(!showMath)}
+          onClick={handleToggle}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -136,21 +135,20 @@ export function MetricCard({
             fontFamily: fonts.body,
           }}
         >
-          {showMath ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
           Show Math
         </button>
       )}
 
-      {/* Evidence Panel (expandable) */}
-      {showMath && evidence && (
+      {isExpanded && evidence && (
         <div
           style={{
             marginTop: 12,
             paddingTop: 12,
             borderTop: `1px solid ${colors.border}`,
+            animation: 'fadeInDown 0.2s ease',
           }}
         >
-          {/* Formula */}
           <div
             style={{
               padding: 8,
@@ -167,7 +165,6 @@ export function MetricCard({
             {evidence.formula}
           </div>
 
-          {/* Additional Details */}
           {Object.entries(evidence)
             .filter(([key]) => key !== 'formula')
             .map(([key, val]) => (
@@ -187,7 +184,6 @@ export function MetricCard({
               </div>
             ))}
 
-          {/* Show Data Link */}
           {onShowData && (
             <button
               onClick={onShowData}
