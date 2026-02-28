@@ -1,0 +1,27 @@
+Here's my honest read, Jeff.
+
+The onboarding doc is smart — the "value → caveat → fix" sequence is exactly right in principle. But it's still fundamentally an enterprise onboarding playbook dressed in PLG language. It assumes someone is *there* guiding the user through Steps 1-4 over their first week. In true PLG, there is no Week 1 guided journey. There's a 5-minute window where someone either says "holy shit, this sees my pipeline better than I do" or they close the tab.
+
+**The real mismatch isn't the features — it's the configuration debt required before value.**
+
+Your WorkspaceConfig schema has pipelines, win_rate, teams, activities, cadence, thresholds, scoring, and config_audit sections. That's an incredibly powerful system. But it was designed with the assumption that someone would care enough to review and confirm inferred settings. PLG users won't. They'll connect HubSpot, see the first screen, and judge the product in 90 seconds.
+
+**What I think needs to change:**
+
+The inference engine you spec'd in Prompt 2 is actually 80% of the answer — it auto-detects from CRM data. The missing piece is the *confidence threshold for action*. Right now the design infers config, then asks the user to review. In a PLG model, you need a different contract: Pandora runs on inferred config *immediately*, shows results with confidence indicators baked into the insights themselves, and only asks for human input when the inference is genuinely ambiguous (like "we found 3 pipelines — which one is your primary sales pipeline?").
+
+That's a meaningful architectural shift. Instead of "infer → present config for review → run skills," it becomes "infer → run skills → embed config uncertainty into the output." The ConfigAssumptions tracker you already designed does this at the skill level. The gap is that the onboarding flow still gates value behind a review step.
+
+**Three concrete changes to make this PLG-viable:**
+
+First, collapse the onboarding to one decision point. After CRM connect + sync, Pandora should ask at most one question: "Which pipeline does your sales team sell through?" If there's only one pipeline, skip even that. Everything else gets inferred with sensible defaults. Rep roster? Anyone who owns a deal is a rep. Stale threshold? 14 days, adjusted later by skill feedback. Win/loss values? closed_won/closed_lost, validated by data patterns.
+
+Second, make the instant audit the *entire* onboarding experience. You already have `triggerInstantAudit` running 4 skills in parallel. That IS the product moment. The user connects HubSpot, waits 60-90 seconds, and gets a Slack message (or in-app view) that says "We found $340K in pipeline risk across 8 deals. Here's what's happening." That's the hook. No config review screen, no setup wizard, no "tell us about your sales process" questionnaire.
+
+Third, move configuration into the *output*, not the *input*. Instead of a settings page where users configure scopes, the pipeline hygiene skill should say: "We noticed 14 deals owned by support@company.com and accounts@company.com — we excluded these from your analysis. Wrong? Click here to include them." That's the SQL filter and scope configuration happening inside the insight, not in a settings panel. The user learns the feature by correcting Pandora, not by configuring it upfront.
+
+**The deeper strategic question:**
+
+Your 4-prompt workspace config system is enterprise infrastructure. It's the right architecture for accuracy. But PLG demands you hide 90% of it behind opinionated defaults and surface it only at the moment of friction — which is exactly what your onboarding doc recommends in theory, but the actual build prompts don't implement. The build prompts create a config review flow. PLG needs a config correction flow. Those are fundamentally different UX patterns.
+
+The good news: you don't need to rebuild the config system. You need a thin PLG layer on top of it that runs inference, applies defaults aggressively, runs the instant audit, and then lets skill outputs drive configuration refinement over time. The workspace config, the inference engine, the feedback signals — all of that still works. You just change *when* the user encounters it: not during setup, but during use.

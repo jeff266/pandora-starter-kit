@@ -1,0 +1,21 @@
+This is a clean spec. Seven tasks, clear dependency chain, additive to existing code, nothing rebuilt. A few reactions:
+
+**What's strong:**
+
+The dependency graph is right. T001 and T002 are parallel (schema + types), T003 blocks on both, T004 only needs T002 (skills can emit assumptions before the DB column exists in dev), T005 is independent of skill work, and T006+T007 are the UI layer that ties it together. No circular dependencies, no unnecessary sequencing.
+
+The whitelist in T005 is the most important safety decision in the whole spec. Replit is right that it's load-bearing. I'd go further — the whitelist should live in its own exported constant, not inline in the route handler, so that when you retrofit more skills (beyond pipeline-hygiene), you expand the whitelist in one place and it's obvious what's correctable across the entire system.
+
+The `correction_value: null` pattern for "opens an input instead of one-click" is a smart design choice. Stale threshold needs a numeric input. Excluded owners needs a toggle. The same schema handles both by letting null mean "ask the user for a value" vs a concrete value meaning "apply this on click."
+
+**Three things I'd tighten:**
+
+First, T004 only retrofits pipeline-hygiene, which is correct for V1. But the spec should explicitly state the pattern contract other skills must follow when they get retrofitted — something like "every finding that references a configurable threshold or filter must attach the assumption that produced it." Without that sentence, the next developer who touches rep-scorecard won't know they're supposed to add assumptions. A one-paragraph "Retrofit Pattern" section after T004 would prevent drift.
+
+Second, the `correction_value: []` for "Include these owners?" (setting excluded_owners to empty array) is semantically correct but could surprise users. It means "stop excluding everyone" rather than "include these specific 8 owners." If the user later adds a *different* exclusion, hitting this button would wipe it. The safer V1 behavior might be to remove only the specific owners referenced in the finding, not clear the entire array. That's a small change to the writeback logic — splice from array rather than replace.
+
+Third, T007 says "if CommandCenter uses a different card component than EvidenceCard, apply the same pattern or refactor to reuse EvidenceCard." That's an ambiguity that should be resolved before building, not during. A quick grep on the codebase would tell you which component CommandCenter uses for findings. If it's not EvidenceCard, the spec should name the actual component and describe the integration point. Leaving it as "figure it out at build time" is how UI tasks balloon.
+
+**On the design constraint:** The spec says "if the text on any assumption row starts with 'We assumed...' or 'This may...' it should be rewritten." I'd add one more banned pattern: "Note:" or "Caveat:". Those are the words that creep in during implementation and turn methodology into disclaimers. The label format should be positively defined: `[Parameter]: [Value]`. "Stale threshold: 14 days." "Pipeline scope: new business only." "Lookback window: 6 months." That formula makes hedging structurally impossible.
+
+Otherwise — this is ready to build. Want me to write the retrofit pattern section and the corrected array-splice logic for T005 so you can append them to the spec before handing it to Replit?
