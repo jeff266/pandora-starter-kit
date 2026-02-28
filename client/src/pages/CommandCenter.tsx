@@ -1,6 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import { formatCurrency, formatNumber, formatPercent, formatTimeAgo, severityColor } from '../lib/format';
@@ -24,6 +23,8 @@ import {
   FindingsFeed,
 } from '../components/dashboard';
 import CompactAlerts from '../components/command-center/CompactAlerts';
+import AnnotatedPipelineChart from '../components/command-center/AnnotatedPipelineChart';
+import ConnectorStatusStrip from '../components/command-center/ConnectorStatusStrip';
 
 interface Finding {
   id: string;
@@ -182,6 +183,11 @@ export default function CommandCenter() {
   const [expandedStageDeals, setExpandedStageDeals] = useState<StageDeal[]>([]);
   const [expandedStageLoading, setExpandedStageLoading] = useState(false);
 
+  const [priorPipeline, setPriorPipeline] = useState<any>(null);
+  const [findingSeverityFilter, setFindingSeverityFilter] = useState<string>('all');
+  const [findingSkillFilter, setFindingSkillFilter] = useState<string>('all');
+  const [availableSkills, setAvailableSkills] = useState<Array<{ id: string; name: string }>>([]);
+
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [refreshing, setRefreshing] = useState(false);
   const [, setTick] = useState(0);
@@ -278,6 +284,13 @@ export default function CommandCenter() {
       }
     };
 
+    const priorRangeMap: Record<string, string> = {
+      this_week: 'last_week',
+      this_month: 'last_month',
+      this_quarter: 'last_quarter',
+    };
+    const priorRange = priorRangeMap[timeRangeParam];
+
     await Promise.all([
       load('pipeline', () => api.get(`/pipeline/snapshot${pipelineQs}`), setPipeline),
       load('summary', () => api.get('/findings/summary'), setSummary),
@@ -288,6 +301,23 @@ export default function CommandCenter() {
       api.get('/connectors/status').then(d => {
         setConnectorStatus(Array.isArray(d) ? d : d.connectors || []);
       }).catch(() => {}),
+      api.get('/skills').then(d => {
+        const skills = Array.isArray(d) ? d : d.skills || [];
+        setAvailableSkills(skills.map((s: any) => ({ id: s.id || s.skill_id, name: s.name || s.display_name || s.id })));
+      }).catch(() => {}),
+      priorRange
+        ? (async () => {
+            const priorQs = pipelineQs.includes('?')
+              ? pipelineQs.replace(`time_range=${timeRangeParam}`, `time_range=${priorRange}`)
+              : `?time_range=${priorRange}`;
+            try {
+              const prior = await api.get(`/pipeline/snapshot${priorQs}`);
+              setPriorPipeline(prior);
+            } catch {
+              setPriorPipeline(null);
+            }
+          })()
+        : Promise.resolve(setPriorPipeline(null)),
     ]);
 
     setLastUpdated(new Date());
@@ -508,11 +538,35 @@ export default function CommandCenter() {
     handleBarClick({ stage: stageName, stage_normalized: stageName });
   }, [handleBarClick]);
 
-  const filteredFindings = stageFilter && stageFilterDealIds.length > 0
+  // Compute trend data from current vs prior period
+  const computeTrend = useCallback((current: number | null | undefined, prior: number | null | undefined): {
+    trend: number | undefined;
+    trend_direction: 'up' | 'down' | 'flat';
+  } => {
+    if (!current || !prior || prior === 0 || !priorPipeline) return { trend: undefined, trend_direction: 'flat' };
+    const delta = ((current - prior) / Math.abs(prior)) * 100;
+    const capped = Math.max(-999, Math.min(999, Math.round(delta)));
+    return {
+      trend: Math.abs(capped),
+      trend_direction: capped > 1 ? 'up' : capped < -1 ? 'down' : 'flat',
+    };
+  }, [priorPipeline]);
+
+  const trendTotalPipeline = computeTrend(pipeline?.total_pipeline, priorPipeline?.total_pipeline);
+  const trendWeighted = computeTrend(pipeline?.weighted_pipeline, priorPipeline?.weighted_pipeline);
+  const trendCoverage = computeTrend(pipeline?.coverage?.ratio, priorPipeline?.coverage?.ratio);
+  const trendWinRate = computeTrend(pipeline?.win_rate?.trailing_90d, priorPipeline?.win_rate?.trailing_90d);
+  const trendOpenDeals = computeTrend(pipeline?.total_deals, priorPipeline?.total_deals);
+
+  const stageFilteredFindings = stageFilter && stageFilterDealIds.length > 0
     ? findings.filter(f => f.deal_id && stageFilterDealIds.includes(f.deal_id))
     : stageFilter && !stageFilterLoading
     ? []
     : findings;
+
+  const filteredFindings = stageFilteredFindings
+    .filter(f => findingSeverityFilter === 'all' || f.severity === findingSeverityFilter)
+    .filter(f => findingSkillFilter === 'all' || f.skill_id === findingSkillFilter);
 
   const updatedMinAgo = Math.floor((Date.now() - lastUpdated.getTime()) / 60000);
   const updatedText = updatedMinAgo < 1 ? 'Updated just now' : `Updated ${updatedMinAgo}m ago`;
@@ -638,30 +692,30 @@ export default function CommandCenter() {
               total_pipeline: {
                 value: totalPipeline || 0,
                 deal_count: pipeline?.total_deals || 0,
-                trend: undefined,
-                trend_direction: 'flat' as const,
+                trend: trendTotalPipeline.trend,
+                trend_direction: trendTotalPipeline.trend_direction,
               },
               weighted_pipeline: {
                 value: weightedPipeline || 0,
-                trend: undefined,
-                trend_direction: 'flat' as const,
+                trend: trendWeighted.trend,
+                trend_direction: trendWeighted.trend_direction,
               },
               coverage_ratio: {
                 value: coverage || 0,
                 quota: pipeline?.coverage?.quota,
-                trend: undefined,
-                trend_direction: 'flat' as const,
+                trend: trendCoverage.trend,
+                trend_direction: trendCoverage.trend_direction,
               },
               win_rate: {
                 value: winRate || 0,
                 period_days: 90,
-                trend: undefined,
-                trend_direction: 'flat' as const,
+                trend: trendWinRate.trend,
+                trend_direction: trendWinRate.trend_direction,
               },
               open_deals: {
                 value: openDealsCount || 0,
-                trend: undefined,
-                trend_direction: 'flat' as const,
+                trend: trendOpenDeals.trend,
+                trend_direction: trendOpenDeals.trend_direction,
               },
             }}
             evidence={pipeline?.metric_evidence}
@@ -684,227 +738,57 @@ export default function CommandCenter() {
         <CompactAlerts workspaceId={wsId} />
       </SectionErrorBoundary>
 
-      <SectionErrorBoundary fallbackMessage="Failed to load forecast panel.">
-        <MonteCarloPanel wsId={wsId} activePipeline={selectedPipeline} />
-      </SectionErrorBoundary>
-
+      {/* Two-column: Pipeline Chart + Actions/Signals */}
       <SectionErrorBoundary fallbackMessage="Failed to load pipeline chart.">
         <div style={{
-          background: colors.surface,
-          border: `1px solid ${colors.border}`,
-          borderRadius: 10,
-          padding: 20,
+          display: 'grid',
+          gridTemplateColumns: isMobile ? '1fr' : '1fr 340px',
+          gap: 16,
+          alignItems: 'start',
         }}>
-          <div style={{ marginBottom: 16 }}>
-            <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>Pipeline by Stage</h3>
-            <p style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
-              {formatCurrency(anon.amount(totalPipeline))} total {'·'} {stageData.reduce((sum, s) => sum + s.deal_count, 0)} deals across {stageData.length} stages
-            </p>
-          </div>
-          {authLoading || loading.pipeline ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} height={36} />)}
+          {/* Left: Pipeline by Stage */}
+          <div style={{
+            background: colors.surface,
+            border: `1px solid ${colors.border}`,
+            borderRadius: 10,
+            padding: 20,
+          }}>
+            <div style={{ marginBottom: 16 }}>
+              <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>Pipeline by Stage</h3>
+              <p style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
+                {formatCurrency(anon.amount(totalPipeline))} total {'·'} {stageData.reduce((sum, s) => sum + s.deal_count, 0)} deals across {stageData.length} stages
+              </p>
             </div>
-          ) : errors.pipeline ? (
-            <ErrorInline message={errors.pipeline} onRetry={fetchData} />
-          ) : stageData.length === 0 ? (
-            <EmptyInline
-              message="No pipeline data. Connect a CRM to get started."
-              linkText="Go to Connectors"
-              onLink={() => navigate('/connectors')}
-            />
-          ) : (
-            <>
-              <ResponsiveContainer width="100%" height={Math.max(stageData.length * 50, 200)}>
-                <BarChart
-                  layout="vertical"
-                  data={stageData}
-                  margin={{ top: 0, right: 20, bottom: 0, left: 0 }}
-                >
-                  <XAxis
-                    type="number"
-                    hide
-                  />
-                  <YAxis
-                    type="category"
-                    dataKey="stage"
-                    width={isMobile ? 80 : 140}
-                    tick={{ fontSize: 12, fill: colors.text, fontFamily: fonts.sans }}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <Tooltip content={<CustomTooltip />} cursor={{ fill: colors.surfaceHover }} />
-                  <Bar
-                    dataKey="total_value"
-                    fill={colors.accent}
-                    radius={[0, 4, 4, 0]}
-                    cursor="pointer"
-                    onClick={(data: any) => handleBarClick(data)}
-                  >
-                    {stageData.map((entry, idx) => (
-                      <Cell
-                        key={idx}
-                        fill={selectedStageData?.stage === entry.stage ? '#60a5fa' : colors.accent}
-                      />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+            {authLoading || loading.pipeline ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} height={40} />)}
+              </div>
+            ) : errors.pipeline ? (
+              <ErrorInline message={errors.pipeline} onRetry={fetchData} />
+            ) : stageData.length === 0 ? (
+              <EmptyInline
+                message="No pipeline data. Connect a CRM to get started."
+                linkText="Go to Connectors"
+                onLink={() => navigate('/connectors')}
+              />
+            ) : (
+              <AnnotatedPipelineChart
+                stages={stageData}
+                findings={findings}
+                totalPipeline={totalPipeline}
+                onStageClick={(stageNorm, stageName) => handleBarClick({ stage: stageName, stage_normalized: stageNorm })}
+                expandedStage={expandedStage}
+                expandedStageDeals={expandedStageDeals}
+                expandedStageLoading={expandedStageLoading}
+                onExpandStage={handleExpandStage}
+                onViewAll={handleViewAllFromPanel}
+                anon={anon}
+              />
+            )}
+          </div>
 
-              {stageData.some(s => (s.findings?.act || 0) > 0 || (s.findings?.watch || 0) > 0) && (
-                <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {stageData.filter(s => (s.findings?.act || 0) > 0 || (s.findings?.watch || 0) > 0).map((stage, idx) => (
-                    <div
-                      key={idx}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 8,
-                        paddingLeft: 4,
-                        cursor: 'pointer',
-                        padding: '4px 4px',
-                        borderRadius: 4,
-                        transition: 'background 0.12s',
-                        justifyContent: 'space-between',
-                      }}
-                      onClick={() => handleExpandStage(stage.stage_normalized || stage.stage)}
-                      onMouseEnter={e => (e.currentTarget.style.background = colors.surfaceHover)}
-                      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                    >
-                      <span style={{ fontSize: 11, fontWeight: 500, color: colors.textSecondary, minWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {stage.stage}
-                      </span>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        {(stage.findings?.act || 0) > 0 && (
-                          <span style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: severityColor('act'), display: 'inline-block' }} />
-                            <span style={{ fontSize: 10, fontFamily: fonts.mono, color: severityColor('act') }}>{stage.findings!.act}</span>
-                          </span>
-                        )}
-                        {(stage.findings?.watch || 0) > 0 && (
-                          <span style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: severityColor('watch'), display: 'inline-block' }} />
-                            <span style={{ fontSize: 10, fontFamily: fonts.mono, color: severityColor('watch') }}>{stage.findings!.watch}</span>
-                          </span>
-                        )}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleBarClick({ stage: stage.stage, stage_normalized: stage.stage_normalized });
-                            setTimeout(() => {
-                              handleAskPandora(`What's the risk profile for deals in ${stage.stage}?`, { type: 'stage', stage: stage.stage });
-                            }, 100);
-                          }}
-                          style={{
-                            marginLeft: 4,
-                            padding: '2px 8px',
-                            fontSize: 10,
-                            background: 'none',
-                            border: `1px solid ${colors.border}`,
-                            borderRadius: 4,
-                            color: colors.accent,
-                            cursor: 'pointer',
-                            flexShrink: 0,
-                          }}
-                          title={`Ask Pandora about ${stage.stage}`}
-                        >
-                          Ask
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {expandedStage && (
-                <div style={{
-                  marginTop: 12,
-                  background: colors.surfaceRaised,
-                  border: `1px solid ${colors.border}`,
-                  borderRadius: 8,
-                  padding: 16,
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>
-                      {expandedStage} — {expandedStageDeals.length} deal{expandedStageDeals.length !== 1 ? 's' : ''} ({formatCurrency(anon.amount(expandedStageTotalValue))})
-                    </div>
-                  </div>
-                  {expandedStageLoading ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} height={28} />)}
-                    </div>
-                  ) : expandedStageDeals.length === 0 ? (
-                    <p style={{ fontSize: 12, color: colors.textMuted }}>No deals found in this stage.</p>
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-                      {expandedStageDeals.map(deal => (
-                        <div
-                          key={deal.id}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 12,
-                            padding: '6px 4px',
-                            borderBottom: `1px solid ${colors.border}`,
-                            cursor: 'pointer',
-                            borderRadius: 4,
-                            transition: 'background 0.12s',
-                          }}
-                          onClick={() => navigate(`/deals/${deal.id}`)}
-                          onMouseEnter={e => (e.currentTarget.style.background = colors.surfaceHover)}
-                          onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                        >
-                          <span style={{ fontSize: 12, fontWeight: 500, color: colors.accent, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {anon.deal(deal.name)}
-                          </span>
-                          {deal.amount != null && (
-                            <span style={{ fontSize: 11, fontFamily: fonts.mono, color: colors.text, flexShrink: 0 }}>
-                              {formatCurrency(anon.amount(deal.amount))}
-                            </span>
-                          )}
-                          {deal.owner_name && (
-                            <span style={{ fontSize: 11, color: colors.textSecondary, flexShrink: 0 }}>
-                              {anon.person(deal.owner_name)}
-                            </span>
-                          )}
-                          {deal.days_in_stage != null && (
-                            <span style={{ fontSize: 10, fontFamily: fonts.mono, color: colors.textMuted, flexShrink: 0 }}>
-                              {deal.days_in_stage}d in stage
-                            </span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
-                    <button
-                      onClick={() => handleViewAllFromPanel(expandedStage)}
-                      style={{ fontSize: 11, color: colors.accent, background: 'none', border: 'none', cursor: 'pointer', fontWeight: 500 }}
-                    >
-                      View All →
-                    </button>
-                    <button
-                      onClick={() => { setExpandedStage(null); setExpandedStageDeals([]); }}
-                      style={{ fontSize: 11, color: colors.textMuted, background: 'none', border: 'none', cursor: 'pointer' }}
-                    >
-                      Close ✕
-                    </button>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      </SectionErrorBoundary>
-
-      {/* Enhanced Dashboard Widgets - Phase 1 */}
-      <SectionErrorBoundary fallbackMessage="Failed to load actions and signals.">
-        <CollapsibleSection
-          title="Actions & Signals"
-          defaultCollapsed={preferences?.sections_config?.actions_signals?.collapsed || false}
-          onToggle={(collapsed) => updateSection('actions_signals', { collapsed })}
-        >
-          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 16 }}>
+          {/* Right: Actions + Signals stacked */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <ActionsWidget
               summary={pipeline?.actions_summary}
               loading={loading.pipeline}
@@ -916,23 +800,151 @@ export default function CommandCenter() {
               workspaceId={wsId}
             />
           </div>
-        </CollapsibleSection>
+        </div>
+      </SectionErrorBoundary>
+
+      <SectionErrorBoundary fallbackMessage="Failed to load forecast panel.">
+        <MonteCarloPanel wsId={wsId} activePipeline={selectedPipeline} />
       </SectionErrorBoundary>
 
       <SectionErrorBoundary fallbackMessage="Failed to load recent findings.">
         <CollapsibleSection
-          title="Recent Findings"
+          title="Active Findings"
           defaultCollapsed={preferences?.sections_config?.findings?.collapsed || false}
           onToggle={(collapsed) => updateSection('findings', { collapsed })}
-          badge={pipeline?.recent_findings?.length || 0}
+          badge={filteredFindings.length}
         >
-          <FindingsFeed
-            findings={pipeline?.recent_findings}
-            loading={loading.pipeline}
-            workspaceId={wsId}
-          />
+          {/* Severity filter pills */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+            {(['all', 'act', 'watch', 'notable', 'info'] as const).map(sev => {
+              const isActive = findingSeverityFilter === sev;
+              const label = sev === 'all' ? 'All' : sev === 'act' ? 'Critical' : sev === 'watch' ? 'Warning' : sev === 'notable' ? 'Notable' : 'Info';
+              const col = sev === 'all' ? colors.accent : severityColor(sev);
+              return (
+                <button
+                  key={sev}
+                  onClick={() => setFindingSeverityFilter(sev)}
+                  style={{
+                    padding: '3px 10px',
+                    borderRadius: 12,
+                    fontSize: 11,
+                    fontWeight: 600,
+                    fontFamily: fonts.sans,
+                    cursor: 'pointer',
+                    border: `1px solid ${isActive ? col : colors.border}`,
+                    background: isActive ? `${col}22` : 'transparent',
+                    color: isActive ? col : colors.textMuted,
+                    transition: 'all 0.1s',
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Skill filter pills */}
+          {availableSkills.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+              <button
+                onClick={() => setFindingSkillFilter('all')}
+                style={{
+                  padding: '3px 10px',
+                  borderRadius: 12,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  fontFamily: fonts.sans,
+                  cursor: 'pointer',
+                  border: `1px solid ${findingSkillFilter === 'all' ? colors.accent : colors.border}`,
+                  background: findingSkillFilter === 'all' ? colors.accentSoft : 'transparent',
+                  color: findingSkillFilter === 'all' ? colors.accent : colors.textMuted,
+                  transition: 'all 0.1s',
+                }}
+              >
+                All Skills
+              </button>
+              {availableSkills.map(skill => {
+                const isActive = findingSkillFilter === skill.id;
+                return (
+                  <button
+                    key={skill.id}
+                    onClick={() => setFindingSkillFilter(isActive ? 'all' : skill.id)}
+                    style={{
+                      padding: '3px 10px',
+                      borderRadius: 12,
+                      fontSize: 11,
+                      fontWeight: 600,
+                      fontFamily: fonts.sans,
+                      cursor: 'pointer',
+                      border: `1px solid ${isActive ? colors.accent : colors.border}`,
+                      background: isActive ? colors.accentSoft : 'transparent',
+                      color: isActive ? colors.accent : colors.textMuted,
+                      transition: 'all 0.1s',
+                    }}
+                  >
+                    {skill.name}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {stageFilter && (
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              background: colors.accentSoft,
+              border: `1px solid ${colors.accent}`,
+              borderRadius: 16,
+              padding: '4px 10px',
+              marginBottom: 12,
+              fontSize: 11,
+              color: colors.accent,
+              fontWeight: 500,
+            }}>
+              <span>Stage: {stageFilter}</span>
+              <button
+                onClick={clearStageFilter}
+                style={{ background: 'none', border: 'none', color: colors.accent, cursor: 'pointer', padding: 0, fontSize: 13, lineHeight: 1, fontWeight: 600 }}
+              >✕</button>
+            </div>
+          )}
+
+          {authLoading || loading.findings ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} height={48} />)}
+            </div>
+          ) : errors.findings ? (
+            <ErrorInline message={errors.findings} onRetry={fetchData} />
+          ) : stageFilterLoading ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: 16 }}>
+              <InlineSpinner />
+              <p style={{ fontSize: 12, color: colors.textMuted, textAlign: 'center' }}>Loading filtered findings…</p>
+            </div>
+          ) : filteredFindings.length === 0 ? (
+            <p style={{ fontSize: 12, color: colors.textMuted, textAlign: 'center', padding: 24 }}>
+              {findingSeverityFilter !== 'all' || findingSkillFilter !== 'all'
+                ? 'No findings match current filters'
+                : stageFilter ? `No findings for stage "${stageFilter}"` : 'No active findings'}
+            </p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 0, maxHeight: 400, overflow: 'auto' }}>
+              {filteredFindings.map(f => (
+                <FindingRow
+                  key={f.id}
+                  finding={f}
+                  onSnooze={handleSnoozeFinding}
+                  onResolve={handleResolveFinding}
+                  onNavigate={navigate}
+                />
+              ))}
+            </div>
+          )}
         </CollapsibleSection>
       </SectionErrorBoundary>
+
+      <ConnectorStatusStrip connectors={connectorStatus} />
 
       {metricBreakdown && (
         <MetricBreakdownModal
@@ -975,200 +987,6 @@ export default function CommandCenter() {
         />
       )}
 
-      <SectionErrorBoundary fallbackMessage="Failed to load findings by rep.">
-        {ownerRows.length > 0 && (
-          <div style={{
-            background: colors.surface,
-            border: `1px solid ${colors.border}`,
-            borderRadius: 10,
-            padding: 20,
-          }}>
-            <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text, marginBottom: 12 }}>Findings by Rep</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 0, overflowX: isMobile ? 'auto' : undefined }}>
-              {ownerRows.map((row, i) => (
-                <div
-                  key={i}
-                  onClick={() => navigate(`/deals?owner=${encodeURIComponent(row.owner)}`)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 12,
-                    padding: '8px 8px',
-                    borderBottom: `1px solid ${colors.border}`,
-                    cursor: 'pointer',
-                    borderRadius: 4,
-                    transition: 'background 0.12s',
-                  }}
-                  onMouseEnter={e => (e.currentTarget.style.background = colors.surfaceHover)}
-                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                >
-                  <span style={{ fontSize: 12, fontWeight: 500, color: colors.text, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {anon.person(row.owner)}
-                  </span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    {row.act > 0 && (
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                        <span style={{ width: 6, height: 6, borderRadius: '50%', background: severityColor('act'), display: 'inline-block' }} />
-                        <span style={{ fontSize: 11, fontFamily: fonts.mono, color: severityColor('act') }}>{row.act}</span>
-                      </span>
-                    )}
-                    {row.watch > 0 && (
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                        <span style={{ width: 6, height: 6, borderRadius: '50%', background: severityColor('watch'), display: 'inline-block' }} />
-                        <span style={{ fontSize: 11, fontFamily: fonts.mono, color: severityColor('watch') }}>{row.watch}</span>
-                      </span>
-                    )}
-                  </div>
-                  <span style={{ fontSize: 11, fontFamily: fonts.mono, color: colors.textMuted, minWidth: 50, textAlign: 'right' }}>
-                    {row.total} total
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </SectionErrorBoundary>
-
-      <SectionErrorBoundary fallbackMessage="Failed to load findings feed.">
-        <div style={{
-          background: colors.surface,
-          border: `1px solid ${colors.border}`,
-          borderRadius: 10,
-          padding: 20,
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>Active Findings</h3>
-              <span style={{
-                fontSize: 10, fontWeight: 600,
-                background: totalActive > 0 ? 'rgba(239,68,68,0.1)' : colors.accentSoft,
-                color: totalActive > 0 ? colors.red : colors.accent,
-                padding: '2px 6px', borderRadius: 8, fontFamily: fonts.mono,
-              }}>
-                {totalActive}
-              </span>
-            </div>
-            <button
-              onClick={() => navigate('/insights')}
-              style={{ fontSize: 11, color: colors.accent, background: 'none', border: 'none', cursor: 'pointer' }}
-            >
-              View all →
-            </button>
-          </div>
-
-          {stageFilter && (
-            <div style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              background: colors.accentSoft,
-              border: `1px solid ${colors.accent}`,
-              borderRadius: 16,
-              padding: '4px 10px',
-              marginBottom: 12,
-              fontSize: 11,
-              color: colors.accent,
-              fontWeight: 500,
-            }}>
-              <span>Filtered by: {stageFilter}</span>
-              <button
-                onClick={clearStageFilter}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: colors.accent,
-                  cursor: 'pointer',
-                  padding: 0,
-                  fontSize: 13,
-                  lineHeight: 1,
-                  fontWeight: 600,
-                }}
-              >
-                ✕
-              </button>
-            </div>
-          )}
-
-          {authLoading || loading.findings ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} height={48} />)}
-            </div>
-          ) : errors.findings ? (
-            <ErrorInline message={errors.findings} onRetry={fetchData} />
-          ) : stageFilterLoading ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: 16 }}>
-              <InlineSpinner />
-              <p style={{ fontSize: 12, color: colors.textMuted, textAlign: 'center' }}>Loading filtered findings…</p>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 0, maxHeight: 400, overflow: 'auto' }}>
-              {filteredFindings.length === 0 ? (
-                <p style={{ fontSize: 12, color: colors.textMuted, textAlign: 'center', padding: 24 }}>
-                  {stageFilter ? `No findings for stage "${stageFilter}"` : 'No active findings'}
-                </p>
-              ) : (
-                filteredFindings.map(f => (
-                  <FindingRow
-                    key={f.id}
-                    finding={f}
-                    onSnooze={handleSnoozeFinding}
-                    onResolve={handleResolveFinding}
-                    onNavigate={navigate}
-                  />
-                ))
-              )}
-            </div>
-          )}
-        </div>
-      </SectionErrorBoundary>
-
-      <SectionErrorBoundary fallbackMessage="Failed to load connector status.">
-        {connectorStatus.length > 0 && (
-          <div style={{
-            background: colors.surface,
-            border: `1px solid ${colors.border}`,
-            borderRadius: 10,
-            padding: '14px 20px',
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-              <h3 style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>Connected Sources</h3>
-              <button
-                onClick={() => navigate('/connectors/health')}
-                style={{ fontSize: 11, color: colors.accent, background: 'none', border: 'none', cursor: 'pointer' }}
-              >
-                View health →
-              </button>
-            </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-              {connectorStatus.map((c: any, i: number) => {
-                const dotColor = c.health === 'healthy' ? colors.green : c.health === 'warning' ? colors.yellow : colors.red;
-                return (
-                  <div
-                    key={i}
-                    onClick={() => navigate('/connectors/health')}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      cursor: 'pointer',
-                      padding: '4px 10px',
-                      borderRadius: 6,
-                      border: `1px solid ${colors.border}`,
-                      transition: 'border-color 0.12s',
-                    }}
-                    onMouseEnter={e => (e.currentTarget.style.borderColor = colors.borderLight)}
-                    onMouseLeave={e => (e.currentTarget.style.borderColor = colors.border)}
-                  >
-                    <span style={{ width: 7, height: 7, borderRadius: '50%', background: dotColor, display: 'inline-block', flexShrink: 0 }} />
-                    <span style={{ fontSize: 12, fontWeight: 500, color: colors.text }}>{c.name || c.connector_name}</span>
-                    {c.last_sync_at && (
-                      <span style={{ fontSize: 10, color: colors.textMuted }}>{formatTimeAgo(c.last_sync_at)}</span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-      </SectionErrorBoundary>
     </div>
   );
 }

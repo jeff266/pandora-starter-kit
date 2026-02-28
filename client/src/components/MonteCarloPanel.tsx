@@ -576,7 +576,14 @@ export default function MonteCarloPanel({ wsId, activePipeline }: { wsId?: strin
             projectedPipelineP50={projectedPipelineP50}
             anon={anon}
           />
-          <RangeBar p10={anon.amount(p10)} p50={anon.amount(p50)} p90={anon.amount(p90)} />
+          <RangeBar
+            p10={anon.amount(p10)}
+            p50={anon.amount(p50)}
+            p90={anon.amount(p90)}
+            confidenceValue={data?.confidence != null
+              ? anon.amount(p10 + (p90 - p10) * data.confidence)
+              : anon.amount(p50)}
+          />
         </div>
 
         <div style={{ width: 1, background: colors.border, flexShrink: 0 }} />
@@ -940,24 +947,69 @@ function HeadlineColumn({ p10, p50, p90, probOfHittingTarget, quota, dataQuality
   );
 }
 
-function RangeBar({ p10, p50, p90 }: { p10: number; p50: number; p90: number }) {
+function RangeBar({ p10, p50, p90, confidenceValue }: {
+  p10: number;
+  p50: number;
+  p90: number;
+  confidenceValue?: number;
+}) {
   const min = p10;
   const max = p90;
-  const range = max - min;
+  const range = max - min || 1;
   const p50pct = ((p50 - min) / range) * 100;
+
+  // Confidence marker: map confidenceValue (a dollar amount) to a position
+  const confPct = confidenceValue != null
+    ? Math.max(0, Math.min(100, ((confidenceValue - min) / range) * 100))
+    : null;
 
   return (
     <div style={{ padding: '24px 0' }}>
-      <div style={{ position: 'relative', height: 6, borderRadius: 3,
-                    background: 'rgba(255,255,255,0.08)', margin: '0 12px' }}>
-        {/* Filled range bar - monochromatic */}
-        <div style={{ position: 'absolute', left: 0, right: 0, top: 0,
-                      height: '100%', borderRadius: 3,
-                      background: 'rgba(255,255,255,0.15)' }} />
+      <div style={{ position: 'relative', height: 8, borderRadius: 4,
+                    background: 'rgba(255,255,255,0.06)', margin: '0 12px' }}>
+        {/* Gradient fill: red → yellow → green */}
+        <div style={{
+          position: 'absolute', left: 0, right: 0, top: 0,
+          height: '100%', borderRadius: 4,
+          background: 'linear-gradient(90deg, #EF4444 0%, #EAB308 50%, #22C55E 100%)',
+          opacity: 0.5,
+        }} />
         {/* P50 marker */}
-        <div style={{ position: 'absolute', left: `${p50pct}%`, top: -5,
-                      width: 2, height: 16, background: '#fff',
-                      transform: 'translateX(-50%)' }} />
+        <div style={{
+          position: 'absolute', left: `${p50pct}%`, top: -5,
+          width: 2, height: 18, background: '#fff',
+          transform: 'translateX(-50%)',
+          borderRadius: 1,
+        }} />
+        {/* P50 label */}
+        <div style={{
+          position: 'absolute', left: `${p50pct}%`, bottom: -18,
+          transform: 'translateX(-50%)',
+          fontSize: 8, fontFamily: fonts.mono, color: colors.textMuted,
+          whiteSpace: 'nowrap',
+        }}>
+          P50
+        </div>
+        {/* Confidence marker (selected percentile) */}
+        {confPct != null && (
+          <div style={{
+            position: 'absolute',
+            left: `${confPct}%`,
+            top: -7,
+            width: 4,
+            height: 22,
+            background: colors.accent,
+            borderRadius: 2,
+            transform: 'translateX(-50%)',
+            transition: 'left 0.2s ease',
+            boxShadow: `0 0 6px ${colors.accent}99`,
+          }} />
+        )}
+      </div>
+      {/* Range labels */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 22, padding: '0 12px' }}>
+        <span style={{ fontSize: 9, fontFamily: fonts.mono, color: colors.red }}>P10</span>
+        <span style={{ fontSize: 9, fontFamily: fonts.mono, color: colors.green }}>P90</span>
       </div>
     </div>
   );
@@ -1133,18 +1185,16 @@ function TornadoTooltip({ driver, pos }: TornadoTooltipProps) {
   );
 }
 
-function VarianceDriversColumn({ drivers, maxImpact, anon }: {
+function VarianceDriversColumn({ drivers, anon }: {
   drivers: VarianceDriver[];
   maxImpact: number;
   anon: any;
 }) {
   const top5 = drivers.slice(0, 5);
-  const barMaxWidth = 50;
-  const [hoveredDriver, setHoveredDriver] = useState<{ driver: VarianceDriver; pos: { x: number; y: number; rowHeight: number } } | null>(null);
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8, position: 'relative', minWidth: 0, alignItems: 'center' }}>
-      <div style={{ fontSize: 11, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', alignSelf: 'flex-start' }}>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8, position: 'relative', minWidth: 0 }}>
+      <div style={{ fontSize: 11, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
         What Moves The Number
       </div>
 
@@ -1152,61 +1202,41 @@ function VarianceDriversColumn({ drivers, maxImpact, anon }: {
         <div style={{ fontSize: 12, color: colors.textMuted }}>No variance data</div>
       ) : (
         top5.map((d, i) => {
-          const upWidth = maxImpact > 0 ? (d.upsideImpact / maxImpact) * barMaxWidth : 0;
-          const downWidth = maxImpact > 0 ? (Math.abs(d.downsideImpact) / maxImpact) * barMaxWidth : 0;
-          const tornadoWidth = barMaxWidth * 2 + 1; // Total width of tornado (left + center + right)
+          const maxSwing = Math.max(d.upsideImpact, Math.abs(d.downsideImpact));
+          const isPositive = d.upsideImpact > 0;
+          const impactColor = isPositive ? colors.green : colors.textSecondary;
+          const explanation = d.assumption?.implication
+            || `±${fmtCompact(anon.amount(maxSwing))} swing`;
+
           return (
             <div
               key={i}
-              style={{ display: 'flex', flexDirection: 'column', gap: 2, cursor: 'default', width: tornadoWidth + 80 }}
-              onMouseEnter={(e) => {
-                const rect = e.currentTarget.getBoundingClientRect();
-                setHoveredDriver({ driver: d, pos: { x: rect.left, y: rect.top, rowHeight: rect.height } });
+              style={{
+                background: colors.surfaceRaised,
+                border: `1px solid ${colors.border}`,
+                borderRadius: 6,
+                padding: '8px 10px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 3,
               }}
-              onMouseLeave={() => setHoveredDriver(null)}
             >
-              <div style={{
-                fontSize: 11,
-                color: colors.textSecondary,
-                fontWeight: 500,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                textAlign: 'center',
-              }}>
-                {d.label}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: colors.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>
+                  {d.label}
+                </span>
+                <span style={{ fontSize: 12, fontFamily: fonts.mono, fontWeight: 600, color: impactColor, flexShrink: 0, whiteSpace: 'nowrap' }}>
+                  ±{fmtCompact(anon.amount(maxSwing))}
+                </span>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 0, height: 14 }}>
-                <div style={{ display: 'flex', justifyContent: 'flex-end', width: barMaxWidth, marginRight: 2 }}>
-                  <div style={{
-                    width: downWidth,
-                    height: 10,
-                    background: `${colors.red}90`,
-                    borderRadius: '3px 0 0 3px',
-                  }} />
-                </div>
-                <div style={{ width: 1, height: 14, background: colors.border, flexShrink: 0 }} />
-                <div style={{ display: 'flex', width: barMaxWidth, marginLeft: 2 }}>
-                  <div style={{
-                    width: upWidth,
-                    height: 10,
-                    background: `${colors.green}90`,
-                    borderRadius: '0 3px 3px 0',
-                  }} />
-                </div>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, fontFamily: fonts.mono, width: tornadoWidth + 4 }}>
-                <span style={{ color: colors.red }}>-{fmtCompact(Math.abs(anon.amount(d.downsideImpact)))}</span>
-                <span style={{ color: colors.green }}>+{fmtCompact(anon.amount(d.upsideImpact))}</span>
+              <div style={{ fontSize: 10, color: colors.textMuted, lineHeight: 1.4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {explanation}
               </div>
             </div>
           );
         })
       )}
-
-      {hoveredDriver && (
-        <TornadoTooltip driver={hoveredDriver.driver} pos={hoveredDriver.pos} />
-      )}
+      <div style={{ display: 'none' }}>{/* TornadoTooltip removed */}</div>
     </div>
   );
 }
