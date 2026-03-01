@@ -42,14 +42,12 @@ function formatWeekLabel(brief: any): string {
 
 function formatDate(dateStr?: string | Date): string {
   if (!dateStr) return '';
-  let d: Date;
   if (dateStr instanceof Date) {
-    d = dateStr;
-  } else {
-    const s = String(dateStr);
-    d = new Date(s.includes('T') ? s : s + 'T00:00:00Z');
+    return dateStr.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' });
   }
-  return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  const s = String(dateStr);
+  const d = new Date(s.includes('T') ? s : s + 'T00:00:00Z');
+  return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' });
 }
 
 export default function AssistantView() {

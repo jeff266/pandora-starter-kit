@@ -85,9 +85,12 @@ async function getTheNumber(workspaceId: string, wonLostStages: string[], now: D
 
   let wonThisPeriod = 0;
   if (quota) {
+    const pipelineClause = quota.pipeline_name ? `AND pipeline = $4` : '';
+    const wonParams: any[] = [workspaceId, quota.period_start, quota.period_end];
+    if (quota.pipeline_name) wonParams.push(quota.pipeline_name);
     const wonRes = await query<{ total: string }>(
-      `SELECT COALESCE(SUM(amount),0)::text as total FROM deals WHERE workspace_id = $1 AND stage_normalized = 'closed_won' AND close_date >= $2 AND close_date <= $3`,
-      [workspaceId, quota.period_start, quota.period_end]
+      `SELECT COALESCE(SUM(amount),0)::text as total FROM deals WHERE workspace_id = $1 AND stage_normalized = 'closed_won' AND close_date >= $2 AND close_date <= $3 ${pipelineClause}`,
+      wonParams
     );
     wonThisPeriod = parseFloat(wonRes.rows[0]?.total || '0');
   }
@@ -204,9 +207,13 @@ async function getReps(workspaceId: string, wonLostStages: string[]): Promise<Re
   const ps = quota?.period_start || quarterStart(new Date()).toISOString().split('T')[0];
   const pe = quota?.period_end || quarterEnd(new Date()).toISOString().split('T')[0];
 
+  const closedPipelineClause = quota?.pipeline_name ? `AND pipeline = $4` : '';
+  const closedParams: any[] = [workspaceId, ps, pe];
+  if (quota?.pipeline_name) closedParams.push(quota.pipeline_name);
+
   const [repRes, closedRes, quotaRes, findingsRes, rosterRes] = await Promise.all([
     query<any>(`SELECT COALESCE(owner, '') as email, COALESCE(owner, 'Unknown') as name, COALESCE(SUM(amount),0)::text as pipeline, COUNT(*)::text as cnt FROM deals WHERE workspace_id = $1 AND ${openFilter} GROUP BY owner ORDER BY SUM(amount) DESC`, [workspaceId]),
-    query<any>(`SELECT COALESCE(owner, '') as email, COALESCE(SUM(amount),0)::text as closed FROM deals WHERE workspace_id = $1 AND stage_normalized = 'closed_won' AND close_date >= $2 AND close_date <= $3 GROUP BY owner`, [workspaceId, ps, pe]),
+    query<any>(`SELECT COALESCE(owner, '') as email, COALESCE(SUM(amount),0)::text as closed FROM deals WHERE workspace_id = $1 AND stage_normalized = 'closed_won' AND close_date >= $2 AND close_date <= $3 ${closedPipelineClause} GROUP BY owner`, closedParams),
     query<any>(`SELECT rep_email, amount::text as quota_value FROM quotas WHERE workspace_id = $1 AND is_active = true AND period_start <= CURRENT_DATE AND period_end >= CURRENT_DATE`, [workspaceId]),
     query<any>(`SELECT COALESCE(owner_email, '') as entity_id, message, COALESCE(escalation_level,0)::text as escalation_level, COALESCE(times_flagged,1)::text as times_flagged FROM findings WHERE workspace_id = $1 AND resolved_at IS NULL AND severity IN ('act', 'watch') ORDER BY escalation_level DESC, times_flagged DESC`, [workspaceId]),
     query<any>(`SELECT rep_email, rep_name FROM sales_reps WHERE workspace_id = $1 AND is_rep = true AND pandora_role IS NOT NULL AND rep_email IS NOT NULL`, [workspaceId]),
