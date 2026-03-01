@@ -32,6 +32,61 @@ export async function loadTargetsAndActuals(workspaceId: string) {
     }
 
     if (monthly <= 0) {
+      // First fallback: read from the targets table (is_active = true only)
+      try {
+        // Try current-period target first (period covering today)
+        let tResult = await query<any>(
+          `SELECT COALESCE(SUM(amount), 0)::numeric as period_quota,
+                  MIN(period_start)::text as period_start,
+                  MAX(period_end)::text as period_end
+           FROM targets
+           WHERE workspace_id = $1
+             AND is_active = true
+             AND period_start <= CURRENT_DATE
+             AND period_end >= CURRENT_DATE`,
+          [workspaceId]
+        );
+        let periodQuota = Number(tResult.rows[0]?.period_quota ?? 0);
+        let periodStart = tResult.rows[0]?.period_start;
+        let periodEnd = tResult.rows[0]?.period_end;
+
+        // Widen to all active targets if no current-period match
+        if (periodQuota <= 0) {
+          tResult = await query<any>(
+            `SELECT COALESCE(SUM(amount), 0)::numeric as period_quota,
+                    MIN(period_start)::text as period_start,
+                    MAX(period_end)::text as period_end
+             FROM targets
+             WHERE workspace_id = $1
+               AND is_active = true`,
+            [workspaceId]
+          );
+          periodQuota = Number(tResult.rows[0]?.period_quota ?? 0);
+          periodStart = tResult.rows[0]?.period_start;
+          periodEnd = tResult.rows[0]?.period_end;
+        }
+
+        if (periodQuota > 0) {
+          // Divide by period length in months to get a monthly figure
+          let monthsInPeriod = 3; // default to quarterly
+          if (periodStart && periodEnd) {
+            const start = new Date(periodStart);
+            const end = new Date(periodEnd);
+            const diffMs = end.getTime() - start.getTime();
+            const diffDays = diffMs / 86400000;
+            monthsInPeriod = Math.max(1, Math.round(diffDays / 30.44));
+          }
+          monthly = periodQuota / monthsInPeriod;
+          source = 'targets_table';
+        }
+      } catch {
+        // targets table unavailable — fall through to trailing average
+      }
+    }
+
+    if (monthly <= 0) {
+      // Last resort: trailing 3-month average of actual closed revenue
+      // This is a run-rate estimate, not a real quota — treat as approximate
       const impliedResult = await query<any>(
         `SELECT COALESCE(AVG(monthly_won), 0)::numeric as implied_monthly_target FROM (
           SELECT DATE_TRUNC('month', close_date) as month, SUM(amount) as monthly_won
@@ -43,7 +98,7 @@ export async function loadTargetsAndActuals(workspaceId: string) {
       );
       monthly = Number(impliedResult.rows[0]?.implied_monthly_target || 0);
       source = 'implied_trailing_3mo';
-      quotaWarning = 'No quota configured. Using trailing 3-month average as implied target.';
+      quotaWarning = 'No quota configured in targets table. Using trailing 3-month average as implied target.';
     }
 
     const attainmentResult = await query<any>(

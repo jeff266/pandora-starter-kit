@@ -6,6 +6,17 @@ import { api } from '../../lib/api';
 
 type TabView = 'active' | 'pending' | 'requests';
 
+type PandoraRole = 'cro' | 'manager' | 'ae' | 'revops' | 'admin' | null;
+
+const PANDORA_ROLE_OPTIONS: { value: PandoraRole; label: string }[] = [
+  { value: null, label: 'Not set' },
+  { value: 'cro', label: 'CRO' },
+  { value: 'manager', label: 'Manager' },
+  { value: 'ae', label: 'AE' },
+  { value: 'revops', label: 'RevOps' },
+  { value: 'admin', label: 'Admin' },
+];
+
 interface Member {
   id: string;
   user_id: string;
@@ -13,6 +24,7 @@ interface Member {
   email: string;
   avatar_url: string | null;
   role: { id: string; name: string };
+  pandora_role: PandoraRole;
   joined_at: string;
   invited_at: string;
   accepted_at: string | null;
@@ -157,6 +169,21 @@ export default function MembersTab() {
       );
       console.error('Failed to update role:', err);
       setToast({ message: 'Failed to update role', type: 'error' });
+    }
+  };
+
+  const handlePandoraRoleChange = async (memberId: string, newPandoraRole: PandoraRole) => {
+    const member = members.find(m => m.id === memberId);
+    if (!member) return;
+    const oldPandoraRole = member.pandora_role;
+    setMembers(prev => prev.map(m => m.id === memberId ? { ...m, pandora_role: newPandoraRole } : m));
+    try {
+      await api.patch(`/members/${memberId}/pandora-role`, { pandora_role: newPandoraRole });
+      setToast({ message: 'Pandora role updated', type: 'success' });
+    } catch (err) {
+      setMembers(prev => prev.map(m => m.id === memberId ? { ...m, pandora_role: oldPandoraRole } : m));
+      console.error('Failed to update pandora role:', err);
+      setToast({ message: 'Failed to update Pandora role', type: 'error' });
     }
   };
 
@@ -362,6 +389,7 @@ export default function MembersTab() {
                   isActionMenuOpen={actionMenuOpen === member.id}
                   onToggleActionMenu={() => setActionMenuOpen(actionMenuOpen === member.id ? null : member.id)}
                   onRoleChange={handleRoleChange}
+                  onPandoraRoleChange={handlePandoraRoleChange}
                   onSuspend={() => setActionConfirm({ memberId: member.id, action: 'suspend', name: member.name })}
                   onReactivate={() => handleReactivate(member.id, member.name)}
                   onRemove={() => setActionConfirm({ memberId: member.id, action: 'remove', name: member.name })}
@@ -463,6 +491,7 @@ function MemberRow({
   isActionMenuOpen,
   onToggleActionMenu,
   onRoleChange,
+  onPandoraRoleChange,
   onSuspend,
   onReactivate,
   onRemove,
@@ -474,6 +503,7 @@ function MemberRow({
   isActionMenuOpen: boolean;
   onToggleActionMenu: () => void;
   onRoleChange: (memberId: string, roleId: string) => void;
+  onPandoraRoleChange: (memberId: string, role: PandoraRole) => void;
   onSuspend: () => void;
   onReactivate: () => void;
   onRemove: () => void;
@@ -532,8 +562,8 @@ function MemberRow({
         </div>
       </div>
 
-      {/* Role */}
-      <div style={{ width: 140 }}>
+      {/* Access Role */}
+      <div style={{ width: 130 }}>
         {canChangeRoles && !isSelf ? (
           <select
             value={member.role.id}
@@ -557,6 +587,36 @@ function MemberRow({
         ) : (
           <span style={{ fontSize: 13, color: colors.textSecondary, textTransform: 'capitalize' }}>
             {member.role.name}
+          </span>
+        )}
+      </div>
+
+      {/* Pandora Role */}
+      <div style={{ width: 120 }}>
+        {canChangeRoles && !isSelf ? (
+          <select
+            value={member.pandora_role ?? ''}
+            onChange={e => onPandoraRoleChange(member.id, (e.target.value || null) as PandoraRole)}
+            style={{
+              width: '100%',
+              padding: '6px 8px',
+              fontSize: 12,
+              fontFamily: fonts.sans,
+              color: member.pandora_role ? colors.text : colors.textMuted,
+              background: colors.surfaceRaised,
+              border: `1px solid ${colors.border}`,
+              borderRadius: 4,
+              cursor: 'pointer',
+            }}
+            title="Pandora data-visibility role"
+          >
+            {PANDORA_ROLE_OPTIONS.map(opt => (
+              <option key={String(opt.value)} value={opt.value ?? ''}>{opt.label}</option>
+            ))}
+          </select>
+        ) : (
+          <span style={{ fontSize: 12, color: member.pandora_role ? colors.text : colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+            {member.pandora_role ?? '—'}
           </span>
         )}
       </div>

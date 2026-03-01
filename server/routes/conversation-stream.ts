@@ -89,7 +89,8 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
 
-  const contextBlock = await buildWorkspaceContextBlock(workspaceId).catch(() => '');
+  const userId = (req as any).user?.user_id as string | undefined;
+  const contextBlock = await buildWorkspaceContextBlock(workspaceId, userId).catch(() => '');
 
   try {
     // ── Brief resolver — cache-first, zero tokens ─────────────────────────────

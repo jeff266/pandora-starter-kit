@@ -7,6 +7,22 @@ import Skeleton from '../components/Skeleton';
 import { useDemoMode } from '../contexts/DemoModeContext';
 import { useIsMobile } from '../hooks/useIsMobile';
 
+type TargetType = 'individual' | 'company' | 'team' | 'board';
+
+const TARGET_TYPE_LABELS: Record<TargetType, string> = {
+  individual: 'Individual',
+  company: 'Company',
+  team: 'Team',
+  board: 'Board',
+};
+
+const TARGET_TYPE_COLORS: Record<TargetType, { bg: string; text: string }> = {
+  company: { bg: 'rgba(99,102,241,0.15)', text: '#818cf8' },
+  board: { bg: 'rgba(168,85,247,0.15)', text: '#c084fc' },
+  team: { bg: 'rgba(59,130,246,0.15)', text: '#60a5fa' },
+  individual: { bg: 'rgba(34,197,94,0.15)', text: '#4ade80' },
+};
+
 interface Target {
   id: string;
   workspace_id: string;
@@ -24,6 +40,9 @@ interface Target {
   is_active: boolean;
   supersedes_id: string | null;
   created_at: string;
+  target_type: TargetType;
+  assigned_to_user_id: string | null;
+  assigned_to_email: string | null;
 }
 
 interface GapCalculation {
@@ -501,6 +520,7 @@ function QuarterlyBreakdown({ targets, anon, onEdit, onDelete }: {
         <thead>
           <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
             <th style={{ padding: '12px 0', textAlign: 'left', fontSize: 12, fontWeight: 600, color: colors.textMuted }}>Period</th>
+            <th style={{ padding: '12px 0', textAlign: 'left', fontSize: 12, fontWeight: 600, color: colors.textMuted }}>Type</th>
             <th style={{ padding: '12px 0', textAlign: 'left', fontSize: 12, fontWeight: 600, color: colors.textMuted }}>Pipeline</th>
             <th style={{ padding: '12px 0', textAlign: 'right', fontSize: 12, fontWeight: 600, color: colors.textMuted }}>Target</th>
             <th style={{ padding: '12px 0', textAlign: 'right', fontSize: 12, fontWeight: 600, color: colors.textMuted }}>Status</th>
@@ -516,6 +536,27 @@ function QuarterlyBreakdown({ targets, anon, onEdit, onDelete }: {
               onMouseLeave={() => setHoveredId(null)}
             >
               <td style={{ padding: '12px 0', fontSize: 14, color: colors.text }}>{target.period_label}</td>
+              <td style={{ padding: '12px 4px' }}>
+                {(() => {
+                  const tt = (target.target_type || 'company') as TargetType;
+                  const tc = TARGET_TYPE_COLORS[tt];
+                  return (
+                    <span style={{
+                      display: 'inline-block',
+                      padding: '2px 7px',
+                      borderRadius: 4,
+                      background: tc.bg,
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: tc.text,
+                      textTransform: 'capitalize',
+                    }}>
+                      {TARGET_TYPE_LABELS[tt]}
+                      {target.assigned_to_email ? ` · ${target.assigned_to_email}` : ''}
+                    </span>
+                  );
+                })()}
+              </td>
               <td style={{ padding: '12px 0', fontSize: 14, color: colors.textSecondary }}>
                 {target.pipeline_name ? anon.pipeline(target.pipeline_name) : <span style={{ fontStyle: 'italic', color: colors.textMuted }}>All pipelines</span>}
               </td>
@@ -689,6 +730,8 @@ function SetTargetModal({ existingTarget, revenueModel, onClose, onSave, isEditi
   const [notes, setNotes] = useState(existingTarget?.notes || '');
   const [pipelineId, setPipelineId] = useState<string>(existingTarget?.pipeline_id || '');
   const [pipelineName, setPipelineName] = useState<string>(existingTarget?.pipeline_name || '');
+  const [targetType, setTargetType] = useState<TargetType>(existingTarget?.target_type || 'company');
+  const [assignedToEmail, setAssignedToEmail] = useState(existingTarget?.assigned_to_email || '');
   const [pipelines, setPipelines] = useState<{ id: string; name: string }[]>([]);
   const [saving, setSaving] = useState(false);
 
@@ -716,6 +759,8 @@ function SetTargetModal({ existingTarget, revenueModel, onClose, onSave, isEditi
     }
   };
 
+  const showAssignment = targetType === 'team' || targetType === 'individual';
+
   const handleSave = async () => {
     setSaving(true);
     try {
@@ -725,6 +770,8 @@ function SetTargetModal({ existingTarget, revenueModel, onClose, onSave, isEditi
           notes: notes || null,
           period_start: periodStart,
           period_end: periodEnd,
+          target_type: targetType,
+          assigned_to_email: assignedToEmail || null,
         });
       } else {
         await api.post('/targets', {
@@ -737,6 +784,8 @@ function SetTargetModal({ existingTarget, revenueModel, onClose, onSave, isEditi
           pipeline_id: pipelineId || null,
           pipeline_name: pipelineName || null,
           notes,
+          target_type: targetType,
+          assigned_to_email: assignedToEmail || null,
         });
       }
       onSave();
@@ -844,6 +893,63 @@ function SetTargetModal({ existingTarget, revenueModel, onClose, onSave, isEditi
             </>
           )}
         </div>
+
+        {/* Target Type */}
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: colors.textMuted, marginBottom: 6 }}>
+            Target Type
+          </label>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
+            {(['company', 'board', 'team', 'individual'] as TargetType[]).map(t => {
+              const tc = TARGET_TYPE_COLORS[t];
+              const isSelected = targetType === t;
+              return (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => { setTargetType(t); if (t === 'company' || t === 'board') setAssignedToEmail(''); }}
+                  style={{
+                    padding: '7px 4px',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    fontFamily: fonts.sans,
+                    borderRadius: 5,
+                    border: isSelected ? `2px solid ${tc.text}` : `1px solid ${colors.border}`,
+                    background: isSelected ? tc.bg : 'transparent',
+                    color: isSelected ? tc.text : colors.textMuted,
+                    cursor: 'pointer',
+                    textTransform: 'capitalize',
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  {TARGET_TYPE_LABELS[t]}
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 4 }}>
+            Company/Board = workspace-wide · Team = manager's pipeline · Individual = specific rep
+          </div>
+        </div>
+
+        {/* Assignment Email (shown for team and individual) */}
+        {showAssignment && (
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: colors.textMuted, marginBottom: 6 }}>
+              Assigned To {targetType === 'team' ? 'Manager' : 'Rep'} Email
+            </label>
+            <input
+              type="email"
+              value={assignedToEmail}
+              onChange={e => setAssignedToEmail(e.target.value)}
+              placeholder={targetType === 'team' ? 'manager@company.com' : 'rep@company.com'}
+              style={editableInput}
+            />
+            <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 4 }}>
+              Email address from your CRM — controls whose pipeline this target applies to
+            </div>
+          </div>
+        )}
 
         {/* Dates — editable in both create and edit mode */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>

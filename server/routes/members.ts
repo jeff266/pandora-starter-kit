@@ -36,6 +36,7 @@ router.get('/', async (req: Request, res: Response) => {
       avatar_url: string | null;
       role_id: string;
       role_name: string;
+      pandora_role: string | null;
       invited_at: string;
       accepted_at: string | null;
       status: string;
@@ -49,6 +50,7 @@ router.get('/', async (req: Request, res: Response) => {
         u.avatar_url,
         wm.role_id,
         wr.name as role_name,
+        wm.pandora_role,
         wm.invited_at,
         wm.accepted_at,
         wm.status,
@@ -71,6 +73,7 @@ router.get('/', async (req: Request, res: Response) => {
         id: m.role_id,
         name: m.role_name,
       },
+      pandora_role: m.pandora_role ?? null,
       joined_at: m.accepted_at || m.invited_at,
       invited_at: m.invited_at,
       accepted_at: m.accepted_at,
@@ -860,6 +863,40 @@ router.post('/accept-invite/:token', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('[members] Error accepting invite:', err instanceof Error ? err.message : err);
     res.status(500).json({ error: 'Failed to accept invite' });
+  }
+});
+
+/**
+ * PATCH /:memberId/pandora-role
+ * Set or clear a member's Pandora role (data-visibility designation, not access control)
+ */
+router.patch('/:memberId/pandora-role', async (req: Request, res: Response) => {
+  try {
+    const workspaceId = req.params.workspaceId as string;
+    const memberId = req.params.memberId as string;
+    const { pandora_role } = req.body as { pandora_role: string | null };
+
+    const VALID_PANDORA_ROLES = ['cro', 'manager', 'ae', 'revops', 'admin', null];
+    if (!VALID_PANDORA_ROLES.includes(pandora_role)) {
+      return res.status(400).json({ error: 'Invalid pandora_role. Must be one of: cro, manager, ae, revops, admin, or null' });
+    }
+
+    const result = await query<{ id: string }>(
+      `UPDATE workspace_members
+       SET pandora_role = $1
+       WHERE id = $2 AND workspace_id = $3
+       RETURNING id`,
+      [pandora_role, memberId, workspaceId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Member not found' });
+    }
+
+    return res.json({ ok: true, pandora_role });
+  } catch (err) {
+    console.error('[members] Error updating pandora_role:', err instanceof Error ? err.message : err);
+    return res.status(500).json({ error: 'Failed to update Pandora role' });
   }
 });
 

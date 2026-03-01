@@ -94,7 +94,8 @@ export class SkillRuntime {
   async executeSkill(
     skill: SkillDefinition,
     workspaceId: string,
-    params?: any
+    params?: any,
+    userId?: string
   ): Promise<SkillResult> {
     const runId = randomUUID();
     const startTime = Date.now();
@@ -107,10 +108,10 @@ export class SkillRuntime {
       query(
         `SELECT pipeline_name, amount, metric, period_label, period_start, period_end
          FROM targets WHERE workspace_id = $1 AND is_active = true
-         ORDER BY created_at DESC`,
+         ORDER BY period_start ASC`,
         [workspaceId]
       ).catch(() => ({ rows: [] })),
-      buildWorkspaceContextBlock(workspaceId).catch(() => ''),
+      buildWorkspaceContextBlock(workspaceId, userId).catch(() => ''),
     ]);
 
     // Merge skill timeConfig with runtime overrides from params
@@ -210,6 +211,7 @@ export class SkillRuntime {
 
     const context: SkillExecutionContext = {
       workspaceId,
+      userId,
       skillId: skill.id,
       runId,
       businessContext,

@@ -98,6 +98,7 @@ import { filterResolver } from '../tools/filter-resolver.js';
 import type { FilterResolutionMetadata } from '../types/workspace-config.js';
 import { computeForecastAnnotations } from '../analysis/forecast-annotations.js';
 import { mergeAnnotationsWithUserState } from '../analysis/annotation-merge.js';
+import { getPandoraRole, getHeadlineTarget } from '../context/pandora-role.js';
 
 // ============================================================================
 // Helper: Safe Tool Execution
@@ -2233,13 +2234,56 @@ const checkQuotaConfig: ToolDefinition = {
       const hasQuotas = teamQuota !== null || repQuotas !== null;
       const hasRepQuotas = repQuotas !== null && Object.keys(repQuotas).length > 0;
 
-      let source: 'quotas' | 'revenue_target' | 'none';
+      let source: 'quotas' | 'revenue_target' | 'targets_table' | 'none';
       if (hasQuotas) {
         source = 'quotas';
       } else if (revenueTarget !== null) {
         source = 'revenue_target';
       } else {
         source = 'none';
+      }
+
+      // Fallback: read directly from the targets table (is_active = true only —
+      // never surfaces inactive/superseded rows such as the $2.8M orphan)
+      if (source === 'none') {
+        try {
+          // First: active target whose period covers today
+          let tResult = await query<{ team_quota: string }>(
+            `SELECT COALESCE(SUM(amount), 0)::numeric as team_quota
+             FROM targets
+             WHERE workspace_id = $1
+               AND is_active = true
+               AND period_start <= CURRENT_DATE
+               AND period_end >= CURRENT_DATE`,
+            [context.workspaceId]
+          );
+          let targetsQuota = Number(tResult.rows[0]?.team_quota ?? 0);
+
+          // Second: widen to all active targets if no current-period match
+          if (targetsQuota <= 0) {
+            tResult = await query<{ team_quota: string }>(
+              `SELECT COALESCE(SUM(amount), 0)::numeric as team_quota
+               FROM targets
+               WHERE workspace_id = $1
+                 AND is_active = true`,
+              [context.workspaceId]
+            );
+            targetsQuota = Number(tResult.rows[0]?.team_quota ?? 0);
+          }
+
+          if (targetsQuota > 0) {
+            return {
+              hasQuotas: true,
+              hasRepQuotas: false,
+              teamQuota: targetsQuota,
+              repQuotas: null,
+              coverageTarget,
+              source: 'targets_table' as const,
+            };
+          }
+        } catch {
+          // targets table unavailable — fall through to source = 'none'
+        }
       }
 
       return {
@@ -2630,6 +2674,19 @@ const forecastRollup: ToolDefinition = {
     return safeExecute('forecastRollup', async () => {
       const nameMap = await resolveOwnerNames(context.workspaceId);
 
+      // Build deal-owner filter for user-scoped roles (AE sees own deals; Manager falls back to all)
+      let dealOwnerClause = '';
+      if (context.userId) {
+        try {
+          const roleInfo = await getPandoraRole(context.workspaceId, context.userId);
+          if (roleInfo.pandoraRole === 'ae' && roleInfo.userEmail) {
+            const esc = roleInfo.userEmail.replace(/'/g, "''");
+            dealOwnerClause = ` AND owner_email = '${esc}'`;
+          }
+          // Manager: team-structure-based filtering deferred — falls back to unfiltered
+        } catch { /* non-fatal */ }
+      }
+
       const teamResult = await query(
         `SELECT
           forecast_category,
@@ -2639,7 +2696,7 @@ const forecastRollup: ToolDefinition = {
         FROM deals
         WHERE workspace_id = $1
           AND forecast_category IS NOT NULL
-          AND stage_normalized NOT IN ('closed_lost')
+          AND stage_normalized NOT IN ('closed_lost')${dealOwnerClause}
         GROUP BY forecast_category`,
         [context.workspaceId]
       );
@@ -2684,7 +2741,7 @@ const forecastRollup: ToolDefinition = {
         WHERE workspace_id = $1
           AND forecast_category IS NOT NULL
           AND stage_normalized NOT IN ('closed_lost')
-          AND owner IS NOT NULL
+          AND owner IS NOT NULL${dealOwnerClause}
         GROUP BY owner, forecast_category
         ORDER BY owner`,
         [context.workspaceId]
@@ -6450,6 +6507,14 @@ const mcResolveForecastWindow: ToolDefinition = {
         }
       }
 
+      // Third fallback: targets table (user-scoped via getHeadlineTarget)
+      if (!quota) {
+        try {
+          const headline = await getHeadlineTarget(context.workspaceId, context.userId);
+          if (headline.amount > 0) quota = headline.amount;
+        } catch { /* non-fatal */ }
+      }
+
       return {
         today: today.toISOString(),
         forecastWindowEnd: forecastWindowEnd.toISOString(),
@@ -6545,6 +6610,19 @@ const mcLoadOpenDeals: ToolDefinition = {
       const params: any[] = [context.workspaceId];
       let pipelineClause = '';
 
+      // Build deal-owner filter for user-scoped roles (AE sees own deals; Manager falls back to all)
+      let ownerClause = '';
+      if (context.userId) {
+        try {
+          const roleInfo = await getPandoraRole(context.workspaceId, context.userId);
+          if (roleInfo.pandoraRole === 'ae' && roleInfo.userEmail) {
+            const esc = roleInfo.userEmail.replace(/'/g, "''");
+            ownerClause = ` AND owner_email = '${esc}'`;
+          }
+          // Manager: team-structure-based filtering deferred — falls back to unfiltered
+        } catch { /* non-fatal */ }
+      }
+
       if (pipelineFilter && pipelineFilter !== 'all' && pipelineFilter !== 'default') {
         // Check if the filter value matches a confirmed analysis scope
         try {
@@ -6582,7 +6660,7 @@ const mcLoadOpenDeals: ToolDefinition = {
          WHERE workspace_id = $1
            AND stage_normalized NOT IN ('closed_won', 'closed_lost')
            AND (close_date IS NULL OR close_date <= NOW() + INTERVAL '24 months')
-           ${pipelineClause}
+           ${pipelineClause}${ownerClause}
          ORDER BY amount DESC NULLS LAST
          LIMIT 500`,
         params

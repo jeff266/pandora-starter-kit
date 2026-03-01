@@ -3,6 +3,9 @@ import { requirePermission, requireAnyPermission } from '../middleware/permissio
 import { query } from '../db.js';
 import { computeGap, getActiveTarget } from '../analysis/gap-calculator.js';
 import { clearWorkspaceMemoryCache } from '../context/workspace-memory.js';
+import { getPandoraRole, getTargetWhereClause } from '../context/pandora-role.js';
+
+const VALID_TARGET_TYPES = ['individual', 'company', 'team', 'board'] as const;
 
 const router = Router();
 
@@ -28,6 +31,25 @@ router.get('/:workspaceId/targets', async (req: Request, res: Response): Promise
       params.push(period_type);
     }
 
+    // Filter by user's Pandora visibility (skip for API-key requests — no user context)
+    const userId = (req as any).user?.user_id as string | undefined;
+    if (userId && req.authMethod !== 'api_key') {
+      const roleInfo = await getPandoraRole(workspaceId, userId).catch(() => null);
+      if (roleInfo) {
+        const { sql: whereClause, params: extraParams } = getTargetWhereClause(
+          roleInfo.pandoraRole,
+          roleInfo.workspaceRole,
+          userId,
+          roleInfo.userEmail,
+          params.length + 1
+        );
+        if (whereClause) {
+          sql += ` ${whereClause}`;
+          params.push(...extraParams);
+        }
+      }
+    }
+
     sql += ' ORDER BY period_start DESC';
 
     const result = await query(sql, params);
@@ -49,7 +71,7 @@ router.get('/:workspaceId/targets', async (req: Request, res: Response): Promise
 
 router.post('/:workspaceId/targets', async (req: Request, res: Response): Promise<void> => {
   const { workspaceId } = req.params;
-  const { metric, period_type, period_start, period_end, period_label, amount, notes, set_by, pipeline_id, pipeline_name } = req.body as {
+  const { metric, period_type, period_start, period_end, period_label, amount, notes, set_by, pipeline_id, pipeline_name, target_type, assigned_to_user_id, assigned_to_email } = req.body as {
     metric: string;
     period_type: string;
     period_start: string;
@@ -60,7 +82,15 @@ router.post('/:workspaceId/targets', async (req: Request, res: Response): Promis
     set_by?: string;
     pipeline_id?: string;
     pipeline_name?: string;
+    target_type?: string;
+    assigned_to_user_id?: string;
+    assigned_to_email?: string;
   };
+
+  if (target_type && !VALID_TARGET_TYPES.includes(target_type as any)) {
+    res.status(400).json({ error: `target_type must be one of: ${VALID_TARGET_TYPES.join(', ')}` });
+    return;
+  }
 
   if (!metric || !period_type || !period_start || !period_end || !period_label || amount == null) {
     res.status(400).json({ error: 'Missing required fields' });
@@ -104,8 +134,9 @@ router.post('/:workspaceId/targets', async (req: Request, res: Response): Promis
     const result = await query(
       `INSERT INTO targets (
         workspace_id, metric, period_type, period_start, period_end,
-        period_label, amount, pipeline_id, pipeline_name, set_by, notes, is_active, supersedes_id
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, true, $12)
+        period_label, amount, pipeline_id, pipeline_name, set_by, notes, is_active, supersedes_id,
+        target_type, assigned_to_user_id, assigned_to_email
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, true, $12, $13, $14, $15)
       RETURNING *`,
       [
         workspaceId,
@@ -120,6 +151,9 @@ router.post('/:workspaceId/targets', async (req: Request, res: Response): Promis
         set_by || null,
         notes || null,
         existingTargetId,
+        target_type || 'company',
+        assigned_to_user_id || null,
+        assigned_to_email || null,
       ]
     );
 
@@ -142,16 +176,24 @@ router.post('/:workspaceId/targets', async (req: Request, res: Response): Promis
 
 router.patch('/:workspaceId/targets/:targetId', async (req: Request, res: Response): Promise<void> => {
   const { workspaceId, targetId } = req.params;
-  const { amount, notes, set_by, period_start, period_end, period_label } = req.body as {
+  const { amount, notes, set_by, period_start, period_end, period_label, target_type, assigned_to_user_id, assigned_to_email } = req.body as {
     amount?: number;
     notes?: string;
     set_by?: string;
     period_start?: string;
     period_end?: string;
     period_label?: string;
+    target_type?: string;
+    assigned_to_user_id?: string | null;
+    assigned_to_email?: string | null;
   };
 
-  if (amount == null && notes == null && !period_start && !period_end && !period_label) {
+  if (target_type && !VALID_TARGET_TYPES.includes(target_type as any)) {
+    res.status(400).json({ error: `target_type must be one of: ${VALID_TARGET_TYPES.join(', ')}` });
+    return;
+  }
+
+  if (amount == null && notes == null && !period_start && !period_end && !period_label && !target_type && assigned_to_user_id === undefined && assigned_to_email === undefined) {
     res.status(400).json({ error: 'Must provide at least one field to update' });
     return;
   }
@@ -177,8 +219,9 @@ router.patch('/:workspaceId/targets/:targetId', async (req: Request, res: Respon
     const result = await query(
       `INSERT INTO targets (
         workspace_id, metric, period_type, period_start, period_end, period_label,
-        amount, pipeline_id, pipeline_name, set_by, notes, is_active, supersedes_id
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, true, $12)
+        amount, pipeline_id, pipeline_name, set_by, notes, is_active, supersedes_id,
+        target_type, assigned_to_user_id, assigned_to_email
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, true, $12, $13, $14, $15)
       RETURNING *`,
       [
         workspaceId,
@@ -193,6 +236,9 @@ router.patch('/:workspaceId/targets/:targetId', async (req: Request, res: Respon
         set_by || null,
         notes ?? currentTarget.notes,
         targetId,
+        target_type ?? currentTarget.target_type ?? 'company',
+        assigned_to_user_id !== undefined ? (assigned_to_user_id || null) : (currentTarget.assigned_to_user_id ?? null),
+        assigned_to_email !== undefined ? (assigned_to_email || null) : (currentTarget.assigned_to_email ?? null),
       ]
     );
 

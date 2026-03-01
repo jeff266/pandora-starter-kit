@@ -158,6 +158,7 @@ export interface SkillStep {
 
 export interface SkillExecutionContext {
   workspaceId: string;
+  userId?: string;
   skillId: string;
   runId: string;
   scopeId?: string;

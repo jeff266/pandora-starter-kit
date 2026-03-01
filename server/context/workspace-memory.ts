@@ -1,4 +1,5 @@
 import { query } from '../db.js';
+import { getPandoraRole, getTargetWhereClause } from './pandora-role.js';
 
 interface CacheEntry {
   block: string;
@@ -10,7 +11,12 @@ const cache = new Map<string, CacheEntry>();
 
 export function clearWorkspaceMemoryCache(workspaceId?: string): void {
   if (workspaceId) {
-    cache.delete(workspaceId);
+    // Clear all cache keys for this workspace (covers per-user variants)
+    for (const key of cache.keys()) {
+      if (key === workspaceId || key.startsWith(`${workspaceId}:`)) {
+        cache.delete(key);
+      }
+    }
   } else {
     cache.clear();
   }
@@ -22,10 +28,29 @@ function fmt(n: number): string {
   return `$${n}`;
 }
 
-export async function buildWorkspaceContextBlock(workspaceId: string): Promise<string> {
-  const cached = cache.get(workspaceId);
+export async function buildWorkspaceContextBlock(workspaceId: string, userId?: string): Promise<string> {
+  const cacheKey = userId ? `${workspaceId}:${userId}` : workspaceId;
+  const cached = cache.get(cacheKey);
   if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
     return cached.block;
+  }
+
+  // Resolve user visibility for targets filtering when userId provided
+  let targetsWhereClause = '';
+  let targetsExtraParams: any[] = [];
+  if (userId) {
+    const roleInfo = await getPandoraRole(workspaceId, userId).catch(() => null);
+    if (roleInfo) {
+      const { sql, params } = getTargetWhereClause(
+        roleInfo.pandoraRole,
+        roleInfo.workspaceRole,
+        userId,
+        roleInfo.userEmail,
+        2
+      );
+      targetsWhereClause = sql;
+      targetsExtraParams = params;
+    }
   }
 
   const [contextRow, targetsRow, stagesRow, goalsRow, scopesRow] = await Promise.all([
@@ -36,9 +61,9 @@ export async function buildWorkspaceContextBlock(workspaceId: string): Promise<s
     ).catch(() => null),
     query(
       `SELECT pipeline_name, amount, metric, period_label, period_start, period_end
-       FROM targets WHERE workspace_id = $1 AND is_active = true
-       ORDER BY created_at DESC`,
-      [workspaceId]
+       FROM targets WHERE workspace_id = $1 AND is_active = true ${targetsWhereClause}
+       ORDER BY period_start ASC`,
+      [workspaceId, ...targetsExtraParams]
     ).catch(() => null),
     query(
       `SELECT stage_name, is_active, display_order
@@ -85,12 +110,30 @@ export async function buildWorkspaceContextBlock(workspaceId: string): Promise<s
   if (targets.length > 0) {
     lines.push('');
     lines.push('REVENUE QUOTAS (active):');
+
+    // Compute annual total by summing all active targets
+    const annualTotal = targets.reduce((sum: number, t: any) => sum + Number(t.amount ?? 0), 0);
+
+    // Check if all targets share the same pipeline name
+    const pipelineNames = [...new Set(targets.map((t: any) => t.pipeline_name).filter(Boolean))];
+    const sharedPipeline = pipelineNames.length === 1 ? pipelineNames[0] : null;
+
+    // Show annual total line when there are multiple targets (otherwise it's redundant)
+    if (targets.length > 1 && annualTotal > 0) {
+      const breakdownParts = targets
+        .map((t: any) => `${t.period_label ?? 'period'} ${fmt(Number(t.amount ?? 0))}`)
+        .join(' + ');
+      const pipelinePrefix = sharedPipeline ? `${sharedPipeline} — ` : '';
+      lines.push(`- ${pipelinePrefix}FY Annual Total: ${fmt(annualTotal)} (${breakdownParts})`);
+    }
+
+    // Individual quarter lines
     for (const t of targets) {
       const pipelineLabel = t.pipeline_name ? t.pipeline_name : 'All Pipelines';
       const amountStr = t.amount != null ? fmt(Number(t.amount)) : '?';
-      const metricStr = t.metric || 'bookings';
+      const metricStr = t.metric || 'ARR';
       const periodStr = t.period_label || (t.period_start ? `${t.period_start} to ${t.period_end}` : '');
-      lines.push(`- ${pipelineLabel}: ${amountStr} ${metricStr}${periodStr ? ` | ${periodStr}` : ''}`);
+      lines.push(`- ${pipelineLabel} ${periodStr}: ${amountStr} ${metricStr}`);
     }
   }
 
@@ -215,6 +258,6 @@ export async function buildWorkspaceContextBlock(workspaceId: string): Promise<s
   const meaningful = lines.length > 2;
 
   const result = meaningful ? block : '';
-  cache.set(workspaceId, { block: result, ts: Date.now() });
+  cache.set(cacheKey, { block: result, ts: Date.now() });
   return result;
 }

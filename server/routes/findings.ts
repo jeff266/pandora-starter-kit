@@ -9,6 +9,7 @@ import { generatePipelineSnapshot } from '../analysis/pipeline-snapshot.js';
 import { getGoals } from '../context/index.js';
 import { configLoader } from '../config/workspace-config-loader.js';
 import { getScopeWhereClause, type ActiveScope } from '../config/scope-loader.js';
+import { getPandoraRole, getHeadlineTarget } from '../context/pandora-role.js';
 
 const router = Router();
 
@@ -397,6 +398,31 @@ router.get('/:workspaceId/pipeline/pipelines', async (req: Request, res: Respons
 router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response): Promise<void> => {
   try {
     const workspaceId = req.params.workspaceId as string;
+    const userId = (req as any).user?.user_id as string | undefined;
+
+    // Resolve Pandora role for deal-scoping and quota selection
+    let dealOwnerFilter = '';  // SQL clause appended to deal WHERE clauses
+    let pandoraUserEmail: string | null = null;
+    let pandoraRoleValue: string | null = null;
+
+    if (userId) {
+      try {
+        const roleInfo = await getPandoraRole(workspaceId, userId);
+        pandoraUserEmail = roleInfo.userEmail;
+        pandoraRoleValue = roleInfo.pandoraRole;
+
+        // AE: filter deals to their own pipeline only (owner_email match)
+        // Manager: team-based filter is deferred — falls back to unfiltered when team structure isn't configured
+        if (roleInfo.pandoraRole === 'ae' && roleInfo.userEmail) {
+          const escaped = roleInfo.userEmail.replace(/'/g, "''");
+          dealOwnerFilter = ` AND d.owner_email = '${escaped}'`;
+        }
+        // Manager: TODO — apply direct-report email filter from context_layer.team_structure
+        // when team_structure is populated. Currently falls through to unfiltered (company-wide).
+      } catch {
+        // Non-fatal — proceed with no user-scoped filter
+      }
+    }
 
     // Support both legacy 'pipeline' and new 'scopeId' query params
     const scopeId = req.query.scopeId as string | undefined;
@@ -516,6 +542,9 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
           OR sc.stage_name IS NOT NULL
         )`;
     }
+
+    // Append deal-owner filter (AE sees only their own deals; Manager fallback = all)
+    scopeFilterClause += dealOwnerFilter;
 
     let excludeStagesClause = '';
     const excludeParams: any[] = [];
