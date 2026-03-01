@@ -40,8 +40,11 @@ import { randomUUID } from 'crypto';
 import { getEvidenceBuilder } from './evidence-builder.js';
 import { configLoader } from '../config/workspace-config-loader.js';
 import { extractFindings, insertFindings } from '../findings/extractor.js';
+import { processFindingPersistence } from '../findings/persistence-engine.js';
 import { parseActionsFromOutput, insertExtractedActions } from '../actions/index.js';
 import { getConsultantContext } from './consultant-context.js';
+import { goalService } from '../goals/goal-service.js';
+import { motionService } from '../goals/motion-service.js';
 import pool from '../db.js';
 
 // ============================================================================
@@ -123,7 +126,7 @@ export class SkillRuntime {
       console.warn(`[Skill Runtime] Failed to load consultant context for ${workspaceId}`);
     }
 
-    const businessContext = {
+    const businessContext: Record<string, any> = {
       business_model: contextData?.business_model || {},
       team_structure: contextData?.team_structure || {},
       goals_and_targets: contextData?.goals_and_targets || {},
@@ -134,6 +137,62 @@ export class SkillRuntime {
       voiceBlock,
       consultantContext: consultantContextBlock,
     };
+
+    // Structured goal context (goal-aware skill prompts)
+    try {
+      const [activeGoals, activeMotions] = await Promise.all([
+        goalService.list(workspaceId, { is_active: true }),
+        motionService.list(workspaceId),
+      ]);
+
+      businessContext.motions = activeMotions.map((m) => ({
+        type: m.type,
+        label: m.label,
+        pipeline_names: m.pipeline_names,
+        thresholds: m.thresholds_override,
+        funnel: m.funnel_model,
+      }));
+
+      businessContext.structured_goals = await Promise.all(
+        activeGoals.map(async (goal) => {
+          const [current, latestSnap] = await Promise.all([
+            goalService.computeCurrentValue(workspaceId, goal),
+            query(
+              'SELECT * FROM goal_snapshots WHERE goal_id = $1 ORDER BY snapshot_date DESC LIMIT 1',
+              [goal.id],
+            ),
+          ]);
+          const snap = latestSnap.rows[0] as any;
+          const motion = activeMotions.find((m) => m.id === goal.motion_id);
+          return {
+            goal_id: goal.id,
+            label: goal.label,
+            metric_type: goal.metric_type,
+            level: goal.level,
+            motion: motion
+              ? { type: motion.type, label: motion.label, pipeline_names: motion.pipeline_names }
+              : null,
+            target: goal.target_value,
+            current: current.current_value,
+            attainment_pct: snap?.attainment_pct ?? 0,
+            gap: snap?.gap ?? goal.target_value - current.current_value,
+            trajectory: snap?.trajectory ?? 'unknown',
+            days_remaining: snap?.days_remaining ?? null,
+            required_run_rate: snap?.required_run_rate ?? null,
+            actual_run_rate: snap?.actual_run_rate ?? null,
+            projected_landing: snap?.projected_landing ?? null,
+            period: `${goal.period_start} to ${goal.period_end}`,
+          };
+        }),
+      );
+    } catch (err) {
+      console.warn(
+        '[BusinessContext] Could not load structured goals:',
+        err instanceof Error ? err.message : err,
+      );
+      businessContext.structured_goals = [];
+      businessContext.motions = [];
+    }
 
     const scopeFilters = params?.scope_filters || [];
 
@@ -250,8 +309,11 @@ export class SkillRuntime {
       try {
         const findings = await extractFindings(skill.id, runId, workspaceId, context.stepResults);
         if (findings.length > 0) {
-          await insertFindings(findings);
-          console.log(`[Findings] Extracted ${findings.length} findings from ${skill.id} run ${runId}`);
+          const insertedFindings = await insertFindings(findings);
+          console.log(`[Findings] Extracted ${insertedFindings.length} findings from ${skill.id} run ${runId}`);
+          processFindingPersistence(workspaceId, runId, skill.id, insertedFindings).catch((err) =>
+            console.error('[Persistence] engine error:', err instanceof Error ? err.message : err),
+          );
         }
       } catch (err) {
         console.error(`[Findings] Extraction failed for ${skill.id}:`, err instanceof Error ? err.message : err);

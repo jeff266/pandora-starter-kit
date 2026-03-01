@@ -4,6 +4,7 @@ import { query } from '../db.js';
 import { getConnectorCredentials } from '../lib/credential-store.js';
 import { HubSpotClient } from '../connectors/hubspot/client.js';
 import { extractFindings, insertFindings } from '../findings/extractor.js';
+import { processFindingPersistence } from '../findings/persistence-engine.js';
 import { generatePipelineSnapshot } from '../analysis/pipeline-snapshot.js';
 import { getGoals } from '../context/index.js';
 import { configLoader } from '../config/workspace-config-loader.js';
@@ -1265,8 +1266,11 @@ router.post('/:workspaceId/admin/backfill-findings', async (req: Request, res: R
           continue;
         }
 
-        const inserted = await insertFindings(findings);
-        totalFindings += inserted;
+        const insertedFindings = await insertFindings(findings);
+        totalFindings += insertedFindings.length;
+        processFindingPersistence(workspaceId, run.run_id, run.skill_id, insertedFindings).catch((err) =>
+          console.error('[Persistence] backfill error:', err instanceof Error ? err.message : err),
+        );
         processedRuns++;
       } catch (err) {
         console.error(`[backfill] Error processing run ${run.run_id} (${run.skill_id}):`, err instanceof Error ? err.message : err);

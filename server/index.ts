@@ -114,6 +114,9 @@ import forecastSnapshotsRouter from './routes/forecast-snapshots.js';
 import briefingRouter from './routes/briefing.js';
 import viewPreferenceRouter from './routes/view-preference.js';
 import conversationStreamRouter from './routes/conversation-stream.js';
+import motionsRouter from './routes/motions.js';
+import goalsRouter from './routes/goals.js';
+import goalSnapshotsRouter from './routes/goal-snapshots.js';
 
 dotenv.config();
 
@@ -329,6 +332,9 @@ workspaceApiRouter.use(toolManifestRouter);
 workspaceApiRouter.use(briefingRouter);
 workspaceApiRouter.use(viewPreferenceRouter);
 workspaceApiRouter.use(conversationStreamRouter);
+workspaceApiRouter.use(motionsRouter);
+workspaceApiRouter.use(goalsRouter);
+workspaceApiRouter.use(goalSnapshotsRouter);
 app.use("/api/workspaces", workspaceApiRouter);
 
 // Webhooks router - intentionally public with token validation in handlers

@@ -2,6 +2,9 @@ import { query } from '../db.js';
 import { runScopedAnalysis } from '../analysis/scoped-analysis.js';
 import { tryHeuristic } from './heuristic-router.js';
 import { classifyDirectQuestion, classifyIntent, logIntentClassification } from './intent-classifier.js';
+import { goalService } from '../goals/goal-service.js';
+import { createInvestigationPlan } from '../investigation/planner.js';
+import { executeInvestigation } from '../investigation/executor.js';
 import {
   getConversationState,
   createConversationState,
@@ -233,6 +236,47 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
     }
   } catch (err) {
     console.warn('[orchestrator] Heuristic router failed, continuing to LLM path:', err);
+  }
+
+  // ── Goal-Aware Investigation Routing ─────────────────────────────────────────
+  // When a question references goal-tracking keywords and structured goals exist,
+  // route through the investigation engine for deeper, causal analysis.
+  const goalKeywords = /\b(number|target|goal|quota|hitting|miss|track|forecast|behind|ahead|gap|pace|run rate|attainment|coverage|on.?track)\b/i;
+  if (!answer && goalKeywords.test(message)) {
+    try {
+      const goals = await goalService.list(workspaceId, { is_active: true });
+      if (goals.length > 0) {
+        console.log(`[Orchestrator] Goal-aware investigation routing for: "${message.slice(0, 80)}"`);
+        const plan = await createInvestigationPlan(workspaceId, message, { maxSteps: 5 });
+        const result = await executeInvestigation(plan, {});
+
+        answer = result.synthesis;
+        routerDecision = 'investigation';
+        dataStrategy = 'goal_aware_investigation';
+        tokensUsed = result.total_tokens;
+
+        await appendMessage(workspaceId, channelId, threadId, {
+          role: 'assistant',
+          content: answer,
+          timestamp: new Date().toISOString(),
+        });
+        await updateTurnMetrics(workspaceId, channelId, threadId, tokensUsed);
+
+        return {
+          answer,
+          thread_id: threadId,
+          scope: { type: scopeType, entity_id: entityId, rep_email: repEmail },
+          router_decision: routerDecision,
+          data_strategy: dataStrategy,
+          tokens_used: tokensUsed,
+          investigation_steps: result.steps_executed,
+          response_id: randomUUID(),
+          feedback_enabled: true,
+        } as any;
+      }
+    } catch (err) {
+      console.error('[Orchestrator] Investigation engine error, falling through:', err instanceof Error ? err.message : err);
+    }
   }
 
   if (!answer) {

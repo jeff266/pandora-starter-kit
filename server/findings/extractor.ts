@@ -10,6 +10,7 @@ function isValidUUID(val: unknown): val is string {
 }
 
 export interface FindingRow {
+  id?: string;
   workspace_id: string;
   skill_run_id: string;
   skill_id: string;
@@ -20,6 +21,7 @@ export interface FindingRow {
   account_id?: string;
   owner_email?: string;
   metadata: Record<string, any>;
+  metric_value?: number;
   assumptions?: FindingAssumption[];
 }
 
@@ -593,8 +595,8 @@ function extractGenericFallback(
   return findings;
 }
 
-export async function insertFindings(findings: FindingRow[]): Promise<number> {
-  if (!findings || findings.length === 0) return 0;
+export async function insertFindings(findings: FindingRow[]): Promise<FindingRow[]> {
+  if (!findings || findings.length === 0) return [];
 
   const workspaceId = findings[0].workspace_id;
   const skillId = findings[0].skill_id;
@@ -605,7 +607,7 @@ export async function insertFindings(findings: FindingRow[]): Promise<number> {
   );
 
   const BATCH_SIZE = 100;
-  let inserted = 0;
+  const insertedFindings: FindingRow[] = [];
 
   for (let i = 0; i < findings.length; i += BATCH_SIZE) {
     const batch = findings.slice(i, i + BATCH_SIZE);
@@ -632,15 +634,18 @@ export async function insertFindings(findings: FindingRow[]): Promise<number> {
       );
     }
 
-    await query(
+    const result = await query<{ id: string }>(
       `INSERT INTO findings (workspace_id, skill_run_id, skill_id, severity, category, message, deal_id, owner_email, metadata, assumptions)
-       VALUES ${placeholders.join(', ')}`,
+       VALUES ${placeholders.join(', ')}
+       RETURNING id`,
       values,
     );
 
-    inserted += batch.length;
+    for (let j = 0; j < result.rows.length; j++) {
+      insertedFindings.push({ ...batch[j], id: result.rows[j].id } as FindingRow);
+    }
   }
 
-  console.log(`[FindingsExtractor] Inserted ${inserted} findings for ${skillId} in workspace ${workspaceId}`);
-  return inserted;
+  console.log(`[FindingsExtractor] Inserted ${insertedFindings.length} findings for ${skillId} in workspace ${workspaceId}`);
+  return insertedFindings;
 }
