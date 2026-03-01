@@ -49,9 +49,9 @@ export function generateMotionsHypothesis(
         Filter: `pipeline = "${p.pipeline}"`,
         Deals: p.count,
         'Avg Size': fmtMoney(p.avg_amount),
-        'Avg Cycle': p.avg_cycle_days != null ? `${Math.round(p.avg_cycle_days)}d` : '—',
+        'Won Cycle': p.avg_cycle_days != null ? `${Math.round(p.avg_cycle_days)}d` : '—',
       })),
-      columns: ['Motion', 'Filter', 'Deals', 'Avg Size', 'Avg Cycle'],
+      columns: ['Motion', 'Filter', 'Deals', 'Avg Size', 'Won Cycle'],
       confidence: 0.85,
       evidence: `${displayPipelines.length} distinct pipelines with different deal profiles`,
       suggested_value: {

@@ -28,7 +28,9 @@ export async function scanCRM(workspaceId: string): Promise<CRMScanResult> {
                COUNT(*) AS count,
                COALESCE(SUM(amount), 0) AS total_amount,
                COALESCE(AVG(amount), 0) AS avg_amount,
-               AVG(EXTRACT(EPOCH FROM (close_date - created_at))/86400) AS avg_cycle_days
+               AVG(
+                 EXTRACT(EPOCH FROM (close_date - created_at))/86400
+               ) FILTER (WHERE stage_normalized = 'closed_won' AND close_date IS NOT NULL AND created_at IS NOT NULL) AS avg_cycle_days
         FROM deals WHERE workspace_id = $1::uuid AND amount IS NOT NULL
         GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 10
       `, [workspaceId]);
