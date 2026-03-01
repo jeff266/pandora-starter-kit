@@ -1,7 +1,7 @@
 import { query } from '../db.js';
 import {
   getMonday, endOfWeek, subDays, quarterStart, quarterEnd, getQuarter,
-  daysRemainingInQuarter, getWonLostStages, getWonStages, getLostStages,
+  daysRemainingInQuarter, getWonLostStages,
   getCurrentQuota, formatCompact, ordinal, buildOpenFilter,
 } from './brief-utils.js';
 import { determineBriefType, determineEditorialFocus } from './editorial-engine.js';
@@ -65,7 +65,6 @@ export async function assembleBrief(
 
 async function getTheNumber(workspaceId: string, wonLostStages: string[], now: Date): Promise<TheNumber> {
   const openFilter = buildOpenFilter(wonLostStages);
-  const wonStages = await getWonStages(workspaceId);
   const quota = await getCurrentQuota(workspaceId);
   const daysRemaining = daysRemainingInQuarter(now);
 
@@ -85,10 +84,9 @@ async function getTheNumber(workspaceId: string, wonLostStages: string[], now: D
   const fResult = forecastRes.rows[0]?.result || {};
 
   let wonThisPeriod = 0;
-  if (quota && wonStages.length > 0) {
-    const wonFilter = wonStages.map(s => `'${s.replace(/'/g, "''")}'`).join(',');
+  if (quota) {
     const wonRes = await query<{ total: string }>(
-      `SELECT COALESCE(SUM(amount),0)::text as total FROM deals WHERE workspace_id = $1 AND stage IN (${wonFilter}) AND close_date >= $2 AND close_date <= $3`,
+      `SELECT COALESCE(SUM(amount),0)::text as total FROM deals WHERE workspace_id = $1 AND stage_normalized = 'closed_won' AND close_date >= $2 AND close_date <= $3`,
       [workspaceId, quota.period_start, quota.period_end]
     );
     wonThisPeriod = parseFloat(wonRes.rows[0]?.total || '0');
@@ -134,23 +132,18 @@ async function getTheNumber(workspaceId: string, wonLostStages: string[], now: D
 }
 
 async function getWhatChanged(workspaceId: string, wonLostStages: string[], since: Date, priorStart: Date, priorEnd: Date): Promise<WhatChanged & { total_pipeline_delta?: number }> {
-  const wonStages = await getWonStages(workspaceId);
-  const lostStages = await getLostStages(workspaceId);
   const openFilter = buildOpenFilter(wonLostStages);
-
   const sinceStr = since.toISOString();
   const priorStartStr = priorStart.toISOString();
   const priorEndStr = priorEnd.toISOString();
-  const wonFilter = wonStages.length ? wonStages.map(s => `'${s.replace(/'/g, "''")}'`).join(',') : "'__none__'";
-  const lostFilter = lostStages.length ? lostStages.map(s => `'${s.replace(/'/g, "''")}'`).join(',') : "'__none__'";
 
   const [thisCreated, thisWon, thisLost, priorCreated, priorWon, priorLost, pushed] = await Promise.all([
     query<{ cnt: string; total: string }>(`SELECT COUNT(*)::text as cnt, COALESCE(SUM(amount),0)::text as total FROM deals WHERE workspace_id = $1 AND created_at >= $2`, [workspaceId, sinceStr]),
-    query<{ cnt: string; total: string }>(`SELECT COUNT(*)::text as cnt, COALESCE(SUM(amount),0)::text as total FROM deals WHERE workspace_id = $1 AND stage IN (${wonFilter}) AND close_date >= $2`, [workspaceId, sinceStr]),
-    query<{ cnt: string; total: string }>(`SELECT COUNT(*)::text as cnt, COALESCE(SUM(amount),0)::text as total FROM deals WHERE workspace_id = $1 AND stage IN (${lostFilter}) AND updated_at >= $2`, [workspaceId, sinceStr]),
+    query<{ cnt: string; total: string }>(`SELECT COUNT(*)::text as cnt, COALESCE(SUM(amount),0)::text as total FROM deals WHERE workspace_id = $1 AND stage_normalized = 'closed_won' AND close_date >= $2`, [workspaceId, sinceStr]),
+    query<{ cnt: string; total: string }>(`SELECT COUNT(*)::text as cnt, COALESCE(SUM(amount),0)::text as total FROM deals WHERE workspace_id = $1 AND stage_normalized = 'closed_lost' AND updated_at >= $2`, [workspaceId, sinceStr]),
     query<{ cnt: string; total: string }>(`SELECT COUNT(*)::text as cnt, COALESCE(SUM(amount),0)::text as total FROM deals WHERE workspace_id = $1 AND created_at >= $2 AND created_at < $3`, [workspaceId, priorStartStr, priorEndStr]),
-    query<{ cnt: string; total: string }>(`SELECT COUNT(*)::text as cnt, COALESCE(SUM(amount),0)::text as total FROM deals WHERE workspace_id = $1 AND stage IN (${wonFilter}) AND close_date >= $2 AND close_date < $3`, [workspaceId, priorStartStr, priorEndStr]),
-    query<{ cnt: string; total: string }>(`SELECT COUNT(*)::text as cnt, COALESCE(SUM(amount),0)::text as total FROM deals WHERE workspace_id = $1 AND stage IN (${lostFilter}) AND updated_at >= $2 AND updated_at < $3`, [workspaceId, priorStartStr, priorEndStr]),
+    query<{ cnt: string; total: string }>(`SELECT COUNT(*)::text as cnt, COALESCE(SUM(amount),0)::text as total FROM deals WHERE workspace_id = $1 AND stage_normalized = 'closed_won' AND close_date >= $2 AND close_date < $3`, [workspaceId, priorStartStr, priorEndStr]),
+    query<{ cnt: string; total: string }>(`SELECT COUNT(*)::text as cnt, COALESCE(SUM(amount),0)::text as total FROM deals WHERE workspace_id = $1 AND stage_normalized = 'closed_lost' AND updated_at >= $2 AND updated_at < $3`, [workspaceId, priorStartStr, priorEndStr]),
     query<{ cnt: string; total: string }>(`SELECT COUNT(*)::text as cnt, COALESCE(SUM(amount),0)::text as total FROM deals WHERE workspace_id = $1 AND ${openFilter} AND updated_at >= $2 AND custom_fields->>'original_close_date' IS NOT NULL AND close_date > (custom_fields->>'original_close_date')::date`, [workspaceId, sinceStr]),
   ]);
 
@@ -207,15 +200,13 @@ async function getSegments(workspaceId: string, wonLostStages: string[]): Promis
 
 async function getReps(workspaceId: string, wonLostStages: string[]): Promise<Reps> {
   const openFilter = buildOpenFilter(wonLostStages);
-  const wonStages = await getWonStages(workspaceId);
   const quota = await getCurrentQuota(workspaceId);
-  const wonFilter = wonStages.length ? wonStages.map(s => `'${s.replace(/'/g, "''")}'`).join(',') : "'__none__'";
   const ps = quota?.period_start || quarterStart(new Date()).toISOString().split('T')[0];
   const pe = quota?.period_end || quarterEnd(new Date()).toISOString().split('T')[0];
 
   const [repRes, closedRes, quotaRes, findingsRes] = await Promise.all([
     query<any>(`SELECT COALESCE(owner_email, '') as email, COALESCE(owner_name, owner_email, 'Unknown') as name, COALESCE(SUM(amount),0)::text as pipeline, COUNT(*)::text as cnt FROM deals WHERE workspace_id = $1 AND ${openFilter} GROUP BY owner_email, owner_name ORDER BY SUM(amount) DESC`, [workspaceId]),
-    query<any>(`SELECT COALESCE(owner_email,'') as email, COALESCE(SUM(amount),0)::text as closed FROM deals WHERE workspace_id = $1 AND stage IN (${wonFilter}) AND close_date >= $2 AND close_date <= $3 GROUP BY owner_email`, [workspaceId, ps, pe]),
+    query<any>(`SELECT COALESCE(owner_email,'') as email, COALESCE(SUM(amount),0)::text as closed FROM deals WHERE workspace_id = $1 AND stage_normalized = 'closed_won' AND close_date >= $2 AND close_date <= $3 GROUP BY owner_email`, [workspaceId, ps, pe]),
     query<any>(`SELECT rq.rep_identifier, rq.quota_value::text FROM rep_quotas rq JOIN quota_periods qp ON qp.id = rq.quota_period_id WHERE rq.workspace_id = $1 AND NOW() BETWEEN qp.period_start AND qp.period_end`, [workspaceId]),
     query<any>(`SELECT COALESCE(owner_email, entity_id, '') as entity_id, message, COALESCE(escalation_level,0)::text as escalation_level, COALESCE(times_flagged,1)::text as times_flagged FROM findings WHERE workspace_id = $1 AND resolved_at IS NULL AND severity IN ('act', 'watch') ORDER BY escalation_level DESC, times_flagged DESC`, [workspaceId]),
   ]);
@@ -248,14 +239,12 @@ async function getReps(workspaceId: string, wonLostStages: string[]): Promise<Re
 
 async function getDealsToWatch(workspaceId: string, wonLostStages: string[], since?: Date): Promise<DealsToWatch> {
   const openFilter = buildOpenFilter(wonLostStages);
-  const wonStages = await getWonStages(workspaceId);
-  const wonFilter = wonStages.length ? wonStages.map(s => `'${s.replace(/'/g, "''")}'`).join(',') : "'__none__'";
   const sinceStr = (since || subDays(new Date(), 7)).toISOString();
 
   const [topDeals, riskyDeals, wonDeals] = await Promise.all([
     query<any>(`SELECT id::text, name, amount, stage, pipeline, COALESCE(owner_name,owner_email,'') as owner, close_date::text FROM deals WHERE workspace_id = $1 AND ${openFilter} ORDER BY amount DESC LIMIT 5`, [workspaceId]),
     query<any>(`SELECT DISTINCT d.id::text, d.name, d.amount, d.stage, COALESCE(d.owner_name,d.owner_email,'') as owner, d.close_date::text, f.message as signal_text, f.severity FROM findings f JOIN deals d ON d.id::text = f.deal_id AND d.workspace_id = f.workspace_id WHERE f.workspace_id = $1 AND f.resolved_at IS NULL AND f.severity IN ('act','watch') ORDER BY d.amount DESC LIMIT 5`, [workspaceId]),
-    query<any>(`SELECT id::text, name, amount, stage, COALESCE(owner_name,owner_email,'') as owner FROM deals WHERE workspace_id = $1 AND stage IN (${wonFilter}) AND close_date >= $2 ORDER BY amount DESC LIMIT 3`, [workspaceId, sinceStr]),
+    query<any>(`SELECT id::text, name, amount, stage, COALESCE(owner_name,owner_email,'') as owner FROM deals WHERE workspace_id = $1 AND stage_normalized = 'closed_won' AND close_date >= $2 ORDER BY amount DESC LIMIT 3`, [workspaceId, sinceStr]),
   ]);
 
   const dealMap = new Map<string, any>();
@@ -328,8 +317,6 @@ async function assembleFridayRecap(workspaceId: string, now: Date, briefType: Br
   const monday = getMonday(now);
   const priorMonday = subDays(monday, 7);
   const wonLostStages = await getWonLostStages(workspaceId);
-  const wonStages = await getWonStages(workspaceId);
-  const wonFilter = wonStages.length ? wonStages.map(s => `'${s.replace(/'/g, "''")}'`).join(',') : "'__none__'";
 
   const [theNumber, whatChanged, segments, reps, deals] = await Promise.all([
     getTheNumber(workspaceId, wonLostStages, now),
@@ -340,7 +327,7 @@ async function assembleFridayRecap(workspaceId: string, now: Date, briefType: Br
   ]);
 
   reps.items.sort((a: any, b: any) => (b.closed || 0) - (a.closed || 0));
-  const wonThisWeek = await query<any>(`SELECT id::text, name, amount, stage, COALESCE(owner_name,owner_email,'') as owner FROM deals WHERE workspace_id = $1 AND stage IN (${wonFilter}) AND close_date >= $2 ORDER BY amount DESC LIMIT 5`, [workspaceId, monday.toISOString().split('T')[0]]);
+  const wonThisWeek = await query<any>(`SELECT id::text, name, amount, stage, COALESCE(owner_name,owner_email,'') as owner FROM deals WHERE workspace_id = $1 AND stage_normalized = 'closed_won' AND close_date >= $2 ORDER BY amount DESC LIMIT 5`, [workspaceId, monday.toISOString().split('T')[0]]);
   (deals as any).won_this_week = wonThisWeek.rows.map((d: any) => ({ id: d.id, name: d.name, amount: parseFloat(d.amount||'0'), owner: d.owner }));
 
   const editorialFocus = determineEditorialFocus(briefType, theNumber, whatChanged as any, reps, deals, theNumber.days_remaining);

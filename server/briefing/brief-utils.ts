@@ -50,39 +50,24 @@ export function daysRemainingInQuarter(date: Date): number {
   return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
 }
 
-export async function getWonLostStages(workspaceId: string): Promise<string[]> {
-  const result = await query<{ stage_name: string }>(
-    'SELECT stage_name FROM stage_configs WHERE workspace_id = $1 AND (is_won = true OR is_lost = true)',
-    [workspaceId]
-  );
-  return result.rows.map(r => r.stage_name);
+export async function getWonLostStages(_workspaceId: string): Promise<string[]> {
+  return ['closed_won', 'closed_lost'];
 }
 
-export async function getWonStages(workspaceId: string): Promise<string[]> {
-  const result = await query<{ stage_name: string }>(
-    'SELECT stage_name FROM stage_configs WHERE workspace_id = $1 AND is_won = true',
-    [workspaceId]
-  );
-  return result.rows.map(r => r.stage_name);
+export async function getWonStages(_workspaceId: string): Promise<string[]> {
+  return ['closed_won'];
 }
 
-export async function getLostStages(workspaceId: string): Promise<string[]> {
-  const result = await query<{ stage_name: string }>(
-    'SELECT stage_name FROM stage_configs WHERE workspace_id = $1 AND is_lost = true',
-    [workspaceId]
-  );
-  return result.rows.map(r => r.stage_name);
+export async function getLostStages(_workspaceId: string): Promise<string[]> {
+  return ['closed_lost'];
 }
 
-export function buildOpenFilter(wonLostStages: string[]): string {
-  if (wonLostStages.length === 0) return 'TRUE';
-  const escaped = wonLostStages.map(s => `'${s.replace(/'/g, "''")}'`).join(', ');
-  return `stage NOT IN (${escaped})`;
+export function buildOpenFilter(_wonLostStages: string[]): string {
+  return `stage_normalized NOT IN ('closed_won', 'closed_lost')`;
 }
 
-export async function getOpenStageFilter(workspaceId: string): Promise<string> {
-  const stages = await getWonLostStages(workspaceId);
-  return buildOpenFilter(stages);
+export async function getOpenStageFilter(_workspaceId: string): Promise<string> {
+  return buildOpenFilter([]);
 }
 
 export async function getCurrentQuota(workspaceId: string): Promise<{ period_start: string, period_end: string, target: number } | null> {
