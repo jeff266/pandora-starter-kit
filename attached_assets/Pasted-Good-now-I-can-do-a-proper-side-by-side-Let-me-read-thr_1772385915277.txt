@@ -1,0 +1,69 @@
+Good — now I can do a proper side-by-side. Let me read through both carefully and give you a reconciliation.Replit's plan is well-structured and mostly aligned with mine. There are a few meaningful divergences worth resolving before you hand either plan to a builder. Let me walk through what matters.
+
+## Where They Agree (No Action Needed)
+
+T001–T004 are identical in intent and approach. Same three broken paths, same fixes, same acceptance criteria. Either plan works for Part 1.
+
+Target types, user roles, and visibility matrix are the same. Both plans land on the same four target types and five user roles with identical access rules.
+
+## Where They Diverge (Decisions Needed)
+
+**1. Assignment mechanism: `assigned_to_user_id` (Replit) vs `owner_email` (mine)**
+
+This is the biggest architectural fork. Replit links targets to Pandora user accounts via a FK to users(id). My spec uses email strings matching the CRM's `owner_email` pattern.
+
+Replit's approach is cleaner long-term (referential integrity, proper joins), but it requires reps to be Pandora users. Today, your reps aren't Pandora users — they're deal owners in HubSpot/Salesforce. Jeff is often the only actual Pandora user per workspace. If you create an Individual target for Nate Phillips and try to set `assigned_to_user_id`, Nate doesn't have a user record to reference.
+
+My recommendation: use Replit's `assigned_to_user_id` as the primary column, but add `assigned_to_email TEXT` alongside it as a CRM-matching fallback. The visibility function checks both — if the user has a Pandora account, match by user_id; if they're a CRM-only rep, match by email against `owner_email` on deals. This keeps the FK clean for users who exist while supporting the reality that most "users" in your system today are CRM email addresses.
+
+**2. Default visibility for no role set: `['company']` (Replit) vs full admin (mine)**
+
+Replit defaults null pandora_role to only company targets. My spec defaults to admin (full visibility). This matters right now because Jeff has no pandora_role set on any workspace, and he's the one asking "what is our annual quota?"
+
+Replit's own plan has an escape hatch — it says "null → ['company'] safe default; Admin workspace role → override to full visibility." But the workspace access role (admin/member/viewer) is separate from pandora_role. So if Jeff's workspace role is `admin` but pandora_role is null, which wins?
+
+My recommendation: if `pandora_role` is null AND the user is the workspace owner/admin, default to full visibility. Otherwise default to `['company']`. This matches Replit's intent (see their note about overriding) but makes it explicit.
+
+**3. Manager visibility inconsistency in Replit's plan**
+
+Replit's visibility matrix says Manager sees "team (assigned to them), individual." But their `getTargetWhereClause` for manager includes `target_type IN ('company')` — so managers would also see company targets. That contradicts the matrix. Your original design says managers should NOT see company targets. The WHERE clause in T006 needs to match the matrix.
+
+**4. Downstream surface scoping**
+
+My spec breaks out Command Center (T006), Forecast Rollup (T007), and Monte Carlo (T008) as separate tasks because each surface has distinct scoping logic — Monte Carlo needs to filter the simulation's deal set, Command Center needs to scope the pipeline numerator for coverage ratio, etc.
+
+Replit bundles this into T009 ("propagate userId through conversation-stream and skill runtime"), which is the wiring but not the per-surface logic. The skill compute functions, synthesis prompts, and API endpoints each need specific changes beyond just "userId is available in context."
+
+My recommendation: keep Replit's T009 as the wiring task, but add my T006–T008 as follow-on tasks that consume the wired userId. Otherwise T009 becomes a catch-all that's hard to test and easy to under-scope.
+
+**5. `getHeadlineTarget()` — missing from Replit's plan**
+
+My spec includes a convenience function that directly answers "what's the right number for this user's role?" — it returns a single `{ amount, label, type }` object. Replit's plan relies on filtering the query and letting existing code sum the results.
+
+The headline function matters because the three broken code paths all need the same answer: "give me one number to use as the quota denominator." Without it, each code path re-implements the "filter, sum, pick the right one" logic independently — which is how we got three wrong answers in the first place.
+
+My recommendation: add `getHeadlineTarget()` to Replit's T006 (it lives naturally alongside `getTargetWhereClause()`). It calls the WHERE clause internally but returns a single resolved number.
+
+**6. UI tasks (T010, T011)**
+
+Replit includes these, my spec doesn't. They're needed. Keep them.
+
+## Proposed Merged Task List
+
+| Task | Source | Notes |
+|------|--------|-------|
+| T001–T004 | Both (identical) | Quota bug fixes, no change |
+| T005 | Replit | Migration — use their schema but add `assigned_to_email` column |
+| T006 | Replit | `getPandoraVisibility()` — add `getHeadlineTarget()` here |
+| T007 | Replit | Targets API filter — no change |
+| T008 | Replit | buildWorkspaceContextBlock with userId — no change |
+| T009 | Replit | Propagate userId — keep as wiring task |
+| T009a (new) | Mine | Command Center scoped metrics (uses wired userId) |
+| T009b (new) | Mine | Forecast Rollup on-demand scoping |
+| T009c (new) | Mine | Monte Carlo simulation scoping |
+| T010 | Replit | Members UI role selector |
+| T011 | Replit | Targets UI type/assignment fields |
+
+The build order stays the same as Replit's. My T009a/b/c slot into Phase 4 after the wiring is done.
+
+Want me to produce a merged spec document that incorporates these decisions, or would you rather resolve the divergences first and then I'll update?
