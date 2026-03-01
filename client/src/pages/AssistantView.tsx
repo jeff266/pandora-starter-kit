@@ -62,7 +62,7 @@ export default function AssistantView() {
   const fetchBrief = useCallback(async () => {
     if (!wsId) return;
     try {
-      const res = await api.get(`/${wsId}/brief`);
+      const res = await api.get('/brief');
       setBrief(res?.available ? res.brief : null);
     } catch {
       setBrief(null);

@@ -14,7 +14,7 @@ export default function BriefEmptyState({ workspaceId, onAssembled }: BriefEmpty
     setLoading(true);
     setError('');
     try {
-      await api.post(`/${workspaceId}/brief/assemble`, { force: true });
+      await api.post('/brief/assemble', { force: true });
       onAssembled?.();
     } catch (err: any) {
       setError(err.message || 'Assembly failed — check operator runs');

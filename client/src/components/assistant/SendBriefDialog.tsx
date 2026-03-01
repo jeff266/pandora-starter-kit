@@ -28,7 +28,7 @@ export default function SendBriefDialog({ brief, workspaceId, onClose }: SendBri
     setSending(true);
     setError('');
     try {
-      await api.post(`/${workspaceId}/brief/${brief.id}/send`, { channel: channel.trim(), format });
+      await api.post(`/brief/${brief.id}/send`, { channel: channel.trim(), format });
       setSent(true);
     } catch (err: any) {
       setError(err.message || 'Failed to send');

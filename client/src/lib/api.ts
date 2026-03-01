@@ -42,7 +42,14 @@ async function request(method: string, path: string, body?: any, signal?: AbortS
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(text || `HTTP ${res.status}`);
+    let msg = `HTTP ${res.status}`;
+    try {
+      const json = JSON.parse(text);
+      msg = json.error || json.message || msg;
+    } catch {
+      if (text && !text.trim().startsWith('<')) msg = text;
+    }
+    throw new Error(msg);
   }
   return res.json();
 }
