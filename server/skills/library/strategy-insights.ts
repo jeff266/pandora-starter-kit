@@ -94,6 +94,8 @@ Keep it under 500 words. This is the "so what?" layer.
   } as any,
 
   estimatedDuration: '300 seconds',
+  answers_questions: ['strategy', 'market', 'positioning', 'competitive position', 'strategic'],
+
   evidenceSchema: {
     entity_type: 'workspace',
     columns: [

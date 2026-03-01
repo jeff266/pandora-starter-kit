@@ -294,6 +294,8 @@ Focus on the top 5-10 most impactful actions. Prioritize by deal amount and stal
 
   estimatedDuration: '1m',
 
+  answers_questions: ['hygiene', 'stale', 'stuck', 'aging', 'no next step', 'overdue', 'missing field', 'data quality', 'no activity'],
+
   evidenceSchema: {
     entity_type: 'deal',
     columns: [

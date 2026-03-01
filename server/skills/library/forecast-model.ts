@@ -220,6 +220,8 @@ Word budget: {{output_budget.target_words}} words.`,
   outputFormat: 'markdown',
   estimatedDuration: '90s',
 
+  answers_questions: ['forecast model', 'historical win rate', 'regression forecast', 'model based forecast'],
+
   evidenceSchema: {
     entity_type: 'deal',
     columns: [

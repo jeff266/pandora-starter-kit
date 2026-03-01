@@ -159,6 +159,8 @@ Keep it concise, actionable, and use real deal names and dollar amounts from the
   outputFormat: 'slack',
   estimatedDuration: '45s',
 
+  answers_questions: ['lead score', 'lead quality', 'marketing qualified', 'mql', 'inbound leads'],
+
   evidenceSchema: {
     entity_type: 'deal',
     columns: [

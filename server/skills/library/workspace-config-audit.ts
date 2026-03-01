@@ -122,6 +122,9 @@ Keep the report under 400 words. Use specific numbers from the data. No generic 
 
   outputFormat: { type: 'sections', sections: [] } as any,
   estimatedDuration: '300 seconds',
+
+  answers_questions: ['config audit', 'drift', 'health check', 'roster', 'mapping', 'setup audit'],
+
   evidenceSchema: {
     entity_type: 'workspace',
     columns: [

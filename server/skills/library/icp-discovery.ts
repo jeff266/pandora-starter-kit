@@ -427,6 +427,8 @@ Keep it concise and actionable. Use real deal sizes and percentages from the dat
   outputFormat: 'slack',
   estimatedDuration: '90s',
 
+  answers_questions: ['icp', 'ideal customer profile', 'who is our target', 'target customer', 'sweet spot', 'buying committee'],
+
   evidenceSchema: {
     entity_type: 'deal',
     columns: [

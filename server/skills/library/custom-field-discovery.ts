@@ -54,6 +54,8 @@ export const customFieldDiscoverySkill: SkillDefinition = {
   outputFormat: 'markdown',
   estimatedDuration: '15s',
 
+  answers_questions: ['custom fields', 'crm fields', 'field discovery', 'mapping', 'schema'],
+
   evidenceSchema: {
     entity_type: 'deal',
     columns: [

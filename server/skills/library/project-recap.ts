@@ -28,6 +28,9 @@ export const projectRecapSkill: SkillDefinition = {
   } as any,
 
   estimatedDuration: '300 seconds',
+
+  answers_questions: ['project update', 'recap', 'summary', 'status'],
+
   evidenceSchema: {
     entity_type: 'workspace',
     columns: [

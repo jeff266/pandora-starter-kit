@@ -141,6 +141,9 @@ Keep it under 500 words. This is a manager's playbook for the week.
   } as any,
 
   estimatedDuration: '300 seconds',
+
+  answers_questions: ['goal', 'motion', 'segment goal', 'pipeline target', 'revenue motion'],
+
   evidenceSchema: {
     entity_type: 'rep',
     columns: [

@@ -161,6 +161,9 @@ Keep it under 600 words. This is for the Monday ops review.
   } as any,
 
   estimatedDuration: '300 seconds',
+
+  answers_questions: ['bowtie', 'funnel', 'full funnel', 'conversion', 'retention', 'expansion', 'top of funnel'],
+
   evidenceSchema: {
     entity_type: 'stage',
     columns: [

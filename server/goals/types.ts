@@ -128,6 +128,7 @@ export interface InvestigationStep {
   index: number;
   operator_name: string;
   skill_id: string;
+  question_answered?: string;
   trigger: 'initial' | 'follow_up';
   triggered_by?: {
     step_index: number;

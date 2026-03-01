@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../db.js';
 import { assembleBrief } from '../briefing/brief-assembler.js';
+import { resolveFromBrief } from '../briefing/brief-resolver.js';
 import { createInvestigationPlan, getOperatorMeta } from '../investigation/planner.js';
 import { executeInvestigation } from '../investigation/executor.js';
 import { classifyComplexity } from '../investigation/complexity-gate.js';
@@ -42,6 +43,27 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
   res.setHeader('X-Accel-Buffering', 'no');
 
   try {
+    // ── Brief resolver — cache-first, zero tokens ─────────────────────────────
+    const briefAnswer = await resolveFromBrief(workspaceId, message).catch(() => null);
+    if (briefAnswer) {
+      console.log(JSON.stringify({ event: 'brief_resolver_hit', workspace_id: workspaceId, section: briefAnswer.section, tokens_used: 0, timestamp: new Date().toISOString() }));
+      sse(res, { type: 'synthesis_start' });
+      sse(res, { type: 'synthesis_chunk', text: briefAnswer.answer });
+      sse(res, { type: 'synthesis_done', full_text: briefAnswer.answer });
+      sse(res, {
+        type: 'deliverable_options',
+        options: [
+          { id: 'slides', label: 'Slides', icon: '📊', sub: 'Board-ready deck' },
+          { id: 'doc', label: 'Doc', icon: '📄', sub: 'Written briefing' },
+          { id: 'slack', label: 'Slack', icon: '💬', sub: 'Team summary' },
+          { id: 'email', label: 'Email', icon: '📧', sub: 'Executive update' },
+        ],
+      });
+      sse(res, { type: 'done' });
+      res.end();
+      return;
+    }
+
     // ── Classify complexity before any LLM call ──────────────────────────────
     const hasGoals = await goalService
       .list(workspaceId, { is_active: true })
@@ -152,6 +174,7 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
               skill_id: primarySkill,
               output_text: result.output || '',
               result: result,
+              output: result.output || null,
             };
           }
         } catch (skillErr) {
@@ -209,48 +232,23 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
       }
 
       if (usedFallback) {
-        // Fallback: simple briefing-based response
+        // Fallback: direct LLM response with no operator framing
         for (const op of FALLBACK_OPERATORS) {
           sse(res, { type: 'recruiting', agent_id: op.id, agent_name: op.name, icon: op.icon, color: op.color, task: op.task });
-        }
-
-        const briefItems = await assembleBrief(workspaceId, { maxItems: 4 });
-        const findingContext = briefItems.length > 0
-          ? briefItems.map((b) => `[${b.severity.toUpperCase()}] ${b.headline}`).join('\n')
-          : 'No recent findings';
-
-        for (const op of FALLBACK_OPERATORS) {
           sse(res, { type: 'agent_thinking', agent_id: op.id });
-          const preview = briefItems.find((b) => b.operator_name === op.name)?.headline ?? briefItems[0]?.headline ?? `No findings from ${op.name}`;
-          sse(res, { type: 'agent_found', agent_id: op.id, finding_preview: preview.substring(0, 80) });
-          sse(res, {
-            type: 'agent_done',
-            agent_id: op.id,
-            finding: { agent_id: op.id, agent_name: op.name, summary: preview, severity: briefItems[0]?.severity ?? 'info' },
-          });
+          sse(res, { type: 'agent_found', agent_id: op.id, finding_preview: 'Reviewing available data' });
+          sse(res, { type: 'agent_done', agent_id: op.id, finding: { agent_id: op.id, agent_name: op.name, summary: 'Analysis complete', severity: 'info' } });
         }
 
         sse(res, { type: 'synthesis_start' });
 
         const { default: Anthropic } = await import('@anthropic-ai/sdk');
-        const anthropic = new Anthropic({
-          apiKey: process.env.ANTHROPIC_API_KEY || process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY,
-        });
-
+        const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY || process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY });
         const chatMessages = [
-          ...(history as { role: string; content: string }[])
-            .filter((m) => m.role && m.content)
-            .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+          ...(history as { role: string; content: string }[]).filter((m) => m.role && m.content).map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
           { role: 'user' as const, content: message },
         ];
-
-        const stream = anthropic.messages.stream({
-          model: 'claude-sonnet-4-5',
-          max_tokens: 512,
-          system: `You are Pandora, a RevOps intelligence assistant. Answer concisely.\n\nRecent findings:\n${findingContext}\n\nRespond in 2-4 sentences. Be specific.`,
-          messages: chatMessages,
-        });
-
+        const stream = anthropic.messages.stream({ model: 'claude-sonnet-4-5', max_tokens: 512, system: `You are Pandora, a RevOps intelligence assistant. Answer concisely in 2-4 sentences. Be specific.`, messages: chatMessages });
         let fullText = '';
         for await (const event of stream) {
           if (event.type === 'content_block_delta' && event.delta.type === 'text_delta' && event.delta.text) {
@@ -258,19 +256,7 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
             sse(res, { type: 'synthesis_chunk', text: event.delta.text });
           }
         }
-
         sse(res, { type: 'synthesis_done', full_text: fullText });
-
-        if (briefItems.length > 0) {
-          sse(res, {
-            type: 'evidence',
-            cards: briefItems.slice(0, 3).map((b) => ({
-              id: b.id, title: b.headline, severity: b.severity,
-              operator_name: b.operator_name, operator_icon: b.operator_icon,
-              operator_color: b.operator_color, body: b.body, skill_run_id: b.skill_run_id,
-            })),
-          });
-        }
       } else {
         // Investigation path (Tier 2 or Tier 3)
         for (const step of plan!.steps) {

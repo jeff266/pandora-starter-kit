@@ -243,6 +243,8 @@ Keep it concise — 3-4 sentences per section max. Use deal names and dollar amo
   outputFormat: 'slack',
   estimatedDuration: '60s',
 
+  answers_questions: ['contact role', 'stakeholder', 'champion', 'economic buyer', 'sponsor', 'dmi', 'decision maker'],
+
   evidenceSchema: {
     entity_type: 'contact',
     columns: [

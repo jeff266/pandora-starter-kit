@@ -281,6 +281,8 @@ Focus on the top 5-10 most impactful coverage gaps or acceleration opportunities
 
   estimatedDuration: '45s',
 
+  answers_questions: ['coverage', 'pipe to quota', 'pipeline coverage', 'coverage ratio', 'do we have enough'],
+
   evidenceSchema: {
     entity_type: 'rep',
     columns: [

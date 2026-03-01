@@ -237,6 +237,8 @@ Focus on the top 3-5 most impactful coaching actions. Example:
   outputFormat: 'markdown',
   estimatedDuration: '60s',
 
+  answers_questions: ['rep', 'scorecard', 'performance', 'quota attainment', 'activity', 'ramp', 'individual', 'how is', 'how are my reps', 'who is behind', 'struggling', 'underperforming'],
+
   evidenceSchema: {
     entity_type: 'rep',
     columns: [

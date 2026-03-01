@@ -1,3 +1,5 @@
+import { SkillRegistry } from '../skills/registry.js';
+
 export type QuestionComplexity = 'data_query' | 'lookup' | 'focused' | 'investigation';
 
 export interface ComplexityResult {
@@ -197,41 +199,61 @@ export async function classifyComplexity(
 }
 
 export function inferPrimarySkill(lower: string): string {
-  if (
-    /\b(forecast|predict|landing|commit|best case|worst case|upside|p50|weighted|coverage ratio)\b/i.test(lower)
-  ) {
-    return 'forecast-rollup';
+  const registry = SkillRegistry.getInstance();
+  const skills = registry.getAll();
+  
+  let bestSkillId = 'forecast-rollup';
+  let highestScore = 0;
+  let firstMatchIndex = Infinity;
+
+  for (const skill of skills) {
+    if (!skill.answers_questions || skill.answers_questions.length === 0) continue;
+
+    let score = 0;
+    let skillFirstMatchIndex = Infinity;
+
+    for (const phrase of skill.answers_questions) {
+      const index = lower.indexOf(phrase.toLowerCase());
+      if (index !== -1) {
+        score++;
+        if (index < skillFirstMatchIndex) {
+          skillFirstMatchIndex = index;
+        }
+      }
+    }
+
+    if (score > highestScore) {
+      highestScore = score;
+      bestSkillId = skill.id;
+      firstMatchIndex = skillFirstMatchIndex;
+    } else if (score > 0 && score === highestScore) {
+      // Tie-break by position (earlier match wins)
+      if (skillFirstMatchIndex < firstMatchIndex) {
+        bestSkillId = skill.id;
+        firstMatchIndex = skillFirstMatchIndex;
+      }
+    }
   }
-  if (/\b(rep|scorecard|performance|quota attainment|activity|ramp|individual)\b/i.test(lower)) {
-    return 'rep-scorecard';
-  }
-  if (/\b(deal|risk|regression|slip|push|close date|single.?thread)\b/i.test(lower)) {
-    return 'deal-risk-review';
-  }
-  if (/\b(waterfall|created|generation|gen|new pipeline|sourced|net new)\b/i.test(lower)) {
-    return 'pipeline-waterfall';
-  }
-  if (/\b(conversation|call|meeting|talk|said|discussed|sentiment|objection)\b/i.test(lower)) {
-    return 'conversation-intelligence';
-  }
-  if (/\b(bowtie|funnel|full|review|everything|overview|brief)\b/i.test(lower)) {
-    return 'forecast-rollup';
-  }
-  if (/\b(hygiene|stale|stuck|aging|no next step|overdue|no activity|missing field)\b/i.test(lower)) {
-    return 'pipeline-hygiene';
-  }
-  if (/\b(pipeline|coverage|pipe.?to.?quota|pipeline coverage)\b/i.test(lower) && !/waterfall/i.test(lower)) {
-    return 'pipeline-coverage';
-  }
-  return 'forecast-rollup';
+
+  return bestSkillId;
 }
 
 function countDomains(lower: string): number {
-  let count = 0;
-  if (/\b(pipeline|coverage|hygiene)\b/.test(lower)) count++;
-  if (/\b(forecast|commit|weighted|landing)\b/.test(lower)) count++;
-  if (/\b(rep|scorecard|performance|quota)\b/.test(lower)) count++;
-  if (/\b(deal|risk|regression|slip)\b/.test(lower)) count++;
-  if (/\b(conversation|call|meeting|sentiment)\b/.test(lower)) count++;
-  return count;
+  const registry = SkillRegistry.getInstance();
+  const skills = registry.getAll();
+  const matchedCategories = new Set<string>();
+
+  for (const skill of skills) {
+    if (!skill.answers_questions) continue;
+    
+    const hasMatch = skill.answers_questions.some(phrase => 
+      lower.includes(phrase.toLowerCase())
+    );
+
+    if (hasMatch) {
+      matchedCategories.add(skill.category);
+    }
+  }
+
+  return matchedCategories.size;
 }

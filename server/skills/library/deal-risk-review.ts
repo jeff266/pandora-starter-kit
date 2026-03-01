@@ -206,6 +206,8 @@ Return as JSON array.
 
   estimatedDuration: '2m',
 
+  answers_questions: ['deal risk', 'at risk', 'slip', 'push', 'close date', 'single threaded', 'regression', 'stalled deal', 'deal health', 'risky deals'],
+
   evidenceSchema: {
     entity_type: 'deal',
     columns: [

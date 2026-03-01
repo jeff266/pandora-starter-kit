@@ -313,6 +313,8 @@ Focus on the top 3-5 most impactful pipeline flow issues. Example:
   outputFormat: 'markdown',
   estimatedDuration: '45s',
 
+  answers_questions: ['waterfall', 'pipeline created', 'net new', 'sourced', 'generation', 'new pipeline', 'pipeline gen', 'deals created'],
+
   evidenceSchema: {
     entity_type: 'deal',
     columns: [

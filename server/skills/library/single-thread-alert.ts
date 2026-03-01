@@ -224,6 +224,8 @@ Focus on the top 5-10 most impactful single-threaded deals. Example:
 
   estimatedDuration: '45s',
 
+  answers_questions: ['single thread', 'one contact', 'no champion', 'no exec sponsor', 'multithreading', 'stakeholder coverage'],
+
   evidenceSchema: {
     entity_type: 'deal',
     columns: [

@@ -388,6 +388,41 @@ export function startSkillScheduler(): void {
   scheduledSkills.push({ skillId: 'account-scoring-daily', cronExpression: '0 3 * * *', job: scoringJob });
   console.log('[Account Scoring Scheduler] Registered daily scoring on cron 0 3 * * * (daily 3am UTC)');
 
+  // Brief assembly cron: daily 7am UTC — assemble context-aware briefs for all active workspaces
+  const briefJob = cron.schedule(
+    '0 7 * * *',
+    async () => {
+      console.log('[BriefScheduler] Daily 7am brief assembly triggered');
+      const { assembleBrief } = await import('../briefing/brief-assembler.js');
+      const { determineBriefType } = await import('../briefing/editorial-engine.js');
+
+      const workspacesResult = await query<{ id: string; name: string }>(
+        `SELECT DISTINCT w.id, w.name
+         FROM workspaces w
+         INNER JOIN connections c ON c.workspace_id = w.id
+         WHERE c.status IN ('connected', 'synced', 'error')
+           AND w.status = 'active'
+         ORDER BY w.name`
+      );
+
+      const workspaces = workspacesResult.rows;
+      const briefType = determineBriefType(new Date());
+      console.log(`[BriefScheduler] Assembling ${briefType} brief for ${workspaces.length} workspace(s)`);
+
+      for (const workspace of workspaces) {
+        try {
+          await assembleBrief(workspace.id, { brief_type: briefType });
+          console.log(`[BriefScheduler] ✓ ${workspace.name} (${workspace.id})`);
+        } catch (err: any) {
+          console.error(`[BriefScheduler] ✗ ${workspace.name}:`, err.message);
+        }
+      }
+    },
+    { timezone: 'UTC' }
+  );
+  scheduledSkills.push({ skillId: 'brief-daily', cronExpression: '0 7 * * *', job: briefJob });
+  console.log('[BriefScheduler] Registered daily brief assembly on cron 0 7 * * * (7am UTC)');
+
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   console.log(`[Skill Scheduler] Server timezone: ${timezone}`);
   console.log(`[Skill Scheduler] Cron expressions use UTC timezone`);

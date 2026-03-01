@@ -233,6 +233,8 @@ Word budget: {{output_budget.wordBudget}} words.`,
 
   estimatedDuration: '60s',
 
+  answers_questions: ['monte carlo', 'probability', 'distribution', 'confidence interval', 'p90', 'p10', 'simulation', 'range'],
+
   evidenceSchema: {
     entity_type: 'deal',
     columns: [

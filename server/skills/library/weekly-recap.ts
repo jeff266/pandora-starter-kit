@@ -232,6 +232,8 @@ Use actual deal names and dollar amounts.
 
   estimatedDuration: '3m',
 
+  answers_questions: ['recap', 'week in review', 'weekly summary', 'what happened this week'],
+
   evidenceSchema: {
     entity_type: 'deal',
     columns: [

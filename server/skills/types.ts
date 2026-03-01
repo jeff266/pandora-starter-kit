@@ -96,6 +96,9 @@ export interface SkillDefinition {
 
   /** Evidence schema declaring the shape of evaluated_records for this skill */
   evidenceSchema?: EvidenceSchema;
+
+  /** Keywords or phrases this skill can answer (used for routing) */
+  answers_questions?: string[];
 }
 
 // ============================================================================

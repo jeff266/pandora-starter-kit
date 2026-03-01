@@ -172,6 +172,8 @@ After the report, emit an <actions> block with a JSON array:
   outputFormat: 'markdown',
   estimatedDuration: '45s',
 
+  answers_questions: ['call', 'meeting', 'conversation', 'talked', 'said', 'sentiment', 'objection', 'gong', 'fireflies', 'call review'],
+
   evidenceSchema: {
     entity_type: 'conversation',
     columns: [

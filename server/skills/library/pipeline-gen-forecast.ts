@@ -189,6 +189,8 @@ After the report, emit an <actions> block:
   outputFormat: 'markdown',
   estimatedDuration: '60s',
 
+  answers_questions: ['pipeline generation forecast', 'gen forecast', 'new pipe needed', 'pipeline needed', 'source enough'],
+
   evidenceSchema: {
     entity_type: 'workspace',
     columns: [

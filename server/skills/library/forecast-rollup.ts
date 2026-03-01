@@ -423,6 +423,8 @@ Return ONLY a JSON array with no other text.`,
 
   estimatedDuration: '45s',
 
+  answers_questions: ['forecast', 'landing', 'commit', 'best case', 'weighted', 'coverage ratio', 'on track', 'hit the number', 'attainment', 'quota', 'target', 'are we going to hit', 'will we make'],
+
   evidenceSchema: {
     entity_type: 'deal',
     columns: [

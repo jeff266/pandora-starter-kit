@@ -111,6 +111,8 @@ export const icpTaxonomyBuilderSkill: SkillDefinition = {
   outputFormat: 'slack',
   estimatedDuration: '120s',
 
+  answers_questions: ['taxonomy', 'verticals', 'industry patterns', 'market segmentation', 'account patterns'],
+
   evidenceSchema: {
     entity_type: 'account',
     columns: [

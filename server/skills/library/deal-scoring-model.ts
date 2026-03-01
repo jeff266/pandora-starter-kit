@@ -192,6 +192,8 @@ Keep sections tight — 2-3 lines each. Use deal names and dollar amounts.
   outputFormat: 'slack',
   estimatedDuration: '90s',
 
+  answers_questions: ['deal score', 'scoring', 'scored', 'deal quality', 'health score', 'deal grade'],
+
   evidenceSchema: {
     entity_type: 'deal',
     columns: [

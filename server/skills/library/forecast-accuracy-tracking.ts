@@ -192,6 +192,8 @@ Word budget: {{output_budget.target_words}} words.`,
   outputFormat: 'markdown',
   estimatedDuration: '45s',
 
+  answers_questions: ['forecast accuracy', 'sandbagging', 'overforecast', 'how accurate', 'forecast error', 'called it right'],
+
   evidenceSchema: {
     entity_type: 'deal',
     columns: [

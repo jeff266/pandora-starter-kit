@@ -334,6 +334,8 @@ Focus on the top 5-10 most impactful data quality issues. Example:
 
   estimatedDuration: '45s',
 
+  answers_questions: ['data quality', 'missing data', 'field coverage', 'crm hygiene', 'bad data', 'data completeness'],
+
   evidenceSchema: {
     entity_type: 'deal',
     columns: [

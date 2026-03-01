@@ -164,6 +164,8 @@ After the report, emit an <actions> block with a JSON array of actions:
   outputFormat: 'markdown',
   estimatedDuration: '30s',
 
+  answers_questions: ['velocity', 'stage duration', 'time in stage', 'benchmark', 'how long', 'days in stage'],
+
   evidenceSchema: {
     entity_type: 'deal',
     columns: [
