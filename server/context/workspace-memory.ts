@@ -1,5 +1,6 @@
 import { query } from '../db.js';
 import { getPandoraRole, getTargetWhereClause } from './pandora-role.js';
+import { getLatestReadyBrief } from '../briefing/brief-resolver.js';
 
 interface CacheEntry {
   block: string;
@@ -268,6 +269,24 @@ export async function buildWorkspaceContextBlock(workspaceId: string, userId?: s
     if (winRateCfg.segment_by_motion) wrParts.push('segmented by motion');
     if (wrParts.length > 0) lines.push('');
     if (wrParts.length > 0) lines.push(`WIN RATE CONFIG: ${wrParts.join(', ')}`);
+  }
+
+  // Inject current open deals from the latest brief so the LLM can name them directly
+  try {
+    const brief = await getLatestReadyBrief(workspaceId);
+    const dealItems: any[] = brief?.deals_to_watch?.items || [];
+    if (dealItems.length > 0) {
+      const sorted = [...dealItems].sort((a, b) => (b.amount || 0) - (a.amount || 0)).slice(0, 8);
+      lines.push('');
+      lines.push('OPEN DEALS (current quarter, sorted by amount):');
+      lines.push('| Deal | Amount | Stage | Owner |');
+      lines.push('| --- | --- | --- | --- |');
+      for (const d of sorted) {
+        lines.push(`| ${d.name} | ${fmt(d.amount || 0)} | ${d.stage || '—'} | ${d.owner || '—'} |`);
+      }
+    }
+  } catch {
+    // Never block context generation if brief fetch fails
   }
 
   lines.push('=== END WORKSPACE CONTEXT ===');

@@ -101,6 +101,13 @@ export async function resolveFromBrief(workspaceId: string, message: string): Pr
     return { section: 'deals_to_watch', display_hint: 'table', answer: formatDealsTable(riskDeals), tokens_used: 0 };
   }
 
+  // ── 9b. Top / open / all deals ───────────────────────────────────────────
+  if (/top.*deal|open deal|deal.*quarter|deal.*remain|biggest deal|largest deal|list.*deal|all deal|show.*deal|deal.*left/.test(lower)) {
+    if (deals.length === 0) return { section: 'deals_to_watch', display_hint: 'value', answer: 'No open deals in current brief.', tokens_used: 0 };
+    const sorted = [...deals].sort((a, b) => b.amount - a.amount);
+    return { section: 'deals_to_watch', display_hint: 'table', answer: formatTopDeals(sorted), tokens_used: 0 };
+  }
+
   // ── 10. This week / week recap ─────────────────────────────────────────────
   if (/this week|week recap|how did we do|weekly summary|week in review/.test(lower)) {
     const num = formatTheNumber(brief);
@@ -150,6 +157,20 @@ function formatRepsTable(reps: RepPerformance[]): string {
     const flag = (r as any).flag ? '⚠️' : '✓';
     out += `| ${r.name} | ${formatCompact(r.pipeline)} | ${att} | ${flag} |\n`;
   }
+  return out;
+}
+
+function formatTopDeals(deals: DealToWatch[]): string {
+  const top = deals.slice(0, 6);
+  const totalPipeline = deals.reduce((sum, d) => sum + (d.amount || 0), 0);
+  let out = `**Top Open Deals**\n\n`;
+  out += `| Deal | Amount | Stage | Owner | Close Date | Signal |\n`;
+  out += `| --- | --- | --- | --- | --- | --- |\n`;
+  for (const d of top) {
+    const closeDate = d.close_date ? d.close_date : '—';
+    out += `| ${d.name} | ${formatCompact(d.amount)} | ${d.stage} | ${d.owner} | ${closeDate} | ${d.signal_text || '—'} |\n`;
+  }
+  out += `\n_${deals.length} open deals · ${formatCompact(totalPipeline)} total pipeline_`;
   return out;
 }
 
@@ -204,7 +225,7 @@ function formatWhatChanged(brief: AssembledBrief): string {
 
 // ─── Fetch helper ─────────────────────────────────────────────────────────────
 
-async function getLatestReadyBrief(workspaceId: string): Promise<AssembledBrief | null> {
+export async function getLatestReadyBrief(workspaceId: string): Promise<AssembledBrief | null> {
   const result = await query<any>(
     `SELECT * FROM weekly_briefs WHERE workspace_id = $1 AND status IN ('ready','sent','edited') ORDER BY generated_at DESC LIMIT 1`,
     [workspaceId]
