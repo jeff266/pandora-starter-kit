@@ -140,10 +140,17 @@ router.post('/:workspaceId/targets', async (req: Request, res: Response): Promis
 
 router.patch('/:workspaceId/targets/:targetId', async (req: Request, res: Response): Promise<void> => {
   const { workspaceId, targetId } = req.params;
-  const { amount, notes, set_by } = req.body as { amount?: number; notes?: string; set_by?: string };
+  const { amount, notes, set_by, period_start, period_end, period_label } = req.body as {
+    amount?: number;
+    notes?: string;
+    set_by?: string;
+    period_start?: string;
+    period_end?: string;
+    period_label?: string;
+  };
 
-  if (amount == null && notes == null) {
-    res.status(400).json({ error: 'Must provide amount or notes to update' });
+  if (amount == null && notes == null && !period_start && !period_end && !period_label) {
+    res.status(400).json({ error: 'Must provide at least one field to update' });
     return;
   }
 
@@ -175,9 +182,9 @@ router.patch('/:workspaceId/targets/:targetId', async (req: Request, res: Respon
         workspaceId,
         currentTarget.metric,
         currentTarget.period_type,
-        currentTarget.period_start,
-        currentTarget.period_end,
-        currentTarget.period_label,
+        period_start ?? currentTarget.period_start,
+        period_end ?? currentTarget.period_end,
+        period_label ?? currentTarget.period_label,
         amount ?? currentTarget.amount,
         currentTarget.pipeline_id,
         currentTarget.pipeline_name,

@@ -723,6 +723,8 @@ function SetTargetModal({ existingTarget, revenueModel, onClose, onSave, isEditi
         await api.patch(`/targets/${existingTarget!.id}`, {
           amount: parseFloat(amount),
           notes: notes || null,
+          period_start: periodStart,
+          period_end: periodEnd,
         });
       } else {
         await api.post('/targets', {
@@ -843,7 +845,7 @@ function SetTargetModal({ existingTarget, revenueModel, onClose, onSave, isEditi
           )}
         </div>
 
-        {/* Dates — read-only when editing */}
+        {/* Dates — editable in both create and edit mode */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
           <div>
             <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: colors.textMuted, marginBottom: 6 }}>
@@ -852,9 +854,8 @@ function SetTargetModal({ existingTarget, revenueModel, onClose, onSave, isEditi
             <input
               type="date"
               value={periodStart}
-              onChange={(e) => !editing && setPeriodStart(e.target.value)}
-              readOnly={editing}
-              style={editing ? readonlyInput : editableInput}
+              onChange={(e) => setPeriodStart(e.target.value)}
+              style={editableInput}
             />
           </div>
           <div>
@@ -864,9 +865,8 @@ function SetTargetModal({ existingTarget, revenueModel, onClose, onSave, isEditi
             <input
               type="date"
               value={periodEnd}
-              onChange={(e) => !editing && setPeriodEnd(e.target.value)}
-              readOnly={editing}
-              style={editing ? readonlyInput : editableInput}
+              onChange={(e) => setPeriodEnd(e.target.value)}
+              style={editableInput}
             />
           </div>
         </div>
