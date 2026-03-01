@@ -518,24 +518,31 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
 
     const stageResult = await query(
       `SELECT
-         COALESCE(d.stage, d.stage_normalized, 'Unknown') as stage,
+         sub.stage,
          count(*)::int as deal_count,
-         COALESCE(sum(d.amount), 0)::float as total_value,
-         COALESCE(sum(d.amount * CASE WHEN d.probability IS NULL THEN 0.5 WHEN d.probability > 1 THEN d.probability / 100.0 ELSE d.probability END), 0)::float as weighted_value,
+         COALESCE(sum(sub.total_value), 0)::float as total_value,
+         COALESCE(sum(sub.weighted_value), 0)::float as weighted_value,
          MAX(sc.display_order) as display_order
-       FROM deals d
+       FROM (
+         SELECT DISTINCT
+           d.id,
+           COALESCE(d.stage, d.stage_normalized, 'Unknown') as stage,
+           COALESCE(d.amount, 0) as total_value,
+           COALESCE(d.amount * CASE WHEN d.probability IS NULL THEN 0.5 WHEN d.probability > 1 THEN d.probability / 100.0 ELSE d.probability END, 0) as weighted_value
+         FROM deals d
+         WHERE d.workspace_id = $1
+           AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+           ${scopeFilterClause}
+           ${timeRangeFilter}
+           ${excludeStagesClause}
+       ) sub
        LEFT JOIN stage_configs sc
-         ON sc.stage_name = COALESCE(d.stage, d.stage_normalized)
-         AND sc.workspace_id = d.workspace_id
+         ON sc.stage_name = sub.stage
+         AND sc.workspace_id = $1
          ${stageConfigPipelineClause}
-       WHERE d.workspace_id = $1
-         AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
-         ${scopeFilterClause}
-         ${timeRangeFilter}
-         ${excludeStagesClause}
-         ${stageFilterClause}
-       GROUP BY COALESCE(d.stage, d.stage_normalized, 'Unknown')
-       ORDER BY MAX(sc.display_order) ASC NULLS LAST, sum(d.amount) DESC`,
+       ${stageFilterClause}
+       GROUP BY sub.stage
+       ORDER BY MAX(sc.display_order) ASC NULLS LAST, sum(sub.total_value) DESC`,
       [...params, ...excludeParams]
     );
 
