@@ -204,27 +204,42 @@ async function getReps(workspaceId: string, wonLostStages: string[]): Promise<Re
   const ps = quota?.period_start || quarterStart(new Date()).toISOString().split('T')[0];
   const pe = quota?.period_end || quarterEnd(new Date()).toISOString().split('T')[0];
 
-  const [repRes, closedRes, quotaRes, findingsRes] = await Promise.all([
+  const [repRes, closedRes, quotaRes, findingsRes, rosterRes] = await Promise.all([
     query<any>(`SELECT COALESCE(owner, '') as email, COALESCE(owner, 'Unknown') as name, COALESCE(SUM(amount),0)::text as pipeline, COUNT(*)::text as cnt FROM deals WHERE workspace_id = $1 AND ${openFilter} GROUP BY owner ORDER BY SUM(amount) DESC`, [workspaceId]),
     query<any>(`SELECT COALESCE(owner, '') as email, COALESCE(SUM(amount),0)::text as closed FROM deals WHERE workspace_id = $1 AND stage_normalized = 'closed_won' AND close_date >= $2 AND close_date <= $3 GROUP BY owner`, [workspaceId, ps, pe]),
     query<any>(`SELECT rep_email, amount::text as quota_value FROM quotas WHERE workspace_id = $1 AND is_active = true AND period_start <= CURRENT_DATE AND period_end >= CURRENT_DATE`, [workspaceId]),
     query<any>(`SELECT COALESCE(owner_email, '') as entity_id, message, COALESCE(escalation_level,0)::text as escalation_level, COALESCE(times_flagged,1)::text as times_flagged FROM findings WHERE workspace_id = $1 AND resolved_at IS NULL AND severity IN ('act', 'watch') ORDER BY escalation_level DESC, times_flagged DESC`, [workspaceId]),
+    query<any>(`SELECT rep_email, rep_name FROM sales_reps WHERE workspace_id = $1 AND is_rep = true AND pandora_role IS NOT NULL AND rep_email IS NOT NULL`, [workspaceId]),
   ]);
 
   const closedMap = new Map(closedRes.rows.map((r: any) => [r.email, parseFloat(r.closed)]));
+
+  // Per-rep quotas: use quotas table if populated, otherwise no per-rep attainment
   const quotaMap = new Map(quotaRes.rows.map((r: any) => [r.rep_email, parseFloat(r.quota_value)]));
+
   const flagMap = new Map<string, any>();
   for (const f of findingsRes.rows) {
     if (!flagMap.has(f.entity_id)) flagMap.set(f.entity_id, f);
   }
 
+  // Build allowed email set from sales_reps roster (pandora_role IS NOT NULL = has an assigned role)
+  // If no roster entries exist for this workspace, fall back to unfiltered (legacy behavior)
+  const allowedEmails = new Set(rosterRes.rows.map((r: any) => r.rep_email as string));
+  const rosterNameMap = new Map(rosterRes.rows.map((r: any) => [r.rep_email as string, r.rep_name as string]));
+
+  const filteredReps = allowedEmails.size > 0
+    ? repRes.rows.filter((r: any) => allowedEmails.has(r.email))
+    : repRes.rows;
+
   return {
-    items: repRes.rows.map((r: any) => {
+    items: filteredReps.map((r: any) => {
       const closed = closedMap.get(r.email) || 0;
       const quotaVal = quotaMap.get(r.email) || 0;
       const flag = flagMap.get(r.email);
+      // Use roster display name when available (avoids showing raw HubSpot email as name)
+      const displayName = rosterNameMap.get(r.email) || r.name;
       return {
-        email: r.email, name: r.name,
+        email: r.email, name: displayName,
         pipeline: parseFloat(r.pipeline), closed, deal_count: parseInt(r.cnt),
         quota: quotaVal || undefined,
         attainment_pct: quotaVal > 0 ? Math.round((closed / quotaVal) * 100) : undefined,
