@@ -131,14 +131,14 @@ export default function OnboardingFlow() {
     } catch { /* ignore */ }
   }
 
-  async function handleStart() {
+  async function handleStart(force = false) {
     if (!wsId) return;
     setFlowState('loading');
     try {
       const res = await fetch(apiUrl(wsId, '/start'), {
         method: 'POST',
         headers: authHeaders(),
-        body: JSON.stringify({ role }),
+        body: JSON.stringify({ role, force }),
       });
       if (!res.ok) throw new Error('Failed to start onboarding');
       const data = await res.json();
@@ -152,6 +152,17 @@ export default function OnboardingFlow() {
       console.error('[OnboardingFlow] start failed:', err);
       setFlowState('welcome');
     }
+  }
+
+  async function handleRestart() {
+    if (!wsId) return;
+    if (!window.confirm('Re-run the CRM scan and restart setup from the beginning?')) return;
+    setThread([]);
+    setCurrentQuestion(null);
+    setCurrentHypothesis(null);
+    setProgress(null);
+    setQuestionStates({});
+    await handleStart(true);
   }
 
   async function handleSubmit(text: string) {
@@ -326,11 +337,21 @@ export default function OnboardingFlow() {
           <span style={{ fontWeight: 700, fontSize: 16, color: 'var(--color-text)' }}>Pandora Setup</span>
           <span style={{ fontSize: 12, color: 'var(--color-textMuted)', marginLeft: 10 }}>10-minute workspace configuration</span>
         </div>
-        {progress && (
-          <span style={{ fontSize: 12, color: 'var(--color-textMuted)' }}>
-            {progress.answered}/{progress.total} questions complete
-          </span>
-        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          {progress && (
+            <span style={{ fontSize: 12, color: 'var(--color-textMuted)' }}>
+              {progress.answered}/{progress.total} questions complete
+            </span>
+          )}
+          {(flowState === 'active' || flowState === 'upload_review' || flowState === 'tier0_complete') && (
+            <button
+              onClick={handleRestart}
+              style={{ background: 'none', border: '1px solid var(--color-border)', color: 'var(--color-textMuted)', borderRadius: 6, padding: '4px 11px', fontSize: 12, cursor: 'pointer' }}
+            >
+              Restart Setup
+            </button>
+          )}
+        </div>
       </div>
 
       {flowState !== 'welcome' && flowState !== 'loading' && (
