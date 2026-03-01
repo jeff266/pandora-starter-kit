@@ -30,6 +30,7 @@ import InsightsPage from './pages/InsightsPage';
 import Actions from './pages/Actions';
 import Playbooks from './pages/Playbooks';
 import SettingsPage from './pages/SettingsPage';
+import OnboardingFlow from './pages/OnboardingFlow';
 import ConnectorHealth from './pages/ConnectorHealth';
 import ToolsPage from './pages/ToolsPage';
 import PushPage from './pages/PushPage';
@@ -291,6 +292,7 @@ export default function App() {
             <Route path="/sql-workspace" element={<SQLWorkspace />} />
             <Route path="/forecast" element={<ForecastPage />} />
             <Route path="/marketplace" element={<MarketplacePage />} />
+            <Route path="/onboarding" element={<OnboardingFlow />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/settings/:tab" element={<SettingsPage />} />
             <Route path="/icp-profile" element={<IcpProfilePage />} />

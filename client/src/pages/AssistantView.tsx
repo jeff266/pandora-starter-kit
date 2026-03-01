@@ -339,6 +339,11 @@ export default function AssistantView() {
           /* No brief — show empty state + findings fallback */
           <>
             <BriefEmptyState workspaceId={wsId} onAssembled={fetchBrief} />
+            <div style={{ textAlign: 'center', padding: '8px 0 0 0' }}>
+              <a href="/onboarding" style={{ fontSize: 12, color: 'var(--color-textMuted)', textDecoration: 'underline dotted' }}>
+                Your brief will be more accurate with a 10-minute setup. Start setup →
+              </a>
+            </div>
             <MorningBrief
               items={undefined}
               loading={false}

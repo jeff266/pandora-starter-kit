@@ -82,6 +82,18 @@ Pandora is built on Node.js 20 with TypeScript 5+, utilizing Express.js and Post
 - **Remaining:** 4 errors in `server/workflows/__tests__/` test mocks + 1 duplicate property in `server/routes/findings.ts` — all pre-existing, out of scope.
 - **Key patterns fixed:** Logger.error signature (LogContext not Error), Express 5 `req.params` cast as string, SkillExecutionContext/WorkspaceConfig interface gaps, SalesforceOpportunityFieldHistory type, duplicate imports (gong/hubspot), pptx-renderer docx type casts, replit_integrations `.js` import extensions, route handler `Request<any>` vs `Request<WorkspaceParams>`.
 
+## Onboarding Interview System (V1)
+-   **Architecture:** Hypothesis-first conversational setup at `/onboarding`. Pre-interview runs CRM scanner + Serper company research + inference engine in parallel before Q1.
+-   **Backend:** `server/onboarding/` — types, crm-scanner, company-research, document-extractor, response-parser, config-writer, flow-engine, hypotheses/, questions/
+-   **API Routes:** `POST/GET /api/workspaces/:id/onboarding/{start,state,answer,upload,skip,resume,complete}` mounted via `server/routes/onboarding.ts`
+-   **Questions:** Tier 0 (Q1-Q4 + Q10): motions, calendar, stages, team, delivery. Tier 1 (Q5-Q9): stale thresholds, forecast method, win rate, coverage, required fields. Tier 2-3: scaffolded stubs.
+-   **Hypothesis generators:** Each question shows CRM-derived tables (deal counts, amounts, stage distributions) as evidence. Pure functions in `server/onboarding/hypotheses/`.
+-   **Config writes:** Q1 → `context_layer` (revenue_motions + onboarding_named_filters). Q2 → cadence config. Q3 → `stage_configs` flags (is_won, is_lost, is_parking_lot, is_stage_0). Q4 → teams config. Q5-Q9 → thresholds/config via context_layer.
+-   **File upload:** multer 25MB, extracts PDF (pdf-parse), DOCX (mammoth), XLSX (SheetJS), images (Claude vision), TXT/MD. Parsed by Claude into new hypothesis.
+-   **Frontend:** `client/src/pages/OnboardingFlow.tsx` + 6 components in `client/src/components/onboarding/`. Conversational thread UX, TierProgress bar, HypothesisCard with tables, ArtifactPreview.
+-   **Integration:** New workspace creation navigates to `/onboarding`. Settings tab has "Re-run Setup Interview". Brief empty state shows setup prompt link.
+-   **Not in V1:** Voice input, Google Drive scan, Tier 2-3 trigger wiring, multi-workspace consultant onboarding.
+
 ## External Dependencies
 -   **PostgreSQL (Neon):** Primary database.
 -   **HubSpot API:** CRM data.

@@ -283,6 +283,24 @@ export default function WorkspacesTab() {
                           Switch
                         </button>
                       ) : null}
+                      {isCurrent && (
+                        <button
+                          onClick={() => { navigate('/onboarding'); }}
+                          style={{
+                            padding: '6px 12px',
+                            fontSize: 12,
+                            fontWeight: 500,
+                            fontFamily: fonts.sans,
+                            color: colors.textMuted,
+                            background: 'transparent',
+                            border: `1px solid ${colors.border}`,
+                            borderRadius: 6,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Re-run Setup Interview
+                        </button>
+                      )}
                     </div>
                   </div>
 

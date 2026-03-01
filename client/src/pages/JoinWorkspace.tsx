@@ -52,7 +52,7 @@ export default function JoinWorkspace() {
       const ws = await res.json();
       await refreshAuth();
       selectWorkspace({ id: ws.id, name: ws.name, slug: ws.slug, role: 'admin', connector_count: 0, deal_count: 0, last_sync: null });
-      navigate('/');
+      navigate('/onboarding');
     } catch (err: any) {
       setError(err.message || 'Failed to create workspace');
     } finally {
