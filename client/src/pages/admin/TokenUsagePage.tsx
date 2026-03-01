@@ -54,6 +54,24 @@ const FEATURE_LABELS: Record<string, string> = {
   compress: 'Result Compression',
 };
 
+const SEGMENT_MAP: Record<string, 'command' | 'assistant'> = {
+  ask_pandora: 'assistant',
+  pipeline_hygiene: 'command',
+  deal_risk_review: 'command',
+  rep_scorecard: 'command',
+  forecast_rollup: 'command',
+  conversation_intelligence: 'command',
+  icp_discovery: 'command',
+  lead_scoring: 'command',
+  intent_classify: 'command',
+  compress: 'command',
+};
+
+const SEGMENT_META = {
+  command: { label: 'Command Center', color: '#22D3EE' },
+  assistant: { label: 'Assistant', color: '#7C6AE8' },
+} as const;
+
 const PERIODS = [
   { label: '7d', days: 7 },
   { label: '30d', days: 30 },
@@ -90,6 +108,14 @@ export default function TokenUsagePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<TokenUsageRow[]>([]);
+  const [expandedSegments, setExpandedSegments] = useState<Set<string>>(new Set(['command', 'assistant']));
+
+  const toggleSegment = (seg: string) =>
+    setExpandedSegments((prev) => {
+      const s = new Set(prev);
+      s.has(seg) ? s.delete(seg) : s.add(seg);
+      return s;
+    });
 
   const fetchData = useCallback(async () => {
     if (!currentWorkspace) return;
@@ -185,6 +211,22 @@ export default function TokenUsagePage() {
   const featureRows = Object.values(byFeature)
     .filter((r) => r.pandora_cost > 0 || r.byok_cost > 0)
     .sort((a, b) => b.pandora_cost - a.pandora_cost);
+
+  type SegKey = 'command' | 'assistant';
+  const segmentTotals: Record<SegKey, { pandora_cost: number; pandora_input: number; pandora_output: number; byok_cost: number; byok_input: number; byok_output: number; calls: number }> = {
+    command: { pandora_cost: 0, pandora_input: 0, pandora_output: 0, byok_cost: 0, byok_input: 0, byok_output: 0, calls: 0 },
+    assistant: { pandora_cost: 0, pandora_input: 0, pandora_output: 0, byok_cost: 0, byok_input: 0, byok_output: 0, calls: 0 },
+  };
+  featureRows.forEach((r) => {
+    const seg: SegKey = SEGMENT_MAP[r.feature] ?? 'command';
+    segmentTotals[seg].pandora_cost += r.pandora_cost;
+    segmentTotals[seg].pandora_input += r.pandora_input;
+    segmentTotals[seg].pandora_output += r.pandora_output;
+    segmentTotals[seg].byok_cost += r.byok_cost;
+    segmentTotals[seg].byok_input += r.byok_input;
+    segmentTotals[seg].byok_output += r.byok_output;
+    segmentTotals[seg].calls += r.calls;
+  });
 
   const totals = featureRows.reduce(
     (acc, r) => ({
@@ -582,135 +624,145 @@ export default function TokenUsagePage() {
           <span style={{ textAlign: 'right' }}>Bar</span>
         </div>
 
-        {featureRows.map((row, idx) => {
-          const pandoraTotal = row.pandora_input + row.pandora_output;
-          const byokTotal = row.byok_input + row.byok_output;
-          const costPerCall = row.calls > 0 ? row.pandora_cost / row.calls : 0;
-          const barW = maxCost > 0 ? (row.pandora_cost / maxCost) * 100 : 0;
-          const isSelected = selectedFeature === row.feature;
+        {(['command', 'assistant'] as SegKey[]).map((seg) => {
+          const meta = SEGMENT_META[seg];
+          const st = segmentTotals[seg];
+          const segRows = featureRows.filter((r) => (SEGMENT_MAP[r.feature] ?? 'command') === seg);
+          if (st.pandora_cost === 0 && st.byok_cost === 0 && segRows.length === 0) return null;
+          const segPandoraTotal = st.pandora_input + st.pandora_output;
+          const segCostPerCall = st.calls > 0 ? st.pandora_cost / st.calls : 0;
+          const segByokTotal = st.byok_input + st.byok_output;
+          const segBarW = maxCost > 0 ? (st.pandora_cost / maxCost) * 100 : 0;
+          const isExpanded = expandedSegments.has(seg);
+
           return (
-            <div key={row.feature}>
+            <div key={seg}>
+              {/* Segment header row */}
               <div
-                onClick={() => setSelectedFeature(isSelected ? null : row.feature)}
+                onClick={() => toggleSegment(seg)}
                 style={{
                   display: 'grid',
                   gridTemplateColumns: '2fr 70px 90px 90px 90px 90px 56px',
-                  padding: '11px 18px',
+                  padding: '10px 18px',
                   borderBottom: `1px solid ${colors.border}`,
+                  borderLeft: `3px solid ${meta.color}`,
                   cursor: 'pointer',
-                  background: isSelected ? colors.surfaceRaised : idx % 2 === 0 ? colors.surface : colors.bg,
+                  background: colors.surfaceRaised,
                   alignItems: 'center',
+                  userSelect: 'none',
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontSize: 12, color: colors.text }}>
-                    {FEATURE_LABELS[row.feature] || row.feature}
+                  <span style={{ fontSize: 9, color: meta.color, marginRight: 2, lineHeight: 1 }}>
+                    {isExpanded ? '▾' : '▸'}
                   </span>
-                  {byokTotal > 0 && (
-                    <span
-                      style={{
-                        fontSize: 8,
-                        color: colors.green,
-                        background: colors.greenSoft,
-                        padding: '1px 5px',
-                        borderRadius: 2,
-                        letterSpacing: '0.1em',
-                      }}
-                    >
-                      BYOK
-                    </span>
-                  )}
+                  <span style={{ fontSize: 11, fontWeight: 600, color: meta.color, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                    {meta.label}
+                  </span>
+                  <span style={{ fontSize: 9, color: colors.textMuted }}>
+                    {segRows.length} feature{segRows.length !== 1 ? 's' : ''}
+                  </span>
                 </div>
-                <span style={{ ...cellStyle, color: colors.textSecondary }}>{row.calls}</span>
-                <span style={{ ...cellStyle, color: pandoraTotal > 0 ? colors.accent : colors.textMuted }}>
-                  {fmt(pandoraTotal)}
+                <span style={{ ...cellStyle, color: colors.textSecondary, fontWeight: 500 }}>{st.calls}</span>
+                <span style={{ ...cellStyle, color: segPandoraTotal > 0 ? meta.color : colors.textMuted, fontWeight: 500 }}>
+                  {segPandoraTotal > 0 ? fmt(segPandoraTotal) : '—'}
                 </span>
-                <span style={{ ...cellStyle, color: row.pandora_cost > 0.01 ? colors.yellow : colors.textMuted }}>
-                  {fmtCost(row.pandora_cost)}
+                <span style={{ ...cellStyle, color: st.pandora_cost > 0.01 ? colors.yellow : colors.textMuted, fontWeight: 500 }}>
+                  {st.pandora_cost > 0 ? fmtCost(st.pandora_cost) : '—'}
                 </span>
-                <span style={{ ...cellStyle, color: costPerCall > 0.005 ? colors.yellow : colors.textSecondary }}>
-                  {row.calls > 0 ? fmtCost(costPerCall) : '—'}
+                <span style={{ ...cellStyle, color: segCostPerCall > 0.005 ? colors.yellow : colors.textSecondary }}>
+                  {st.calls > 0 ? fmtCost(segCostPerCall) : '—'}
                 </span>
-                <span style={{ ...cellStyle, color: byokTotal > 0 ? colors.green : colors.textMuted }}>
-                  {byokTotal > 0 ? fmt(byokTotal) : '—'}
+                <span style={{ ...cellStyle, color: segByokTotal > 0 ? colors.green : colors.textMuted }}>
+                  {segByokTotal > 0 ? fmt(segByokTotal) : '—'}
                 </span>
                 <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                  <div
-                    style={{
-                      width: 44,
-                      height: 4,
-                      background: colors.border,
-                      borderRadius: 2,
-                      overflow: 'hidden',
-                    }}
-                  >
-                    <div
-                      style={{
-                        width: `${barW}%`,
-                        height: '100%',
-                        background: barW > 66 ? colors.yellow : barW > 33 ? colors.accent : colors.accentSoft,
-                        borderRadius: 2,
-                      }}
-                    />
+                  <div style={{ width: 44, height: 4, background: colors.border, borderRadius: 2, overflow: 'hidden' }}>
+                    <div style={{ width: `${segBarW}%`, height: '100%', background: meta.color, borderRadius: 2, opacity: 0.7 }} />
                   </div>
                 </div>
               </div>
-              {isSelected && (
-                <div
-                  style={{
-                    background: colors.bg,
-                    borderBottom: `1px solid ${colors.border}`,
-                    padding: '12px 18px 16px',
-                  }}
-                >
-                  <div
-                    style={{
-                      fontSize: 9,
-                      color: colors.textMuted,
-                      letterSpacing: '0.15em',
-                      textTransform: 'uppercase',
-                      marginBottom: 10,
-                    }}
-                  >
-                    Breakdown
-                  </div>
-                  <div style={{ display: 'flex', gap: 28, flexWrap: 'wrap' }}>
-                    {[
-                      { label: 'Input tokens', value: fmt(row.pandora_input) },
-                      { label: 'Output tokens', value: fmt(row.pandora_output) },
-                      {
-                        label: 'Avg tokens / call',
-                        value: fmt(Math.round(pandoraTotal / Math.max(row.calls, 1))),
-                      },
-                      { label: 'Total calls', value: String(row.calls) },
-                    ].map((s) => (
-                      <div key={s.label}>
-                        <div style={{ fontSize: 9, color: colors.textMuted, letterSpacing: '0.1em', marginBottom: 3 }}>
-                          {s.label}
-                        </div>
-                        <div style={{ fontSize: 14, color: colors.textSecondary }}>{s.value}</div>
+
+              {/* Per-feature rows within this segment */}
+              {isExpanded && segRows.map((row, idx) => {
+                const pandoraTotal = row.pandora_input + row.pandora_output;
+                const byokTotal = row.byok_input + row.byok_output;
+                const costPerCall = row.calls > 0 ? row.pandora_cost / row.calls : 0;
+                const barW = maxCost > 0 ? (row.pandora_cost / maxCost) * 100 : 0;
+                const isSelected = selectedFeature === row.feature;
+                return (
+                  <div key={row.feature}>
+                    <div
+                      onClick={() => setSelectedFeature(isSelected ? null : row.feature)}
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '2fr 70px 90px 90px 90px 90px 56px',
+                        padding: '11px 18px 11px 30px',
+                        borderBottom: `1px solid ${colors.border}`,
+                        cursor: 'pointer',
+                        background: isSelected ? colors.surfaceRaised : idx % 2 === 0 ? colors.surface : colors.bg,
+                        alignItems: 'center',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 12, color: colors.text }}>
+                          {FEATURE_LABELS[row.feature] || row.feature}
+                        </span>
+                        {byokTotal > 0 && (
+                          <span style={{ fontSize: 8, color: colors.green, background: colors.greenSoft, padding: '1px 5px', borderRadius: 2, letterSpacing: '0.1em' }}>
+                            BYOK
+                          </span>
+                        )}
                       </div>
-                    ))}
-                    {byokTotal > 0 && (
-                      <div
-                        style={{
-                          marginLeft: 'auto',
-                          paddingLeft: 24,
-                          borderLeft: `1px solid ${colors.border}`,
-                        }}
-                      >
-                        <div style={{ fontSize: 9, color: colors.green, letterSpacing: '0.1em', marginBottom: 3 }}>
-                          BYOK tokens
+                      <span style={{ ...cellStyle, color: colors.textSecondary }}>{row.calls}</span>
+                      <span style={{ ...cellStyle, color: pandoraTotal > 0 ? colors.accent : colors.textMuted }}>
+                        {fmt(pandoraTotal)}
+                      </span>
+                      <span style={{ ...cellStyle, color: row.pandora_cost > 0.01 ? colors.yellow : colors.textMuted }}>
+                        {fmtCost(row.pandora_cost)}
+                      </span>
+                      <span style={{ ...cellStyle, color: costPerCall > 0.005 ? colors.yellow : colors.textSecondary }}>
+                        {row.calls > 0 ? fmtCost(costPerCall) : '—'}
+                      </span>
+                      <span style={{ ...cellStyle, color: byokTotal > 0 ? colors.green : colors.textMuted }}>
+                        {byokTotal > 0 ? fmt(byokTotal) : '—'}
+                      </span>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                        <div style={{ width: 44, height: 4, background: colors.border, borderRadius: 2, overflow: 'hidden' }}>
+                          <div style={{ width: `${barW}%`, height: '100%', background: barW > 66 ? colors.yellow : barW > 33 ? colors.accent : colors.accentSoft, borderRadius: 2 }} />
                         </div>
-                        <div style={{ fontSize: 14, color: colors.green }}>{fmt(byokTotal)}</div>
-                        <div style={{ fontSize: 9, color: colors.greenSoft, marginTop: 2 }}>
-                          Est. ~${row.byok_cost.toFixed(3)} — billed to customer key
+                      </div>
+                    </div>
+                    {isSelected && (
+                      <div style={{ background: colors.bg, borderBottom: `1px solid ${colors.border}`, padding: '12px 18px 16px 30px' }}>
+                        <div style={{ fontSize: 9, color: colors.textMuted, letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: 10 }}>
+                          Breakdown
+                        </div>
+                        <div style={{ display: 'flex', gap: 28, flexWrap: 'wrap' }}>
+                          {[
+                            { label: 'Input tokens', value: fmt(row.pandora_input) },
+                            { label: 'Output tokens', value: fmt(row.pandora_output) },
+                            { label: 'Avg tokens / call', value: fmt(Math.round(pandoraTotal / Math.max(row.calls, 1))) },
+                            { label: 'Total calls', value: String(row.calls) },
+                          ].map((s) => (
+                            <div key={s.label}>
+                              <div style={{ fontSize: 9, color: colors.textMuted, letterSpacing: '0.1em', marginBottom: 3 }}>{s.label}</div>
+                              <div style={{ fontSize: 14, color: colors.textSecondary }}>{s.value}</div>
+                            </div>
+                          ))}
+                          {byokTotal > 0 && (
+                            <div style={{ marginLeft: 'auto', paddingLeft: 24, borderLeft: `1px solid ${colors.border}` }}>
+                              <div style={{ fontSize: 9, color: colors.green, letterSpacing: '0.1em', marginBottom: 3 }}>BYOK tokens</div>
+                              <div style={{ fontSize: 14, color: colors.green }}>{fmt(byokTotal)}</div>
+                              <div style={{ fontSize: 9, color: colors.greenSoft, marginTop: 2 }}>Est. ~${row.byok_cost.toFixed(3)} — billed to customer key</div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     )}
                   </div>
-                </div>
-              )}
+                );
+              })}
             </div>
           );
         })}
