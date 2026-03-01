@@ -83,7 +83,7 @@ export async function buildWorkspaceContextBlock(workspaceId: string, userId?: s
     ).catch(() => null),
     query(
       `SELECT rep_name, rep_email, team, quota_eligible
-       FROM sales_reps WHERE workspace_id = $1 AND is_rep = true
+       FROM sales_reps WHERE workspace_id = $1 AND is_rep = true AND pandora_role IS NOT NULL
        ORDER BY rep_name ASC`,
       [workspaceId]
     ).catch(() => null),
