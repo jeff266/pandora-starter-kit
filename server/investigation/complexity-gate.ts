@@ -76,6 +76,20 @@ export async function classifyComplexity(
     };
   }
 
+  // Direct metric amount questions — "How much pipeline...", "What's the pipeline in...", etc.
+  if (
+    /^(how much|what('?s| is| are) (the|our|my|total)(\s+\w+)?)\s+(pipeline|forecast|revenue|deals?|quota|coverage|weighted)\b/i.test(lower) &&
+    !/\b(why|going to|will we|can we|do we need|compare|versus|vs\.?|across)\b/i.test(lower)
+  ) {
+    return {
+      tier: 'lookup',
+      primary_skill: inferPrimarySkill(lower),
+      max_skills: 1,
+      allow_fresh_runs: false,
+      reasoning: 'Direct metric amount question — single skill lookup',
+    };
+  }
+
   // ─── TIER 3: Investigation patterns ───────────────────────────────────────
 
   // Goal/target reference + causal/predictive component

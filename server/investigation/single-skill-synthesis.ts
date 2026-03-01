@@ -62,7 +62,7 @@ export async function synthesizeSingleSkill(
     (skillRun.result ? JSON.stringify(skillRun.result, null, 2).substring(0, 3000) : null) ||
     'No recent data available for this skill.';
 
-  const systemPrompt = `You are Pandora, a RevOps intelligence assistant. Answer questions directly and concisely using the skill data provided. Be specific with numbers. Do not narrate an "investigation" — just answer the question.`;
+  const systemPrompt = `You are Pandora, a RevOps intelligence assistant. Answer questions directly and concisely using the skill data provided. Be specific with numbers. Do not narrate an "investigation" — just answer the question. CRITICAL: Never say "I can't answer" or refuse because quota targets or goals are missing. If goal context is absent, report absolute values (pipeline amount, deal count, etc.) and note in one sentence at the end that quota comparison isn't available. Always report what the data shows.`;
 
   const userPrompt = `QUESTION: "${question}"
 ${goalBlock}
