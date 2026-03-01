@@ -242,7 +242,7 @@ export default function SalesRosterTab() {
     if (!currentWorkspace?.id) return;
     try {
       const data = await api.get(`/workspaces/${currentWorkspace.id}/sales-reps`);
-      const owners: { rep_name: string; rep_email: string | null }[] = (data || [])
+      const owners: { rep_name: string; rep_email: string | null }[] = (data.reps || [])
         .filter((r: any) => r.rep_name && !r.rep_name.includes('@') && !/^\d+$/.test(r.rep_name))
         .map((r: any) => ({ rep_name: r.rep_name, rep_email: r.rep_email || null }));
       setDealOwners(owners);
