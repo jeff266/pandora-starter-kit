@@ -1,4 +1,4 @@
-export type QuestionComplexity = 'lookup' | 'focused' | 'investigation';
+export type QuestionComplexity = 'data_query' | 'lookup' | 'focused' | 'investigation';
 
 export interface ComplexityResult {
   tier: QuestionComplexity;
@@ -16,6 +16,49 @@ export async function classifyComplexity(
   },
 ): Promise<ComplexityResult> {
   const lower = message.toLowerCase().trim();
+
+  // ─── TIER 0: Direct data queries — SQL, no AI synthesis ────────────────────
+  // Questions answerable with a single aggregation or filter query against deals.
+
+  const dataQueryPatterns = [
+    /^how (much|many)\s+(pipeline|revenue|deals?|opportunities?|arr)\b/i,
+    /\b(break\s*down|breakdown|split|segment)\b.+\b(by|per|across)\b/i,
+    /^(total|sum|count)\s+(pipeline|revenue|deals?|opportunities?)\b/i,
+    /^(list|show|give me|pull)\s+(all\s+)?(the\s+)?(open\s+)?(deals?|opportunities?)\b/i,
+    /\b(average|avg|mean|median)\s+(deal\s+size|deal\s+value|cycle|amount)\b/i,
+    /how many\s+(deals?|opportunities?|opps?)\s+(in|at)\s+/i,
+    /^pipeline\s+(by|per|across)\s+/i,
+  ];
+
+  const notDataQuery = [
+    /\bwhy\b/i,
+    /\bshould\b/i,
+    /\bhealthy\b/i,
+    /\bon track\b/i,
+    /\bcompare\b.*\b(to|with|against)\b/i,
+    /\btrend\b/i,
+    /\bchanged?\b/i,
+    /\bimprove\b/i,
+    /\brisk\b/i,
+    /\bforecast\b/i,
+    /\bgoing to\b/i,
+    /\bwill we\b/i,
+    /\bcan we\b/i,
+    /\bdo we need\b/i,
+  ];
+
+  const isDataQuery = dataQueryPatterns.some(p => p.test(lower));
+  const isAnalytical = notDataQuery.some(p => p.test(lower));
+
+  if (isDataQuery && !isAnalytical) {
+    return {
+      tier: 'data_query',
+      primary_skill: null,
+      max_skills: 0,
+      allow_fresh_runs: false,
+      reasoning: 'Direct data query — SQL, no AI needed',
+    };
+  }
 
   // ─── TIER 1: Lookup patterns ───────────────────────────────────────────────
 

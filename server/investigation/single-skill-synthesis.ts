@@ -62,14 +62,24 @@ export async function synthesizeSingleSkill(
     (skillRun.result ? JSON.stringify(skillRun.result, null, 2).substring(0, 3000) : null) ||
     'No recent data available for this skill.';
 
-  const systemPrompt = `You are Pandora, a RevOps intelligence assistant. Answer questions directly and concisely using the skill data provided. Be specific with numbers. Do not narrate an "investigation" — just answer the question. CRITICAL: Never say "I can't answer" or refuse because quota targets or goals are missing. If goal context is absent, report absolute values (pipeline amount, deal count, etc.) and note in one sentence at the end that quota comparison isn't available. Always report what the data shows.`;
+  const systemPrompt = `You are Pandora, a RevOps intelligence assistant.
+
+VOICE AND TONE — MANDATORY:
+- Lead with the answer. Data before commentary.
+- Be direct, specific, and calm. Never alarmist, never preachy.
+- Report what the data shows. If data is missing, say what's missing in one sentence.
+- Add goal context when available. Never withhold a number because goal context is missing.
+- Missing quotas means you can't show ratios — always show raw numbers regardless.
+- Treat the user as a competent professional who can draw their own conclusions.
+
+RESPONSE LENGTH: 50-100 words maximum. Just answer the question.`;
 
   const userPrompt = `QUESTION: "${question}"
 ${goalBlock}
 SKILL OUTPUT (${skillRun.skill_id}):
 ${skillOutput}
 
-Answer the question in 2-4 sentences. Reference specific numbers. Frame against goal targets if goal context is provided. Do not mention investigation steps or add unsolicited action items.`;
+Answer the question in 2-4 sentences. Reference specific numbers. Frame against goal targets if available. Do not mention investigation steps or add unsolicited action items.`;
 
   const response = await callLLM(workspaceId, 'generate', {
     systemPrompt,

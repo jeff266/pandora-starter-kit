@@ -5,6 +5,7 @@ import { createInvestigationPlan, getOperatorMeta } from '../investigation/plann
 import { executeInvestigation } from '../investigation/executor.js';
 import { classifyComplexity } from '../investigation/complexity-gate.js';
 import { synthesizeSingleSkill, getMostRecentSkillRun } from '../investigation/single-skill-synthesis.js';
+import { executeDataQuery } from '../investigation/data-query-executor.js';
 import { goalService } from '../goals/goal-service.js';
 import { getSkillRuntime } from '../skills/runtime.js';
 import { getSkillRegistry } from '../skills/registry.js';
@@ -70,8 +71,59 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
       }),
     );
 
+    // ── Tier 0: Direct data query — SQL only, no AI synthesis ───────────────
+    if (complexity.tier === 'data_query') {
+      const dataResult = await executeDataQuery(workspaceId, message).catch((err) => {
+        console.error('[conversation-stream] Tier 0 query failed, falling through:', err.message);
+        return null;
+      });
+
+      if (dataResult) {
+        let responseText = '';
+
+        if (dataResult.type === 'single_value') {
+          responseText = `**${dataResult.title}**\n\n${dataResult.value}`;
+          if (dataResult.subtitle) responseText += `\n${dataResult.subtitle}`;
+        } else if (dataResult.type === 'table' && dataResult.columns && dataResult.rows) {
+          responseText = `**${dataResult.title}**\n\n`;
+          const cols = dataResult.columns;
+          responseText += `| ${cols.join(' | ')} |\n`;
+          responseText += `| ${cols.map(() => '---').join(' | ')} |\n`;
+          for (const row of dataResult.rows) {
+            responseText += `| ${cols.map((c) => String(row[c] ?? '—')).join(' | ')} |\n`;
+          }
+        } else if (dataResult.type === 'list' && dataResult.items) {
+          responseText = `**${dataResult.title}**\n\n`;
+          for (const item of dataResult.items) {
+            responseText += `- **${item.label}**: ${item.value}${item.detail ? ` — ${item.detail}` : ''}\n`;
+          }
+        }
+
+        if (dataResult.footnote) responseText += `\n_${dataResult.footnote}_`;
+        responseText += `\n\n_(${dataResult.query_ms}ms)_`;
+
+        sse(res, { type: 'synthesis_start' });
+        sse(res, { type: 'synthesis_chunk', text: responseText });
+        sse(res, { type: 'synthesis_done', full_text: responseText });
+        sse(res, {
+          type: 'deliverable_options',
+          options: [
+            { id: 'slides', label: 'Slides', icon: '📊', sub: 'Board-ready deck' },
+            { id: 'doc', label: 'Doc', icon: '📄', sub: 'Written briefing' },
+            { id: 'slack', label: 'Slack', icon: '💬', sub: 'Team summary' },
+            { id: 'email', label: 'Email', icon: '📧', sub: 'Executive update' },
+          ],
+        });
+        sse(res, { type: 'done' });
+        res.end();
+        return;
+      }
+
+      // Data query couldn't be parsed — fall through to Tier 1 logic
+    }
+
     // ── Tier 1: Lookup — single skill, cache-first, lightweight synthesis ────
-    if (complexity.tier === 'lookup') {
+    if (complexity.tier === 'lookup' || complexity.tier === 'data_query') {
       const primarySkill = complexity.primary_skill ?? 'forecast-rollup';
       const meta = resolveOperatorMeta(primarySkill);
 
