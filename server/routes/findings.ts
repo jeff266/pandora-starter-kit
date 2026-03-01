@@ -53,6 +53,12 @@ function calculateTimeRange(timeRange: string): { start: Date; end: Date } | nul
       return { start: firstDay, end: lastDay };
     }
 
+    case 'this_year': {
+      const firstDay = new Date(now.getFullYear(), 0, 1);
+      const lastDay = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+      return { start: firstDay, end: lastDay };
+    }
+
     default:
       return null;
   }
@@ -400,7 +406,7 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
     // Calculate time range filter if provided
     let timeRangeFilter = '';
     let dateRange: { start: string; end: string } | null = null;
-    if (timeRangeParam && ['today', 'this_week', 'this_month', 'this_quarter'].includes(timeRangeParam)) {
+    if (timeRangeParam && ['today', 'this_week', 'this_month', 'this_quarter', 'this_year'].includes(timeRangeParam)) {
       const range = calculateTimeRange(timeRangeParam);
       if (range) {
         dateRange = {
@@ -575,47 +581,86 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
         } catch {}
       }
 
-      // Use the start of the viewed time range as the reference date so that filtering
-      // to e.g. Q3 deals pulls the Q3 target, not the current-period target.
-      const periodRefDate = dateRange?.start
-        ? new Date(dateRange.start).toISOString().slice(0, 10)
-        : new Date().toISOString().slice(0, 10);
+      // For this_year: SUM all quarterly targets across the full year.
+      // For all other ranges: pick the single target covering the period reference date.
+      if (timeRangeParam === 'this_year' && dateRange) {
+        const yearStart = new Date(dateRange.start).toISOString().slice(0, 10);
+        const yearEnd = new Date(dateRange.end).toISOString().slice(0, 10);
 
-      // When "All" pipelines is selected (targetPipelineName is null), only match
-      // workspace-wide targets (pipeline_name IS NULL). When a specific pipeline is
-      // selected, prefer that pipeline's target and fall back to workspace-wide.
-      let targetQuery: string;
-      let targetParams: any[];
-      if (targetPipelineName) {
-        targetQuery = `
-          SELECT amount, pipeline_name FROM targets
-          WHERE workspace_id = $1
-            AND is_active = true
-            AND period_start <= $3::date
-            AND period_end >= $3::date
-          ORDER BY
-            CASE WHEN pipeline_name = $2 THEN 0 WHEN pipeline_name IS NULL THEN 1 ELSE 2 END,
-            period_start DESC
-          LIMIT 1`;
-        targetParams = [workspaceId, targetPipelineName, periodRefDate];
+        let annualQuery: string;
+        let annualParams: any[];
+        if (targetPipelineName) {
+          annualQuery = `
+            SELECT COALESCE(SUM(amount), 0)::float as total, pipeline_name
+            FROM targets
+            WHERE workspace_id = $1
+              AND is_active = true
+              AND pipeline_name = $2
+              AND period_start >= $3::date
+              AND period_end <= $4::date
+            GROUP BY pipeline_name`;
+          annualParams = [workspaceId, targetPipelineName, yearStart, yearEnd];
+        } else {
+          annualQuery = `
+            SELECT COALESCE(SUM(amount), 0)::float as total, pipeline_name
+            FROM targets
+            WHERE workspace_id = $1
+              AND is_active = true
+              AND pipeline_name IS NULL
+              AND period_start >= $2::date
+              AND period_end <= $3::date
+            GROUP BY pipeline_name`;
+          annualParams = [workspaceId, yearStart, yearEnd];
+        }
+
+        const annualRows = await query<{ total: string; pipeline_name: string | null }>(annualQuery, annualParams);
+        if (annualRows.rows.length > 0 && parseFloat(annualRows.rows[0].total) > 0) {
+          targetForCoverage = parseFloat(annualRows.rows[0].total);
+          coverageTargetSource = annualRows.rows[0].pipeline_name ? 'Annual pipeline target' : 'Annual workspace target';
+        }
       } else {
-        targetQuery = `
-          SELECT amount, pipeline_name FROM targets
-          WHERE workspace_id = $1
-            AND is_active = true
-            AND pipeline_name IS NULL
-            AND period_start <= $2::date
-            AND period_end >= $2::date
-          ORDER BY created_at DESC
-          LIMIT 1`;
-        targetParams = [workspaceId, periodRefDate];
-      }
+        // Use the start of the viewed time range as the reference date so that filtering
+        // to e.g. Q3 deals pulls the Q3 target, not the current-period target.
+        const periodRefDate = dateRange?.start
+          ? new Date(dateRange.start).toISOString().slice(0, 10)
+          : new Date().toISOString().slice(0, 10);
 
-      const targetRows = await query<{ amount: string; pipeline_name: string | null }>(targetQuery, targetParams);
-      if (targetRows.rows.length > 0) {
-        const t = targetRows.rows[0];
-        targetForCoverage = parseFloat(t.amount) || targetForCoverage;
-        coverageTargetSource = t.pipeline_name ? 'Pipeline target' : 'Workspace target';
+        // When "All" pipelines is selected (targetPipelineName is null), only match
+        // workspace-wide targets (pipeline_name IS NULL). When a specific pipeline is
+        // selected, prefer that pipeline's target and fall back to workspace-wide.
+        let targetQuery: string;
+        let targetParams: any[];
+        if (targetPipelineName) {
+          targetQuery = `
+            SELECT amount, pipeline_name FROM targets
+            WHERE workspace_id = $1
+              AND is_active = true
+              AND period_start <= $3::date
+              AND period_end >= $3::date
+            ORDER BY
+              CASE WHEN pipeline_name = $2 THEN 0 WHEN pipeline_name IS NULL THEN 1 ELSE 2 END,
+              period_start DESC
+            LIMIT 1`;
+          targetParams = [workspaceId, targetPipelineName, periodRefDate];
+        } else {
+          targetQuery = `
+            SELECT amount, pipeline_name FROM targets
+            WHERE workspace_id = $1
+              AND is_active = true
+              AND pipeline_name IS NULL
+              AND period_start <= $2::date
+              AND period_end >= $2::date
+            ORDER BY created_at DESC
+            LIMIT 1`;
+          targetParams = [workspaceId, periodRefDate];
+        }
+
+        const targetRows = await query<{ amount: string; pipeline_name: string | null }>(targetQuery, targetParams);
+        if (targetRows.rows.length > 0) {
+          const t = targetRows.rows[0];
+          targetForCoverage = parseFloat(t.amount) || targetForCoverage;
+          coverageTargetSource = t.pipeline_name ? 'Pipeline target' : 'Workspace target';
+        }
       }
     } catch {
       // targets table not available, keep fallback
