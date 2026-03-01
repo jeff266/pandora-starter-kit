@@ -196,6 +196,7 @@ export default function SalesRosterTab() {
   const [addLoading, setAddLoading] = useState(false);
   const [addError, setAddError] = useState('');
   const [dealOwners, setDealOwners] = useState<{ rep_name: string; rep_email: string | null }[]>([]);
+  const [nameDropdownOpen, setNameDropdownOpen] = useState(false);
 
   const defaultRoleId = roles.find(r => r.system_type === 'member' || r.name.toLowerCase() === 'member')?.id || roles[0]?.id || '';
 
@@ -355,34 +356,73 @@ export default function SalesRosterTab() {
         }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 12 }}>Add Rep to Roster</div>
           <div style={{ display: 'grid', gridTemplateColumns: '2fr 2fr 1fr 1.5fr', gap: 10, marginBottom: 12 }}>
-            <div>
+            <div style={{ position: 'relative' }}>
               <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
                 Name *
               </label>
-              <input
-                list="add-rep-name-options"
-                value={newName}
-                onChange={e => {
-                  const val = e.target.value;
-                  setNewName(val);
-                  const existingNames = new Set(reps.map(r => r.rep_name));
-                  const match = dealOwners.find(o => o.rep_name === val && !existingNames.has(o.rep_name));
-                  if (match && !newEmail && match.rep_email) {
-                    setNewEmail(match.rep_email);
-                  }
-                }}
-                placeholder="Carter McKay"
-                autoFocus
-                style={inputStyle}
-                autoComplete="off"
-              />
-              <datalist id="add-rep-name-options">
-                {dealOwners
-                  .filter(o => !reps.some(r => r.rep_name === o.rep_name))
-                  .map(o => (
-                    <option key={o.rep_name} value={o.rep_name} />
-                  ))}
-              </datalist>
+              <div style={{ position: 'relative' }}>
+                <input
+                  value={newName}
+                  onChange={e => {
+                    const val = e.target.value;
+                    setNewName(val);
+                    setNameDropdownOpen(true);
+                    const existingNames = new Set(reps.map(r => r.rep_name));
+                    const match = dealOwners.find(o => o.rep_name === val && !existingNames.has(o.rep_name));
+                    if (match && !newEmail && match.rep_email) {
+                      setNewEmail(match.rep_email);
+                    }
+                  }}
+                  onFocus={() => setNameDropdownOpen(true)}
+                  onBlur={() => setTimeout(() => setNameDropdownOpen(false), 150)}
+                  placeholder="Carter McKay"
+                  autoFocus
+                  style={{ ...inputStyle, paddingRight: 28 }}
+                  autoComplete="off"
+                />
+                <span style={{
+                  position: 'absolute', right: 9, top: '50%', transform: 'translateY(-50%)',
+                  color: colors.textMuted, fontSize: 11, pointerEvents: 'none', userSelect: 'none',
+                }}>▾</span>
+              </div>
+              {nameDropdownOpen && (() => {
+                const existingNames = new Set(reps.map(r => r.rep_name));
+                const filtered = dealOwners.filter(o =>
+                  !existingNames.has(o.rep_name) &&
+                  (!newName || o.rep_name.toLowerCase().includes(newName.toLowerCase()))
+                );
+                return filtered.length > 0 ? (
+                  <div style={{
+                    position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 200,
+                    background: colors.surfaceRaised, border: `1px solid ${colors.border}`,
+                    borderRadius: 6, boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
+                    maxHeight: 200, overflowY: 'auto', marginTop: 2,
+                  }}>
+                    {filtered.map(o => (
+                      <div
+                        key={o.rep_name}
+                        onMouseDown={() => {
+                          setNewName(o.rep_name);
+                          if (!newEmail && o.rep_email) setNewEmail(o.rep_email);
+                          setNameDropdownOpen(false);
+                        }}
+                        style={{
+                          padding: '8px 12px', cursor: 'pointer', display: 'flex',
+                          justifyContent: 'space-between', alignItems: 'center',
+                          borderBottom: `1px solid ${colors.border}`,
+                        }}
+                        onMouseEnter={e => (e.currentTarget.style.background = colors.surfaceHover)}
+                        onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                      >
+                        <span style={{ fontSize: 13, color: colors.text, fontWeight: 500 }}>{o.rep_name}</span>
+                        {o.rep_email && (
+                          <span style={{ fontSize: 11, color: colors.textMuted, marginLeft: 8 }}>{o.rep_email}</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : null;
+              })()}
             </div>
             <div>
               <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
