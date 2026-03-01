@@ -6876,6 +6876,417 @@ const mcRunSimulation: ToolDefinition = {
 };
 
 // ============================================================================
+// Pipeline Contribution Forecast tools
+// ============================================================================
+
+const pcfResolveContext: ToolDefinition = {
+  name: 'pcfResolveContext',
+  description: 'Resolve current quarter bounds, attainment, gap, and pipeline creation pace',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (_params, context) => {
+    return safeExecute('pcfResolveContext', async () => {
+      const now = new Date();
+      const currentQStart = new Date(Date.UTC(now.getUTCFullYear(), Math.floor(now.getUTCMonth() / 3) * 3, 1));
+      const currentQEnd = new Date(Date.UTC(now.getUTCFullYear(), Math.floor(now.getUTCMonth() / 3) * 3 + 3, 0));
+      const daysElapsed = Math.max(1, Math.round((now.getTime() - currentQStart.getTime()) / 86400000));
+      const daysRemaining = Math.max(0, Math.round((currentQEnd.getTime() - now.getTime()) / 86400000));
+      const currentQ = `${now.getUTCFullYear()}-Q${Math.floor(now.getUTCMonth() / 3) + 1}`;
+
+      const [quotaRes, wonRes, openRes, createdRes] = await Promise.all([
+        query<any>(
+          `SELECT amount::numeric as quota FROM targets WHERE workspace_id = $1 AND is_active = true AND period_start <= CURRENT_DATE AND period_end >= CURRENT_DATE ORDER BY period_start DESC LIMIT 1`,
+          [context.workspaceId]
+        ).catch(() => ({ rows: [] as any[] })),
+        query<any>(
+          `SELECT COALESCE(SUM(amount),0)::numeric as total FROM deals WHERE workspace_id = $1 AND stage_normalized = 'closed_won' AND close_date >= $2 AND close_date <= $3`,
+          [context.workspaceId, currentQStart.toISOString().split('T')[0], currentQEnd.toISOString().split('T')[0]]
+        ),
+        query<any>(
+          `SELECT COALESCE(SUM(amount),0)::numeric as total, COUNT(*)::int as cnt FROM deals WHERE workspace_id = $1 AND stage_normalized NOT IN ('closed_won','closed_lost') AND amount > 0`,
+          [context.workspaceId]
+        ),
+        query<any>(
+          `SELECT COALESCE(SUM(amount),0)::numeric as total, COUNT(*)::int as cnt FROM deals WHERE workspace_id = $1 AND created_at >= $2 AND amount > 0`,
+          [context.workspaceId, currentQStart.toISOString()]
+        ),
+      ]);
+
+      const quota = parseFloat(quotaRes.rows[0]?.quota || '0');
+      const closedWon = parseFloat(wonRes.rows[0]?.total || '0');
+      const openPipeline = parseFloat(openRes.rows[0]?.total || '0');
+      const createdThisQtr = parseFloat(createdRes.rows[0]?.total || '0');
+      const attainmentPct = quota > 0 ? Math.round((closedWon / quota) * 1000) / 10 : 0;
+      const gap = quota > 0 ? Math.max(0, quota - closedWon) : 0;
+      const pacePerDay = daysElapsed > 0 ? Math.round(createdThisQtr / daysElapsed) : 0;
+
+      const futureQuotaRes = await query<any>(
+        `SELECT period_start::text, period_end::text, amount::numeric as quota FROM targets WHERE workspace_id = $1 AND period_end > CURRENT_DATE AND is_active = true ORDER BY period_start ASC LIMIT 4`,
+        [context.workspaceId]
+      ).catch(() => ({ rows: [] as any[] }));
+
+      return {
+        current_quarter: currentQ,
+        quarter_start: currentQStart.toISOString().split('T')[0],
+        quarter_end: currentQEnd.toISOString().split('T')[0],
+        days_elapsed: daysElapsed,
+        days_remaining: daysRemaining,
+        quota,
+        closed_won_this_quarter: Math.round(closedWon),
+        attainment_pct: attainmentPct,
+        gap: Math.round(gap),
+        open_pipeline_total: Math.round(openPipeline),
+        open_pipeline_count: openRes.rows[0]?.cnt || 0,
+        amount_created_this_quarter: Math.round(createdThisQtr),
+        deals_created_this_quarter: createdRes.rows[0]?.cnt || 0,
+        pace_per_day: pacePerDay,
+        future_quotas: futureQuotaRes.rows.map((r: any) => ({
+          period_start: r.period_start,
+          period_end: r.period_end,
+          quota: Math.round(parseFloat(r.quota)),
+        })),
+      };
+    }, _params);
+  },
+};
+
+const pcfBuildCohortMatrix: ToolDefinition = {
+  name: 'pcfBuildCohortMatrix',
+  description: 'For each of the last N quarters, track what fraction of created pipeline closed in Q+0, Q+1, Q+2, Q+3, Q+4+',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: { lookback_quarters: { type: 'number', description: 'Quarters of history (default 6)' } },
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('pcfBuildCohortMatrix', async () => {
+      const lookback = params.lookback_quarters || 6;
+      const now = new Date();
+      const currentQStart = new Date(Date.UTC(now.getUTCFullYear(), Math.floor(now.getUTCMonth() / 3) * 3, 1));
+
+      const cohorts: any[] = [];
+      const agg: Record<string, { created: number; closed: number }> = {
+        'q+0': { created: 0, closed: 0 },
+        'q+1': { created: 0, closed: 0 },
+        'q+2': { created: 0, closed: 0 },
+        'q+3': { created: 0, closed: 0 },
+        'q+4+': { created: 0, closed: 0 },
+      };
+
+      for (let q = lookback; q >= 1; q--) {
+        const qStart = new Date(currentQStart);
+        qStart.setUTCMonth(qStart.getUTCMonth() - q * 3);
+        const qEnd = new Date(qStart);
+        qEnd.setUTCMonth(qEnd.getUTCMonth() + 3);
+        if (qEnd > now) continue;
+
+        const qLabel = `${qStart.getUTCFullYear()}-Q${Math.floor(qStart.getUTCMonth() / 3) + 1}`;
+
+        const dealsRes = await query<any>(
+          `SELECT amount::numeric as amount, close_date, stage_normalized
+           FROM deals
+           WHERE workspace_id = $1
+             AND created_at >= $2 AND created_at < $3
+             AND amount > 0`,
+          [context.workspaceId, qStart.toISOString(), qEnd.toISOString()]
+        ).catch(() => ({ rows: [] as any[] }));
+
+        let totalCreated = 0;
+        const horizonClosed: Record<string, number> = { 'q+0': 0, 'q+1': 0, 'q+2': 0, 'q+3': 0, 'q+4+': 0 };
+
+        for (const deal of dealsRes.rows) {
+          const amt = parseFloat(deal.amount);
+          totalCreated += amt;
+
+          if (deal.stage_normalized !== 'closed_won' || !deal.close_date) continue;
+
+          const closeDate = new Date(deal.close_date);
+          const closeQStart = new Date(Date.UTC(closeDate.getUTCFullYear(), Math.floor(closeDate.getUTCMonth() / 3) * 3, 1));
+          const quartersDiff = Math.round((closeQStart.getTime() - qStart.getTime()) / (91 * 86400000));
+
+          const horizon = quartersDiff <= 0 ? 'q+0'
+            : quartersDiff === 1 ? 'q+1'
+            : quartersDiff === 2 ? 'q+2'
+            : quartersDiff === 3 ? 'q+3'
+            : 'q+4+';
+
+          horizonClosed[horizon] += amt;
+        }
+
+        if (totalCreated === 0) continue;
+
+        const rates: Record<string, number> = {};
+        for (const h of ['q+0', 'q+1', 'q+2', 'q+3', 'q+4+']) {
+          rates[h] = Math.round((horizonClosed[h] / totalCreated) * 1000) / 1000;
+          agg[h].created += totalCreated;
+          agg[h].closed += horizonClosed[h];
+        }
+
+        cohorts.push({
+          quarter: qLabel,
+          total_created: Math.round(totalCreated),
+          deal_count: dealsRes.rows.length,
+          conversion_rates: rates,
+          closed_by_horizon: Object.fromEntries(
+            Object.entries(horizonClosed).map(([k, v]) => [k, Math.round(v)])
+          ),
+        });
+      }
+
+      const avgRates: Record<string, number> = {};
+      for (const h of ['q+0', 'q+1', 'q+2', 'q+3', 'q+4+']) {
+        avgRates[h] = agg[h].created > 0 ? Math.round((agg[h].closed / agg[h].created) * 1000) / 1000 : 0;
+      }
+
+      const q0Rate = avgRates['q+0'] || 0;
+      const q1Rate = avgRates['q+1'] || 0;
+      const lagProfile = q0Rate > 0.4 ? 'transactional'
+        : q0Rate + q1Rate > 0.5 ? 'mid_market'
+        : 'enterprise';
+
+      const dataQuality = cohorts.length >= 4 ? 'good' : cohorts.length >= 2 ? 'limited' : 'insufficient';
+      const cumulativeRate = Object.values(avgRates).reduce((s, r) => s + r, 0);
+
+      return {
+        cohorts,
+        avg_conversion_rates: avgRates,
+        lag_profile: lagProfile,
+        quarters_analyzed: cohorts.length,
+        data_quality: dataQuality,
+        cumulative_conversion_rate: Math.round(cumulativeRate * 1000) / 1000,
+      };
+    }, params);
+  },
+};
+
+const pcfLoadVelocityBenchmarks: ToolDefinition = {
+  name: 'pcfLoadVelocityBenchmarks',
+  description: 'Load stage velocity benchmarks from latest skill run, or compute total-cycle stats inline as fallback',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (_params, context) => {
+    return safeExecute('pcfLoadVelocityBenchmarks', async () => {
+      const skillRunRes = await query<any>(
+        `SELECT result FROM skill_runs WHERE workspace_id = $1 AND skill_id = 'stage-velocity-benchmarks' AND status = 'completed' ORDER BY started_at DESC LIMIT 1`,
+        [context.workspaceId]
+      ).catch(() => ({ rows: [] as any[] }));
+
+      if (skillRunRes.rows.length > 0) {
+        const result = typeof skillRunRes.rows[0].result === 'string'
+          ? JSON.parse(skillRunRes.rows[0].result)
+          : skillRunRes.rows[0].result;
+        const benchmarks = result?.benchmarks || result?.step_results?.benchmarks;
+        if (benchmarks?.stages?.length) {
+          const totalMedian = benchmarks.stages.reduce((s: number, st: any) => s + (st.median_days || 0), 0);
+          const totalP75 = benchmarks.stages.reduce((s: number, st: any) => s + (st.p75_days || 0), 0);
+          const totalP90 = benchmarks.stages.reduce((s: number, st: any) => s + (st.p90_days || 0), 0);
+          return {
+            source: 'skill_run',
+            median_total_cycle_days: Math.round(totalMedian) || 60,
+            p75_total_cycle_days: Math.round(totalP75) || 90,
+            p90_total_cycle_days: Math.round(totalP90) || 120,
+            stages: benchmarks.stages,
+          };
+        }
+      }
+
+      const cycleRes = await query<any>(
+        `SELECT
+           PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY cycle_days)::numeric as median_days,
+           PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY cycle_days)::numeric as p75_days,
+           PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY cycle_days)::numeric as p90_days,
+           COUNT(*)::int as deal_count
+         FROM (
+           SELECT EXTRACT(DAY FROM close_date::timestamptz - created_at)::int as cycle_days
+           FROM deals
+           WHERE workspace_id = $1
+             AND stage_normalized = 'closed_won'
+             AND close_date IS NOT NULL AND created_at IS NOT NULL
+             AND close_date > created_at
+             AND created_at >= NOW() - INTERVAL '18 months'
+         ) sub
+         WHERE cycle_days BETWEEN 1 AND 730`,
+        [context.workspaceId]
+      ).catch(() => ({ rows: [] as any[] }));
+
+      const row = cycleRes.rows[0] || {};
+      return {
+        source: 'inline',
+        median_total_cycle_days: Math.round(parseFloat(row.median_days || '60')),
+        p75_total_cycle_days: Math.round(parseFloat(row.p75_days || '90')),
+        p90_total_cycle_days: Math.round(parseFloat(row.p90_days || '120')),
+        deal_count: row.deal_count || 0,
+        stages: [],
+      };
+    }, _params);
+  },
+};
+
+const pcfProjectCreation: ToolDefinition = {
+  name: 'pcfProjectCreation',
+  description: 'Project future pipeline creation for the remaining quarter across three pace scenarios, apply cohort matrix to produce bookings by horizon (Q+0 through Q+3)',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (_params, context) => {
+    return safeExecute('pcfProjectCreation', async () => {
+      const ctx = (context.stepResults as any).context;
+      const cohort = (context.stepResults as any).cohort_matrix;
+      const velocity = (context.stepResults as any).velocity;
+      if (!ctx || !cohort) return { error: 'Missing context or cohort matrix' };
+
+      const pacePerDay = ctx.pace_per_day || 0;
+      const daysRemaining = ctx.days_remaining || 0;
+      const avgRates = cohort.avg_conversion_rates || {};
+      const medianCycle = velocity?.median_total_cycle_days || 60;
+
+      const scenarios = { bear: pacePerDay * 0.80, base: pacePerDay, bull: pacePerDay * 1.15 };
+
+      // Time-decay for Q+0: deals created with fewer days than the median cycle
+      // have proportionally lower in-quarter close probability
+      const decayMultiplier = medianCycle > 0 ? Math.min(1, daysRemaining / medianCycle) : 0;
+      const q0RateAdjusted = (avgRates['q+0'] || 0) * decayMultiplier;
+
+      const horizons = [
+        { key: 'q+0', label: 'Rest of this quarter' },
+        { key: 'q+1', label: 'Next quarter (Q+1)' },
+        { key: 'q+2', label: 'Q+2' },
+        { key: 'q+3', label: 'Q+3' },
+      ];
+
+      const results: any[] = [];
+      const totals = { bear: 0, base: 0, bull: 0 };
+
+      for (const { key, label } of horizons) {
+        const rate = key === 'q+0' ? q0RateAdjusted : (avgRates[key] || 0);
+        const bear = Math.round(scenarios.bear * daysRemaining * rate);
+        const base = Math.round(scenarios.base * daysRemaining * rate);
+        const bull = Math.round(scenarios.bull * daysRemaining * rate);
+        totals.bear += bear;
+        totals.base += base;
+        totals.bull += bull;
+
+        results.push({
+          horizon: key,
+          label,
+          conversion_rate_used: Math.round(rate * 1000) / 1000,
+          cohort_rate_unadjusted: avgRates[key] || 0,
+          decay_multiplier_applied: key === 'q+0' ? Math.round(decayMultiplier * 1000) / 1000 : 1,
+          scenarios: {
+            bear: { creation_projected: Math.round(scenarios.bear * daysRemaining), bookings: bear },
+            base: { creation_projected: Math.round(scenarios.base * daysRemaining), bookings: base },
+            bull: { creation_projected: Math.round(scenarios.bull * daysRemaining), bookings: bull },
+          },
+        });
+      }
+
+      results.push({
+        horizon: 'full_year',
+        label: 'Full-year contribution (Q+0 through Q+3)',
+        scenarios: {
+          bear: { creation_projected: Math.round(scenarios.bear * daysRemaining), bookings: totals.bear },
+          base: { creation_projected: Math.round(scenarios.base * daysRemaining), bookings: totals.base },
+          bull: { creation_projected: Math.round(scenarios.bull * daysRemaining), bookings: totals.bull },
+        },
+      });
+
+      const creationWindowStatus = daysRemaining > medianCycle ? 'open'
+        : daysRemaining > medianCycle * 0.2 ? 'narrowing'
+        : 'effectively_closed';
+
+      return {
+        scenarios_basis: {
+          bear_pace_per_day: Math.round(scenarios.bear),
+          base_pace_per_day: Math.round(scenarios.base),
+          bull_pace_per_day: Math.round(scenarios.bull),
+          days_remaining_in_quarter: daysRemaining,
+          median_sales_cycle_days: medianCycle,
+          q0_decay_multiplier: Math.round(decayMultiplier * 1000) / 1000,
+        },
+        horizon_results: results,
+        creation_window_status: creationWindowStatus,
+        q0_base_bookings: results.find(r => r.horizon === 'q+0')?.scenarios.base.bookings || 0,
+        full_year_base_bookings: totals.base,
+      };
+    }, _params);
+  },
+};
+
+const pcfAuditOpenPipeline: ToolDefinition = {
+  name: 'pcfAuditOpenPipeline',
+  description: 'Flag open deals with Q-end close dates that are moving too slowly to realistically close by their stated date, using velocity benchmarks',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (_params, context) => {
+    return safeExecute('pcfAuditOpenPipeline', async () => {
+      const ctx = (context.stepResults as any).context;
+      const velocity = (context.stepResults as any).velocity;
+      if (!ctx) return { error: 'Missing context' };
+
+      const qEnd = ctx.quarter_end;
+      const medianCycle = velocity?.median_total_cycle_days || 60;
+      const p75Cycle = velocity?.p75_total_cycle_days || 90;
+
+      const dealsRes = await query<any>(
+        `SELECT d.id::text, d.name, d.amount::numeric as amount, d.stage, d.close_date::text,
+                d.owner, COALESCE(d.days_in_stage, 0)::int as days_in_stage,
+                EXTRACT(DAY FROM NOW() - d.created_at)::int as age_days
+         FROM deals d
+         WHERE d.workspace_id = $1
+           AND d.stage_normalized NOT IN ('closed_won','closed_lost')
+           AND d.close_date <= $2
+           AND d.amount > 0
+         ORDER BY d.amount DESC`,
+        [context.workspaceId, qEnd]
+      ).catch(() => ({ rows: [] as any[] }));
+
+      let credibleAmount = 0, atRiskAmount = 0;
+      const credibleDeals: any[] = [], atRiskDeals: any[] = [];
+
+      for (const deal of dealsRes.rows) {
+        const amt = parseFloat(deal.amount);
+        const ageDays = deal.age_days || 0;
+        const daysInStage = deal.days_in_stage || 0;
+        const closeDate = new Date(deal.close_date);
+        const daysUntilClose = Math.max(0, Math.round((closeDate.getTime() - Date.now()) / 86400000));
+
+        const expectedAgeAtClose = medianCycle;
+        const isOnTrack = ageDays >= (expectedAgeAtClose - daysUntilClose - 10);
+        const isStuck = daysInStage > p75Cycle * 0.5;
+
+        if (isOnTrack && !isStuck) {
+          credibleAmount += amt;
+          credibleDeals.push({ id: deal.id, name: deal.name, amount: Math.round(amt), stage: deal.stage, close_date: deal.close_date, owner: deal.owner, days_until_close: daysUntilClose, age_days: ageDays });
+        } else {
+          atRiskAmount += amt;
+          atRiskDeals.push({
+            id: deal.id, name: deal.name, amount: Math.round(amt), stage: deal.stage,
+            close_date: deal.close_date, owner: deal.owner, days_until_close: daysUntilClose,
+            age_days: ageDays, days_in_stage: daysInStage,
+            risk_reason: isStuck
+              ? `Stuck in ${deal.stage} for ${daysInStage} days`
+              : `Only ${ageDays} days old — needs ${Math.max(0, expectedAgeAtClose - daysUntilClose - ageDays)} more days of progression`,
+          });
+        }
+      }
+
+      const total = credibleAmount + atRiskAmount;
+      return {
+        total_q_close_pipeline: Math.round(total),
+        credible_amount: Math.round(credibleAmount),
+        credible_count: credibleDeals.length,
+        at_risk_amount: Math.round(atRiskAmount),
+        at_risk_count: atRiskDeals.length,
+        credibility_rate: total > 0 ? Math.round((credibleAmount / total) * 100) : 0,
+        credible_deals: credibleDeals.slice(0, 10),
+        at_risk_deals: atRiskDeals.slice(0, 10),
+        methodology: `Credible = age sufficient for ${medianCycle}-day median cycle given days to close. At-risk = stuck in stage >${Math.round(p75Cycle * 0.5)} days or insufficient age.`,
+      };
+    }, _params);
+  },
+};
+
+// ============================================================================
 
 export const toolRegistry = new Map<string, ToolDefinition>([
   ['queryDeals', queryDeals],
@@ -6997,6 +7408,12 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['mcLoadUpcomingRenewals', mcLoadUpcomingRenewals],
   ['mcComputeRiskAdjustments', mcComputeRiskAdjustments],
   ['mcRunSimulation', mcRunSimulation],
+  // Pipeline Contribution Forecast tools
+  ['pcfResolveContext', pcfResolveContext],
+  ['pcfBuildCohortMatrix', pcfBuildCohortMatrix],
+  ['pcfLoadVelocityBenchmarks', pcfLoadVelocityBenchmarks],
+  ['pcfProjectCreation', pcfProjectCreation],
+  ['pcfAuditOpenPipeline', pcfAuditOpenPipeline],
 ]);
 
 // ============================================================================
