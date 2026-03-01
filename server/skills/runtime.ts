@@ -304,7 +304,7 @@ export class SkillRuntime {
         console.log(`[Skill Runtime] Storing ${annotationsList.length} annotations in output`);
       }
 
-      await this.logSkillRun(runId, skill.id, workspaceId, 'completed', finalOutput, undefined, context.metadata.tokenUsage, evidence, annotationsList, annotationsMetadata);
+      await this.logSkillRun(runId, skill.id, workspaceId, 'completed', finalOutput, undefined, context.metadata.tokenUsage, evidence, annotationsList, annotationsMetadata, Date.now() - startTime);
 
       try {
         const findings = await extractFindings(skill.id, runId, workspaceId, context.stepResults);
@@ -397,7 +397,7 @@ export class SkillRuntime {
       const errorMsg = error instanceof Error ? error.message : String(error);
       console.error(`[Skill Runtime] Skill ${skill.id} failed:`, errorMsg);
 
-      await this.logSkillRun(runId, skill.id, workspaceId, 'failed', null, errorMsg);
+      await this.logSkillRun(runId, skill.id, workspaceId, 'failed', null, errorMsg, undefined, undefined, undefined, undefined, Date.now() - startTime);
 
       return {
         runId,
@@ -915,7 +915,8 @@ Important:
     tokenUsageData?: { compute: number; deepseek: number; claude: number; claudeCacheCreation?: number; claudeCacheRead?: number },
     evidence?: SkillEvidence,
     annotations?: any,
-    annotationsMetadata?: any
+    annotationsMetadata?: any,
+    durationMs?: number
   ): Promise<void> {
     try {
       if (status === 'running') {
@@ -960,6 +961,7 @@ Important:
         await query(
           `UPDATE skill_runs
            SET status = $2, output = $3, error = $4, completed_at = NOW(),
+               duration_ms = COALESCE($6, duration_ms),
                token_usage = COALESCE($5::jsonb, token_usage)
            WHERE run_id = $1`,
           [
@@ -968,6 +970,7 @@ Important:
             resultData ? JSON.stringify(resultData) : null,
             error,
             enhancedTokenUsage ? JSON.stringify(enhancedTokenUsage) : null,
+            durationMs ?? null,
           ]
         );
       }

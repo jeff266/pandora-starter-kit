@@ -124,10 +124,12 @@ export async function executeInvestigation(
     callbacks.onStepStart?.(step);
 
     try {
+      const cacheWindow = plan.prefer_cache ? '2 hours' : '30 minutes';
+
       const cached = await query<{ id: string; output_text: string; result: any }>(
         `SELECT id, output_text, result FROM skill_runs
          WHERE workspace_id = $1 AND skill_id = $2 AND status = 'completed'
-           AND started_at >= NOW() - INTERVAL '30 minutes'
+           AND started_at >= NOW() - INTERVAL '${cacheWindow}'
          ORDER BY started_at DESC LIMIT 1`,
         [plan.workspace_id, step.skill_id],
       );

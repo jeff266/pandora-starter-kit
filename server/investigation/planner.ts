@@ -40,8 +40,36 @@ export async function createInvestigationPlan(
     maxSteps?: number;
     goalIds?: string[];
     anchorFindings?: any[];
+    preferCache?: boolean;
+    primarySkill?: string;
   },
 ): Promise<InvestigationPlan> {
+  // Fast path: skip LLM planning when a primary skill is already known and scope is narrow
+  if (options?.primarySkill && (options?.maxSteps ?? 5) <= 2) {
+    const meta = getOperatorMeta(options.primarySkill);
+    return {
+      id: randomUUID(),
+      workspace_id: workspaceId,
+      question,
+      goal_context: [],
+      steps: [
+        {
+          index: 0,
+          operator_name: meta.name,
+          skill_id: options.primarySkill,
+          trigger: 'initial',
+          status: 'pending',
+          used_cache: false,
+        } as InvestigationStep,
+      ],
+      current_step: 0,
+      status: 'planning',
+      max_steps: options?.maxSteps ?? 2,
+      prefer_cache: options?.preferCache ?? true,
+      total_tokens: 0,
+    };
+  }
+
   const [goals, recentFindingsResult] = await Promise.all([
     options?.goalIds
       ? Promise.all(options.goalIds.map((id) => goalService.getById(id)))
@@ -161,6 +189,7 @@ Respond ONLY with valid JSON in this exact format:
     current_step: 0,
     status: 'planning',
     max_steps: options?.maxSteps || 4,
+    prefer_cache: options?.preferCache ?? false,
     total_tokens: 0,
   };
 }

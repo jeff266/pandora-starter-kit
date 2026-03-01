@@ -153,6 +153,7 @@ export interface InvestigationPlan {
   status: 'planning' | 'executing' | 'synthesizing' | 'complete' | 'error';
   max_steps: number;
   total_tokens: number;
+  prefer_cache?: boolean;
 }
 
 export interface InvestigationResult {
