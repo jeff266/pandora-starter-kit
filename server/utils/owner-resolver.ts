@@ -28,6 +28,30 @@ export async function resolveOwnerNames(workspaceId: string): Promise<OwnerMap> 
   return ownerMap;
 }
 
+async function fetchSalesRepsAsOwnerMap(workspaceId: string): Promise<OwnerMap> {
+  try {
+    const result = await pool.query(
+      `SELECT rep_name, rep_email FROM sales_reps WHERE workspace_id = $1 AND is_rep = true AND rep_email IS NOT NULL`,
+      [workspaceId]
+    );
+    const map: OwnerMap = {};
+    for (const row of result.rows) {
+      if (row.rep_email && row.rep_name) {
+        map[row.rep_email] = row.rep_name;
+        // Also map the local part of the email (e.g. "carter") in case deal owner is stored as username
+        const localPart = row.rep_email.split('@')[0];
+        if (localPart) map[localPart] = row.rep_name;
+      }
+    }
+    if (Object.keys(map).length > 0) {
+      console.log(`[OwnerResolver] Built email-based owner map from sales_reps (${Object.keys(map).length / 2} reps) for workspace ${workspaceId}`);
+    }
+    return map;
+  } catch {
+    return {};
+  }
+}
+
 export async function fetchAndCacheOwners(workspaceId: string): Promise<OwnerMap> {
   // Check if HubSpot connection exists
   const connResult = await pool.query(
@@ -36,18 +60,31 @@ export async function fetchAndCacheOwners(workspaceId: string): Promise<OwnerMap
   );
 
   if (connResult.rows.length === 0) {
-    return {};
+    // No HubSpot — fall back to sales_reps email→name map
+    const fallback = await fetchSalesRepsAsOwnerMap(workspaceId);
+    if (Object.keys(fallback).length > 0) {
+      ownerCache.set(workspaceId, { map: fallback, fetchedAt: Date.now() });
+    }
+    return fallback;
   }
 
   // Get credentials from credential store
   const credentials = await getConnectorCredentials(workspaceId, 'hubspot');
   if (!credentials) {
-    return {};
+    const fallback = await fetchSalesRepsAsOwnerMap(workspaceId);
+    if (Object.keys(fallback).length > 0) {
+      ownerCache.set(workspaceId, { map: fallback, fetchedAt: Date.now() });
+    }
+    return fallback;
   }
 
   const accessToken = credentials.access_token || credentials.accessToken;
   if (!accessToken) {
-    return {};
+    const fallback = await fetchSalesRepsAsOwnerMap(workspaceId);
+    if (Object.keys(fallback).length > 0) {
+      ownerCache.set(workspaceId, { map: fallback, fetchedAt: Date.now() });
+    }
+    return fallback;
   }
 
   try {
@@ -70,6 +107,12 @@ export async function fetchAndCacheOwners(workspaceId: string): Promise<OwnerMap
     return ownerMap;
   } catch (error) {
     console.warn(`[OwnerResolver] Failed to fetch owners from HubSpot:`, error instanceof Error ? error.message : error);
+    // Fall back to sales_reps on HubSpot fetch failure
+    const fallback = await fetchSalesRepsAsOwnerMap(workspaceId);
+    if (Object.keys(fallback).length > 0) {
+      ownerCache.set(workspaceId, { map: fallback, fetchedAt: Date.now() });
+      return fallback;
+    }
     return {};
   }
 }

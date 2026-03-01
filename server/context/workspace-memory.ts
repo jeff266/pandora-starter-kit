@@ -53,7 +53,7 @@ export async function buildWorkspaceContextBlock(workspaceId: string, userId?: s
     }
   }
 
-  const [contextRow, targetsRow, stagesRow, goalsRow, scopesRow] = await Promise.all([
+  const [contextRow, targetsRow, stagesRow, goalsRow, scopesRow, salesRepsRow] = await Promise.all([
     query(
       `SELECT business_model, team_structure, goals_and_targets, definitions, operational_maturity
        FROM context_layer WHERE workspace_id = $1 LIMIT 1`,
@@ -79,6 +79,12 @@ export async function buildWorkspaceContextBlock(workspaceId: string, userId?: s
     ).catch(() => null),
     query(
       `SELECT name FROM analysis_scopes WHERE workspace_id = $1 ORDER BY name`,
+      [workspaceId]
+    ).catch(() => null),
+    query(
+      `SELECT rep_name, rep_email, team, quota_eligible
+       FROM sales_reps WHERE workspace_id = $1 AND is_rep = true
+       ORDER BY rep_name ASC`,
       [workspaceId]
     ).catch(() => null),
   ]);
@@ -191,9 +197,11 @@ export async function buildWorkspaceContextBlock(workspaceId: string, userId?: s
   }
 
   // Team
+  // Priority: context_layer.definitions.team_roster > context_layer.team_structure > sales_reps table
   const reps: any[] = def.team_roster?.value?.reps ?? ts.reps ?? [];
   const managers: string[] = def.team_roster?.value?.managers ?? ts.managers ?? [];
   const excluded: string[] = def.team_roster?.value?.excluded_owners ?? ts.excluded_owners ?? [];
+  const salesRepsDb: any[] = salesRepsRow?.rows ?? [];
   if (reps.length > 0) {
     const repNames = reps.slice(0, 5).map((r: any) => r.name ?? r).join(', ');
     const more = reps.length > 5 ? ` (+ ${reps.length - 5} more)` : '';
@@ -201,6 +209,17 @@ export async function buildWorkspaceContextBlock(workspaceId: string, userId?: s
     lines.push(`TEAM: ${repNames}${more}`);
     if (managers.length > 0) lines.push(`MANAGERS: ${managers.join(', ')}`);
     if (excluded.length > 0) lines.push(`EXCLUDED: ${excluded.join(', ')}`);
+  } else if (salesRepsDb.length > 0) {
+    const eligibleCount = salesRepsDb.filter((r: any) => r.quota_eligible !== false).length;
+    const eligibleNote = eligibleCount < salesRepsDb.length ? `, ${eligibleCount} quota-eligible` : '';
+    const repLabels = salesRepsDb.map((r: any) => {
+      const name = r.rep_name ?? 'Unknown';
+      return r.rep_email ? `${name} (${r.rep_email})` : name;
+    });
+    const displayNames = repLabels.slice(0, 8).join(', ');
+    const more = repLabels.length > 8 ? ` (+ ${repLabels.length - 8} more)` : '';
+    lines.push('');
+    lines.push(`SALES TEAM (${salesRepsDb.length} reps${eligibleNote}): ${displayNames}${more}`);
   }
 
   // Sales methodology, competitors, loss reasons, buying committee (tier-2/3 onboarding)
