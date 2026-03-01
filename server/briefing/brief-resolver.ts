@@ -15,7 +15,7 @@ export async function resolveFromBrief(workspaceId: string, message: string): Pr
   const lower = message.toLowerCase().trim();
 
   // Hard pass: causal, predictive, or open-ended questions always need investigation
-  if (/\bwhy\b|\bbecause\b|\bgoing to\b|\bwill we\b|\bshould we\b|\bwhat if\b|\bcompare\b|\bvs\b|\bversus\b/.test(lower)) return null;
+  if (/\bwhy\b|\bbecause\b|\bgoing to\b|\bwill we\b|\bshould we\b|\bwhat if\b|\bcompare\b|\bvs\b|\bversus\b|\bwhere will\b|\bwill (she|he|they)\b|\bend (the|this) quarter\b|\bon track (to|for)\b|\bby (end of|quarter end)\b|\bproject(ed)?\b/.test(lower)) return null;
   if (lower.split(' ').length > 20) return null;
 
   const brief = await getLatestReadyBrief(workspaceId);
@@ -25,6 +25,11 @@ export async function resolveFromBrief(workspaceId: string, message: string): Pr
   const deals: DealToWatch[] = brief.deals_to_watch?.items || [];
   const segments = brief.segments?.items || [];
   const dimension = brief.segments?.dimension || '';
+
+  // ── 0. Gap-to-target / "what do I need to close" ───────────────────────────
+  if (/(reach|hit|make).*(target|quota)|(need|must).*(close|hit)|(close|deals?).*(reach|hit|make|gap)|what.*need.*(close|hit)|close the gap|deals? (needed|to close)/.test(lower)) {
+    return { section: 'the_number', display_hint: 'section', answer: formatGapToTarget(brief, deals), tokens_used: 0 };
+  }
 
   // ── 1. Specific rep name match ──────────────────────────────────────────────
   const repMatch = reps.find(r => {
@@ -119,6 +124,46 @@ export async function resolveFromBrief(workspaceId: string, message: string): Pr
 }
 
 // ─── Formatters ───────────────────────────────────────────────────────────────
+
+function formatGapToTarget(brief: AssembledBrief, deals: DealToWatch[]): string {
+  const n = brief.the_number;
+  const gap = n.gap ?? 0;
+  const att = n.attainment_pct != null ? `${n.attainment_pct.toFixed(0)}%` : '—';
+  const days = n.days_remaining != null ? `${n.days_remaining} days left` : null;
+  const coverage = n.coverage_on_gap;
+
+  const lines: string[] = ['**Gap to Target**'];
+  const daysStr = days ? `, ${days}` : '';
+  if (gap <= 0) {
+    lines.push(`You've hit quota! Attainment: ${att}${daysStr}.`);
+    return lines.join('\n');
+  }
+
+  lines.push(`You need **${formatCompact(gap)}** more to hit quota — currently at ${att} attainment${daysStr}.`);
+  if (coverage != null) {
+    const coverageStr = coverage.toFixed(1);
+    const covered = coverage >= 1 ? `Pipeline covers the gap (${coverageStr}× coverage).` : `Pipeline does NOT fully cover the gap (${coverageStr}× coverage) — you need more deals in-quarter.`;
+    lines.push(covered);
+  }
+
+  const closeable = [...deals].sort((a, b) => b.amount - a.amount).slice(0, 5);
+  if (closeable.length > 0) {
+    const total = closeable.reduce((s, d) => s + (d.amount || 0), 0);
+    lines.push('');
+    lines.push('**Top deals that can close the gap:**');
+    lines.push('| Deal | Amount | Stage | Owner | Close Date |');
+    lines.push('| --- | --- | --- | --- | --- |');
+    for (const d of closeable) {
+      lines.push(`| ${d.name} | ${formatCompact(d.amount)} | ${d.stage} | ${d.owner} | ${d.close_date || '—'} |`);
+    }
+    const suffix = total >= gap
+      ? `These ${closeable.length} deals total **${formatCompact(total)}** — enough to close the gap if they all land.`
+      : `These ${closeable.length} deals total **${formatCompact(total)}** — not enough to close the gap alone. You need additional pipeline or faster conversions.`;
+    lines.push('');
+    lines.push(suffix);
+  }
+  return lines.join('\n');
+}
 
 function formatRepCard(rep: RepPerformance): string {
   const lines: string[] = [`**${rep.name}**`];

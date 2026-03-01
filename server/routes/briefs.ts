@@ -87,7 +87,7 @@ router.post('/:workspaceId/brief/:briefId/send', async (req: Request, res: Respo
 
     const blocks = formatBriefForSlack(brief, format as 'full' | 'summary');
     const slackClient = getSlackAppClient();
-    await slackClient.postMessage(workspaceId, channel, blocks, { text: `Pandora ${brief.brief_type.replace('_', ' ')} brief` });
+    await slackClient.postMessage(workspaceId as string, channel, blocks);
 
     const sentEntry = { channel, format, sent_at: new Date().toISOString() };
     await query(
