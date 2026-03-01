@@ -205,10 +205,10 @@ async function getReps(workspaceId: string, wonLostStages: string[]): Promise<Re
   const pe = quota?.period_end || quarterEnd(new Date()).toISOString().split('T')[0];
 
   const [repRes, closedRes, quotaRes, findingsRes] = await Promise.all([
-    query<any>(`SELECT COALESCE(owner_email, '') as email, COALESCE(owner_name, owner_email, 'Unknown') as name, COALESCE(SUM(amount),0)::text as pipeline, COUNT(*)::text as cnt FROM deals WHERE workspace_id = $1 AND ${openFilter} GROUP BY owner_email, owner_name ORDER BY SUM(amount) DESC`, [workspaceId]),
-    query<any>(`SELECT COALESCE(owner_email,'') as email, COALESCE(SUM(amount),0)::text as closed FROM deals WHERE workspace_id = $1 AND stage_normalized = 'closed_won' AND close_date >= $2 AND close_date <= $3 GROUP BY owner_email`, [workspaceId, ps, pe]),
+    query<any>(`SELECT COALESCE(owner, '') as email, COALESCE(owner, 'Unknown') as name, COALESCE(SUM(amount),0)::text as pipeline, COUNT(*)::text as cnt FROM deals WHERE workspace_id = $1 AND ${openFilter} GROUP BY owner ORDER BY SUM(amount) DESC`, [workspaceId]),
+    query<any>(`SELECT COALESCE(owner, '') as email, COALESCE(SUM(amount),0)::text as closed FROM deals WHERE workspace_id = $1 AND stage_normalized = 'closed_won' AND close_date >= $2 AND close_date <= $3 GROUP BY owner`, [workspaceId, ps, pe]),
     query<any>(`SELECT rep_email, amount::text as quota_value FROM quotas WHERE workspace_id = $1 AND is_active = true AND period_start <= CURRENT_DATE AND period_end >= CURRENT_DATE`, [workspaceId]),
-    query<any>(`SELECT COALESCE(owner_email, entity_id, '') as entity_id, message, COALESCE(escalation_level,0)::text as escalation_level, COALESCE(times_flagged,1)::text as times_flagged FROM findings WHERE workspace_id = $1 AND resolved_at IS NULL AND severity IN ('act', 'watch') ORDER BY escalation_level DESC, times_flagged DESC`, [workspaceId]),
+    query<any>(`SELECT COALESCE(owner_email, '') as entity_id, message, COALESCE(escalation_level,0)::text as escalation_level, COALESCE(times_flagged,1)::text as times_flagged FROM findings WHERE workspace_id = $1 AND resolved_at IS NULL AND severity IN ('act', 'watch') ORDER BY escalation_level DESC, times_flagged DESC`, [workspaceId]),
   ]);
 
   const closedMap = new Map(closedRes.rows.map((r: any) => [r.email, parseFloat(r.closed)]));
@@ -242,9 +242,9 @@ async function getDealsToWatch(workspaceId: string, wonLostStages: string[], sin
   const sinceStr = (since || subDays(new Date(), 7)).toISOString();
 
   const [topDeals, riskyDeals, wonDeals] = await Promise.all([
-    query<any>(`SELECT id::text, name, amount, stage, pipeline, COALESCE(owner_name,owner_email,'') as owner, close_date::text FROM deals WHERE workspace_id = $1 AND ${openFilter} ORDER BY amount DESC LIMIT 5`, [workspaceId]),
-    query<any>(`SELECT DISTINCT d.id::text, d.name, d.amount, d.stage, COALESCE(d.owner_name,d.owner_email,'') as owner, d.close_date::text, f.message as signal_text, f.severity FROM findings f JOIN deals d ON d.id = f.deal_id AND d.workspace_id = f.workspace_id WHERE f.workspace_id = $1 AND f.resolved_at IS NULL AND f.severity IN ('act','watch') ORDER BY d.amount DESC LIMIT 5`, [workspaceId]),
-    query<any>(`SELECT id::text, name, amount, stage, COALESCE(owner_name,owner_email,'') as owner FROM deals WHERE workspace_id = $1 AND stage_normalized = 'closed_won' AND close_date >= $2 ORDER BY amount DESC LIMIT 3`, [workspaceId, sinceStr]),
+    query<any>(`SELECT id::text, name, amount, stage, pipeline, COALESCE(owner,'') as owner, close_date::text FROM deals WHERE workspace_id = $1 AND ${openFilter} ORDER BY amount DESC LIMIT 5`, [workspaceId]),
+    query<any>(`SELECT DISTINCT d.id::text, d.name, d.amount, d.stage, COALESCE(d.owner,'') as owner, d.close_date::text, f.message as signal_text, f.severity FROM findings f JOIN deals d ON d.id = f.deal_id AND d.workspace_id = f.workspace_id WHERE f.workspace_id = $1 AND f.resolved_at IS NULL AND f.severity IN ('act','watch') ORDER BY d.amount DESC LIMIT 5`, [workspaceId]),
+    query<any>(`SELECT id::text, name, amount, stage, COALESCE(owner,'') as owner FROM deals WHERE workspace_id = $1 AND stage_normalized = 'closed_won' AND close_date >= $2 ORDER BY amount DESC LIMIT 3`, [workspaceId, sinceStr]),
   ]);
 
   const dealMap = new Map<string, any>();
@@ -327,7 +327,7 @@ async function assembleFridayRecap(workspaceId: string, now: Date, briefType: Br
   ]);
 
   reps.items.sort((a: any, b: any) => (b.closed || 0) - (a.closed || 0));
-  const wonThisWeek = await query<any>(`SELECT id::text, name, amount, stage, COALESCE(owner_name,owner_email,'') as owner FROM deals WHERE workspace_id = $1 AND stage_normalized = 'closed_won' AND close_date >= $2 ORDER BY amount DESC LIMIT 5`, [workspaceId, monday.toISOString().split('T')[0]]);
+  const wonThisWeek = await query<any>(`SELECT id::text, name, amount, stage, COALESCE(owner,'') as owner FROM deals WHERE workspace_id = $1 AND stage_normalized = 'closed_won' AND close_date >= $2 ORDER BY amount DESC LIMIT 5`, [workspaceId, monday.toISOString().split('T')[0]]);
   (deals as any).won_this_week = wonThisWeek.rows.map((d: any) => ({ id: d.id, name: d.name, amount: parseFloat(d.amount||'0'), owner: d.owner }));
 
   const editorialFocus = determineEditorialFocus(briefType, theNumber, whatChanged as any, reps, deals, theNumber.days_remaining);
@@ -346,7 +346,7 @@ async function assembleQuarterClose(workspaceId: string, now: Date, briefType: B
   reps.items.sort((a: any, b: any) => (b.gap || 0) - (a.gap || 0));
 
   const qEnd = quarterEnd(now).toISOString().split('T')[0];
-  const closeable = await query<any>(`SELECT id::text, name, amount, stage, COALESCE(owner_name,owner_email,'') as owner, close_date::text FROM deals WHERE workspace_id = $1 AND ${openFilter} AND close_date <= $2 ORDER BY close_date ASC`, [workspaceId, qEnd]);
+  const closeable = await query<any>(`SELECT id::text, name, amount, stage, COALESCE(owner,'') as owner, close_date::text FROM deals WHERE workspace_id = $1 AND ${openFilter} AND close_date <= $2 ORDER BY close_date ASC`, [workspaceId, qEnd]);
   const riskRes = await query<any>(`SELECT f.deal_id::text, f.message, f.severity FROM findings f WHERE f.workspace_id = $1 AND f.resolved_at IS NULL AND f.severity IN ('act','watch')`, [workspaceId]);
   const riskMap = new Map(riskRes.rows.map((r: any) => [r.deal_id, r]));
 
