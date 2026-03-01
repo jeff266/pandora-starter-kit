@@ -76,6 +76,11 @@ Answer the question in 2-4 sentences. Reference specific numbers. Frame against 
     messages: [{ role: 'user', content: userPrompt }],
     maxTokens: 500,
     temperature: 0.3,
+    _tracking: {
+      workspaceId,
+      phase: 'chat',
+      stepName: 'pandora-agent-synthesis',
+    },
   });
 
   return {

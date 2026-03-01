@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { query } from '../db.js';
+import { trackTokenUsage } from '../lib/token-tracker.js';
 import type { InvestigationPlan } from '../goals/types.js';
 
 const anthropic = new Anthropic({
@@ -94,7 +95,9 @@ VOICE: Direct, specific, actionable. A CRO reading this at 7:42am should know ex
 Word budget: 300-500 words.`;
 
   let fullText = '';
-  let tokens = 0;
+  let inputTokens = 0;
+  let outputTokens = 0;
+  const startTime = Date.now();
 
   try {
     const stream = anthropic.messages.stream({
@@ -112,8 +115,11 @@ Word budget: 300-500 words.`;
           onChunk?.(chunk);
         }
       }
+      if (event.type === 'message_start' && event.message.usage) {
+        inputTokens += event.message.usage.input_tokens || 0;
+      }
       if (event.type === 'message_delta' && event.usage) {
-        tokens += event.usage.output_tokens || 0;
+        outputTokens += event.usage.output_tokens || 0;
       }
     }
   } catch (err) {
@@ -121,5 +127,30 @@ Word budget: 300-500 words.`;
     fullText = allFindings.map((f) => f.summary).join('\n\n') || 'Investigation complete. No synthesis available.';
   }
 
-  return { text: fullText, tokens };
+  const latencyMs = Date.now() - startTime;
+  const totalTokens = inputTokens + outputTokens;
+
+  trackTokenUsage({
+    workspaceId: plan.workspace_id,
+    phase: 'chat',
+    stepName: 'pandora-agent-synthesis',
+    provider: 'anthropic',
+    model: 'claude-sonnet-4-5',
+    inputTokens,
+    outputTokens,
+    estimatedCostUsd: (inputTokens / 1_000_000) * 3.0 + (outputTokens / 1_000_000) * 15.0,
+    promptChars: prompt.length,
+    responseChars: fullText.length,
+    truncated: false,
+    payloadSummary: {
+      totalChars: prompt.length,
+      largestField: 'prompt',
+      largestFieldChars: prompt.length,
+      estimatedTokens: Math.round(prompt.length / 4),
+      sections: [{ role: 'user', chars: prompt.length, hasSourceData: false, hasTranscript: false, hasRawJson: false }],
+    },
+    latencyMs,
+  }).catch((err) => console.warn('[Synthesizer] Token tracking failed:', err?.message));
+
+  return { text: fullText, tokens: totalTokens };
 }
