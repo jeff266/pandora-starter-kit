@@ -207,12 +207,12 @@ async function getReps(workspaceId: string, wonLostStages: string[]): Promise<Re
   const [repRes, closedRes, quotaRes, findingsRes] = await Promise.all([
     query<any>(`SELECT COALESCE(owner_email, '') as email, COALESCE(owner_name, owner_email, 'Unknown') as name, COALESCE(SUM(amount),0)::text as pipeline, COUNT(*)::text as cnt FROM deals WHERE workspace_id = $1 AND ${openFilter} GROUP BY owner_email, owner_name ORDER BY SUM(amount) DESC`, [workspaceId]),
     query<any>(`SELECT COALESCE(owner_email,'') as email, COALESCE(SUM(amount),0)::text as closed FROM deals WHERE workspace_id = $1 AND stage_normalized = 'closed_won' AND close_date >= $2 AND close_date <= $3 GROUP BY owner_email`, [workspaceId, ps, pe]),
-    query<any>(`SELECT rq.rep_identifier, rq.quota_value::text FROM rep_quotas rq JOIN quota_periods qp ON qp.id = rq.quota_period_id WHERE rq.workspace_id = $1 AND NOW() BETWEEN qp.period_start AND qp.period_end`, [workspaceId]),
+    query<any>(`SELECT rep_email, amount::text as quota_value FROM quotas WHERE workspace_id = $1 AND is_active = true AND period_start <= CURRENT_DATE AND period_end >= CURRENT_DATE`, [workspaceId]),
     query<any>(`SELECT COALESCE(owner_email, entity_id, '') as entity_id, message, COALESCE(escalation_level,0)::text as escalation_level, COALESCE(times_flagged,1)::text as times_flagged FROM findings WHERE workspace_id = $1 AND resolved_at IS NULL AND severity IN ('act', 'watch') ORDER BY escalation_level DESC, times_flagged DESC`, [workspaceId]),
   ]);
 
   const closedMap = new Map(closedRes.rows.map((r: any) => [r.email, parseFloat(r.closed)]));
-  const quotaMap = new Map(quotaRes.rows.map((r: any) => [r.rep_identifier, parseFloat(r.quota_value)]));
+  const quotaMap = new Map(quotaRes.rows.map((r: any) => [r.rep_email, parseFloat(r.quota_value)]));
   const flagMap = new Map<string, any>();
   for (const f of findingsRes.rows) {
     if (!flagMap.has(f.entity_id)) flagMap.set(f.entity_id, f);

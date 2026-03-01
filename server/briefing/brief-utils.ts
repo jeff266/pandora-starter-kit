@@ -72,18 +72,18 @@ export async function getOpenStageFilter(_workspaceId: string): Promise<string> 
 
 export async function getCurrentQuota(workspaceId: string): Promise<{ period_start: string, period_end: string, target: number } | null> {
   const now = new Date().toISOString().split('T')[0];
-  const result = await query<{ period_start: string, period_end: string, target: string }>(
-    `SELECT period_start::text, period_end::text, target::text
-     FROM quota_periods
-     WHERE workspace_id = $1 AND period_start <= $2 AND period_end >= $2
-     LIMIT 1`,
+  const result = await query<{ period_start: string, period_end: string, amount: string }>(
+    `SELECT period_start::text, period_end::text, amount::text
+     FROM targets
+     WHERE workspace_id = $1 AND period_start <= $2 AND period_end >= $2 AND is_active = true
+     ORDER BY period_start DESC LIMIT 1`,
     [workspaceId, now]
   );
   if (result.rows.length === 0) return null;
   return {
     period_start: result.rows[0].period_start,
     period_end: result.rows[0].period_end,
-    target: parseFloat(result.rows[0].target)
+    target: parseFloat(result.rows[0].amount)
   };
 }
 
