@@ -5,7 +5,21 @@ async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
   try { return await fn(); } catch { return fallback; }
 }
 
+async function getSAOStageName(workspaceId: string): Promise<string> {
+  try {
+    const r = await query(
+      `SELECT stage_name FROM stage_configs WHERE workspace_id = $1::uuid AND is_sao = true LIMIT 1`,
+      [workspaceId]
+    );
+    return r.rows[0]?.stage_name ?? '';
+  } catch {
+    return '';
+  }
+}
+
 export async function scanCRM(workspaceId: string): Promise<CRMScanResult> {
+  const saoStage = await getSAOStageName(workspaceId);
+
   const [
     pipelines,
     deal_types,
@@ -24,18 +38,31 @@ export async function scanCRM(workspaceId: string): Promise<CRMScanResult> {
 
     safe(async (): Promise<PipelineStat[]> => {
       const r = await query(`
-        SELECT COALESCE(pipeline, 'Default') AS pipeline,
+        WITH sao_entry AS (
+          SELECT deal_id, MIN(entered_at) AS entered_at
+          FROM deal_stage_history
+          WHERE workspace_id = $1::uuid AND stage = $2
+          GROUP BY deal_id
+        )
+        SELECT COALESCE(d.pipeline, 'Default') AS pipeline,
                COUNT(*) AS count,
-               COALESCE(SUM(amount), 0) AS total_amount,
-               COALESCE(AVG(amount), 0) AS avg_amount,
+               COALESCE(SUM(d.amount), 0) AS total_amount,
+               COALESCE(AVG(d.amount), 0) AS avg_amount,
                AVG(
-                 EXTRACT(EPOCH FROM (close_date - created_at))/86400
-               ) FILTER (WHERE stage_normalized = 'closed_won' AND close_date IS NOT NULL AND created_at IS NOT NULL AND close_date > created_at) AS avg_cycle_days,
-               PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (close_date - created_at))/86400)
-               FILTER (WHERE stage_normalized = 'closed_won' AND close_date IS NOT NULL AND created_at IS NOT NULL AND close_date > created_at) AS median_cycle_days
-        FROM deals WHERE workspace_id = $1::uuid AND amount IS NOT NULL
+                 EXTRACT(EPOCH FROM (d.close_date - COALESCE(se.entered_at, d.created_at)))/86400
+               ) FILTER (WHERE d.stage_normalized = 'closed_won' AND d.close_date IS NOT NULL
+                           AND COALESCE(se.entered_at, d.created_at) IS NOT NULL
+                           AND d.close_date > COALESCE(se.entered_at, d.created_at)) AS avg_cycle_days,
+               PERCENTILE_CONT(0.5) WITHIN GROUP (
+                 ORDER BY EXTRACT(EPOCH FROM (d.close_date - COALESCE(se.entered_at, d.created_at)))/86400
+               ) FILTER (WHERE d.stage_normalized = 'closed_won' AND d.close_date IS NOT NULL
+                           AND COALESCE(se.entered_at, d.created_at) IS NOT NULL
+                           AND d.close_date > COALESCE(se.entered_at, d.created_at)) AS median_cycle_days
+        FROM deals d
+        LEFT JOIN sao_entry se ON se.deal_id = d.id
+        WHERE d.workspace_id = $1::uuid AND d.amount IS NOT NULL
         GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 10
-      `, [workspaceId]);
+      `, [workspaceId, saoStage]);
       return r.rows.map(row => ({
         pipeline: row.pipeline,
         count: parseInt(row.count),
@@ -184,34 +211,41 @@ export async function scanCRM(workspaceId: string): Promise<CRMScanResult> {
 
     safe(async (): Promise<AmountCycleBucket[]> => {
       const r = await query(`
-        WITH buckets AS (
+        WITH sao_entry AS (
+          SELECT deal_id, MIN(entered_at) AS entered_at
+          FROM deal_stage_history
+          WHERE workspace_id = $1::uuid AND stage = $2
+          GROUP BY deal_id
+        ),
+        buckets AS (
           SELECT
             CASE
-              WHEN amount < 1000   THEN 1
-              WHEN amount < 5000   THEN 2
-              WHEN amount < 10000  THEN 3
-              WHEN amount < 25000  THEN 4
-              WHEN amount < 50000  THEN 5
-              WHEN amount < 100000 THEN 6
-              WHEN amount < 250000 THEN 7
+              WHEN d.amount < 1000   THEN 1
+              WHEN d.amount < 5000   THEN 2
+              WHEN d.amount < 10000  THEN 3
+              WHEN d.amount < 25000  THEN 4
+              WHEN d.amount < 50000  THEN 5
+              WHEN d.amount < 100000 THEN 6
+              WHEN d.amount < 250000 THEN 7
               ELSE 8
             END AS bucket_order,
             CASE
-              WHEN amount < 1000   THEN '<$1K'
-              WHEN amount < 5000   THEN '$1K-$5K'
-              WHEN amount < 10000  THEN '$5K-$10K'
-              WHEN amount < 25000  THEN '$10K-$25K'
-              WHEN amount < 50000  THEN '$25K-$50K'
-              WHEN amount < 100000 THEN '$50K-$100K'
-              WHEN amount < 250000 THEN '$100K-$250K'
+              WHEN d.amount < 1000   THEN '<$1K'
+              WHEN d.amount < 5000   THEN '$1K-$5K'
+              WHEN d.amount < 10000  THEN '$5K-$10K'
+              WHEN d.amount < 25000  THEN '$10K-$25K'
+              WHEN d.amount < 50000  THEN '$25K-$50K'
+              WHEN d.amount < 100000 THEN '$50K-$100K'
+              WHEN d.amount < 250000 THEN '$100K-$250K'
               ELSE '$250K+'
             END AS bucket,
-            amount,
-            EXTRACT(EPOCH FROM (close_date - created_at))/86400 AS cycle_days,
-            stage_normalized
-          FROM deals
-          WHERE workspace_id = $1::uuid AND amount > 0
-            AND (close_date IS NULL OR close_date > created_at)
+            d.amount,
+            EXTRACT(EPOCH FROM (d.close_date - COALESCE(se.entered_at, d.created_at)))/86400 AS cycle_days,
+            d.stage_normalized
+          FROM deals d
+          LEFT JOIN sao_entry se ON se.deal_id = d.id
+          WHERE d.workspace_id = $1::uuid AND d.amount > 0
+            AND (d.close_date IS NULL OR d.close_date > COALESCE(se.entered_at, d.created_at))
         )
         SELECT
           bucket_order,
@@ -228,7 +262,7 @@ export async function scanCRM(workspaceId: string): Promise<CRMScanResult> {
         GROUP BY bucket_order, bucket
         HAVING COUNT(*) >= 3
         ORDER BY bucket_order
-      `, [workspaceId]);
+      `, [workspaceId, saoStage]);
       return r.rows.map(row => ({
         bucket: row.bucket,
         bucket_order: parseInt(row.bucket_order),

@@ -8,7 +8,7 @@ const SCHEMA_GUIDANCE: Record<string, string> = {
   Q4_team: `Return: { "reps": [{ "name": string, "motion"?: string, "is_new_hire"?: boolean }], "excluded_owners": string[], "managers": string[] }`,
   Q5_stale: `Return: { "thresholds": [{ "motion": string, "stale_days": number, "critical_days": number }] | { "stale_days": number, "critical_days": number } }`,
   Q6_forecast: `Return: { "forecast_method": "stage_probability"|"rep_categories"|"hybrid", "category_field"?: string, "commit_confidence"?: number }`,
-  Q7_winrate: `Return: { "exclude_stage_0": boolean, "lookback_days": 90|180|365, "segment_by_motion": boolean }`,
+  Q7_winrate: `Return: { "exclude_stage_0": boolean, "lookback_days": 90|180|365, "segment_by_motion": boolean, "sao_stage": string | null }`,
   Q8_coverage: `Return: { "coverage_target": number, "motion_targets"?: [{ "motion": string, "target": number }] }`,
   Q9_fields: `Return: { "required_fields": string[], "ignored_fields": string[], "stage_requirements"?: [{ "stage": string, "fields": string[] }] }`,
   Q10_delivery: `Return: { "timezone": string, "slack_channel"?: string, "brief_time"?: string, "additional_recipients"?: string[] }`,

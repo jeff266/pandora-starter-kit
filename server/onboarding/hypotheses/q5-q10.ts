@@ -67,6 +67,27 @@ export function generateForecastHypothesis(scan: CRMScanResult): Hypothesis {
   };
 }
 
+const SAO_KEYWORDS = ['sao', 'sqo', 'qualified', 'qualification', 'accepted', 'mql', 'sql', 'opportunity'];
+
+function guessSAOStage(scan: CRMScanResult, stage0: string[]): string | null {
+  const wonLostNames = new Set([
+    ...(scan.won_lost ?? []).map(s => s.stage?.toLowerCase() ?? ''),
+  ]);
+  const stage0Lower = new Set(stage0.map(s => s.toLowerCase()));
+
+  const active = (scan.stages ?? []).filter(s => {
+    const lower = s.stage?.toLowerCase() ?? '';
+    return s.stage && !wonLostNames.has(lower) && !stage0Lower.has(lower);
+  });
+
+  const byKeyword = active.find(s =>
+    SAO_KEYWORDS.some(kw => s.stage?.toLowerCase().includes(kw))
+  );
+  if (byKeyword) return byKeyword.stage;
+
+  return active[0]?.stage ?? null;
+}
+
 export function generateWinRateHypothesis(scan: CRMScanResult, inference: InferenceResult): Hypothesis {
   const wonLost = scan.won_lost ?? [];
   const stage0 = inference.stage_0_stages ?? [];
@@ -77,28 +98,42 @@ export function generateWinRateHypothesis(scan: CRMScanResult, inference: Infere
   const lostCount = lost.reduce((s, r) => s + r.count, 0);
   const total = wonCount + lostCount;
 
+  const guessedSAO = guessSAOStage(scan, stage0);
+
   if (total === 0) {
     return {
       summary: 'No closed deal data yet. Win rate tracking will begin once deals close.',
       confidence: 0.1,
       evidence: 'No closed deals found',
-      suggested_value: { win_rate: { minimum_stage: null, lookback_days: 180 } },
+      suggested_value: { win_rate: { minimum_stage: null, lookback_days: 180 }, sao_stage: guessedSAO },
     };
   }
 
   const overallRate = total > 0 ? Math.round((wonCount / total) * 100) : 0;
 
-  let summary = `Overall win rate: ${overallRate}% (${wonCount} won, ${lostCount} lost).`;
-  if (stage0.length > 0) summary += ` You have pre-qual stages (${stage0.join(', ')}) — excluding losses from these would raise your qualified win rate.`;
+  const summaryParts: string[] = [
+    `Overall win rate: ${overallRate}% (${wonCount} won, ${lostCount} lost).`,
+  ];
+  if (stage0.length > 0) {
+    summaryParts.push(`Excluding pre-qual losses (${stage0.join(', ')}) gives you a higher qualified win rate.`);
+  }
+  if (guessedSAO) {
+    summaryParts.push(`I'll also measure sales cycle from when deals first enter **${guessedSAO}** — is that your qualification gate (SAO/SQO), or should it be a different stage?`);
+  }
 
   return {
-    summary,
+    summary: summaryParts.join(' '),
     confidence: 0.75,
     evidence: `${total} closed deals analyzed`,
-    suggested_value: { exclude_stage_0: stage0.length > 0, lookback_days: 180, segment_by_motion: false },
+    suggested_value: {
+      exclude_stage_0: stage0.length > 0,
+      lookback_days: 180,
+      segment_by_motion: false,
+      sao_stage: guessedSAO,
+    },
     options: [
-      { id: 'all_deals', label: 'All closed deals', description: `Current: ${overallRate}% win rate` },
-      { id: 'qualified_only', label: 'Qualified deals only', description: `Excludes losses from ${stage0.join(', ')} stages` },
+      { id: 'all_deals', label: 'All closed deals', description: `${overallRate}% win rate` },
+      { id: 'qualified_only', label: 'Qualified deals only', description: stage0.length > 0 ? `Excludes losses from ${stage0.slice(0, 2).join(', ')}${stage0.length > 2 ? '…' : ''} stages` : 'Excludes pre-qualification stage losses' },
     ],
   };
 }

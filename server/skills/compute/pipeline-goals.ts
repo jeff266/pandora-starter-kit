@@ -94,18 +94,52 @@ export async function loadTargetsAndActuals(workspaceId: string) {
   }
 }
 
+async function getSAOStageForGoals(workspaceId: string): Promise<string | null> {
+  try {
+    const r = await query<any>(
+      `SELECT definitions->>'sao_stage' as raw FROM context_layer WHERE workspace_id = $1 LIMIT 1`,
+      [workspaceId]
+    );
+    const raw = r.rows[0]?.raw;
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      return typeof parsed === 'string' ? parsed : (parsed?.value ?? null);
+    } catch {
+      return typeof raw === 'string' ? raw : null;
+    }
+  } catch {
+    return null;
+  }
+}
+
 export async function calculateHistoricalRates(workspaceId: string) {
   try {
     console.log('[PipelineGoals] Calculating historical rates for workspace', workspaceId);
 
+    const saoStage = await getSAOStageForGoals(workspaceId);
+
     const winRateResult = await query<any>(
-      `SELECT 
-        COUNT(*) FILTER (WHERE stage_normalized = 'closed_won')::int as won,
-        COUNT(*) FILTER (WHERE stage_normalized = 'closed_lost')::int as lost
-       FROM deals WHERE workspace_id = $1
-         AND close_date >= NOW() - INTERVAL '6 months'
-         AND stage_normalized IN ('closed_won', 'closed_lost')`,
-      [workspaceId]
+      saoStage
+        ? `WITH sao_passed AS (
+             SELECT DISTINCT deal_id FROM deal_stage_history
+             WHERE workspace_id = $1 AND stage = $2
+           )
+           SELECT
+             COUNT(*) FILTER (WHERE d.stage_normalized = 'closed_won' AND sao.deal_id IS NOT NULL)::int as won,
+             COUNT(*) FILTER (WHERE d.stage_normalized = 'closed_lost' AND sao.deal_id IS NOT NULL)::int as lost
+           FROM deals d
+           LEFT JOIN sao_passed sao ON sao.deal_id = d.id
+           WHERE d.workspace_id = $1
+             AND d.close_date >= NOW() - INTERVAL '6 months'
+             AND d.stage_normalized IN ('closed_won', 'closed_lost')`
+        : `SELECT
+             COUNT(*) FILTER (WHERE stage_normalized = 'closed_won')::int as won,
+             COUNT(*) FILTER (WHERE stage_normalized = 'closed_lost')::int as lost
+           FROM deals WHERE workspace_id = $1
+             AND close_date >= NOW() - INTERVAL '6 months'
+             AND stage_normalized IN ('closed_won', 'closed_lost')`,
+      saoStage ? [workspaceId, saoStage] : [workspaceId]
     );
 
     const wr = winRateResult.rows[0] || {};

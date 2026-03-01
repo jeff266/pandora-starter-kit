@@ -144,6 +144,36 @@ export async function writeConfigPatch(
       break;
     }
 
+    case 'Q7_winrate': {
+      const p = patch as { exclude_stage_0?: boolean; lookback_days?: number; segment_by_motion?: boolean; sao_stage?: string | null };
+      const winRatePatch: Record<string, unknown> = {
+        win_rate_config: {
+          value: {
+            exclude_stage_0: p.exclude_stage_0 ?? false,
+            lookback_days: p.lookback_days ?? 180,
+            segment_by_motion: p.segment_by_motion ?? false,
+          },
+          _meta: meta,
+        },
+      };
+      if (p.sao_stage) {
+        winRatePatch['sao_stage'] = { value: p.sao_stage, _meta: meta };
+        await query(`ALTER TABLE stage_configs ADD COLUMN IF NOT EXISTS is_sao boolean DEFAULT false`).catch(() => null);
+        await query(
+          `UPDATE stage_configs SET is_sao = (stage_name = $2) WHERE workspace_id = $1::uuid`,
+          [workspaceId, p.sao_stage]
+        ).catch(() => null);
+      }
+      await mergeDefinitions(workspaceId, winRatePatch);
+      const detail = [
+        p.exclude_stage_0 ? 'Qualified deals only' : 'All deals',
+        `${p.lookback_days ?? 180}d lookback`,
+        p.sao_stage ? `SAO: ${p.sao_stage}` : null,
+      ].filter(Boolean).join(', ');
+      artifacts.push({ type: 'config_saved', label: 'Win Rate Configured', detail });
+      break;
+    }
+
     default: {
       const configKey = `onboarding_${questionId}`;
       await mergeDefinitions(workspaceId, { [configKey]: { value: patch, _meta: meta } });
