@@ -470,6 +470,9 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
     } catch {
     }
 
+    // Determine the pipeline name for target lookup
+    const activePipelineName = useLegacyPipeline ? legacyPipelineValue : null;
+
     const [snapshot, findingsSummaryResult] = await Promise.all([
       generatePipelineSnapshot(workspaceId, quota ?? undefined, staleDaysThreshold),
       query(
@@ -549,6 +552,31 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
     const total_pipeline = stageResult.rows.reduce((s, r) => s + r.total_value, 0);
     const total_deals = stageResult.rows.reduce((s, r) => s + r.deal_count, 0);
     const weighted_pipeline = stageResult.rows.reduce((s, r) => s + r.weighted_value, 0);
+
+    // Look up the active target from the targets table for coverage ratio
+    // Priority: pipeline-specific target → workspace-wide target → context_layer quota → DEFAULT_QUOTA
+    let targetForCoverage: number = quota ?? 1_000_000;
+    let coverageTargetSource = quota ? 'From goals' : 'Default fallback';
+    try {
+      const targetRows = await query<{ amount: string; pipeline_name: string | null }>(
+        `SELECT amount, pipeline_name FROM targets
+         WHERE workspace_id = $1
+           AND is_active = true
+           AND period_start <= CURRENT_DATE
+           AND period_end >= CURRENT_DATE
+         ORDER BY
+           CASE WHEN pipeline_name = $2 THEN 0 WHEN pipeline_name IS NULL THEN 1 ELSE 2 END
+         LIMIT 1`,
+        [workspaceId, activePipelineName ?? null]
+      );
+      if (targetRows.rows.length > 0) {
+        const t = targetRows.rows[0];
+        targetForCoverage = parseFloat(t.amount) || targetForCoverage;
+        coverageTargetSource = t.pipeline_name ? 'Pipeline target' : 'Workspace target';
+      }
+    } catch {
+      // targets table not available, keep fallback
+    }
 
     // Run separate unfiltered count to get authoritative total_open_deals (fixes mismatch with pipeline dropdown)
     const totalOpenDealsResult = await query<{ count: string }>(
@@ -791,9 +819,9 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
         method: 'Using stage-default probabilities where deal probability is null',
       },
       coverage_ratio: {
-        formula: 'weighted_pipeline / remaining_quota',
-        quota_source: quota ? 'From revenue targets' : 'Not configured',
-        remaining_quota: quota || null,
+        formula: 'open_pipeline / active_target',
+        quota_source: coverageTargetSource,
+        remaining_quota: targetForCoverage,
       },
       win_rate: {
         formula: 'closed_won / (closed_won + closed_lost) trailing 90 days',
@@ -950,7 +978,12 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
         weighted_pipeline,
         by_stage: by_stage_with_deals,
         deals_by_stage: dealsByStage,
-        coverage: { ratio: snapshot.coverageRatio, quota, pipeline: total_pipeline },
+        coverage: {
+          ratio: targetForCoverage > 0 ? Math.round((total_pipeline / targetForCoverage) * 100) / 100 : null,
+          quota: targetForCoverage,
+          pipeline: total_pipeline,
+          target_source: coverageTargetSource,
+        },
         win_rate: {
           trailing_90d: Math.round(trailing_90d * 1000) / 1000,
           trend: win_trend,
@@ -974,7 +1007,12 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
       total_open_deals,
       weighted_pipeline,
       by_stage,
-      coverage: { ratio: snapshot.coverageRatio, quota, pipeline: total_pipeline },
+      coverage: {
+        ratio: targetForCoverage > 0 ? Math.round((total_pipeline / targetForCoverage) * 100) / 100 : null,
+        quota: targetForCoverage,
+        pipeline: total_pipeline,
+        target_source: coverageTargetSource,
+      },
       win_rate: {
         trailing_90d: Math.round(trailing_90d * 1000) / 1000,
         trend: win_trend,
