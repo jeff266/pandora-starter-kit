@@ -2171,6 +2171,51 @@ const checkQuotaConfig: ToolDefinition = {
   },
   execute: async (params, context) => {
     return safeExecute('checkQuotaConfig', async () => {
+      const goals = await getGoals(context.workspaceId);
+      const coverageTarget = (goals as any).pipeline_coverage_target ?? await configLoader.getCoverageTarget(context.workspaceId);
+
+      // ── Priority 1: targets table (authoritative new source, is_active = true only) ──
+      // This must run before quota_periods so stale quota_periods rows never win.
+      try {
+        // Current-period targets (period window covers today)
+        let tResult = await query<{ team_quota: string }>(
+          `SELECT COALESCE(SUM(amount), 0)::numeric as team_quota
+           FROM targets
+           WHERE workspace_id = $1
+             AND is_active = true
+             AND period_start <= CURRENT_DATE
+             AND period_end >= CURRENT_DATE`,
+          [context.workspaceId]
+        );
+        let targetsQuota = Number(tResult.rows[0]?.team_quota ?? 0);
+
+        // Widen to all active targets if no current-period match
+        if (targetsQuota <= 0) {
+          tResult = await query<{ team_quota: string }>(
+            `SELECT COALESCE(SUM(amount), 0)::numeric as team_quota
+             FROM targets
+             WHERE workspace_id = $1
+               AND is_active = true`,
+            [context.workspaceId]
+          );
+          targetsQuota = Number(tResult.rows[0]?.team_quota ?? 0);
+        }
+
+        if (targetsQuota > 0) {
+          return {
+            hasQuotas: true,
+            hasRepQuotas: false,
+            teamQuota: targetsQuota,
+            repQuotas: null,
+            coverageTarget,
+            source: 'targets_table' as const,
+          };
+        }
+      } catch {
+        // targets table unavailable — continue to quota_periods fallback
+      }
+
+      // ── Priority 2: quota_periods table (legacy) ──
       const activePeriod = await query<{
         id: string;
         name: string;
@@ -2184,6 +2229,7 @@ const checkQuotaConfig: ToolDefinition = {
          WHERE workspace_id = $1
            AND start_date <= CURRENT_DATE
            AND end_date >= CURRENT_DATE
+           AND team_quota > 0
          ORDER BY start_date DESC
          LIMIT 1`,
         [context.workspaceId]
@@ -2204,9 +2250,6 @@ const checkQuotaConfig: ToolDefinition = {
         const teamQuota = Number(period.team_quota);
         const hasRepQuotas = Object.keys(repQuotas).length > 0;
 
-        const goals = await getGoals(context.workspaceId);
-        const coverageTarget = (goals as any).pipeline_coverage_target ?? 3.0;
-
         return {
           hasQuotas: true,
           hasRepQuotas,
@@ -2224,11 +2267,10 @@ const checkQuotaConfig: ToolDefinition = {
         };
       }
 
-      const goals = await getGoals(context.workspaceId);
+      // ── Priority 3: context_layer goals_and_targets ──
       const quotas = (goals as any).quotas;
       const teamQuota = quotas?.team ?? (goals as any).quarterly_quota ?? null;
       const repQuotas = quotas?.byRep ?? null;
-      const coverageTarget = (goals as any).pipeline_coverage_target ?? await configLoader.getCoverageTarget(context.workspaceId);
       const revenueTarget = (goals as any).revenue_target ?? null;
 
       const hasQuotas = teamQuota !== null || repQuotas !== null;
@@ -2241,49 +2283,6 @@ const checkQuotaConfig: ToolDefinition = {
         source = 'revenue_target';
       } else {
         source = 'none';
-      }
-
-      // Fallback: read directly from the targets table (is_active = true only —
-      // never surfaces inactive/superseded rows such as the $2.8M orphan)
-      if (source === 'none') {
-        try {
-          // First: active target whose period covers today
-          let tResult = await query<{ team_quota: string }>(
-            `SELECT COALESCE(SUM(amount), 0)::numeric as team_quota
-             FROM targets
-             WHERE workspace_id = $1
-               AND is_active = true
-               AND period_start <= CURRENT_DATE
-               AND period_end >= CURRENT_DATE`,
-            [context.workspaceId]
-          );
-          let targetsQuota = Number(tResult.rows[0]?.team_quota ?? 0);
-
-          // Second: widen to all active targets if no current-period match
-          if (targetsQuota <= 0) {
-            tResult = await query<{ team_quota: string }>(
-              `SELECT COALESCE(SUM(amount), 0)::numeric as team_quota
-               FROM targets
-               WHERE workspace_id = $1
-                 AND is_active = true`,
-              [context.workspaceId]
-            );
-            targetsQuota = Number(tResult.rows[0]?.team_quota ?? 0);
-          }
-
-          if (targetsQuota > 0) {
-            return {
-              hasQuotas: true,
-              hasRepQuotas: false,
-              teamQuota: targetsQuota,
-              repQuotas: null,
-              coverageTarget,
-              source: 'targets_table' as const,
-            };
-          }
-        } catch {
-          // targets table unavailable — fall through to source = 'none'
-        }
       }
 
       return {
@@ -6475,44 +6474,53 @@ const mcResolveForecastWindow: ToolDefinition = {
       const daysRemaining = Math.max(0, Math.floor((forecastWindowEnd.getTime() - today.getTime()) / 86400000));
       const monthsRemaining = daysRemaining / 30;
 
-      // Read most recent active annual quota period
-      const quotaResult = await query<{
-        id: string;
-        team_quota: string | null;
-        start_date: string;
-        end_date: string;
-      }>(
-        `SELECT id, team_quota::text, start_date::text, end_date::text
-         FROM quota_periods
-         WHERE workspace_id = $1
-           AND period_type IN ('annual', 'yearly')
-           AND end_date >= NOW()
-         ORDER BY start_date DESC
-         LIMIT 1`,
-        [context.workspaceId]
-      ).catch(() => ({ rows: [] as any[] }));
-
+      // ── Priority 1: targets table (authoritative — is_active = true only) ──
+      // Sum ALL active targets for the full fiscal year; Monte Carlo runs to year-end so needs
+      // the full annual quota, not just the current quarter.
       let quota: number | null = null;
-      if (quotaResult.rows.length > 0 && quotaResult.rows[0].team_quota) {
-        quota = parseFloat(quotaResult.rows[0].team_quota);
-        if (isNaN(quota)) quota = null;
-      }
+      try {
+        const tResult = await query<{ total: string }>(
+          `SELECT COALESCE(SUM(amount), 0)::numeric as total
+           FROM targets
+           WHERE workspace_id = $1 AND is_active = true`,
+          [context.workspaceId]
+        );
+        const total = Number(tResult.rows[0]?.total ?? 0);
+        if (total > 0) quota = total;
+      } catch { /* non-fatal */ }
 
-      // Fallback: check workspace config for target_arr
+      // ── Priority 2: annual quota_periods record ──
       if (!quota) {
-        const goalsCtx = context.businessContext?.goals_and_targets as Record<string, any> | undefined;
-        if (goalsCtx?.annual_target) {
-          quota = parseFloat(String(goalsCtx.annual_target));
-          if (isNaN(quota)) quota = null;
+        const quotaResult = await query<{
+          id: string;
+          team_quota: string | null;
+          start_date: string;
+          end_date: string;
+        }>(
+          `SELECT id, team_quota::text, start_date::text, end_date::text
+           FROM quota_periods
+           WHERE workspace_id = $1
+             AND period_type IN ('annual', 'yearly')
+             AND end_date >= NOW()
+             AND team_quota > 0
+           ORDER BY start_date DESC
+           LIMIT 1`,
+          [context.workspaceId]
+        ).catch(() => ({ rows: [] as any[] }));
+
+        if (quotaResult.rows.length > 0 && quotaResult.rows[0].team_quota) {
+          const parsed = parseFloat(quotaResult.rows[0].team_quota);
+          if (!isNaN(parsed) && parsed > 0) quota = parsed;
         }
       }
 
-      // Third fallback: targets table (user-scoped via getHeadlineTarget)
+      // ── Priority 3: workspace config for target_arr ──
       if (!quota) {
-        try {
-          const headline = await getHeadlineTarget(context.workspaceId, context.userId);
-          if (headline.amount > 0) quota = headline.amount;
-        } catch { /* non-fatal */ }
+        const goalsCtx = context.businessContext?.goals_and_targets as Record<string, any> | undefined;
+        if (goalsCtx?.annual_target) {
+          const parsed = parseFloat(String(goalsCtx.annual_target));
+          if (!isNaN(parsed) && parsed > 0) quota = parsed;
+        }
       }
 
       return {
