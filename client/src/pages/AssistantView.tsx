@@ -63,6 +63,7 @@ export default function AssistantView() {
   const [briefLoading, setBriefLoading] = useState(true);
   const [operators, setOperators] = useState<any[] | null>(null);
   const [showSendDialog, setShowSendDialog] = useState(false);
+  const [expandedNumberRow, setExpandedNumberRow] = useState<'pipeline' | 'attainment' | 'gap' | null>(null);
 
   const numberSectionRef = useRef<HTMLDivElement>(null);
   const whatChangedSectionRef = useRef<HTMLDivElement>(null);
@@ -71,8 +72,15 @@ export default function AssistantView() {
 
   const handleDrilldown = useCallback((drilldown: string) => {
     const scroll = (ref: React.RefObject<HTMLDivElement>) =>
-      ref.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    if (drilldown === 'attainment' || drilldown === 'gap' || drilldown === 'pipeline_total') {
+      ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (drilldown === 'attainment') {
+      setExpandedNumberRow('attainment');
+      scroll(numberSectionRef);
+    } else if (drilldown === 'gap') {
+      setExpandedNumberRow('gap');
+      scroll(numberSectionRef);
+    } else if (drilldown === 'pipeline_total') {
+      setExpandedNumberRow('pipeline');
       scroll(numberSectionRef);
     } else if (drilldown === 'pipeline_change') {
       scroll(whatChangedSectionRef);
@@ -301,7 +309,7 @@ export default function AssistantView() {
                 highlighted={ef.primary === 'attainment_risk' || ef.primary === 'attainment_countdown'}
                 hidden={isSuppressed('the_number')}
               >
-                <TheNumberCard theNumber={brief.the_number} briefType={bt} deltaMode={bt === 'pulse'} reps={brief.reps} />
+                <TheNumberCard theNumber={brief.the_number} briefType={bt} deltaMode={bt === 'pulse'} reps={brief.reps} expandedRow={expandedNumberRow} onExpandedRowChange={setExpandedNumberRow} />
               </BriefSection>
             </div>
 

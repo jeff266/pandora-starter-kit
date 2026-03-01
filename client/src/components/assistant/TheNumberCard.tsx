@@ -17,6 +17,8 @@ interface TheNumberCardProps {
   briefType: string;
   deltaMode?: boolean;
   reps?: any;
+  expandedRow?: ExpandedRow;
+  onExpandedRowChange?: (row: ExpandedRow) => void;
 }
 
 type ExpandedRow = 'pipeline' | 'attainment' | 'gap' | null;
@@ -46,12 +48,17 @@ function MathRow({ label, value, highlight }: { label: string; value: string; hi
   );
 }
 
-export default function TheNumberCard({ theNumber: n, briefType, deltaMode, reps }: TheNumberCardProps) {
-  const [expanded, setExpanded] = useState<ExpandedRow>(null);
+export default function TheNumberCard({ theNumber: n, briefType, deltaMode, reps, expandedRow: controlledExpanded, onExpandedRowChange }: TheNumberCardProps) {
+  const [internalExpanded, setInternalExpanded] = useState<ExpandedRow>(null);
+  const expanded = controlledExpanded !== undefined ? controlledExpanded : internalExpanded;
 
   if (!n) return null;
 
-  const toggle = (row: ExpandedRow) => setExpanded(prev => prev === row ? null : row);
+  const toggle = (row: ExpandedRow) => {
+    const next = expanded === row ? null : row;
+    if (onExpandedRowChange) onExpandedRowChange(next);
+    else setInternalExpanded(next);
+  };
 
   const dir = n.direction === 'up' ? '↑' : n.direction === 'down' ? '↓' : '→';
   const dirColor = n.direction === 'up' ? '#34D399' : n.direction === 'down' ? '#F87171' : '#9CA3AF';
