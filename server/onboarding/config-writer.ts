@@ -1,4 +1,5 @@
 import { query } from '../db.js';
+import { clearWorkspaceMemoryCache } from '../context/workspace-memory.js';
 import type { ConfigPatch, ConfigArtifact } from './types.js';
 
 type ConfigSource = 'confirmed' | 'default' | 'inferred';
@@ -188,5 +189,6 @@ export async function writeConfigPatch(
     }
   }
 
+  clearWorkspaceMemoryCache(workspaceId);
   return artifacts;
 }

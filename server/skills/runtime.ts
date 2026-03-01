@@ -24,6 +24,7 @@ import type {
 import Handlebars from 'handlebars';
 import { getToolDefinition } from './tool-definitions.js';
 import { getContext, getDataFreshness } from '../context/index.js';
+import { buildWorkspaceContextBlock } from '../context/workspace-memory.js';
 import {
   callLLM,
   assistantMessageFromResponse,
@@ -100,8 +101,17 @@ export class SkillRuntime {
 
     console.log(`[Skill Runtime] Starting ${skill.id} for workspace ${workspaceId}, runId: ${runId}`);
 
-    const contextData = await getContext(workspaceId);
-    const dataFreshness = await getDataFreshness(workspaceId);
+    const [contextData, dataFreshness, activeTargetsResult, workspaceContextBlock] = await Promise.all([
+      getContext(workspaceId),
+      getDataFreshness(workspaceId),
+      query(
+        `SELECT pipeline_name, amount, metric, period_label, period_start, period_end
+         FROM targets WHERE workspace_id = $1 AND is_active = true
+         ORDER BY created_at DESC`,
+        [workspaceId]
+      ).catch(() => ({ rows: [] })),
+      buildWorkspaceContextBlock(workspaceId).catch(() => ''),
+    ]);
 
     // Merge skill timeConfig with runtime overrides from params
     const mergedTimeConfig = {
@@ -136,6 +146,8 @@ export class SkillRuntime {
       dataFreshness,
       voiceBlock,
       consultantContext: consultantContextBlock,
+      active_targets: (activeTargetsResult as any).rows ?? [],
+      workspaceContextBlock,
     };
 
     // Structured goal context (goal-aware skill prompts)

@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { query } from '../db.js';
 import { computeGap, getActiveTarget } from '../analysis/gap-calculator.js';
+import { clearWorkspaceMemoryCache } from '../context/workspace-memory.js';
 
 const router = Router();
 
@@ -122,6 +123,7 @@ router.post('/:workspaceId/targets', async (req: Request, res: Response): Promis
       ]
     );
 
+    clearWorkspaceMemoryCache(workspaceId);
     res.json({
       target: result.rows[0],
       superseded: supersededTarget,
@@ -220,6 +222,7 @@ router.delete('/:workspaceId/targets/:targetId', async (req: Request, res: Respo
       res.status(404).json({ error: 'Target not found' });
       return;
     }
+    clearWorkspaceMemoryCache(workspaceId);
     res.json({ ok: true, id: targetId });
   } catch (err) {
     console.error('[targets] Error deleting target:', err);
@@ -422,6 +425,7 @@ router.patch('/:workspaceId/quotas/:quotaId', async (req: Request, res: Response
       ]
     );
 
+    clearWorkspaceMemoryCache(workspaceId);
     res.json({
       quota: result.rows[0],
       superseded_id: quotaId,

@@ -22,7 +22,7 @@ export async function synthesizeSingleSkill(
   workspaceId: string,
   question: string,
   skillRun: { skill_id: string; output_text?: string | null; result?: any; output?: any },
-  options?: { goalContext?: boolean },
+  options?: { goalContext?: boolean; contextBlock?: string },
 ): Promise<{ text: string; tokens: number }> {
   let goalBlock = '';
 
@@ -72,7 +72,7 @@ VOICE AND TONE — MANDATORY:
 - Missing quotas means you can't show ratios — always show raw numbers regardless.
 - Treat the user as a competent professional who can draw their own conclusions.
 
-RESPONSE LENGTH: 50-100 words maximum. Just answer the question.`;
+RESPONSE LENGTH: 50-100 words maximum. Just answer the question.${options?.contextBlock ? `\n\n${options.contextBlock}` : ''}`;
 
   const userPrompt = `QUESTION: "${question}"
 ${goalBlock}

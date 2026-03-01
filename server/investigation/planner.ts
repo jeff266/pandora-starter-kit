@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { query } from '../db.js';
 import { goalService } from '../goals/goal-service.js';
 import { getSkillRegistry } from '../skills/registry.js';
+import { buildWorkspaceContextBlock } from '../context/workspace-memory.js';
 import type { InvestigationPlan, InvestigationStep } from '../goals/types.js';
 
 const anthropic = new Anthropic({
@@ -70,7 +71,7 @@ export async function createInvestigationPlan(
     };
   }
 
-  const [goals, recentFindingsResult] = await Promise.all([
+  const [goals, recentFindingsResult, contextBlock] = await Promise.all([
     options?.goalIds
       ? Promise.all(options.goalIds.map((id) => goalService.getById(id)))
       : goalService.list(workspaceId, { is_active: true }),
@@ -80,6 +81,7 @@ export async function createInvestigationPlan(
        ORDER BY severity ASC, created_at DESC LIMIT 15`,
       [workspaceId],
     ),
+    buildWorkspaceContextBlock(workspaceId).catch(() => ''),
   ]);
 
   const registry = getSkillRegistry();
@@ -88,7 +90,7 @@ export async function createInvestigationPlan(
   const goalsFiltered = goals.filter(Boolean);
   const recentFindings = recentFindingsResult.rows;
 
-  const planPrompt = `You are planning an investigation to answer this question:
+  const planPrompt = `${contextBlock ? contextBlock + '\n\n' : ''}You are planning an investigation to answer this question:
 "${question}"
 
 AVAILABLE SKILLS:

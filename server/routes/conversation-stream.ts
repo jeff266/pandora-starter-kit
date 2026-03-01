@@ -12,6 +12,7 @@ import { goalService } from '../goals/goal-service.js';
 import { getSkillRuntime } from '../skills/runtime.js';
 import { getSkillRegistry } from '../skills/registry.js';
 import { createConversationState, getConversationState, appendMessage } from '../chat/conversation-state.js';
+import { buildWorkspaceContextBlock } from '../context/workspace-memory.js';
 import type { InvestigationStep } from '../goals/types.js';
 
 const router = Router();
@@ -87,6 +88,8 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
+
+  const contextBlock = await buildWorkspaceContextBlock(workspaceId).catch(() => '');
 
   try {
     // ── Brief resolver — cache-first, zero tokens ─────────────────────────────
@@ -246,7 +249,7 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
       sse(res, { type: 'synthesis_start' });
 
       if (skillRun) {
-        const synthesis = await synthesizeSingleSkill(workspaceId, message, skillRun, { goalContext: hasGoals });
+        const synthesis = await synthesizeSingleSkill(workspaceId, message, skillRun, { goalContext: hasGoals, contextBlock });
         assistantResponse = synthesis.text;
         sse(res, { type: 'synthesis_chunk', text: synthesis.text });
         sse(res, { type: 'synthesis_done', full_text: synthesis.text });
@@ -299,7 +302,7 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
           ...(history as { role: string; content: string }[]).filter((m) => m.role && m.content).map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
           { role: 'user' as const, content: message },
         ];
-        const stream = anthropic.messages.stream({ model: 'claude-sonnet-4-5', max_tokens: 512, system: `You are Pandora, a RevOps intelligence assistant. Answer concisely in 2-4 sentences. Be specific.`, messages: chatMessages });
+        const stream = anthropic.messages.stream({ model: 'claude-sonnet-4-5', max_tokens: 512, system: `You are Pandora, a RevOps intelligence assistant. Answer concisely in 2-4 sentences. Be specific.${contextBlock ? `\n\n${contextBlock}` : ''}`, messages: chatMessages });
         let fullText = '';
         for await (const event of stream) {
           if (event.type === 'content_block_delta' && event.delta.type === 'text_delta' && event.delta.text) {

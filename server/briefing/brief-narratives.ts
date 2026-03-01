@@ -1,6 +1,7 @@
 import type { BriefType, EditorialFocus, AiBlurbs } from './brief-types.js';
 import { callLLM } from '../utils/llm-router.js';
 import { formatCompact } from './brief-utils.js';
+import { buildWorkspaceContextBlock } from '../context/workspace-memory.js';
 
 export async function generateBriefNarratives(
   workspaceId: string,
@@ -11,6 +12,8 @@ export async function generateBriefNarratives(
   deals: any[],
   editorialFocus: EditorialFocus
 ): Promise<AiBlurbs> {
+  const contextBlock = await buildWorkspaceContextBlock(workspaceId).catch(() => '');
+
   const systemPrompt = `You are Pandora, a virtual VP of Revenue Operations writing a daily briefing for a CRO.
 
 TONE RULES:
@@ -22,7 +25,7 @@ TONE RULES:
 - If data is sparse, work with what's there. Never refuse.
 
 OUTPUT FORMAT:
-Return a valid JSON object only. No markdown fences. No explanation outside the JSON.`;
+Return a valid JSON object only. No markdown fences. No explanation outside the JSON.${contextBlock ? `\n\n${contextBlock}` : ''}`;
 
   const numberLine = theNumber.attainment_pct != null
     ? `${theNumber.attainment_pct.toFixed(0)}% attainment, ${formatCompact(theNumber.gap || 0)} gap, ${theNumber.days_remaining} days left`

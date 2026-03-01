@@ -9,6 +9,7 @@ import { Router, type Request, type Response } from 'express';
 import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { query } from '../db.js';
 import { configLoader } from '../config/workspace-config-loader.js';
+import { clearWorkspaceMemoryCache } from '../context/workspace-memory.js';
 import {
   validateWorkspaceConfig,
   type WorkspaceConfig,
@@ -113,6 +114,7 @@ router.put(
 
       // Clear cache
       configLoader.clearCache(workspaceId);
+      clearWorkspaceMemoryCache(workspaceId);
 
       res.json({ success: true, config });
     } catch (error) {
@@ -220,6 +222,7 @@ router.patch(
 
       // Clear cache
       configLoader.clearCache(workspaceId);
+      clearWorkspaceMemoryCache(workspaceId);
 
       res.json({ success: true, config: updated });
     } catch (error) {
@@ -291,6 +294,7 @@ router.delete(
 
       // Clear cache
       configLoader.clearCache(workspaceId);
+      clearWorkspaceMemoryCache(workspaceId);
 
       res.json({
         success: true,
@@ -491,6 +495,7 @@ router.post(
       );
 
       configLoader.clearCache(workspaceId);
+      clearWorkspaceMemoryCache(workspaceId);
 
       res.json({ success: true, message: 'Review item confirmed' });
     } catch (error) {
