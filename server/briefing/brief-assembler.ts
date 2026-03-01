@@ -243,7 +243,7 @@ async function getDealsToWatch(workspaceId: string, wonLostStages: string[], sin
 
   const [topDeals, riskyDeals, wonDeals] = await Promise.all([
     query<any>(`SELECT id::text, name, amount, stage, pipeline, COALESCE(owner_name,owner_email,'') as owner, close_date::text FROM deals WHERE workspace_id = $1 AND ${openFilter} ORDER BY amount DESC LIMIT 5`, [workspaceId]),
-    query<any>(`SELECT DISTINCT d.id::text, d.name, d.amount, d.stage, COALESCE(d.owner_name,d.owner_email,'') as owner, d.close_date::text, f.message as signal_text, f.severity FROM findings f JOIN deals d ON d.id::text = f.deal_id AND d.workspace_id = f.workspace_id WHERE f.workspace_id = $1 AND f.resolved_at IS NULL AND f.severity IN ('act','watch') ORDER BY d.amount DESC LIMIT 5`, [workspaceId]),
+    query<any>(`SELECT DISTINCT d.id::text, d.name, d.amount, d.stage, COALESCE(d.owner_name,d.owner_email,'') as owner, d.close_date::text, f.message as signal_text, f.severity FROM findings f JOIN deals d ON d.id = f.deal_id AND d.workspace_id = f.workspace_id WHERE f.workspace_id = $1 AND f.resolved_at IS NULL AND f.severity IN ('act','watch') ORDER BY d.amount DESC LIMIT 5`, [workspaceId]),
     query<any>(`SELECT id::text, name, amount, stage, COALESCE(owner_name,owner_email,'') as owner FROM deals WHERE workspace_id = $1 AND stage_normalized = 'closed_won' AND close_date >= $2 ORDER BY amount DESC LIMIT 3`, [workspaceId, sinceStr]),
   ]);
 
@@ -347,7 +347,7 @@ async function assembleQuarterClose(workspaceId: string, now: Date, briefType: B
 
   const qEnd = quarterEnd(now).toISOString().split('T')[0];
   const closeable = await query<any>(`SELECT id::text, name, amount, stage, COALESCE(owner_name,owner_email,'') as owner, close_date::text FROM deals WHERE workspace_id = $1 AND ${openFilter} AND close_date <= $2 ORDER BY close_date ASC`, [workspaceId, qEnd]);
-  const riskRes = await query<any>(`SELECT f.deal_id, f.message, f.severity FROM findings f WHERE f.workspace_id = $1 AND f.resolved_at IS NULL AND f.severity IN ('act','watch')`, [workspaceId]);
+  const riskRes = await query<any>(`SELECT f.deal_id::text, f.message, f.severity FROM findings f WHERE f.workspace_id = $1 AND f.resolved_at IS NULL AND f.severity IN ('act','watch')`, [workspaceId]);
   const riskMap = new Map(riskRes.rows.map((r: any) => [r.deal_id, r]));
 
   const deals: DealsToWatch = {
