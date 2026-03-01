@@ -714,8 +714,10 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
        FROM deals d
        WHERE d.workspace_id = $1
          AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
-         ${scopeFilterClause}`,
-      [workspaceId]
+         ${scopeFilterClause}
+         ${timeRangeFilter}
+         ${excludeStagesClause}`,
+      [workspaceId, ...excludeParams]
     );
     const total_open_deals = parseInt(totalOpenDealsResult.rows[0]?.count || '0', 10);
 
