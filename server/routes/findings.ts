@@ -660,6 +660,48 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
           const t = targetRows.rows[0];
           targetForCoverage = parseFloat(t.amount) || targetForCoverage;
           coverageTargetSource = t.pipeline_name ? 'Pipeline target' : 'Workspace target';
+        } else if (timeRangeParam === 'this_week' || timeRangeParam === 'this_month') {
+          // No exact weekly/monthly target — derive from quarterly target (÷13 for week, ÷3 for month)
+          const divisor = timeRangeParam === 'this_week' ? 13 : 3;
+          const quarterStart = (() => {
+            const d = new Date();
+            const qMonth = Math.floor(d.getMonth() / 3) * 3;
+            return new Date(d.getFullYear(), qMonth, 1).toISOString().slice(0, 10);
+          })();
+          let quarterQuery: string;
+          let quarterParams: any[];
+          if (targetPipelineName) {
+            quarterQuery = `
+              SELECT amount, pipeline_name FROM targets
+              WHERE workspace_id = $1
+                AND is_active = true
+                AND period_start <= $3::date
+                AND period_end >= $3::date
+              ORDER BY
+                CASE WHEN pipeline_name = $2 THEN 0 WHEN pipeline_name IS NULL THEN 1 ELSE 2 END,
+                period_start DESC
+              LIMIT 1`;
+            quarterParams = [workspaceId, targetPipelineName, quarterStart];
+          } else {
+            quarterQuery = `
+              SELECT amount, pipeline_name FROM targets
+              WHERE workspace_id = $1
+                AND is_active = true
+                AND pipeline_name IS NULL
+                AND period_start <= $2::date
+                AND period_end >= $2::date
+              ORDER BY created_at DESC
+              LIMIT 1`;
+            quarterParams = [workspaceId, quarterStart];
+          }
+          const quarterRows = await query<{ amount: string; pipeline_name: string | null }>(quarterQuery, quarterParams);
+          if (quarterRows.rows.length > 0) {
+            const qAmount = parseFloat(quarterRows.rows[0].amount);
+            if (qAmount > 0) {
+              targetForCoverage = Math.round(qAmount / divisor);
+              coverageTargetSource = `${quarterRows.rows[0].pipeline_name ? 'Pipeline' : 'Workspace'} quarterly ÷${divisor}`;
+            }
+          }
         }
       }
     } catch {
