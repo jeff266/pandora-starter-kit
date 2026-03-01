@@ -1,8 +1,10 @@
 import { query } from '../db.js';
+import { callLLM } from '../utils/llm-router.js';
 import { scanCRM } from './crm-scanner.js';
 import { researchCompany } from './company-research.js';
 import { inferWorkspaceConfig } from '../config/inference-engine.js';
 import { getAllQuestions, getQuestion, getNextQuestion, getTier0Questions } from './questions/index.js';
+import { buildBucketMarkdownTable, detectAnomalousSegments } from './hypotheses/q1-motions.js';
 import {
   generateMotionsHypothesis,
   generateCalendarHypothesis,
@@ -54,6 +56,74 @@ async function setContextValue(workspaceId: string, key: string, value: unknown)
 async function getWorkspaceName(workspaceId: string): Promise<string> {
   const r = await query(`SELECT name FROM workspaces WHERE id = $1 LIMIT 1`, [workspaceId]);
   return r.rows[0]?.name ?? 'Your Company';
+}
+
+async function analyzeSegments(
+  workspaceId: string,
+  scan: CRMScanResult,
+  companyName: string,
+): Promise<CRMScanResult['segment_analysis']> {
+  const buckets = scan.amount_cycle_buckets;
+  if (!buckets || buckets.length < 2) return null;
+
+  const table = buildBucketMarkdownTable(buckets);
+  const systemPrompt = `You are a B2B revenue operations analyst. Your job is to identify natural selling motions from deal data by looking for discontinuities in sales cycle length and win rate across deal size brackets. Be conservative — only split into segments when the data clearly shows different buying behaviors. It is perfectly fine to conclude there is only one motion.`;
+
+  const userPrompt = `Company: ${companyName}
+
+Here is the deal data for this company, bucketed by deal size. Each row shows how many deals fall in that size range, the median deal amount, median days from deal creation to close, and win rate among deals that have closed:
+
+${table}
+
+Based on this data:
+1. Look for brackets where median cycle time OR win rate jumps significantly (e.g. more than 40% relative change from neighboring brackets)
+2. Group consecutive brackets with similar behavior into segments
+3. If a segment has an unusual pattern (very short cycle + very high win rate, or vice versa), flag it as anomalous — it may represent a different deal TYPE rather than a distinct selling motion (e.g. a grant program, renewal, fixed-price contract)
+4. Name segments naturally based on the data (not just "Enterprise/Mid-Market/SMB" unless the sizes clearly warrant it)
+5. If the data shows no clear behavioral discontinuities, say single_motion: true
+
+Return ONLY valid JSON matching this schema exactly:
+{
+  "segments": [
+    {
+      "name": "string",
+      "min_amount": number or null,
+      "max_amount": number or null,
+      "deals": number,
+      "median_amount": number,
+      "median_cycle_days": number or null,
+      "win_rate_pct": number or null,
+      "rationale": "one sentence explaining why this is a distinct segment",
+      "confidence": 0.0-1.0,
+      "anomalous": true or false,
+      "anomaly_question": "if anomalous, a question to ask the admin about whether this is a real selling motion or a data artifact — otherwise omit"
+    }
+  ],
+  "single_motion": true or false,
+  "confidence": 0.0-1.0,
+  "notes": "brief summary of the analysis"
+}`;
+
+  try {
+    const response = await callLLM(workspaceId, 'classify', {
+      systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }],
+      maxTokens: 1500,
+      temperature: 0.1,
+    });
+
+    const raw = response.content?.trim() ?? '';
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return null;
+
+    const parsed = JSON.parse(jsonMatch[0]) as CRMScanResult['segment_analysis'];
+    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed?.segments)) return null;
+
+    parsed.segments = detectAnomalousSegments(parsed.segments);
+    return parsed;
+  } catch {
+    return null;
+  }
 }
 
 function buildInferenceResult(engineResult: Awaited<ReturnType<typeof inferWorkspaceConfig>>): InferenceResult {
@@ -141,7 +211,7 @@ export async function startOnboarding(
   }
 
   const [scanResult, engineResult, companyName] = await Promise.all([
-    scanCRM(workspaceId).catch(() => ({ pipelines: [], deal_types: [], record_types: [], stages: [], won_lost: [], owners: [], close_date_clusters: [], amount_distribution: null, custom_field_fill_rates: [], contacts_per_deal: null, new_owners: [], unused_stages: [] }) as CRMScanResult),
+    scanCRM(workspaceId).catch(() => ({ pipelines: [], deal_types: [], record_types: [], stages: [], won_lost: [], owners: [], close_date_clusters: [], amount_distribution: null, custom_field_fill_rates: [], contacts_per_deal: null, new_owners: [], unused_stages: [], amount_cycle_buckets: [], segment_analysis: null }) as CRMScanResult),
     inferWorkspaceConfig(workspaceId, { skipDocMining: true, skipReportMining: true, skipToolRoster: true }).catch(() => ({ config: {}, signals: {}, user_review_items: [], detection_summary: {} })),
     getWorkspaceName(workspaceId),
   ]);
@@ -152,6 +222,12 @@ export async function startOnboarding(
   })) as CompanyResearch;
 
   const inference = buildInferenceResult(engineResult as Awaited<ReturnType<typeof inferWorkspaceConfig>>);
+
+  const realPipelines = scanResult.pipelines.filter(p => p.pipeline !== 'Default');
+  const effectivePipelineCount = realPipelines.length > 0 ? realPipelines.length : scanResult.pipelines.length;
+  if (effectivePipelineCount <= 1 && scanResult.amount_cycle_buckets.length >= 2) {
+    scanResult.segment_analysis = await analyzeSegments(workspaceId, scanResult, companyName);
+  }
 
   await setContextValue(workspaceId, 'onboarding_crm_scan', scanResult);
   await setContextValue(workspaceId, 'onboarding_research', researchResult);

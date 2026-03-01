@@ -11,6 +11,8 @@ export interface CRMScanResult {
   contacts_per_deal: { avg_contacts: number; median_contacts: number } | null;
   new_owners: string[];
   unused_stages: string[];
+  amount_cycle_buckets: AmountCycleBucket[];
+  segment_analysis: SegmentAnalysis | null;
 }
 
 export interface PipelineStat {
@@ -61,6 +63,37 @@ export interface FieldFillRate {
   key: string;
   filled_count: number;
   fill_pct: number;
+}
+
+export interface AmountCycleBucket {
+  bucket: string;
+  bucket_order: number;
+  deals: number;
+  median_amount: number;
+  median_cycle_days: number | null;
+  avg_cycle_days: number | null;
+  win_rate_pct: number | null;
+}
+
+export interface SegmentAnalysisSegment {
+  name: string;
+  min_amount: number | null;
+  max_amount: number | null;
+  deals: number;
+  median_amount: number;
+  median_cycle_days: number | null;
+  win_rate_pct: number | null;
+  rationale: string;
+  confidence: number;
+  anomalous: boolean;
+  anomaly_question?: string;
+}
+
+export interface SegmentAnalysis {
+  segments: SegmentAnalysisSegment[];
+  single_motion: boolean;
+  confidence: number;
+  notes: string;
 }
 
 export interface CompanyResearch {
