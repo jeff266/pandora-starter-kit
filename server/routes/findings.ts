@@ -561,17 +561,57 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
     let targetForCoverage: number = quota ?? 1_000_000;
     let coverageTargetSource = quota ? 'From goals' : 'Default fallback';
     try {
-      const targetRows = await query<{ amount: string; pipeline_name: string | null }>(
-        `SELECT amount, pipeline_name FROM targets
-         WHERE workspace_id = $1
-           AND is_active = true
-           AND period_start <= CURRENT_DATE
-           AND period_end >= CURRENT_DATE
-         ORDER BY
-           CASE WHEN pipeline_name = $2 THEN 0 WHEN pipeline_name IS NULL THEN 1 ELSE 2 END
-         LIMIT 1`,
-        [workspaceId, activePipelineName ?? null]
-      );
+      // Resolve the display name for scope-based pipeline filters (scope_id !== display name)
+      let targetPipelineName: string | null = activePipelineName;
+      if (!useLegacyPipeline && scopeId && scopeId !== 'all') {
+        try {
+          const scopeNameResult = await query<{ name: string }>(
+            `SELECT name FROM analysis_scopes WHERE workspace_id = $1 AND scope_id = $2 LIMIT 1`,
+            [workspaceId, scopeId]
+          );
+          if (scopeNameResult.rows.length > 0) {
+            targetPipelineName = scopeNameResult.rows[0].name;
+          }
+        } catch {}
+      }
+
+      // Use the start of the viewed time range as the reference date so that filtering
+      // to e.g. Q3 deals pulls the Q3 target, not the current-period target.
+      const periodRefDate = dateRange?.start
+        ? new Date(dateRange.start).toISOString().slice(0, 10)
+        : new Date().toISOString().slice(0, 10);
+
+      // When "All" pipelines is selected (targetPipelineName is null), only match
+      // workspace-wide targets (pipeline_name IS NULL). When a specific pipeline is
+      // selected, prefer that pipeline's target and fall back to workspace-wide.
+      let targetQuery: string;
+      let targetParams: any[];
+      if (targetPipelineName) {
+        targetQuery = `
+          SELECT amount, pipeline_name FROM targets
+          WHERE workspace_id = $1
+            AND is_active = true
+            AND period_start <= $3::date
+            AND period_end >= $3::date
+          ORDER BY
+            CASE WHEN pipeline_name = $2 THEN 0 WHEN pipeline_name IS NULL THEN 1 ELSE 2 END,
+            period_start DESC
+          LIMIT 1`;
+        targetParams = [workspaceId, targetPipelineName, periodRefDate];
+      } else {
+        targetQuery = `
+          SELECT amount, pipeline_name FROM targets
+          WHERE workspace_id = $1
+            AND is_active = true
+            AND pipeline_name IS NULL
+            AND period_start <= $2::date
+            AND period_end >= $2::date
+          ORDER BY created_at DESC
+          LIMIT 1`;
+        targetParams = [workspaceId, periodRefDate];
+      }
+
+      const targetRows = await query<{ amount: string; pipeline_name: string | null }>(targetQuery, targetParams);
       if (targetRows.rows.length > 0) {
         const t = targetRows.rows[0];
         targetForCoverage = parseFloat(t.amount) || targetForCoverage;
