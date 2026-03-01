@@ -6,6 +6,7 @@ import { colors, fonts } from '../styles/theme';
 import NotificationBell from './notifications/NotificationBell';
 import SectionErrorBoundary from './SectionErrorBoundary';
 import { useIsMobile } from '../hooks/useIsMobile';
+import PalettePicker from './PalettePicker';
 
 interface NavItem {
   label: string;
@@ -353,6 +354,12 @@ export default function Sidebar({ badges, showAllClients, collapsed = false, onT
             </div>
           )}
         </div>
+        {!collapsed && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0' }}>
+            <span style={{ fontSize: 12, color: colors.textMuted, whiteSpace: 'nowrap' }}>Theme</span>
+            <PalettePicker />
+          </div>
+        )}
       </div>
 
       {/* View mode toggle */}

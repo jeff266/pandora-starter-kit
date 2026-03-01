@@ -10,17 +10,199 @@ html, body, #root {
   overflow: hidden;
 }
 
+/* ============================================================
+   SEMANTIC CONSTANTS — identical across all palettes
+   ============================================================ */
+:root {
+  --color-green: #5fcc9c;
+  --color-greenSoft: #1b2924;
+  --color-yellow: #ffb380;
+  --color-yellowSoft: #2b251a;
+  --color-red: #ff8c82;
+  --color-redSoft: #2b1f1d;
+  --color-coral: #ff8c82;
+  --color-coralSoft: #2b1f1d;
+  --color-purple: #a78bfa;
+  --color-purpleSoft: rgba(167,139,250,0.12);
+  --color-orange: #f97316;
+}
+
+/* ============================================================
+   PANDORA — dark teal (default)
+   ============================================================ */
+:root,
+[data-palette="pandora"] {
+  --color-bg: #0b1014;
+  --color-bgSidebar: #0a0d14;
+  --color-surface: #10171d;
+  --color-surfaceRaised: #162028;
+  --color-surfaceHover: #1b2531;
+  --color-surfaceActive: #1e2436;
+  --color-border: #253541;
+  --color-borderLight: #242b3a;
+  --color-borderFocus: #48af9b;
+  --color-text: #e0ece9;
+  --color-textSecondary: #a4bcb5;
+  --color-textMuted: #6b8b84;
+  --color-textDim: #3a4252;
+  --color-textTertiary: #475569;
+  --color-accent: #48af9b;
+  --color-accentHover: #3d9d8b;
+  --color-accentSoft: rgba(72,175,155,0.12);
+}
+
+/* ============================================================
+   MIDNIGHT — navy + powder blue + mauve
+   ============================================================ */
+[data-palette="midnight"] {
+  --color-bg: #0b1b32;
+  --color-bgSidebar: #0d1e4c;
+  --color-surface: #16273d;
+  --color-surfaceRaised: #1e3252;
+  --color-surfaceHover: #26415e;
+  --color-surfaceActive: #2d4e72;
+  --color-border: #26415e;
+  --color-borderLight: #1e3252;
+  --color-borderFocus: #83a6ce;
+  --color-text: #f0edf8;
+  --color-textSecondary: #c48cb3;
+  --color-textMuted: #8a7a9e;
+  --color-textDim: #3d3560;
+  --color-textTertiary: #5a4e7a;
+  --color-accent: #83a6ce;
+  --color-accentHover: #6a8dba;
+  --color-accentSoft: rgba(131,166,206,0.12);
+}
+
+/* ============================================================
+   EMBER — dark purple + amber + blush
+   ============================================================ */
+[data-palette="ember"] {
+  --color-bg: #1b1931;
+  --color-bgSidebar: #110f24;
+  --color-surface: #251e40;
+  --color-surfaceRaised: #2e2550;
+  --color-surfaceHover: #37296a;
+  --color-surfaceActive: #40307a;
+  --color-border: #44174e;
+  --color-borderLight: #351440;
+  --color-borderFocus: #ed9e59;
+  --color-text: #f7ede8;
+  --color-textSecondary: #e9bcb9;
+  --color-textMuted: #a08890;
+  --color-textDim: #4a2840;
+  --color-textTertiary: #6b3a5a;
+  --color-accent: #ed9e59;
+  --color-accentHover: #d8893d;
+  --color-accentSoft: rgba(237,158,89,0.12);
+}
+
+/* ============================================================
+   CRIMSON — navy + peach + deep red
+   ============================================================ */
+[data-palette="crimson"] {
+  --color-bg: #181a2f;
+  --color-bgSidebar: #0f1020;
+  --color-surface: #242e49;
+  --color-surfaceRaised: #2d3a58;
+  --color-surfaceHover: #37415c;
+  --color-surfaceActive: #404e6e;
+  --color-border: #37415c;
+  --color-borderLight: #2d3a58;
+  --color-borderFocus: #fda481;
+  --color-text: #f5e8e6;
+  --color-textSecondary: #e8c8c5;
+  --color-textMuted: #8090b0;
+  --color-textDim: #303a56;
+  --color-textTertiary: #485272;
+  --color-accent: #fda481;
+  --color-accentHover: #e8855a;
+  --color-accentSoft: rgba(253,164,129,0.12);
+}
+
+/* ============================================================
+   LAVENDER — navy + lilac + copper
+   ============================================================ */
+[data-palette="lavender"] {
+  --color-bg: #03122f;
+  --color-bgSidebar: #02091f;
+  --color-surface: #19305c;
+  --color-surfaceRaised: #233d6e;
+  --color-surfaceHover: #2d4a80;
+  --color-surfaceActive: #37578e;
+  --color-border: #413b61;
+  --color-borderLight: #332f50;
+  --color-borderFocus: #ae7dac;
+  --color-text: #f8f0f8;
+  --color-textSecondary: #f3dadf;
+  --color-textMuted: #8a7aa0;
+  --color-textDim: #2a2848;
+  --color-textTertiary: #3d3a65;
+  --color-accent: #ae7dac;
+  --color-accentHover: #956a92;
+  --color-accentSoft: rgba(174,125,172,0.12);
+}
+
+/* ============================================================
+   OCEAN — near-black teal + aqua + slate
+   ============================================================ */
+[data-palette="ocean"] {
+  --color-bg: #031716;
+  --color-bgSidebar: #021010;
+  --color-surface: #032f30;
+  --color-surfaceRaised: #0d4040;
+  --color-surfaceHover: #0e5055;
+  --color-surfaceActive: #0f6065;
+  --color-border: #0a7075;
+  --color-borderLight: #0d5055;
+  --color-borderFocus: #0c969c;
+  --color-text: #e0f5f5;
+  --color-textSecondary: #6ba3be;
+  --color-textMuted: #4a7a7a;
+  --color-textDim: #0a3030;
+  --color-textTertiary: #1a4e4e;
+  --color-accent: #0c969c;
+  --color-accentHover: #0a7e83;
+  --color-accentSoft: rgba(12,150,156,0.12);
+}
+
+/* ============================================================
+   PLUM — black-violet + mauve + cream
+   ============================================================ */
+[data-palette="plum"] {
+  --color-bg: #150016;
+  --color-bgSidebar: #0e0010;
+  --color-surface: #29104a;
+  --color-surfaceRaised: #33185a;
+  --color-surfaceHover: #3d2068;
+  --color-surfaceActive: #472878;
+  --color-border: #522c5d;
+  --color-borderLight: #401e4a;
+  --color-borderFocus: #845162;
+  --color-text: #fff0f8;
+  --color-textSecondary: #e3b6b1;
+  --color-textMuted: #9a7080;
+  --color-textDim: #2a0e30;
+  --color-textTertiary: #401848;
+  --color-accent: #845162;
+  --color-accentHover: #6e3f50;
+  --color-accentSoft: rgba(132,81,98,0.12);
+}
+
+/* ============================================================
+   BASE STYLES — use CSS vars
+   ============================================================ */
 body {
   font-family: 'Outfit', -apple-system, sans-serif;
   font-size: 13px;
-  color: #e0ece9;
-  background: #0b1014;
+  color: var(--color-text);
+  background: var(--color-bg);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
 a {
-  color: #48af9b;
+  color: var(--color-accent);
   text-decoration: none;
 }
 
@@ -50,12 +232,12 @@ input, textarea, select {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #253541;
+  background: var(--color-border);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #2a3a47;
+  background: var(--color-surfaceHover);
 }
 
 /* Mobile responsive overrides */
