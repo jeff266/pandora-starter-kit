@@ -142,6 +142,27 @@ export async function executeInvestigation(
           result: cached.rows[0].result,
         };
         step.used_cache = true;
+      } else if (plan.prefer_cache) {
+        const staleCache = await query<{ output_text: string; result: any }>(
+          `SELECT output_text, result FROM skill_runs
+           WHERE workspace_id = $1 AND skill_id = $2 AND status = 'completed'
+           ORDER BY started_at DESC LIMIT 1`,
+          [plan.workspace_id, step.skill_id],
+        );
+        if (staleCache.rows.length > 0) {
+          skillResult = { output_text: staleCache.rows[0].output_text, result: staleCache.rows[0].result };
+          step.used_cache = true;
+        } else {
+          const skillDef = registry.get(step.skill_id);
+          if (skillDef) {
+            const result = await skillRuntime.executeSkill(skillDef, plan.workspace_id, {});
+            skillResult = result;
+            step.used_cache = false;
+          } else {
+            skillResult = { output_text: `No results available for ${step.skill_id}`, result: null };
+            step.used_cache = true;
+          }
+        }
       } else {
         const skillDef = registry.get(step.skill_id);
         if (skillDef) {

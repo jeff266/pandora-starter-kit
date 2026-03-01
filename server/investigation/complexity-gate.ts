@@ -145,9 +145,6 @@ export function inferPrimarySkill(lower: string): string {
   ) {
     return 'forecast-rollup';
   }
-  if (/\b(pipeline|hygiene|stale|stuck|aging|no next step|missing)\b/i.test(lower)) {
-    return 'pipeline-hygiene';
-  }
   if (/\b(rep|scorecard|performance|quota attainment|activity|ramp|individual)\b/i.test(lower)) {
     return 'rep-scorecard';
   }
@@ -157,17 +154,17 @@ export function inferPrimarySkill(lower: string): string {
   if (/\b(waterfall|created|generation|gen|new pipeline|sourced|net new)\b/i.test(lower)) {
     return 'pipeline-waterfall';
   }
-  if (
-    /\b(coverage|pipe.?to.?quota|pipeline coverage)\b/i.test(lower) &&
-    !/waterfall/i.test(lower)
-  ) {
-    return 'pipeline-coverage';
-  }
   if (/\b(conversation|call|meeting|talk|said|discussed|sentiment|objection)\b/i.test(lower)) {
     return 'conversation-intelligence';
   }
   if (/\b(bowtie|funnel|full|review|everything|overview|brief)\b/i.test(lower)) {
     return 'forecast-rollup';
+  }
+  if (/\b(hygiene|stale|stuck|aging|no next step|overdue|no activity|missing field)\b/i.test(lower)) {
+    return 'pipeline-hygiene';
+  }
+  if (/\b(pipeline|coverage|pipe.?to.?quota|pipeline coverage)\b/i.test(lower) && !/waterfall/i.test(lower)) {
+    return 'pipeline-coverage';
   }
   return 'forecast-rollup';
 }
