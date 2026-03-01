@@ -30,6 +30,11 @@ export interface TheNumber {
   attainment_delta?: number;
   omitted?: boolean;
   reason?: string;
+  required_pipeline?: number;
+  coverage_ratio?: number;
+  avg_deal_size?: number;
+  weeks_remaining?: number;
+  required_deals_to_close?: number;
 }
 
 export interface WhatChanged {
@@ -93,6 +98,12 @@ export interface DealsToWatch {
   reason?: string;
 }
 
+export interface AiBlurbClaim {
+  text: string;
+  drilldown: string;
+  verified?: boolean;
+}
+
 export interface AiBlurbs {
   overall_summary?: string;
   rep_conversation?: string;
@@ -103,6 +114,7 @@ export interface AiBlurbs {
   next_week_focus?: string;
   quarter_situation?: string;
   close_plan?: string;
+  claims?: AiBlurbClaim[];
 }
 
 export interface WeeklyBriefRow {

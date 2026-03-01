@@ -20,7 +20,8 @@ TONE RULES:
 - Calm, specific, professional. Trusted advisor, not an alarm system.
 - Use actual names, dollar amounts, and timeframes from the data.
 - Never say "terrifying", "flying blind", "alarming", "vanity metrics", "CRITICAL", or "urgent action required".
-- No homework. Don't assign tasks or deadlines unless directly asked.
+- Be prescriptive: tell the CRO exactly what needs to happen this week, not just what occurred. Name the deal, name the rep, name the action.
+- Give a forecast, not just a status report. Tell them if they're on track and what has to happen to stay on track.
 - Short is better. Total output under 200 words.
 - If data is sparse, work with what's there. Never refuse.
 
@@ -33,6 +34,10 @@ Return a valid JSON object only. No markdown fences. No explanation outside the 
 
   const pipelineDelta = whatChanged.total_pipeline_delta != null
     ? `${whatChanged.total_pipeline_delta >= 0 ? '+' : ''}${formatCompact(whatChanged.total_pipeline_delta)} WoW`
+    : '';
+
+  const coverageLine = theNumber.coverage_ratio != null && theNumber.required_pipeline != null
+    ? `Coverage: ${theNumber.coverage_ratio}x (need ${formatCompact(theNumber.required_pipeline)} at ${Math.round((theNumber.forecast?.win_rate || 0.3) * 100)}% win rate to close the gap)`
     : '';
 
   const repLines = (reps || []).slice(0, 5).map((r: any) =>
@@ -48,16 +53,16 @@ Return a valid JSON object only. No markdown fences. No explanation outside the 
   let requestedKeys = '';
   if (briefType === 'monday_setup') {
     requestedKeys = `Return JSON with exactly these keys:
-{"overall_summary":"1-2 sentences setting up the week for the CRO. What they need to know in 10 seconds.","rep_conversation":"2-3 sentences. Which rep needs attention this week and why. Reference week count if a flag persisted.","deal_recommendation":"2-3 sentences. The ONE deal to ask about today. Name it, state the risk, suggest what to ask."}`;
+{"overall_summary":"1-2 sentences: where we stand entering the week and whether we're on pace. Reference the coverage ratio and what it means for the week ahead.","rep_conversation":"2-3 sentences. Which rep needs attention and specifically what they need to do this week — name the deal, name the action, name the stakes.","deal_recommendation":"2-3 sentences. The ONE deal to focus on today. Name it, state the specific risk, and tell the CRO exactly what question to ask."}`;
   } else if (briefType === 'pulse') {
     requestedKeys = `Return JSON with exactly these keys:
-{"pulse_summary":"1 sentence summarizing material changes since Monday. Be specific with numbers.","key_action":"1 sentence on the most important thing to act on today."}`;
+{"pulse_summary":"1-2 sentences: what changed since Monday AND whether the forecast still shows we hit target. Reference coverage ratio if available.","key_action":"1 sentence: the single most important thing to do today — specific deal or rep, specific action, specific reason why it matters to hitting the number."}`;
   } else if (briefType === 'friday_recap') {
     requestedKeys = `Return JSON with exactly these keys:
-{"week_summary":"1-2 sentences on how the week went. Wins, misses, net result.","next_week_focus":"1-2 sentences on the one thing to prioritize when Monday arrives."}`;
+{"week_summary":"1-2 sentences on how the week went. Wins, misses, net result, and whether attainment moved in the right direction.","next_week_focus":"1-2 sentences on the one concrete thing to prioritize when Monday arrives — name it specifically."}`;
   } else if (briefType === 'quarter_close') {
     requestedKeys = `Return JSON with exactly these keys:
-{"quarter_situation":"2 sentences. Days remaining, gap to quota, what it realistically looks like.","close_plan":"2 sentences. Name the specific deals that will determine the quarter outcome and why."}`;
+{"quarter_situation":"2 sentences. Days remaining, gap to quota, and a frank assessment: will we hit it based on what's in the pipe?","close_plan":"2 sentences. Name the 2-3 specific deals that will determine the quarter outcome and what needs to happen with each one this week."}`;
   }
 
   const userPrompt = `Brief Type: ${briefType}
@@ -66,6 +71,7 @@ Editorial Focus: ${editorialFocus.primary} — ${editorialFocus.reason}
 DATA:
 ${numberLine}
 ${pipelineDelta ? `Pipeline change: ${pipelineDelta}` : ''}${whatChanged.streak ? ` (${whatChanged.streak})` : ''}
+${coverageLine}
 ${repLines ? `\nReps:\n${repLines}` : ''}
 ${dealLines ? `\nAt-risk deals:\n${dealLines}` : ''}
 

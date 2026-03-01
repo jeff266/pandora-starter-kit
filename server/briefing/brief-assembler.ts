@@ -6,6 +6,7 @@ import {
 } from './brief-utils.js';
 import { determineBriefType, determineEditorialFocus } from './editorial-engine.js';
 import { generateBriefNarratives } from './brief-narratives.js';
+import { annotateBriefNarrative } from './brief-annotator.js';
 import type { BriefType, TheNumber, WhatChanged, Segments, Reps, DealsToWatch, AssembledBrief } from './brief-types.js';
 
 // ─── Entry point ─────────────────────────────────────────────────────────────
@@ -100,6 +101,11 @@ async function getTheNumber(workspaceId: string, wonLostStages: string[], now: D
   const attainmentPct = target > 0 ? (wonThisPeriod / target) * 100 : 0;
   const winRate = (fResult as any).win_rate || 0.3;
   const coverageOnGap = gap > 0 && winRate > 0 ? pipelineTotal / (gap / winRate) : 0;
+  const requiredPipeline = gap > 0 && winRate > 0 ? gap / winRate : 0;
+  const coverageRatio = requiredPipeline > 0 ? Math.round((pipelineTotal / requiredPipeline) * 100) / 100 : undefined;
+  const avgDealSize = dealCount > 0 ? Math.round(pipelineTotal / dealCount) : 0;
+  const weeksRemaining = Math.ceil(daysRemaining / 7);
+  const requiredDealsToCLose = gap > 0 && avgDealSize > 0 ? Math.ceil(gap / avgDealSize) : undefined;
 
   let direction: 'up' | 'down' | 'flat' = 'flat';
   let wowPts: number | undefined;
@@ -131,6 +137,11 @@ async function getTheNumber(workspaceId: string, wonLostStages: string[], now: D
     direction,
     wow_pts: wowPts,
     days_remaining: daysRemaining,
+    required_pipeline: requiredPipeline > 0 ? Math.round(requiredPipeline) : undefined,
+    coverage_ratio: coverageRatio,
+    avg_deal_size: avgDealSize || undefined,
+    weeks_remaining: weeksRemaining,
+    required_deals_to_close: requiredDealsToCLose,
   };
 }
 
@@ -216,7 +227,7 @@ async function getReps(workspaceId: string, wonLostStages: string[]): Promise<Re
     query<any>(`SELECT COALESCE(owner, '') as email, COALESCE(SUM(amount),0)::text as closed FROM deals WHERE workspace_id = $1 AND stage_normalized = 'closed_won' AND close_date >= $2 AND close_date <= $3 ${closedPipelineClause} GROUP BY owner`, closedParams),
     query<any>(`SELECT rep_email, amount::text as quota_value FROM quotas WHERE workspace_id = $1 AND is_active = true AND period_start <= CURRENT_DATE AND period_end >= CURRENT_DATE`, [workspaceId]),
     query<any>(`SELECT COALESCE(owner_email, '') as entity_id, message, COALESCE(escalation_level,0)::text as escalation_level, COALESCE(times_flagged,1)::text as times_flagged FROM findings WHERE workspace_id = $1 AND resolved_at IS NULL AND severity IN ('act', 'watch') ORDER BY escalation_level DESC, times_flagged DESC`, [workspaceId]),
-    query<any>(`SELECT rep_email, rep_name FROM sales_reps WHERE workspace_id = $1 AND is_rep = true AND pandora_role IS NOT NULL AND rep_email IS NOT NULL`, [workspaceId]),
+    query<any>(`SELECT rep_name FROM sales_reps WHERE workspace_id = $1 AND is_rep = true AND pandora_role IS NOT NULL`, [workspaceId]),
   ]);
 
   const closedMap = new Map(closedRes.rows.map((r: any) => [r.email, parseFloat(r.closed)]));
@@ -229,13 +240,13 @@ async function getReps(workspaceId: string, wonLostStages: string[]): Promise<Re
     if (!flagMap.has(f.entity_id)) flagMap.set(f.entity_id, f);
   }
 
-  // Build allowed email set from sales_reps roster (pandora_role IS NOT NULL = has an assigned role)
-  // If no roster entries exist for this workspace, fall back to unfiltered (legacy behavior)
-  const allowedEmails = new Set(rosterRes.rows.map((r: any) => r.rep_email as string));
-  const rosterNameMap = new Map(rosterRes.rows.map((r: any) => [r.rep_email as string, r.rep_name as string]));
+  // Build allowed names set from sales_reps roster (pandora_role IS NOT NULL = has an assigned Pandora role)
+  // Deal owners are stored by display name, so we match on rep_name.
+  // If no roster entries exist for this workspace, fall back to unfiltered (legacy behavior).
+  const allowedNames = new Set(rosterRes.rows.map((r: any) => r.rep_name as string));
 
-  const filteredReps = allowedEmails.size > 0
-    ? repRes.rows.filter((r: any) => allowedEmails.has(r.email))
+  const filteredReps = allowedNames.size > 0
+    ? repRes.rows.filter((r: any) => allowedNames.has(r.name))
     : repRes.rows;
 
   return {
@@ -243,10 +254,8 @@ async function getReps(workspaceId: string, wonLostStages: string[]): Promise<Re
       const closed = closedMap.get(r.email) || 0;
       const quotaVal = quotaMap.get(r.email) || 0;
       const flag = flagMap.get(r.email);
-      // Use roster display name when available (avoids showing raw HubSpot email as name)
-      const displayName = rosterNameMap.get(r.email) || r.name;
       return {
-        email: r.email, name: displayName,
+        email: r.email, name: r.name,
         pipeline: parseFloat(r.pipeline), closed, deal_count: parseInt(r.cnt),
         quota: quotaVal || undefined,
         attainment_pct: quotaVal > 0 ? Math.round((closed / quotaVal) * 100) : undefined,
@@ -292,7 +301,8 @@ async function assembleMondaySetup(workspaceId: string, now: Date, briefType: Br
     getDealsToWatch(workspaceId, wonLostStages, subDays(now, 7)),
   ]);
   const editorialFocus = determineEditorialFocus(briefType, theNumber, whatChanged as any, reps, deals, theNumber.days_remaining);
-  const aiBlurbs = await generateBriefNarratives(workspaceId, briefType, theNumber, whatChanged, reps.items, deals.items, editorialFocus);
+  const rawBlurbs = await generateBriefNarratives(workspaceId, briefType, theNumber, whatChanged, reps.items, deals.items, editorialFocus);
+  const aiBlurbs = await annotateBriefNarrative(workspaceId, rawBlurbs, { theNumber, whatChanged, reps: reps.items, deals: deals.items });
   return saveBrief(workspaceId, briefType, now, { theNumber, whatChanged, segments, reps, deals, aiBlurbs, editorialFocus, startTime });
 }
 
@@ -331,7 +341,8 @@ async function assemblePulse(workspaceId: string, now: Date, briefType: BriefTyp
   }
 
   const editorialFocus = determineEditorialFocus(briefType, theNumber, whatChanged as any, reps, deals, theNumber.days_remaining);
-  const aiBlurbs = await generateBriefNarratives(workspaceId, briefType, theNumber, whatChanged, reps.items, deals.items, editorialFocus);
+  const rawBlurbs = await generateBriefNarratives(workspaceId, briefType, theNumber, whatChanged, reps.items, deals.items, editorialFocus);
+  const aiBlurbs = await annotateBriefNarrative(workspaceId, rawBlurbs, { theNumber, whatChanged, reps: reps.items, deals: deals.items });
   return saveBrief(workspaceId, briefType, now, { theNumber, whatChanged, segments, reps, deals, aiBlurbs, editorialFocus, startTime });
 }
 
@@ -353,7 +364,8 @@ async function assembleFridayRecap(workspaceId: string, now: Date, briefType: Br
   (deals as any).won_this_week = wonThisWeek.rows.map((d: any) => ({ id: d.id, name: d.name, amount: parseFloat(d.amount||'0'), owner: d.owner }));
 
   const editorialFocus = determineEditorialFocus(briefType, theNumber, whatChanged as any, reps, deals, theNumber.days_remaining);
-  const aiBlurbs = await generateBriefNarratives(workspaceId, briefType, theNumber, whatChanged, reps.items, deals.items, editorialFocus);
+  const rawBlurbs = await generateBriefNarratives(workspaceId, briefType, theNumber, whatChanged, reps.items, deals.items, editorialFocus);
+  const aiBlurbs = await annotateBriefNarrative(workspaceId, rawBlurbs, { theNumber, whatChanged, reps: reps.items, deals: deals.items });
   return saveBrief(workspaceId, briefType, now, { theNumber, whatChanged, segments, reps, deals, aiBlurbs, editorialFocus, startTime });
 }
 
@@ -382,7 +394,8 @@ async function assembleQuarterClose(workspaceId: string, now: Date, briefType: B
   const whatChanged: WhatChanged = { created: { count: 0, amount: 0 }, won: { count: 0, amount: 0 }, lost: { count: 0, amount: 0 }, pushed: { count: 0, amount: 0 } };
   const segments: any = { omitted: true, reason: 'Not shown during quarter-close' };
   const editorialFocus = determineEditorialFocus(briefType, theNumber, whatChanged, reps, deals, theNumber.days_remaining);
-  const aiBlurbs = await generateBriefNarratives(workspaceId, briefType, theNumber, whatChanged, reps.items, deals.items, editorialFocus);
+  const rawBlurbs = await generateBriefNarratives(workspaceId, briefType, theNumber, whatChanged, reps.items, deals.items, editorialFocus);
+  const aiBlurbs = await annotateBriefNarrative(workspaceId, rawBlurbs, { theNumber, whatChanged, reps: reps.items, deals: deals.items });
   return saveBrief(workspaceId, briefType, now, { theNumber, whatChanged, segments, reps, deals, aiBlurbs, editorialFocus, startTime });
 }
 

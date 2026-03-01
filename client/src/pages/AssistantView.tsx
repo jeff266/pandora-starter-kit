@@ -14,6 +14,7 @@ import RepsCard from '../components/assistant/RepsCard';
 import DealsToWatchCard from '../components/assistant/DealsToWatchCard';
 import SendBriefDialog from '../components/assistant/SendBriefDialog';
 import BriefEmptyState from '../components/assistant/BriefEmptyState';
+import AnnotatedText from '../components/assistant/AnnotatedText';
 
 type ViewMode = 'home' | 'conversation';
 
@@ -62,6 +63,25 @@ export default function AssistantView() {
   const [briefLoading, setBriefLoading] = useState(true);
   const [operators, setOperators] = useState<any[] | null>(null);
   const [showSendDialog, setShowSendDialog] = useState(false);
+
+  const numberSectionRef = useRef<HTMLDivElement>(null);
+  const whatChangedSectionRef = useRef<HTMLDivElement>(null);
+  const repsSectionRef = useRef<HTMLDivElement>(null);
+  const dealsSectionRef = useRef<HTMLDivElement>(null);
+
+  const handleDrilldown = useCallback((drilldown: string) => {
+    const scroll = (ref: React.RefObject<HTMLDivElement>) =>
+      ref.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    if (drilldown === 'attainment' || drilldown === 'gap' || drilldown === 'pipeline_total') {
+      scroll(numberSectionRef);
+    } else if (drilldown === 'pipeline_change') {
+      scroll(whatChangedSectionRef);
+    } else if (drilldown === 'deals_at_risk' || drilldown.startsWith('deal:')) {
+      scroll(dealsSectionRef);
+    } else if (drilldown.startsWith('rep:')) {
+      scroll(repsSectionRef);
+    }
+  }, []);
 
   const fetchBrief = useCallback(async () => {
     if (!wsId) return;
@@ -238,48 +258,64 @@ export default function AssistantView() {
             {/* AI summary blurb */}
             {brief.ai_blurbs?.overall_summary && bt === 'monday_setup' && (
               <div style={{ fontSize: 13, color: '#9CA3AF', padding: '8px 2px 10px', lineHeight: 1.5 }}>
-                {brief.ai_blurbs.overall_summary}
+                <AnnotatedText text={brief.ai_blurbs.overall_summary} claims={brief.ai_blurbs.claims} onDrilldown={handleDrilldown} />
               </div>
             )}
             {brief.ai_blurbs?.pulse_summary && bt === 'pulse' && (
               <div style={{ fontSize: 13, color: '#9CA3AF', padding: '8px 2px 10px', lineHeight: 1.5 }}>
-                {brief.ai_blurbs.pulse_summary}
-                {brief.ai_blurbs.key_action && <span style={{ color: '#6488EA' }}> {brief.ai_blurbs.key_action}</span>}
+                <AnnotatedText text={brief.ai_blurbs.pulse_summary} claims={brief.ai_blurbs.claims} onDrilldown={handleDrilldown} />
+                {brief.ai_blurbs.key_action && (
+                  <span style={{ color: '#6488EA' }}>
+                    {' '}<AnnotatedText text={brief.ai_blurbs.key_action} claims={brief.ai_blurbs.claims} onDrilldown={handleDrilldown} style={{ color: '#6488EA' }} />
+                  </span>
+                )}
               </div>
             )}
             {brief.ai_blurbs?.week_summary && bt === 'friday_recap' && (
               <div style={{ fontSize: 13, color: '#9CA3AF', padding: '8px 2px 10px', lineHeight: 1.5 }}>
-                {brief.ai_blurbs.week_summary}
-                {brief.ai_blurbs.next_week_focus && <span style={{ color: '#6488EA' }}> {brief.ai_blurbs.next_week_focus}</span>}
+                <AnnotatedText text={brief.ai_blurbs.week_summary} claims={brief.ai_blurbs.claims} onDrilldown={handleDrilldown} />
+                {brief.ai_blurbs.next_week_focus && (
+                  <span style={{ color: '#6488EA' }}>
+                    {' '}<AnnotatedText text={brief.ai_blurbs.next_week_focus} claims={brief.ai_blurbs.claims} onDrilldown={handleDrilldown} style={{ color: '#6488EA' }} />
+                  </span>
+                )}
               </div>
             )}
             {brief.ai_blurbs?.quarter_situation && bt === 'quarter_close' && (
               <div style={{ fontSize: 13, color: '#9CA3AF', padding: '8px 2px 10px', lineHeight: 1.5 }}>
-                {brief.ai_blurbs.quarter_situation}
-                {brief.ai_blurbs.close_plan && <span style={{ color: '#F59E0B' }}> {brief.ai_blurbs.close_plan}</span>}
+                <AnnotatedText text={brief.ai_blurbs.quarter_situation} claims={brief.ai_blurbs.claims} onDrilldown={handleDrilldown} />
+                {brief.ai_blurbs.close_plan && (
+                  <span style={{ color: '#F59E0B' }}>
+                    {' '}<AnnotatedText text={brief.ai_blurbs.close_plan} claims={brief.ai_blurbs.claims} onDrilldown={handleDrilldown} style={{ color: '#F59E0B' }} />
+                  </span>
+                )}
               </div>
             )}
 
             {/* Sections */}
-            <BriefSection
-              title="The Number"
-              subtitle={bt === 'quarter_close' ? 'Attainment · Gap · Coverage' : bt === 'pulse' ? `Changes since Monday` : undefined}
-              defaultExpanded={isOpen('the_number') || bt === 'quarter_close'}
-              highlighted={ef.primary === 'attainment_risk' || ef.primary === 'attainment_countdown'}
-              hidden={isSuppressed('the_number')}
-            >
-              <TheNumberCard theNumber={brief.the_number} briefType={bt} deltaMode={bt === 'pulse'} />
-            </BriefSection>
+            <div ref={numberSectionRef}>
+              <BriefSection
+                title="The Number"
+                subtitle={bt === 'quarter_close' ? 'Attainment · Gap · Coverage' : bt === 'pulse' ? `Changes since Monday` : undefined}
+                defaultExpanded={isOpen('the_number') || bt === 'quarter_close'}
+                highlighted={ef.primary === 'attainment_risk' || ef.primary === 'attainment_countdown'}
+                hidden={isSuppressed('the_number')}
+              >
+                <TheNumberCard theNumber={brief.the_number} briefType={bt} deltaMode={bt === 'pulse'} reps={brief.reps} />
+              </BriefSection>
+            </div>
 
-            <BriefSection
-              title={bt === 'pulse' ? 'What Changed' : 'Activity'}
-              subtitle={brief.what_changed?.since_date ? `Since ${brief.what_changed.since_date}` : undefined}
-              defaultExpanded={isOpen('what_changed') || ef.primary === 'pipeline_decline'}
-              highlighted={ef.primary === 'pipeline_decline'}
-              hidden={isSuppressed('what_changed')}
-            >
-              <WhatChangedCard whatChanged={brief.what_changed} briefType={bt} />
-            </BriefSection>
+            <div ref={whatChangedSectionRef}>
+              <BriefSection
+                title={bt === 'pulse' ? 'What Changed' : 'Activity'}
+                subtitle={brief.what_changed?.since_date ? `Since ${brief.what_changed.since_date}` : undefined}
+                defaultExpanded={isOpen('what_changed') || ef.primary === 'pipeline_decline'}
+                highlighted={ef.primary === 'pipeline_decline'}
+                hidden={isSuppressed('what_changed')}
+              >
+                <WhatChangedCard whatChanged={brief.what_changed} briefType={bt} />
+              </BriefSection>
+            </div>
 
             <BriefSection
               title="Pipeline by Segment"
@@ -291,35 +327,39 @@ export default function AssistantView() {
               <SegmentsCard segments={brief.segments} />
             </BriefSection>
 
-            <BriefSection
-              title={bt === 'quarter_close' ? 'Reps — Gap to Quota' : 'Reps'}
-              defaultExpanded={isOpen('reps') || ef.primary === 'rep_coaching'}
-              highlighted={ef.primary === 'rep_coaching'}
-              hidden={isSuppressed('reps')}
-              omitted={brief.reps?.omitted && !isSuppressed('reps')}
-              omitMessage={brief.reps?.reason}
-            >
-              <RepsCard
-                reps={brief.reps}
-                highlightEmails={highlightReps}
-                briefType={bt}
-                onAsk={handleSend}
-              />
-            </BriefSection>
+            <div ref={repsSectionRef}>
+              <BriefSection
+                title={bt === 'quarter_close' ? 'Reps — Gap to Quota' : 'Reps'}
+                defaultExpanded={isOpen('reps') || ef.primary === 'rep_coaching'}
+                highlighted={ef.primary === 'rep_coaching'}
+                hidden={isSuppressed('reps')}
+                omitted={brief.reps?.omitted && !isSuppressed('reps')}
+                omitMessage={brief.reps?.reason}
+              >
+                <RepsCard
+                  reps={brief.reps}
+                  highlightEmails={highlightReps}
+                  briefType={bt}
+                  onAsk={handleSend}
+                />
+              </BriefSection>
+            </div>
 
-            <BriefSection
-              title={bt === 'quarter_close' ? 'Closeable this Quarter' : bt === 'friday_recap' ? 'Going into next week' : 'Deals to Watch'}
-              defaultExpanded={isOpen('deals_to_watch') || ef.primary === 'deal_risk' || bt === 'quarter_close'}
-              highlighted={ef.primary === 'deal_risk'}
-              hidden={isSuppressed('deals_to_watch')}
-            >
-              <DealsToWatchCard
-                deals={brief.deals_to_watch}
-                highlightNames={highlightDeals}
-                briefType={bt}
-                onAsk={handleSend}
-              />
-            </BriefSection>
+            <div ref={dealsSectionRef}>
+              <BriefSection
+                title={bt === 'quarter_close' ? 'Closeable this Quarter' : bt === 'friday_recap' ? 'Going into next week' : 'Deals to Watch'}
+                defaultExpanded={isOpen('deals_to_watch') || ef.primary === 'deal_risk' || bt === 'quarter_close'}
+                highlighted={ef.primary === 'deal_risk'}
+                hidden={isSuppressed('deals_to_watch')}
+              >
+                <DealsToWatchCard
+                  deals={brief.deals_to_watch}
+                  highlightNames={highlightDeals}
+                  briefType={bt}
+                  onAsk={handleSend}
+                />
+              </BriefSection>
+            </div>
 
             {/* Rep conversation / deal recommendation for monday */}
             {bt === 'monday_setup' && (brief.ai_blurbs?.rep_conversation || brief.ai_blurbs?.deal_recommendation) && (
