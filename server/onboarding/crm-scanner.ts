@@ -30,7 +30,9 @@ export async function scanCRM(workspaceId: string): Promise<CRMScanResult> {
                COALESCE(AVG(amount), 0) AS avg_amount,
                AVG(
                  EXTRACT(EPOCH FROM (close_date - created_at))/86400
-               ) FILTER (WHERE stage_normalized = 'closed_won' AND close_date IS NOT NULL AND created_at IS NOT NULL) AS avg_cycle_days
+               ) FILTER (WHERE stage_normalized = 'closed_won' AND close_date IS NOT NULL AND created_at IS NOT NULL AND close_date > created_at) AS avg_cycle_days,
+               PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (close_date - created_at))/86400)
+               FILTER (WHERE stage_normalized = 'closed_won' AND close_date IS NOT NULL AND created_at IS NOT NULL AND close_date > created_at) AS median_cycle_days
         FROM deals WHERE workspace_id = $1::uuid AND amount IS NOT NULL
         GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 10
       `, [workspaceId]);
@@ -40,6 +42,7 @@ export async function scanCRM(workspaceId: string): Promise<CRMScanResult> {
         total_amount: parseFloat(row.total_amount) || 0,
         avg_amount: parseFloat(row.avg_amount) || 0,
         avg_cycle_days: row.avg_cycle_days != null ? parseFloat(row.avg_cycle_days) : null,
+        median_cycle_days: row.median_cycle_days != null ? parseFloat(row.median_cycle_days) : null,
       }));
     }, []),
 
@@ -208,6 +211,7 @@ export async function scanCRM(workspaceId: string): Promise<CRMScanResult> {
             stage_normalized
           FROM deals
           WHERE workspace_id = $1::uuid AND amount > 0
+            AND (close_date IS NULL OR close_date > created_at)
         )
         SELECT
           bucket_order,

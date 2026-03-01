@@ -21,6 +21,7 @@ export interface PipelineStat {
   total_amount: number;
   avg_amount: number;
   avg_cycle_days: number | null;
+  median_cycle_days: number | null;
 }
 
 export interface DimensionStat {
