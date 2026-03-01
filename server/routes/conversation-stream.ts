@@ -363,7 +363,7 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
           onSynthesisChunk: (text: string) => {
             sse(res, { type: 'synthesis_chunk', text });
           },
-        });
+        }, contextBlock || undefined);
 
         assistantResponse = result.synthesis;
         sse(res, { type: 'synthesis_done', full_text: result.synthesis });

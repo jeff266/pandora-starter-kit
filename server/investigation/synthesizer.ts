@@ -15,6 +15,7 @@ export async function synthesizeInvestigation(
   plan: InvestigationPlan,
   allFindings: Array<{ step: number; skill_id: string; findings: string[]; summary: string }>,
   onChunk?: (text: string) => void,
+  workspaceContext?: string,
 ): Promise<{ text: string; tokens: number }> {
   const goalBlock =
     plan.goal_context.length > 0
@@ -76,7 +77,7 @@ export async function synthesizeInvestigation(
   const prompt = `You are Pandora, a RevOps intelligence system.
 
 QUESTION: "${plan.question}"
-
+${workspaceContext ? `\nWORKSPACE CONTEXT:\n${workspaceContext}\n` : ''}
 GOAL CONTEXT:
 ${goalBlock}
 

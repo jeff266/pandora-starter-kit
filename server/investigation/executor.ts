@@ -124,6 +124,7 @@ export async function executeInvestigation(
     onSynthesisStart?: () => void;
     onSynthesisChunk?: (text: string) => void;
   },
+  workspaceContext?: string,
 ): Promise<InvestigationResult> {
   plan.status = 'executing';
   const allFindings: StepFinding[] = [];
@@ -260,7 +261,7 @@ export async function executeInvestigation(
   plan.status = 'synthesizing';
   callbacks.onSynthesisStart?.();
 
-  const synthesis = await synthesizeInvestigation(plan, allFindings, callbacks.onSynthesisChunk);
+  const synthesis = await synthesizeInvestigation(plan, allFindings, callbacks.onSynthesisChunk, workspaceContext);
 
   plan.status = 'complete';
 
