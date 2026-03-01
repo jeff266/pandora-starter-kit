@@ -299,7 +299,7 @@ export async function answerQuestion(
   const inference = await getContextValue<InferenceResult>(workspaceId, 'onboarding_inference') ?? {};
   const hypothesis = generateHypothesis(questionId, scan as CRMScanResult, research as CompanyResearch, inference as InferenceResult);
 
-  const patch = await parseResponse(question, hypothesis, response);
+  const patch = await parseResponse(workspaceId, question, hypothesis, response);
 
   if (patch.parse_error) {
     return {

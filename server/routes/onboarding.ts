@@ -116,7 +116,7 @@ router.post('/:workspaceId/onboarding/upload', upload.single('file'), async (req
       return;
     }
 
-    const hypothesis = await parseUploadedDocument(question, extracted.text, mimeType);
+    const hypothesis = await parseUploadedDocument(workspaceId, question, extracted.text, mimeType);
     res.json({ extraction_hypothesis: hypothesis, pages: extracted.pages, confidence: extracted.confidence });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

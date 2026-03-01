@@ -15,6 +15,7 @@ const SCHEMA_GUIDANCE: Record<string, string> = {
 };
 
 export async function parseResponse(
+  workspaceId: string,
   question: OnboardingQuestion,
   hypothesis: Hypothesis,
   userResponse: string,
@@ -48,7 +49,7 @@ Additional rules:
 - Return only valid JSON, no markdown fences`;
 
   try {
-    const response = await callLLM('system', 'extract', {
+    const response = await callLLM(workspaceId, 'extract', {
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.1,
       maxTokens: 600,
@@ -67,6 +68,7 @@ Additional rules:
 }
 
 export async function parseUploadedDocument(
+  workspaceId: string,
   question: OnboardingQuestion,
   fileText: string,
   fileType: string,
@@ -100,7 +102,7 @@ Be specific about what you found. If the document doesn't contain relevant infor
 Return only valid JSON, no markdown.`;
 
   try {
-    const response = await callLLM('system', 'extract', {
+    const response = await callLLM(workspaceId, 'extract', {
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.1,
       maxTokens: 800,
