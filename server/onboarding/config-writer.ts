@@ -13,17 +13,17 @@ interface ConfigMeta {
 async function mergeDefinitions(workspaceId: string, patch: Record<string, unknown>): Promise<void> {
   const patchJson = JSON.stringify(patch);
   const existing = await query(
-    `SELECT id FROM context_layer WHERE workspace_id = $1 LIMIT 1`,
+    `SELECT id FROM context_layer WHERE workspace_id = $1::uuid LIMIT 1`,
     [workspaceId]
   );
   if (existing.rows[0]) {
     await query(
-      `UPDATE context_layer SET definitions = COALESCE(definitions, '{}'::jsonb) || $2::jsonb, updated_at = NOW() WHERE id = $3`,
-      [workspaceId, patchJson, existing.rows[0].id]
+      `UPDATE context_layer SET definitions = COALESCE(definitions, '{}'::jsonb) || $1::jsonb, updated_at = NOW() WHERE id = $2`,
+      [patchJson, existing.rows[0].id]
     );
   } else {
     await query(
-      `INSERT INTO context_layer (workspace_id, definitions, updated_at) VALUES ($1, $2::jsonb, NOW())`,
+      `INSERT INTO context_layer (workspace_id, definitions, updated_at) VALUES ($1::uuid, $2::jsonb, NOW())`,
       [workspaceId, patchJson]
     );
   }

@@ -25,7 +25,7 @@ import type { OnboardingQuestion } from './types.js';
 
 async function getContextValue<T>(workspaceId: string, key: string): Promise<T | null> {
   const r = await query(
-    `SELECT definitions->$2 AS val FROM context_layer WHERE workspace_id = $1 LIMIT 1`,
+    `SELECT definitions->($2::text) AS val FROM context_layer WHERE workspace_id = $1::uuid LIMIT 1`,
     [workspaceId, key]
   );
   if (!r.rows[0] || r.rows[0].val === null || r.rows[0].val === undefined) return null;
@@ -35,17 +35,17 @@ async function getContextValue<T>(workspaceId: string, key: string): Promise<T |
 async function setContextValue(workspaceId: string, key: string, value: unknown): Promise<void> {
   const patch = JSON.stringify({ [key]: value });
   const existing = await query(
-    `SELECT id FROM context_layer WHERE workspace_id = $1 LIMIT 1`,
+    `SELECT id FROM context_layer WHERE workspace_id = $1::uuid LIMIT 1`,
     [workspaceId]
   );
   if (existing.rows[0]) {
     await query(
-      `UPDATE context_layer SET definitions = COALESCE(definitions, '{}'::jsonb) || $2::jsonb, updated_at = NOW() WHERE id = $3`,
-      [workspaceId, patch, existing.rows[0].id]
+      `UPDATE context_layer SET definitions = COALESCE(definitions, '{}'::jsonb) || $1::jsonb, updated_at = NOW() WHERE id = $2`,
+      [patch, existing.rows[0].id]
     );
   } else {
     await query(
-      `INSERT INTO context_layer (workspace_id, definitions, updated_at) VALUES ($1, $2::jsonb, NOW())`,
+      `INSERT INTO context_layer (workspace_id, definitions, updated_at) VALUES ($1::uuid, $2::jsonb, NOW())`,
       [workspaceId, patch]
     );
   }
