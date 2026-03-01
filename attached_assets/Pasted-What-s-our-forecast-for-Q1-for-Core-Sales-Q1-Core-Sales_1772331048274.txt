@@ -1,0 +1,38 @@
+What's our forecast for Q1 for Core Sales?
+
+✦
+Q1 Core Sales Forecast — Investigation Summary
+The Number
+I don't have your Q1 Core Sales forecast. The forecast rollup returned no data.
+
+What Happened
+I triggered the Forecast Analyst to pull your Q1 Core Sales numbers, but it came back empty. This means one of three things:
+
+No forecast data exists — Core Sales reps haven't logged opportunities or updated close dates for Q1
+System integration issue — The connection between your CRM and forecast rollup is broken or misconfigured
+Naming mismatch — "Core Sales" may be labeled differently in your system (Enterprise, Direct Sales, etc.)
+Without forecast data, you're flying blind 30-60 days from quarter-end. You can't allocate resources, adjust comp plans, or give the board a credible number.
+
+What This Means
+If this is a data gap: You likely have reps working deals that aren't being captured in any rollup. That's invisible pipeline.
+
+If this is a technical issue: Every day without visibility costs you reaction time. Deals slip, ramp plans fail, and you find out in week 12 that you're short.
+
+If this is a naming issue: Your reporting taxonomy is broken, which means other dashboards are probably wrong too.
+
+What To Do Next
+Immediate (today):
+
+Confirm the segment name — Have your RevOps lead verify what "Core Sales" is called in Salesforce/HubSpot. Check if it's tagged as a team, region, or product line.
+
+Run a manual pull — Export all open opportunities owned by Core Sales reps with close dates in Q1. Get a rough number by EOD even if it's in a spreadsheet.
+
+Check system logs — Have your CRM admin verify the last successful forecast sync. If it failed, escalate to your data engineering team.
+
+This week:
+
+Audit forecast hygiene — If data exists but isn't rolling up, mandate that all Core Sales reps update close dates and stages by Friday. No exceptions.
+
+Set a baseline — Even if incomplete, publish a preliminary Q1 number by end of week. You need something to track against.
+
+You can't manage what you can't measure. Fix the data pipeline first, then we'll talk about whether the forecast is healthy.
