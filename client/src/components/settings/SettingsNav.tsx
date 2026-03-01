@@ -23,6 +23,7 @@ const userTabs: NavItem[] = [
 
 const adminTabs: NavItem[] = [
   { key: 'members', label: 'Members', icon: 'connections' },
+  { key: 'sales-roster', label: 'Sales Roster', icon: 'connections' },
   { key: 'roles', label: 'Roles', icon: 'building' },
   { key: 'notifications', label: 'Notifications', icon: 'target' },
   { key: 'features', label: 'Features', icon: 'flow' },

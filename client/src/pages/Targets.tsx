@@ -6,6 +6,7 @@ import { formatCurrency, formatTimeAgo } from '../lib/format';
 import Skeleton from '../components/Skeleton';
 import { useDemoMode } from '../contexts/DemoModeContext';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { useWorkspace } from '../context/WorkspaceContext';
 
 type TargetType = 'individual' | 'company' | 'team' | 'board';
 
@@ -118,6 +119,7 @@ const statusColors = {
 
 export default function Targets() {
   const { anon } = useDemoMode();
+  const { currentWorkspace } = useWorkspace();
   const isMobile = useIsMobile();
   const [loading, setLoading] = useState(true);
   const [revenueModel, setRevenueModel] = useState<RevenueModel | null>(null);
@@ -296,6 +298,7 @@ export default function Targets() {
           existingTarget={editingTarget ?? activeTarget}
           revenueModel={revenueModel}
           isEditing={!!editingTarget}
+          workspaceId={currentWorkspace?.id}
           onClose={() => { setShowSetTargetModal(false); setEditingTarget(null); }}
           onSave={() => {
             setShowSetTargetModal(false);
@@ -711,12 +714,13 @@ function RepQuotasTable({ repAttainment, gap, anon }: {
   );
 }
 
-function SetTargetModal({ existingTarget, revenueModel, onClose, onSave, isEditing }: {
+function SetTargetModal({ existingTarget, revenueModel, onClose, onSave, isEditing, workspaceId }: {
   existingTarget: Target | null;
   revenueModel: RevenueModel | null;
   onClose: () => void;
   onSave: () => void;
   isEditing?: boolean;
+  workspaceId?: string;
 }) {
   const { anon } = useDemoMode();
   const editing = isEditing && !!existingTarget?.id;
@@ -733,10 +737,12 @@ function SetTargetModal({ existingTarget, revenueModel, onClose, onSave, isEditi
   const [targetType, setTargetType] = useState<TargetType>(existingTarget?.target_type || 'company');
   const [assignedToEmail, setAssignedToEmail] = useState(existingTarget?.assigned_to_email || '');
   const [pipelines, setPipelines] = useState<{ id: string; name: string }[]>([]);
+  const [rosterReps, setRosterReps] = useState<{ id: string; rep_name: string; rep_email: string; pandora_role: string | null; is_manager: boolean }[]>([]);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!editing) fetchPipelines();
+    fetchRosterReps();
   }, []);
 
   const fetchPipelines = async () => {
@@ -746,6 +752,17 @@ function SetTargetModal({ existingTarget, revenueModel, onClose, onSave, isEditi
       setPipelines(pipelineNames.map((name: string) => ({ id: name, name })));
     } catch (err) {
       console.error('Failed to fetch pipelines:', err);
+    }
+  };
+
+  const fetchRosterReps = async () => {
+    if (!workspaceId) return;
+    try {
+      const res = await api.get(`/workspaces/${workspaceId}/sales-reps/roster`);
+      const reps = (res.reps || []).filter((r: any) => r.rep_email);
+      setRosterReps(reps);
+    } catch {
+      // Non-fatal — combobox falls back to free text
     }
   };
 
@@ -760,6 +777,15 @@ function SetTargetModal({ existingTarget, revenueModel, onClose, onSave, isEditi
   };
 
   const showAssignment = targetType === 'team' || targetType === 'individual';
+
+  const filteredRosterReps = rosterReps.filter(r => {
+    if (targetType === 'team') return r.pandora_role === 'manager' || r.is_manager;
+    if (targetType === 'individual') {
+      const isAe = r.pandora_role === 'ae' || (!r.pandora_role && !r.is_manager);
+      return isAe;
+    }
+    return false;
+  });
 
   const handleSave = async () => {
     setSaving(true);
@@ -932,21 +958,34 @@ function SetTargetModal({ existingTarget, revenueModel, onClose, onSave, isEditi
           </div>
         </div>
 
-        {/* Assignment Email (shown for team and individual) */}
+        {/* Assignment — datalist combobox from roster (shown for team and individual) */}
         {showAssignment && (
           <div style={{ marginBottom: 16 }}>
             <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: colors.textMuted, marginBottom: 6 }}>
-              Assigned To {targetType === 'team' ? 'Manager' : 'Rep'} Email
+              Assigned To {targetType === 'team' ? 'Manager' : 'Rep'}
             </label>
             <input
-              type="email"
+              list="roster-rep-options"
               value={assignedToEmail}
               onChange={e => setAssignedToEmail(e.target.value)}
-              placeholder={targetType === 'team' ? 'manager@company.com' : 'rep@company.com'}
+              placeholder={
+                filteredRosterReps.length > 0
+                  ? `Type or select ${targetType === 'team' ? 'a manager' : 'a rep'}...`
+                  : targetType === 'team' ? 'manager@company.com' : 'rep@company.com'
+              }
               style={editableInput}
             />
+            <datalist id="roster-rep-options">
+              {filteredRosterReps.map(r => (
+                <option key={r.id} value={r.rep_email}>
+                  {r.rep_name}{r.pandora_role === 'manager' || r.is_manager ? ' (Manager)' : ''}
+                </option>
+              ))}
+            </datalist>
             <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 4 }}>
-              Email address from your CRM — controls whose pipeline this target applies to
+              {filteredRosterReps.length > 0
+                ? `${filteredRosterReps.length} roster ${targetType === 'team' ? 'manager(s)' : 'rep(s)'} available — or type any email`
+                : 'Email address from your CRM — controls whose pipeline this target applies to'}
             </div>
           </div>
         )}

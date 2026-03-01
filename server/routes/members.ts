@@ -100,7 +100,7 @@ router.get('/', async (req: Request, res: Response) => {
 router.post('/invite', async (req: Request, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId as string;
-    const { email, roleId, note } = req.body;
+    const { email, roleId, note, pandora_role } = req.body;
 
     // Validation
     if (!email || typeof email !== 'string') {
@@ -156,16 +156,19 @@ router.post('/invite', async (req: Request, res: Response) => {
 
     // Create workspace_members row with status = 'pending'
     const invitedBy = req.user?.user_id;
+    const validPandoraRoles = ['cro', 'manager', 'ae', 'revops', 'admin'];
+    const resolvedPandoraRole = pandora_role && validPandoraRoles.includes(pandora_role) ? pandora_role : null;
     const memberResult = await query<{ id: string }>(`
       INSERT INTO workspace_members (
         workspace_id,
         user_id,
         role_id,
         invited_by,
-        status
-      ) VALUES ($1, $2, $3, $4, 'pending')
+        status,
+        pandora_role
+      ) VALUES ($1, $2, $3, $4, 'pending', $5)
       RETURNING id
-    `, [workspaceId, userId, roleId, invitedBy]);
+    `, [workspaceId, userId, roleId, invitedBy, resolvedPandoraRole]);
 
     const memberId = memberResult.rows[0].id;
 
@@ -844,6 +847,25 @@ router.post('/accept-invite/:token', async (req: Request, res: Response) => {
       SET status = 'active', accepted_at = NOW()
       WHERE id = $1
     `, [member.id]);
+
+    // Auto-claim: if a sales_reps row exists with matching email, link it to this user
+    try {
+      const userEmailResult = await query<{ email: string }>(`
+        SELECT email FROM users WHERE id = $1
+      `, [member.user_id]);
+      const userEmail = userEmailResult.rows[0]?.email;
+      if (userEmail) {
+        await query(`
+          UPDATE sales_reps
+          SET pandora_user_id = $1, updated_at = NOW()
+          WHERE workspace_id = $2
+            AND rep_email = $3
+            AND pandora_user_id IS NULL
+        `, [member.user_id, member.workspace_id, userEmail]);
+      }
+    } catch (claimErr) {
+      console.warn('[members] Auto-claim failed (non-fatal):', claimErr instanceof Error ? claimErr.message : claimErr);
+    }
 
     // Get workspace details
     const workspaceResult = await query<{ name: string }>(`
