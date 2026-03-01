@@ -539,10 +539,13 @@ router.get('/:workspaceId/pipeline/snapshot', async (req: Request, res: Response
            ${timeRangeFilter}
            ${excludeStagesClause}
        ) sub
-       LEFT JOIN stage_configs sc
-         ON sc.stage_name = sub.stage
-         AND sc.workspace_id = $1
+       LEFT JOIN (
+         SELECT stage_name, MIN(display_order) as display_order
+         FROM stage_configs
+         WHERE workspace_id = $1
          ${stageConfigPipelineClause}
+         GROUP BY stage_name
+       ) sc ON sc.stage_name = sub.stage
        ${stageFilterClause}
        GROUP BY sub.stage
        ORDER BY MAX(sc.display_order) ASC NULLS LAST, sum(sub.total_value) DESC`,
