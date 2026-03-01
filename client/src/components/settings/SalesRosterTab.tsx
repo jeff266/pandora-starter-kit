@@ -217,10 +217,9 @@ export default function SalesRosterTab() {
   };
 
   const fetchRoster = async () => {
-    if (!currentWorkspace?.id) return;
     setLoading(true);
     try {
-      const data = await api.get(`/workspaces/${currentWorkspace.id}/sales-reps/roster`);
+      const data = await api.get('/sales-reps/roster');
       setReps(data.reps || []);
     } catch {
       setReps([]);
@@ -241,7 +240,7 @@ export default function SalesRosterTab() {
   const fetchDealOwners = async () => {
     if (!currentWorkspace?.id) return;
     try {
-      const data = await api.get(`/workspaces/${currentWorkspace.id}/sales-reps`);
+      const data = await api.get('/sales-reps');
       const owners: { rep_name: string; rep_email: string | null }[] = (data.reps || [])
         .filter((r: any) => r.rep_name && !r.rep_name.includes('@') && !/^\d+$/.test(r.rep_name))
         .map((r: any) => ({ rep_name: r.rep_name, rep_email: r.rep_email || null }));
@@ -253,7 +252,7 @@ export default function SalesRosterTab() {
 
   const handlePandoraRoleChange = async (rep: RosterRep, role: PandoraRole) => {
     try {
-      await api.patch(`/workspaces/${currentWorkspace!.id}/sales-reps/${rep.id}/pandora-role`, { pandora_role: role });
+      await api.patch(`/sales-reps/${rep.id}/pandora-role`, { pandora_role: role });
       setReps(prev => prev.map(r => r.id === rep.id ? { ...r, pandora_role: role } : r));
     } catch {
       showToast('Failed to update role', 'error');
@@ -263,7 +262,7 @@ export default function SalesRosterTab() {
   const handleDelete = async (rep: RosterRep) => {
     if (!window.confirm(`Remove ${rep.rep_name} from the roster?`)) return;
     try {
-      await api.delete(`/workspaces/${currentWorkspace!.id}/sales-reps/${rep.id}`);
+      await api.delete(`/sales-reps/${rep.id}`);
       setReps(prev => prev.filter(r => r.id !== rep.id));
       showToast(`${rep.rep_name} removed`, 'success');
     } catch {
@@ -277,7 +276,7 @@ export default function SalesRosterTab() {
     setAddLoading(true);
     setAddError('');
     try {
-      await api.post(`/workspaces/${currentWorkspace!.id}/sales-reps`, {
+      await api.post('/sales-reps', {
         rep_name: newName.trim(),
         rep_email: newEmail.trim() || undefined,
         team: newTeam.trim() || undefined,
