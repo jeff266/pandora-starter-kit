@@ -195,6 +195,7 @@ export default function SalesRosterTab() {
   const [newPandoraRole, setNewPandoraRole] = useState<PandoraRole>(null);
   const [addLoading, setAddLoading] = useState(false);
   const [addError, setAddError] = useState('');
+  const [dealOwners, setDealOwners] = useState<{ rep_name: string; rep_email: string | null }[]>([]);
 
   const defaultRoleId = roles.find(r => r.system_type === 'member' || r.name.toLowerCase() === 'member')?.id || roles[0]?.id || '';
 
@@ -202,6 +203,12 @@ export default function SalesRosterTab() {
     fetchRoster();
     fetchRoles();
   }, [currentWorkspace]);
+
+  useEffect(() => {
+    if (showAddForm && currentWorkspace?.id) {
+      fetchDealOwners();
+    }
+  }, [showAddForm, currentWorkspace?.id]);
 
   const showToast = (message: string, type: 'success' | 'error') => {
     setToast({ message, type });
@@ -227,6 +234,19 @@ export default function SalesRosterTab() {
       setRoles(data.roles || []);
     } catch {
       setRoles([]);
+    }
+  };
+
+  const fetchDealOwners = async () => {
+    if (!currentWorkspace?.id) return;
+    try {
+      const data = await api.get(`/workspaces/${currentWorkspace.id}/sales-reps`);
+      const owners: { rep_name: string; rep_email: string | null }[] = (data || [])
+        .filter((r: any) => r.rep_name && !r.rep_name.includes('@') && !/^\d+$/.test(r.rep_name))
+        .map((r: any) => ({ rep_name: r.rep_name, rep_email: r.rep_email || null }));
+      setDealOwners(owners);
+    } catch {
+      setDealOwners([]);
     }
   };
 
@@ -339,7 +359,30 @@ export default function SalesRosterTab() {
               <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
                 Name *
               </label>
-              <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="Carter McKay" autoFocus style={inputStyle} />
+              <input
+                list="add-rep-name-options"
+                value={newName}
+                onChange={e => {
+                  const val = e.target.value;
+                  setNewName(val);
+                  const existingNames = new Set(reps.map(r => r.rep_name));
+                  const match = dealOwners.find(o => o.rep_name === val && !existingNames.has(o.rep_name));
+                  if (match && !newEmail && match.rep_email) {
+                    setNewEmail(match.rep_email);
+                  }
+                }}
+                placeholder="Carter McKay"
+                autoFocus
+                style={inputStyle}
+                autoComplete="off"
+              />
+              <datalist id="add-rep-name-options">
+                {dealOwners
+                  .filter(o => !reps.some(r => r.rep_name === o.rep_name))
+                  .map(o => (
+                    <option key={o.rep_name} value={o.rep_name} />
+                  ))}
+              </datalist>
             </div>
             <div>
               <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
