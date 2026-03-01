@@ -15,7 +15,7 @@ import { extractText } from '../onboarding/document-extractor.js';
 import { parseUploadedDocument } from '../onboarding/response-parser.js';
 import { getQuestion } from '../onboarding/questions/index.js';
 
-const router = Router({ mergeParams: true });
+const router = Router();
 
 const upload = multer({
   dest: path.join(os.tmpdir(), 'pandora-onboarding-uploads'),
@@ -40,7 +40,7 @@ const upload = multer({
   },
 });
 
-router.post('/start', async (req: Request, res: Response): Promise<void> => {
+router.post('/:workspaceId/onboarding/start', async (req: Request, res: Response): Promise<void> => {
   const workspaceId = req.params.workspaceId as string;
   const { role = 'admin', force } = req.body as { role?: string; force?: boolean | string };
   try {
@@ -57,7 +57,7 @@ router.post('/start', async (req: Request, res: Response): Promise<void> => {
   }
 });
 
-router.get('/state', async (req: Request, res: Response): Promise<void> => {
+router.get('/:workspaceId/onboarding/state', async (req: Request, res: Response): Promise<void> => {
   const workspaceId = req.params.workspaceId as string;
   try {
     const result = await getOnboardingState(workspaceId);
@@ -69,7 +69,7 @@ router.get('/state', async (req: Request, res: Response): Promise<void> => {
   }
 });
 
-router.post('/answer', async (req: Request, res: Response): Promise<void> => {
+router.post('/:workspaceId/onboarding/answer', async (req: Request, res: Response): Promise<void> => {
   const workspaceId = req.params.workspaceId as string;
   const { question_id, response } = req.body as { question_id: string; response: string };
   if (!question_id || !response) {
@@ -86,7 +86,7 @@ router.post('/answer', async (req: Request, res: Response): Promise<void> => {
   }
 });
 
-router.post('/upload', upload.single('file'), async (req: Request, res: Response): Promise<void> => {
+router.post('/:workspaceId/onboarding/upload', upload.single('file'), async (req: Request, res: Response): Promise<void> => {
   const workspaceId = req.params.workspaceId as string;
   const { question_id } = req.body as { question_id: string };
 
@@ -127,7 +127,7 @@ router.post('/upload', upload.single('file'), async (req: Request, res: Response
   }
 });
 
-router.post('/skip', async (req: Request, res: Response): Promise<void> => {
+router.post('/:workspaceId/onboarding/skip', async (req: Request, res: Response): Promise<void> => {
   const workspaceId = req.params.workspaceId as string;
   const { question_id } = req.body as { question_id: string };
   if (!question_id) {
@@ -144,7 +144,7 @@ router.post('/skip', async (req: Request, res: Response): Promise<void> => {
   }
 });
 
-router.post('/resume', async (req: Request, res: Response): Promise<void> => {
+router.post('/:workspaceId/onboarding/resume', async (req: Request, res: Response): Promise<void> => {
   const workspaceId = req.params.workspaceId as string;
   try {
     const result = await resumeOnboarding(workspaceId);
@@ -155,7 +155,7 @@ router.post('/resume', async (req: Request, res: Response): Promise<void> => {
   }
 });
 
-router.get('/complete', async (req: Request, res: Response): Promise<void> => {
+router.get('/:workspaceId/onboarding/complete', async (req: Request, res: Response): Promise<void> => {
   const workspaceId = req.params.workspaceId as string;
   try {
     const result = await getCompletionSummary(workspaceId);
