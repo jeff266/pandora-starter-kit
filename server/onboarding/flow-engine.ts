@@ -23,25 +23,32 @@ import type {
 } from './types.js';
 import type { OnboardingQuestion } from './types.js';
 
-const CONTEXT_CATEGORY = 'onboarding';
-
 async function getContextValue<T>(workspaceId: string, key: string): Promise<T | null> {
   const r = await query(
-    `SELECT value FROM context_layer WHERE workspace_id = $1 AND category = $2 AND key = $3 LIMIT 1`,
-    [workspaceId, CONTEXT_CATEGORY, key]
+    `SELECT definitions->$2 AS val FROM context_layer WHERE workspace_id = $1 LIMIT 1`,
+    [workspaceId, key]
   );
-  if (!r.rows[0]) return null;
-  const parsed = typeof r.rows[0].value === 'string' ? JSON.parse(r.rows[0].value) : r.rows[0].value;
-  return (parsed?.value ?? parsed) as T;
+  if (!r.rows[0] || r.rows[0].val === null || r.rows[0].val === undefined) return null;
+  return r.rows[0].val as T;
 }
 
 async function setContextValue(workspaceId: string, key: string, value: unknown): Promise<void> {
-  await query(`
-    INSERT INTO context_layer (workspace_id, category, key, value, updated_at)
-    VALUES ($1, $2, $3, $4, NOW())
-    ON CONFLICT (workspace_id, category, key)
-    DO UPDATE SET value = $4, updated_at = NOW()
-  `, [workspaceId, CONTEXT_CATEGORY, key, JSON.stringify({ value })]);
+  const patch = JSON.stringify({ [key]: value });
+  const existing = await query(
+    `SELECT id FROM context_layer WHERE workspace_id = $1 LIMIT 1`,
+    [workspaceId]
+  );
+  if (existing.rows[0]) {
+    await query(
+      `UPDATE context_layer SET definitions = COALESCE(definitions, '{}'::jsonb) || $2::jsonb, updated_at = NOW() WHERE id = $3`,
+      [workspaceId, patch, existing.rows[0].id]
+    );
+  } else {
+    await query(
+      `INSERT INTO context_layer (workspace_id, definitions, updated_at) VALUES ($1, $2::jsonb, NOW())`,
+      [workspaceId, patch]
+    );
+  }
 }
 
 async function getWorkspaceName(workspaceId: string): Promise<string> {
@@ -186,7 +193,6 @@ export async function getOnboardingState(workspaceId: string): Promise<{ state: 
   const state = await getContextValue<OnboardingState>(workspaceId, 'onboarding_state');
   if (!state) return { state: null, not_started: true, current_question: null, hypothesis: null, progress: null };
 
-  const answeredIds = new Set(Object.entries(state.questions).filter(([, qs]) => qs.status === 'answered' || qs.status === 'skipped').map(([id]) => id));
   const currentId = state.resume_from || 'Q1_motions';
   const currentQuestion = getQuestion(currentId) ?? null;
 

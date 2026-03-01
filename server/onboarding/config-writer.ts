@@ -10,20 +10,23 @@ interface ConfigMeta {
   last_validated: string;
 }
 
-async function setContextLayer(
-  workspaceId: string,
-  category: string,
-  key: string,
-  value: unknown,
-  meta: ConfigMeta,
-): Promise<void> {
-  const valueWithMeta = { value, _meta: meta };
-  await query(`
-    INSERT INTO context_layer (workspace_id, category, key, value, updated_at)
-    VALUES ($1, $2, $3, $4, NOW())
-    ON CONFLICT (workspace_id, category, key)
-    DO UPDATE SET value = $4, updated_at = NOW()
-  `, [workspaceId, category, key, JSON.stringify(valueWithMeta)]);
+async function mergeDefinitions(workspaceId: string, patch: Record<string, unknown>): Promise<void> {
+  const patchJson = JSON.stringify(patch);
+  const existing = await query(
+    `SELECT id FROM context_layer WHERE workspace_id = $1 LIMIT 1`,
+    [workspaceId]
+  );
+  if (existing.rows[0]) {
+    await query(
+      `UPDATE context_layer SET definitions = COALESCE(definitions, '{}'::jsonb) || $2::jsonb, updated_at = NOW() WHERE id = $3`,
+      [workspaceId, patchJson, existing.rows[0].id]
+    );
+  } else {
+    await query(
+      `INSERT INTO context_layer (workspace_id, definitions, updated_at) VALUES ($1, $2::jsonb, NOW())`,
+      [workspaceId, patchJson]
+    );
+  }
 }
 
 export async function writeConfigPatch(
@@ -48,8 +51,6 @@ export async function writeConfigPatch(
     case 'Q1_motions': {
       const motions = (patch as { motions?: Array<{ name: string; filter_field?: string; filter_values?: string[]; amount_threshold_min?: number; amount_threshold_max?: number }> }).motions;
       if (Array.isArray(motions)) {
-        await setContextLayer(workspaceId, 'config', 'revenue_motions', motions, meta);
-
         const namedFiltersForConfig = motions.map(motion => {
           const filterRules: Record<string, unknown>[] = [];
           if (motion.filter_field === 'pipeline' || motion.filter_field === 'deal_type') {
@@ -61,9 +62,12 @@ export async function writeConfigPatch(
           return { name: motion.name, rules: filterRules };
         }).filter(f => f.rules.length > 0);
 
-        if (namedFiltersForConfig.length > 0) {
-          await setContextLayer(workspaceId, 'config', 'onboarding_named_filters', namedFiltersForConfig, meta);
-        }
+        await mergeDefinitions(workspaceId, {
+          revenue_motions: { value: motions, _meta: meta },
+          onboarding_named_filters: namedFiltersForConfig.length > 0
+            ? { value: namedFiltersForConfig, _meta: meta }
+            : undefined,
+        });
 
         artifacts.push({
           type: 'named_filter',
@@ -77,11 +81,11 @@ export async function writeConfigPatch(
 
     case 'Q2_calendar': {
       const p = patch as { fiscal_year_start_month?: number; quota_period?: string; quarterly_target?: number; motion_targets?: Array<{ motion: string; target: number }> };
-      if (p.fiscal_year_start_month != null) {
-        await setContextLayer(workspaceId, 'config', 'cadence.fiscal_year_start_month', p.fiscal_year_start_month, meta);
-      }
-      if (p.quota_period) {
-        await setContextLayer(workspaceId, 'config', 'cadence.quota_period', p.quota_period, meta);
+      const cadencePatch: Record<string, unknown> = {};
+      if (p.fiscal_year_start_month != null) cadencePatch['cadence_fiscal_year_start_month'] = { value: p.fiscal_year_start_month, _meta: meta };
+      if (p.quota_period) cadencePatch['cadence_quota_period'] = { value: p.quota_period, _meta: meta };
+      if (Object.keys(cadencePatch).length > 0) {
+        await mergeDefinitions(workspaceId, cadencePatch);
       }
       if (p.quarterly_target != null) {
         await query(`
@@ -116,7 +120,7 @@ export async function writeConfigPatch(
           WHERE workspace_id = $1 AND stage_name = $2
         `, [workspaceId, u.stage, u.val]).catch(() => null);
       }
-      await setContextLayer(workspaceId, 'config', 'stage_classification', p, meta);
+      await mergeDefinitions(workspaceId, { stage_classification: { value: p, _meta: meta } });
       artifacts.push({
         type: 'stage_update',
         label: 'Stages Classified',
@@ -127,11 +131,11 @@ export async function writeConfigPatch(
 
     case 'Q4_team': {
       const p = patch as { reps?: Array<{ name: string; motion?: string; is_new_hire?: boolean }>; excluded_owners?: string[]; managers?: string[] };
-      await setContextLayer(workspaceId, 'config', 'teams.reps', p.reps ?? [], meta);
-      await setContextLayer(workspaceId, 'config', 'teams.excluded_owners', p.excluded_owners ?? [], meta);
-      if (p.managers?.length) {
-        await setContextLayer(workspaceId, 'config', 'teams.managers', p.managers, meta);
-      }
+      await mergeDefinitions(workspaceId, {
+        teams_reps: { value: p.reps ?? [], _meta: meta },
+        teams_excluded_owners: { value: p.excluded_owners ?? [], _meta: meta },
+        ...(p.managers?.length ? { teams_managers: { value: p.managers, _meta: meta } } : {}),
+      });
       artifacts.push({
         type: 'rep_classified',
         label: 'Team Roster Saved',
@@ -141,8 +145,8 @@ export async function writeConfigPatch(
     }
 
     default: {
-      const configKey = `onboarding.${questionId}`;
-      await setContextLayer(workspaceId, 'onboarding', configKey, patch, meta);
+      const configKey = `onboarding_${questionId}`;
+      await mergeDefinitions(workspaceId, { [configKey]: { value: patch, _meta: meta } });
 
       const targetsWritten = Object.keys(patch).filter(k => !k.startsWith('_') && k !== 'parse_error');
       artifacts.push({
