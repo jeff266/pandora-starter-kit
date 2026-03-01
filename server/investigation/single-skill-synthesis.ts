@@ -5,9 +5,9 @@ export async function getMostRecentSkillRun(
   workspaceId: string,
   skillId: string,
   maxAgeMinutes: number = 60,
-): Promise<{ id: string; skill_id: string; output_text: string; result: any } | null> {
-  const result = await query<{ id: string; skill_id: string; output_text: string; result: any }>(
-    `SELECT id, skill_id, output_text, result
+): Promise<{ id: string; skill_id: string; output_text: string; result: any; output: any } | null> {
+  const result = await query<{ id: string; skill_id: string; output_text: string; result: any; output: any }>(
+    `SELECT id, skill_id, output_text, result, output
      FROM skill_runs
      WHERE workspace_id = $1 AND skill_id = $2 AND status = 'completed'
        AND started_at >= NOW() - INTERVAL '${maxAgeMinutes} minutes'
@@ -21,7 +21,7 @@ export async function getMostRecentSkillRun(
 export async function synthesizeSingleSkill(
   workspaceId: string,
   question: string,
-  skillRun: { skill_id: string; output_text: string; result: any },
+  skillRun: { skill_id: string; output_text?: string | null; result?: any; output?: any },
   options?: { goalContext?: boolean },
 ): Promise<{ text: string; tokens: number }> {
   let goalBlock = '';
@@ -57,7 +57,10 @@ export async function synthesizeSingleSkill(
 
   const skillOutput =
     skillRun.output_text ||
-    (skillRun.result ? JSON.stringify(skillRun.result, null, 2).substring(0, 3000) : 'No output available');
+    (typeof skillRun.output?.narrative === 'string' ? skillRun.output.narrative : null) ||
+    (typeof skillRun.output === 'string' ? skillRun.output : null) ||
+    (skillRun.result ? JSON.stringify(skillRun.result, null, 2).substring(0, 3000) : null) ||
+    'No recent data available for this skill.';
 
   const systemPrompt = `You are Pandora, a RevOps intelligence assistant. Answer questions directly and concisely using the skill data provided. Be specific with numbers. Do not narrate an "investigation" — just answer the question.`;
 

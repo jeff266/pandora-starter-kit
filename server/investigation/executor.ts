@@ -12,6 +12,14 @@ interface StepFinding {
   summary: string;
 }
 
+function resolveOutputText(row: { output_text?: string | null; result?: any; output?: any }): string {
+  if (row.output_text) return row.output_text;
+  if (typeof row.output?.narrative === 'string') return row.output.narrative;
+  if (typeof row.output === 'string') return row.output;
+  if (typeof row.result?.narrative === 'string') return row.result.narrative;
+  return '';
+}
+
 function extractKeyFindings(skillResult: any): { summary: string; items: string[] } {
   let text = '';
 
@@ -25,6 +33,10 @@ function extractKeyFindings(skillResult: any): { summary: string; items: string[
     text = skillResult.result.summary;
   } else if (skillResult?.narrative) {
     text = skillResult.narrative;
+  } else if (typeof skillResult?.output === 'string') {
+    text = skillResult.output;
+  } else if (typeof skillResult?.output?.narrative === 'string') {
+    text = skillResult.output.narrative;
   } else {
     text = JSON.stringify(skillResult).slice(0, 500);
   }
@@ -126,8 +138,8 @@ export async function executeInvestigation(
     try {
       const cacheWindow = plan.prefer_cache ? '2 hours' : '30 minutes';
 
-      const cached = await query<{ id: string; output_text: string; result: any }>(
-        `SELECT id, output_text, result FROM skill_runs
+      const cached = await query<{ id: string; output_text: string; result: any; output: any }>(
+        `SELECT id, output_text, result, output FROM skill_runs
          WHERE workspace_id = $1 AND skill_id = $2 AND status = 'completed'
            AND started_at >= NOW() - INTERVAL '${cacheWindow}'
          ORDER BY started_at DESC LIMIT 1`,
@@ -137,20 +149,23 @@ export async function executeInvestigation(
       let skillResult: any;
 
       if (cached.rows.length > 0) {
+        const row = cached.rows[0];
         skillResult = {
-          output_text: cached.rows[0].output_text,
-          result: cached.rows[0].result,
+          output_text: resolveOutputText(row),
+          result: row.result,
+          output: row.output,
         };
         step.used_cache = true;
       } else if (plan.prefer_cache) {
-        const staleCache = await query<{ output_text: string; result: any }>(
-          `SELECT output_text, result FROM skill_runs
+        const staleCache = await query<{ output_text: string; result: any; output: any }>(
+          `SELECT output_text, result, output FROM skill_runs
            WHERE workspace_id = $1 AND skill_id = $2 AND status = 'completed'
            ORDER BY started_at DESC LIMIT 1`,
           [plan.workspace_id, step.skill_id],
         );
         if (staleCache.rows.length > 0) {
-          skillResult = { output_text: staleCache.rows[0].output_text, result: staleCache.rows[0].result };
+          const srow = staleCache.rows[0];
+          skillResult = { output_text: resolveOutputText(srow), result: srow.result, output: srow.output };
           step.used_cache = true;
         } else {
           const skillDef = registry.get(step.skill_id);
@@ -170,13 +185,18 @@ export async function executeInvestigation(
           skillResult = result;
           step.used_cache = false;
         } else {
-          const latestRun = await query<{ output_text: string; result: any }>(
-            `SELECT output_text, result FROM skill_runs
+          const latestRun = await query<{ output_text: string; result: any; output: any }>(
+            `SELECT output_text, result, output FROM skill_runs
              WHERE workspace_id = $1 AND skill_id = $2 AND status = 'completed'
              ORDER BY completed_at DESC LIMIT 1`,
             [plan.workspace_id, step.skill_id],
           );
-          skillResult = latestRun.rows[0] || { output_text: `No results available for ${step.skill_id}`, result: null };
+          if (latestRun.rows.length > 0) {
+            const lrow = latestRun.rows[0];
+            skillResult = { output_text: resolveOutputText(lrow), result: lrow.result, output: lrow.output };
+          } else {
+            skillResult = { output_text: `No results available for ${step.skill_id}`, result: null, output: null };
+          }
           step.used_cache = true;
         }
       }
