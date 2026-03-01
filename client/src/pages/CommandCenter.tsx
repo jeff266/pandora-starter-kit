@@ -104,6 +104,7 @@ interface ThreadMessage {
   content: string;
   sources?: string[];
   isThinking?: boolean;
+  tokens_used?: number;
 }
 
 function PushBanner() {
@@ -496,6 +497,7 @@ export default function CommandCenter() {
           role: 'assistant',
           content: result.answer || 'No response received.',
           sources: result.evidence_sources || (result.data_consulted ? ['pipeline data'] : []),
+          tokens_used: result.tokens_used ?? undefined,
         }];
       });
     } catch (err: any) {
@@ -1458,10 +1460,17 @@ function AskPandoraDrawer({ thread, loading, onClose, onSend }: {
 }) {
   const [input, setInput] = useState('');
   const threadRef = useRef<HTMLDivElement>(null);
+  const lastMsgRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (threadRef.current) {
+    if (!threadRef.current) return;
+    const lastMsg = thread[thread.length - 1];
+    if (lastMsg?.isThinking) {
       threadRef.current.scrollTop = threadRef.current.scrollHeight;
+    } else if (lastMsg?.role === 'assistant' && lastMsg.content) {
+      setTimeout(() => {
+        lastMsgRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 30);
     }
   }, [thread]);
 
@@ -1489,48 +1498,56 @@ function AskPandoraDrawer({ thread, loading, onClose, onSend }: {
       </div>
 
       <div ref={threadRef} style={{ padding: '16px 24px', flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {thread.map((msg, i) => (
-          <div key={i} style={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
-            <div style={{
-              padding: '10px 16px',
-              background: msg.role === 'user' ? 'rgba(59,130,246,0.12)' : '#151D2E',
-              borderRadius: msg.role === 'user' ? '12px 12px 2px 12px' : '12px 12px 12px 2px',
-              maxWidth: '85%', fontSize: 13, color: msg.role === 'user' ? '#E2E8F0' : '#8896AB',
-              lineHeight: 1.6,
-              border: msg.role === 'assistant' ? '1px solid #1E293B' : 'none',
-            }}>
-              {msg.isThinking ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ display: 'flex', gap: 4 }}>
-                    {[0,1,2].map(j => (
-                      <div key={j} style={{
-                        width: 6, height: 6, borderRadius: 3, background: '#3B82F6',
-                        animation: `pandoraPulse 1.2s ease-in-out ${j * 0.2}s infinite`,
-                        opacity: 0.4,
-                      }} />
-                    ))}
-                  </div>
-                  <span style={{ fontSize: 12, color: '#5A6A80' }}>Analyzing pipeline data...</span>
-                </div>
-              ) : (
-                <>
-                  {msg.role === 'assistant' ? renderMarkdownLite(msg.content) : msg.content}
-                  {msg.sources && msg.sources.length > 0 && (
-                    <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                      {msg.sources.map((s, si) => (
-                        <span key={si} style={{
-                          fontSize: 10, fontFamily: 'IBM Plex Mono, monospace',
-                          padding: '2px 6px', borderRadius: 4,
-                          background: 'rgba(255,255,255,0.06)', color: '#5A6A80',
-                        }}>{s}</span>
+        {thread.map((msg, i) => {
+          const isLastAssistant = i === thread.length - 1 && msg.role === 'assistant' && !msg.isThinking;
+          return (
+            <div key={i} ref={isLastAssistant ? lastMsgRef : undefined} style={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
+              <div style={{
+                padding: '10px 16px',
+                background: msg.role === 'user' ? 'rgba(59,130,246,0.12)' : '#151D2E',
+                borderRadius: msg.role === 'user' ? '12px 12px 2px 12px' : '12px 12px 12px 2px',
+                maxWidth: '85%', fontSize: 13, color: msg.role === 'user' ? '#E2E8F0' : '#8896AB',
+                lineHeight: 1.6,
+                border: msg.role === 'assistant' ? '1px solid #1E293B' : 'none',
+              }}>
+                {msg.isThinking ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      {[0,1,2].map(j => (
+                        <div key={j} style={{
+                          width: 6, height: 6, borderRadius: 3, background: '#3B82F6',
+                          animation: `pandoraPulse 1.2s ease-in-out ${j * 0.2}s infinite`,
+                          opacity: 0.4,
+                        }} />
                       ))}
                     </div>
-                  )}
-                </>
-              )}
+                    <span style={{ fontSize: 12, color: '#5A6A80' }}>Analyzing pipeline data...</span>
+                  </div>
+                ) : (
+                  <>
+                    {msg.role === 'assistant' ? renderMarkdownLite(msg.content) : msg.content}
+                    {msg.sources && msg.sources.length > 0 && (
+                      <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                        {msg.sources.map((s, si) => (
+                          <span key={si} style={{
+                            fontSize: 10, fontFamily: 'IBM Plex Mono, monospace',
+                            padding: '2px 6px', borderRadius: 4,
+                            background: 'rgba(255,255,255,0.06)', color: '#5A6A80',
+                          }}>{s}</span>
+                        ))}
+                      </div>
+                    )}
+                    {msg.role === 'assistant' && msg.tokens_used && (
+                      <div style={{ marginTop: 6, fontSize: 10, color: '#3B4A5C', fontFamily: 'IBM Plex Mono, monospace' }}>
+                        {msg.tokens_used.toLocaleString()} tokens
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <div style={{ padding: '10px 24px', borderTop: '1px solid #1E293B', display: 'flex', gap: 8 }}>
