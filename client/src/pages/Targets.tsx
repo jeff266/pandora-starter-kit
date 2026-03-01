@@ -107,6 +107,7 @@ export default function Targets() {
   const [quotas, setQuotas] = useState<Quota[]>([]);
   const [showSetTargetModal, setShowSetTargetModal] = useState(false);
   const [showQuotaModal, setShowQuotaModal] = useState(false);
+  const [editingTarget, setEditingTarget] = useState<Target | null>(null);
 
   useEffect(() => {
     fetchAll();
@@ -221,7 +222,20 @@ export default function Targets() {
           <div style={{ fontSize: 14, fontWeight: 600, color: colors.text, marginBottom: 16 }}>
             Quarterly Breakdown
           </div>
-          <QuarterlyBreakdown targets={targets} anon={anon} />
+          <QuarterlyBreakdown
+            targets={targets}
+            anon={anon}
+            onEdit={(t) => { setEditingTarget(t); setShowSetTargetModal(true); }}
+            onDelete={async (t) => {
+              if (!window.confirm(`Remove ${t.period_label} target of ${formatCurrency(t.amount)}?`)) return;
+              try {
+                await api.delete(`/targets/${t.id}`);
+                fetchAll();
+              } catch {
+                alert('Failed to remove target');
+              }
+            }}
+          />
         </div>
       )}
 
@@ -260,11 +274,13 @@ export default function Targets() {
       {/* Modals */}
       {showSetTargetModal && (
         <SetTargetModal
-          existingTarget={activeTarget}
+          existingTarget={editingTarget ?? activeTarget}
           revenueModel={revenueModel}
-          onClose={() => setShowSetTargetModal(false)}
+          isEditing={!!editingTarget}
+          onClose={() => { setShowSetTargetModal(false); setEditingTarget(null); }}
           onSave={() => {
             setShowSetTargetModal(false);
+            setEditingTarget(null);
             fetchAll();
           }}
         />
@@ -471,8 +487,14 @@ function EmptyState({ onSetTarget }: { onSetTarget: () => void }) {
   );
 }
 
-function QuarterlyBreakdown({ targets, anon }: { targets: Target[]; anon: any }) {
-  // Group targets by year and show quarterly breakdown
+function QuarterlyBreakdown({ targets, anon, onEdit, onDelete }: {
+  targets: Target[];
+  anon: any;
+  onEdit: (t: Target) => void;
+  onDelete: (t: Target) => void;
+}) {
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+
   return (
     <div style={{ overflowX: 'auto' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -482,11 +504,17 @@ function QuarterlyBreakdown({ targets, anon }: { targets: Target[]; anon: any })
             <th style={{ padding: '12px 0', textAlign: 'left', fontSize: 12, fontWeight: 600, color: colors.textMuted }}>Pipeline</th>
             <th style={{ padding: '12px 0', textAlign: 'right', fontSize: 12, fontWeight: 600, color: colors.textMuted }}>Target</th>
             <th style={{ padding: '12px 0', textAlign: 'right', fontSize: 12, fontWeight: 600, color: colors.textMuted }}>Status</th>
+            <th style={{ padding: '12px 0', textAlign: 'right', fontSize: 12, fontWeight: 600, color: colors.textMuted, width: 80 }}></th>
           </tr>
         </thead>
         <tbody>
           {targets.map((target, i) => (
-            <tr key={target.id} style={{ borderBottom: i < targets.length - 1 ? `1px solid ${colors.border}` : 'none' }}>
+            <tr
+              key={target.id}
+              style={{ borderBottom: i < targets.length - 1 ? `1px solid ${colors.border}` : 'none' }}
+              onMouseEnter={() => setHoveredId(target.id)}
+              onMouseLeave={() => setHoveredId(null)}
+            >
               <td style={{ padding: '12px 0', fontSize: 14, color: colors.text }}>{target.period_label}</td>
               <td style={{ padding: '12px 0', fontSize: 14, color: colors.textSecondary }}>
                 {target.pipeline_name ? anon.pipeline(target.pipeline_name) : <span style={{ fontStyle: 'italic', color: colors.textMuted }}>All pipelines</span>}
@@ -506,6 +534,50 @@ function QuarterlyBreakdown({ targets, anon }: { targets: Target[]; anon: any })
                 }}>
                   {target.is_active ? 'Active' : 'Inactive'}
                 </span>
+              </td>
+              <td style={{ padding: '12px 0', textAlign: 'right' }}>
+                <div style={{
+                  display: 'flex',
+                  gap: 4,
+                  justifyContent: 'flex-end',
+                  opacity: hoveredId === target.id ? 1 : 0,
+                  transition: 'opacity 0.15s',
+                }}>
+                  <button
+                    onClick={() => onEdit(target)}
+                    title="Edit target"
+                    style={{
+                      padding: '3px 8px',
+                      fontSize: 12,
+                      fontFamily: fonts.sans,
+                      fontWeight: 500,
+                      background: colors.surfaceRaised,
+                      color: colors.text,
+                      border: `1px solid ${colors.border}`,
+                      borderRadius: 4,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    onClick={() => onDelete(target)}
+                    title="Remove target"
+                    style={{
+                      padding: '3px 8px',
+                      fontSize: 12,
+                      fontFamily: fonts.sans,
+                      fontWeight: 500,
+                      background: 'transparent',
+                      color: colors.red,
+                      border: `1px solid ${colors.red}`,
+                      borderRadius: 4,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
               </td>
             </tr>
           ))}
@@ -598,13 +670,15 @@ function RepQuotasTable({ repAttainment, gap, anon }: {
   );
 }
 
-function SetTargetModal({ existingTarget, revenueModel, onClose, onSave }: {
+function SetTargetModal({ existingTarget, revenueModel, onClose, onSave, isEditing }: {
   existingTarget: Target | null;
   revenueModel: RevenueModel | null;
   onClose: () => void;
   onSave: () => void;
+  isEditing?: boolean;
 }) {
   const { anon } = useDemoMode();
+  const editing = isEditing && !!existingTarget?.id;
   const [amount, setAmount] = useState(existingTarget?.amount.toString() || '');
   const [periodType, setPeriodType] = useState<'annual' | 'quarterly' | 'monthly'>(
     existingTarget?.period_type as any || 'quarterly'
@@ -619,14 +693,12 @@ function SetTargetModal({ existingTarget, revenueModel, onClose, onSave }: {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    fetchPipelines();
+    if (!editing) fetchPipelines();
   }, []);
 
   const fetchPipelines = async () => {
     try {
       const res = await api.get('/deals/pipelines');
-      // API returns { data: ["Pipeline 1", "Pipeline 2"] }
-      // Map to { id, name } objects (using pipeline name as both id and name)
       const pipelineNames = res.data || [];
       setPipelines(pipelineNames.map((name: string) => ({ id: name, name })));
     } catch (err) {
@@ -647,18 +719,24 @@ function SetTargetModal({ existingTarget, revenueModel, onClose, onSave }: {
   const handleSave = async () => {
     setSaving(true);
     try {
-      await api.post('/targets', {
-        metric: revenueModel?.detected_metric || 'revenue',
-        period_type: periodType,
-        period_start: periodStart,
-        period_end: periodEnd,
-        period_label: periodLabel,
-        amount: parseFloat(amount),
-        pipeline_id: pipelineId || null,
-        pipeline_name: pipelineName || null,
-        notes,
-        set_by: 'user@example.com', // TODO: get from auth context
-      });
+      if (editing) {
+        await api.patch(`/targets/${existingTarget!.id}`, {
+          amount: parseFloat(amount),
+          notes: notes || null,
+        });
+      } else {
+        await api.post('/targets', {
+          metric: revenueModel?.detected_metric || 'revenue',
+          period_type: periodType,
+          period_start: periodStart,
+          period_end: periodEnd,
+          period_label: periodLabel,
+          amount: parseFloat(amount),
+          pipeline_id: pipelineId || null,
+          pipeline_name: pipelineName || null,
+          notes,
+        });
+      }
       onSave();
     } catch (err) {
       console.error('Failed to save target:', err);
@@ -666,6 +744,29 @@ function SetTargetModal({ existingTarget, revenueModel, onClose, onSave }: {
     } finally {
       setSaving(false);
     }
+  };
+
+  const readonlyInput = {
+    width: '100%',
+    padding: '8px 12px',
+    fontSize: 14,
+    background: 'transparent',
+    border: `1px solid ${colors.border}`,
+    borderRadius: 6,
+    color: colors.textMuted,
+    fontFamily: fonts.sans,
+    cursor: 'default',
+  };
+
+  const editableInput = {
+    width: '100%',
+    padding: '8px 12px',
+    fontSize: 14,
+    background: colors.surfaceRaised,
+    border: `1px solid ${colors.border}`,
+    borderRadius: 6,
+    color: colors.text,
+    fontFamily: fonts.sans,
   };
 
   return (
@@ -687,10 +788,16 @@ function SetTargetModal({ existingTarget, revenueModel, onClose, onSave }: {
         maxHeight: '80vh',
         overflowY: 'auto',
       }}>
-        <div style={{ fontSize: 18, fontWeight: 700, color: colors.text, marginBottom: 20 }}>
-          Set Target
+        <div style={{ fontSize: 18, fontWeight: 700, color: colors.text, marginBottom: editing ? 6 : 20 }}>
+          {editing ? `Edit ${existingTarget!.period_label} Target` : 'Set Target'}
         </div>
+        {editing && (
+          <div style={{ fontSize: 12, color: colors.textMuted, marginBottom: 20 }}>
+            Period and pipeline cannot be changed after creation. To change them, delete this target and create a new one.
+          </div>
+        )}
 
+        {/* Period Label — read-only when editing */}
         <div style={{ marginBottom: 16 }}>
           <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: colors.textMuted, marginBottom: 6 }}>
             Period Label
@@ -698,49 +805,45 @@ function SetTargetModal({ existingTarget, revenueModel, onClose, onSave }: {
           <input
             type="text"
             value={periodLabel}
-            onChange={(e) => setPeriodLabel(e.target.value)}
+            onChange={(e) => !editing && setPeriodLabel(e.target.value)}
+            readOnly={editing}
             placeholder="Q1 2026"
-            style={{
-              width: '100%',
-              padding: '8px 12px',
-              fontSize: 14,
-              background: colors.surfaceRaised,
-              border: `1px solid ${colors.border}`,
-              borderRadius: 6,
-              color: colors.text,
-              fontFamily: fonts.sans,
-            }}
+            style={editing ? readonlyInput : editableInput}
           />
         </div>
 
+        {/* Pipeline — read-only when editing */}
         <div style={{ marginBottom: 16 }}>
           <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: colors.textMuted, marginBottom: 6 }}>
-            Pipeline (optional)
+            Pipeline
           </label>
-          <select
-            value={pipelineId}
-            onChange={(e) => handlePipelineChange(e.target.value)}
-            style={{
-              width: '100%',
-              padding: '8px 12px',
-              fontSize: 14,
-              background: colors.surfaceRaised,
-              border: `1px solid ${colors.border}`,
-              borderRadius: 6,
-              color: colors.text,
-              fontFamily: fonts.sans,
-            }}
-          >
-            <option value="">All pipelines (workspace-wide)</option>
-            {pipelines.map(p => (
-              <option key={p.id} value={p.id}>{anon.pipeline(p.name)}</option>
-            ))}
-          </select>
-          <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 4 }}>
-            Leave blank for a workspace-wide target across all pipelines
-          </div>
+          {editing ? (
+            <input
+              type="text"
+              value={existingTarget?.pipeline_name || 'All pipelines'}
+              readOnly
+              style={readonlyInput}
+            />
+          ) : (
+            <>
+              <select
+                value={pipelineId}
+                onChange={(e) => handlePipelineChange(e.target.value)}
+                style={editableInput}
+              >
+                <option value="">All pipelines (workspace-wide)</option>
+                {pipelines.map(p => (
+                  <option key={p.id} value={p.id}>{anon.pipeline(p.name)}</option>
+                ))}
+              </select>
+              <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 4 }}>
+                Leave blank for a workspace-wide target across all pipelines
+              </div>
+            </>
+          )}
         </div>
 
+        {/* Dates — read-only when editing */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
           <div>
             <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: colors.textMuted, marginBottom: 6 }}>
@@ -749,17 +852,9 @@ function SetTargetModal({ existingTarget, revenueModel, onClose, onSave }: {
             <input
               type="date"
               value={periodStart}
-              onChange={(e) => setPeriodStart(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '8px 12px',
-                fontSize: 14,
-                background: colors.surfaceRaised,
-                border: `1px solid ${colors.border}`,
-                borderRadius: 6,
-                color: colors.text,
-                fontFamily: fonts.sans,
-              }}
+              onChange={(e) => !editing && setPeriodStart(e.target.value)}
+              readOnly={editing}
+              style={editing ? readonlyInput : editableInput}
             />
           </div>
           <div>
@@ -769,21 +864,14 @@ function SetTargetModal({ existingTarget, revenueModel, onClose, onSave }: {
             <input
               type="date"
               value={periodEnd}
-              onChange={(e) => setPeriodEnd(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '8px 12px',
-                fontSize: 14,
-                background: colors.surfaceRaised,
-                border: `1px solid ${colors.border}`,
-                borderRadius: 6,
-                color: colors.text,
-                fontFamily: fonts.sans,
-              }}
+              onChange={(e) => !editing && setPeriodEnd(e.target.value)}
+              readOnly={editing}
+              style={editing ? readonlyInput : editableInput}
             />
           </div>
         </div>
 
+        {/* Amount — always editable */}
         <div style={{ marginBottom: 16 }}>
           <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: colors.textMuted, marginBottom: 6 }}>
             Target Amount
@@ -793,19 +881,11 @@ function SetTargetModal({ existingTarget, revenueModel, onClose, onSave }: {
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
             placeholder="1000000"
-            style={{
-              width: '100%',
-              padding: '8px 12px',
-              fontSize: 14,
-              background: colors.surfaceRaised,
-              border: `1px solid ${colors.border}`,
-              borderRadius: 6,
-              color: colors.text,
-              fontFamily: fonts.sans,
-            }}
+            style={editableInput}
           />
         </div>
 
+        {/* Notes — always editable */}
         <div style={{ marginBottom: 20 }}>
           <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: colors.textMuted, marginBottom: 6 }}>
             Notes (optional)
@@ -815,17 +895,7 @@ function SetTargetModal({ existingTarget, revenueModel, onClose, onSave }: {
             onChange={(e) => setNotes(e.target.value)}
             placeholder="Board-approved plan, Jan 2026"
             rows={3}
-            style={{
-              width: '100%',
-              padding: '8px 12px',
-              fontSize: 14,
-              background: colors.surfaceRaised,
-              border: `1px solid ${colors.border}`,
-              borderRadius: 6,
-              color: colors.text,
-              fontFamily: fonts.sans,
-              resize: 'none',
-            }}
+            style={{ ...editableInput, resize: 'none' as const }}
           />
         </div>
 
@@ -861,7 +931,7 @@ function SetTargetModal({ existingTarget, revenueModel, onClose, onSave }: {
               cursor: saving || !amount ? 'not-allowed' : 'pointer',
             }}
           >
-            {saving ? 'Saving...' : 'Save Target'}
+            {saving ? 'Saving...' : editing ? 'Update Target' : 'Save Target'}
           </button>
         </div>
       </div>

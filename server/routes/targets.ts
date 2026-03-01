@@ -198,6 +198,29 @@ router.patch('/:workspaceId/targets/:targetId', async (req: Request, res: Respon
 });
 
 // ============================================================================
+// DELETE /:workspaceId/targets/:targetId
+// Soft-deactivate a target (no revision created)
+// ============================================================================
+
+router.delete('/:workspaceId/targets/:targetId', async (req: Request, res: Response): Promise<void> => {
+  const { workspaceId, targetId } = req.params;
+  try {
+    const result = await query(
+      `UPDATE targets SET is_active = false WHERE workspace_id = $1 AND id = $2 RETURNING id`,
+      [workspaceId, targetId]
+    );
+    if (result.rows.length === 0) {
+      res.status(404).json({ error: 'Target not found' });
+      return;
+    }
+    res.json({ ok: true, id: targetId });
+  } catch (err) {
+    console.error('[targets] Error deleting target:', err);
+    res.status(500).json({ error: 'Failed to delete target' });
+  }
+});
+
+// ============================================================================
 // GET /:workspaceId/targets/gap
 // Returns GapCalculation for the active target
 // ============================================================================
