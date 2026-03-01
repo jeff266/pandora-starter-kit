@@ -22,7 +22,7 @@ export interface ConversationState {
   workspace_id: string;
   thread_ts: string;
   channel_id: string;
-  source: 'slack' | 'web';
+  source: 'slack' | 'web' | 'command_center';
   messages: ConversationMessage[];
   context: ConversationContext;
   skill_run_id: string | null;
@@ -68,7 +68,7 @@ export async function createConversationState(
   workspaceId: string,
   channelId: string,
   threadTs: string,
-  source: 'slack' | 'web' = 'slack',
+  source: 'slack' | 'web' | 'command_center' = 'slack',
   skillRunId?: string
 ): Promise<ConversationState> {
   const expiresAt = new Date(Date.now() + TTL_HOURS * 60 * 60 * 1000).toISOString();

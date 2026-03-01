@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { colors } from '../../styles/theme';
 import { useConversationStream } from './useConversationStream';
+import { getWorkspaceId } from '../../lib/api';
 import AgentChip from './AgentChip';
 import EvidenceCard from './EvidenceCard';
 import ActionCard from './ActionCard';
@@ -15,31 +16,46 @@ interface ConversationViewProps {
 }
 
 export default function ConversationView({ initialMessage, onBack }: ConversationViewProps) {
-  const { state, sendMessage, reset, dismissAction } = useConversationStream();
+  const { state, sendMessage, dismissAction, loadHistory, startNewThread } = useConversationStream();
   const bottomRef = useRef<HTMLDivElement>(null);
   const sentRef = useRef(false);
+  const historyLoadedRef = useRef(false);
 
   useEffect(() => {
-    if (initialMessage && !sentRef.current) {
+    if (historyLoadedRef.current) return;
+    historyLoadedRef.current = true;
+    const workspaceId = getWorkspaceId();
+    if (workspaceId) {
+      loadHistory(workspaceId).then(() => {
+        if (initialMessage && !sentRef.current) {
+          sentRef.current = true;
+          sendMessage(initialMessage);
+        }
+      });
+    } else if (initialMessage && !sentRef.current) {
       sentRef.current = true;
       sendMessage(initialMessage);
     }
-  }, [initialMessage, sendMessage]);
+  }, [initialMessage, sendMessage, loadHistory]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [state.messages, state.synthesisText, state.evidenceCards, state.actions, state.deliverableOptions]);
 
   const handleBack = () => {
-    reset();
     onBack();
+  };
+
+  const handleNewThread = () => {
+    sentRef.current = false;
+    startNewThread();
   };
 
   const inProgress = state.phase !== 'idle' && state.phase !== 'complete';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
         <button
           onClick={handleBack}
           style={{
@@ -52,7 +68,31 @@ export default function ConversationView({ initialMessage, onBack }: Conversatio
         >
           ← Back to brief
         </button>
+        <button
+          onClick={handleNewThread}
+          disabled={inProgress}
+          style={{
+            background: 'transparent', border: `1px solid ${colors.border}`, cursor: inProgress ? 'not-allowed' : 'pointer',
+            fontSize: 11, color: colors.textMuted, padding: '3px 10px', borderRadius: 6,
+            opacity: inProgress ? 0.4 : 1,
+          }}
+          onMouseEnter={e => { if (!inProgress) (e.currentTarget as HTMLButtonElement).style.color = colors.text; }}
+          onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.color = colors.textMuted}
+        >
+          New conversation
+        </button>
       </div>
+
+      {state.restored && state.messages.length > 0 && (
+        <div style={{
+          fontSize: 11, color: colors.textMuted, textAlign: 'center',
+          marginBottom: 12, padding: '4px 10px',
+          background: colors.surface, border: `1px solid ${colors.border}`,
+          borderRadius: 6,
+        }}>
+          Previous conversation restored
+        </div>
+      )}
 
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {state.messages.map(msg => (

@@ -1,4 +1,4 @@
-import { useReducer, useCallback, useRef } from 'react';
+import { useReducer, useCallback, useRef, useState } from 'react';
 import { getWorkspaceId, getAuthToken } from '../../lib/api';
 import type { OperatorProgress } from './AgentChip';
 import type { EvidenceCardData } from './EvidenceCard';
@@ -22,12 +22,14 @@ export interface ConversationState {
   actions: RecommendedAction[];
   deliverableOptions: DeliverableOption[];
   error: string | null;
+  restored: boolean;
 }
 
 type Action =
   | { type: 'USER_MESSAGE'; text: string }
   | { type: 'STREAM_EVENT'; event: any }
   | { type: 'DISMISS_ACTION'; id: string }
+  | { type: 'INIT_MESSAGES'; messages: ConversationMessage[] }
   | { type: 'RESET' };
 
 function makeId(): string {
@@ -44,10 +46,15 @@ const initial: ConversationState = {
   actions: [],
   deliverableOptions: [],
   error: null,
+  restored: false,
 };
 
 function reducer(state: ConversationState, action: Action): ConversationState {
   if (action.type === 'RESET') return { ...initial };
+  if (action.type === 'INIT_MESSAGES') {
+    if (action.messages.length === 0) return state;
+    return { ...state, messages: action.messages, restored: true };
+  }
   if (action.type === 'DISMISS_ACTION') {
     return { ...state, actions: state.actions.filter(a => a.id !== action.id) };
   }
@@ -61,6 +68,7 @@ function reducer(state: ConversationState, action: Action): ConversationState {
       actions: [],
       deliverableOptions: [],
       error: null,
+      restored: false,
       messages: [...state.messages, { id: makeId(), role: 'user', content: action.text, timestamp: Date.now() }],
     };
   }
@@ -138,9 +146,50 @@ function reducer(state: ConversationState, action: Action): ConversationState {
   return state;
 }
 
+function storageKey(workspaceId: string): string {
+  return `pandora_assistant_thread_${workspaceId}`;
+}
+
 export function useConversationStream() {
   const [state, dispatch] = useReducer(reducer, initial);
   const abortRef = useRef<AbortController | null>(null);
+  const threadIdRef = useRef<string | null>(null);
+  const [threadId, setThreadId] = useState<string | null>(null);
+
+  const updateThreadId = useCallback((id: string) => {
+    const workspaceId = getWorkspaceId();
+    if (workspaceId) {
+      localStorage.setItem(storageKey(workspaceId), id);
+    }
+    threadIdRef.current = id;
+    setThreadId(id);
+  }, []);
+
+  const loadHistory = useCallback(async (workspaceId: string) => {
+    const savedThreadId = localStorage.getItem(storageKey(workspaceId));
+    if (!savedThreadId) return;
+
+    const token = getAuthToken();
+    try {
+      const res = await fetch(`/api/workspaces/${workspaceId}/conversation/history/${savedThreadId}`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.messages && data.messages.length > 0) {
+        const messages: ConversationMessage[] = data.messages.map((m: any) => ({
+          id: makeId(),
+          role: m.role as 'user' | 'assistant',
+          content: m.content,
+          timestamp: m.timestamp ? new Date(m.timestamp).getTime() : Date.now(),
+        }));
+        dispatch({ type: 'INIT_MESSAGES', messages });
+        threadIdRef.current = savedThreadId;
+        setThreadId(savedThreadId);
+      }
+    } catch {
+    }
+  }, []);
 
   const sendMessage = useCallback(async (text: string) => {
     if (abortRef.current) abortRef.current.abort();
@@ -158,7 +207,10 @@ export function useConversationStream() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({
+          message: text,
+          thread_id: threadIdRef.current ?? undefined,
+        }),
         signal: abortRef.current.signal,
       });
 
@@ -181,6 +233,9 @@ export function useConversationStream() {
           if (line.startsWith('data: ')) {
             try {
               const event = JSON.parse(line.slice(6));
+              if (event.type === 'done' && event.thread_id) {
+                updateThreadId(event.thread_id);
+              }
               dispatch({ type: 'STREAM_EVENT', event });
             } catch {
             }
@@ -192,9 +247,20 @@ export function useConversationStream() {
         dispatch({ type: 'STREAM_EVENT', event: { type: 'error', message: err?.message ?? 'Stream error' } });
       }
     }
-  }, []);
+  }, [updateThreadId]);
 
   const reset = useCallback(() => {
+    if (abortRef.current) abortRef.current.abort();
+    dispatch({ type: 'RESET' });
+  }, []);
+
+  const startNewThread = useCallback(() => {
+    const workspaceId = getWorkspaceId();
+    if (workspaceId) {
+      localStorage.removeItem(storageKey(workspaceId));
+    }
+    threadIdRef.current = null;
+    setThreadId(null);
     if (abortRef.current) abortRef.current.abort();
     dispatch({ type: 'RESET' });
   }, []);
@@ -203,5 +269,5 @@ export function useConversationStream() {
     dispatch({ type: 'DISMISS_ACTION', id });
   }, []);
 
-  return { state, sendMessage, reset, dismissAction };
+  return { state, sendMessage, reset, dismissAction, threadId, loadHistory, startNewThread };
 }

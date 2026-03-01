@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { randomUUID } from 'crypto';
 import { query } from '../db.js';
 import { assembleBrief } from '../briefing/brief-assembler.js';
 import { resolveFromBrief } from '../briefing/brief-resolver.js';
@@ -10,9 +11,12 @@ import { executeDataQuery } from '../investigation/data-query-executor.js';
 import { goalService } from '../goals/goal-service.js';
 import { getSkillRuntime } from '../skills/runtime.js';
 import { getSkillRegistry } from '../skills/registry.js';
+import { createConversationState, getConversationState, appendMessage } from '../chat/conversation-state.js';
 import type { InvestigationStep } from '../goals/types.js';
 
 const router = Router();
+
+const CHANNEL_ID = 'command_center';
 
 const FALLBACK_OPERATORS = [
   { id: 'pipeline-coverage', name: 'Pipeline Analyst', icon: '📊', color: '#22D3EE', task: 'Analyzing pipeline health and deal distribution' },
@@ -28,13 +32,55 @@ function resolveOperatorMeta(skillId: string): { name: string; icon: string; col
   return getOperatorMeta(skillId);
 }
 
+async function persistExchange(
+  workspaceId: string,
+  threadId: string,
+  userMsg: string,
+  assistantMsg: string,
+): Promise<void> {
+  const now = new Date().toISOString();
+  await appendMessage(workspaceId, CHANNEL_ID, threadId, { role: 'user', content: userMsg, timestamp: now }).catch(() => null);
+  await appendMessage(workspaceId, CHANNEL_ID, threadId, { role: 'assistant', content: assistantMsg, timestamp: now }).catch(() => null);
+}
+
+// ── GET history ───────────────────────────────────────────────────────────────
+router.get('/:workspaceId/conversation/history/:threadId', async (req: Request, res: Response): Promise<void> => {
+  const { workspaceId, threadId } = req.params as { workspaceId: string; threadId: string };
+  try {
+    const state = await getConversationState(workspaceId, CHANNEL_ID, threadId);
+    res.json({ thread_id: threadId, messages: state ? state.messages : [] });
+  } catch (err) {
+    res.json({ thread_id: threadId, messages: [] });
+  }
+});
+
+// ── POST stream ───────────────────────────────────────────────────────────────
 router.post('/:workspaceId/conversation/stream', async (req: Request, res: Response): Promise<void> => {
   const workspaceId = req.params.workspaceId as string;
-  const { message, history = [] } = req.body as { message: string; history?: { role: string; content: string }[] };
+  const { message, thread_id } = req.body as { message: string; thread_id?: string };
 
   if (!message?.trim()) {
     res.status(400).json({ error: 'message required' });
     return;
+  }
+
+  // ── Resolve / create conversation thread ────────────────────────────────────
+  const workingThreadId: string = thread_id || randomUUID();
+  let history: { role: string; content: string }[] = [];
+
+  try {
+    if (thread_id) {
+      const existing = await getConversationState(workspaceId, CHANNEL_ID, thread_id);
+      if (existing) {
+        history = existing.messages.map(m => ({ role: m.role, content: m.content }));
+      }
+      // Refresh TTL regardless
+      await createConversationState(workspaceId, CHANNEL_ID, thread_id, 'command_center');
+    } else {
+      await createConversationState(workspaceId, CHANNEL_ID, workingThreadId, 'command_center');
+    }
+  } catch (stateErr) {
+    console.error('[conversation-stream] state init error (non-fatal):', stateErr);
   }
 
   res.setHeader('Content-Type', 'text/event-stream');
@@ -59,7 +105,8 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
           { id: 'email', label: 'Email', icon: '📧', sub: 'Executive update' },
         ],
       });
-      sse(res, { type: 'done' });
+      await persistExchange(workspaceId, workingThreadId, message, briefAnswer.answer);
+      sse(res, { type: 'done', thread_id: workingThreadId });
       res.end();
       return;
     }
@@ -92,6 +139,8 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
         timestamp: new Date().toISOString(),
       }),
     );
+
+    let assistantResponse = '';
 
     // ── Tier 0: Direct data query — SQL only, no AI synthesis ───────────────
     if (complexity.tier === 'data_query') {
@@ -136,7 +185,8 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
             { id: 'email', label: 'Email', icon: '📧', sub: 'Executive update' },
           ],
         });
-        sse(res, { type: 'done' });
+        await persistExchange(workspaceId, workingThreadId, message, responseText);
+        sse(res, { type: 'done', thread_id: workingThreadId });
         res.end();
         return;
       }
@@ -197,12 +247,13 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
 
       if (skillRun) {
         const synthesis = await synthesizeSingleSkill(workspaceId, message, skillRun, { goalContext: hasGoals });
+        assistantResponse = synthesis.text;
         sse(res, { type: 'synthesis_chunk', text: synthesis.text });
         sse(res, { type: 'synthesis_done', full_text: synthesis.text });
       } else {
-        const fallback = 'I don\'t have recent data for that — try running a skill scan first.';
-        sse(res, { type: 'synthesis_chunk', text: fallback });
-        sse(res, { type: 'synthesis_done', full_text: fallback });
+        assistantResponse = 'I don\'t have recent data for that — try running a skill scan first.';
+        sse(res, { type: 'synthesis_chunk', text: assistantResponse });
+        sse(res, { type: 'synthesis_done', full_text: assistantResponse });
       }
     }
 
@@ -256,6 +307,7 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
             sse(res, { type: 'synthesis_chunk', text: event.delta.text });
           }
         }
+        assistantResponse = fullText;
         sse(res, { type: 'synthesis_done', full_text: fullText });
       } else {
         // Investigation path (Tier 2 or Tier 3)
@@ -309,6 +361,7 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
           },
         });
 
+        assistantResponse = result.synthesis;
         sse(res, { type: 'synthesis_done', full_text: result.synthesis });
 
         const recentFindings = await query(
@@ -341,7 +394,8 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
       ],
     });
 
-    sse(res, { type: 'done' });
+    await persistExchange(workspaceId, workingThreadId, message, assistantResponse);
+    sse(res, { type: 'done', thread_id: workingThreadId });
     res.end();
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
