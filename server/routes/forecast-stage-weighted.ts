@@ -159,7 +159,7 @@ router.get('/:id/forecast/stage-weighted-series', async (
     const weekEndings = generateQuarterWeeks(quarterStart, quarterEnd);
 
     // Query 1: Get all deals with close_date in this quarter
-    const pipelineFilter = pipeline ? `AND pipeline = $4` : '';
+    const pipelineFilter = pipeline ? `AND scope_id = $4` : '';
     const dealsParams = pipeline ? [workspaceId, quarterStart, quarterEnd, pipeline] : [workspaceId, quarterStart, quarterEnd];
 
     const dealsResult = await query<DealSnapshot>(

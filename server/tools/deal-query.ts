@@ -41,6 +41,7 @@ export interface DealFilters {
   daysInStageGt?: number;
   daysSinceActivityGt?: number;
   pipelineName?: string;
+  scopeId?: string;
   search?: string;
   sortBy?: 'amount' | 'close_date' | 'deal_risk' | 'health_score' | 'days_in_stage' | 'created_at';
   sortDir?: 'asc' | 'desc';
@@ -137,6 +138,12 @@ function buildWhereClause(workspaceId: string, filters: DealFilters) {
   if (filters.pipelineName !== undefined) {
     conditions.push(`pipeline = $${idx}`);
     params.push(filters.pipelineName);
+    idx++;
+  }
+
+  if (filters.scopeId !== undefined) {
+    conditions.push(`scope_id = $${idx}`);
+    params.push(filters.scopeId);
     idx++;
   }
 

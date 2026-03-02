@@ -257,7 +257,7 @@ router.get('/:id/forecast/tte-series', async (
     const isReliable = closedDealsCount >= 20;
 
     // Query deals in quarter
-    const pipelineFilter = pipeline ? `AND pipeline = $4` : '';
+    const pipelineFilter = pipeline ? `AND scope_id = $4` : '';
     const dealsParams = pipeline ? [workspaceId, quarterStart, quarterEnd, pipeline] : [workspaceId, quarterStart, quarterEnd];
 
     const dealsResult = await query<DealSnapshot>(

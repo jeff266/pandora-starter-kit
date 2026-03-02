@@ -71,7 +71,7 @@ export default function ForecastPage() {
   const [mathPanel, setMathPanel] = useState<{ metric: string; value: number; context: MathContext } | null>(null);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [dealsLoading, setDealsLoading] = useState(true);
-  const [pipelines, setPipelines] = useState<string[]>([]);
+  const [pipelines, setPipelines] = useState<{id: string; name: string}[]>([]);
   const [selectedPipeline, setSelectedPipeline] = useState<string>('all');
   const [allActiveTargets, setAllActiveTargets] = useState<any[]>([]);
   const [runningForecast, setRunningForecast] = useState(false);
@@ -187,8 +187,9 @@ export default function ForecastPage() {
     if (!wsId) return;
     api.get('/deals/pipelines')
       .then((data: any) => {
-        const list: string[] = Array.isArray(data) ? data : data.data || data.pipelines || [];
-        setPipelines(list.filter(Boolean));
+        const raw = Array.isArray(data) ? data : data.data || [];
+        const list = raw.filter((s: any) => s && s.id && s.name);
+        setPipelines(list);
       })
       .catch(() => {});
   }, [wsId]);
@@ -222,7 +223,7 @@ export default function ForecastPage() {
   useEffect(() => {
     if (!wsId) return;
     setDealsLoading(true);
-    const qs = selectedPipeline !== 'all' ? `?pipelineName=${encodeURIComponent(selectedPipeline)}&limit=2000` : '?limit=2000';
+    const qs = selectedPipeline !== 'all' ? `?scopeId=${encodeURIComponent(selectedPipeline)}&limit=2000` : '?limit=2000';
     api.get(`/deals${qs}`)
       .then((data: any) => {
         const dealList = Array.isArray(data) ? data : data.data || data.deals || [];
@@ -909,7 +910,7 @@ export default function ForecastPage() {
             >
               <option value="all">All Pipelines</option>
               {pipelines.map(p => (
-                <option key={p} value={p}>{p}</option>
+                <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </select>
           )}

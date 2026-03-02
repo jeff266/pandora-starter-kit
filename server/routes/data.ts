@@ -129,11 +129,11 @@ router.get('/:id/deals/pipeline-summary', async (req: Request, res: Response): P
 
 router.get('/:id/deals/pipelines', async (req: Request, res: Response): Promise<void> => {
   try {
-    const result = await query<{ pipeline: string }>(
-      `SELECT DISTINCT pipeline FROM deals WHERE workspace_id = $1 AND pipeline IS NOT NULL AND pipeline != '' ORDER BY pipeline`,
+    const result = await query<{ id: string; name: string }>(
+      `SELECT scope_id AS id, name FROM analysis_scopes WHERE workspace_id = $1 AND scope_id != 'default' ORDER BY name`,
       [req.params.id as string]
     );
-    res.json({ data: result.rows.map(r => r.pipeline) });
+    res.json({ data: result.rows });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: msg });
@@ -260,6 +260,7 @@ router.get('/:id/deals', async (req: Request, res: Response): Promise<void> => {
       daysInStageGt: parseNum(q.daysInStageGt),
       daysSinceActivityGt: parseNum(q.daysSinceActivityGt),
       pipelineName: q.pipelineName as string | undefined,
+      scopeId: q.scopeId as string | undefined,
       search: q.search as string | undefined,
       sortBy: q.sortBy as any,
       sortDir: q.sortDir as any,

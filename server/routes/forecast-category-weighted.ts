@@ -111,8 +111,11 @@ function computeCategoryWeighted(teamForecast: any): { categoryWeighted: number;
 // Compute live category-weighted from current deals
 async function computeLiveCategoryWeighted(
   workspaceId: string,
-  quarterEnd: Date
+  quarterEnd: Date,
+  scopeId?: string
 ): Promise<{ categoryWeighted: number; closedWon: number }> {
+  const scopeFilter = scopeId ? `AND scope_id = $3` : '';
+  const params = scopeId ? [workspaceId, quarterEnd, scopeId] : [workspaceId, quarterEnd];
   const result = await query(
     `SELECT
       forecast_category,
@@ -121,8 +124,9 @@ async function computeLiveCategoryWeighted(
      WHERE workspace_id = $1
        AND stage_normalized NOT IN ('closed_lost')
        AND close_date <= $2
+       ${scopeFilter}
      GROUP BY forecast_category`,
-    [workspaceId, quarterEnd]
+    params
   );
 
   let closedWon = 0;
@@ -164,7 +168,7 @@ router.get('/:id/forecast/category-weighted-series', async (
 ) => {
   try {
     const workspaceId = req.params.id;
-    const { quarter } = req.query;
+    const { quarter, pipeline: scopeId } = req.query;
 
     if (!quarter) {
       res.status(400).json({ error: 'quarter parameter required (e.g., "2026-Q1")' });
@@ -209,7 +213,7 @@ router.get('/:id/forecast/category-weighted-series', async (
 
       if (isCurrentWeek) {
         // For current week, compute live
-        const live = await computeLiveCategoryWeighted(workspaceId, quarterEnd);
+        const live = await computeLiveCategoryWeighted(workspaceId, quarterEnd, scopeId);
         series.push({
           weekEnding: weekEnd.toISOString(),
           weekLabel: formatWeekLabel(weekEnd),
