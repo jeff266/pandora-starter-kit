@@ -146,7 +146,7 @@ export async function fetchDealObservations(
     stageJoin = `
       JOIN (
         SELECT DISTINCT deal_id FROM deal_stage_history
-        WHERE workspace_id = $1 AND to_stage_normalized = $${params.length}
+        WHERE workspace_id = $1 AND stage_normalized = $${params.length}
       ) dsh_filter ON dsh_filter.deal_id = d.id
     `;
   }
@@ -163,10 +163,10 @@ export async function fetchDealObservations(
       COALESCE(d.lead_source, d.source_data->>'original_source') AS lead_source,
       d.pipeline AS pipeline_name,
       (
-        SELECT dsh.to_stage_normalized
+        SELECT dsh.stage_normalized
         FROM deal_stage_history dsh
         WHERE dsh.deal_id = d.id AND dsh.workspace_id = d.workspace_id
-        ORDER BY dsh.changed_at DESC
+        ORDER BY dsh.entered_at DESC
         LIMIT 1
       ) AS highest_stage
     FROM deals d
@@ -292,10 +292,10 @@ export async function buildSurvivalCurves(
         COALESCE(d.lead_source, d.source_data->>'original_source') AS lead_source,
         d.pipeline AS pipeline_name,
         (
-          SELECT dsh.to_stage_normalized
+          SELECT dsh.stage_normalized
           FROM deal_stage_history dsh
           WHERE dsh.deal_id = d.id AND dsh.workspace_id = d.workspace_id
-          ORDER BY dsh.changed_at DESC
+          ORDER BY dsh.entered_at DESC
           LIMIT 1
         ) AS highest_stage
       FROM deals d

@@ -117,16 +117,32 @@ export default function ForecastPage() {
       .catch(() => {});
   }, [wsId]);
 
-  // Fetch current-period quota for live snapshot — sum active rep quotas for the current quarter
+  // Fetch current-period quota from targets — filter by today falling within period_start/period_end
   useEffect(() => {
     if (!wsId) return;
-    const now = new Date();
-    const qStart = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
-    const periodStart = qStart.toISOString().slice(0, 10);
-    api.get(`/quotas?period_start=${periodStart}`)
+    api.get('/targets?active_only=true')
       .then((data: any) => {
-        const rows: any[] = data.quotas || [];
-        const total = rows.reduce((sum: number, r: any) => sum + (Number(r.amount) || 0), 0);
+        const rows: any[] = data.targets || data.data || [];
+        if (rows.length === 0) return;
+        const today = new Date().toISOString().slice(0, 10);
+        // Find targets whose period covers today (metric=arr, company-level or pipeline-level)
+        const current = rows.filter((r: any) =>
+          r.is_active !== false &&
+          (!r.metric || r.metric === 'arr' || r.metric === 'revenue') &&
+          r.period_start <= today &&
+          r.period_end >= today
+        );
+        if (current.length === 0) {
+          // Fall back: most recent active target by period_start
+          const sorted = [...rows].sort((a, b) => b.period_start.localeCompare(a.period_start));
+          const latest = sorted[0];
+          if (latest) setLiveQuota(Number(latest.amount) || null);
+          return;
+        }
+        // Sum all matching company-level targets (avoid double-counting rep-level ones)
+        const companyLevel = current.filter((r: any) => !r.assigned_to_email && !r.assigned_to_user_id);
+        const toSum = companyLevel.length > 0 ? companyLevel : current;
+        const total = toSum.reduce((sum: number, r: any) => sum + (Number(r.amount) || 0), 0);
         setLiveQuota(total > 0 ? total : null);
       })
       .catch(() => {});
