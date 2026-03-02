@@ -190,7 +190,7 @@ export function MathBreakdown({ metric, value, context, deals, workspaceId, onCl
         {/* Actions */}
         <div style={{ display: 'flex', gap: 8, marginTop: 20, paddingTop: 16, borderTop: `1px solid ${colors.border}`, flexWrap: 'wrap' }}>
           <button
-            onClick={() => navigate(`/workspaces/${workspaceId}/tools`, { state: { sql, sourceName: label, sourceType: 'forecast-math' } })}
+            onClick={() => navigate('/sql-workspace', { state: { sql, sourceName: label, sourceType: 'forecast-math' } })}
             style={{
               padding: '8px 14px',
               background: colors.surfaceRaised,
