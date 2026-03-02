@@ -77,6 +77,19 @@ Pandora is built on Node.js 20 with TypeScript 5+, utilizing Express.js and Post
     - `client/src/components/assistant/`: Greeting, QuickActionPills, MorningBrief, OperatorStrip, StickyInput, AgentChip, EvidenceCard, ActionCard, DeliverablePicker, useConversationStream, ConversationView.
     - CommandCenter: slim greeting bar at top (fetches `/briefing/greeting`; shows headline + state_summary + two quick-action buttons that open Ask Pandora drawer).
 
+-   **Autonomous Skill Governance Layer (Phase 2):** Safety system between self-heal suggestions and deployed changes. Five governance agents:
+    - **Shape Validator** (`server/governance/shape-validator.ts`): structural/syntax checks per change_type (resolver_pattern, workspace_context, named_filter, skill_definition). Validates regex syntax, test_inputs match, field names against `information_schema`, injection_point values.
+    - **Review Agent** (`server/governance/review-agent.ts`): LLM quality review scoring 5 dimensions (specificity, evidence_strength, risk, clarity, reversibility). Auto-rejects if score < 0.3. Direct Anthropic SDK call.
+    - **Explainer Agent** (`server/governance/explainer-agent.ts`): plain-English summary for VP Sales-level admin. summary always starts "Pandora will...", rollback_note fixed. Direct Anthropic SDK call.
+    - **Comparison Engine** (`server/governance/comparison-engine.ts`): before/after test cases from `test_inputs` + source feedback original_questions. Judges per-case via LLM. Overall improvement score -1 to 1.
+    - **Rollback Engine** (`server/governance/rollback-engine.ts`): `applyChange` writes to `context_layer.definitions` (dynamic_resolvers / injected_context / workspace_config.named_filters keys). `rollbackChange` reverts. `checkForAutoRollback` monitors feedback rate degradation.
+    - **Pipeline** (`server/governance/pipeline.ts`): orchestrates all 5 agents in sequence; `buildPayloadFromSuggestion` converts raw self-heal suggestions to typed payloads.
+    - **DB Helpers** (`server/governance/db.ts`): createGovernanceRecord, getGovernanceRecord, updateStatus (appends to status_history JSONB array), updateShapeValidation, updateReview, updateExplanation, updateComparison, updateSnapshot.
+    - **Governance API** (`server/routes/governance.ts`): 8 endpoints — list (with status filter), history, get by id, approve (→ monitoring + 7-day trial), reject, rollback, delete, recompare.
+    - **skill_governance table** (migration `124_skill_governance.sql`): full lifecycle tracking with 35+ columns covering all agent outputs, status_history JSONB array, trial/monitoring/rollback state.
+    - **Self-heal wiring**: `agent-feedback.ts` review endpoint now fire-and-forgets `processGovernanceProposal` for each suggestion after returning the API response.
+    - **Monitoring cron**: `server/index.ts` runs `checkForAutoRollback` every 6 hours across all active workspaces.
+
 ## TypeScript Health
 - **Status (Feb 2026):** 0 non-test server errors maintained. All server files pass `tsc --noEmit`.
 - **Remaining:** 4 errors in `server/workflows/__tests__/` test mocks + 1 duplicate property in `server/routes/findings.ts` — all pre-existing, out of scope.

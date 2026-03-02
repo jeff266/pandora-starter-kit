@@ -108,6 +108,7 @@ import { initRenderers } from './renderers/index.js';
 import { cleanupExpiredAnnotations } from './feedback/cleanup.js';
 import crmWritebackRouter from './routes/crm-writeback.js';
 import agentFeedbackRouter from './routes/agent-feedback.js';
+import governanceRouter from './routes/governance.js';
 import waitlistRouter from './routes/waitlist.js';
 import forecastAnnotationsRouter from './routes/forecast-annotations.js';
 import forecastSnapshotsRouter from './routes/forecast-snapshots.js';
@@ -339,6 +340,7 @@ workspaceApiRouter.use(conversationStreamRouter);
 workspaceApiRouter.use(motionsRouter);
 workspaceApiRouter.use(goalsRouter);
 workspaceApiRouter.use(goalSnapshotsRouter);
+workspaceApiRouter.use(governanceRouter);
 app.use("/api/workspaces", workspaceApiRouter);
 
 // Webhooks router - intentionally public with token validation in handlers
@@ -550,6 +552,21 @@ async function initializeAfterStart(t0: number, tDb: number): Promise<void> {
     }
   };
   setInterval(runAnnotationCleanup, 60000);
+
+  // Governance auto-rollback monitor — runs every 6 hours
+  const runGovernanceMonitor = async () => {
+    try {
+      const { checkForAutoRollback } = await import('./governance/rollback-engine.js');
+      const wsResult = await query<{ id: string }>(`SELECT id FROM workspaces WHERE status = 'active' OR status IS NULL LIMIT 100`);
+      for (const ws of wsResult.rows) {
+        await checkForAutoRollback(ws.id).catch(() => null);
+      }
+    } catch (err) {
+      console.warn('[Governance] Monitor run failed (non-fatal):', err instanceof Error ? err.message : err);
+    }
+  };
+  setInterval(runGovernanceMonitor, 6 * 60 * 60 * 1000);
+  console.log('[Governance] Auto-rollback monitor scheduled (every 6 hours)');
 
   setServerReady();
 

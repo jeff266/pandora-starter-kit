@@ -303,6 +303,32 @@ Output as JSON with this exact structure:
       ).catch(() => null);
     }
 
+    // Fire-and-forget: run each suggestion through the governance pipeline
+    const feedbackIds = feedbackResult.rows
+      .slice(0, 10)
+      .map((r: any) => r.id)
+      .filter(Boolean);
+
+    (async () => {
+      try {
+        const { processGovernanceProposal, buildPayloadFromSuggestion } = await import('../governance/pipeline.js');
+        for (const suggestion of suggestions) {
+          processGovernanceProposal(workspaceId, {
+            source_type: 'self_heal',
+            source_feedback_ids: feedbackIds,
+            change_type: suggestion.type === 'context_addition' ? 'workspace_context' : suggestion.type,
+            change_description: suggestion.description,
+            change_payload: buildPayloadFromSuggestion({
+              ...suggestion,
+              type: suggestion.type === 'context_addition' ? 'workspace_context' : suggestion.type,
+            }),
+          }).catch((err: Error) => console.error('[Governance] Pipeline failed for suggestion:', err.message));
+        }
+      } catch (err: any) {
+        console.error('[Governance] Pipeline import failed:', err.message);
+      }
+    })();
+
     res.json({
       suggestions,
       feedback_analyzed: records.length,
