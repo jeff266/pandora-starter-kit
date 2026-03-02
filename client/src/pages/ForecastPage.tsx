@@ -424,13 +424,25 @@ export default function ForecastPage() {
         return sd >= weekStart && sd <= weekEnd;
       });
 
-      // Get data from new series endpoints
-      const stageWeek = stageWeightedData?.series?.[w];
-      const categoryWeek = categoryWeightedData?.series?.[w];
-      const tteWeek = tteData?.series?.[w];
+      // Get data from new series endpoints - match by week date overlap, not array index
+      // Backend uses Saturday week-endings, frontend uses Monday-Sunday weeks
+      const findSeriesWeek = (seriesData: any) => {
+        if (!seriesData?.series) return null;
+        return seriesData.series.find((s: any) => {
+          const seriesWeekEnd = new Date(s.weekEnding);
+          // Check if the series week-ending falls within this frontend week
+          return seriesWeekEnd >= weekStart && seriesWeekEnd <= weekEnd;
+        });
+      };
+
+      const stageWeek = findSeriesWeek(stageWeightedData);
+      const categoryWeek = findSeriesWeek(categoryWeightedData);
+      const tteWeek = findSeriesWeek(tteData);
 
       if (w === 0) {
         console.log('[QuarterSeries] Week 0 data:', {
+          weekStart: weekStart.toISOString(),
+          weekEnd: weekEnd.toISOString(),
           stageWeek,
           categoryWeek,
           tteWeek,
@@ -554,9 +566,13 @@ export default function ForecastPage() {
     const byOwner = new Map<string, { name: string; email: string; closedWon: number; pipeline: number; stageWeighted: number; dealCount: number }>();
 
     for (const d of deals) {
-      const email = (d as any).owner_email || (d as any).owner || '';
+      const email = ((d as any).owner_email || (d as any).owner || '').trim().toLowerCase();
       const name = (d as any).owner_name || (d as any).owner || 'Unknown';
       const amt = typeof (d as any).amount === 'string' ? parseFloat((d as any).amount) || 0 : ((d as any).amount || 0);
+
+      // Skip deals without a valid email
+      if (!email) continue;
+
       if (!byOwner.has(email)) byOwner.set(email, { name, email, closedWon: 0, pipeline: 0, stageWeighted: 0, dealCount: 0 });
       const row = byOwner.get(email)!;
 
@@ -910,7 +926,33 @@ export default function ForecastPage() {
         <MetricCards
           current={currentMetrics}
           previous={previousMetrics}
-          onMetricClick={(metric, value, context) => setMathPanel({ metric, value, context })}
+          onMetricClick={(metric, value, context) => {
+            // For pipe_gen, add the current week's deals to the context
+            if (metric === 'pipe_gen') {
+              const liveWeek = quarterSeries.find(w => w.isLive);
+              if (liveWeek) {
+                const weekStart = new Date(liveWeek.snapshot_date);
+                weekStart.setHours(0, 0, 0, 0);
+                const weekEnd = new Date(weekStart);
+                weekEnd.setDate(weekStart.getDate() + 6);
+                weekEnd.setHours(23, 59, 59, 999);
+
+                const dealsInWeek = deals.filter(d => {
+                  const createdDate = new Date(d.created_at);
+                  return createdDate >= weekStart && createdDate <= weekEnd;
+                });
+
+                context = {
+                  ...context,
+                  deals: dealsInWeek,
+                  week_label: new Date(liveWeek.snapshot_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+                  week_start: weekStart.toISOString(),
+                  week_end: weekEnd.toISOString(),
+                };
+              }
+            }
+            setMathPanel({ metric, value, context });
+          }}
         />
       </SectionErrorBoundary>
 
@@ -989,11 +1031,11 @@ export default function ForecastPage() {
                     const weekSnapshot = quarterSeries[weekIndex];
                     if (!weekSnapshot) return;
 
-                    const weekDate = new Date(weekSnapshot.snapshot_date);
-                    const weekStart = new Date(weekDate);
-                    weekStart.setDate(weekDate.getDate() - 6);
+                    // snapshot_date represents the Monday (start of week)
+                    const weekStart = new Date(weekSnapshot.snapshot_date);
                     weekStart.setHours(0, 0, 0, 0);
-                    const weekEnd = new Date(weekDate);
+                    const weekEnd = new Date(weekStart);
+                    weekEnd.setDate(weekStart.getDate() + 6);  // Add 6 days to get Sunday
                     weekEnd.setHours(23, 59, 59, 999);
 
                     const dealsInWeek = deals.filter(d => {
