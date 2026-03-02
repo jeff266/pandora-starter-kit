@@ -56,11 +56,14 @@ export async function getPandoraRole(
  * and workspace access role.
  *
  * Visibility matrix:
- *   CRO / RevOps / Admin → board, company, team, individual (all)
- *   Manager              → team (assigned to them), individual
- *   AE                   → individual (assigned to them)
+ *   CRO / RevOps / Admin pandoraRole → all types (full visibility)
+ *   Manager              → board, company (org KPIs), team (assigned to them), individual
+ *   AE                   → board, company (org KPIs for context), individual (assigned to them)
  *   null + workspace admin → full visibility (default for unconfigured admins)
- *   null + other role    → company only (safe default)
+ *   null + other role    → board, company (org KPIs; safe minimum for any authenticated member)
+ *
+ * board and company are organisation-wide KPIs and are always readable by any
+ * authenticated workspace member. team and individual targets are scoped by assignment.
  */
 export function getVisibleTargetTypes(
   pandoraRole: PandolaRole,
@@ -70,16 +73,16 @@ export function getVisibleTargetTypes(
     return ['board', 'company', 'team', 'individual'];
   }
   if (pandoraRole === 'manager') {
-    return ['team', 'individual'];
+    return ['board', 'company', 'team', 'individual'];
   }
   if (pandoraRole === 'ae') {
-    return ['individual'];
+    return ['board', 'company', 'individual'];
   }
-  // No pandora_role set: admin workspace role → full visibility; others → company only
+  // No pandora_role set: admin workspace role → full visibility; others → org KPIs only
   if (workspaceRole === 'admin') {
     return ['board', 'company', 'team', 'individual'];
   }
-  return ['company'];
+  return ['board', 'company'];
 }
 
 /**
@@ -95,16 +98,10 @@ export function getTargetWhereClause(
   userEmail: string | null,
   startIdx: number = 2
 ): { sql: string; params: any[] } {
-  const visibleTypes = getVisibleTargetTypes(pandoraRole, workspaceRole);
-
-  // Full visibility — no restriction beyond is_active
-  if (visibleTypes.length === 4) {
-    return { sql: '', params: [] };
-  }
-
+  // Manager is handled explicitly before the full-visibility shortcut because
+  // they see all 4 target types but team targets are still scoped to their assignment.
   if (pandoraRole === 'manager') {
-    // Managers see: team targets assigned to them + all individual targets
-    // Note: manager does NOT see company or board targets
+    // Managers see: board + company (org KPIs) + team targets assigned to them + all individual
     const params: any[] = [userId];
     let emailClause = 'FALSE';
     if (userEmail) {
@@ -112,14 +109,21 @@ export function getTargetWhereClause(
       emailClause = `assigned_to_email = $${startIdx + 1}`;
     }
     const sql = `AND (
-      (target_type = 'team' AND (assigned_to_user_id = $${startIdx} OR ${emailClause}))
+      target_type IN ('board', 'company')
+      OR (target_type = 'team' AND (assigned_to_user_id = $${startIdx} OR ${emailClause}))
       OR target_type = 'individual'
     )`;
     return { sql, params };
   }
 
+  // CRO / RevOps / Admin pandoraRole and workspace admins get full visibility
+  const visibleTypes = getVisibleTargetTypes(pandoraRole, workspaceRole);
+  if (visibleTypes.length === 4) {
+    return { sql: '', params: [] };
+  }
+
   if (pandoraRole === 'ae') {
-    // AEs see individual targets assigned to them (by user_id or email).
+    // AEs see board + company (org KPIs for context) + individual targets assigned to them.
     // TRANSITIONAL: assigned_to_user_id IS NULL allows AEs to see unassigned individual
     // targets while the admin is still setting up assignments. Once all individual targets
     // have explicit assignees, remove the IS NULL clause so AEs only see their own targets.
@@ -130,15 +134,18 @@ export function getTargetWhereClause(
       emailClause = `assigned_to_email = $${startIdx + 1}`;
     }
     const sql = `AND (
-      target_type = 'individual'
-      AND (assigned_to_user_id = $${startIdx} OR ${emailClause} OR assigned_to_user_id IS NULL)
+      target_type IN ('board', 'company')
+      OR (
+        target_type = 'individual'
+        AND (assigned_to_user_id = $${startIdx} OR ${emailClause} OR assigned_to_user_id IS NULL)
+      )
     )`;
     return { sql, params };
   }
 
-  // Default safe case: company only (null pandoraRole + non-admin workspace role)
+  // Default: null pandoraRole + non-admin workspace role → org KPIs only (board + company)
   return {
-    sql: `AND target_type = 'company'`,
+    sql: `AND target_type IN ('board', 'company')`,
     params: [],
   };
 }
