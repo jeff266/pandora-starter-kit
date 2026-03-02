@@ -25,6 +25,47 @@ const SLIM_FIELDS = `
 `;
 
 /**
+ * GET /:workspaceId/governance/summary
+ * Aggregate counts of governance records by status
+ */
+router.get('/:workspaceId/governance/summary', async (req, res) => {
+  try {
+    const { workspaceId } = req.params;
+    const result = await query(
+      `SELECT status, COUNT(*)::int as count 
+       FROM skill_governance 
+       WHERE workspace_id = $1 
+       GROUP BY status`,
+      [workspaceId]
+    );
+
+    const counts: Record<string, number> = {
+      pending_approval: 0,
+      deployed: 0,
+      monitoring: 0,
+      stable: 0,
+      rejected: 0,
+      rolled_back: 0,
+      total: 0
+    };
+
+    let total = 0;
+    result.rows.forEach(row => {
+      if (row.status in counts) {
+        counts[row.status] = row.count;
+      }
+      total += row.count;
+    });
+    counts.total = total;
+
+    res.json(counts);
+  } catch (err) {
+    console.error('[Governance] Summary failed:', err);
+    res.status(500).json({ error: 'Failed to fetch governance summary' });
+  }
+});
+
+/**
  * GET /:workspaceId/governance
  * List governance records (default: pending_approval)
  */

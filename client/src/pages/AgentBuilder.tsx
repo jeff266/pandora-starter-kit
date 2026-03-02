@@ -8,6 +8,7 @@ import AgentCopilot from '../components/copilot/AgentCopilot';
 import AvatarPicker from '../components/avatars/AvatarPicker';
 import AvatarDisplay from '../components/avatars/AvatarDisplay';
 import { AVATAR_GALLERY } from '../components/avatars/avatar-data';
+import IntelligenceNav from '../components/IntelligenceNav';
 
 interface AudienceConfig {
   role: string;
@@ -134,10 +135,12 @@ export default function AgentBuilder() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [lastRunStatus, setLastRunStatus] = useState<string | null>(null);
   const [latestGeneration, setLatestGeneration] = useState<any>(null);
+  const [pendingCount, setPendingCount] = useState(0);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
+      api.get('/governance/summary').then(s => setPendingCount(s?.pending_approval ?? 0)).catch(() => {});
       const [templatesRes, agentsRes, filtersRes] = await Promise.all([
         api.get('/agent-templates'),
         api.get('/agents-v2'),
@@ -379,6 +382,7 @@ export default function AgentBuilder() {
   if (view === 'list') {
     return (
       <div style={{ padding: 32, maxWidth: 1200, margin: '0 auto' }}>
+        <IntelligenceNav activeTab="agents" pendingCount={pendingCount} />
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
           <div>
             <h1 style={{ font: `600 22px ${fonts.sans}`, color: colors.text, margin: 0 }}>Agent Builder</h1>
@@ -468,6 +472,7 @@ export default function AgentBuilder() {
   if (view === 'gallery') {
     return (
       <div style={{ padding: 32, maxWidth: 1200, margin: '0 auto' }}>
+        <IntelligenceNav activeTab="agents" pendingCount={pendingCount} />
         <button onClick={() => setView('list')} style={btnBack}>
           <ChevronLeft size={16} /> Back to Agents
         </button>
@@ -527,6 +532,7 @@ export default function AgentBuilder() {
 
   return (
     <div style={{ padding: 32, maxWidth: 900, margin: '0 auto' }}>
+      <IntelligenceNav activeTab="agents" pendingCount={pendingCount} />
       <button onClick={() => setView('list')} style={btnBack}>
         <ChevronLeft size={16} /> Back to Agents
       </button>

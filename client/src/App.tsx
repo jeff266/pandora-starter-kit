@@ -44,6 +44,7 @@ import ReportViewer from './pages/ReportViewer';
 import ReportsPage from './pages/ReportsPage';
 import ReportBuilder from './pages/ReportBuilder';
 import AgentBuilder from './pages/AgentBuilder';
+import GovernancePage from './pages/GovernancePage';
 import FiltersPage from './pages/FiltersPage';
 import SQLWorkspace from './pages/SQLWorkspace';
 import ForecastPage from './pages/ForecastPage';
@@ -58,6 +59,7 @@ const pageTitles: Record<string, string> = {
   '/conversations': 'Conversations',
   '/targets': 'Targets',
   '/agents': 'Agents',
+  '/governance': 'Governance',
   '/agent-builder': 'Agent Builder',
   '/skills': 'Skills',
   '/tools': 'Tools',
@@ -115,6 +117,7 @@ export default function App() {
   const { token, isAuthenticated, isLoading, workspaces, currentWorkspace } = useWorkspace();
   const location = useLocation();
   const [badges, setBadges] = useState<Record<string, number>>({});
+  const [governancePending, setGovernancePending] = useState(0);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatScope, setChatScope] = useState<{ type: string; entity_id?: string; entity_name?: string; rep_email?: string } | undefined>(undefined);
@@ -164,12 +167,13 @@ export default function App() {
   const fetchBadges = useCallback(async () => {
     if (!currentWorkspace) return;
     try {
-      const [skillsRes, findingsRes, actionsRes, gapRes, conversationsRes] = await Promise.allSettled([
+      const [skillsRes, findingsRes, actionsRes, gapRes, conversationsRes, govRes] = await Promise.allSettled([
         api.get('/skills'),
         api.get('/findings/summary'),
         api.get('/action-items/summary'),
         api.get('/targets/gap'),
         api.get('/conversations/next-action-gaps'),
+        api.get('/governance/summary'),
       ]);
       const newBadges: Record<string, number> = {};
       if (skillsRes.status === 'fulfilled') {
@@ -192,6 +196,11 @@ export default function App() {
       if (conversationsRes.status === 'fulfilled') {
         const gaps = conversationsRes.value?.summary;
         newBadges['conversations'] = gaps?.critical_count || 0;
+      }
+      if (govRes.status === 'fulfilled') {
+        const pending = govRes.value?.pending_approval ?? 0;
+        setGovernancePending(pending);
+        newBadges['governance'] = pending;
       }
       setBadges(newBadges);
       setLastRefreshed(new Date());
@@ -261,7 +270,7 @@ export default function App() {
       <Sidebar badges={badges} showAllClients={hasMultipleWorkspaces} collapsed={sidebarCollapsed} onToggleCollapse={toggleSidebar} mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} mode={activeView} onModeChange={handleViewChange} />
       <main style={{ marginLeft: isMobile ? 0 : (sidebarCollapsed ? 56 : 220), flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', transition: 'margin-left 0.2s ease' }}>
         <DemoModeBanner />
-        <TopBar title={title} lastRefreshed={lastRefreshed} onRefresh={fetchBadges} onMenuToggle={isMobile ? () => setMobileMenuOpen(true) : undefined} />
+        <TopBar title={title} lastRefreshed={lastRefreshed} onRefresh={fetchBadges} onMenuToggle={isMobile ? () => setMobileMenuOpen(true) : undefined} governancePending={governancePending} />
         <div style={{ flex: 1, overflow: 'auto', padding: isMobile ? '16px 12px' : '24px 28px' }}>
           <Routes>
             <Route path="/" element={activeView === 'assistant' ? <AssistantView /> : <CommandCenter />} />
@@ -274,6 +283,7 @@ export default function App() {
             <Route path="/conversations" element={<ConversationsPage />} />
             <Route path="/targets" element={<Targets />} />
             <Route path="/skills" element={<SkillsPage />} />
+            <Route path="/governance" element={<GovernancePage />} />
             <Route path="/skills/:skillId/runs" element={<SkillRunsPage />} />
             <Route path="/connectors" element={<ConnectorsPage />} />
             <Route path="/enrichment" element={<EnrichmentConnectorsPage />} />

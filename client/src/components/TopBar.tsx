@@ -1,6 +1,7 @@
 import React, { useState, Component, type ReactNode, type ErrorInfo } from 'react';
 import { colors, fonts } from '../styles/theme';
 import { formatTimeAgo } from '../lib/format';
+import { useNavigate } from 'react-router-dom';
 import LensDropdown from './LensDropdown';
 
 class LensBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
@@ -19,6 +20,7 @@ interface TopBarProps {
   onDateRangeChange?: (range: string) => void;
   onRefresh?: () => void;
   onMenuToggle?: () => void;
+  governancePending?: number;
 }
 
 const timeRangeOptions = [
@@ -37,8 +39,10 @@ export default function TopBar({
   onDateRangeChange,
   onRefresh,
   onMenuToggle,
+  governancePending = 0,
 }: TopBarProps) {
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const navigate = useNavigate();
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -141,6 +145,36 @@ export default function TopBar({
         )}
 
         <LensBoundary><LensDropdown /></LensBoundary>
+
+        {governancePending > 0 && (
+          <button
+            onClick={() => navigate('/governance')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '6px 10px',
+              borderRadius: 6,
+              background: colors.orangeSoft,
+              border: `1px solid ${colors.orange}`,
+              color: colors.orange,
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: 'pointer',
+              animation: 'pulse 2s infinite',
+            }}
+          >
+            <span style={{ fontSize: 14 }}>●</span>
+            {governancePending} pending
+            <style>{`
+              @keyframes pulse {
+                0% { opacity: 1; }
+                50% { opacity: 0.7; }
+                100% { opacity: 1; }
+              }
+            `}</style>
+          </button>
+        )}
 
         {/* Refresh Button and Last Refreshed */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

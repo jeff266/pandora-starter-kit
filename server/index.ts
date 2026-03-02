@@ -4,7 +4,7 @@ import dotenv from "dotenv";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
 import cookieParser from "cookie-parser";
-import { verifyConnection } from "./db.js";
+import { verifyConnection, query } from "./db.js";
 import { requireWorkspaceAccess, requireUserSession } from "./middleware/auth.js";
 import { attachWorkspaceContext } from "./middleware/workspace-context.js";
 import healthRouter, { setAPHealthChecker, setServerReady } from "./routes/health.js";

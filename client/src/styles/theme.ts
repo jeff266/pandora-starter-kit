@@ -27,6 +27,7 @@ export const colors = {
   purple: 'var(--color-purple)',
   purpleSoft: 'var(--color-purpleSoft)',
   orange: 'var(--color-orange)',
+  orangeSoft: 'var(--color-orangeSoft)',
 } as const;
 
 export const fonts = {

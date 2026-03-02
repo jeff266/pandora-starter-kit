@@ -142,6 +142,153 @@ router.post('/:workspaceId/skills/:skillId/run', async (req, res) => {
   }
 });
 
+router.get('/:workspaceId/skills/dashboard', async (req, res) => {
+  try {
+    const { workspaceId } = req.params;
+
+    const ws = await query('SELECT id FROM workspaces WHERE id = $1', [workspaceId]);
+    if (ws.rows.length === 0) {
+      return res.status(404).json({ error: 'Workspace not found' });
+    }
+
+    const registry = getSkillRegistry();
+    const skills = registry.getAll();
+
+    // Fetch last runs
+    const lastRuns = await query<{
+      skill_id: string;
+      created_at: string;
+      status: string;
+      duration_ms: number | null;
+    }>(
+      `SELECT DISTINCT ON (skill_id) skill_id, created_at, status, duration_ms
+       FROM skill_runs
+       WHERE workspace_id = $1
+       ORDER BY skill_id, created_at DESC`,
+      [workspaceId]
+    );
+
+    const lastRunMap = new Map<string, { at: string; status: string; duration: number | null }>();
+    for (const row of lastRuns.rows) {
+      lastRunMap.set(row.skill_id, { at: row.created_at, status: row.status, duration: row.duration_ms });
+    }
+
+    // Fetch 30d stats
+    const stats30d = await query<{
+      skill_id: string;
+      runs_count: string;
+      avg_duration: string;
+      avg_tokens: string;
+      success_count: string;
+    }>(
+      `SELECT 
+         skill_id, 
+         COUNT(*)::text as runs_count,
+         AVG(duration_ms)::text as avg_duration,
+         AVG((token_usage->>'total')::int)::text as avg_tokens,
+         COUNT(*) FILTER (WHERE status = 'completed')::text as success_count
+       FROM skill_runs
+       WHERE workspace_id = $1 AND started_at >= NOW() - INTERVAL '30 days'
+       GROUP BY skill_id`,
+      [workspaceId]
+    );
+
+    const statsMap = new Map<string, any>();
+    for (const row of stats30d.rows) {
+      const runs = parseInt(row.runs_count, 10);
+      const success = parseInt(row.success_count, 10);
+      statsMap.set(row.skill_id, {
+        runs30d: runs,
+        avgDurationMs: Math.round(parseFloat(row.avg_duration || '0')),
+        avgTokens: Math.round(parseFloat(row.avg_tokens || '0')),
+        successRate: runs > 0 ? Math.round((success / runs) * 100) : 0
+      });
+    }
+
+    // Fetch open findings counts
+    const findingsCounts = await query<{
+      skill_id: string;
+      cnt: string;
+    }>(
+      `SELECT skill_id, COUNT(*)::text as cnt
+       FROM findings
+       WHERE workspace_id = $1 AND resolved_at IS NULL
+       GROUP BY skill_id`,
+      [workspaceId]
+    );
+
+    const findingsMap = new Map<string, number>();
+    for (const row of findingsCounts.rows) {
+      findingsMap.set(row.skill_id, parseInt(row.cnt, 10));
+    }
+
+    // Schedule overrides
+    const scheduleOverrides = await query<{ skill_id: string; cron: string | null; enabled: boolean }>(
+      `SELECT skill_id, cron, enabled FROM skill_schedules WHERE workspace_id = $1`,
+      [workspaceId]
+    ).catch(() => ({ rows: [] as { skill_id: string; cron: string | null; enabled: boolean }[] }));
+    
+    const overrideMap = new Map<string, { cron: string | null; enabled: boolean }>();
+    for (const row of scheduleOverrides.rows) {
+      overrideMap.set(row.skill_id, { cron: row.cron, enabled: row.enabled });
+    }
+
+    const now = new Date();
+    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const twoWeeksAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+
+    const skillsWithStats = skills.map(s => {
+      const last = lastRunMap.get(s.id);
+      const stats = statsMap.get(s.id) || { runs30d: 0, avgDurationMs: 0, avgTokens: 0, successRate: 0 };
+      const findingsCount = findingsMap.get(s.id) || 0;
+      const override = overrideMap.get(s.id);
+      const baseSchedule = s.schedule || {};
+
+      let status: 'healthy' | 'warning' | 'stale' = 'stale';
+      if (last?.at) {
+        const lastRunDate = new Date(last.at);
+        if (lastRunDate >= weekAgo) status = 'healthy';
+        else if (lastRunDate >= twoWeeksAgo) status = 'warning';
+      }
+
+      return {
+        id: s.id,
+        name: s.name,
+        category: s.category,
+        description: s.description,
+        schedule: {
+          ...baseSchedule,
+          cron: override?.cron ?? baseSchedule.cron ?? null,
+          enabled: override !== undefined ? override.enabled : false,
+        },
+        lastRunAt: last?.at || null,
+        lastRunStatus: last?.status || null,
+        status,
+        stats: {
+          ...stats,
+          findingsCount
+        }
+      };
+    });
+
+    const summary = {
+      totalSkills: skillsWithStats.length,
+      activeSkills: skillsWithStats.filter(s => s.status === 'healthy').length,
+      staleSkills: skillsWithStats.filter(s => s.status === 'stale').length,
+      totalRuns30d: Array.from(statsMap.values()).reduce((sum, s) => sum + s.runs30d, 0),
+      totalFindings: Array.from(findingsMap.values()).reduce((sum, count) => sum + count, 0)
+    };
+
+    return res.json({
+      skills: skillsWithStats,
+      summary
+    });
+  } catch (err) {
+    console.error('[skills] Dashboard failed:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 router.get('/:workspaceId/skills', async (req, res) => {
   try {
     const { workspaceId } = req.params;

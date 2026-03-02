@@ -4,6 +4,7 @@ import { useWorkspace } from '../context/WorkspaceContext';
 import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import { highlightSQL } from '../utils/sql-highlight';
+import IntelligenceNav from '../components/IntelligenceNav';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -343,12 +344,14 @@ export default function ToolsPage() {
   const [savedQueries, setSavedQueries] = useState<SavedQuery[]>([]);
   const [expandedTool, setExpandedTool] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [pendingCount, setPendingCount] = useState(0);
 
   // Fetch tools and saved queries on mount
   useEffect(() => {
     if (!workspaceId) return;
 
     setLoading(true);
+    api.get('/governance/summary').then(s => setPendingCount(s?.pending_approval ?? 0)).catch(() => {});
     Promise.all([
       api.get(`/tools/manifest`).catch(() => []),
       api.get(`/sql/saved`).catch(() => []),
@@ -382,6 +385,7 @@ export default function ToolsPage() {
 
   return (
     <div style={{ maxWidth: 900, margin: '0 auto' }}>
+      <IntelligenceNav activeTab="tools" pendingCount={pendingCount} />
       {/* Page Header */}
       <div style={{ marginBottom: 24, display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between' }}>
         <div>
