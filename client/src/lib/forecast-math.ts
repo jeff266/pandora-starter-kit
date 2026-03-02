@@ -142,6 +142,9 @@ export function getFormulaLine(
     case 'stage_weighted':
       return `Σ(deal_amount × stage_probability) across ${ctx.dealCount || 0} deals`;
 
+    case 'tte_forecast':
+      return `Σ(deal_amount × survival_probability) across ${ctx.dealCount || 0} open deals`;
+
     case 'category_weighted':
       return `Commit×90% + BestCase×60% + Pipeline×30% + Omit×10%`;
 
@@ -231,6 +234,36 @@ export function getBreakdownData(
         }).sort((a, b) => (b.contribution || 0) - (a.contribution || 0)),
         dealsLabel: 'Deal breakdown (sorted by weighted value)',
         notes: 'Stage probabilities come from the CRM deal.probability field. If blank, Pandora applies default probabilities based on the normalized stage mapping (Prospecting 10%, Qualification 20%, Discovery 30%, Evaluation 50%, Proposal 60%, Negotiation 80%, Commit 90%).',
+      };
+    }
+
+    case 'tte_forecast': {
+      const tteDeals = deals
+        .filter(d => !['closed_won', 'closed_lost'].includes(d.stage_normalized))
+        .filter(d => ctx.repEmail ? d.owner_email === ctx.repEmail : true);
+      return {
+        title: ctx.repName
+          ? `TTE Forecast: ${fmt(value)} (${ctx.repName})`
+          : `Time-to-Earn (TTE) Forecast: ${fmt(value)}`,
+        explanation: `Each open deal is assigned a survival probability based on how long deals at its stage historically take to close. Deals that have been in stage longer than the median get a lower probability; deals moving faster get a higher one. The TTE forecast sums (amount × survival probability) across all open deals. Unlike stage-weighted, TTE accounts for deal age — a stalled deal in Proposal is worth less than a fresh one.`,
+        inputs: [
+          { label: 'Open deals', value: String(tteDeals.length) },
+          { label: 'Total pipeline', value: fmt(tteDeals.reduce((s, d) => s + getDealAmount(d), 0)) },
+          { label: 'Result', value: `${tteDeals.length} deals × survival probabilities = ${fmt(value)}` },
+        ],
+        deals: tteDeals.map(d => {
+          const amount = getDealAmount(d);
+          const prob = d.probability > 1 ? d.probability / 100 : d.probability > 0 ? d.probability : 0.3;
+          return {
+            ...d,
+            amount,
+            contribution: amount * prob,
+            stage: d.stage_normalized,
+            owner: d.owner_name,
+          };
+        }).sort((a, b) => (b.contribution || 0) - (a.contribution || 0)),
+        dealsLabel: 'Deal breakdown (sorted by weighted value)',
+        notes: 'Survival probabilities are fitted from your historical deal-stage transition data. Deals with no history fall back to stage-probability defaults. The more closed deals in your CRM history, the more accurate TTE becomes.',
       };
     }
 
