@@ -295,17 +295,26 @@ export async function checkForAutoRollback(workspaceId: string): Promise<void> {
         [workspaceId, deployedAt]
       );
 
-      const beforeRate = parseInt(beforeResult.rows[0].thumbs_down) / Math.max(parseInt(beforeResult.rows[0].total), 1);
-      const afterRate = parseInt(afterResult.rows[0].thumbs_down) / Math.max(parseInt(afterResult.rows[0].total), 1);
-      const afterTotal = parseInt(afterResult.rows[0].total);
+      // Use Number() with explicit fallback for safe arithmetic — COUNT(*) always returns
+      // a row, but we guard against any null/NaN edge case explicitly.
+      const beforeDown = Math.max(Number(beforeResult.rows[0]?.thumbs_down) || 0, 0);
+      const beforeTotal = Math.max(Number(beforeResult.rows[0]?.total) || 0, 0);
+      const afterDown = Math.max(Number(afterResult.rows[0]?.thumbs_down) || 0, 0);
+      const afterTotal = Math.max(Number(afterResult.rows[0]?.total) || 0, 0);
 
-      if (afterRate > beforeRate * 1.5 && afterTotal >= 5) {
-        console.log(`[Governance] Auto-rolling back ${record.id}: feedback degraded (${(beforeRate * 100).toFixed(0)}% → ${(afterRate * 100).toFixed(0)}%)`);
+      // Rates: if no feedback at all in a window, rate = 0 (not NaN)
+      const beforeRate = beforeTotal > 0 ? beforeDown / beforeTotal : 0;
+      const afterRate = afterTotal > 0 ? afterDown / afterTotal : 0;
+
+      // Need at least 5 total signals after deployment before considering rollback
+      // This prevents noise from small-N feedback windows
+      if (afterTotal >= 5 && afterRate > beforeRate * 1.5) {
+        console.log(`[Governance] Auto-rolling back ${record.id}: feedback degraded (${(beforeRate * 100).toFixed(0)}% → ${(afterRate * 100).toFixed(0)}%, n=${afterTotal})`);
         await rollbackChange(
           workspaceId,
           record.id,
           'auto_rollback',
-          `Feedback degraded: thumbs-down rate went from ${(beforeRate * 100).toFixed(0)}% to ${(afterRate * 100).toFixed(0)}%`
+          `Feedback degraded: thumbs-down rate went from ${(beforeRate * 100).toFixed(0)}% to ${(afterRate * 100).toFixed(0)}% (${afterTotal} signals)`
         );
       } else if (record.trial_expires_at && new Date() > new Date(record.trial_expires_at)) {
         if (afterRate <= beforeRate * 1.1) {

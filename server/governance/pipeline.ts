@@ -93,22 +93,48 @@ export async function processGovernanceProposal(
     console.warn(`[Governance] Explainer failed for ${record.id}:`, err);
   }
 
-  // 6. Comparison engine
-  let comparisonResult;
+  // 6. Comparison engine — initialized with a safe default so step 7 always has a value
+  let comparisonResult: { test_cases: any[]; overall_improvement: number; recommendation: 'deploy' | 'hold' | 'reject'; summary: string } = {
+    test_cases: [],
+    overall_improvement: 0,
+    recommendation: 'hold',
+    summary: 'Comparison not yet run',
+  };
+
   try {
     const currentRecord = (await getGovernanceRecord(record.id))!;
     comparisonResult = await compareBeforeAfter(workspaceId, currentRecord);
-    await updateComparison(record.id, comparisonResult);
   } catch (err) {
-    comparisonResult = { test_cases: [], overall_improvement: 0, recommendation: 'hold' as const, summary: `Comparison error: ${err}` };
-    await updateComparison(record.id, comparisonResult);
+    comparisonResult = {
+      test_cases: [],
+      overall_improvement: 0,
+      recommendation: 'hold',
+      summary: `Comparison engine error: ${err}`,
+    };
+    console.warn(`[Governance] Comparison engine failed for ${record.id}:`, err);
   }
 
-  // 7. Final status
-  if (comparisonResult.recommendation === 'reject' || comparisonResult.overall_improvement < -0.2) {
-    await updateStatus(record.id, 'rejected', 'comparison_engine', `Comparison showed regression: ${comparisonResult.summary}`);
-  } else {
-    await updateStatus(record.id, 'pending_approval', 'system');
+  // Persist comparison results separately — failure here must not block step 7
+  try {
+    await updateComparison(record.id, comparisonResult);
+  } catch (err) {
+    console.warn(`[Governance] Could not persist comparison for ${record.id} (non-fatal):`, err);
+  }
+
+  // 7. Final status — guaranteed to run regardless of comparison outcome
+  try {
+    if (comparisonResult.recommendation === 'reject' || comparisonResult.overall_improvement < -0.2) {
+      await updateStatus(record.id, 'rejected', 'comparison_engine', `Comparison showed regression: ${comparisonResult.summary}`);
+    } else {
+      await updateStatus(record.id, 'pending_approval', 'system');
+    }
+  } catch (err) {
+    // Last-ditch: if updateStatus itself fails, force the record out of 'reviewed'
+    console.error(`[Governance] Could not set final status for ${record.id}:`, err);
+    await query(
+      `UPDATE skill_governance SET status = 'pending_approval', updated_at = NOW() WHERE id = $1 AND status = 'reviewed'`,
+      [record.id]
+    ).catch(() => null);
   }
 
   return (await getGovernanceRecord(record.id))!;
