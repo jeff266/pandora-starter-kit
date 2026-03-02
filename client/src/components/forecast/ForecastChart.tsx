@@ -5,12 +5,14 @@ export interface SnapshotPoint {
   snapshot_date: string;
   stage_weighted_forecast: number | null;
   category_weighted_forecast: number | null;
+  tte_forecast: number | null;
   monte_carlo_p50: number | null;
   monte_carlo_p25: number | null;
   monte_carlo_p75: number | null;
   attainment: number | null;
   quota: number | null;
   isLive?: boolean;
+  isFuture?: boolean;
 }
 
 interface ForecastChartProps {
@@ -23,6 +25,7 @@ interface ForecastChartProps {
 const LINE_COLORS = {
   stage_weighted: '#3b82f6',
   category_weighted: '#06b6d4',
+  tte_forecast: '#f59e0b',
   mc_p50: '#a78bfa',
   attainment: '#22c55e',
 };
@@ -30,6 +33,7 @@ const LINE_COLORS = {
 const LINE_LABELS: Record<string, string> = {
   stage_weighted: 'Stage Weighted',
   category_weighted: 'Category Weighted',
+  tte_forecast: 'TTE Forecast',
   mc_p50: 'MC P50',
   attainment: 'Closed Won',
 };
@@ -49,6 +53,7 @@ export default function ForecastChart({ snapshots, quota, onPointClick, isRefres
   const [toggles, setToggles] = useState({
     stage_weighted: true,
     category_weighted: true,
+    tte_forecast: true,
     mc_p50: true,
     attainment: true,
     confidence_band: true,
@@ -66,6 +71,7 @@ export default function ForecastChart({ snapshots, quota, onPointClick, isRefres
     snapshots.forEach(s => {
       if (s.stage_weighted_forecast != null) vals.push(s.stage_weighted_forecast);
       if (s.category_weighted_forecast != null) vals.push(s.category_weighted_forecast);
+      if (s.tte_forecast != null) vals.push(s.tte_forecast);
       if (s.monte_carlo_p50 != null) vals.push(s.monte_carlo_p50);
       if (s.monte_carlo_p75 != null) vals.push(s.monte_carlo_p75);
       if (s.monte_carlo_p25 != null) vals.push(s.monte_carlo_p25);
@@ -319,6 +325,9 @@ export default function ForecastChart({ snapshots, quota, onPointClick, isRefres
         {snapshots.length > 1 && toggles.category_weighted && (
           <path d={buildPath('category_weighted_forecast')} fill="none" stroke={LINE_COLORS.category_weighted} strokeWidth={2} />
         )}
+        {snapshots.length > 1 && toggles.tte_forecast && (
+          <path d={buildPath('tte_forecast')} fill="none" stroke={LINE_COLORS.tte_forecast} strokeWidth={2} />
+        )}
         {snapshots.length > 1 && toggles.mc_p50 && (
           <path d={buildPath('monte_carlo_p50')} fill="none" stroke={LINE_COLORS.mc_p50} strokeWidth={2.5} />
         )}
@@ -346,6 +355,16 @@ export default function ForecastChart({ snapshots, quota, onPointClick, isRefres
                 onMouseEnter={() => setHoveredPoint({ idx: i, metric: 'category_weighted', x: xScale(i), y: yScale(s.category_weighted_forecast!), value: s.category_weighted_forecast! })}
                 onMouseLeave={() => setHoveredPoint(null)}
                 onClick={() => onPointClick?.(s, 'category_weighted')}
+              />
+            )}
+            {toggles.tte_forecast && s.tte_forecast != null && (
+              <circle
+                cx={xScale(i)} cy={yScale(s.tte_forecast)} r={3}
+                fill={LINE_COLORS.tte_forecast} stroke={colors.surface} strokeWidth={1.5}
+                style={{ cursor: 'pointer' }}
+                onMouseEnter={() => setHoveredPoint({ idx: i, metric: 'tte_forecast', x: xScale(i), y: yScale(s.tte_forecast!), value: s.tte_forecast! })}
+                onMouseLeave={() => setHoveredPoint(null)}
+                onClick={() => onPointClick?.(s, 'tte_forecast')}
               />
             )}
             {toggles.mc_p50 && s.monte_carlo_p50 != null && (

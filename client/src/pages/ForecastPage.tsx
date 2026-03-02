@@ -32,6 +32,7 @@ interface SnapshotData {
   monte_carlo_p75: number | null;
   monte_carlo_p10: number | null;
   monte_carlo_p90: number | null;
+  tte_forecast: number | null;
   attainment: number | null;
   quota: number | null;
   total_pipeline: number | null;
@@ -43,6 +44,7 @@ interface SnapshotData {
   by_rep: any[];
   annotation_count: number;
   isLive?: boolean;
+  isFuture?: boolean;
 }
 
 function formatCurrency(val: number): string {
@@ -76,6 +78,12 @@ export default function ForecastPage() {
   const [forecastRunStatus, setForecastRunStatus] = useState<string | null>(null);
   const autoTriggeredRef = useRef(false);
 
+  // New historical series data
+  const [stageWeightedData, setStageWeightedData] = useState<any>(null);
+  const [categoryWeightedData, setCategoryWeightedData] = useState<any>(null);
+  const [tteData, setTteData] = useState<any>(null);
+  const [seriesLoading, setSeriesLoading] = useState(false);
+
   const { annotations, grouped, dismiss, snooze } = useForecastAnnotations(wsId);
 
   useEffect(() => {
@@ -93,6 +101,36 @@ export default function ForecastPage() {
       })
       .finally(() => setLoading(false));
   }, [wsId]);
+
+  // Load historical forecast series
+  useEffect(() => {
+    if (!wsId) return;
+
+    // Calculate current quarter
+    const now = new Date();
+    const fyMonth = fiscalYearStartMonth - 1;
+    const adjustedMonth = (now.getMonth() - fyMonth + 12) % 12;
+    const fiscalQuarter = Math.floor(adjustedMonth / 3) + 1;
+    const quarter = `${now.getFullYear()}-Q${fiscalQuarter}`;
+
+    setSeriesLoading(true);
+
+    // Fetch all three series in parallel
+    Promise.all([
+      api.get(`/workspaces/${wsId}/forecast/stage-weighted-series?quarter=${quarter}`),
+      api.get(`/workspaces/${wsId}/forecast/category-weighted-series?quarter=${quarter}`),
+      api.get(`/workspaces/${wsId}/forecast/tte-series?quarter=${quarter}`),
+    ])
+      .then(([stageData, categoryData, tte]) => {
+        setStageWeightedData(stageData);
+        setCategoryWeightedData(categoryData);
+        setTteData(tte);
+      })
+      .catch((err: any) => {
+        console.error('[ForecastPage] Failed to load series data:', err);
+      })
+      .finally(() => setSeriesLoading(false));
+  }, [wsId, fiscalYearStartMonth]);
 
   // Auto-trigger forecast run when data is missing or stale (>8 days since last snapshot)
   useEffect(() => {
@@ -256,6 +294,7 @@ export default function ForecastPage() {
       scope_id: selectedPipeline !== 'all' ? selectedPipeline : null,
       stage_weighted_forecast: stageWeighted + closedWon,
       category_weighted_forecast: null,
+      tte_forecast: null,
       monte_carlo_p50: null,
       monte_carlo_p25: null,
       monte_carlo_p75: null,
@@ -347,13 +386,19 @@ export default function ForecastPage() {
         return sd >= weekStart && sd <= weekEnd;
       });
 
+      // Get data from new series endpoints
+      const stageWeek = stageWeightedData?.series?.[w];
+      const categoryWeek = categoryWeightedData?.series?.[w];
+      const tteWeek = tteData?.series?.[w];
+
       series.push({
         run_id: isCurrentWeek ? 'live-today' : `week-${w + 1}`,
         snapshot_date: isCurrentWeek ? now.toISOString() : weekStart.toISOString(),
         scope_id: selectedPipeline !== 'all' ? selectedPipeline : null,
-        // Stage weighted: show for current week only (open pipeline estimate)
-        stage_weighted_forecast: isCurrentWeek ? (runningClosedWon + currentWeekStageWeighted) : null,
-        category_weighted_forecast: matchSnap?.category_weighted_forecast ?? null,
+        // Use historical series data from new endpoints
+        stage_weighted_forecast: stageWeek?.stageWeighted ?? null,
+        category_weighted_forecast: categoryWeek?.categoryWeighted ?? null,
+        tte_forecast: tteWeek?.tteForecast ?? null,
         monte_carlo_p50: matchSnap?.monte_carlo_p50 ?? null,
         monte_carlo_p25: matchSnap?.monte_carlo_p25 ?? null,
         monte_carlo_p75: matchSnap?.monte_carlo_p75 ?? null,
@@ -370,11 +415,12 @@ export default function ForecastPage() {
         by_rep: [],
         annotation_count: matchSnap?.annotation_count ?? 0,
         isLive: isCurrentWeek,
+        isFuture: weekStart > now,
       });
     }
 
     return series;
-  }, [deals, fiscalYearStartMonth, liveQuota, weeklySnapshots, selectedPipeline]);
+  }, [deals, fiscalYearStartMonth, liveQuota, weeklySnapshots, selectedPipeline, stageWeightedData, categoryWeightedData, tteData]);
 
   // MC data always comes from the latest real snapshot (skill run)
   // Pipeline-filtered metrics come from liveSnapshot when a specific pipeline is selected
