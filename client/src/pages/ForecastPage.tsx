@@ -404,8 +404,8 @@ export default function ForecastPage() {
             weekClosedWon += amt;
           }
         }
-        // Pipe gen: any deal whose created_at falls in this week
-        if (createdAt && createdAt >= weekStart && createdAt <= weekEnd) {
+        // Pipe gen: deals created in this week AND on/after the fiscal quarter start
+        if (createdAt && createdAt >= weekStart && createdAt <= weekEnd && createdAt >= fiscalQStart) {
           weekPipeGen += amt;
         }
         // Open pipeline & stage weighted — only needed for current week
@@ -992,8 +992,14 @@ export default function ForecastPage() {
                   quota={quota}
                   isRefreshing={runningForecast}
                   onPointClick={(snapshot, metric) => {
-                    // Get the value for the clicked metric
-                    const value = snapshot[metric as keyof typeof snapshot];
+                    // ForecastChart passes short keys ('stage_weighted') but SnapshotData uses
+                    // longer field names ('stage_weighted_forecast'). Map them here.
+                    const FIELD_ALIAS: Record<string, string> = {
+                      stage_weighted: 'stage_weighted_forecast',
+                      category_weighted: 'category_weighted_forecast',
+                    };
+                    const fieldKey = FIELD_ALIAS[metric] ?? metric;
+                    const value = snapshot[fieldKey as keyof typeof snapshot];
                     if (value == null || typeof value !== 'number') return;
 
                     // Build context based on metric
@@ -1002,7 +1008,6 @@ export default function ForecastPage() {
                       quota: liveQuota,
                     };
 
-                    // For specific metrics, add relevant deals
                     if (metric === 'attainment' || metric === 'closed_won') {
                       // Closed won deals up to this snapshot date
                       const snapshotDate = new Date(snapshot.snapshot_date);
@@ -1013,6 +1018,9 @@ export default function ForecastPage() {
                       );
                       context.deals = closedDeals;
                       context.closedWon = value;
+                    } else if (metric === 'stage_weighted' || metric === 'tte_forecast' || metric === 'category_weighted') {
+                      // Pass all live deals so MathBreakdown can render the deal breakdown table
+                      context.deals = deals;
                     }
 
                     setMathPanel({
