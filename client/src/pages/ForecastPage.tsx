@@ -394,10 +394,31 @@ export default function ForecastPage() {
   }, [pipelineMetricSource, quota, weekInfo]);
 
   const pipeGenWeeks = useMemo(() => {
-    return augmentedSnapshots.slice(-8).map(s => ({
-      week_label: new Date(s.snapshot_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-      created: s.pipe_gen_this_week || 0,
-    }));
+    const WEEKS = 12;
+    const now = new Date();
+    // Build Monday-based week buckets for the last 12 weeks
+    const weeks: { week_label: string; created: number }[] = [];
+    for (let w = WEEKS - 1; w >= 0; w--) {
+      const monday = new Date(now);
+      const dayOfWeek = now.getDay();
+      monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1) - w * 7);
+      monday.setHours(0, 0, 0, 0);
+      const sunday = new Date(monday);
+      sunday.setDate(monday.getDate() + 6);
+      sunday.setHours(23, 59, 59, 999);
+
+      // Find any snapshot whose date falls within this week
+      const match = augmentedSnapshots.find(s => {
+        const d = new Date(s.snapshot_date);
+        return d >= monday && d <= sunday;
+      });
+
+      weeks.push({
+        week_label: monday.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        created: match?.pipe_gen_this_week || 0,
+      });
+    }
+    return weeks;
   }, [augmentedSnapshots]);
 
   const runForecastSkills = async () => {

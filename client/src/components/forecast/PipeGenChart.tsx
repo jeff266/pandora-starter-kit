@@ -36,7 +36,7 @@ export default function PipeGenChart({ weeks }: PipeGenChartProps) {
     );
   }
 
-  const trailingWeeks = weeks.slice(-8);
+  const trailingWeeks = weeks.slice(-12);
   const maxVal = Math.max(...trailingWeeks.map(w => w.created), 1);
   const avg =
     trailingWeeks.reduce((s, w) => s + w.created, 0) / trailingWeeks.length;
@@ -76,7 +76,7 @@ export default function PipeGenChart({ weeks }: PipeGenChartProps) {
         </div>
       </div>
       <div style={{ fontSize: 11, color: colors.textMuted, marginBottom: 16 }}>
-        Trailing {trailingWeeks.length} weeks
+        Trailing 12 weeks
       </div>
 
       <div style={{ position: 'relative', height: chartHeight }}>
