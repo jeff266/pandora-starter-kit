@@ -42,6 +42,7 @@ interface SnapshotData {
   coverage_ratio: number | null;
   by_rep: any[];
   annotation_count: number;
+  isLive?: boolean;
 }
 
 function formatCurrency(val: number): string {
@@ -67,6 +68,7 @@ export default function ForecastPage() {
   const [fiscalYearStartMonth, setFiscalYearStartMonth] = useState(1);
   const [mathPanel, setMathPanel] = useState<{ metric: string; value: number; context: MathContext } | null>(null);
   const [deals, setDeals] = useState<Deal[]>([]);
+  const [dealsLoading, setDealsLoading] = useState(true);
   const [runningForecast, setRunningForecast] = useState(false);
   const [forecastRunStatus, setForecastRunStatus] = useState<string | null>(null);
 
@@ -88,9 +90,10 @@ export default function ForecastPage() {
       .finally(() => setLoading(false));
   }, [wsId]);
 
-  // Fetch deals for Show the Math
+  // Fetch deals for Show the Math and live snapshot
   useEffect(() => {
     if (!wsId) return;
+    setDealsLoading(true);
     api.get('/deals')
       .then((data: any) => {
         const dealList = Array.isArray(data) ? data : data.data || data.deals || [];
@@ -98,7 +101,8 @@ export default function ForecastPage() {
       })
       .catch((err: any) => {
         console.error('[ForecastPage] Failed to load deals:', err);
-      });
+      })
+      .finally(() => setDealsLoading(false));
   }, [wsId]);
 
   // Deduplicate snapshots by week (keep latest per week)
@@ -126,8 +130,77 @@ export default function ForecastPage() {
     );
   }, [snapshots]);
 
-  const latest = weeklySnapshots.length > 0 ? weeklySnapshots[weeklySnapshots.length - 1] : null;
-  const previous = weeklySnapshots.length > 1 ? weeklySnapshots[weeklySnapshots.length - 2] : null;
+  // Build a live synthetic snapshot from current deal data when we lack real snapshots
+  const liveSnapshot = useMemo((): SnapshotData | null => {
+    if (dealsLoading || deals.length === 0) return null;
+
+    const now = new Date();
+    const fyMonth = fiscalYearStartMonth - 1;
+    const adjustedMonth = (now.getMonth() - fyMonth + 12) % 12;
+    const fiscalQuarter = Math.floor(adjustedMonth / 3) + 1;
+    const fiscalQStart = new Date(now.getFullYear(), fyMonth + (fiscalQuarter - 1) * 3, 1);
+    if (fiscalQStart > now) fiscalQStart.setFullYear(fiscalQStart.getFullYear() - 1);
+    const fiscalQEnd = new Date(fiscalQStart.getFullYear(), fiscalQStart.getMonth() + 3, 1);
+
+    let closedWon = 0;
+    let totalPipeline = 0;
+    let stageWeighted = 0;
+
+    for (const d of deals) {
+      const amt = typeof (d as any).amount === 'string'
+        ? parseFloat((d as any).amount) || 0
+        : ((d as any).amount || 0);
+      if (d.stage_normalized === 'closed_won') {
+        const closeDate = d.close_date ? new Date(d.close_date) : null;
+        if (closeDate && closeDate >= fiscalQStart && closeDate < fiscalQEnd) {
+          closedWon += amt;
+        }
+      } else if (d.stage_normalized !== 'closed_lost') {
+        totalPipeline += amt;
+        const prob = d.probability > 1 ? d.probability / 100 : (d.probability > 0 ? d.probability : 0.3);
+        stageWeighted += amt * prob;
+      }
+    }
+
+    const openCount = deals.filter(d => !['closed_won', 'closed_lost'].includes(d.stage_normalized)).length;
+
+    return {
+      run_id: 'live-today',
+      snapshot_date: now.toISOString(),
+      scope_id: null,
+      stage_weighted_forecast: stageWeighted + closedWon,
+      category_weighted_forecast: null,
+      monte_carlo_p50: null,
+      monte_carlo_p25: null,
+      monte_carlo_p75: null,
+      monte_carlo_p10: null,
+      monte_carlo_p90: null,
+      attainment: closedWon,
+      quota: null,
+      total_pipeline: totalPipeline,
+      weighted_pipeline: stageWeighted,
+      deal_count: openCount,
+      pipe_gen_this_week: null,
+      pipe_gen_avg: null,
+      coverage_ratio: null,
+      by_rep: [],
+      annotation_count: 0,
+      isLive: true,
+    };
+  }, [deals, dealsLoading, fiscalYearStartMonth]);
+
+  // Augment weekly snapshots with a live "Today" point when we don't have enough for a trend line
+  const augmentedSnapshots = useMemo((): SnapshotData[] => {
+    if (weeklySnapshots.length >= 2) return weeklySnapshots;
+    if (!liveSnapshot) return weeklySnapshots;
+    const todayStr = new Date().toDateString();
+    const hasToday = weeklySnapshots.some(s => new Date(s.snapshot_date).toDateString() === todayStr);
+    if (hasToday) return weeklySnapshots;
+    return [...weeklySnapshots, liveSnapshot];
+  }, [weeklySnapshots, liveSnapshot]);
+
+  const latest = augmentedSnapshots.length > 0 ? augmentedSnapshots[augmentedSnapshots.length - 1] : null;
+  const previous = augmentedSnapshots.length > 1 ? augmentedSnapshots[augmentedSnapshots.length - 2] : null;
   const quota = latest?.quota || null;
 
   const currentMetrics = useMemo(() => {
@@ -200,7 +273,6 @@ export default function ForecastPage() {
   }, [repRows, isAdmin, userEmail]);
 
   const weekInfo = useMemo(() => {
-    if (!latest) return { label: '', weekNum: 0, totalWeeks: 13 };
     const now = new Date();
     const fyMonth = fiscalYearStartMonth - 1;
     const adjustedMonth = (now.getMonth() - fyMonth + 12) % 12;
@@ -216,12 +288,12 @@ export default function ForecastPage() {
       weekNum,
       totalWeeks: 13,
     };
-  }, [latest, fiscalYearStartMonth]);
+  }, [fiscalYearStartMonth]);
 
   const coverageQuarters = useMemo(() => {
-    if (!latest) return [];
-    const q = latest.quota || 0;
-    const p = latest.total_pipeline || 0;
+    const q = latest?.quota || 0;
+    const p = latest?.total_pipeline || 0;
+    if (!q && !p) return [];
     return [{ label: weekInfo.label, pipeline: p, quota: q }];
   }, [latest, weekInfo]);
 
@@ -282,58 +354,55 @@ export default function ForecastPage() {
     );
   }
 
-  if (snapshots.length === 0) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-        <h1 style={{ fontSize: 20, fontWeight: 700, color: colors.text, fontFamily: fonts.sans }}>Forecast</h1>
-        <div style={{
-          background: colors.surface,
-          border: `1px solid ${colors.border}`,
-          borderRadius: 10,
-          padding: 60,
-          textAlign: 'center',
-        }}>
-          <div style={{ fontSize: 48, marginBottom: 16 }}>📈</div>
-          <h2 style={{ fontSize: 16, fontWeight: 600, color: colors.text, marginBottom: 8, fontFamily: fonts.sans }}>
-            No forecast data yet
-          </h2>
-          <p style={{ fontSize: 13, color: colors.textSecondary, maxWidth: 400, margin: '0 auto 20px', fontFamily: fonts.sans }}>
-            Forecast tracking starts after your first weekly pipeline review. Run a forecast skill to capture your first snapshot.
-          </p>
-          <button
-            onClick={runForecastSkills}
-            disabled={runningForecast}
-            style={{
-              padding: '8px 20px',
-              background: runningForecast ? colors.surfaceRaised : colors.accent,
-              color: '#fff',
-              border: 'none',
-              borderRadius: 6,
-              cursor: runningForecast ? 'not-allowed' : 'pointer',
-              fontSize: 13,
-              fontWeight: 500,
-              fontFamily: fonts.sans,
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 8,
-              opacity: runningForecast ? 0.8 : 1,
-            }}
-          >
-            {runningForecast && (
-              <span style={{
-                width: 12, height: 12,
-                border: '2px solid rgba(255,255,255,0.3)',
-                borderTopColor: '#fff', borderRadius: '50%',
-                display: 'inline-block',
-                animation: 'pandora-spin 0.8s linear infinite',
-              }} />
-            )}
-            {runningForecast ? (forecastRunStatus ?? 'Running...') : 'Generate First Forecast ▶'}
-          </button>
-        </div>
-      </div>
-    );
-  }
+  const noSnapshotsBanner = snapshots.length === 0 ? (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+      background: colors.surface,
+      border: `1px solid ${colors.border}`,
+      borderRadius: 8,
+      padding: '10px 16px',
+      flexWrap: 'wrap',
+    }}>
+      <p style={{ fontSize: 12, color: colors.textSecondary, fontFamily: fonts.sans, margin: 0 }}>
+        Pipeline data is live — run forecast skills weekly to enable trend tracking.
+      </p>
+      <button
+        onClick={runForecastSkills}
+        disabled={runningForecast}
+        style={{
+          padding: '5px 14px',
+          background: runningForecast ? colors.surfaceRaised : colors.accent,
+          color: '#fff',
+          border: 'none',
+          borderRadius: 6,
+          cursor: runningForecast ? 'not-allowed' : 'pointer',
+          fontSize: 12,
+          fontWeight: 500,
+          fontFamily: fonts.sans,
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          whiteSpace: 'nowrap',
+          opacity: runningForecast ? 0.8 : 1,
+          flexShrink: 0,
+        }}
+      >
+        {runningForecast && (
+          <span style={{
+            width: 10, height: 10,
+            border: '2px solid rgba(255,255,255,0.3)',
+            borderTopColor: '#fff', borderRadius: '50%',
+            display: 'inline-block',
+            animation: 'pandora-spin 0.8s linear infinite',
+          }} />
+        )}
+        {runningForecast ? (forecastRunStatus ?? 'Running...') : 'Capture First Snapshot ▶'}
+      </button>
+    </div>
+  ) : null;
 
   const dealRiskPanel = (
     <div style={{
@@ -457,13 +526,15 @@ export default function ForecastPage() {
         />
       </SectionErrorBoundary>
 
+      {noSnapshotsBanner}
+
       {forecastView === 'company' && (
         <>
           <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 16, alignItems: 'flex-start' }}>
             <div style={{ flex: 1, minWidth: 0, width: isMobile ? '100%' : 'auto' }}>
               <SectionErrorBoundary fallbackMessage="Failed to load forecast chart.">
                 <ForecastChart
-                  snapshots={weeklySnapshots}
+                  snapshots={augmentedSnapshots}
                   quota={quota}
                   onPointClick={(snapshot, metric) => {
                     console.log('Chart point clicked:', metric, snapshot.snapshot_date);

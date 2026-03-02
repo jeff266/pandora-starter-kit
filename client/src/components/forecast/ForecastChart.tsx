@@ -10,6 +10,7 @@ export interface SnapshotPoint {
   monte_carlo_p75: number | null;
   attainment: number | null;
   quota: number | null;
+  isLive?: boolean;
 }
 
 interface ForecastChartProps {
@@ -53,10 +54,7 @@ export default function ForecastChart({ snapshots, quota, onPointClick }: Foreca
   });
   const [hoveredPoint, setHoveredPoint] = useState<{ idx: number; metric: string; x: number; y: number; value: number } | null>(null);
 
-  if (snapshots.length < 2) {
-    const msg = snapshots.length === 0
-      ? 'Forecast tracking starts after your first weekly pipeline review. Run a forecast skill to capture your first snapshot.'
-      : `Forecast chart appears after 2 weekly snapshots. First snapshot captured ${formatWeekLabel(snapshots[0].snapshot_date)}.`;
+  if (snapshots.length === 0) {
     return (
       <div style={{
         background: colors.surface,
@@ -65,8 +63,7 @@ export default function ForecastChart({ snapshots, quota, onPointClick }: Foreca
         padding: 40,
         textAlign: 'center',
       }}>
-        <div style={{ fontSize: 32, marginBottom: 12 }}>📈</div>
-        <p style={{ fontSize: 14, color: colors.textSecondary, fontFamily: fonts.sans, maxWidth: 400, margin: '0 auto' }}>{msg}</p>
+        <p style={{ fontSize: 13, color: colors.textMuted, fontFamily: fonts.sans }}>Loading pipeline data...</p>
       </div>
     );
   }
@@ -95,7 +92,7 @@ export default function ForecastChart({ snapshots, quota, onPointClick }: Foreca
   const maxVal = Math.max(...allValues) * 1.15;
   const range = maxVal - minVal || 1;
 
-  const xScale = (i: number) => PADDING.left + (i / (snapshots.length - 1)) * chartW;
+  const xScale = (i: number) => PADDING.left + (snapshots.length > 1 ? i / (snapshots.length - 1) : 0.5) * chartW;
   const yScale = (v: number) => PADDING.top + chartH - ((v - minVal) / range) * chartH;
 
   const buildPath = (key: keyof SnapshotPoint) => {
@@ -217,20 +214,35 @@ export default function ForecastChart({ snapshots, quota, onPointClick }: Foreca
               x2={xScale(i)}
               y1={PADDING.top}
               y2={PADDING.top + chartH}
-              stroke={colors.border}
-              strokeWidth={0.5}
-              strokeDasharray="2,4"
+              stroke={s.isLive ? 'rgba(34,197,94,0.25)' : colors.border}
+              strokeWidth={s.isLive ? 1 : 0.5}
+              strokeDasharray={s.isLive ? '4,3' : '2,4'}
             />
             <text
               x={xScale(i)}
-              y={HEIGHT - 8}
+              y={HEIGHT - 18}
               textAnchor="middle"
-              fill={colors.textMuted}
+              fill={s.isLive ? '#22c55e' : colors.textMuted}
               fontSize={10}
               fontFamily={fonts.mono}
+              fontWeight={s.isLive ? 600 : 400}
             >
               {formatWeekLabel(s.snapshot_date)}
             </text>
+            {s.isLive && (
+              <text
+                x={xScale(i)}
+                y={HEIGHT - 6}
+                textAnchor="middle"
+                fill="#22c55e"
+                fontSize={8}
+                fontFamily={fonts.sans}
+                fontWeight={600}
+                letterSpacing={0.5}
+              >
+                LIVE
+              </text>
+            )}
           </g>
         ))}
 
