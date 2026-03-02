@@ -9,6 +9,7 @@ interface WeekData {
 interface PipeGenChartProps {
   weeks: WeekData[];
   subtitle?: string;
+  onBarClick?: (weekIndex: number, weekData: WeekData) => void;
 }
 
 function formatCurrency(value: number): string {
@@ -17,7 +18,7 @@ function formatCurrency(value: number): string {
   return `$${value.toFixed(0)}`;
 }
 
-export default function PipeGenChart({ weeks, subtitle }: PipeGenChartProps) {
+export default function PipeGenChart({ weeks, subtitle, onBarClick }: PipeGenChartProps) {
   if (!weeks || weeks.length === 0) {
     return (
       <div
@@ -152,10 +153,24 @@ export default function PipeGenChart({ weeks, subtitle }: PipeGenChartProps) {
                       ? `linear-gradient(180deg, ${colors.green}, rgba(34,197,94,0.5))`
                       : `linear-gradient(180deg, ${colors.accent}, rgba(59,130,246,0.5))`,
                     borderRadius: '3px 3px 0 0',
-                    transition: 'height 0.3s ease',
+                    transition: 'all 0.2s ease',
                     position: 'relative',
+                    cursor: onBarClick ? 'pointer' : 'default',
                   }}
                   title={`${w.week_label}: ${formatCurrency(w.created)}`}
+                  onClick={() => onBarClick?.(i, w)}
+                  onMouseEnter={(e) => {
+                    if (onBarClick) {
+                      e.currentTarget.style.opacity = '0.8';
+                      e.currentTarget.style.transform = 'scaleY(1.05)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (onBarClick) {
+                      e.currentTarget.style.opacity = '1';
+                      e.currentTarget.style.transform = 'scaleY(1)';
+                    }
+                  }}
                 />
               </div>
             );

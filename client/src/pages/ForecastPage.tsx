@@ -883,6 +883,53 @@ export default function ForecastPage() {
             )}
           </div>
 
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 16 }}>
+            {coverageQuarters.length > 0 && (
+              <SectionErrorBoundary fallbackMessage="Failed to load coverage bars.">
+                <CoverageBars
+                  quarters={coverageQuarters}
+                  annotations={showAI ? grouped.coverage : []}
+                />
+              </SectionErrorBoundary>
+            )}
+
+            {pipeGenWeeks.length > 0 && (
+              <SectionErrorBoundary fallbackMessage="Failed to load pipe gen chart.">
+                <PipeGenChart
+                  weeks={pipeGenWeeks}
+                  subtitle={`${weekInfo.label} · by Week`}
+                  onBarClick={(weekIndex, weekData) => {
+                    const weekSnapshot = quarterSeries[weekIndex];
+                    if (!weekSnapshot) return;
+
+                    const weekDate = new Date(weekSnapshot.snapshot_date);
+                    const weekStart = new Date(weekDate);
+                    weekStart.setDate(weekDate.getDate() - 6);
+                    weekStart.setHours(0, 0, 0, 0);
+                    const weekEnd = new Date(weekDate);
+                    weekEnd.setHours(23, 59, 59, 999);
+
+                    const dealsInWeek = deals.filter(d => {
+                      const createdDate = new Date(d.created_at);
+                      return createdDate >= weekStart && createdDate <= weekEnd;
+                    });
+
+                    setMathPanel({
+                      metric: 'pipe_gen',
+                      value: weekData.created,
+                      context: {
+                        week_label: weekData.week_label,
+                        week_start: weekStart.toISOString(),
+                        week_end: weekEnd.toISOString(),
+                        deals: dealsInWeek,
+                      },
+                    });
+                  }}
+                />
+              </SectionErrorBoundary>
+            )}
+          </div>
+
           {showAI && grouped.deals.length > 0 && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 16 }}>
               {dealRiskPanel}
@@ -902,26 +949,6 @@ export default function ForecastPage() {
           {showAI && grouped.deals.length > 0 && dealRiskPanel}
         </>
       )}
-
-      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 16 }}>
-        {coverageQuarters.length > 0 && (
-          <SectionErrorBoundary fallbackMessage="Failed to load coverage bars.">
-            <CoverageBars
-              quarters={coverageQuarters}
-              annotations={showAI ? grouped.coverage : []}
-            />
-          </SectionErrorBoundary>
-        )}
-
-        {pipeGenWeeks.length > 0 && (
-          <SectionErrorBoundary fallbackMessage="Failed to load pipe gen chart.">
-            <PipeGenChart
-              weeks={pipeGenWeeks}
-              subtitle={`${weekInfo.label} · by Week`}
-            />
-          </SectionErrorBoundary>
-        )}
-      </div>
 
       {showAI && annotations.length > 0 && grouped.chart.length === 0 && grouped.deals.length === 0 && (
         <SectionErrorBoundary fallbackMessage="Failed to load annotations.">
