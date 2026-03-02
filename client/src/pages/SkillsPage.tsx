@@ -60,6 +60,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   enrichment: '#a78bfa',
   scoring: '#f472b6',
   intelligence: '#06b6d4',
+  calls: '#e879f9',
   config: colors.textMuted,
 };
 

@@ -15,13 +15,13 @@ interface GovernanceRecord {
   change_description: string;
   explanation_summary?: string;
   explanation_detail?: string;
-  impact_assessment?: string;
+  explanation_impact?: string;
   rollback_note?: string;
   review_score?: number;
+  review_result?: any;
   review_concerns?: string[];
-  review_strengths?: string[];
   dimension_scores?: Record<string, number>;
-  test_cases?: any[];
+  comparison_test_cases?: any;
   status_history?: any[];
   change_payload?: any;
   trial_expires_at?: string;
@@ -279,12 +279,12 @@ const GovernancePage: React.FC = () => {
                     <div style={{ 
                       fontSize: '12px', 
                       fontWeight: 'bold', 
-                      color: record.review_score > 80 ? colors.green : record.review_score > 60 ? colors.yellow : colors.red,
+                      color: record.review_score > 0.8 ? colors.green : record.review_score > 0.6 ? colors.yellow : colors.red,
                       background: colors.surfaceRaised,
                       padding: '2px 6px',
                       borderRadius: '4px'
                     }}>
-                      {record.review_score}%
+                      {Math.round((record.review_score || 0) * 100)}%
                     </div>
                   )}
                 </div>
@@ -674,10 +674,10 @@ const GovernancePage: React.FC = () => {
                 {selectedRecord.explanation_detail && (
                   <div style={{ marginTop: '12px', fontSize: '13px', color: colors.textSecondary }}>{selectedRecord.explanation_detail}</div>
                 )}
-                {selectedRecord.impact_assessment && (
+                {selectedRecord.explanation_impact && (
                   <div style={{ marginTop: '12px', padding: '12px', background: colors.surfaceRaised, borderRadius: '8px' }}>
                     <div style={{ fontSize: '11px', fontWeight: 'bold', color: colors.accent, textTransform: 'uppercase', marginBottom: '4px' }}>Impact Assessment</div>
-                    <div style={{ fontSize: '13px' }}>{selectedRecord.impact_assessment}</div>
+                    <div style={{ fontSize: '13px' }}>{selectedRecord.explanation_impact}</div>
                   </div>
                 )}
               </section>
@@ -687,7 +687,7 @@ const GovernancePage: React.FC = () => {
                   <div style={{ fontSize: '12px', fontWeight: 'bold', color: colors.textMuted, textTransform: 'uppercase', marginBottom: '8px' }}>Review</div>
                   <div style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
                     <div style={{ flex: 1, textAlign: 'center', padding: '12px', background: colors.surfaceRaised, borderRadius: '8px' }}>
-                      <div style={{ fontSize: '24px', fontWeight: 'bold', color: selectedRecord.review_score > 80 ? colors.green : colors.yellow }}>{selectedRecord.review_score}%</div>
+                      <div style={{ fontSize: '24px', fontWeight: 'bold', color: selectedRecord.review_score > 0.8 ? colors.green : colors.yellow }}>{Math.round((selectedRecord.review_score || 0) * 100)}%</div>
                       <div style={{ fontSize: '10px', color: colors.textMuted }}>Overall Score</div>
                     </div>
                     {selectedRecord.dimension_scores && Object.entries(selectedRecord.dimension_scores).map(([k, v]) => (
@@ -709,10 +709,10 @@ const GovernancePage: React.FC = () => {
                     </div>
                   )}
 
-                  {selectedRecord.review_strengths && selectedRecord.review_strengths.length > 0 && (
+                  {selectedRecord.review_result?.strengths && selectedRecord.review_result.strengths.length > 0 && (
                     <div>
                       <div style={{ fontSize: '11px', fontWeight: 'bold', color: colors.green, marginBottom: '4px' }}>STRENGTHS</div>
-                      {selectedRecord.review_strengths.map((s, i) => (
+                      {selectedRecord.review_result.strengths.map((s: string, i: number) => (
                         <div key={i} style={{ fontSize: '13px', marginBottom: '4px', display: 'flex', gap: '6px' }}>
                           <span style={{ color: colors.green }}>✓</span> {s}
                         </div>
@@ -722,7 +722,7 @@ const GovernancePage: React.FC = () => {
                 </section>
               )}
 
-              {selectedRecord.test_cases && selectedRecord.test_cases.length > 0 && (
+              {selectedRecord.comparison_test_cases?.test_cases?.length > 0 && (
                 <section>
                   <div style={{ fontSize: '12px', fontWeight: 'bold', color: colors.textMuted, textTransform: 'uppercase', marginBottom: '8px' }}>Test Comparison</div>
                   <div style={{ overflowX: 'auto', border: `1px solid ${colors.border}`, borderRadius: '8px' }}>
@@ -736,7 +736,7 @@ const GovernancePage: React.FC = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {selectedRecord.test_cases.map((t, i) => (
+                        {(selectedRecord.comparison_test_cases?.test_cases || []).map((t: any, i: number) => (
                           <tr key={i}>
                             <td style={{ padding: '8px', borderBottom: `1px solid ${colors.borderLight}` }}>{t.input}</td>
                             <td style={{ padding: '8px', borderBottom: `1px solid ${colors.borderLight}`, color: colors.textSecondary }}>{t.before}</td>
