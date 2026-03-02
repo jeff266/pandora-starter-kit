@@ -82,6 +82,8 @@ export default function ForecastPage() {
   const [pipelineMc, setPipelineMc] = useState<{
     p50: number; p25: number; p75: number; p10: number; p90: number;
   } | null>(null);
+  const [runningMc, setRunningMc] = useState(false);
+  const [mcRunStatus, setMcRunStatus] = useState<string | null>(null);
 
   // New historical series data
   const [stageWeightedData, setStageWeightedData] = useState<any>(null);
@@ -718,6 +720,47 @@ export default function ForecastPage() {
     }));
   }, [quarterSeries]);
 
+  // Run MC simulation scoped to the selected pipeline + current fiscal quarter.
+  // Does NOT re-run forecast-rollup — only the MC step. Used when global data is fresh
+  // but no pipeline-specific MC run exists yet.
+  const runMcForPipeline = async () => {
+    if (!wsId || selectedPipeline === 'all' || runningMc) return;
+    setRunningMc(true);
+    setMcRunStatus('Starting simulation…');
+    try {
+      await api.post('/skills/monte-carlo-forecast/run', {
+        params: {
+          pipelineFilter: selectedPipeline,
+          forecastWindowEnd: weekInfo.quarterEndISO,
+        },
+      });
+      setMcRunStatus('Simulation running — checking for results…');
+      // Poll every 10s for up to 5 minutes
+      const start = Date.now();
+      await new Promise<void>((resolve) => {
+        const poll = setInterval(async () => {
+          try {
+            const path = `/monte-carlo/latest?pipeline=${encodeURIComponent(selectedPipeline)}&quarterEnd=${encodeURIComponent(weekInfo.quarterEndISO)}`;
+            const res: any = await api.get(path);
+            const cc = res?.commandCenter;
+            if (cc && typeof cc.p50 === 'number') {
+              setPipelineMc({ p50: cc.p50, p25: cc.p25 ?? cc.p50, p75: cc.p75 ?? cc.p50, p10: cc.p10 ?? cc.p50, p90: cc.p90 ?? cc.p50 });
+              clearInterval(poll);
+              resolve();
+            }
+          } catch {}
+          if (Date.now() - start > 300_000) { clearInterval(poll); resolve(); }
+        }, 10_000);
+      });
+    } catch (err: any) {
+      setMcRunStatus(`Failed: ${err?.message ?? 'unknown error'}`);
+      setTimeout(() => setMcRunStatus(null), 5000);
+    } finally {
+      setRunningMc(false);
+      setMcRunStatus(null);
+    }
+  };
+
   // Fetch pipeline+quarter-scoped MC results whenever the active pipeline or fiscal quarter changes.
   // Falls back silently if no pipeline-specific run exists yet (pipelineMc stays null).
   useEffect(() => {
@@ -969,6 +1012,47 @@ export default function ForecastPage() {
               ))}
             </select>
           )}
+          {/* MC trigger — visible when a pipeline is filtered but no scoped MC result exists yet */}
+          {selectedPipeline !== 'all' && !pipelineMc && (
+            <button
+              onClick={runMcForPipeline}
+              disabled={runningMc}
+              title={`Run Monte Carlo simulation scoped to this pipeline for ${weekInfo.label}`}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '5px 12px',
+                fontSize: 12,
+                fontFamily: fonts.sans,
+                fontWeight: 500,
+                borderRadius: 6,
+                border: `1px solid ${colors.purple}`,
+                background: runningMc ? 'transparent' : `${colors.purple}18`,
+                color: runningMc ? colors.textMuted : colors.purple,
+                cursor: runningMc ? 'default' : 'pointer',
+                whiteSpace: 'nowrap',
+                transition: 'all 0.15s',
+              }}
+            >
+              {runningMc ? (
+                <>
+                  <span style={{
+                    width: 10, height: 10,
+                    border: `1.5px solid ${colors.purple}44`,
+                    borderTopColor: colors.purple,
+                    borderRadius: '50%',
+                    display: 'inline-block',
+                    animation: 'pandora-spin 0.8s linear infinite',
+                    flexShrink: 0,
+                  }} />
+                  {mcRunStatus ?? 'Running…'}
+                </>
+              ) : (
+                <>Run MC ▶</>
+              )}
+            </button>
+          )}
           {showViewTabs && (
             <div style={{ display: 'flex', gap: 4 }}>
               <button style={tabStyle(forecastView === 'company')} onClick={() => setForecastView('company')}>Company</button>
@@ -1005,6 +1089,43 @@ export default function ForecastPage() {
       </div>
 
       {forecastStatusBanner}
+
+      {/* Inline MC prompt — shows below metric cards when pipeline is selected but MC data is absent */}
+      {selectedPipeline !== 'all' && !pipelineMc && !runningMc && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 10,
+          padding: '8px 14px',
+          background: `${colors.purple}0d`,
+          border: `1px solid ${colors.purple}33`,
+          borderRadius: 7,
+          fontSize: 12,
+          fontFamily: fonts.sans,
+          color: colors.textMuted,
+        }}>
+          <span>MC P50 and MC Range require a simulation run scoped to this pipeline.</span>
+          <button
+            onClick={runMcForPipeline}
+            style={{
+              padding: '4px 12px',
+              fontSize: 11,
+              fontFamily: fonts.sans,
+              fontWeight: 500,
+              borderRadius: 5,
+              border: `1px solid ${colors.purple}`,
+              background: `${colors.purple}18`,
+              color: colors.purple,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              flexShrink: 0,
+            }}
+          >
+            Run simulation ▶
+          </button>
+        </div>
+      )}
 
       <SectionErrorBoundary fallbackMessage="Failed to load metric cards.">
         <MetricCards
