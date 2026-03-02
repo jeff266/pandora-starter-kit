@@ -322,14 +322,15 @@ router.get('/:id/forecast/tte-series', async (
         if (deal.created_at > weekEnd) continue;
 
         const state = reconstructDealState(deal, allTransitions, weekEnd);
+        const amt = parseFloat(deal.amount as any) || 0;
 
         if (state.wasClosedWon && deal.close_date <= weekEnd) {
-          closedWon += deal.amount || 0;
+          closedWon += amt;
         } else {
           const daysInStage = daysBetween(state.stageEnteredAt, weekEnd);
           expectedFromPipeline += computeDealTTE(
             {
-              amount: deal.amount || 0,
+              amount: amt,
               stageAtPoint: state.stage,
               daysInStage
             },

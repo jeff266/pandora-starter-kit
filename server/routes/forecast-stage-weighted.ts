@@ -230,14 +230,15 @@ router.get('/:id/forecast/stage-weighted-series', async (
         if (deal.created_at > weekEnd) continue;
 
         const state = reconstructDealState(deal, allTransitions, weekEnd);
+        const amt = parseFloat(deal.amount as any) || 0;
 
         // Check if deal was closed-won by this week
         if (state.wasClosedWon && deal.close_date <= weekEnd) {
-          closedWon += deal.amount || 0;
+          closedWon += amt;
         } else {
           // Open deal → weight by stage probability
           const probability = stageProbabilities[state.stage] ?? 0.30;
-          weightedPipeline += (deal.amount || 0) * probability;
+          weightedPipeline += amt * probability;
         }
       }
 

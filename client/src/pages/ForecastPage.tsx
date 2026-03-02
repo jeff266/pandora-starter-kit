@@ -499,22 +499,36 @@ export default function ForecastPage() {
     if (!pipelineMetricSource && !latestReal) return null;
     const src = pipelineMetricSource;
     const mcSrc = latestReal ?? src;
-    // Pipe gen always comes from quarterSeries current week so it matches the chart bar
-    const liveWeek = quarterSeries.find(w => w.isLive);
+    // Pipe gen is quarter-to-date: sum all weekly pipe gen from quarterSeries
+    const quarterPipeGen = quarterSeries.reduce((sum, w) => sum + (w.pipe_gen_this_week || 0), 0) || undefined;
+    // Closed deal count from live deal data
+    const now = new Date();
+    const fyMonth = fiscalYearStartMonth - 1;
+    const adjustedMonth = (now.getMonth() - fyMonth + 12) % 12;
+    const fiscalQuarter = Math.floor(adjustedMonth / 3) + 1;
+    const fiscalQStart = new Date(now.getFullYear(), fyMonth + (fiscalQuarter - 1) * 3, 1);
+    if (fiscalQStart > now) fiscalQStart.setFullYear(fiscalQStart.getFullYear() - 1);
+    const fiscalQEnd = new Date(fiscalQStart.getFullYear(), fiscalQStart.getMonth() + 3, 1);
+    const closedDealCount = deals.filter(d => {
+      if (d.stage_normalized !== 'closed_won') return false;
+      const cd = d.close_date ? new Date(d.close_date) : null;
+      return cd && cd >= fiscalQStart && cd < fiscalQEnd;
+    }).length;
     return {
       snapshot_date: src?.snapshot_date ?? new Date().toISOString(),
       mc_p50: mcSrc?.monte_carlo_p50 ?? undefined,
       mc_p25: mcSrc?.monte_carlo_p25 ?? undefined,
       mc_p75: mcSrc?.monte_carlo_p75 ?? undefined,
       closed_won: src?.attainment ?? undefined,
+      closed_deal_count: closedDealCount || undefined,
       pipeline_total: src?.total_pipeline ?? undefined,
       quota: src?.quota ?? liveQuota ?? undefined,
-      pipe_gen: liveWeek?.pipe_gen_this_week ?? src?.pipe_gen_this_week ?? undefined,
+      pipe_gen: quarterPipeGen,
       forecast_weighted: src?.stage_weighted_forecast ?? undefined,
       category_weighted: src?.category_weighted_forecast ?? undefined,
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pipelineMetricSource, latestReal, liveQuota, quarterSeries]);
+  }, [pipelineMetricSource, latestReal, liveQuota, quarterSeries, deals, fiscalYearStartMonth]);
 
   const previousMetrics = useMemo(() => {
     // When a pipeline is selected the "previous" snapshot is all-pipeline — comparing it against
@@ -627,17 +641,31 @@ export default function ForecastPage() {
   }, [repRows, isAdmin, hasRepRow, viewInitialized]);
 
   const visibleRepRows = useMemo(() => {
-    // Filter by roster: only include reps who are quota_eligible
-    const eligibleReps = repRows.filter(r => {
-      const rosterEntry = roster.find(rr =>
-        rr.rep_email === r.rep_email || rr.rep_name === r.rep_name
-      );
-      // Include if in roster with quota_eligible = true, or if not in roster at all (legacy data)
-      return !rosterEntry || (rosterEntry.quota_eligible && rosterEntry.is_rep !== false);
-    });
+    // If the roster is configured, only show reps who are on it and quota_eligible.
+    // If roster is empty (not yet set up), fall back to showing all reps so the table
+    // is never blank for new workspaces.
+    const filtered = roster.length > 0
+      ? repRows.filter(r => {
+          const rosterEntry = roster.find(rr =>
+            rr.rep_email === r.rep_email || rr.rep_name === r.rep_name
+          );
+          return rosterEntry && rosterEntry.quota_eligible !== false;
+        })
+      : repRows;
 
-    if (isAdmin) return eligibleReps;
-    return eligibleReps.filter(r => r.rep_email === userEmail);
+    // Deduplicate by email — keep the row with the larger pipeline value
+    const byEmail = new Map<string, RepRow>();
+    for (const r of filtered) {
+      const key = r.rep_email || r.rep_name;
+      const existing = byEmail.get(key);
+      if (!existing || r.pipeline > existing.pipeline) {
+        byEmail.set(key, r);
+      }
+    }
+    const deduped = Array.from(byEmail.values());
+
+    if (isAdmin) return deduped;
+    return deduped.filter(r => r.rep_email === userEmail);
   }, [repRows, roster, isAdmin, userEmail]);
 
   const weekInfo = useMemo(() => {
@@ -891,7 +919,7 @@ export default function ForecastPage() {
               <button style={tabStyle(forecastView === 'reps')} onClick={() => setForecastView('reps')}>By Rep</button>
             </div>
           )}
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12, color: colors.textSecondary, fontFamily: fonts.sans }}>
+          <label title="Shows/hides AI-generated risk alerts, forecast annotations, and deal insights overlaid on the chart and rep table" style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12, color: colors.textSecondary, fontFamily: fonts.sans }}>
             <span>✨ AI Insights</span>
             <div
               onClick={() => setShowAI(!showAI)}
@@ -927,29 +955,27 @@ export default function ForecastPage() {
           current={currentMetrics}
           previous={previousMetrics}
           onMetricClick={(metric, value, context) => {
-            // For pipe_gen, add the current week's deals to the context
+            // For pipe_gen, show all deals created this quarter (QTD)
             if (metric === 'pipe_gen') {
-              const liveWeek = quarterSeries.find(w => w.isLive);
-              if (liveWeek) {
-                const weekStart = new Date(liveWeek.snapshot_date);
-                weekStart.setHours(0, 0, 0, 0);
-                const weekEnd = new Date(weekStart);
-                weekEnd.setDate(weekStart.getDate() + 6);
-                weekEnd.setHours(23, 59, 59, 999);
+              const nowPg = new Date();
+              const fyMonthPg = fiscalYearStartMonth - 1;
+              const adjMonthPg = (nowPg.getMonth() - fyMonthPg + 12) % 12;
+              const fqPg = Math.floor(adjMonthPg / 3) + 1;
+              const qStartPg = new Date(nowPg.getFullYear(), fyMonthPg + (fqPg - 1) * 3, 1);
+              if (qStartPg > nowPg) qStartPg.setFullYear(qStartPg.getFullYear() - 1);
 
-                const dealsInWeek = deals.filter(d => {
-                  const createdDate = new Date(d.created_at);
-                  return createdDate >= weekStart && createdDate <= weekEnd;
-                });
+              const dealsThisQuarter = deals.filter(d => {
+                const createdDate = (d as any).created_at ? new Date((d as any).created_at) : null;
+                return createdDate && createdDate >= qStartPg && createdDate <= nowPg;
+              });
 
-                context = {
-                  ...context,
-                  deals: dealsInWeek,
-                  week_label: new Date(liveWeek.snapshot_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-                  week_start: weekStart.toISOString(),
-                  week_end: weekEnd.toISOString(),
-                };
-              }
+              context = {
+                ...context,
+                deals: dealsThisQuarter,
+                week_label: 'Quarter to Date',
+                week_start: qStartPg.toISOString(),
+                week_end: nowPg.toISOString(),
+              };
             }
             setMathPanel({ metric, value, context });
           }}

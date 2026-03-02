@@ -14,6 +14,7 @@ interface Snapshot {
   mc_p10?: number;
   mc_p90?: number;
   closed_won?: number;
+  closed_deal_count?: number;
   pipeline_total?: number;
   quota?: number;
   pipe_gen?: number;
@@ -161,6 +162,7 @@ export default function MetricCards({ current, previous, onMetricClick }: Metric
         // Build formula context
         const formulaContext: FormulaContext = {
           dealCount: current.deal_count,
+          closedDealCount: current.closed_deal_count,
           quota: current.quota,
           closedWon: current.closed_won,
           simulations: 10000,

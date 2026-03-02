@@ -349,25 +349,37 @@ export function getBreakdownData(
       const totalCreated = pipeGenDeals.reduce((s, d) => s + d.amount, 0);
       const weeklyAvg = pipeGenDeals.length > 0 ? totalCreated / 8 : 0;
 
-      const isSpecificWeek = (ctx as any).week_label;
-      const title = isSpecificWeek
-        ? `Pipeline Generated: ${fmt(value)} (Week of ${(ctx as any).week_label})`
-        : `Pipeline Generated: ${fmt(value)}`;
-      const explanation = isSpecificWeek
-        ? `Sum of amount for all deals created within the week ending ${(ctx as any).week_label}, regardless of current stage or status.`
-        : 'Sum of amount for all deals created within the trailing 8-week window, regardless of current stage or status. This measures raw pipeline creation velocity.';
-      const inputs = isSpecificWeek
+      const weekLabel = (ctx as any).week_label as string | undefined;
+      const isQTD = weekLabel === 'Quarter to Date';
+      const isSpecificWeek = weekLabel && !isQTD;
+      const title = isQTD
+        ? `Pipeline Generated: ${fmt(value)} (Quarter to Date)`
+        : isSpecificWeek
+          ? `Pipeline Generated: ${fmt(value)} (Week of ${weekLabel})`
+          : `Pipeline Generated: ${fmt(value)}`;
+      const explanation = isQTD
+        ? 'Sum of amount for all deals created since the start of this fiscal quarter, regardless of current stage or status.'
+        : isSpecificWeek
+          ? `Sum of amount for all deals created within the week ending ${weekLabel}, regardless of current stage or status.`
+          : 'Sum of amount for all deals created within the trailing 8-week window, regardless of current stage or status. This measures raw pipeline creation velocity.';
+      const inputs = isQTD
         ? [
-            { label: 'Week ending', value: (ctx as any).week_label },
+            { label: 'Period', value: 'Quarter to Date' },
             { label: 'Total created', value: fmt(totalCreated) },
             { label: 'Deals created', value: String(pipeGenDeals.length) },
           ]
-        : [
-            { label: 'Trailing period', value: '8 weeks' },
-            { label: 'Total created', value: fmt(totalCreated) },
-            { label: 'Weekly average', value: weeklyAvg > 0 ? `${fmt(weeklyAvg)}/wk` : 'N/A' },
-            { label: 'Deals created', value: String(pipeGenDeals.length) },
-          ];
+        : isSpecificWeek
+          ? [
+              { label: 'Week ending', value: weekLabel! },
+              { label: 'Total created', value: fmt(totalCreated) },
+              { label: 'Deals created', value: String(pipeGenDeals.length) },
+            ]
+          : [
+              { label: 'Trailing period', value: '8 weeks' },
+              { label: 'Total created', value: fmt(totalCreated) },
+              { label: 'Weekly average', value: weeklyAvg > 0 ? `${fmt(weeklyAvg)}/wk` : 'N/A' },
+              { label: 'Deals created', value: String(pipeGenDeals.length) },
+            ];
 
       return {
         title,
