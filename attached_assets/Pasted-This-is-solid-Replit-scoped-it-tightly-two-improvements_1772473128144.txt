@@ -1,0 +1,49 @@
+This is solid. Replit scoped it tightly — two improvements, four tasks, no scope creep into the deferred items. A few things I'd flag:
+
+**The stage-relative recency query has a join logic issue.** The query filters `d.stage_normalized = 'closed_won'` to only look at closed-won deals, which is correct — you want to learn normal stage durations from deals that actually converted. But `dsh.stage_normalized` is the stage the deal *passed through*, not the deal's final state. The query is saying "for deals that eventually won, how long did they spend in each stage?" That's exactly right. Just want to confirm the join is `dsh.deal_id = d.id` and not accidentally joining on stage — looks correct as written.
+
+**The percentile-to-quintile mapping is inverted from what you'd expect.** The spec says p25/p50/p75/p90 become R5/R4/R3/R2 breakpoints. That means a deal whose recency days are below p25 of the stage's typical duration gets R5 (best), and above p90 gets R1 (worst). This is the right inversion — lower recency days = more recently touched = healthier. But the default arrays need to follow the same convention. The defaults `discovery: [3, 7, 10, 14]` mean: under 3 days = R5, 3-7 = R4, 7-10 = R3, 10-14 = R2, over 14 = R1. For discovery that feels right. For `awareness: [14, 21, 30, 45]` — under 14 days = R5, over 45 = R1. Also feels right for a long procurement stage.
+
+**One thing missing: what happens when `stage_normalized` is NULL or unmapped.** Deals that haven't been through workspace config inference might have raw stage names that don't match the normalized keys. The function needs a fallback chain: look up by `stage_normalized` → if not found, try `stage_raw` against the default map → if still not found, use `DEFAULT_GLOBAL`. Replit's spec mentions the global default as "last resort" but doesn't explicitly handle the null/unmapped case in the function signature.
+
+**The threading multiplier query assumes `deal_contacts` is populated.** Your codebase audit shows 8,274 rows in deal_contacts, which is healthy for the existing clients. But for a new workspace where the Closed Deal Enrichment skill hasn't run yet, `deal_contacts` will be empty and every deal gets `contactCount = 0` → threading factor 0.6 → frequency penalty across the board. That's actively misleading — it's not that deals are single-threaded, it's that contact resolution hasn't happened yet.
+
+Add a coverage check similar to the RFM activity coverage pre-check:
+
+```typescript
+const dealContactCoverage = dealsWithContacts / totalOpenDeals;
+if (dealContactCoverage < 0.3) {
+  // Skip threading multiplier entirely — apply factor 1.0 to all
+  // Add caveat: "Contact data insufficient for threading analysis"
+}
+```
+
+This follows the same degradation philosophy as the RFM mode tiers (full_rfm / rm_only / r_only). Don't penalize when the data doesn't exist yet.
+
+**The `has_executive` boolean in the threading query uses `buying_role IN ('economic_buyer', 'champion', 'decision_maker', 'executive_sponsor')`.** That's four roles. The ICP enrichment spec defines buying roles — make sure these string values match exactly what the Closed Deal Enrichment skill writes to `deal_contacts.buying_role`. If the enrichment skill writes `'Economic Buyer'` (title case) and the query checks `'economic_buyer'` (snake case), the bonus never fires. Worth a quick check against the actual data:
+
+```sql
+SELECT DISTINCT buying_role, COUNT(*) 
+FROM deal_contacts 
+WHERE workspace_id = $1 
+GROUP BY buying_role
+```
+
+**The `rfm_recency_stage_threshold` column is smart for debugging** but consider storing the full context — not just which threshold was used, but which stage drove it. A nullable `rfm_recency_stage TEXT` column alongside the numeric threshold would let you see "this deal scored R3 because it's in `awareness` where 30 days is p75" vs just "threshold was 30." Costs one extra column, saves significant debugging time when a user questions why a deal isn't flagged.
+
+**T004 is underscoped.** The skill description update is necessary but not sufficient. The RFM build prompt's Step 7 (Three Evidence Layers) and the tri-signal addendum's narrative synthesis prompts both reference recency in flat terms — "34 days since last activity (bottom 20% of your pipeline)." With stage-relative recency, the evidence layer should say "34 days since last activity — normal for Awareness stage (median: 40 days)" or "34 days since last activity — critical for Proposal stage (median: 13 days)." The synthesis prompt context block needs the stage name and the stage threshold so Claude can frame the recency appropriately. Without this, the model scores correctly but the explanation still reads as if 34 days is universally bad.
+
+Add to T004: update the RFM score card template (Layer 1 evidence) to include stage context:
+
+```
+Recency: {{recencyDays}} days since last activity
+  {{#if stageRelative}}
+  Stage context: {{stageNormalized}} median duration is {{stageMedian}} days.
+  {{#if recencyHealthy}}This gap is normal for this stage.{{/if}}
+  {{#if recencyCritical}}This exceeds the 90th percentile for this stage — unusual.{{/if}}
+  {{/if}}
+```
+
+Otherwise you get the exact false alarm the feature is designed to prevent — the model scores R3 (healthy) but the Slack message still says "34 days cold" with a warning emoji because the narrative template doesn't know the score is stage-adjusted.
+
+**Overall: green light.** The four tasks are correctly sequenced, the acceptance criteria are testable, and the deferred items (directionality, topic progression) are the right things to defer. Ship it.

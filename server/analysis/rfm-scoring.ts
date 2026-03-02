@@ -27,6 +27,9 @@ export interface RFMScore {
   rfmLabel: string;
   mode: 'full_rfm' | 'rm_only' | 'r_only';
   isReliable: boolean;
+  stageNormalized: string | null;
+  stageThreshold: number | null;
+  threadingFactor: number | null;
 }
 
 export interface RFMQuintileBreakpoints {
@@ -59,6 +62,18 @@ const DEFAULT_ENGAGEMENT_WEIGHTS = {
   note: 1,
 };
 
+const STAGE_RECENCY_DEFAULTS: Record<string, number[]> = {
+  discovery:     [3,  7,  10, 14],
+  qualification: [5,  10, 14, 21],
+  evaluation:    [7,  14, 21, 30],
+  proposal:      [3,  5,  7,  14],
+  negotiation:   [7,  14, 21, 30],
+  awareness:     [14, 21, 30, 45],
+  decision:      [14, 21, 30, 45],
+};
+
+const DEFAULT_GLOBAL_RECENCY: number[] = [7, 14, 21, 30];
+
 const rfmMetaCache = new Map<string, { meta: RFMWorkspaceMeta; cachedAt: number }>();
 const RFM_META_TTL_MS = 6 * 60 * 60 * 1000;
 
@@ -75,6 +90,9 @@ export async function ensureRFMColumns(): Promise<void> {
     ALTER TABLE deals ADD COLUMN IF NOT EXISTS rfm_label TEXT;
     ALTER TABLE deals ADD COLUMN IF NOT EXISTS rfm_mode TEXT;
     ALTER TABLE deals ADD COLUMN IF NOT EXISTS rfm_scored_at TIMESTAMPTZ;
+    ALTER TABLE deals ADD COLUMN IF NOT EXISTS rfm_recency_stage TEXT;
+    ALTER TABLE deals ADD COLUMN IF NOT EXISTS rfm_recency_stage_threshold NUMERIC;
+    ALTER TABLE deals ADD COLUMN IF NOT EXISTS rfm_threading_factor NUMERIC;
   `;
   await query(sql, []);
 }
@@ -103,9 +121,9 @@ export async function assessActivityCoverage(workspaceId: string): Promise<Activ
          AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')`,
       [workspaceId]
     ),
-    query<{ type: string }>(
-      `SELECT DISTINCT type FROM activities
-       WHERE workspace_id = $1 AND timestamp > NOW() - INTERVAL '90 days' AND type IS NOT NULL`,
+    query<{ activity_type: string }>(
+      `SELECT DISTINCT activity_type FROM activities
+       WHERE workspace_id = $1 AND timestamp > NOW() - INTERVAL '90 days' AND activity_type IS NOT NULL`,
       [workspaceId]
     ),
     query<{ linked_conversations: string }>(
@@ -119,7 +137,7 @@ export async function assessActivityCoverage(workspaceId: string): Promise<Activ
   const dealsWithActivityLast30d = Number(recentRes.rows[0]?.deals_with_recent ?? 0);
   const dealsWithActivityEver = Number(everRes.rows[0]?.deals_with_any ?? 0);
   const coveragePercent = totalOpenDeals > 0 ? dealsWithActivityLast30d / totalOpenDeals : 0;
-  const activitySources = typesRes.rows.map(r => r.type);
+  const activitySources = typesRes.rows.map(r => r.activity_type);
   const hasConversationData = Number(convoRes.rows[0]?.linked_conversations ?? 0) > 0;
 
   let mode: 'full_rfm' | 'rm_only' | 'r_only';
@@ -155,7 +173,7 @@ export async function assessActivityCoverage(workspaceId: string): Promise<Activ
   return { mode, totalOpenDeals, dealsWithActivityLast30d, dealsWithActivityEver, coveragePercent, activitySources, hasConversationData, caveats };
 }
 
-type RawRFMValues = { recencyDays: number; recencySource: string; frequencyCount: number; monetaryValue: number };
+type RawRFMValues = { recencyDays: number; recencySource: string; frequencyCount: number; monetaryValue: number; stageNormalized: string };
 
 export async function computeRawRFMValues(
   workspaceId: string,
@@ -169,10 +187,12 @@ export async function computeRawRFMValues(
     amount: string | null;
     last_touch_date: string | null;
     recency_source: string;
+    stage_normalized: string | null;
   }>(
     `SELECT
       d.id AS deal_id,
       d.amount,
+      d.stage_normalized,
       COALESCE(
         latest_activity.last_date,
         latest_convo.last_date,
@@ -218,6 +238,7 @@ export async function computeRawRFMValues(
       recencySource: row.recency_source,
       frequencyCount: 0,
       monetaryValue: Number(row.amount ?? 0),
+      stageNormalized: row.stage_normalized ?? 'unknown',
     });
   }
 
@@ -230,7 +251,7 @@ export async function computeRawRFMValues(
       `SELECT
         a.deal_id,
         SUM(
-          CASE a.type
+          CASE a.activity_type
             WHEN 'meeting' THEN $2
             WHEN 'call' THEN $3
             WHEN 'email' THEN $4
@@ -358,6 +379,109 @@ function assignRFMLabel(r: number, f: number | null, m: number, mode: string): s
     case 'D': return 'Losing Momentum';
     default: return 'Likely Dead';
   }
+}
+
+async function computeStageRecencyThresholds(
+  workspaceId: string
+): Promise<Map<string, number[]>> {
+  const result = await query<{
+    stage_normalized: string;
+    p25: string;
+    p50: string;
+    p75: string;
+    p90: string;
+    sample_size: string;
+  }>(
+    `SELECT
+      dsh.stage_normalized,
+      PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY dsh.duration_days) AS p25,
+      PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY dsh.duration_days) AS p50,
+      PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY dsh.duration_days) AS p75,
+      PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY dsh.duration_days) AS p90,
+      COUNT(*) AS sample_size
+    FROM deal_stage_history dsh
+    JOIN deals d ON d.id = dsh.deal_id
+    WHERE dsh.workspace_id = $1
+      AND d.stage_normalized = 'closed_won'
+      AND dsh.stage_normalized NOT IN ('closed_won', 'closed_lost')
+      AND dsh.duration_days BETWEEN 0 AND 365
+    GROUP BY dsh.stage_normalized
+    HAVING COUNT(*) >= 5`,
+    [workspaceId]
+  );
+
+  const map = new Map<string, number[]>();
+  for (const row of result.rows) {
+    const p25 = Math.round(Number(row.p25));
+    const p50 = Math.round(Number(row.p50));
+    const p75 = Math.round(Number(row.p75));
+    const p90 = Math.round(Number(row.p90));
+    map.set(row.stage_normalized, [p25, p50, p75, p90]);
+  }
+  return map;
+}
+
+function assignStageRecencyQuintile(
+  recencyDays: number,
+  stageNormalized: string,
+  stageThresholds: Map<string, number[]>
+): { quintile: number; threshold: number } {
+  const breakpoints =
+    stageThresholds.get(stageNormalized) ??
+    STAGE_RECENCY_DEFAULTS[stageNormalized] ??
+    DEFAULT_GLOBAL_RECENCY;
+
+  let quintile: number;
+  if (recencyDays <= breakpoints[0]) quintile = 5;
+  else if (recencyDays <= breakpoints[1]) quintile = 4;
+  else if (recencyDays <= breakpoints[2]) quintile = 3;
+  else if (recencyDays <= breakpoints[3]) quintile = 2;
+  else quintile = 1;
+
+  return { quintile, threshold: breakpoints[3] };
+}
+
+async function computeThreadingData(
+  workspaceId: string
+): Promise<{ map: Map<string, { contactCount: number; hasExecutive: boolean }>; coverage: number; totalDeals: number }> {
+  const [contactsResult, totalResult] = await Promise.all([
+    query<{ deal_id: string; contact_count: string; has_executive: boolean }>(
+      `SELECT
+        dc.deal_id,
+        COUNT(DISTINCT dc.contact_id) AS contact_count,
+        BOOL_OR(dc.buying_role = ANY($2)) AS has_executive
+      FROM deal_contacts dc
+      JOIN deals d ON d.id = dc.deal_id AND d.workspace_id = dc.workspace_id
+      WHERE dc.workspace_id = $1
+        AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+      GROUP BY dc.deal_id`,
+      [workspaceId, ['economic_buyer', 'champion', 'decision_maker', 'executive_sponsor']]
+    ),
+    query<{ total: string }>(
+      `SELECT COUNT(*) AS total FROM deals
+       WHERE workspace_id = $1 AND stage_normalized NOT IN ('closed_won', 'closed_lost')`,
+      [workspaceId]
+    ),
+  ]);
+
+  const totalDeals = Number(totalResult.rows[0]?.total ?? 0);
+  const map = new Map<string, { contactCount: number; hasExecutive: boolean }>();
+  for (const row of contactsResult.rows) {
+    map.set(row.deal_id, {
+      contactCount: Number(row.contact_count),
+      hasExecutive: Boolean(row.has_executive),
+    });
+  }
+
+  const coverage = totalDeals > 0 ? map.size / totalDeals : 0;
+  return { map, coverage, totalDeals };
+}
+
+function calcThreadingFactor(contactCount: number, hasExecutive: boolean): number {
+  if (contactCount >= 3 && hasExecutive) return 1.2;
+  if (contactCount >= 3) return 1.0;
+  if (contactCount === 2) return 0.8;
+  return 0.6;
 }
 
 export async function computeHistoricalWinRatesByRFM(
@@ -500,12 +624,16 @@ async function batchUpdateRFMScores(workspaceId: string, scores: Map<string, RFM
             rfm_grade = $8,
             rfm_label = $9,
             rfm_mode = $10,
+            rfm_recency_stage = $11,
+            rfm_recency_stage_threshold = $12,
+            rfm_threading_factor = $13,
             rfm_scored_at = NOW()
-          WHERE id = $11 AND workspace_id = $12`,
+          WHERE id = $14 AND workspace_id = $15`,
           [
             s.recencyDays, s.recencyQuintile, s.recencySource,
             s.frequencyCount, s.frequencyQuintile, s.monetaryQuintile,
             s.rfmSegment, s.rfmGrade, s.rfmLabel, s.mode,
+            s.stageNormalized, s.stageThreshold, s.threadingFactor,
             dealId, workspaceId,
           ]
         );
@@ -553,18 +681,57 @@ export async function computeAndStoreRFMScores(workspaceId: string): Promise<{
   const windowStart = new Date();
   windowStart.setMonth(windowStart.getMonth() - 24);
 
+  const [stageThresholds, threadingData] = await Promise.all([
+    computeStageRecencyThresholds(workspaceId),
+    computeThreadingData(workspaceId),
+  ]);
+
+  const useThreading = threadingData.coverage >= 0.3;
+  if (!useThreading) {
+    coverage.caveats.push(
+      `Contact data covers ${Math.round(threadingData.coverage * 100)}% of open deals. ` +
+      'Threading multiplier disabled — run the Contact Role Resolution skill to enable multi-stakeholder scoring.'
+    );
+  }
+
+  const adjustedFrequencyMap = new Map<string, { adjusted: number; factor: number | null }>();
+  if (mode !== 'r_only') {
+    for (const [dealId, raw] of rawValues) {
+      if (!useThreading) {
+        adjustedFrequencyMap.set(dealId, { adjusted: raw.frequencyCount, factor: null });
+      } else {
+        const td = threadingData.map.get(dealId);
+        const factor = td ? calcThreadingFactor(td.contactCount, td.hasExecutive) : 0.6;
+        adjustedFrequencyMap.set(dealId, { adjusted: raw.frequencyCount * factor, factor });
+      }
+    }
+  }
+
+  const frequencyValuesForBreakpoints = mode !== 'r_only'
+    ? [...adjustedFrequencyMap.values()].map(v => v.adjusted)
+    : null;
+
   const breakpoints: RFMQuintileBreakpoints = {
     recency: computeQuintileBreakpoints(recencyValues, 'recency'),
-    frequency: frequencyValues ? computeQuintileBreakpoints(frequencyValues, 'frequency') : null,
+    frequency: frequencyValuesForBreakpoints ? computeQuintileBreakpoints(frequencyValuesForBreakpoints, 'frequency') : null,
     monetary: monetaryValues.length > 0 ? computeQuintileBreakpoints(monetaryValues, 'monetary') : [0, 0, 0, 0],
     computedFrom: { dealCount: rawValues.size, windowStart, windowEnd: new Date() },
   };
 
   const scores = new Map<string, RFMScore>();
   for (const [dealId, raw] of rawValues) {
-    const r = assignRecencyQuintile(raw.recencyDays, breakpoints.recency);
+    const { quintile: r, threshold: stageThreshold } = assignStageRecencyQuintile(
+      raw.recencyDays,
+      raw.stageNormalized,
+      stageThresholds
+    );
+
+    const freqEntry = adjustedFrequencyMap.get(dealId);
+    const adjustedFrequency = freqEntry?.adjusted ?? raw.frequencyCount;
+    const threadingFactor = freqEntry?.factor ?? null;
+
     const f = mode !== 'r_only' && breakpoints.frequency !== null
-      ? assignQuintile(raw.frequencyCount, breakpoints.frequency)
+      ? assignQuintile(adjustedFrequency, breakpoints.frequency)
       : null;
     const m = raw.monetaryValue > 0 ? assignQuintile(raw.monetaryValue, breakpoints.monetary) : 1;
 
@@ -582,6 +749,9 @@ export async function computeAndStoreRFMScores(workspaceId: string): Promise<{
       rfmLabel: assignRFMLabel(r, f, m, mode),
       mode,
       isReliable: raw.recencySource !== 'record_update',
+      stageNormalized: raw.stageNormalized,
+      stageThreshold,
+      threadingFactor,
     });
   }
 
@@ -636,8 +806,11 @@ export function renderRFMScoreCard(
     rfm_label: string;
     rfm_recency_days: number;
     rfm_recency_quintile: number;
+    rfm_recency_stage?: string | null;
+    rfm_recency_stage_threshold?: number | null;
     rfm_frequency_count: number;
     rfm_frequency_quintile: number | null;
+    rfm_threading_factor?: number | null;
     rfm_monetary_quintile: number;
     amount: number;
   }
@@ -648,11 +821,30 @@ export function renderRFMScoreCard(
   const recencyEmoji = deal.rfm_recency_quintile >= 4 ? '✅' : deal.rfm_recency_quintile >= 2 ? '⚠️' : '🔴';
   const days = Math.round(deal.rfm_recency_days);
   const recencyContext = days <= 1 ? 'today' : `${days} days ago`;
-  lines.push(`  ${recencyEmoji} Recency: Last touch ${recencyContext}`);
+
+  let stageContext = '';
+  if (deal.rfm_recency_stage && deal.rfm_recency_stage !== 'unknown') {
+    const stageName = deal.rfm_recency_stage.replace(/_/g, ' ');
+    const threshold = deal.rfm_recency_stage_threshold;
+    if (threshold != null) {
+      if (deal.rfm_recency_quintile >= 3) {
+        stageContext = ` — normal for ${stageName} (threshold: ${threshold}d)`;
+      } else {
+        stageContext = ` — exceeds ${stageName} threshold (${threshold}d)`;
+      }
+    } else {
+      stageContext = ` (stage: ${stageName})`;
+    }
+  }
+
+  lines.push(`  ${recencyEmoji} Recency: Last touch ${recencyContext}${stageContext}`);
 
   if (deal.rfm_frequency_quintile !== null) {
     const freqEmoji = deal.rfm_frequency_quintile >= 4 ? '✅' : deal.rfm_frequency_quintile >= 2 ? '⚠️' : '🔴';
-    lines.push(`  ${freqEmoji} Activity: ${Math.round(deal.rfm_frequency_count)} touchpoints in last 30d`);
+    const threadingNote = deal.rfm_threading_factor != null && deal.rfm_threading_factor !== 1.0
+      ? ` (×${deal.rfm_threading_factor.toFixed(1)} threading)`
+      : '';
+    lines.push(`  ${freqEmoji} Activity: ${Math.round(deal.rfm_frequency_count)} touchpoints in last 30d${threadingNote}`);
   }
 
   const moneyEmoji = deal.rfm_monetary_quintile >= 4 ? '💰' : deal.rfm_monetary_quintile >= 2 ? '💵' : '📉';
