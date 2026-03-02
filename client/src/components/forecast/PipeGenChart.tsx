@@ -8,6 +8,7 @@ interface WeekData {
 
 interface PipeGenChartProps {
   weeks: WeekData[];
+  subtitle?: string;
 }
 
 function formatCurrency(value: number): string {
@@ -16,7 +17,7 @@ function formatCurrency(value: number): string {
   return `$${value.toFixed(0)}`;
 }
 
-export default function PipeGenChart({ weeks }: PipeGenChartProps) {
+export default function PipeGenChart({ weeks, subtitle }: PipeGenChartProps) {
   if (!weeks || weeks.length === 0) {
     return (
       <div
@@ -36,7 +37,7 @@ export default function PipeGenChart({ weeks }: PipeGenChartProps) {
     );
   }
 
-  const trailingWeeks = weeks.slice(-12);
+  const trailingWeeks = weeks.slice(-13);
   const maxVal = Math.max(...trailingWeeks.map(w => w.created), 1);
   const avg =
     trailingWeeks.reduce((s, w) => s + w.created, 0) / trailingWeeks.length;
@@ -76,7 +77,7 @@ export default function PipeGenChart({ weeks }: PipeGenChartProps) {
         </div>
       </div>
       <div style={{ fontSize: 11, color: colors.textMuted, marginBottom: 16 }}>
-        Trailing 12 weeks
+        {subtitle ?? 'Trailing 13 weeks'}
       </div>
 
       <div style={{ position: 'relative', height: chartHeight }}>

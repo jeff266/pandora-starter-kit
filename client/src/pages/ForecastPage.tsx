@@ -275,15 +275,106 @@ export default function ForecastPage() {
     };
   }, [deals, dealsLoading, fiscalYearStartMonth, liveQuota, selectedPipeline]);
 
-  // Augment weekly snapshots with a live "Today" point when we don't have enough for a trend line
-  const augmentedSnapshots = useMemo((): SnapshotData[] => {
-    if (weeklySnapshots.length >= 2) return weeklySnapshots;
-    if (!liveSnapshot) return weeklySnapshots;
-    const todayStr = new Date().toDateString();
-    const hasToday = weeklySnapshots.some(s => new Date(s.snapshot_date).toDateString() === todayStr);
-    if (hasToday) return weeklySnapshots;
-    return [...weeklySnapshots, liveSnapshot];
-  }, [weeklySnapshots, liveSnapshot]);
+  // Quarter-level time series built entirely from deal data (filtered by pipeline).
+  // 13 Monday-aligned weekly buckets for the current fiscal quarter.
+  // This is the single source of truth for the chart, pipe gen bars, and pipe_gen metric card.
+  const quarterSeries = useMemo((): SnapshotData[] => {
+    const now = new Date();
+    const fyMonth = fiscalYearStartMonth - 1;
+    const adjustedMonth = (now.getMonth() - fyMonth + 12) % 12;
+    const fiscalQuarter = Math.floor(adjustedMonth / 3) + 1;
+    const fiscalQStart = new Date(now.getFullYear(), fyMonth + (fiscalQuarter - 1) * 3, 1);
+    if (fiscalQStart > now) fiscalQStart.setFullYear(fiscalQStart.getFullYear() - 1);
+
+    // Find the Monday on or before fiscalQStart for weekly alignment
+    const fyStartDay = fiscalQStart.getDay();
+    const daysBack = fyStartDay === 0 ? 6 : fyStartDay - 1;
+    const quarterMonday = new Date(fiscalQStart);
+    quarterMonday.setDate(fiscalQStart.getDate() - daysBack);
+    quarterMonday.setHours(0, 0, 0, 0);
+
+    // Pre-parse deal fields once for performance
+    const parsedDeals = deals.map(d => ({
+      d,
+      amt: typeof (d as any).amount === 'string' ? parseFloat((d as any).amount) || 0 : ((d as any).amount || 0),
+      closeDate: d.close_date ? new Date(d.close_date) : null,
+      createdAt: (d as any).created_at
+        ? new Date((d as any).created_at)
+        : (d as any).created_date ? new Date((d as any).created_date) : null,
+    }));
+
+    let runningClosedWon = 0;
+    const series: SnapshotData[] = [];
+
+    for (let w = 0; w < 13; w++) {
+      const weekStart = new Date(quarterMonday);
+      weekStart.setDate(quarterMonday.getDate() + w * 7);
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekStart.getDate() + 6);
+      weekEnd.setHours(23, 59, 59, 999);
+
+      const isCurrentWeek = weekStart <= now && now <= weekEnd;
+
+      let weekClosedWon = 0;
+      let weekPipeGen = 0;
+      let currentWeekPipeline = 0;
+      let currentWeekStageWeighted = 0;
+
+      for (const { d, amt, closeDate, createdAt } of parsedDeals) {
+        // Closed won this week: close_date in [weekStart, weekEnd] AND >= fiscalQStart
+        if (d.stage_normalized === 'closed_won' && closeDate) {
+          if (closeDate >= weekStart && closeDate <= weekEnd && closeDate >= fiscalQStart) {
+            weekClosedWon += amt;
+          }
+        }
+        // Pipe gen: any deal whose created_at falls in this week
+        if (createdAt && createdAt >= weekStart && createdAt <= weekEnd) {
+          weekPipeGen += amt;
+        }
+        // Open pipeline & stage weighted — only needed for current week
+        if (isCurrentWeek && d.stage_normalized !== 'closed_won' && d.stage_normalized !== 'closed_lost') {
+          currentWeekPipeline += amt;
+          const prob = d.probability > 1 ? d.probability / 100 : (d.probability > 0 ? d.probability : 0.3);
+          currentWeekStageWeighted += amt * prob;
+        }
+      }
+
+      runningClosedWon += weekClosedWon;
+
+      // Overlay MC data from any real snapshot that falls in this week
+      const matchSnap = weeklySnapshots.find(s => {
+        const sd = new Date(s.snapshot_date);
+        return sd >= weekStart && sd <= weekEnd;
+      });
+
+      series.push({
+        run_id: isCurrentWeek ? 'live-today' : `week-${w + 1}`,
+        snapshot_date: isCurrentWeek ? now.toISOString() : weekStart.toISOString(),
+        scope_id: selectedPipeline !== 'all' ? selectedPipeline : null,
+        // Stage weighted: show for current week only (open pipeline estimate)
+        stage_weighted_forecast: isCurrentWeek ? (runningClosedWon + currentWeekStageWeighted) : null,
+        category_weighted_forecast: matchSnap?.category_weighted_forecast ?? null,
+        monte_carlo_p50: matchSnap?.monte_carlo_p50 ?? null,
+        monte_carlo_p25: matchSnap?.monte_carlo_p25 ?? null,
+        monte_carlo_p75: matchSnap?.monte_carlo_p75 ?? null,
+        monte_carlo_p10: matchSnap?.monte_carlo_p10 ?? null,
+        monte_carlo_p90: matchSnap?.monte_carlo_p90 ?? null,
+        attainment: runningClosedWon,
+        quota: liveQuota,
+        total_pipeline: isCurrentWeek ? currentWeekPipeline : null,
+        weighted_pipeline: isCurrentWeek ? currentWeekStageWeighted : null,
+        deal_count: null,
+        pipe_gen_this_week: weekPipeGen || null,
+        pipe_gen_avg: null,
+        coverage_ratio: isCurrentWeek && liveQuota ? currentWeekPipeline / liveQuota : null,
+        by_rep: [],
+        annotation_count: matchSnap?.annotation_count ?? 0,
+        isLive: isCurrentWeek,
+      });
+    }
+
+    return series;
+  }, [deals, fiscalYearStartMonth, liveQuota, weeklySnapshots, selectedPipeline]);
 
   // MC data always comes from the latest real snapshot (skill run)
   // Pipeline-filtered metrics come from liveSnapshot when a specific pipeline is selected
@@ -299,6 +390,8 @@ export default function ForecastPage() {
     if (!pipelineMetricSource && !latestReal) return null;
     const src = pipelineMetricSource;
     const mcSrc = latestReal ?? src;
+    // Pipe gen always comes from quarterSeries current week so it matches the chart bar
+    const liveWeek = quarterSeries.find(w => w.isLive);
     return {
       snapshot_date: src?.snapshot_date ?? new Date().toISOString(),
       mc_p50: mcSrc?.monte_carlo_p50 ?? undefined,
@@ -307,14 +400,17 @@ export default function ForecastPage() {
       closed_won: src?.attainment ?? undefined,
       pipeline_total: src?.total_pipeline ?? undefined,
       quota: src?.quota ?? liveQuota ?? undefined,
-      pipe_gen: src?.pipe_gen_this_week ?? undefined,
+      pipe_gen: liveWeek?.pipe_gen_this_week ?? src?.pipe_gen_this_week ?? undefined,
       forecast_weighted: src?.stage_weighted_forecast ?? undefined,
       category_weighted: src?.category_weighted_forecast ?? undefined,
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pipelineMetricSource, latestReal, liveQuota]);
+  }, [pipelineMetricSource, latestReal, liveQuota, quarterSeries]);
 
   const previousMetrics = useMemo(() => {
+    // When a pipeline is selected the "previous" snapshot is all-pipeline — comparing it against
+    // pipeline-filtered current values would produce misleading trend arrows, so we hide it.
+    if (selectedPipeline !== 'all') return null;
     if (!previous) return null;
     return {
       snapshot_date: previous.snapshot_date,
@@ -328,9 +424,10 @@ export default function ForecastPage() {
       forecast_weighted: previous.stage_weighted_forecast ?? undefined,
       category_weighted: previous.category_weighted_forecast ?? undefined,
     };
-  }, [previous]);
+  }, [previous, selectedPipeline]);
 
-  const repRows: RepRow[] = useMemo(() => {
+  // Rep rows from skill snapshot (all-pipeline, used when no filter is active)
+  const snapshotRepRows: RepRow[] = useMemo(() => {
     if (!latest?.by_rep) return [];
     return latest.by_rep.map((r: any) => ({
       rep_name: anon.person(r.rep_name || r.owner_name || 'Unknown'),
@@ -344,6 +441,60 @@ export default function ForecastPage() {
       quota: r.quota || 0,
     }));
   }, [latest, anon]);
+
+  // Rep rows computed from live deal data when a pipeline filter is active
+  const dealRepRows: RepRow[] = useMemo(() => {
+    if (selectedPipeline === 'all' || deals.length === 0) return [];
+
+    const now = new Date();
+    const fyMonth = fiscalYearStartMonth - 1;
+    const adjustedMonth = (now.getMonth() - fyMonth + 12) % 12;
+    const fiscalQuarter = Math.floor(adjustedMonth / 3) + 1;
+    const fiscalQStart = new Date(now.getFullYear(), fyMonth + (fiscalQuarter - 1) * 3, 1);
+    if (fiscalQStart > now) fiscalQStart.setFullYear(fiscalQStart.getFullYear() - 1);
+    const fiscalQEnd = new Date(fiscalQStart.getFullYear(), fiscalQStart.getMonth() + 3, 1);
+
+    const byOwner = new Map<string, { name: string; email: string; closedWon: number; pipeline: number; stageWeighted: number; dealCount: number }>();
+
+    for (const d of deals) {
+      const email = (d as any).owner_email || (d as any).owner || '';
+      const name = (d as any).owner_name || (d as any).owner || 'Unknown';
+      const amt = typeof (d as any).amount === 'string' ? parseFloat((d as any).amount) || 0 : ((d as any).amount || 0);
+      if (!byOwner.has(email)) byOwner.set(email, { name, email, closedWon: 0, pipeline: 0, stageWeighted: 0, dealCount: 0 });
+      const row = byOwner.get(email)!;
+
+      if (d.stage_normalized === 'closed_won') {
+        const closeDate = d.close_date ? new Date(d.close_date) : null;
+        if (closeDate && closeDate >= fiscalQStart && closeDate < fiscalQEnd) {
+          row.closedWon += amt;
+          row.dealCount += 1;
+        }
+      } else if (d.stage_normalized !== 'closed_lost') {
+        row.pipeline += amt;
+        const prob = d.probability > 1 ? d.probability / 100 : (d.probability > 0 ? d.probability : 0.3);
+        row.stageWeighted += amt * prob;
+        row.dealCount += 1;
+      }
+    }
+
+    return Array.from(byOwner.values())
+      .filter(r => r.dealCount > 0)
+      .map(r => ({
+        rep_name: anon.person(r.name),
+        rep_email: r.email,
+        deals: r.dealCount,
+        pipeline: r.pipeline,
+        stage_weighted: r.stageWeighted,
+        category_weighted: 0,
+        mc_p50: 0,
+        actual: r.closedWon,
+        quota: 0,
+      }))
+      .sort((a, b) => (b.pipeline + b.actual) - (a.pipeline + a.actual));
+  }, [deals, selectedPipeline, fiscalYearStartMonth, anon]);
+
+  // Use deal-derived rows when a pipeline filter is active; fall back to skill snapshot rows
+  const repRows: RepRow[] = selectedPipeline !== 'all' ? dealRepRows : snapshotRepRows;
 
   const isAdmin = currentWorkspace?.role === 'admin';
   const userEmail = user?.email || '';
@@ -393,33 +544,13 @@ export default function ForecastPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pipelineMetricSource, quota, weekInfo]);
 
+  // Pipe gen bars — derived from quarterSeries so they react to the pipeline filter
   const pipeGenWeeks = useMemo(() => {
-    const WEEKS = 12;
-    const now = new Date();
-    // Build Monday-based week buckets for the last 12 weeks
-    const weeks: { week_label: string; created: number }[] = [];
-    for (let w = WEEKS - 1; w >= 0; w--) {
-      const monday = new Date(now);
-      const dayOfWeek = now.getDay();
-      monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1) - w * 7);
-      monday.setHours(0, 0, 0, 0);
-      const sunday = new Date(monday);
-      sunday.setDate(monday.getDate() + 6);
-      sunday.setHours(23, 59, 59, 999);
-
-      // Find any snapshot whose date falls within this week
-      const match = augmentedSnapshots.find(s => {
-        const d = new Date(s.snapshot_date);
-        return d >= monday && d <= sunday;
-      });
-
-      weeks.push({
-        week_label: monday.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        created: match?.pipe_gen_this_week || 0,
-      });
-    }
-    return weeks;
-  }, [augmentedSnapshots]);
+    return quarterSeries.map(w => ({
+      week_label: new Date(w.snapshot_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      created: w.pipe_gen_this_week || 0,
+    }));
+  }, [quarterSeries]);
 
   const runForecastSkills = async () => {
     setRunningForecast(true);
@@ -683,7 +814,7 @@ export default function ForecastPage() {
             <div style={{ flex: 1, minWidth: 0, width: isMobile ? '100%' : 'auto' }}>
               <SectionErrorBoundary fallbackMessage="Failed to load forecast chart.">
                 <ForecastChart
-                  snapshots={augmentedSnapshots}
+                  snapshots={quarterSeries}
                   quota={quota}
                   isRefreshing={runningForecast}
                   onPointClick={(snapshot, metric) => {
@@ -738,7 +869,10 @@ export default function ForecastPage() {
 
         {pipeGenWeeks.length > 0 && (
           <SectionErrorBoundary fallbackMessage="Failed to load pipe gen chart.">
-            <PipeGenChart weeks={pipeGenWeeks} />
+            <PipeGenChart
+              weeks={pipeGenWeeks}
+              subtitle={`${weekInfo.label} · by Week`}
+            />
           </SectionErrorBoundary>
         )}
       </div>
