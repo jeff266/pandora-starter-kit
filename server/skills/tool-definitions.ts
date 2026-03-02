@@ -55,6 +55,7 @@ import {
   type CustomFieldDiscoveryResult,
 } from './compute/custom-field-discovery.js';
 import { scoreLeads } from './compute/lead-scoring.js';
+import { computeAndStoreRFMScores, computeAndStoreTTEProbs } from '../analysis/rfm-scoring.js';
 import { resolveContactRoles, type ResolutionResult } from './compute/contact-role-resolution.js';
 import { discoverICP, type ICPDiscoveryResult } from './compute/icp-discovery.js';
 import {
@@ -4184,6 +4185,36 @@ const scoreLeadsTool: ToolDefinition = {
 };
 
 // ============================================================================
+// RFM + TTE Scoring Tool
+// ============================================================================
+
+const computeRFMScoresTool: ToolDefinition = {
+  name: 'computeRFMScores',
+  description: 'Compute RFM behavioral grades (A–F) and TTE survival-model close probabilities for all deals in the workspace. Writes rfm_grade, rfm_label, rfm_recency_days, rfm_frequency_count, tte_conditional_prob, and related fields to the deals table.',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('computeRFMScores', async () => {
+      const rfm = await computeAndStoreRFMScores(context.workspaceId);
+      console.log(`[RFM Scoring] Scored ${rfm.scored} deals (mode: ${rfm.mode})`);
+
+      await computeAndStoreTTEProbs(context.workspaceId);
+      console.log(`[TTE Scoring] Computed TTE probabilities for workspace ${context.workspaceId}`);
+
+      return {
+        rfm_scored: rfm.scored,
+        rfm_mode: rfm.mode,
+        tte_computed: true,
+      };
+    }, params);
+  },
+};
+
+// ============================================================================
 // Contact Role Resolution Tools
 // ============================================================================
 
@@ -7705,6 +7736,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['discoverCustomFields', discoverCustomFieldsTool],
   ['generateCustomFieldReport', generateCustomFieldReportTool],
   ['scoreLeads', scoreLeadsTool],
+  ['computeRFMScores', computeRFMScoresTool],
   ['resolveContactRoles', resolveContactRolesTool],
   ['generateContactRoleReport', generateContactRoleReportTool],
   ['discoverICP', discoverICPTool],

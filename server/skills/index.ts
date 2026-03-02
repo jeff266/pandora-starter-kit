@@ -32,6 +32,7 @@ import { pipelineGenForecastSkill } from './library/pipeline-gen-forecast.js';
 import { competitiveIntelligenceSkill } from './library/competitive-intelligence.js';
 import { forecastAccuracyTrackingSkill } from './library/forecast-accuracy-tracking.js';
 import { dealScoringModelSkill } from './library/deal-scoring-model.js';
+import { dealRfmScoringSkill } from './library/deal-rfm-scoring.js';
 import { monteCarloForecastSkill } from './library/monte-carlo-forecast.js';
 import { pipelineContributionForecastSkill } from './library/pipeline-contribution-forecast.js';
 
@@ -171,6 +172,7 @@ export function registerBuiltInSkills(): void {
   registry.register(competitiveIntelligenceSkill);
   registry.register(forecastAccuracyTrackingSkill);
   registry.register(dealScoringModelSkill);
+  registry.register(dealRfmScoringSkill);
   registry.register(monteCarloForecastSkill);
   registry.register(pipelineContributionForecastSkill);
 

@@ -388,7 +388,7 @@ export default function SkillsPage() {
                     <CategoryBadge category={skill.category} />
                   </div>
                   {skill.description && (
-                    <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 2, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
                       {skill.description}
                     </div>
                   )}
