@@ -313,16 +313,16 @@ export default function ForecastChart({ snapshots, quota, onPointClick, isRefres
           return <path d={areaPath} fill="rgba(34,197,94,0.08)" stroke="none" />;
         })()}
 
-        {toggles.stage_weighted && (
+        {snapshots.length > 1 && toggles.stage_weighted && (
           <path d={buildPath('stage_weighted_forecast')} fill="none" stroke={LINE_COLORS.stage_weighted} strokeWidth={2} />
         )}
-        {toggles.category_weighted && (
+        {snapshots.length > 1 && toggles.category_weighted && (
           <path d={buildPath('category_weighted_forecast')} fill="none" stroke={LINE_COLORS.category_weighted} strokeWidth={2} />
         )}
-        {toggles.mc_p50 && (
+        {snapshots.length > 1 && toggles.mc_p50 && (
           <path d={buildPath('monte_carlo_p50')} fill="none" stroke={LINE_COLORS.mc_p50} strokeWidth={2.5} />
         )}
-        {toggles.attainment && (
+        {snapshots.length > 1 && toggles.attainment && (
           <path d={buildPath('attainment')} fill="none" stroke={LINE_COLORS.attainment} strokeWidth={2} />
         )}
 
@@ -368,6 +368,21 @@ export default function ForecastChart({ snapshots, quota, onPointClick, isRefres
                 onClick={() => onPointClick?.(s, 'attainment')}
               />
             )}
+            {s.isLive && (() => {
+              const liveVal = s.stage_weighted_forecast ?? s.attainment ?? null;
+              if (liveVal == null) return null;
+              const cx = xScale(i);
+              const cy = yScale(liveVal);
+              return (
+                <g key="live-pulse">
+                  <circle cx={cx} cy={cy} r={10} fill="none" stroke="#22c55e" strokeWidth={1.5} opacity={0.5}>
+                    <animate attributeName="r" from="6" to="16" dur="1.8s" repeatCount="indefinite" />
+                    <animate attributeName="opacity" from="0.5" to="0" dur="1.8s" repeatCount="indefinite" />
+                  </circle>
+                  <circle cx={cx} cy={cy} r={5} fill="#22c55e" stroke={colors.surface} strokeWidth={2} />
+                </g>
+              );
+            })()}
           </g>
         ))}
 

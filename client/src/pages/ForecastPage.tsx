@@ -469,7 +469,7 @@ export default function ForecastPage() {
           {runningForecast
             ? (forecastRunStatus ?? 'Refreshing forecast data...')
             : snapshots.length === 0
-              ? 'No forecast snapshots yet — run your first forecast to populate all metrics.'
+              ? 'Pipeline data is live — run forecast skills weekly to enable trend tracking and Monte Carlo simulation.'
               : `Last snapshot was ${daysSinceLastSnapshot} days ago — refreshing forecast data...`}
         </p>
       </div>
@@ -490,7 +490,7 @@ export default function ForecastPage() {
             flexShrink: 0,
           }}
         >
-          Run Now ▶
+          {snapshots.length === 0 ? 'Generate First Forecast ▶' : 'Run Now ▶'}
         </button>
       )}
     </div>
