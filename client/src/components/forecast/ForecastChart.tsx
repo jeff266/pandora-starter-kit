@@ -69,17 +69,17 @@ export default function ForecastChart({ snapshots, quota, onPointClick, isRefres
   const allValues = useMemo(() => {
     const vals: number[] = [];
     snapshots.forEach(s => {
-      if (s.stage_weighted_forecast != null) vals.push(s.stage_weighted_forecast);
-      if (s.category_weighted_forecast != null) vals.push(s.category_weighted_forecast);
-      if (s.tte_forecast != null) vals.push(s.tte_forecast);
-      if (s.monte_carlo_p50 != null) vals.push(s.monte_carlo_p50);
-      if (s.monte_carlo_p75 != null) vals.push(s.monte_carlo_p75);
-      if (s.monte_carlo_p25 != null) vals.push(s.monte_carlo_p25);
-      if (s.attainment != null) vals.push(s.attainment);
+      if (toggles.stage_weighted && s.stage_weighted_forecast != null) vals.push(s.stage_weighted_forecast);
+      if (toggles.category_weighted && s.category_weighted_forecast != null) vals.push(s.category_weighted_forecast);
+      if (toggles.tte_forecast && s.tte_forecast != null) vals.push(s.tte_forecast);
+      if (toggles.mc_p50 && s.monte_carlo_p50 != null) vals.push(s.monte_carlo_p50);
+      if (toggles.confidence_band && s.monte_carlo_p75 != null) vals.push(s.monte_carlo_p75);
+      if (toggles.confidence_band && s.monte_carlo_p25 != null) vals.push(s.monte_carlo_p25);
+      if (toggles.attainment && s.attainment != null) vals.push(s.attainment);
     });
     if (quota != null) vals.push(quota);
     return vals;
-  }, [snapshots, quota]);
+  }, [snapshots, quota, toggles]);
 
   const minVal = allValues.length > 0 ? Math.min(...allValues) * 0.85 : 0;
   const maxVal = allValues.length > 0 ? Math.max(...allValues) * 1.15 : 1;
