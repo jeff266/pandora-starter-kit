@@ -111,11 +111,14 @@ function computeCategoryWeighted(teamForecast: any): { categoryWeighted: number;
 // Compute live category-weighted from current deals
 async function computeLiveCategoryWeighted(
   workspaceId: string,
+  quarterStart: Date,
   quarterEnd: Date,
   scopeId?: string
 ): Promise<{ categoryWeighted: number; closedWon: number }> {
-  const scopeFilter = scopeId ? `AND scope_id = $3` : '';
-  const params = scopeId ? [workspaceId, quarterEnd, scopeId] : [workspaceId, quarterEnd];
+  const scopeFilter = scopeId ? `AND scope_id = $4` : '';
+  const params = scopeId
+    ? [workspaceId, quarterStart, quarterEnd, scopeId]
+    : [workspaceId, quarterStart, quarterEnd];
   const result = await query(
     `SELECT
       forecast_category,
@@ -123,7 +126,8 @@ async function computeLiveCategoryWeighted(
      FROM deals
      WHERE workspace_id = $1
        AND stage_normalized NOT IN ('closed_lost')
-       AND close_date <= $2
+       AND close_date >= $2
+       AND close_date <= $3
        ${scopeFilter}
      GROUP BY forecast_category`,
     params
@@ -146,6 +150,7 @@ async function computeLiveCategoryWeighted(
         break;
       case 'best_case':
       case 'bestcase':
+      case 'most_likely':
         bestCase += amount;
         break;
       case 'pipeline':
@@ -213,7 +218,7 @@ router.get('/:id/forecast/category-weighted-series', async (
 
       if (isCurrentWeek) {
         // For current week, compute live
-        const live = await computeLiveCategoryWeighted(workspaceId, quarterEnd, scopeId);
+        const live = await computeLiveCategoryWeighted(workspaceId, quarterStart, quarterEnd, scopeId);
         series.push({
           weekEnding: weekEnd.toISOString(),
           weekLabel: formatWeekLabel(weekEnd),

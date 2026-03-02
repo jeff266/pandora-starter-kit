@@ -29,6 +29,7 @@ interface DealSnapshot {
   stage_normalized: string;
   close_date: Date;
   created_at: Date;
+  probability: string | null;
 }
 
 interface StageTransition {
@@ -163,7 +164,7 @@ router.get('/:id/forecast/stage-weighted-series', async (
     const dealsParams = pipeline ? [workspaceId, quarterStart, quarterEnd, pipeline] : [workspaceId, quarterStart, quarterEnd];
 
     const dealsResult = await query<DealSnapshot>(
-      `SELECT id, amount, stage_normalized, close_date, created_at
+      `SELECT id, amount, stage_normalized, close_date, created_at, probability
        FROM deals
        WHERE workspace_id = $1
          AND close_date >= $2 AND close_date <= $3
@@ -236,8 +237,11 @@ router.get('/:id/forecast/stage-weighted-series', async (
         if (state.wasClosedWon && deal.close_date <= weekEnd) {
           closedWon += amt;
         } else {
-          // Open deal → weight by stage probability
-          const probability = stageProbabilities[state.stage] ?? 0.30;
+          // Open deal → prefer per-deal CRM probability, fall back to stage defaults
+          const crmProb = deal.probability !== null ? parseFloat(deal.probability as any) : NaN;
+          const probability = (!isNaN(crmProb) && crmProb > 0)
+            ? crmProb / 100
+            : (stageProbabilities[state.stage] ?? 0.30);
           weightedPipeline += amt * probability;
         }
       }
