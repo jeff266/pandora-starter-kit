@@ -250,6 +250,16 @@ When synthesizing, reference ICP grades in recommendations:
 - Flag D/F-grade deals as deprioritization candidates
 {{/if}}
 
+{{#if stale_deals_agg.hasRFMScores}}
+STALE DEAL PRIORITY (behavioral grade — RFM scoring):
+{{#if stale_deals_agg.rfmBreakdown.A}}- {{stale_deals_agg.rfmBreakdown.A.count}} A-grade deals stale (\${{stale_deals_agg.rfmBreakdown.A.totalValue}}) — highest priority for recovery, these are actively engaged{{/if}}
+{{#if stale_deals_agg.rfmBreakdown.B}}- {{stale_deals_agg.rfmBreakdown.B.count}} B-grade deals stale (\${{stale_deals_agg.rfmBreakdown.B.totalValue}}) — healthy pipeline at risk{{/if}}
+{{#if stale_deals_agg.rfmBreakdown.C}}- {{stale_deals_agg.rfmBreakdown.C.count}} C-grade deals stale (\${{stale_deals_agg.rfmBreakdown.C.totalValue}}) — needs attention{{/if}}
+{{#if stale_deals_agg.rfmBreakdown.D}}- {{stale_deals_agg.rfmBreakdown.D.count}} D-grade deals stale (\${{stale_deals_agg.rfmBreakdown.D.totalValue}}) — losing momentum, lower recovery priority{{/if}}
+{{#if stale_deals_agg.rfmBreakdown.F}}- {{stale_deals_agg.rfmBreakdown.F.count}} F-grade deals stale (\${{stale_deals_agg.rfmBreakdown.F.totalValue}}) — likely dead, candidates for cleanup{{/if}}
+When synthesizing, lead re-engagement recommendations with A/B-grade stale deals. Flag F-grade stale deals as cleanup candidates.
+{{/if}}
+
 REPORT PARAMETERS:
 - Depth: {{output_budget.reportDepth}}
 - Word budget: {{output_budget.wordBudget}} words maximum

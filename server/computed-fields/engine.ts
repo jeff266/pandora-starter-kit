@@ -1,5 +1,6 @@
 import { query, getClient } from '../db.js';
 import { getContext } from '../context/index.js';
+import { computeAndStoreRFMScores } from '../analysis/rfm-scoring.js';
 import { computeDealScores, computeConversationModifier, computeCompositeScore, computeInferredPhase, type DealRow, type CompositeScoreResult, type InferredPhase } from './deal-scores.js';
 import { computeContactEngagement, type ContactRow } from './contact-scores.js';
 import { computeAccountHealth, type AccountRow } from './account-scores.js';
@@ -70,12 +71,21 @@ export async function computeFields(workspaceId: string): Promise<ComputeResult>
     computeAccounts(workspaceId),
   ]);
 
+  let rfmResult: { scored: number; mode: string } = { scored: 0, mode: 'r_only' };
+  try {
+    const rfm = await computeAndStoreRFMScores(workspaceId);
+    rfmResult = { scored: rfm.scored, mode: rfm.mode };
+  } catch (err) {
+    console.warn('[ComputedFields] RFM scoring failed (non-fatal):', err);
+  }
+
   return {
     workspaceId,
     computedAt: new Date().toISOString(),
     deals: dealResult,
     contacts: contactResult,
     accounts: accountResult,
+    rfm: rfmResult,
   };
 }
 

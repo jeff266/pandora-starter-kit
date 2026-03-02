@@ -67,6 +67,8 @@ export default function ForecastPage() {
   const [fiscalYearStartMonth, setFiscalYearStartMonth] = useState(1);
   const [mathPanel, setMathPanel] = useState<{ metric: string; value: number; context: MathContext } | null>(null);
   const [deals, setDeals] = useState<Deal[]>([]);
+  const [runningForecast, setRunningForecast] = useState(false);
+  const [forecastRunStatus, setForecastRunStatus] = useState<string | null>(null);
 
   const { annotations, grouped, dismiss, snooze } = useForecastAnnotations(wsId);
 
@@ -230,6 +232,26 @@ export default function ForecastPage() {
     }));
   }, [snapshots]);
 
+  const runForecastSkills = async () => {
+    setRunningForecast(true);
+    try {
+      setForecastRunStatus('Running Forecast Rollup...');
+      await api.post('/skills/forecast-rollup/run');
+      setForecastRunStatus('Running Monte Carlo Simulation...');
+      await api.post('/skills/monte-carlo-forecast/run');
+      setForecastRunStatus('Done — reloading forecast data...');
+      const data: any = await api.get('/forecast/snapshots?limit=13');
+      setSnapshots(data.snapshots || []);
+      if (data.fiscal_year_start_month) setFiscalYearStartMonth(data.fiscal_year_start_month);
+      setForecastRunStatus(null);
+    } catch (err: any) {
+      setForecastRunStatus(`Failed: ${err.message}`);
+      setTimeout(() => setForecastRunStatus(null), 5000);
+    } finally {
+      setRunningForecast(false);
+    }
+  };
+
   if (loading) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -279,20 +301,34 @@ export default function ForecastPage() {
             Forecast tracking starts after your first weekly pipeline review. Run a forecast skill to capture your first snapshot.
           </p>
           <button
-            onClick={() => navigate('/skills')}
+            onClick={runForecastSkills}
+            disabled={runningForecast}
             style={{
               padding: '8px 20px',
-              background: colors.accent,
+              background: runningForecast ? colors.surfaceRaised : colors.accent,
               color: '#fff',
               border: 'none',
               borderRadius: 6,
-              cursor: 'pointer',
+              cursor: runningForecast ? 'not-allowed' : 'pointer',
               fontSize: 13,
               fontWeight: 500,
               fontFamily: fonts.sans,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              opacity: runningForecast ? 0.8 : 1,
             }}
           >
-            Go to Skills
+            {runningForecast && (
+              <span style={{
+                width: 12, height: 12,
+                border: '2px solid rgba(255,255,255,0.3)',
+                borderTopColor: '#fff', borderRadius: '50%',
+                display: 'inline-block',
+                animation: 'pandora-spin 0.8s linear infinite',
+              }} />
+            )}
+            {runningForecast ? (forecastRunStatus ?? 'Running...') : 'Generate First Forecast ▶'}
           </button>
         </div>
       </div>

@@ -215,6 +215,20 @@ WIN RATE CURVE (Kaplan-Meier survival analysis — {{survival_curve_context.meta
 Use this curve to contextualize whether bear/base/bull are conservative or aggressive relative to historical conversion.
 {{/if}}
 
+{{#if forecast_data.rfmQuality.hasRFMScores}}
+BEHAVIORAL QUALITY OF COMMITTED PIPELINE (RFM):
+{{#if forecast_data.rfmQuality.commit}}
+- Commit (\${{forecast_data.rfmQuality.commit.total}}): {{forecast_data.rfmQuality.commit.ab_count}} deals behaviorally active (A/B), {{forecast_data.rfmQuality.commit.df_count}} cold (D/F, \${{forecast_data.rfmQuality.commit.df_value}})
+{{/if}}
+{{#if forecast_data.rfmQuality.best_case}}
+- Best Case (\${{forecast_data.rfmQuality.best_case.total}}): {{forecast_data.rfmQuality.best_case.ab_count}} active, {{forecast_data.rfmQuality.best_case.df_count}} cold (\${{forecast_data.rfmQuality.best_case.df_value}})
+{{/if}}
+{{#if forecast_data.rfmQuality.pipeline}}
+- Pipeline (\${{forecast_data.rfmQuality.pipeline.total}}): {{forecast_data.rfmQuality.pipeline.ab_count}} active, {{forecast_data.rfmQuality.pipeline.df_count}} cold (\${{forecast_data.rfmQuality.pipeline.df_value}})
+{{/if}}
+{{#if forecast_data.rfmQuality.coldCommitPct}}⚠ {{forecast_data.rfmQuality.coldCommitPct}}% of commit pipeline has gone behaviorally cold — these deals may not close on schedule{{/if}}
+{{/if}}
+
 CONCENTRATION RISK ANALYSIS:
 {{{json concentration_risk}}}
 

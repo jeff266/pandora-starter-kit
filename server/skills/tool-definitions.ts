@@ -1060,6 +1060,17 @@ const aggregateStaleDeals: ToolDefinition = {
         }
       }
 
+      const rfmBreakdown: Record<string, { count: number; totalValue: number }> = {};
+      for (const deal of deals) {
+        const grade = (deal as any).rfm_grade;
+        if (grade) {
+          rfmBreakdown[grade] = rfmBreakdown[grade] ?? { count: 0, totalValue: 0 };
+          rfmBreakdown[grade].count++;
+          rfmBreakdown[grade].totalValue += Number((deal as any).amount) || 0;
+        }
+      }
+      const hasRFMScores = Object.keys(rfmBreakdown).length > 0;
+
       return {
         summary: { total: summary.total, totalValue: summary.totalValue, avgDaysStale },
         bySeverity,
@@ -1069,6 +1080,8 @@ const aggregateStaleDeals: ToolDefinition = {
         remaining,
         hasIcpScores,
         icpRiskSignals,
+        rfmBreakdown,
+        hasRFMScores,
       };
     }, params);
   },
@@ -2729,6 +2742,13 @@ const forecastRollup: ToolDefinition = {
       const bullCase = closedWon + commit + bestCase + pipelineAmt;
       const weightedForecast = closedWon + categories.commit.weighted + categories.best_case.weighted + categories.pipeline.weighted;
 
+      const excludedOwners: string[] = (context.businessContext as any)?.excluded_owners
+        ?? (context.businessContext as any)?.definitions?.excluded_owners
+        ?? [];
+      const excludeClause = excludedOwners.length > 0
+        ? ` AND owner NOT IN (${excludedOwners.map((_: string, i: number) => `$${i + 2}`).join(', ')})`
+        : '';
+
       const repResult = await query(
         `SELECT
           owner,
@@ -2740,10 +2760,10 @@ const forecastRollup: ToolDefinition = {
         WHERE workspace_id = $1
           AND forecast_category IS NOT NULL
           AND stage_normalized NOT IN ('closed_lost')
-          AND owner IS NOT NULL${dealOwnerClause}
+          AND owner IS NOT NULL${excludeClause}${dealOwnerClause}
         GROUP BY owner, forecast_category
         ORDER BY owner`,
-        [context.workspaceId]
+        [context.workspaceId, ...excludedOwners]
       );
 
       const repMap = new Map<string, {
@@ -2825,7 +2845,7 @@ const forecastRollup: ToolDefinition = {
 
       // Load ICP scores for forecast deals
       const icpDealsResult = await query(
-        `SELECT d.id, d.amount, d.forecast_category, ls.score_grade
+        `SELECT d.id, d.amount, d.forecast_category, d.rfm_grade, ls.score_grade
          FROM deals d
          LEFT JOIN lead_scores ls ON ls.entity_id = d.id
            AND ls.workspace_id = d.workspace_id
@@ -2934,6 +2954,38 @@ const forecastRollup: ToolDefinition = {
         }).catch(err => console.error('[Feedback Signal] Error adding forecast category alert:', err));
       }
 
+      const hasRFMScores = icpDealsResult.rows.some((r: any) => r.rfm_grade !== null);
+      let rfmQuality: any = { hasRFMScores: false };
+
+      if (hasRFMScores) {
+        const buildCatRFM = (cat: string) => {
+          const catDeals = icpDealsResult.rows.filter((r: any) => r.forecast_category === cat);
+          const total = catDeals.reduce((s: number, d: any) => s + (Number(d.amount) || 0), 0);
+          const abDeals = catDeals.filter((d: any) => d.rfm_grade === 'A' || d.rfm_grade === 'B');
+          const dfDeals = catDeals.filter((d: any) => d.rfm_grade === 'D' || d.rfm_grade === 'F');
+          return {
+            total,
+            ab_count: abDeals.length,
+            ab_value: abDeals.reduce((s: number, d: any) => s + (Number(d.amount) || 0), 0),
+            df_count: dfDeals.length,
+            df_value: dfDeals.reduce((s: number, d: any) => s + (Number(d.amount) || 0), 0),
+          };
+        };
+
+        const commitRFM = buildCatRFM('commit');
+        const coldCommitPct = commitRFM.total > 0
+          ? Math.round((commitRFM.df_value / commitRFM.total) * 100)
+          : 0;
+
+        rfmQuality = {
+          hasRFMScores: true,
+          commit: commitRFM,
+          best_case: buildCatRFM('best_case'),
+          pipeline: buildCatRFM('pipeline'),
+          coldCommitPct: coldCommitPct > 0 ? coldCommitPct : null,
+        };
+      }
+
       return {
         team: {
           closedWon,
@@ -2958,6 +3010,7 @@ const forecastRollup: ToolDefinition = {
         },
         byRep,
         icpForecast,
+        rfmQuality,
       };
     }, params);
   },

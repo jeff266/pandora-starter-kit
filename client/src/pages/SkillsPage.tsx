@@ -118,7 +118,8 @@ export default function SkillsPage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [runHistory, setRunHistory] = useState<SkillRun[]>([]);
   const [loadingRuns, setLoadingRuns] = useState(false);
-  const [runningSkill, setRunningSkill] = useState<string | null>(null);
+  const [runningSkills, setRunningSkills] = useState<Set<string>>(new Set());
+  const [queuedSkills, setQueuedSkills] = useState<string[]>([]);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [pendingCount, setPendingCount] = useState(0);
   const [usedFallback, setUsedFallback] = useState(false);
@@ -192,7 +193,17 @@ export default function SkillsPage() {
 
   const runSkill = async (skillId: string, skillName: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    setRunningSkill(skillId);
+    if (runningSkills.has(skillId)) return;
+
+    if (runningSkills.size > 0) {
+      if (!queuedSkills.includes(skillId)) {
+        setQueuedSkills(prev => [...prev, skillId]);
+        showToast(`${skillName} queued — will run when current skill finishes`, 'success');
+      }
+      return;
+    }
+
+    setRunningSkills(prev => new Set(prev).add(skillId));
     try {
       const result = await api.post(`/skills/${skillId}/run`);
       const dur = result?.duration_ms ? ` in ${(result.duration_ms / 1000).toFixed(1)}s` : '';
@@ -202,7 +213,20 @@ export default function SkillsPage() {
     } catch (err: any) {
       showToast(`${skillName} failed: ${err.message}`, 'error');
     } finally {
-      setRunningSkill(null);
+      setRunningSkills(prev => {
+        const next = new Set(prev);
+        next.delete(skillId);
+        return next;
+      });
+      setQueuedSkills(prev => {
+        if (prev.length === 0) return prev;
+        const [nextId, ...rest] = prev;
+        const nextSkill = skills.find(s => s.id === nextId);
+        if (nextSkill) {
+          setTimeout(() => runSkill(nextId, nextSkill.name), 0);
+        }
+        return rest;
+      });
     }
   };
 
@@ -335,7 +359,8 @@ export default function SkillsPage() {
           </div>
         ) : (
           filtered.map((skill, i) => {
-            const isRunning = runningSkill === skill.id;
+            const isRunning = runningSkills.has(skill.id);
+            const isQueued = queuedSkills.includes(skill.id);
             const isLast = i === filtered.length - 1;
             return (
               <div
@@ -390,13 +415,15 @@ export default function SkillsPage() {
                 <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                   <button
                     onClick={e => runSkill(skill.id, skill.name, e)}
-                    disabled={isRunning}
+                    disabled={isRunning || isQueued}
                     style={{
                       fontSize: 11, fontWeight: 600, padding: '4px 10px',
                       borderRadius: 6,
-                      background: isRunning ? colors.surfaceHover : colors.accent,
-                      color: '#fff', opacity: isRunning ? 0.6 : 1,
-                      border: 'none', cursor: isRunning ? 'not-allowed' : 'pointer',
+                      background: isRunning ? colors.surfaceHover : isQueued ? colors.surfaceRaised : colors.accent,
+                      color: isQueued ? colors.yellow : '#fff',
+                      opacity: isRunning ? 0.6 : 1,
+                      border: isQueued ? `1px solid ${colors.yellow}` : 'none',
+                      cursor: isRunning || isQueued ? 'not-allowed' : 'pointer',
                       display: 'flex', alignItems: 'center', gap: 5,
                     }}
                   >
@@ -409,7 +436,7 @@ export default function SkillsPage() {
                         animation: 'pandora-spin 0.8s linear infinite',
                       }} />
                     )}
-                    {isRunning ? 'Running' : 'Run ▶'}
+                    {isRunning ? 'Running' : isQueued ? 'Queued' : 'Run ▶'}
                   </button>
                 </div>
               </div>
@@ -511,16 +538,16 @@ export default function SkillsPage() {
                 </div>
                 <button
                   onClick={e => runSkill(selectedSkill.id, selectedSkill.name, e)}
-                  disabled={runningSkill === selectedSkill.id}
+                  disabled={runningSkills.has(selectedSkill.id)}
                   style={{
                     fontSize: 12, fontWeight: 600, padding: '8px 16px',
                     borderRadius: 8, background: colors.accent, color: '#fff',
                     border: 'none', cursor: 'pointer', flexShrink: 0,
-                    opacity: runningSkill === selectedSkill.id ? 0.6 : 1,
+                    opacity: runningSkills.has(selectedSkill.id) ? 0.6 : 1,
                     display: 'flex', alignItems: 'center', gap: 6,
                   }}
                 >
-                  {runningSkill === selectedSkill.id && (
+                  {runningSkills.has(selectedSkill.id) && (
                     <span style={{
                       width: 12, height: 12,
                       border: '2px solid rgba(255,255,255,0.3)',
@@ -529,7 +556,7 @@ export default function SkillsPage() {
                       animation: 'pandora-spin 0.8s linear infinite',
                     }} />
                   )}
-                  {runningSkill === selectedSkill.id ? 'Running...' : 'Run Now ▶'}
+                  {runningSkills.has(selectedSkill.id) ? 'Running...' : 'Run Now ▶'}
                 </button>
               </div>
 

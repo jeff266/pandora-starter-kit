@@ -100,6 +100,30 @@ Pandora is built on Node.js 20 with TypeScript 5+, utilizing Express.js and Post
     - 5-minute in-memory cache keyed by `workspaceId:userId`.
     - Wired into `conversation-stream.ts`: new conversations detected by `!thread_id` → brief assembled, prepended to message, routed directly through Anthropic with `BRIEF_SYSTEM_PROMPT`.
 
+-   **TTE Survival Curve Engine + Monte Carlo Integration (Coaching Intelligence V2):**
+    - `server/analysis/survival-curve.ts`: Kaplan-Meier algorithm with Greenwood variance, log-log CI, `conditionalWinProbability`, `expectedValueInWindow`, `getCumulativeWinRateAtDay`, `assessDataTier`, `emptyCurve`.
+    - `server/analysis/survival-data.ts`: `fetchDealObservations` (schema-adapted: stage_normalized='closed_won', deal_outcomes JOIN for closed_at, d.owner), `buildSurvivalCurves` with source/owner/size_band/stage_reached segmentation, 6-hour in-memory cache, `invalidateSurvivalCache`.
+    - `server/analysis/survival-rendering.ts`: `summarizeCurveForLLM` (~250-token checkpoint string), `buildCohortWinMatrix` with mature/developing cohort logic.
+    - Monte Carlo swapped: `stageWinRates`/`BetaDistribution`/`fitStageWinRates` removed; `SimulationInputs.distributions` now uses `survivalCurve` + `stageCurves`; component A uses `conditionalWinProbability(curve, dealAgeDays)`; component B uses `expectedValueInWindow` at age 0.
+    - `GET /api/workspaces/:id/survival-curve` endpoint with `requireWorkspaceAccess`; `survival-curve-query` registered in tool manifest with `summarizeCurveForLLM` output gating.
+    - Survival curve context block added to forecast-rollup and pipeline-coverage synthesis prompts.
+    - `weightedCoverageRatio` added to `RepCoverage`/`CoverageByRep` using `expectedValueInWindow`.
+
+-   **RFM Behavioral Scoring Engine:**
+    - `server/analysis/rfm-scoring.ts`: Pure SQL + arithmetic compute module (zero LLM tokens). `assessActivityCoverage` → mode selection (`full_rfm`/`rm_only`/`r_only`). `computeRawRFMValues` with LATERAL joins for recency (activity → conversation → stage_change → record_update priority), frequency (weighted: meeting=10/call=5/email=2 + conversation count), monetary (deal.amount). `computeQuintileBreakpoints` with tercile fallback for <10 deals. `assignRecencyQuintile` (inverted: lower days = better), `assignQuintile` (normal). `assignRFMGrade` (strategic A-F matrix), `assignRFMLabel` (action-oriented: "Big Deal at Risk", "Hot Opportunity", etc.). `computeHistoricalWinRatesByRFM` with T-30 snapshot reconstruction. `testRFMDiscrimination` (A/F lift check). `batchUpdateRFMScores` writes to deals table in 200-record batches. `computeAndStoreRFMScores` orchestrates full cycle. Evidence rendering: `renderRFMScoreCard`, `renderRFMComparison`, `renderRFMMethodology`, `buildRFMContextForLLM`.
+    - DB columns added lazily via `ensureRFMColumns()`: `rfm_recency_days/quintile/source`, `rfm_frequency_count/quintile`, `rfm_monetary_quintile`, `rfm_segment`, `rfm_grade`, `rfm_label`, `rfm_mode`, `rfm_scored_at`.
+    - Wired into `server/computed-fields/engine.ts`: `computeAndStoreRFMScores` runs after deals/contacts/accounts, non-fatal (logged as warning on failure).
+    - `aggregateStaleDeals` now includes `rfmBreakdown` + `hasRFMScores` by grouping stale deals by rfm_grade.
+    - `forecastRollup` tool now includes `rfmQuality` (per forecast-category: total/ab_count/ab_value/df_count/df_value + coldCommitPct).
+    - Pipeline Hygiene synthesis prompt: RFM stale deal priority block (A/B/C/D/F grade counts + values + action instructions).
+    - Forecast Rollup synthesis prompt: Behavioral quality of committed pipeline block (cold commit %, category breakdown).
+    - Schema delta applied throughout: `stage_normalized NOT IN ('closed_won', 'closed_lost')` for open deals (no `is_closed` column); `d.owner` (not `owner_email`); activities use `timestamp` column (not `activity_date`); conversations use `call_date`.
+
+-   **UX + Data Fixes (Coaching Intelligence V2):**
+    - **Skill Queue**: `runningSkill: string | null` → `runningSkills: Set<string>` + `queuedSkills: string[]`. Skills now queue when one is already running; queued skills show amber "Queued" button state; queue drains sequentially on completion.
+    - **Forecast "Go to Skills" button**: Replaced with "Generate First Forecast ▶" that runs `forecast-rollup` then `monte-carlo-forecast` inline, shows live status ("Running Forecast Rollup..." / "Running Monte Carlo Simulation..." / "Done — reloading forecast data..."), and refreshes snapshot data without navigation.
+    - **forecastRollup excluded_owners filter**: `byRep` query now applies `excluded_owners` from business context (same pattern as `coverageByRep`), removing admin/test accounts like Jack McArdle and Carter McKay from rep breakdown table.
+
 ## TypeScript Health
 - **Status (Feb 2026):** 0 non-test server errors maintained. All server files pass `tsc --noEmit`.
 - **Remaining:** 4 errors in `server/workflows/__tests__/` test mocks + 1 duplicate property in `server/routes/findings.ts` — all pre-existing, out of scope.
