@@ -29,7 +29,6 @@ interface DealSnapshot {
   stage_normalized: string;
   close_date: Date;
   created_at: Date;
-  is_closed_won: boolean;
 }
 
 interface StageTransition {
@@ -127,7 +126,7 @@ function reconstructDealState(
     // No history → use current stage
     return {
       stage: deal.stage_normalized,
-      wasClosedWon: deal.is_closed_won
+      wasClosedWon: deal.stage_normalized === 'closed_won'
     };
   }
 
@@ -164,11 +163,10 @@ router.get('/:id/forecast/stage-weighted-series', async (
     const dealsParams = pipeline ? [workspaceId, quarterStart, quarterEnd, pipeline] : [workspaceId, quarterStart, quarterEnd];
 
     const dealsResult = await query<DealSnapshot>(
-      `SELECT id, amount, stage_normalized, close_date, created_at, is_closed_won
+      `SELECT id, amount, stage_normalized, close_date, created_at
        FROM deals
        WHERE workspace_id = $1
          AND close_date >= $2 AND close_date <= $3
-         AND is_deleted = false
          ${pipelineFilter}
        ORDER BY id`,
       dealsParams

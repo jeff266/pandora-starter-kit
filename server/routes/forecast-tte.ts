@@ -34,7 +34,6 @@ interface DealSnapshot {
   stage_normalized: string;
   close_date: Date;
   created_at: Date;
-  is_closed_won: boolean;
 }
 
 interface StageTransition {
@@ -104,15 +103,15 @@ async function fitStageParameters(workspaceId: string): Promise<{
   // Query 1: Stage-specific win rates
   const winRateResult = await query(
     `WITH closed_deals AS (
-      SELECT d.id, d.stage_normalized, d.is_closed_won
+      SELECT d.id, d.stage_normalized
       FROM deals d
       WHERE d.workspace_id = $1
-        AND (d.is_closed_won = true OR d.stage_normalized = 'closed_lost')
+        AND (d.stage_normalized = 'closed_won' OR d.stage_normalized = 'closed_lost')
         AND d.close_date > NOW() - INTERVAL '24 months'
     )
     SELECT
       dsh.stage_normalized as stage,
-      COUNT(*) FILTER (WHERE cd.is_closed_won = true) AS wins,
+      COUNT(*) FILTER (WHERE cd.stage_normalized = 'closed_won') AS wins,
       COUNT(*) AS total_closed
     FROM deal_stage_history dsh
     JOIN closed_deals cd ON dsh.deal_id = cd.id
@@ -132,7 +131,7 @@ async function fitStageParameters(workspaceId: string): Promise<{
       FROM deal_stage_history dsh
       JOIN deals d ON dsh.deal_id = d.id
       WHERE d.workspace_id = $1
-        AND d.is_closed_won = true
+        AND d.stage_normalized = 'closed_won'
         AND d.close_date > NOW() - INTERVAL '24 months'
     )
     SELECT
@@ -220,7 +219,7 @@ function reconstructDealState(
     return {
       stage: deal.stage_normalized,
       stageEnteredAt: deal.created_at,
-      wasClosedWon: deal.is_closed_won
+      wasClosedWon: deal.stage_normalized === 'closed_won'
     };
   }
 
@@ -262,11 +261,10 @@ router.get('/:id/forecast/tte-series', async (
     const dealsParams = pipeline ? [workspaceId, quarterStart, quarterEnd, pipeline] : [workspaceId, quarterStart, quarterEnd];
 
     const dealsResult = await query<DealSnapshot>(
-      `SELECT id, amount, stage_normalized, close_date, created_at, is_closed_won
+      `SELECT id, amount, stage_normalized, close_date, created_at
        FROM deals
        WHERE workspace_id = $1
          AND close_date >= $2 AND close_date <= $3
-         AND is_deleted = false
          ${pipelineFilter}
        ORDER BY id`,
       dealsParams
