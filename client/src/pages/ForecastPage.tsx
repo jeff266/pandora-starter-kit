@@ -271,27 +271,34 @@ export default function ForecastPage() {
     return [...weeklySnapshots, liveSnapshot];
   }, [weeklySnapshots, liveSnapshot]);
 
-  // MetricCards always reads from real snapshots — live snapshot is chart-only
+  // MC data always comes from the latest real snapshot (skill run)
+  // Pipeline-filtered metrics come from liveSnapshot when a specific pipeline is selected
   const latestReal = weeklySnapshots.length > 0 ? weeklySnapshots[weeklySnapshots.length - 1] : null;
   const latest = latestReal ?? liveSnapshot;
   const previous = weeklySnapshots.length > 1 ? weeklySnapshots[weeklySnapshots.length - 2] : null;
-  const quota = latest?.quota || liveQuota || null;
+
+  // When a pipeline is selected, use liveSnapshot for pipeline-scoped numbers; fall back to latestReal
+  const pipelineMetricSource = (selectedPipeline !== 'all' && liveSnapshot) ? liveSnapshot : latest;
+  const quota = pipelineMetricSource?.quota || liveQuota || null;
 
   const currentMetrics = useMemo(() => {
-    if (!latest) return null;
+    if (!pipelineMetricSource && !latestReal) return null;
+    const src = pipelineMetricSource;
+    const mcSrc = latestReal ?? src;
     return {
-      snapshot_date: latest.snapshot_date,
-      mc_p50: latest.monte_carlo_p50 ?? undefined,
-      mc_p25: latest.monte_carlo_p25 ?? undefined,
-      mc_p75: latest.monte_carlo_p75 ?? undefined,
-      closed_won: latest.attainment ?? undefined,
-      pipeline_total: latest.total_pipeline ?? undefined,
-      quota: latest.quota ?? liveQuota ?? undefined,
-      pipe_gen: latest.pipe_gen_this_week ?? liveSnapshot?.pipe_gen_this_week ?? undefined,
-      forecast_weighted: latest.stage_weighted_forecast ?? undefined,
-      category_weighted: latest.category_weighted_forecast ?? undefined,
+      snapshot_date: src?.snapshot_date ?? new Date().toISOString(),
+      mc_p50: mcSrc?.monte_carlo_p50 ?? undefined,
+      mc_p25: mcSrc?.monte_carlo_p25 ?? undefined,
+      mc_p75: mcSrc?.monte_carlo_p75 ?? undefined,
+      closed_won: src?.attainment ?? undefined,
+      pipeline_total: src?.total_pipeline ?? undefined,
+      quota: src?.quota ?? liveQuota ?? undefined,
+      pipe_gen: src?.pipe_gen_this_week ?? undefined,
+      forecast_weighted: src?.stage_weighted_forecast ?? undefined,
+      category_weighted: src?.category_weighted_forecast ?? undefined,
     };
-  }, [latest, liveQuota, liveSnapshot]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pipelineMetricSource, latestReal, liveQuota]);
 
   const previousMetrics = useMemo(() => {
     if (!previous) return null;
@@ -365,11 +372,12 @@ export default function ForecastPage() {
   }, [fiscalYearStartMonth]);
 
   const coverageQuarters = useMemo(() => {
-    const q = latest?.quota || 0;
-    const p = latest?.total_pipeline || 0;
+    const q = quota || 0;
+    const p = pipelineMetricSource?.total_pipeline || 0;
     if (!q && !p) return [];
     return [{ label: weekInfo.label, pipeline: p, quota: q }];
-  }, [latest, weekInfo]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pipelineMetricSource, quota, weekInfo]);
 
   const pipeGenWeeks = useMemo(() => {
     return snapshots.slice(-8).map(s => ({
