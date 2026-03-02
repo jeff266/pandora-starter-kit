@@ -71,7 +71,7 @@ export default function ForecastPage() {
   const [dealsLoading, setDealsLoading] = useState(true);
   const [pipelines, setPipelines] = useState<string[]>([]);
   const [selectedPipeline, setSelectedPipeline] = useState<string>('all');
-  const [liveQuota, setLiveQuota] = useState<number | null>(null);
+  const [allActiveTargets, setAllActiveTargets] = useState<any[]>([]);
   const [runningForecast, setRunningForecast] = useState(false);
   const [forecastRunStatus, setForecastRunStatus] = useState<string | null>(null);
   const autoTriggeredRef = useRef(false);
@@ -117,7 +117,7 @@ export default function ForecastPage() {
       .catch(() => {});
   }, [wsId]);
 
-  // Fetch current-period quota from targets — filter by today falling within period_start/period_end
+  // Fetch current-period targets — store all rows so quota can be derived per-pipeline reactively
   useEffect(() => {
     if (!wsId) return;
     api.get('/targets?active_only=true')
@@ -125,25 +125,19 @@ export default function ForecastPage() {
         const rows: any[] = data.targets || data.data || [];
         if (rows.length === 0) return;
         const today = new Date().toISOString().slice(0, 10);
-        // Find targets whose period covers today (metric=arr, company-level or pipeline-level)
         const current = rows.filter((r: any) =>
           r.is_active !== false &&
           (!r.metric || r.metric === 'arr' || r.metric === 'revenue') &&
           r.period_start <= today &&
           r.period_end >= today
         );
+        // Fall back to most-recent active targets if none cover today
         if (current.length === 0) {
-          // Fall back: most recent active target by period_start
           const sorted = [...rows].sort((a, b) => b.period_start.localeCompare(a.period_start));
-          const latest = sorted[0];
-          if (latest) setLiveQuota(Number(latest.amount) || null);
-          return;
+          setAllActiveTargets(sorted.slice(0, 5));
+        } else {
+          setAllActiveTargets(current);
         }
-        // Sum all matching company-level targets (avoid double-counting rep-level ones)
-        const companyLevel = current.filter((r: any) => !r.assigned_to_email && !r.assigned_to_user_id);
-        const toSum = companyLevel.length > 0 ? companyLevel : current;
-        const total = toSum.reduce((sum: number, r: any) => sum + (Number(r.amount) || 0), 0);
-        setLiveQuota(total > 0 ? total : null);
       })
       .catch(() => {});
   }, [wsId]);
@@ -163,6 +157,26 @@ export default function ForecastPage() {
       })
       .finally(() => setDealsLoading(false));
   }, [wsId, selectedPipeline]);
+
+  // Derive quota from state — plain variable, no hook, recalculates on every render
+  const liveQuota: number | null = (() => {
+    if (allActiveTargets.length === 0) return null;
+    if (selectedPipeline !== 'all') {
+      const pipelineTargets = allActiveTargets.filter(
+        (r: any) => r.pipeline_name && r.pipeline_name === selectedPipeline && !r.assigned_to_email && !r.assigned_to_user_id
+      );
+      if (pipelineTargets.length > 0) {
+        const total = pipelineTargets.reduce((sum: number, r: any) => sum + (Number(r.amount) || 0), 0);
+        if (total > 0) return total;
+      }
+    }
+    const companyLevel = allActiveTargets.filter(
+      (r: any) => !r.assigned_to_email && !r.assigned_to_user_id && !r.pipeline_name
+    );
+    const toSum = companyLevel.length > 0 ? companyLevel : allActiveTargets;
+    const total = toSum.reduce((sum: number, r: any) => sum + (Number(r.amount) || 0), 0);
+    return total > 0 ? total : null;
+  })();
 
   // Deduplicate snapshots by week (keep latest per week)
   const weeklySnapshots = useMemo(() => {
@@ -380,11 +394,11 @@ export default function ForecastPage() {
   }, [pipelineMetricSource, quota, weekInfo]);
 
   const pipeGenWeeks = useMemo(() => {
-    return snapshots.slice(-8).map(s => ({
+    return augmentedSnapshots.slice(-8).map(s => ({
       week_label: new Date(s.snapshot_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
       created: s.pipe_gen_this_week || 0,
     }));
-  }, [snapshots]);
+  }, [augmentedSnapshots]);
 
   const runForecastSkills = async () => {
     setRunningForecast(true);
