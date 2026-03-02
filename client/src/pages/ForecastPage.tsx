@@ -78,6 +78,11 @@ export default function ForecastPage() {
   const [forecastRunStatus, setForecastRunStatus] = useState<string | null>(null);
   const autoTriggeredRef = useRef(false);
 
+  // Pipeline+quarter-scoped MC results — fetched separately from global snapshot MC
+  const [pipelineMc, setPipelineMc] = useState<{
+    p50: number; p25: number; p75: number; p10: number; p90: number;
+  } | null>(null);
+
   // New historical series data
   const [stageWeightedData, setStageWeightedData] = useState<any>(null);
   const [categoryWeightedData, setCategoryWeightedData] = useState<any>(null);
@@ -515,11 +520,17 @@ export default function ForecastPage() {
       const cd = d.close_date ? new Date(d.close_date) : null;
       return cd && cd >= fiscalQStart && cd < fiscalQEnd;
     }).length;
+    // When a pipeline is selected and we have a pipeline-scoped MC run, use those values
+    // instead of the global snapshot MC (which doesn't reflect the filtered pipeline).
+    const mcP50 = (selectedPipeline !== 'all' && pipelineMc) ? pipelineMc.p50 : (mcSrc?.monte_carlo_p50 ?? undefined);
+    const mcP25 = (selectedPipeline !== 'all' && pipelineMc) ? pipelineMc.p25 : (mcSrc?.monte_carlo_p25 ?? undefined);
+    const mcP75 = (selectedPipeline !== 'all' && pipelineMc) ? pipelineMc.p75 : (mcSrc?.monte_carlo_p75 ?? undefined);
+
     return {
       snapshot_date: src?.snapshot_date ?? new Date().toISOString(),
-      mc_p50: mcSrc?.monte_carlo_p50 ?? undefined,
-      mc_p25: mcSrc?.monte_carlo_p25 ?? undefined,
-      mc_p75: mcSrc?.monte_carlo_p75 ?? undefined,
+      mc_p50: mcP50,
+      mc_p25: mcP25,
+      mc_p75: mcP75,
       closed_won: src?.attainment ?? undefined,
       closed_deal_count: closedDealCount || undefined,
       pipeline_total: src?.total_pipeline ?? undefined,
@@ -529,7 +540,7 @@ export default function ForecastPage() {
       category_weighted: src?.category_weighted_forecast ?? undefined,
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pipelineMetricSource, latestReal, liveQuota, quarterSeries, deals, fiscalYearStartMonth]);
+  }, [pipelineMetricSource, latestReal, liveQuota, quarterSeries, deals, fiscalYearStartMonth, selectedPipeline, pipelineMc]);
 
   const previousMetrics = useMemo(() => {
     // When a pipeline is selected the "previous" snapshot is all-pipeline — comparing it against
@@ -676,12 +687,16 @@ export default function ForecastPage() {
     const fiscalQuarter = Math.floor(adjustedMonth / 3) + 1;
     const fiscalQStart = new Date(now.getFullYear(), fyMonth + (fiscalQuarter - 1) * 3, 1);
     if (fiscalQStart > now) fiscalQStart.setFullYear(fiscalQStart.getFullYear() - 1);
+    // Last day of the fiscal quarter (day 0 of the next month = last day of current month)
+    const fiscalQEnd = new Date(fiscalQStart.getFullYear(), fiscalQStart.getMonth() + 3, 0);
+    const quarterEndISO = fiscalQEnd.toISOString().slice(0, 10);
     const daysSinceQStart = Math.floor((now.getTime() - fiscalQStart.getTime()) / (1000 * 60 * 60 * 24));
     const weekNum = Math.min(13, Math.floor(daysSinceQStart / 7) + 1);
     const fyYear = now.getMonth() + 1 >= fiscalYearStartMonth ? now.getFullYear() : now.getFullYear() - 1;
     const fyLabel = fiscalYearStartMonth === 1 ? `${fyYear}` : `FY${fyYear + 1}`;
     return {
       label: `Q${fiscalQuarter} ${fyLabel}`,
+      quarterEndISO,
       weekNum,
       totalWeeks: 13,
     };
@@ -703,17 +718,57 @@ export default function ForecastPage() {
     }));
   }, [quarterSeries]);
 
+  // Fetch pipeline+quarter-scoped MC results whenever the active pipeline or fiscal quarter changes.
+  // Falls back silently if no pipeline-specific run exists yet (pipelineMc stays null).
+  useEffect(() => {
+    if (!wsId || selectedPipeline === 'all') {
+      setPipelineMc(null);
+      return;
+    }
+    const { quarterEndISO } = weekInfo;
+    const path = `/monte-carlo/latest?pipeline=${encodeURIComponent(selectedPipeline)}&quarterEnd=${encodeURIComponent(quarterEndISO)}`;
+    api.get(path)
+      .then((res: any) => {
+        const cc = res?.commandCenter;
+        if (cc && typeof cc.p50 === 'number') {
+          setPipelineMc({ p50: cc.p50, p25: cc.p25 ?? cc.p50, p75: cc.p75 ?? cc.p50, p10: cc.p10 ?? cc.p50, p90: cc.p90 ?? cc.p50 });
+        } else {
+          setPipelineMc(null);
+        }
+      })
+      .catch(() => setPipelineMc(null));
+  }, [wsId, selectedPipeline, weekInfo.quarterEndISO]);
+
   const runForecastSkills = async () => {
     setRunningForecast(true);
     try {
       setForecastRunStatus('Running Forecast Rollup...');
       await api.post('/skills/forecast-rollup/run');
       setForecastRunStatus('Running Monte Carlo Simulation...');
-      await api.post('/skills/monte-carlo-forecast/run');
+      // Pass pipeline filter and the fiscal quarter end date so the MC run is scoped correctly.
+      // When no pipeline is selected this behaves identically to the old global run.
+      const mcParams: Record<string, any> = {};
+      if (selectedPipeline !== 'all') {
+        mcParams.pipelineFilter = selectedPipeline;
+        mcParams.forecastWindowEnd = weekInfo.quarterEndISO;
+      }
+      await api.post('/skills/monte-carlo-forecast/run', Object.keys(mcParams).length ? { params: mcParams } : undefined);
       setForecastRunStatus('Done — reloading forecast data...');
       const data: any = await api.get('/forecast/snapshots?limit=13');
       setSnapshots(data.snapshots || []);
       if (data.fiscal_year_start_month) setFiscalYearStartMonth(data.fiscal_year_start_month);
+      // Re-fetch pipeline MC now that a fresh run exists
+      if (selectedPipeline !== 'all') {
+        const path = `/monte-carlo/latest?pipeline=${encodeURIComponent(selectedPipeline)}&quarterEnd=${encodeURIComponent(weekInfo.quarterEndISO)}`;
+        api.get(path)
+          .then((res: any) => {
+            const cc = res?.commandCenter;
+            if (cc && typeof cc.p50 === 'number') {
+              setPipelineMc({ p50: cc.p50, p25: cc.p25 ?? cc.p50, p75: cc.p75 ?? cc.p50, p10: cc.p10 ?? cc.p50, p90: cc.p90 ?? cc.p50 });
+            }
+          })
+          .catch(() => {});
+      }
       setForecastRunStatus(null);
     } catch (err: any) {
       setForecastRunStatus(`Failed: ${err.message}`);

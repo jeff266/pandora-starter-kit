@@ -833,43 +833,68 @@ router.get('/:workspaceId/monte-carlo/latest', async (req, res) => {
     const { workspaceId } = req.params;
     const pipeline = req.query.pipeline as string | undefined;
     const runId = req.query.runId as string | undefined;
+    // ISO date (YYYY-MM-DD) of the fiscal quarter end — used to look up a quarter-scoped run
+    const quarterEnd = req.query.quarterEnd as string | undefined;
 
     const ws = await query('SELECT id FROM workspaces WHERE id = $1', [workspaceId]);
     if (ws.rows.length === 0) {
       return res.status(404).json({ error: 'Workspace not found' });
     }
 
+    let sql: string;
+    let params: any[];
+
+    if (runId) {
+      sql = `SELECT run_id, created_at, result
+             FROM skill_runs
+             WHERE workspace_id = $1 AND run_id = $2
+             LIMIT 1`;
+      params = [workspaceId, runId];
+    } else if (pipeline && quarterEnd) {
+      // Pipeline-scoped + quarter-scoped: match pipelineFilter AND forecastWindowEnd within ±7 days
+      // of the requested quarter end (tolerates minor day-of-month differences).
+      sql = `SELECT run_id, created_at, result
+             FROM skill_runs
+             WHERE workspace_id = $1
+               AND skill_id = 'monte-carlo-forecast'
+               AND status = 'completed'
+               AND result IS NOT NULL
+               AND result->>'simulation' IS NOT NULL
+               AND result->'simulation'->'commandCenter'->>'pipelineFilter' = $2
+               AND (result->'simulation'->'commandCenter'->>'forecastWindowEnd')::date
+                     BETWEEN ($3::date - INTERVAL '7 days') AND ($3::date + INTERVAL '7 days')
+             ORDER BY created_at DESC
+             LIMIT 1`;
+      params = [workspaceId, pipeline, quarterEnd];
+    } else if (pipeline) {
+      sql = `SELECT run_id, created_at, result
+             FROM skill_runs
+             WHERE workspace_id = $1
+               AND skill_id = 'monte-carlo-forecast'
+               AND status = 'completed'
+               AND result IS NOT NULL
+               AND result->>'simulation' IS NOT NULL
+               AND result->'simulation'->'commandCenter'->>'pipelineFilter' = $2
+             ORDER BY created_at DESC
+             LIMIT 1`;
+      params = [workspaceId, pipeline];
+    } else {
+      sql = `SELECT run_id, created_at, result
+             FROM skill_runs
+             WHERE workspace_id = $1
+               AND skill_id = 'monte-carlo-forecast'
+               AND status = 'completed'
+               AND result IS NOT NULL
+             ORDER BY created_at DESC
+             LIMIT 1`;
+      params = [workspaceId];
+    }
+
     const result = await query<{
       run_id: string;
       created_at: string;
       result: any;
-    }>(
-      runId
-        ? `SELECT run_id, created_at, result
-           FROM skill_runs
-           WHERE workspace_id = $1 AND run_id = $2
-           LIMIT 1`
-        : pipeline
-        ? `SELECT run_id, created_at, result
-           FROM skill_runs
-           WHERE workspace_id = $1
-             AND skill_id = 'monte-carlo-forecast'
-             AND status = 'completed'
-             AND result IS NOT NULL
-             AND result->>'simulation' IS NOT NULL
-             AND result->'simulation'->'commandCenter'->>'pipelineFilter' = $2
-           ORDER BY created_at DESC
-           LIMIT 1`
-        : `SELECT run_id, created_at, result
-           FROM skill_runs
-           WHERE workspace_id = $1
-             AND skill_id = 'monte-carlo-forecast'
-             AND status = 'completed'
-             AND result IS NOT NULL
-           ORDER BY created_at DESC
-           LIMIT 1`,
-      runId ? [workspaceId, runId] : pipeline ? [workspaceId, pipeline] : [workspaceId]
-    );
+    }>(sql, params);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'No completed monte-carlo-forecast run found' });
