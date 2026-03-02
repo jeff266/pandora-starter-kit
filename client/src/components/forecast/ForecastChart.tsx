@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useCallback } from 'react';
 import { colors, fonts } from '../../styles/theme';
 
 export interface SnapshotPoint {
@@ -49,6 +49,9 @@ function formatWeekLabel(dateStr: string): string {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
+const ZOOM_MIN = 1;
+const ZOOM_MAX = 8;
+
 export default function ForecastChart({ snapshots, quota, onPointClick, isRefreshing }: ForecastChartProps) {
   const [toggles, setToggles] = useState({
     stage_weighted: true,
@@ -59,12 +62,30 @@ export default function ForecastChart({ snapshots, quota, onPointClick, isRefres
     confidence_band: true,
   });
   const [hoveredPoint, setHoveredPoint] = useState<{ idx: number; metric: string; x: number; y: number; value: number } | null>(null);
+  const [view, setView] = useState({ zoom: 1, panOffset: 0 });
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const svgRef = useRef<SVGSVGElement>(null);
 
   const PADDING = { top: 30, right: 60, bottom: 40, left: 70 };
   const WIDTH = 800;
   const HEIGHT = 340;
   const chartW = WIDTH - PADDING.left - PADDING.right;
   const chartH = HEIGHT - PADDING.top - PADDING.bottom;
+
+  const n = snapshots.length;
+
+  const viewSpan = (n - 1) / view.zoom;
+  const maxPan = Math.max(0, (n - 1) - viewSpan);
+  const clampedPan = Math.min(maxPan, Math.max(0, view.panOffset));
+
+  const xScale = useCallback((i: number) => {
+    if (n <= 1) return PADDING.left + chartW / 2;
+    const span = (n - 1) / viewRef.current.zoom;
+    const maxP = Math.max(0, (n - 1) - span);
+    const pan = Math.min(maxP, Math.max(0, viewRef.current.panOffset));
+    return PADDING.left + ((i - pan) / span) * chartW;
+  }, [n, chartW]);
 
   const allValues = useMemo(() => {
     const vals: number[] = [];
@@ -85,7 +106,6 @@ export default function ForecastChart({ snapshots, quota, onPointClick, isRefres
   const maxVal = allValues.length > 0 ? Math.max(...allValues) * 1.15 : 1;
   const range = (maxVal - minVal) || 1;
 
-  const xScale = (i: number) => PADDING.left + (snapshots.length > 1 ? i / (snapshots.length - 1) : 0.5) * chartW;
   const yScale = (v: number) => PADDING.top + chartH - ((v - minVal) / range) * chartH;
 
   const buildPath = (key: keyof SnapshotPoint) => {
@@ -93,7 +113,8 @@ export default function ForecastChart({ snapshots, quota, onPointClick, isRefres
     snapshots.forEach((s, i) => {
       const val = s[key] as number | null;
       if (val != null) {
-        points.push(`${points.length === 0 ? 'M' : 'L'}${xScale(i).toFixed(1)},${yScale(val).toFixed(1)}`);
+        const x = xScale(i);
+        points.push(`${points.length === 0 ? 'M' : 'L'}${x.toFixed(1)},${yScale(val).toFixed(1)}`);
       }
     });
     return points.join(' ');
@@ -105,14 +126,14 @@ export default function ForecastChart({ snapshots, quota, onPointClick, isRefres
     const lower: string[] = [];
     snapshots.forEach((s, i) => {
       if (s.monte_carlo_p25 != null && s.monte_carlo_p75 != null) {
-        upper.push(`${upper.length === 0 ? 'M' : 'L'}${xScale(i).toFixed(1)},${yScale(s.monte_carlo_p75).toFixed(1)}`);
-        lower.unshift(`L${xScale(i).toFixed(1)},${yScale(s.monte_carlo_p25).toFixed(1)}`);
+        const x = xScale(i);
+        upper.push(`${upper.length === 0 ? 'M' : 'L'}${x.toFixed(1)},${yScale(s.monte_carlo_p75).toFixed(1)}`);
+        lower.unshift(`L${x.toFixed(1)},${yScale(s.monte_carlo_p25).toFixed(1)}`);
       }
     });
     if (upper.length < 2) return null;
     return upper.join(' ') + ' ' + lower.join(' ') + ' Z';
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [snapshots, toggles.confidence_band]);
+  }, [snapshots, toggles.confidence_band, view]);
 
   const yTicks = useMemo(() => {
     const count = 5;
@@ -121,6 +142,109 @@ export default function ForecastChart({ snapshots, quota, onPointClick, isRefres
   }, [minVal, range]);
 
   const toggle = (key: string) => setToggles(prev => ({ ...prev, [key]: !prev[key as keyof typeof prev] }));
+
+  const getSvgScale = () => {
+    if (!svgRef.current) return 1;
+    const rect = svgRef.current.getBoundingClientRect();
+    return WIDTH / rect.width;
+  };
+
+  const applyZoom = useCallback((
+    factor: number,
+    focusDataX: number
+  ) => {
+    setView(prev => {
+      const nextZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, prev.zoom * factor));
+      const newSpan = (n - 1) / nextZoom;
+      const newMaxPan = Math.max(0, (n - 1) - newSpan);
+      const curSpan = (n - 1) / prev.zoom;
+      const curPan = Math.min(Math.max(0, (n - 1) - curSpan), prev.panOffset);
+      const frac = (focusDataX - curPan) / curSpan;
+      const newPan = Math.max(0, Math.min(newMaxPan, focusDataX - frac * newSpan));
+      return { zoom: nextZoom, panOffset: newPan };
+    });
+  }, [n]);
+
+  const touchState = useRef<{
+    lastDist: number | null;
+    lastX: number | null;
+    startZoom: number;
+    startPan: number;
+  }>({ lastDist: null, lastX: null, startZoom: 1, startPan: 0 });
+
+  const getTouchDist = (t1: React.Touch, t2: React.Touch) =>
+    Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+
+  const svgXToDataIdx = useCallback((svgX: number) => {
+    const { zoom, panOffset } = viewRef.current;
+    const span = (n - 1) / zoom;
+    const maxP = Math.max(0, (n - 1) - span);
+    const pan = Math.min(maxP, Math.max(0, panOffset));
+    return pan + ((svgX - PADDING.left) / chartW) * span;
+  }, [n, chartW]);
+
+  const handleTouchStart = useCallback((e: React.TouchEvent<SVGSVGElement>) => {
+    if (e.touches.length === 2) {
+      const dist = getTouchDist(e.touches[0], e.touches[1]);
+      touchState.current.lastDist = dist;
+      touchState.current.lastX = null;
+      touchState.current.startZoom = viewRef.current.zoom;
+      touchState.current.startPan = viewRef.current.panOffset;
+    } else if (e.touches.length === 1) {
+      touchState.current.lastDist = null;
+      touchState.current.lastX = e.touches[0].clientX;
+    }
+  }, []);
+
+  const handleTouchMove = useCallback((e: React.TouchEvent<SVGSVGElement>) => {
+    e.preventDefault();
+    const scale = getSvgScale();
+
+    if (e.touches.length === 2 && touchState.current.lastDist != null) {
+      const dist = getTouchDist(e.touches[0], e.touches[1]);
+      const ratio = dist / touchState.current.lastDist;
+      const midClientX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+      const svgRect = svgRef.current?.getBoundingClientRect();
+      const midSvgX = svgRect ? (midClientX - svgRect.left) * scale : WIDTH / 2;
+      const focusDataX = svgXToDataIdx(midSvgX);
+      applyZoom(ratio, focusDataX);
+      touchState.current.lastDist = dist;
+    } else if (e.touches.length === 1 && touchState.current.lastX != null) {
+      const dx = e.touches[0].clientX - touchState.current.lastX;
+      touchState.current.lastX = e.touches[0].clientX;
+      const { zoom } = viewRef.current;
+      if (zoom <= 1.05) return;
+      const span = (n - 1) / zoom;
+      const dIdx = -(dx * scale) / chartW * span;
+      setView(prev => {
+        const newSpan = (n - 1) / prev.zoom;
+        const newMaxPan = Math.max(0, (n - 1) - newSpan);
+        return { ...prev, panOffset: Math.max(0, Math.min(newMaxPan, prev.panOffset + dIdx)) };
+      });
+    }
+  }, [applyZoom, svgXToDataIdx, n, chartW]);
+
+  const handleTouchEnd = useCallback(() => {
+    touchState.current.lastDist = null;
+    touchState.current.lastX = null;
+  }, []);
+
+  const handleWheel = useCallback((e: React.WheelEvent<SVGSVGElement>) => {
+    e.preventDefault();
+    const scale = getSvgScale();
+    const svgRect = svgRef.current?.getBoundingClientRect();
+    const mouseClientX = e.clientX;
+    const mouseSvgX = svgRect ? (mouseClientX - svgRect.left) * scale : WIDTH / 2;
+    const focusDataX = svgXToDataIdx(mouseSvgX);
+    const factor = e.deltaY > 0 ? 0.85 : 1 / 0.85;
+    applyZoom(factor, focusDataX);
+  }, [applyZoom, svgXToDataIdx]);
+
+  const resetZoom = () => setView({ zoom: 1, panOffset: 0 });
+  const isZoomed = view.zoom > 1.05;
+
+  const visibleMin = clampedPan - 0.5;
+  const visibleMax = clampedPan + viewSpan + 0.5;
 
   if (snapshots.length === 0) {
     return (
@@ -170,9 +294,30 @@ export default function ForecastChart({ snapshots, quota, onPointClick, isRefres
       padding: 20,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-        <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text, fontFamily: fonts.sans }}>
-          Forecast vs. Attainment
-        </h3>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text, fontFamily: fonts.sans, margin: 0 }}>
+            Forecast vs. Attainment
+          </h3>
+          {isZoomed && (
+            <button
+              onClick={resetZoom}
+              style={{
+                fontSize: 10,
+                padding: '2px 8px',
+                borderRadius: 10,
+                border: `1px solid ${colors.borderLight}`,
+                background: 'rgba(255,255,255,0.06)',
+                color: colors.textMuted,
+                cursor: 'pointer',
+                fontFamily: fonts.sans,
+                fontWeight: 500,
+              }}
+              title="Reset zoom to show full quarter"
+            >
+              Reset zoom
+            </button>
+          )}
+        </div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {Object.entries(LINE_LABELS).map(([key, label]) => (
             <button
@@ -214,9 +359,20 @@ export default function ForecastChart({ snapshots, quota, onPointClick, isRefres
       </div>
 
       <svg
+        ref={svgRef}
         viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-        style={{ width: '100%', height: 'auto', maxHeight: 380 }}
+        style={{ width: '100%', height: 'auto', maxHeight: 380, touchAction: 'none', userSelect: 'none' }}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onWheel={handleWheel}
       >
+        <defs>
+          <clipPath id="forecast-chart-clip">
+            <rect x={PADDING.left} y={PADDING.top} width={chartW} height={chartH} />
+          </clipPath>
+        </defs>
+
         {yTicks.map((tick, i) => (
           <g key={i}>
             <line
@@ -241,44 +397,48 @@ export default function ForecastChart({ snapshots, quota, onPointClick, isRefres
           </g>
         ))}
 
-        {snapshots.map((s, i) => (
-          <g key={i}>
-            <line
-              x1={xScale(i)}
-              x2={xScale(i)}
-              y1={PADDING.top}
-              y2={PADDING.top + chartH}
-              stroke={s.isLive ? 'rgba(34,197,94,0.25)' : colors.border}
-              strokeWidth={s.isLive ? 1 : 0.5}
-              strokeDasharray={s.isLive ? '4,3' : '2,4'}
-            />
-            <text
-              x={xScale(i)}
-              y={HEIGHT - 18}
-              textAnchor="middle"
-              fill={s.isLive ? '#22c55e' : colors.textMuted}
-              fontSize={10}
-              fontFamily={fonts.mono}
-              fontWeight={s.isLive ? 600 : 400}
-            >
-              {formatWeekLabel(s.snapshot_date)}
-            </text>
-            {s.isLive && (
+        {snapshots.map((s, i) => {
+          if (i < visibleMin || i > visibleMax) return null;
+          const x = xScale(i);
+          return (
+            <g key={i}>
+              <line
+                x1={x} x2={x}
+                y1={PADDING.top}
+                y2={PADDING.top + chartH}
+                stroke={s.isLive ? 'rgba(34,197,94,0.25)' : colors.border}
+                strokeWidth={s.isLive ? 1 : 0.5}
+                strokeDasharray={s.isLive ? '4,3' : '2,4'}
+                clipPath="url(#forecast-chart-clip)"
+              />
               <text
-                x={xScale(i)}
-                y={HEIGHT - 6}
+                x={x}
+                y={HEIGHT - 18}
                 textAnchor="middle"
-                fill="#22c55e"
-                fontSize={8}
-                fontFamily={fonts.sans}
-                fontWeight={600}
-                letterSpacing={0.5}
+                fill={s.isLive ? '#22c55e' : colors.textMuted}
+                fontSize={10}
+                fontFamily={fonts.mono}
+                fontWeight={s.isLive ? 600 : 400}
               >
-                LIVE
+                {formatWeekLabel(s.snapshot_date)}
               </text>
-            )}
-          </g>
-        ))}
+              {s.isLive && (
+                <text
+                  x={x}
+                  y={HEIGHT - 6}
+                  textAnchor="middle"
+                  fill="#22c55e"
+                  fontSize={8}
+                  fontFamily={fonts.sans}
+                  fontWeight={600}
+                  letterSpacing={0.5}
+                >
+                  LIVE
+                </text>
+              )}
+            </g>
+          );
+        })}
 
         {quota != null && (
           <g>
@@ -304,106 +464,111 @@ export default function ForecastChart({ snapshots, quota, onPointClick, isRefres
           </g>
         )}
 
-        {confidencePath && (
-          <path d={confidencePath} fill="rgba(167,139,250,0.12)" stroke="none" />
-        )}
+        <g clipPath="url(#forecast-chart-clip)">
+          {confidencePath && (
+            <path d={confidencePath} fill="rgba(167,139,250,0.12)" stroke="none" />
+          )}
 
-        {toggles.attainment && (() => {
-          const pts = snapshots
-            .map((s, i) => s.attainment != null ? { x: xScale(i), y: yScale(s.attainment) } : null)
-            .filter(Boolean) as { x: number; y: number }[];
-          if (pts.length < 2) return null;
-          const areaPath = `M${pts[0].x},${PADDING.top + chartH} ` +
-            pts.map(p => `L${p.x},${p.y}`).join(' ') +
-            ` L${pts[pts.length - 1].x},${PADDING.top + chartH} Z`;
-          return <path d={areaPath} fill="rgba(34,197,94,0.08)" stroke="none" />;
-        })()}
+          {toggles.attainment && (() => {
+            const pts = snapshots
+              .map((s, i) => s.attainment != null ? { x: xScale(i), y: yScale(s.attainment) } : null)
+              .filter(Boolean) as { x: number; y: number }[];
+            if (pts.length < 2) return null;
+            const areaPath = `M${pts[0].x},${PADDING.top + chartH} ` +
+              pts.map(p => `L${p.x},${p.y}`).join(' ') +
+              ` L${pts[pts.length - 1].x},${PADDING.top + chartH} Z`;
+            return <path d={areaPath} fill="rgba(34,197,94,0.08)" stroke="none" />;
+          })()}
 
-        {snapshots.length > 1 && toggles.stage_weighted && (
-          <path d={buildPath('stage_weighted_forecast')} fill="none" stroke={LINE_COLORS.stage_weighted} strokeWidth={2} />
-        )}
-        {snapshots.length > 1 && toggles.category_weighted && (
-          <path d={buildPath('category_weighted_forecast')} fill="none" stroke={LINE_COLORS.category_weighted} strokeWidth={2} />
-        )}
-        {snapshots.length > 1 && toggles.tte_forecast && (
-          <path d={buildPath('tte_forecast')} fill="none" stroke={LINE_COLORS.tte_forecast} strokeWidth={2} />
-        )}
-        {snapshots.length > 1 && toggles.mc_p50 && (
-          <path d={buildPath('monte_carlo_p50')} fill="none" stroke={LINE_COLORS.mc_p50} strokeWidth={2.5} />
-        )}
-        {snapshots.length > 1 && toggles.attainment && (
-          <path d={buildPath('attainment')} fill="none" stroke={LINE_COLORS.attainment} strokeWidth={2} />
-        )}
+          {snapshots.length > 1 && toggles.stage_weighted && (
+            <path d={buildPath('stage_weighted_forecast')} fill="none" stroke={LINE_COLORS.stage_weighted} strokeWidth={2} />
+          )}
+          {snapshots.length > 1 && toggles.category_weighted && (
+            <path d={buildPath('category_weighted_forecast')} fill="none" stroke={LINE_COLORS.category_weighted} strokeWidth={2} />
+          )}
+          {snapshots.length > 1 && toggles.tte_forecast && (
+            <path d={buildPath('tte_forecast')} fill="none" stroke={LINE_COLORS.tte_forecast} strokeWidth={2} />
+          )}
+          {snapshots.length > 1 && toggles.mc_p50 && (
+            <path d={buildPath('monte_carlo_p50')} fill="none" stroke={LINE_COLORS.mc_p50} strokeWidth={2.5} />
+          )}
+          {snapshots.length > 1 && toggles.attainment && (
+            <path d={buildPath('attainment')} fill="none" stroke={LINE_COLORS.attainment} strokeWidth={2} />
+          )}
 
-        {snapshots.map((s, i) => (
-          <g key={`dots-${i}`}>
-            {toggles.stage_weighted && s.stage_weighted_forecast != null && (
-              <circle
-                cx={xScale(i)} cy={yScale(s.stage_weighted_forecast)} r={3}
-                fill={LINE_COLORS.stage_weighted} stroke={colors.surface} strokeWidth={1.5}
-                style={{ cursor: 'pointer' }}
-                onMouseEnter={(e) => setHoveredPoint({ idx: i, metric: 'stage_weighted', x: xScale(i), y: yScale(s.stage_weighted_forecast!), value: s.stage_weighted_forecast! })}
-                onMouseLeave={() => setHoveredPoint(null)}
-                onClick={() => onPointClick?.(s, 'stage_weighted')}
-              />
-            )}
-            {toggles.category_weighted && s.category_weighted_forecast != null && (
-              <circle
-                cx={xScale(i)} cy={yScale(s.category_weighted_forecast)} r={3}
-                fill={LINE_COLORS.category_weighted} stroke={colors.surface} strokeWidth={1.5}
-                style={{ cursor: 'pointer' }}
-                onMouseEnter={() => setHoveredPoint({ idx: i, metric: 'category_weighted', x: xScale(i), y: yScale(s.category_weighted_forecast!), value: s.category_weighted_forecast! })}
-                onMouseLeave={() => setHoveredPoint(null)}
-                onClick={() => onPointClick?.(s, 'category_weighted')}
-              />
-            )}
-            {toggles.tte_forecast && s.tte_forecast != null && (
-              <circle
-                cx={xScale(i)} cy={yScale(s.tte_forecast)} r={3}
-                fill={LINE_COLORS.tte_forecast} stroke={colors.surface} strokeWidth={1.5}
-                style={{ cursor: 'pointer' }}
-                onMouseEnter={() => setHoveredPoint({ idx: i, metric: 'tte_forecast', x: xScale(i), y: yScale(s.tte_forecast!), value: s.tte_forecast! })}
-                onMouseLeave={() => setHoveredPoint(null)}
-                onClick={() => onPointClick?.(s, 'tte_forecast')}
-              />
-            )}
-            {toggles.mc_p50 && s.monte_carlo_p50 != null && (
-              <circle
-                cx={xScale(i)} cy={yScale(s.monte_carlo_p50)} r={4}
-                fill={LINE_COLORS.mc_p50} stroke={colors.surface} strokeWidth={1.5}
-                style={{ cursor: 'pointer' }}
-                onMouseEnter={() => setHoveredPoint({ idx: i, metric: 'mc_p50', x: xScale(i), y: yScale(s.monte_carlo_p50!), value: s.monte_carlo_p50! })}
-                onMouseLeave={() => setHoveredPoint(null)}
-                onClick={() => onPointClick?.(s, 'mc_p50')}
-              />
-            )}
-            {toggles.attainment && s.attainment != null && (
-              <circle
-                cx={xScale(i)} cy={yScale(s.attainment)} r={3}
-                fill={LINE_COLORS.attainment} stroke={colors.surface} strokeWidth={1.5}
-                style={{ cursor: 'pointer' }}
-                onMouseEnter={() => setHoveredPoint({ idx: i, metric: 'attainment', x: xScale(i), y: yScale(s.attainment!), value: s.attainment! })}
-                onMouseLeave={() => setHoveredPoint(null)}
-                onClick={() => onPointClick?.(s, 'attainment')}
-              />
-            )}
-            {s.isLive && (() => {
-              const liveVal = s.stage_weighted_forecast ?? s.attainment ?? null;
-              if (liveVal == null) return null;
-              const cx = xScale(i);
-              const cy = yScale(liveVal);
-              return (
-                <g key="live-pulse">
-                  <circle cx={cx} cy={cy} r={10} fill="none" stroke="#22c55e" strokeWidth={1.5} opacity={0.5}>
-                    <animate attributeName="r" from="6" to="16" dur="1.8s" repeatCount="indefinite" />
-                    <animate attributeName="opacity" from="0.5" to="0" dur="1.8s" repeatCount="indefinite" />
-                  </circle>
-                  <circle cx={cx} cy={cy} r={5} fill="#22c55e" stroke={colors.surface} strokeWidth={2} />
-                </g>
-              );
-            })()}
-          </g>
-        ))}
+          {snapshots.map((s, i) => {
+            if (i < visibleMin || i > visibleMax) return null;
+            const cx = xScale(i);
+            return (
+              <g key={`dots-${i}`}>
+                {toggles.stage_weighted && s.stage_weighted_forecast != null && (
+                  <circle
+                    cx={cx} cy={yScale(s.stage_weighted_forecast)} r={3}
+                    fill={LINE_COLORS.stage_weighted} stroke={colors.surface} strokeWidth={1.5}
+                    style={{ cursor: 'pointer' }}
+                    onMouseEnter={() => setHoveredPoint({ idx: i, metric: 'stage_weighted', x: cx, y: yScale(s.stage_weighted_forecast!), value: s.stage_weighted_forecast! })}
+                    onMouseLeave={() => setHoveredPoint(null)}
+                    onClick={() => onPointClick?.(s, 'stage_weighted')}
+                  />
+                )}
+                {toggles.category_weighted && s.category_weighted_forecast != null && (
+                  <circle
+                    cx={cx} cy={yScale(s.category_weighted_forecast)} r={3}
+                    fill={LINE_COLORS.category_weighted} stroke={colors.surface} strokeWidth={1.5}
+                    style={{ cursor: 'pointer' }}
+                    onMouseEnter={() => setHoveredPoint({ idx: i, metric: 'category_weighted', x: cx, y: yScale(s.category_weighted_forecast!), value: s.category_weighted_forecast! })}
+                    onMouseLeave={() => setHoveredPoint(null)}
+                    onClick={() => onPointClick?.(s, 'category_weighted')}
+                  />
+                )}
+                {toggles.tte_forecast && s.tte_forecast != null && (
+                  <circle
+                    cx={cx} cy={yScale(s.tte_forecast)} r={3}
+                    fill={LINE_COLORS.tte_forecast} stroke={colors.surface} strokeWidth={1.5}
+                    style={{ cursor: 'pointer' }}
+                    onMouseEnter={() => setHoveredPoint({ idx: i, metric: 'tte_forecast', x: cx, y: yScale(s.tte_forecast!), value: s.tte_forecast! })}
+                    onMouseLeave={() => setHoveredPoint(null)}
+                    onClick={() => onPointClick?.(s, 'tte_forecast')}
+                  />
+                )}
+                {toggles.mc_p50 && s.monte_carlo_p50 != null && (
+                  <circle
+                    cx={cx} cy={yScale(s.monte_carlo_p50)} r={4}
+                    fill={LINE_COLORS.mc_p50} stroke={colors.surface} strokeWidth={1.5}
+                    style={{ cursor: 'pointer' }}
+                    onMouseEnter={() => setHoveredPoint({ idx: i, metric: 'mc_p50', x: cx, y: yScale(s.monte_carlo_p50!), value: s.monte_carlo_p50! })}
+                    onMouseLeave={() => setHoveredPoint(null)}
+                    onClick={() => onPointClick?.(s, 'mc_p50')}
+                  />
+                )}
+                {toggles.attainment && s.attainment != null && (
+                  <circle
+                    cx={cx} cy={yScale(s.attainment)} r={3}
+                    fill={LINE_COLORS.attainment} stroke={colors.surface} strokeWidth={1.5}
+                    style={{ cursor: 'pointer' }}
+                    onMouseEnter={() => setHoveredPoint({ idx: i, metric: 'attainment', x: cx, y: yScale(s.attainment!), value: s.attainment! })}
+                    onMouseLeave={() => setHoveredPoint(null)}
+                    onClick={() => onPointClick?.(s, 'attainment')}
+                  />
+                )}
+                {s.isLive && (() => {
+                  const liveVal = s.stage_weighted_forecast ?? s.attainment ?? null;
+                  if (liveVal == null) return null;
+                  const cy = yScale(liveVal);
+                  return (
+                    <g key="live-pulse">
+                      <circle cx={cx} cy={cy} r={10} fill="none" stroke="#22c55e" strokeWidth={1.5} opacity={0.5}>
+                        <animate attributeName="r" from="6" to="16" dur="1.8s" repeatCount="indefinite" />
+                        <animate attributeName="opacity" from="0.5" to="0" dur="1.8s" repeatCount="indefinite" />
+                      </circle>
+                      <circle cx={cx} cy={cy} r={5} fill="#22c55e" stroke={colors.surface} strokeWidth={2} />
+                    </g>
+                  );
+                })()}
+              </g>
+            );
+          })}
+        </g>
 
         {hoveredPoint && (
           <g>
@@ -429,6 +594,19 @@ export default function ForecastChart({ snapshots, quota, onPointClick, isRefres
               {formatCurrency(hoveredPoint.value)}
             </text>
           </g>
+        )}
+
+        {isZoomed && (
+          <text
+            x={PADDING.left + chartW / 2}
+            y={PADDING.top - 10}
+            textAnchor="middle"
+            fill={colors.textMuted}
+            fontSize={9}
+            fontFamily={fonts.sans}
+          >
+            {view.zoom.toFixed(1)}× zoom · pinch or scroll to zoom · drag to pan
+          </text>
         )}
       </svg>
     </div>
