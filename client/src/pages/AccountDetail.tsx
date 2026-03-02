@@ -9,6 +9,7 @@ import SectionErrorBoundary from '../components/SectionErrorBoundary';
 import { DossierNarrative, AnalysisModal } from '../components/shared';
 import { renderMarkdown } from '../lib/render-markdown';
 import { AccountSignalsTimeline } from '../components/account';
+import { AccountPipelinePanel } from '../components/accounts/AccountPipelinePanel';
 import { useDemoMode } from '../contexts/DemoModeContext';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { buildAccountCrmUrl, buildConversationUrl, useCrmInfo } from '../lib/deeplinks';
@@ -92,6 +93,7 @@ export default function AccountDetail() {
   const [askError, setAskError] = useState('');
   const { crmInfo } = useCrmInfo();
   const [analysisOpen, setAnalysisOpen] = useState(false);
+  const [showPipelineMath, setShowPipelineMath] = useState(false);
 
   const fetchDossier = async (withNarrative = false) => {
     if (!accountId) return;
@@ -301,7 +303,19 @@ export default function AccountDetail() {
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: isMobile ? 12 : 20, marginTop: 12 }}>
               <MiniStat label="Total Deals" value={String(rel.total_deals || deals.length)} />
-              <MiniStat label="Open Value" value={formatCurrency(anon.amount(Number(rel.open_value) || 0))} />
+              <div>
+                <MiniStat label="Open Value" value={formatCurrency(anon.amount(Number(rel.open_value) || 0))} />
+                <button
+                  onClick={() => setShowPipelineMath(true)}
+                  style={{
+                    background: 'none', border: 'none', padding: 0,
+                    fontSize: 10, fontWeight: 600, color: colors.accent,
+                    cursor: 'pointer', marginTop: 3, letterSpacing: '0.03em',
+                  }}
+                >
+                  Show Math
+                </button>
+              </div>
               <MiniStat label="Won Value" value={formatCurrency(anon.amount(Number(rel.won_value) || 0))} />
             </div>
           </div>
@@ -809,6 +823,16 @@ export default function AccountDetail() {
         visible={analysisOpen}
         onClose={() => setAnalysisOpen(false)}
       />
+
+      {showPipelineMath && (
+        <AccountPipelinePanel
+          accountId={accountId!}
+          accountName={account.name || 'Account'}
+          workspaceId={api.getWorkspaceId()}
+          deals={deals}
+          onClose={() => setShowPipelineMath(false)}
+        />
+      )}
     </div>
   );
 }

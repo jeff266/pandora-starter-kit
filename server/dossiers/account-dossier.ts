@@ -133,7 +133,7 @@ async function getAccountById(workspaceId: string, accountId: string) {
 
 async function getDealsForAccount(workspaceId: string, accountId: string) {
   const result = await query(
-    `SELECT id, name, amount, stage, stage_normalized, close_date, owner
+    `SELECT id, name, amount, stage, stage_normalized, close_date, owner, tte_conditional_prob
      FROM deals
      WHERE workspace_id = $1 AND account_id = $2
      ORDER BY created_at DESC`,
