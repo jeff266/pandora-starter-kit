@@ -117,13 +117,17 @@ export default function ForecastPage() {
       .catch(() => {});
   }, [wsId]);
 
-  // Fetch current-period quota for live snapshot
+  // Fetch current-period quota for live snapshot — sum active rep quotas for the current quarter
   useEffect(() => {
     if (!wsId) return;
-    api.get('/quotas')
+    const now = new Date();
+    const qStart = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
+    const periodStart = qStart.toISOString().slice(0, 10);
+    api.get(`/quotas?period_start=${periodStart}`)
       .then((data: any) => {
-        const q = data.period?.teamQuota || data.teamTotal || null;
-        setLiveQuota(q > 0 ? q : null);
+        const rows: any[] = data.quotas || [];
+        const total = rows.reduce((sum: number, r: any) => sum + (Number(r.amount) || 0), 0);
+        setLiveQuota(total > 0 ? total : null);
       })
       .catch(() => {});
   }, [wsId]);

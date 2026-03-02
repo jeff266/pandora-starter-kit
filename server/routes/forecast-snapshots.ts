@@ -38,7 +38,7 @@ router.get('/:id/forecast/snapshots', async (req, res) => {
       [workspaceId]
     );
     const mcData = mcResult.rows[0]?.result;
-    const mcCommandCenter = mcData?.commandCenter || null;
+    const mcCommandCenter = mcData?.simulation?.commandCenter || mcData?.commandCenter || null;
 
     const snapshots = runs.rows.map((row: any) => {
       const result = row.result || {};
