@@ -1,6 +1,6 @@
 import { query, getClient } from '../db.js';
 import { getContext } from '../context/index.js';
-import { computeAndStoreRFMScores } from '../analysis/rfm-scoring.js';
+import { computeAndStoreRFMScores, computeAndStoreTTEProbs } from '../analysis/rfm-scoring.js';
 import { computeDealScores, computeConversationModifier, computeCompositeScore, computeInferredPhase, type DealRow, type CompositeScoreResult, type InferredPhase } from './deal-scores.js';
 import { computeContactEngagement, type ContactRow } from './contact-scores.js';
 import { computeAccountHealth, type AccountRow } from './account-scores.js';
@@ -77,6 +77,12 @@ export async function computeFields(workspaceId: string): Promise<ComputeResult>
     rfmResult = { scored: rfm.scored, mode: rfm.mode };
   } catch (err) {
     console.warn('[ComputedFields] RFM scoring failed (non-fatal):', err);
+  }
+
+  try {
+    await computeAndStoreTTEProbs(workspaceId);
+  } catch (err) {
+    console.warn('[ComputedFields] TTE probability compute failed (non-fatal):', err);
   }
 
   return {

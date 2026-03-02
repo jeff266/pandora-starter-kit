@@ -3,6 +3,13 @@ import { colors, fonts } from '../../styles/theme';
 import SeverityDot from './SeverityDot';
 import TimeAgo from './TimeAgo';
 
+interface TriSignal {
+  icp_grade: string | null;
+  rfm_grade: string | null;
+  rfm_label: string | null;
+  tte_prob: number | null;
+}
+
 interface Finding {
   id: string;
   severity: string;
@@ -14,11 +21,68 @@ interface Finding {
   account_name?: string;
   owner_email?: string;
   found_at: string;
+  tri_signal?: TriSignal | null;
 }
 
 interface FindingCardProps {
   finding: Finding;
   onClick?: (finding: Finding) => void;
+}
+
+const GRADE_COLORS: Record<string, string> = {
+  A: '#22c55e',
+  B: '#86efac',
+  C: '#f59e0b',
+  D: '#f97316',
+  F: '#ef4444',
+};
+
+function gradeColor(grade: string | null): string {
+  return grade ? (GRADE_COLORS[grade] ?? colors.textMuted) : colors.textMuted;
+}
+
+function TriSignalBadges({ sig }: { sig: TriSignal }) {
+  const hasSomething = sig.icp_grade || sig.rfm_grade || sig.tte_prob != null;
+  if (!hasSomething) return null;
+
+  const badge = (label: string, color: string, bg: string) => (
+    <span
+      key={label}
+      style={{
+        fontSize: 10,
+        fontWeight: 600,
+        fontFamily: fonts.mono,
+        padding: '2px 6px',
+        borderRadius: 4,
+        border: `1px solid ${color}44`,
+        color,
+        background: bg,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {label}
+    </span>
+  );
+
+  return (
+    <div style={{ display: 'flex', gap: 5, marginTop: 6, flexWrap: 'wrap' }}>
+      {sig.icp_grade && badge(
+        `ICP: ${sig.icp_grade}`,
+        gradeColor(sig.icp_grade),
+        `${gradeColor(sig.icp_grade)}18`
+      )}
+      {sig.rfm_grade && badge(
+        `Beh: ${sig.rfm_grade}${sig.rfm_label ? ` · ${sig.rfm_label}` : ''}`,
+        gradeColor(sig.rfm_grade),
+        `${gradeColor(sig.rfm_grade)}18`
+      )}
+      {sig.tte_prob != null && badge(
+        `Prob: ${Math.round(sig.tte_prob * 100)}%`,
+        sig.tte_prob >= 0.3 ? '#22c55e' : sig.tte_prob >= 0.1 ? '#f59e0b' : '#ef4444',
+        sig.tte_prob >= 0.3 ? '#22c55e18' : sig.tte_prob >= 0.1 ? '#f59e0b18' : '#ef444418'
+      )}
+    </div>
+  );
 }
 
 export default function FindingCard({ finding, onClick }: FindingCardProps) {
@@ -68,6 +132,7 @@ export default function FindingCard({ finding, onClick }: FindingCardProps) {
               <TimeAgo date={finding.found_at} />
             </span>
           </div>
+          {finding.tri_signal && <TriSignalBadges sig={finding.tri_signal} />}
         </div>
       </div>
     </div>

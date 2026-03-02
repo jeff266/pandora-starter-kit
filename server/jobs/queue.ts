@@ -10,6 +10,22 @@ import { syncSalesforce } from '../connectors/salesforce/sync.js';
 import pRetry from 'p-retry';
 import { notifyProgress, notifyCompleted, notifyFailed } from '../utils/webhook-notifier.js';
 
+async function prewarmSurvivalCache(workspaceId: string): Promise<void> {
+  try {
+    const { buildSurvivalCurves, invalidateSurvivalCache } = await import('../analysis/survival-data.js');
+    invalidateSurvivalCache(workspaceId);
+    await Promise.all([
+      buildSurvivalCurves({ workspaceId, lookbackMonths: 24, groupBy: 'none' }),
+      buildSurvivalCurves({ workspaceId, lookbackMonths: 24, groupBy: 'stage_reached', minSegmentSize: 20 }),
+      buildSurvivalCurves({ workspaceId, lookbackMonths: 24, groupBy: 'source', minSegmentSize: 20 }),
+      buildSurvivalCurves({ workspaceId, lookbackMonths: 24, groupBy: 'owner', minSegmentSize: 15 }),
+    ]);
+    console.log(`[SurvivalCache] Pre-warmed for workspace ${workspaceId}`);
+  } catch (err) {
+    console.warn(`[SurvivalCache] Pre-warm failed (non-fatal):`, err instanceof Error ? err.message : err);
+  }
+}
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -339,6 +355,9 @@ export class JobQueue {
       ]
     ).catch(() => {});
 
+    // Pre-warm survival curve cache (fire-and-forget)
+    prewarmSurvivalCache(job.workspace_id).catch(() => {});
+
     return {
       results,
       totalRecords,
@@ -389,6 +408,9 @@ export class JobQueue {
        WHERE workspace_id = $1 AND connector_name = 'salesforce'`,
       [job.workspace_id]
     ).catch(() => {});
+
+    // Pre-warm survival curve cache (fire-and-forget)
+    prewarmSurvivalCache(job.workspace_id).catch(() => {});
 
     return {
       success: result.success,

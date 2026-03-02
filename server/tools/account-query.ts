@@ -32,6 +32,11 @@ export interface Account {
   signal_industry?: string;
   growth_stage?: string;
   classification_confidence?: number;
+  // Tri-signal fields
+  quality_pipeline?: number;
+  deal_grade_breakdown?: Record<string, number>;
+  min_recency_days?: number;
+  icp_grade?: string | null;
 }
 
 interface AccountDeal {
@@ -129,7 +134,7 @@ function buildWhereClause(workspaceId: string, filters: AccountFilters) {
   return { where: conditions.join(' AND '), params, idx };
 }
 
-const VALID_SORT_COLUMNS = new Set(['name', 'annual_revenue', 'employee_count', 'health_score', 'created_at', 'total_score', 'open_deals', 'pipeline_value', 'last_activity']);
+const VALID_SORT_COLUMNS = new Set(['name', 'annual_revenue', 'employee_count', 'health_score', 'created_at', 'total_score', 'open_deals', 'pipeline_value', 'last_activity', 'quality_pipeline']);
 
 /**
  * Extract requested custom fields from the custom_fields JSONB column
@@ -191,6 +196,8 @@ export async function queryAccounts(workspaceId: string, filters: AccountFilters
     sortExpr = `COALESCE(deal_stats.open_deal_count, 0) DESC, COALESCE(conv_stats.last_conversation_date, '1970-01-01'::date) DESC, a.name ASC`;
   } else if (rawSort === 'pipeline_value') {
     sortExpr = `COALESCE(deal_stats.total_pipeline_value, 0) ${sortDir}`;
+  } else if (rawSort === 'quality_pipeline') {
+    sortExpr = `COALESCE(deal_stats.quality_pipeline, 0) ${sortDir} NULLS LAST`;
   } else if (rawSort === 'last_activity') {
     sortExpr = `COALESCE(conv_stats.last_conversation_date, '1970-01-01'::date) ${sortDir}`;
   } else {
@@ -244,11 +251,15 @@ export async function queryAccounts(workspaceId: string, filters: AccountFilters
        COALESCE(deal_stats.open_deal_count, 0) as open_deal_count,
        COALESCE(deal_stats.total_pipeline_value, 0) as total_pipeline_value,
        COALESCE(deal_stats.total_deal_count, 0) as total_deal_count,
+       deal_stats.quality_pipeline,
+       deal_stats.deal_grade_breakdown,
+       deal_stats.min_recency_days,
        conv_stats.last_conversation_date,
        conv_stats.conversation_count,
        acs.total_score, acs.grade, acs.score_delta, acs.data_confidence,
        asig.signals, asig.signal_score, asig.industry AS signal_industry,
-       asig.growth_stage, asig.classification_confidence
+       asig.growth_stage, asig.classification_confidence,
+       icp_stats.icp_grade
      FROM accounts a
      LEFT JOIN LATERAL (
        SELECT
@@ -258,7 +269,18 @@ export async function queryAccounts(workspaceId: string, filters: AccountFilters
          SUM(d.amount) FILTER (
            WHERE d.stage_normalized NOT IN ('closed_won', 'closed_lost')
          ) as total_pipeline_value,
-         COUNT(*) as total_deal_count
+         COUNT(*) as total_deal_count,
+         SUM(d.amount * COALESCE(d.tte_conditional_prob, 0.25)) FILTER (
+           WHERE d.stage_normalized NOT IN ('closed_won', 'closed_lost')
+         ) as quality_pipeline,
+         jsonb_build_object(
+           'A', COUNT(*) FILTER (WHERE d.rfm_grade = 'A' AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')),
+           'B', COUNT(*) FILTER (WHERE d.rfm_grade = 'B' AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')),
+           'C', COUNT(*) FILTER (WHERE d.rfm_grade = 'C' AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')),
+           'D', COUNT(*) FILTER (WHERE d.rfm_grade = 'D' AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')),
+           'F', COUNT(*) FILTER (WHERE d.rfm_grade = 'F' AND d.stage_normalized NOT IN ('closed_won', 'closed_lost'))
+         ) as deal_grade_breakdown,
+         MIN(d.rfm_recency_days) FILTER (WHERE d.stage_normalized NOT IN ('closed_won', 'closed_lost')) as min_recency_days
        FROM deals d
        WHERE d.account_id = a.id AND d.workspace_id = a.workspace_id
      ) deal_stats ON true
@@ -271,6 +293,18 @@ export async function queryAccounts(workspaceId: string, filters: AccountFilters
      ) conv_stats ON true
      LEFT JOIN account_scores acs ON acs.account_id = a.id AND acs.workspace_id = a.workspace_id
      LEFT JOIN account_signals asig ON asig.account_id = a.id AND asig.workspace_id = a.workspace_id
+     LEFT JOIN LATERAL (
+       SELECT ls.score_grade as icp_grade
+       FROM lead_scores ls
+       WHERE ls.entity_id IN (
+           SELECT id FROM deals
+           WHERE account_id = a.id AND workspace_id = a.workspace_id
+             AND stage_normalized NOT IN ('closed_won', 'closed_lost')
+         )
+         AND ls.entity_type = 'deal'
+       ORDER BY CASE ls.score_grade WHEN 'A' THEN 1 WHEN 'B' THEN 2 WHEN 'C' THEN 3 WHEN 'D' THEN 4 WHEN 'F' THEN 5 ELSE 6 END ASC
+       LIMIT 1
+     ) icp_stats ON true
      WHERE ${where.replace(/\bworkspace_id\b/g, 'a.workspace_id')}${hasOpenDealsWhere}
      ORDER BY ${sortExpr}
      LIMIT $${idx} OFFSET $${idx + 1}`,

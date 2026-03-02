@@ -2737,10 +2737,53 @@ const forecastRollup: ToolDefinition = {
       const bestCase = categories.best_case.amount;
       const pipelineAmt = categories.pipeline.amount;
 
-      const bearCase = closedWon + commit;
-      const baseCase = closedWon + commit + bestCase;
-      const bullCase = closedWon + commit + bestCase + pipelineAmt;
+      // CRM category sums (kept as raw reference values)
+      const crmBearCase = closedWon + commit;
+      const crmBaseCase = closedWon + commit + bestCase;
+      const crmBullCase = closedWon + commit + bestCase + pipelineAmt;
       const weightedForecast = closedWon + categories.commit.weighted + categories.best_case.weighted + categories.pipeline.weighted;
+
+      // TTE-based bear/base/bull using survival curve CI bounds (non-fatal, falls back to CRM sums)
+      let bearCase = crmBearCase;
+      let baseCase = crmBaseCase;
+      let bullCase = crmBullCase;
+      let tteScenarios: { bear: number; base: number; bull: number; fromSurvival: boolean } = {
+        bear: crmBearCase, base: crmBaseCase, bull: crmBullCase, fromSurvival: false,
+      };
+      try {
+        const { buildSurvivalCurves } = await import('../analysis/survival-data.js');
+        const { conditionalWinProbability, expectedValueInWindow, assessDataTier } = await import('../analysis/survival-curve.js');
+        const survResult = await buildSurvivalCurves({ workspaceId: context.workspaceId, lookbackMonths: 24 });
+        const curve = survResult.overall;
+        if (assessDataTier(curve) >= 2) {
+          const openDealsRes = await query(
+            `SELECT amount, created_at, close_date FROM deals
+             WHERE workspace_id = $1
+               AND stage_normalized NOT IN ('closed_won', 'closed_lost')
+               AND amount > 0 AND amount IS NOT NULL
+               AND created_at IS NOT NULL${dealOwnerClause}`,
+            [context.workspaceId]
+          );
+          const now = new Date();
+          const qStart = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
+          const qEnd = new Date(qStart.getFullYear(), qStart.getMonth() + 3, 0);
+          const daysRemainingInQtr = Math.max(1, Math.round((qEnd.getTime() - now.getTime()) / 86400000));
+          let sumBear = 0, sumBase = 0, sumBull = 0;
+          for (const row of (openDealsRes as any).rows) {
+            const amt = parseFloat(row.amount) || 0;
+            const dealAgeDays = Math.max(0, (now.getTime() - new Date(row.created_at).getTime()) / 86400000);
+            const { confidence } = conditionalWinProbability(curve, dealAgeDays);
+            const { expectedValue } = expectedValueInWindow(curve, dealAgeDays, daysRemainingInQtr, amt);
+            sumBear += amt * confidence.lower;
+            sumBase += expectedValue;
+            sumBull += amt * confidence.upper;
+          }
+          bearCase = Math.round(closedWon + sumBear);
+          baseCase = Math.round(closedWon + sumBase);
+          bullCase = Math.round(closedWon + sumBull);
+          tteScenarios = { bear: bearCase, base: baseCase, bull: bullCase, fromSurvival: true };
+        }
+      } catch { /* non-fatal: stick with CRM category sums */ }
 
       const excludedOwners: string[] = (context.businessContext as any)?.excluded_owners
         ?? (context.businessContext as any)?.definitions?.excluded_owners
@@ -2996,9 +3039,13 @@ const forecastRollup: ToolDefinition = {
           bearCase,
           baseCase,
           bullCase,
+          crmBearCase,
+          crmBaseCase,
+          crmBullCase,
           weightedForecast,
           teamQuota,
-          attainment: teamQuota ? bearCase / teamQuota : null,
+          attainment: teamQuota ? baseCase / teamQuota : null,
+          tteScenarios,
         },
         dealCount: {
           closed: categories.closed.count,
@@ -4953,7 +5000,7 @@ const fmScoreOpenDeals: ToolDefinition = {
       const result = await query<any>(
         `SELECT d.id, d.name, d.amount, d.stage, d.stage_normalized, d.close_date,
                 d.owner as owner_name, d.account_id, d.forecast_category,
-                d.probability as crm_probability, d.days_in_stage,
+                d.probability as crm_probability, d.days_in_stage, d.created_at,
                 CASE WHEN d.close_date IS NOT NULL
                      THEN (d.close_date::date - CURRENT_DATE)
                      ELSE NULL END as days_to_close
@@ -5017,6 +5064,7 @@ const fmScoreOpenDeals: ToolDefinition = {
           key_contacts: cont.key_contacts,
           days_to_close: daysToClose !== null ? Math.round(daysToClose) : null,
           days_in_stage: Math.round(parseFloat(deal.days_in_stage) || 0),
+          created_at: deal.created_at ?? null,
         };
       }).sort((a: any, b: any) => b.weighted_amount - a.weighted_amount);
 
@@ -5191,9 +5239,46 @@ const fmBuildForecastModel: ToolDefinition = {
       const pipelineAmount = pipelineDeals.reduce((s: number, d: any) => s + d.adjusted_amount, 0);
       const inQtrProjection = pipelineProjection.projected_inqtr_bookings || 0;
 
-      const baseCase = Math.round(closedWonAmount + commitAmount + inQtrProjection);
-      const bullCase = Math.round(closedWonAmount + commitAmount + bestCaseAmount * 0.5 + inQtrProjection * 1.2);
-      const bearCase = Math.round(closedWonAmount + commitAmount * 0.7 + inQtrProjection * 0.5);
+      // TTE-based scenarios using survival curve CI bounds (non-fatal, falls back to static multipliers)
+      let baseCase: number;
+      let bullCase: number;
+      let bearCase: number;
+      try {
+        const { buildSurvivalCurves } = await import('../analysis/survival-data.js');
+        const { conditionalWinProbability, expectedValueInWindow, assessDataTier } = await import('../analysis/survival-curve.js');
+        const survResult = await buildSurvivalCurves({ workspaceId: context.workspaceId, lookbackMonths: 24 });
+        const curve = survResult.overall;
+        const dealsWithAge = adjustedDeals.filter((d: any) => d.created_at);
+        if (assessDataTier(curve) >= 2 && dealsWithAge.length > 0) {
+          const now = new Date();
+          const qStart = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
+          const qEnd = new Date(qStart.getFullYear(), qStart.getMonth() + 3, 0);
+          const daysRemainingInQtr = Math.max(1, Math.round((qEnd.getTime() - now.getTime()) / 86400000));
+          let sumBear = 0, sumBase = 0, sumBull = 0;
+          for (const d of adjustedDeals) {
+            const amt = (d.amount as number) || 0;
+            const dealAgeDays = d.created_at
+              ? Math.max(0, (now.getTime() - new Date(d.created_at).getTime()) / 86400000)
+              : 90;
+            const { confidence } = conditionalWinProbability(curve, dealAgeDays);
+            const { expectedValue } = expectedValueInWindow(curve, dealAgeDays, daysRemainingInQtr, amt);
+            sumBear += amt * confidence.lower;
+            sumBase += expectedValue;
+            sumBull += amt * confidence.upper;
+          }
+          bearCase = Math.round(closedWonAmount + sumBear);
+          baseCase = Math.round(closedWonAmount + sumBase + inQtrProjection);
+          bullCase = Math.round(closedWonAmount + sumBull + inQtrProjection);
+        } else {
+          baseCase = Math.round(closedWonAmount + commitAmount + inQtrProjection);
+          bullCase = Math.round(closedWonAmount + commitAmount + bestCaseAmount * 0.5 + inQtrProjection * 1.2);
+          bearCase = Math.round(closedWonAmount + commitAmount * 0.7 + inQtrProjection * 0.5);
+        }
+      } catch {
+        baseCase = Math.round(closedWonAmount + commitAmount + inQtrProjection);
+        bullCase = Math.round(closedWonAmount + commitAmount + bestCaseAmount * 0.5 + inQtrProjection * 1.2);
+        bearCase = Math.round(closedWonAmount + commitAmount * 0.7 + inQtrProjection * 0.5);
+      }
 
       // Rep rollup
       const repMap = new Map<string, { commit: number; best_case: number; pipeline: number; deals: number }>();
@@ -7476,6 +7561,77 @@ const pcfAuditOpenPipeline: ToolDefinition = {
 };
 
 // ============================================================================
+// Survival Curve Query Tool (for Ask Pandora)
+// ============================================================================
+
+const survivalCurveQuery: ToolDefinition = {
+  name: 'survivalCurveQuery',
+  description: 'Query the Kaplan-Meier win probability survival curve for historical deal outcomes. Returns time-aware win probabilities: what fraction of deals opened at age X eventually close as won. Supports segmentation by stage, lead source, owner, deal size band, and pipeline. Use this to answer questions about win rates by age, expected close timing, time-to-event probability, and survival analysis. Examples: "What is our win rate for deals open 90+ days?", "How does win probability decay with deal age?", "What fraction of deals created in Q1 eventually close won?", "What is the conditional win probability for a deal open 6 months?", "Compare win curves by lead source", "What is our median time to close for won deals?"',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {
+      groupBy: {
+        type: 'string',
+        enum: ['none', 'stage_reached', 'source', 'owner', 'size_band', 'pipeline'],
+        description: 'Segment the curve by this dimension. Use "none" for overall curve.',
+      },
+      lookbackMonths: {
+        type: 'number',
+        description: 'How many months of historical deals to include (default: 24)',
+      },
+      minSegmentSize: {
+        type: 'number',
+        description: 'Minimum closed deals per segment to show it separately (default: 20)',
+      },
+    },
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('survivalCurveQuery', async () => {
+      const { buildSurvivalCurves } = await import('../analysis/survival-data.js');
+      const { summarizeCurveForLLM } = await import('../analysis/survival-rendering.js');
+      const { assessDataTier } = await import('../analysis/survival-curve.js');
+
+      const groupBy = ((params as any).groupBy || 'none') as any;
+      const lookbackMonths = (params as any).lookbackMonths || 24;
+      const minSegmentSize = (params as any).minSegmentSize || 20;
+
+      const result = await buildSurvivalCurves({
+        workspaceId: context.workspaceId,
+        lookbackMonths,
+        groupBy,
+        minSegmentSize,
+      });
+
+      const overallSummary = summarizeCurveForLLM(result.overall);
+      const dataTier = assessDataTier(result.overall);
+
+      const segmentSummaries: Record<string, string> = {};
+      if (groupBy !== 'none') {
+        for (const [key, curve] of result.segments) {
+          segmentSummaries[key] = summarizeCurveForLLM(curve);
+        }
+      }
+
+      return {
+        overall: overallSummary,
+        segments: segmentSummaries,
+        metadata: {
+          sampleSize: result.metadata.totalDeals,
+          eventCount: result.metadata.eventCount,
+          dataTier,
+          dataTierLabel: ['', 'Very Limited (<20 wins)', 'Limited (20-49 wins)', 'Moderate (50-199 wins)', 'Robust (200+ wins)'][dataTier] || 'Unknown',
+          groupBy,
+          lookbackMonths,
+          segmentCount: result.segments.size,
+        },
+      };
+    }, params);
+  },
+};
+
+// ============================================================================
 
 export const toolRegistry = new Map<string, ToolDefinition>([
   ['queryDeals', queryDeals],
@@ -7603,6 +7759,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['pcfLoadVelocityBenchmarks', pcfLoadVelocityBenchmarks],
   ['pcfProjectCreation', pcfProjectCreation],
   ['pcfAuditOpenPipeline', pcfAuditOpenPipeline],
+  ['survivalCurveQuery', survivalCurveQuery],
 ]);
 
 // ============================================================================

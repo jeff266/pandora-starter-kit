@@ -250,6 +250,31 @@ export default function InsightsPage() {
                               >
                                 {anon.deal(f.deal_name)}
                               </a>
+                              {f.tri_signal && (f.tri_signal.icp_grade || f.tri_signal.rfm_grade || f.tri_signal.tte_prob != null) && (
+                                <span style={{ display: 'inline-flex', gap: 4, marginLeft: 4 }}>
+                                  {f.tri_signal.icp_grade && (
+                                    <span style={{
+                                      fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 3,
+                                      color: { A: '#22c55e', B: '#86efac', C: '#f59e0b', D: '#f97316', F: '#ef4444' }[f.tri_signal.icp_grade as string] ?? '#6b7280',
+                                      border: `1px solid currentColor`, opacity: 0.9,
+                                    }}>ICP:{f.tri_signal.icp_grade}</span>
+                                  )}
+                                  {f.tri_signal.rfm_grade && (
+                                    <span style={{
+                                      fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 3,
+                                      color: { A: '#22c55e', B: '#86efac', C: '#f59e0b', D: '#f97316', F: '#ef4444' }[f.tri_signal.rfm_grade as string] ?? '#6b7280',
+                                      border: `1px solid currentColor`, opacity: 0.9,
+                                    }}>Beh:{f.tri_signal.rfm_grade}</span>
+                                  )}
+                                  {f.tri_signal.tte_prob != null && (
+                                    <span style={{
+                                      fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 3,
+                                      color: f.tri_signal.tte_prob >= 0.3 ? '#22c55e' : f.tri_signal.tte_prob >= 0.1 ? '#f59e0b' : '#ef4444',
+                                      border: `1px solid currentColor`, opacity: 0.9,
+                                    }}>{Math.round(f.tri_signal.tte_prob * 100)}%</span>
+                                  )}
+                                </span>
+                              )}
                               {(() => {
                                 const crmUrl = buildCrmUrl(crmInfo.crm, crmInfo.portalId ?? null, crmInfo.instanceUrl ?? null, f.deal_source_id, f.deal_source);
                                 if (!crmUrl) return null;

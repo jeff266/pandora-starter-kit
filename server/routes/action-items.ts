@@ -65,6 +65,14 @@ router.get('/:workspaceId/action-items', async (req: Request<WorkspaceParams>, r
       case 'severity':
         orderBy = `CASE a.severity WHEN 'critical' THEN 1 WHEN 'warning' THEN 2 ELSE 3 END, a.created_at DESC`;
         break;
+      case 'composite':
+        orderBy = `CASE a.severity WHEN 'critical' THEN 1 WHEN 'warning' THEN 2 ELSE 3 END,
+          (CASE COALESCE(d.rfm_grade, 'Z') WHEN 'A' THEN 4 WHEN 'B' THEN 3 WHEN 'C' THEN 2 WHEN 'D' THEN 1 ELSE 0 END
+           * COALESCE(a.impact_amount, 0)
+           * COALESCE(d.tte_conditional_prob, 0.25)) DESC,
+          a.impact_amount DESC NULLS LAST,
+          a.created_at DESC`;
+        break;
       case 'impact':
         orderBy = 'a.impact_amount DESC NULLS LAST, a.created_at DESC';
         break;
@@ -80,9 +88,14 @@ router.get('/:workspaceId/action-items', async (req: Request<WorkspaceParams>, r
       SELECT a.*,
              d.name as deal_name,
              d.stage as deal_stage,
-             d.amount as deal_amount
+             d.amount as deal_amount,
+             d.rfm_grade,
+             d.rfm_label,
+             d.tte_conditional_prob,
+             ls.score_grade as icp_grade
       FROM actions a
       LEFT JOIN deals d ON a.target_deal_id = d.id
+      LEFT JOIN lead_scores ls ON ls.entity_id = a.target_deal_id AND ls.entity_type = 'deal'
       WHERE ${where}
       ORDER BY ${orderBy}
       LIMIT $${paramIdx++}

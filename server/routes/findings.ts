@@ -292,17 +292,31 @@ router.get('/:workspaceId/findings', async (req: Request, res: Response): Promis
 
     const dataParams = [...params, limit, offset];
     const dataResult = await query(
-      `SELECT f.*, d.source_id as deal_source_id, d.source as deal_source
+      `SELECT f.*,
+              d.source_id as deal_source_id, d.source as deal_source,
+              d.rfm_grade, d.rfm_label, d.tte_conditional_prob,
+              ls.score_grade as icp_grade
        FROM findings f
        LEFT JOIN deals d ON d.id = f.deal_id AND d.workspace_id = f.workspace_id
+       LEFT JOIN lead_scores ls ON ls.entity_id = f.deal_id AND ls.entity_type = 'deal'
        WHERE ${whereClause}
        ORDER BY ${orderClause}
        LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`,
       dataParams
     );
 
+    const findings = dataResult.rows.map((row: any) => ({
+      ...row,
+      tri_signal: row.deal_id ? {
+        icp_grade: row.icp_grade ?? null,
+        rfm_grade: row.rfm_grade ?? null,
+        rfm_label: row.rfm_label ?? null,
+        tte_prob: row.tte_conditional_prob != null ? parseFloat(row.tte_conditional_prob) : null,
+      } : null,
+    }));
+
     res.json({
-      findings: dataResult.rows,
+      findings,
       total,
       filters_applied: filtersApplied,
       pagination: { limit, offset, has_more: offset + limit < total },

@@ -1,4 +1,6 @@
 import { query, getClient } from '../db.js';
+import { buildSurvivalCurves } from './survival-data.js';
+import { conditionalWinProbability } from './survival-curve.js';
 
 export interface ActivityCoverageAssessment {
   mode: 'full_rfm' | 'rm_only' | 'r_only';
@@ -770,4 +772,63 @@ export function buildRFMContextForLLM(
   }
 
   return lines.join('\n');
+}
+
+// ─── TTE Conditional Probability ─────────────────────────────────────────────
+
+let tteMigrationDone = false;
+
+async function ensureTTEColumns(): Promise<void> {
+  if (tteMigrationDone) return;
+  await query(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS tte_conditional_prob NUMERIC`, []);
+  await query(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS tte_computed_at TIMESTAMPTZ`, []);
+  tteMigrationDone = true;
+}
+
+/**
+ * Compute and store TTE conditional win probabilities for all open deals
+ * in a workspace. Uses the workspace's overall KM survival curve.
+ * Safe to re-run — idempotent batch UPDATE.
+ */
+export async function computeAndStoreTTEProbs(workspaceId: string): Promise<{ computed: number }> {
+  await ensureTTEColumns();
+
+  const { overall: curve } = await buildSurvivalCurves({ workspaceId, lookbackMonths: 24, groupBy: 'none' });
+
+  if (curve.sampleSize < 5) {
+    return { computed: 0 };
+  }
+
+  const dealsResult = await query<{ id: string; created_at: string }>(
+    `SELECT id, created_at
+     FROM deals
+     WHERE workspace_id = $1
+       AND stage_normalized NOT IN ('closed_won', 'closed_lost')
+       AND created_at IS NOT NULL`,
+    [workspaceId]
+  );
+
+  if (dealsResult.rows.length === 0) return { computed: 0 };
+
+  const today = new Date();
+  const ids: string[] = [];
+  const probs: number[] = [];
+
+  for (const d of dealsResult.rows) {
+    const ageDays = Math.max(0, (today.getTime() - new Date(d.created_at).getTime()) / 86400000);
+    const { probability } = conditionalWinProbability(curve, ageDays);
+    ids.push(d.id);
+    probs.push(Math.round(probability * 10000) / 10000);
+  }
+
+  await query(
+    `UPDATE deals SET
+       tte_conditional_prob = upd.prob::numeric,
+       tte_computed_at = NOW()
+     FROM (SELECT unnest($1::uuid[]) AS id, unnest($2::numeric[]) AS prob) upd
+     WHERE deals.id = upd.id AND deals.workspace_id = $3`,
+    [ids, probs, workspaceId]
+  );
+
+  return { computed: ids.length };
 }
