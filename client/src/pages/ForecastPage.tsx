@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
@@ -74,6 +74,7 @@ export default function ForecastPage() {
   const [liveQuota, setLiveQuota] = useState<number | null>(null);
   const [runningForecast, setRunningForecast] = useState(false);
   const [forecastRunStatus, setForecastRunStatus] = useState<string | null>(null);
+  const autoTriggeredRef = useRef(false);
 
   const { annotations, grouped, dismiss, snooze } = useForecastAnnotations(wsId);
 
@@ -92,6 +93,18 @@ export default function ForecastPage() {
       })
       .finally(() => setLoading(false));
   }, [wsId]);
+
+  // Auto-trigger forecast run when data is missing or stale (>8 days since last snapshot)
+  useEffect(() => {
+    if (loading || autoTriggeredRef.current || runningForecast || !wsId) return;
+    const isStale = snapshots.length === 0 ||
+      ((Date.now() - new Date(snapshots[snapshots.length - 1].snapshot_date).getTime()) > 8 * 24 * 60 * 60 * 1000);
+    if (isStale) {
+      autoTriggeredRef.current = true;
+      runForecastSkills();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, wsId]);
 
   // Fetch pipelines list once
   useEffect(() => {
@@ -395,53 +408,63 @@ export default function ForecastPage() {
     );
   }
 
-  const noSnapshotsBanner = snapshots.length === 0 ? (
+  const daysSinceLastSnapshot = snapshots.length > 0
+    ? Math.floor((Date.now() - new Date(snapshots[snapshots.length - 1].snapshot_date).getTime()) / (1000 * 60 * 60 * 24))
+    : null;
+  const isStale = snapshots.length === 0 || (daysSinceLastSnapshot !== null && daysSinceLastSnapshot > 8);
+
+  const forecastStatusBanner = (runningForecast || isStale) ? (
     <div style={{
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
       gap: 12,
-      background: colors.surface,
-      border: `1px solid ${colors.border}`,
+      background: runningForecast ? 'rgba(99,102,241,0.08)' : colors.surface,
+      border: `1px solid ${runningForecast ? colors.accent : colors.border}`,
       borderRadius: 8,
-      padding: '10px 16px',
+      padding: '12px 16px',
       flexWrap: 'wrap',
     }}>
-      <p style={{ fontSize: 12, color: colors.textSecondary, fontFamily: fonts.sans, margin: 0 }}>
-        Pipeline data is live — run forecast skills weekly to enable trend tracking.
-      </p>
-      <button
-        onClick={runForecastSkills}
-        disabled={runningForecast}
-        style={{
-          padding: '5px 14px',
-          background: runningForecast ? colors.surfaceRaised : colors.accent,
-          color: '#fff',
-          border: 'none',
-          borderRadius: 6,
-          cursor: runningForecast ? 'not-allowed' : 'pointer',
-          fontSize: 12,
-          fontWeight: 500,
-          fontFamily: fonts.sans,
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 6,
-          whiteSpace: 'nowrap',
-          opacity: runningForecast ? 0.8 : 1,
-          flexShrink: 0,
-        }}
-      >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
         {runningForecast && (
           <span style={{
-            width: 10, height: 10,
-            border: '2px solid rgba(255,255,255,0.3)',
-            borderTopColor: '#fff', borderRadius: '50%',
+            width: 14, height: 14,
+            border: `2px solid ${colors.accent}33`,
+            borderTopColor: colors.accent,
+            borderRadius: '50%',
             display: 'inline-block',
+            flexShrink: 0,
             animation: 'pandora-spin 0.8s linear infinite',
           }} />
         )}
-        {runningForecast ? (forecastRunStatus ?? 'Running...') : 'Capture First Snapshot ▶'}
-      </button>
+        <p style={{ fontSize: 13, color: runningForecast ? colors.accent : colors.textSecondary, fontFamily: fonts.sans, margin: 0 }}>
+          {runningForecast
+            ? (forecastRunStatus ?? 'Refreshing forecast data...')
+            : snapshots.length === 0
+              ? 'No forecast snapshots yet — run your first forecast to populate all metrics.'
+              : `Last snapshot was ${daysSinceLastSnapshot} days ago — refreshing forecast data...`}
+        </p>
+      </div>
+      {!runningForecast && (
+        <button
+          onClick={runForecastSkills}
+          style={{
+            padding: '5px 14px',
+            background: colors.accent,
+            color: '#fff',
+            border: 'none',
+            borderRadius: 6,
+            cursor: 'pointer',
+            fontSize: 12,
+            fontWeight: 500,
+            fontFamily: fonts.sans,
+            whiteSpace: 'nowrap',
+            flexShrink: 0,
+          }}
+        >
+          Run Now ▶
+        </button>
+      )}
     </div>
   ) : null;
 
@@ -581,6 +604,8 @@ export default function ForecastPage() {
         </div>
       </div>
 
+      {forecastStatusBanner}
+
       <SectionErrorBoundary fallbackMessage="Failed to load metric cards.">
         <MetricCards
           current={currentMetrics}
@@ -588,8 +613,6 @@ export default function ForecastPage() {
           onMetricClick={(metric, value, context) => setMathPanel({ metric, value, context })}
         />
       </SectionErrorBoundary>
-
-      {noSnapshotsBanner}
 
       {forecastView === 'company' && (
         <>
@@ -599,6 +622,7 @@ export default function ForecastPage() {
                 <ForecastChart
                   snapshots={augmentedSnapshots}
                   quota={quota}
+                  isRefreshing={runningForecast}
                   onPointClick={(snapshot, metric) => {
                     console.log('Chart point clicked:', metric, snapshot.snapshot_date);
                   }}

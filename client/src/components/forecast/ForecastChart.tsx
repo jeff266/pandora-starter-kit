@@ -17,6 +17,7 @@ interface ForecastChartProps {
   snapshots: SnapshotPoint[];
   quota: number | null;
   onPointClick?: (snapshot: SnapshotPoint, metric: string) => void;
+  isRefreshing?: boolean;
 }
 
 const LINE_COLORS = {
@@ -44,7 +45,7 @@ function formatWeekLabel(dateStr: string): string {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
-export default function ForecastChart({ snapshots, quota, onPointClick }: ForecastChartProps) {
+export default function ForecastChart({ snapshots, quota, onPointClick, isRefreshing }: ForecastChartProps) {
   const [toggles, setToggles] = useState({
     stage_weighted: true,
     category_weighted: true,
@@ -53,20 +54,6 @@ export default function ForecastChart({ snapshots, quota, onPointClick }: Foreca
     confidence_band: true,
   });
   const [hoveredPoint, setHoveredPoint] = useState<{ idx: number; metric: string; x: number; y: number; value: number } | null>(null);
-
-  if (snapshots.length === 0) {
-    return (
-      <div style={{
-        background: colors.surface,
-        border: `1px solid ${colors.border}`,
-        borderRadius: 10,
-        padding: 40,
-        textAlign: 'center',
-      }}>
-        <p style={{ fontSize: 13, color: colors.textMuted, fontFamily: fonts.sans }}>Loading pipeline data...</p>
-      </div>
-    );
-  }
 
   const PADDING = { top: 30, right: 60, bottom: 40, left: 70 };
   const WIDTH = 800;
@@ -88,9 +75,9 @@ export default function ForecastChart({ snapshots, quota, onPointClick }: Foreca
     return vals;
   }, [snapshots, quota]);
 
-  const minVal = Math.min(...allValues) * 0.85;
-  const maxVal = Math.max(...allValues) * 1.15;
-  const range = maxVal - minVal || 1;
+  const minVal = allValues.length > 0 ? Math.min(...allValues) * 0.85 : 0;
+  const maxVal = allValues.length > 0 ? Math.max(...allValues) * 1.15 : 1;
+  const range = (maxVal - minVal) || 1;
 
   const xScale = (i: number) => PADDING.left + (snapshots.length > 1 ? i / (snapshots.length - 1) : 0.5) * chartW;
   const yScale = (v: number) => PADDING.top + chartH - ((v - minVal) / range) * chartH;
@@ -118,6 +105,7 @@ export default function ForecastChart({ snapshots, quota, onPointClick }: Foreca
     });
     if (upper.length < 2) return null;
     return upper.join(' ') + ' ' + lower.join(' ') + ' Z';
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snapshots, toggles.confidence_band]);
 
   const yTicks = useMemo(() => {
@@ -127,6 +115,46 @@ export default function ForecastChart({ snapshots, quota, onPointClick }: Foreca
   }, [minVal, range]);
 
   const toggle = (key: string) => setToggles(prev => ({ ...prev, [key]: !prev[key as keyof typeof prev] }));
+
+  if (snapshots.length === 0) {
+    return (
+      <div style={{
+        background: colors.surface,
+        border: `1px solid ${isRefreshing ? '#6366f1' : colors.border}`,
+        borderRadius: 10,
+        padding: '56px 40px',
+        textAlign: 'center',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: 14,
+        transition: 'border-color 0.3s',
+      }}>
+        {isRefreshing ? (
+          <>
+            <span style={{
+              width: 28, height: 28,
+              border: '3px solid rgba(99,102,241,0.2)',
+              borderTopColor: '#6366f1',
+              borderRadius: '50%',
+              display: 'inline-block',
+              animation: 'pandora-spin 0.8s linear infinite',
+            }} />
+            <p style={{ fontSize: 13, color: '#6366f1', fontFamily: fonts.sans, margin: 0, fontWeight: 500 }}>
+              Running forecast analysis — this takes about a minute...
+            </p>
+            <p style={{ fontSize: 11, color: colors.textMuted, fontFamily: fonts.sans, margin: 0 }}>
+              Calculating pipeline coverage, stage-weighted forecast, and Monte Carlo simulation
+            </p>
+          </>
+        ) : (
+          <p style={{ fontSize: 13, color: colors.textMuted, fontFamily: fonts.sans, margin: 0 }}>
+            Syncing pipeline data...
+          </p>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div style={{
