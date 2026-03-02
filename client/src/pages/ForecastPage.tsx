@@ -115,25 +115,45 @@ export default function ForecastPage() {
 
     setSeriesLoading(true);
 
-    // Fetch all three series in parallel
-    Promise.all([
-      api.get(`/workspaces/${wsId}/forecast/stage-weighted-series?quarter=${quarter}`),
-      api.get(`/workspaces/${wsId}/forecast/category-weighted-series?quarter=${quarter}`),
-      api.get(`/workspaces/${wsId}/forecast/tte-series?quarter=${quarter}`),
+    // Build query params
+    const pipelineParam = selectedPipeline !== 'all' ? `&pipeline=${encodeURIComponent(selectedPipeline)}` : '';
+
+    // Fetch all three series - use Promise.allSettled for resilience
+    Promise.allSettled([
+      api.get(`/forecast/stage-weighted-series?quarter=${quarter}${pipelineParam}`),
+      api.get(`/forecast/category-weighted-series?quarter=${quarter}${pipelineParam}`),
+      api.get(`/forecast/tte-series?quarter=${quarter}${pipelineParam}`),
     ])
-      .then(([stageData, categoryData, tte]) => {
-        console.log('[ForecastPage] Stage Weighted Data:', stageData);
-        console.log('[ForecastPage] Category Weighted Data:', categoryData);
-        console.log('[ForecastPage] TTE Data:', tte);
-        setStageWeightedData(stageData);
-        setCategoryWeightedData(categoryData);
-        setTteData(tte);
-      })
-      .catch((err: any) => {
-        console.error('[ForecastPage] Failed to load series data:', err);
+      .then((results) => {
+        // Handle each result independently
+        const [stageResult, categoryResult, tteResult] = results;
+
+        if (stageResult.status === 'fulfilled') {
+          console.log('[ForecastPage] Stage Weighted Data:', stageResult.value);
+          setStageWeightedData(stageResult.value);
+        } else {
+          console.error('[ForecastPage] Stage Weighted failed:', stageResult.reason);
+          setStageWeightedData(null);
+        }
+
+        if (categoryResult.status === 'fulfilled') {
+          console.log('[ForecastPage] Category Weighted Data:', categoryResult.value);
+          setCategoryWeightedData(categoryResult.value);
+        } else {
+          console.error('[ForecastPage] Category Weighted failed:', categoryResult.reason);
+          setCategoryWeightedData(null);
+        }
+
+        if (tteResult.status === 'fulfilled') {
+          console.log('[ForecastPage] TTE Data:', tteResult.value);
+          setTteData(tteResult.value);
+        } else {
+          console.error('[ForecastPage] TTE failed:', tteResult.reason);
+          setTteData(null);
+        }
       })
       .finally(() => setSeriesLoading(false));
-  }, [wsId, fiscalYearStartMonth]);
+  }, [wsId, fiscalYearStartMonth, selectedPipeline]);
 
   // Auto-trigger forecast run when data is missing or stale (>8 days since last snapshot)
   useEffect(() => {
@@ -403,12 +423,16 @@ export default function ForecastPage() {
         });
       }
 
+      // Fallback: if series data is null and this is current week, use live calculation
+      const stageWeightedValue = stageWeek?.stageWeighted ??
+        (isCurrentWeek ? (runningClosedWon + currentWeekStageWeighted) : null);
+
       series.push({
         run_id: isCurrentWeek ? 'live-today' : `week-${w + 1}`,
         snapshot_date: isCurrentWeek ? now.toISOString() : weekStart.toISOString(),
         scope_id: selectedPipeline !== 'all' ? selectedPipeline : null,
         // Use historical series data from new endpoints
-        stage_weighted_forecast: stageWeek?.stageWeighted ?? null,
+        stage_weighted_forecast: stageWeightedValue,
         category_weighted_forecast: categoryWeek?.categoryWeighted ?? null,
         tte_forecast: tteWeek?.tteForecast ?? null,
         monte_carlo_p50: matchSnap?.monte_carlo_p50 ?? null,

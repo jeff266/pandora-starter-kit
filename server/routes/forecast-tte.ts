@@ -39,8 +39,8 @@ interface DealSnapshot {
 
 interface StageTransition {
   deal_id: string;
-  to_stage_normalized: string;
-  changed_at: Date;
+  stage_normalized: string;
+  entered_at: Date;
 }
 
 // Parse quarter string
@@ -111,13 +111,13 @@ async function fitStageParameters(workspaceId: string): Promise<{
         AND d.close_date > NOW() - INTERVAL '24 months'
     )
     SELECT
-      dsh.to_stage_normalized as stage,
+      dsh.stage_normalized as stage,
       COUNT(*) FILTER (WHERE cd.is_closed_won = true) AS wins,
       COUNT(*) AS total_closed
     FROM deal_stage_history dsh
     JOIN closed_deals cd ON dsh.deal_id = cd.id
     WHERE dsh.workspace_id = $1
-    GROUP BY dsh.to_stage_normalized`,
+    GROUP BY dsh.stage_normalized`,
     [workspaceId]
   );
 
@@ -125,9 +125,9 @@ async function fitStageParameters(workspaceId: string): Promise<{
   const velocityResult = await query(
     `WITH stage_entries AS (
       SELECT
-        dsh.to_stage_normalized as stage,
+        dsh.stage_normalized as stage,
         dsh.deal_id,
-        dsh.changed_at as stage_entered_at,
+        dsh.entered_at as stage_entered_at,
         d.close_date
       FROM deal_stage_history dsh
       JOIN deals d ON dsh.deal_id = d.id
@@ -213,7 +213,7 @@ function reconstructDealState(
   weekEndDate: Date
 ): { stage: string; stageEnteredAt: Date; wasClosedWon: boolean } {
   const applicableTransitions = transitions.filter(
-    t => t.deal_id === deal.id && t.changed_at <= weekEndDate
+    t => t.deal_id === deal.id && t.entered_at <= weekEndDate
   );
 
   if (applicableTransitions.length === 0) {
@@ -226,9 +226,9 @@ function reconstructDealState(
 
   const lastTransition = applicableTransitions[applicableTransitions.length - 1];
   return {
-    stage: lastTransition.to_stage_normalized,
-    stageEnteredAt: lastTransition.changed_at,
-    wasClosedWon: lastTransition.to_stage_normalized === 'closed_won'
+    stage: lastTransition.stage_normalized,
+    stageEnteredAt: lastTransition.entered_at,
+    wasClosedWon: lastTransition.stage_normalized === 'closed_won'
   };
 }
 
@@ -239,7 +239,7 @@ router.get('/:id/forecast/tte-series', async (
 ) => {
   try {
     const workspaceId = req.params.id;
-    const { quarter } = req.query;
+    const { quarter, pipeline } = req.query;
 
     if (!quarter) {
       res.status(400).json({ error: 'quarter parameter required (e.g., "2026-Q1")' });
@@ -258,14 +258,18 @@ router.get('/:id/forecast/tte-series', async (
     const isReliable = closedDealsCount >= 20;
 
     // Query deals in quarter
+    const pipelineFilter = pipeline ? `AND pipeline_name = $4` : '';
+    const dealsParams = pipeline ? [workspaceId, quarterStart, quarterEnd, pipeline] : [workspaceId, quarterStart, quarterEnd];
+
     const dealsResult = await query<DealSnapshot>(
       `SELECT id, amount, stage_normalized, close_date, created_at, is_closed_won
        FROM deals
        WHERE workspace_id = $1
          AND close_date >= $2 AND close_date <= $3
          AND is_deleted = false
+         ${pipelineFilter}
        ORDER BY id`,
-      [workspaceId, quarterStart, quarterEnd]
+      dealsParams
     );
 
     const deals = dealsResult.rows;
@@ -296,11 +300,11 @@ router.get('/:id/forecast/tte-series', async (
     // Query stage transitions
     const dealIds = deals.map(d => d.id);
     const transitionsResult = await query<StageTransition>(
-      `SELECT deal_id, to_stage_normalized, changed_at
+      `SELECT deal_id, stage_normalized, entered_at
        FROM deal_stage_history
        WHERE workspace_id = $1
          AND deal_id = ANY($2)
-       ORDER BY deal_id, changed_at`,
+       ORDER BY deal_id, entered_at`,
       [workspaceId, dealIds]
     );
 

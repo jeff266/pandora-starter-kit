@@ -34,8 +34,8 @@ interface DealSnapshot {
 
 interface StageTransition {
   deal_id: string;
-  to_stage_normalized: string;
-  changed_at: Date;
+  stage_normalized: string;
+  entered_at: Date;
 }
 
 // Parse quarter string to start/end dates
@@ -120,7 +120,7 @@ function reconstructDealState(
 ): { stage: string; wasClosedWon: boolean } {
   // Filter transitions for this deal that happened before weekEnd
   const applicableTransitions = transitions.filter(
-    t => t.deal_id === deal.id && t.changed_at <= weekEndDate
+    t => t.deal_id === deal.id && t.entered_at <= weekEndDate
   );
 
   if (applicableTransitions.length === 0) {
@@ -134,8 +134,8 @@ function reconstructDealState(
   // Most recent transition before weekEnd
   const lastTransition = applicableTransitions[applicableTransitions.length - 1];
   return {
-    stage: lastTransition.to_stage_normalized,
-    wasClosedWon: lastTransition.to_stage_normalized === 'closed_won'
+    stage: lastTransition.stage_normalized,
+    wasClosedWon: lastTransition.stage_normalized === 'closed_won'
   };
 }
 
@@ -160,14 +160,18 @@ router.get('/:id/forecast/stage-weighted-series', async (
     const weekEndings = generateQuarterWeeks(quarterStart, quarterEnd);
 
     // Query 1: Get all deals with close_date in this quarter
+    const pipelineFilter = pipeline ? `AND pipeline_name = $4` : '';
+    const dealsParams = pipeline ? [workspaceId, quarterStart, quarterEnd, pipeline] : [workspaceId, quarterStart, quarterEnd];
+
     const dealsResult = await query<DealSnapshot>(
       `SELECT id, amount, stage_normalized, close_date, created_at, is_closed_won
        FROM deals
        WHERE workspace_id = $1
          AND close_date >= $2 AND close_date <= $3
          AND is_deleted = false
+         ${pipelineFilter}
        ORDER BY id`,
-      [workspaceId, quarterStart, quarterEnd]
+      dealsParams
     );
 
     const deals = dealsResult.rows;
@@ -199,11 +203,11 @@ router.get('/:id/forecast/stage-weighted-series', async (
     // Query 2: Get ALL stage transitions for these deals
     const dealIds = deals.map(d => d.id);
     const transitionsResult = await query<StageTransition>(
-      `SELECT deal_id, to_stage_normalized, changed_at
+      `SELECT deal_id, stage_normalized, entered_at
        FROM deal_stage_history
        WHERE workspace_id = $1
          AND deal_id = ANY($2)
-       ORDER BY deal_id, changed_at`,
+       ORDER BY deal_id, entered_at`,
       [workspaceId, dealIds]
     );
 
