@@ -5,7 +5,8 @@
  * Pure JavaScript arithmetic — no LLM calls.
  */
 
-import type { BetaDistribution, LogNormalDistribution, NormalDistribution, PipelineRateDistribution, FittedDistributions } from './monte-carlo-distributions.js';
+import type { LogNormalDistribution, NormalDistribution, PipelineRateDistribution, FittedDistributions } from './monte-carlo-distributions.js';
+import { conditionalWinProbability, expectedValueInWindow } from './survival-curve.js';
 import { query } from '../db.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -16,6 +17,7 @@ export interface OpenDeal {
   amount: number;
   stageNormalized: string;
   closeDate: Date;
+  createdAt?: Date;
   ownerEmail: string | null;
   probability: number | null;
 }
@@ -306,14 +308,16 @@ function runIterationWithDetail(
 
   // ── Component A: Existing pipeline ──
   for (const deal of inputs.openDeals) {
-    const stageDist = inputs.distributions.stageWinRates[deal.stageNormalized];
-    const alpha = stageDist?.alpha ?? 2;
-    const betaVal = stageDist?.beta ?? 6;
-    const baseWinRate = sampleBeta(alpha, betaVal);
+    const curve = inputs.distributions.stageCurves?.get(deal.stageNormalized)
+      ?? inputs.distributions.survivalCurve;
+    const dealAgeDays = deal.createdAt
+      ? daysBetween(toDate(deal.createdAt), today)
+      : Math.max(0, 90 - daysBetween(today, toDate(deal.closeDate)));
+    const { probability: baseWinProb } = conditionalWinProbability(curve, Math.max(0, dealAgeDays));
     const adjustment = inputs.riskAdjustments[deal.id]?.multiplier ?? 1.0;
-    const adjustedWinRate = Math.max(0.05, Math.min(0.95, baseWinRate * adjustment));
+    const adjustedWinProb = Math.max(0.05, Math.min(0.95, baseWinProb * adjustment));
 
-    if (!sampleBernoulli(adjustedWinRate)) continue;
+    if (!sampleBernoulli(adjustedWinProb)) continue;
 
     // Sample close date slippage
     const slippageDist = inputs.distributions.slippage[deal.stageNormalized];
@@ -341,12 +345,10 @@ function runIterationWithDetail(
       const renewalClose = toDate(renewal.expectedCloseDate);
       if (renewalClose > forecastEnd) continue;
 
-      const renewalDist = inputs.distributions.stageWinRates['renewal'];
-      const renewalWinRate = renewalDist
-        ? sampleBeta(renewalDist.alpha, renewalDist.beta)
-        : sampleBeta(7, 3);
+      const { probability: renewalWinProb } = conditionalWinProbability(inputs.distributions.survivalCurve, 0);
+      const clampedRenewalProb = Math.max(0.50, Math.min(0.95, renewalWinProb > 0 ? renewalWinProb : 0.75));
 
-      if (!sampleBernoulli(renewalWinRate)) continue;
+      if (!sampleBernoulli(clampedRenewalProb)) continue;
 
       const logMu = Math.log(renewal.contractValue);
       const amount = sampleLogNormal(logMu, inputs.distributions.dealSize.sigma * 0.15);
@@ -370,10 +372,8 @@ function runIterationWithDetail(
 
       const windowFraction = Math.min(1, monthsRemaining / cycleMonths);
 
-      const expansionDist = inputs.distributions.stageWinRates['expansion'];
-      const expansionWinRate = expansionDist
-        ? sampleBeta(expansionDist.alpha, expansionDist.beta)
-        : sampleBeta(6, 4);
+      const { probability: expansionWinProb } = conditionalWinProbability(inputs.distributions.survivalCurve, 0);
+      const expansionWinRate = Math.max(0.20, Math.min(0.85, expansionWinProb > 0 ? expansionWinProb : 0.60));
 
       const expansionRevenue = inputs.customerBaseARR! * expRate * windowFraction * expansionWinRate;
       projectedRevenue += expansionRevenue;
@@ -397,7 +397,14 @@ function runIterationWithDetail(
 
           if (projectedCloseDaysFromNow > daysRemaining) continue;
 
-          if (!sampleBernoulli(sampleBeta(2, 6))) continue;
+          const { winProbInWindow } = expectedValueInWindow(
+            inputs.distributions.survivalCurve,
+            0,
+            Math.max(1, daysRemaining - dealCreatedDaysFromNow),
+            1
+          );
+          const newDealWinProb = Math.max(0.01, winProbInWindow);
+          if (!sampleBernoulli(newDealWinProb)) continue;
 
           const amount = Math.max(1000, sampleLogNormal(
             inputs.distributions.dealSize.mu,
@@ -437,9 +444,9 @@ function buildDataQualityReport(
   if (distributions.cycleLength.isReliable) reliable.push('cycle_length');
   else { unreliable.push('cycle_length'); warnings.push('Cycle length based on <20 closed deals'); }
 
-  const reliableStages = Object.values(distributions.stageWinRates).filter(d => d.isReliable).length;
-  if (reliableStages >= 2) reliable.push('stage_win_rates');
-  else { unreliable.push('stage_win_rates'); warnings.push('Fewer than 2 stages have reliable win rate data'); }
+  const curve = distributions.survivalCurve;
+  if (curve.isReliable) reliable.push('survival_curve');
+  else { unreliable.push('survival_curve'); warnings.push(`Win rate curve based on ${curve.eventCount} wins — confidence intervals are wide`); }
 
   return { reliableDistributions: reliable, unreliableDistributions: unreliable, warnings };
 }

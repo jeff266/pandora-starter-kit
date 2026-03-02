@@ -3102,13 +3102,56 @@ const prepareForecastSummary: ToolDefinition = {
         wowSummary = wow?.reason || 'First run — no previous data for comparison.';
       }
 
-      return {
+      // Enrich with survival curve context for Claude
+      let survivalCurveContext: any = null;
+      try {
+        const { buildSurvivalCurves } = await import('../analysis/survival-data.js');
+        const { assessDataTier, getCumulativeWinRateAtDay } = await import('../analysis/survival-curve.js');
+        const survivalResult = await buildSurvivalCurves({
+          workspaceId: context.workspaceId,
+          lookbackMonths: 24,
+          groupBy: 'none',
+          minSegmentSize: 20,
+        });
+        const curve = survivalResult.overall;
+        const tier = assessDataTier(curve);
+        const tierLabels: Record<number, string> = {
+          1: 'Low (<20 wins)',
+          2: 'Limited (20-49 wins)',
+          3: 'Moderate (50-199 wins)',
+          4: 'High (200+ wins)',
+        };
+        const pct = (v: number) => (v * 100).toFixed(1);
+        survivalCurveContext = {
+          terminalWinRatePct: pct(curve.terminalWinRate),
+          medianDaysToWin: curve.medianTimeTilWon ?? 'N/A',
+          at30d: pct(getCumulativeWinRateAtDay(curve, 30)),
+          at60d: pct(getCumulativeWinRateAtDay(curve, 60)),
+          at90d: pct(getCumulativeWinRateAtDay(curve, 90)),
+          at180d: pct(getCumulativeWinRateAtDay(curve, 180)),
+          dataTier: tier,
+          reliability: tier <= 1 ? 'insufficient — treat as directional' : curve.isReliable ? 'reliable' : 'limited — use with caution',
+          metadata: { sampleSize: curve.sampleSize },
+        };
+      } catch (_e) {
+        // Non-fatal — survival curve context is additive
+      }
+
+      const result: Record<string, any> = {
         quotaNote,
         teamSummary,
         dealCounts: countsLine,
         repTable: repRows || 'No rep data available.',
         wowSummary,
       };
+
+      // Attach survival_curve_context to stepResults so the template can access it
+      if (survivalCurveContext) {
+        (context.stepResults as any).survival_curve_context = survivalCurveContext;
+        result.survivalCurveContext = survivalCurveContext;
+      }
+
+      return result;
     }, params);
   },
 };
@@ -6543,7 +6586,6 @@ const mcFitDistributions: ToolDefinition = {
   execute: async (_params, context) => {
     return safeExecute('mcFitDistributions', async () => {
       const {
-        fitStageWinRates,
         fitDealSizeDistribution,
         fitCycleLengthDistribution,
         fitCloseSlippageDistribution,
@@ -6551,6 +6593,8 @@ const mcFitDistributions: ToolDefinition = {
         fitExpansionRateDistribution,
         assessDataQuality,
       } = await import('../analysis/monte-carlo-distributions.js');
+
+      const { buildSurvivalCurves } = await import('../analysis/survival-data.js');
 
       const pipelineFilter: string | null = context.params?.pipelineFilter ?? null;
       const pipelineType: string = context.params?.pipelineType ?? 'new_business';
@@ -6576,13 +6620,17 @@ const mcFitDistributions: ToolDefinition = {
         }
       }
 
-      const [stageWinRates, dealSize, cycleLength, slippage, pipelineRates] = await Promise.all([
-        fitStageWinRates(context.workspaceId, resolvedFilter, 24, filterClause),
+      const survivalFilters = resolvedFilter ? { pipeline: resolvedFilter } : undefined;
+      const [survivalResult, dealSize, cycleLength, slippage, pipelineRates] = await Promise.all([
+        buildSurvivalCurves({ workspaceId: context.workspaceId, lookbackMonths: 24, groupBy: 'stage_reached', minSegmentSize: 20, filters: survivalFilters }),
         fitDealSizeDistribution(context.workspaceId, resolvedFilter, 24, filterClause),
         fitCycleLengthDistribution(context.workspaceId, resolvedFilter, 24, filterClause),
         fitCloseSlippageDistribution(context.workspaceId, resolvedFilter, 24, filterClause),
         fitPipelineCreationRates(context.workspaceId, resolvedFilter, 12, filterClause),
       ]);
+
+      const survivalCurve = survivalResult.overall;
+      const stageCurves = survivalResult.segments.size > 0 ? survivalResult.segments : null;
 
       let expansionRate = null;
       if (pipelineType === 'expansion') {
@@ -6599,7 +6647,7 @@ const mcFitDistributions: ToolDefinition = {
       );
       const closedDealCount = parseInt(closedResult.rows[0]?.cnt || '0', 10);
 
-      const distributions = { stageWinRates, dealSize, cycleLength, slippage, pipelineRates, expansionRate };
+      const distributions = { survivalCurve, stageCurves, dealSize, cycleLength, slippage, pipelineRates, expansionRate };
       const dataQuality = assessDataQuality(distributions, closedDealCount);
 
       return { distributions, dataQuality, closedDealCount };
@@ -6660,10 +6708,11 @@ const mcLoadOpenDeals: ToolDefinition = {
         amount: string | null;
         stage_normalized: string | null;
         close_date: string | null;
+        created_at: string | null;
         owner: string | null;
         probability: string | null;
       }>(
-        `SELECT id, name, amount::text, stage_normalized, close_date::text, owner, probability::text
+        `SELECT id, name, amount::text, stage_normalized, close_date::text, created_at::text, owner, probability::text
          FROM deals
          WHERE workspace_id = $1
            AND stage_normalized NOT IN ('closed_won', 'closed_lost')
@@ -6680,6 +6729,7 @@ const mcLoadOpenDeals: ToolDefinition = {
         amount: r.amount ? Math.max(0, parseFloat(r.amount)) : 50000,
         stageNormalized: r.stage_normalized || 'qualification',
         closeDate: r.close_date ? new Date(r.close_date) : new Date(Date.now() + 90 * 86400000),
+        createdAt: r.created_at ? new Date(r.created_at) : undefined,
         ownerEmail: r.owner,
         probability: r.probability ? parseFloat(r.probability) : null,
       }));

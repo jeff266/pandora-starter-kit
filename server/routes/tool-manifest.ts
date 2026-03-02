@@ -17,6 +17,8 @@ export interface ToolManifestEntry {
   lastRunAt?: string; // from skill_runs table
   lastRunRows?: number;
   lastRunMs?: number;
+  answers_questions?: string[];
+  examples?: Array<{ query: string; params?: Record<string, any> }>;
 }
 
 /**
@@ -152,6 +154,43 @@ ORDER BY dsh.changed_at DESC
 LIMIT 100`,
       source: 'query_tool',
       status: 'live',
+    },
+    {
+      id: 'survival-curve-query',
+      name: 'Win Rate Curve Analysis',
+      category: 'analysis',
+      description: 'Query historical win rate curves segmented by source, rep, deal size, or stage. Returns time-to-won survival curves showing how win probability changes over deal age. Use for questions about conversion rates, pipeline quality, and planning.',
+      sql: `-- Kaplan-Meier survival curve: cumulative win probability over deal age
+-- Segmented by: source | owner | size_band | stage_reached | pipeline | none
+SELECT
+  d.id AS deal_id,
+  EXTRACT(EPOCH FROM (COALESCE(do2.closed_at, NOW()) - d.created_at)) / 86400 AS days_open,
+  (d.stage_normalized = 'closed_won') AS is_won,
+  d.amount,
+  COALESCE(d.lead_source, d.source_data->>'original_source') AS lead_source,
+  d.owner,
+  d.pipeline
+FROM deals d
+LEFT JOIN deal_outcomes do2 ON do2.deal_id = d.id
+WHERE d.workspace_id = $1
+  AND d.created_at > NOW() - INTERVAL '24 months'
+  AND d.amount IS NOT NULL AND d.amount > 0
+ORDER BY days_open ASC`,
+      source: 'query_tool',
+      status: 'live',
+      answers_questions: [
+        'win rate', 'conversion rate', 'pipeline quality', 'how long does it take to close',
+        'probability of winning', 'deal velocity', 'inbound vs outbound', 'win rate by source',
+        'win rate by rep', 'what percentage of pipeline will close', 'survival curve',
+      ],
+      examples: [
+        { query: 'What is our win rate by source?', params: { groupBy: 'source' } },
+        { query: 'How does outbound pipeline convert compared to inbound?', params: { groupBy: 'source' } },
+        { query: 'Which rep has the best conversion rate?', params: { groupBy: 'owner' } },
+        { query: 'What percentage of Q2 pipeline will close this quarter?', params: { groupBy: 'none' } },
+        { query: 'Do enterprise deals convert differently than mid-market?', params: { groupBy: 'size_band' } },
+        { query: 'How long does it take deals to close?', params: { groupBy: 'none' } },
+      ],
     },
   ];
 }

@@ -502,30 +502,22 @@ export function queryPipelineCreationTarget(
     warnings.push('Existing pipeline covers P50 entirely — new pipeline creation is not on the critical path for this forecast window.');
   }
 
-  // 2. Win rate range from Beta distributions
-  const stageWinRates = simulationInputs.distributions.stageWinRates ?? {};
-  const stages = Object.values(stageWinRates) as { alpha: number; beta: number }[];
-
-  let winRateP50 = 0.20;
+  // 2. Win rate range from survival curve
+  const survivalCurve = simulationInputs.distributions.survivalCurve;
+  let winRateP50 = survivalCurve?.terminalWinRate ?? 0.20;
   let winRateP10 = 0.12;
   let winRateP90 = 0.32;
 
-  if (stages.length > 0) {
-    const entryStage = stages.reduce((min, s) =>
-      ((s.alpha + s.beta) < (min.alpha + min.beta)) ? s : min
-    );
-    winRateP50 = entryStage.alpha / (entryStage.alpha + entryStage.beta);
-    const variance = (entryStage.alpha * entryStage.beta) /
-      (Math.pow(entryStage.alpha + entryStage.beta, 2) * (entryStage.alpha + entryStage.beta + 1));
-    const sd = Math.sqrt(variance);
+  if (survivalCurve && survivalCurve.steps.length > 0) {
+    const sd = Math.min(0.15, winRateP50 * 0.4);
     winRateP10 = Math.max(0.01, winRateP50 - 1.28 * sd);
     winRateP90 = Math.min(0.99, winRateP50 + 1.28 * sd);
 
     if (winRateP50 < 0.05) {
-      warnings.push('Win rate is below 5% — pipeline creation requirements may be very high. Verify stage win rate data quality.');
+      warnings.push('Win rate is below 5% — pipeline creation requirements may be very high. Verify historical deal data quality.');
     }
   } else {
-    warnings.push('No stage win rate distributions available — using 20% default win rate. Re-run skill to fit distributions.');
+    warnings.push('No historical win rate curve available — using 20% default win rate. Re-run Monte Carlo skill to fit survival curve.');
   }
 
   // 3. Deal size distribution

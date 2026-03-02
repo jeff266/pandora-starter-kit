@@ -219,6 +219,12 @@ REPORT PERIOD: {{time_windows.analysisRange.quarter}}
 TEAM OVERVIEW:
 {{coverage_summary.teamSummary}}
 
+{{#if coverage_data.team.weightedCoverageRatio}}
+PROBABILITY-WEIGHTED COVERAGE:
+Raw pipeline coverage is {{coverage_data.team.coverageRatio}}x; probability-weighted effective coverage (adjusted for deal age using historical win rates) is {{coverage_data.team.weightedCoverageRatio}}x.
+The weighted figure discounts each open deal's value by its time-adjusted probability of closing this quarter. A gap between raw and weighted coverage indicates aging pipeline that converts at a lower rate in-quarter.
+{{/if}}
+
 REP-BY-REP STATUS:
 {{coverage_summary.repTable}}
 
@@ -239,7 +245,7 @@ REPORT PARAMETERS:
 - Report depth: {{output_budget.reportDepth}}
 
 STRUCTURE YOUR REPORT:
-1. Team coverage: total coverage ratio vs target, gap in dollars, and trend direction. One paragraph.
+1. Team coverage: lead with raw pipeline coverage ratio vs target, then note probability-weighted effective coverage if available (explain the gap between the two in plain English). Include gap in dollars and trend direction. One paragraph.
 2. Rep-level view: table or list of each rep's coverage ratio, gap, and trend. Highlight anyone below 2x.
 3. At-risk reps: for each classified at-risk rep, include their coverage, gap, root cause, and the specific intervention from classifications. If a rep has conversations_without_deals_count > 0, note it as potential untracked pipeline.
 4. Pipeline quality: if any rep has >70% of pipeline in early stages, flag it as conversion risk.

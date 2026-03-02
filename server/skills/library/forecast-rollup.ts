@@ -205,6 +205,16 @@ REP-BY-REP BREAKDOWN:
 WEEK-OVER-WEEK CHANGES:
 {{forecast_summary.wowSummary}}
 
+{{#if survival_curve_context}}
+WIN RATE CURVE (Kaplan-Meier survival analysis — {{survival_curve_context.metadata.sampleSize}} historical deals):
+- Terminal win rate: {{survival_curve_context.terminalWinRatePct}}% (all deals that ever reach creation)
+- Median time to close (won deals): {{survival_curve_context.medianDaysToWin}} days
+- Cumulative win rates by age: 30d={{survival_curve_context.at30d}}%, 60d={{survival_curve_context.at60d}}%, 90d={{survival_curve_context.at90d}}%, 180d={{survival_curve_context.at180d}}%
+- Scenario basis: Bear = CI lower bound × remaining; Base = expected value in quarter window; Bull = CI upper bound × remaining
+- Data reliability: {{survival_curve_context.dataTier}} ({{survival_curve_context.reliability}})
+Use this curve to contextualize whether bear/base/bull are conservative or aggressive relative to historical conversion.
+{{/if}}
+
 CONCENTRATION RISK ANALYSIS:
 {{{json concentration_risk}}}
 

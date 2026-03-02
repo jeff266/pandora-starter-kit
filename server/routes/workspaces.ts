@@ -394,4 +394,53 @@ router.delete('/:workspaceId', requireAdmin, async (req, res) => {
   }
 });
 
+// GET /api/workspaces/:id/survival-curve
+// Parameterized win rate curve API for Ask Pandora and on-demand queries
+router.get('/:id/survival-curve', requireWorkspaceAccess, async (req, res) => {
+  try {
+    const { buildSurvivalCurves } = await import('../analysis/survival-data.js');
+    const workspaceId = req.params.id as string;
+    const groupBy = (req.query.groupBy as string) || 'none';
+    const lookbackMonths = parseInt(req.query.lookbackMonths as string) || 24;
+    const minSegmentSize = parseInt(req.query.minSegmentSize as string) || 30;
+
+    const qs = (key: string): string | undefined => {
+      const raw = req.query[key];
+      if (!raw) return undefined;
+      const v = Array.isArray(raw) ? raw[0] : raw;
+      return typeof v === 'string' ? v : undefined;
+    };
+    const filters: Record<string, any> = {};
+    if (qs('source')) filters.source = qs('source');
+    if (qs('owner')) filters.ownerEmail = qs('owner');
+    if (qs('minAmount')) filters.minAmount = parseFloat(qs('minAmount')!);
+    if (qs('maxAmount')) filters.maxAmount = parseFloat(qs('maxAmount')!);
+    if (qs('stage')) filters.stage = qs('stage');
+    if (qs('pipeline')) filters.pipeline = qs('pipeline');
+
+    const result = await buildSurvivalCurves({
+      workspaceId,
+      lookbackMonths,
+      groupBy: groupBy as any,
+      filters: Object.keys(filters).length > 0 ? filters as any : undefined,
+      minSegmentSize,
+    });
+
+    // Serialize Map to plain object for JSON
+    const segments: Record<string, any> = {};
+    for (const [key, curve] of result.segments) {
+      segments[key] = curve;
+    }
+
+    res.json({
+      overall: result.overall,
+      segments,
+      metadata: result.metadata,
+    });
+  } catch (err) {
+    console.error('[workspaces] Error computing survival curve:', err instanceof Error ? err.message : err);
+    res.status(500).json({ error: 'Failed to compute survival curve' });
+  }
+});
+
 export default router;

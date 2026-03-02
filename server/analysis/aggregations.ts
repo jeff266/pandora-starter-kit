@@ -1,5 +1,6 @@
 import { query } from '../db.js';
 import { configLoader } from '../config/workspace-config-loader.js';
+import type { SurvivalCurve } from './survival-curve.js';
 
 interface GroupStats {
   count: number;
@@ -1264,6 +1265,7 @@ export interface RepCoverage {
   closedWon: number;
   remaining: number | null;
   coverageRatio: number | null;
+  weightedCoverageRatio: number | null;
   gap: number | null;
   dealCount: number;
   avgDealSize: number;
@@ -1280,6 +1282,7 @@ export interface CoverageByRep {
     totalBestCase: number;
     closedWon: number;
     coverageRatio: number | null;
+    weightedCoverageRatio: number | null;
     coverageTarget: number;
     gap: number | null;
     daysInQuarter: number;
@@ -1288,6 +1291,7 @@ export interface CoverageByRep {
     requiredWeeklyPipelineGen: number | null;
     dealCount: number;
     avgDealSize: number;
+    survivalDataTier: number | null;
   };
   reps: RepCoverage[];
 }
@@ -1344,6 +1348,61 @@ export async function coverageByRep(
     ORDER BY pipeline DESC
   `, params);
 
+  // Load survival curve for weighted coverage (non-fatal)
+  let survivalCurve: SurvivalCurve | null = null;
+  let survivalDataTier: number | null = null;
+  const daysRemainInQtr = Math.max(0, Math.ceil((quarterEnd.getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
+  try {
+    const { buildSurvivalCurves } = await import('./survival-data.js');
+    const { assessDataTier } = await import('./survival-curve.js');
+    const survivalResult = await buildSurvivalCurves({
+      workspaceId,
+      lookbackMonths: 24,
+      groupBy: 'none',
+      minSegmentSize: 20,
+    });
+    survivalCurve = survivalResult.overall;
+    survivalDataTier = assessDataTier(survivalCurve);
+    // Only use weighted coverage if we have at least tier 2 data quality
+    if (survivalDataTier < 2) survivalCurve = null;
+  } catch (_e) {
+    // Non-fatal: fall back to raw coverage only
+  }
+
+  // If we have a curve, load open deals per rep with created_at for age calculation
+  let repWeightedPipeline: Map<string, number> | null = null;
+  if (survivalCurve) {
+    try {
+      const { expectedValueInWindow } = await import('./survival-curve.js');
+      const openDealsResult = await query(
+        `SELECT
+          COALESCE(owner, 'unassigned') as rep_email,
+          amount,
+          created_at,
+          close_date
+        FROM deals
+        WHERE workspace_id = $1
+          AND stage_normalized NOT IN ('closed_won', 'closed_lost')
+          AND close_date BETWEEN $2 AND $3
+          AND amount IS NOT NULL AND amount > 0`,
+        [workspaceId, quarterStart, quarterEnd]
+      );
+      repWeightedPipeline = new Map();
+      for (const row of openDealsResult.rows) {
+        const rep = (row.rep_email as string) || 'unassigned';
+        const amount = parseFloat(row.amount) || 0;
+        const createdAt = row.created_at ? new Date(row.created_at) : null;
+        const dealAgeDays = createdAt
+          ? Math.max(0, (Date.now() - createdAt.getTime()) / (1000 * 60 * 60 * 24))
+          : 90;
+        const { expectedValue: ev } = expectedValueInWindow(survivalCurve!, dealAgeDays, daysRemainInQtr, amount);
+        repWeightedPipeline.set(rep, (repWeightedPipeline.get(rep) ?? 0) + ev);
+      }
+    } catch (_e) {
+      repWeightedPipeline = null;
+    }
+  }
+
   // Build rep coverage objects
   const reps: RepCoverage[] = repsResult.rows.map((row: any) => {
     const repEmail = row.rep_email;
@@ -1377,6 +1436,11 @@ export async function coverageByRep(
       status = 'unknown';
     }
 
+    const weightedPipe = repWeightedPipeline?.get(repEmail) ?? null;
+    const weightedCoverageRatio = weightedPipe !== null && remaining !== null && remaining > 0
+      ? weightedPipe / remaining
+      : null;
+
     return {
       name: row.rep_name,
       email: repEmail,
@@ -1387,6 +1451,7 @@ export async function coverageByRep(
       closedWon,
       remaining,
       coverageRatio,
+      weightedCoverageRatio,
       gap,
       dealCount,
       avgDealSize,
@@ -1429,6 +1494,14 @@ export async function coverageByRep(
     ? Math.round(gap / weeksRemaining)
     : null;
 
+  // Team-level weighted coverage
+  const totalWeightedPipeline = repWeightedPipeline
+    ? Array.from(repWeightedPipeline.values()).reduce((s, v) => s + v, 0)
+    : null;
+  const teamWeightedCoverageRatio = totalWeightedPipeline !== null && teamRemaining !== null && teamRemaining > 0
+    ? totalWeightedPipeline / teamRemaining
+    : null;
+
   return {
     team: {
       totalQuota,
@@ -1437,6 +1510,7 @@ export async function coverageByRep(
       totalBestCase: Math.round(totalBestCase),
       closedWon: Math.round(totalClosedWon),
       coverageRatio,
+      weightedCoverageRatio: teamWeightedCoverageRatio,
       coverageTarget: configCoverageTarget,
       gap: gap !== null ? Math.round(gap) : null,
       daysInQuarter,
@@ -1445,6 +1519,7 @@ export async function coverageByRep(
       requiredWeeklyPipelineGen,
       dealCount: totalDealCount,
       avgDealSize,
+      survivalDataTier,
     },
     reps,
   };

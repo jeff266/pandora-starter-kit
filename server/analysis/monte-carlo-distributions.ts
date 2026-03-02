@@ -44,80 +44,6 @@ function stdev(values: number[]): number {
   return Math.sqrt(variance);
 }
 
-// ─── 2a. Stage Win Rates ─────────────────────────────────────────────────────
-
-export async function fitStageWinRates(
-  workspaceId: string,
-  pipelineFilter?: string | null,
-  lookbackMonths: number = 24,
-  filterClause: string = ''
-): Promise<Record<string, BetaDistribution>> {
-  const pClause = filterClause || (pipelineFilter ? `AND d.pipeline = $3` : '');
-  const pClauseNoAlias = filterClause ? filterClause.replace(/\bd\./g, '') : (pipelineFilter ? `AND pipeline = $3` : '');
-  const params = [workspaceId, lookbackMonths, ...(pipelineFilter && !filterClause ? [pipelineFilter] : [])];
-
-  const histResult = await query<{
-    stage_normalized: string;
-    wins: string;
-    losses: string;
-  }>(
-    `SELECT
-       dsh.stage_normalized,
-       COUNT(*) FILTER (WHERE d.stage_normalized = 'closed_won')::text AS wins,
-       COUNT(*) FILTER (WHERE d.stage_normalized = 'closed_lost')::text AS losses
-     FROM deal_stage_history dsh
-     JOIN deals d ON dsh.deal_id = d.id AND d.workspace_id = dsh.workspace_id
-     WHERE d.workspace_id = $1
-       AND d.stage_normalized IN ('closed_won', 'closed_lost')
-       AND d.updated_at > NOW() - ($2 || ' months')::interval
-       ${pClause}
-     GROUP BY dsh.stage_normalized
-     HAVING dsh.stage_normalized IS NOT NULL`,
-    params
-  );
-
-  const result: Record<string, BetaDistribution> = {};
-
-  let rows = histResult.rows;
-  if (rows.length < 2) {
-    const fallback = await query<{
-      stage_normalized: string;
-      wins: string;
-      losses: string;
-    }>(
-      `SELECT
-         stage_normalized,
-         COUNT(*) FILTER (WHERE stage_normalized = 'closed_won')::text AS wins,
-         COUNT(*) FILTER (WHERE stage_normalized = 'closed_lost')::text AS losses
-       FROM deals
-       WHERE workspace_id = $1
-         AND stage_normalized IN ('closed_won', 'closed_lost')
-         AND updated_at > NOW() - ($2 || ' months')::interval
-         AND stage_normalized IS NOT NULL
-         ${pClauseNoAlias}
-       GROUP BY stage_normalized`,
-      params
-    );
-    rows = fallback.rows;
-  }
-
-  for (const row of rows) {
-    const wins = parseInt(row.wins, 10);
-    const losses = parseInt(row.losses, 10);
-    const alpha = wins + 1;  // Laplace smoothing
-    const beta = losses + 1;
-    const sampleSize = wins + losses;
-    result[row.stage_normalized] = {
-      alpha,
-      beta,
-      mean: alpha / (alpha + beta),
-      sampleSize,
-      isReliable: sampleSize >= 10,
-    };
-  }
-
-  return result;
-}
 
 // ─── 2b. Deal Size ───────────────────────────────────────────────────────────
 
@@ -433,8 +359,11 @@ export async function fitExpansionRateDistribution(
 
 // ─── Data Quality Report ─────────────────────────────────────────────────────
 
+import type { SurvivalCurve } from './survival-curve.js';
+
 export interface FittedDistributions {
-  stageWinRates: Record<string, BetaDistribution>;
+  survivalCurve: SurvivalCurve;
+  stageCurves: Map<string, SurvivalCurve> | null;
   dealSize: LogNormalDistribution;
   cycleLength: LogNormalDistribution;
   slippage: Record<string, NormalDistribution>;
@@ -456,9 +385,9 @@ export function assessDataQuality(
   if (distributions.cycleLength.isReliable) reliable.push('cycle_length');
   else { unreliable.push('cycle_length'); warnings.push('Sales cycle distribution based on fewer than 20 closed deals.'); }
 
-  const reliableStages = Object.entries(distributions.stageWinRates).filter(([, d]) => d.isReliable);
-  if (reliableStages.length >= 2) reliable.push('stage_win_rates');
-  else { unreliable.push('stage_win_rates'); warnings.push('Fewer than 2 stages have reliable win rate data (>= 10 observations).'); }
+  const curve = distributions.survivalCurve;
+  if (curve.isReliable) reliable.push('survival_curve');
+  else { unreliable.push('survival_curve'); warnings.push(`Win rate curve based on limited history (${curve.eventCount} wins). Probabilities are indicative.`); }
 
   const slippageCount = Object.values(distributions.slippage).filter(d => d.isReliable).length;
   if (slippageCount >= 2) reliable.push('slippage');
@@ -471,6 +400,6 @@ export function assessDataQuality(
     reliable,
     unreliable,
     warnings,
-    canRun: true,  // always run — just adjust confidence
+    canRun: true,
   };
 }

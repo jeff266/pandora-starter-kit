@@ -7,6 +7,7 @@
 
 import type { SimulationInputs, PipelineType } from './monte-carlo-engine.js';
 import { runSimulation } from './monte-carlo-engine.js';
+import { conditionalWinProbability } from './survival-curve.js';
 
 export interface TornadoAssumption {
   label: string;
@@ -114,30 +115,36 @@ export function computeVarianceDrivers(
 
   // ── Win Rate ────────────────────────────────────────────────────────────────
   {
+    // Perturb win probability using the survival curve terminal win rate
+    const curve = baseInputs.distributions.survivalCurve;
+    const terminalWinRate = curve?.terminalWinRate ?? 0.20;
+    const wrP50 = terminalWinRate;
+    const wrSd = Math.min(0.15, terminalWinRate * 0.4); // approximate spread
+    const wrP10 = Math.max(0.01, wrP50 - 1.28 * wrSd);
+    const wrP90 = Math.min(0.99, wrP50 + 1.28 * wrSd);
+    const p0 = curve ? conditionalWinProbability(curve, 0) : null;
+    const confidenceLower = p0?.confidence?.lower ?? wrP10;
+    const confidenceUpper = p0?.confidence?.upper ?? wrP90;
+
+    // Estimate upside/downside by shifting curve's terminal rate
     const upInputs = cloneInputs(miniInputs);
     const downInputs = cloneInputs(miniInputs);
-    for (const stage of Object.keys(upInputs.distributions.stageWinRates)) {
-      const d = upInputs.distributions.stageWinRates[stage];
-      upInputs.distributions.stageWinRates[stage] = { ...d, alpha: d.alpha * 1.20 };
-      const dd = downInputs.distributions.stageWinRates[stage];
-      downInputs.distributions.stageWinRates[stage] = { ...dd, alpha: Math.max(1.1, dd.alpha * 0.80) };
+    if (upInputs.distributions.survivalCurve) {
+      upInputs.distributions.survivalCurve = {
+        ...upInputs.distributions.survivalCurve,
+        terminalWinRate: Math.min(0.95, upInputs.distributions.survivalCurve.terminalWinRate * 1.20),
+      };
+    }
+    if (downInputs.distributions.survivalCurve) {
+      downInputs.distributions.survivalCurve = {
+        ...downInputs.distributions.survivalCurve,
+        terminalWinRate: Math.max(0.01, downInputs.distributions.survivalCurve.terminalWinRate * 0.80),
+      };
     }
     const upP50 = runSimulation(upInputs, null).p50;
     const downP50 = runSimulation(downInputs, null).p50;
     const upsideImpact = Math.max(0, upP50 - baseP50);
     const downsideImpact = Math.max(0, baseP50 - downP50);
-
-    // Compute win rate P50/P10/P90 from Beta distributions (weighted average across stages)
-    const stages = Object.values(baseInputs.distributions.stageWinRates);
-    const entryStage = stages.length > 0
-      ? stages.reduce((min, s) => ((s.alpha + s.beta) < (min.alpha + min.beta)) ? s : min)
-      : { alpha: 2, beta: 8 };
-    const wrP50 = entryStage.alpha / (entryStage.alpha + entryStage.beta);
-    const wrVariance = (entryStage.alpha * entryStage.beta) /
-      (Math.pow(entryStage.alpha + entryStage.beta, 2) * (entryStage.alpha + entryStage.beta + 1));
-    const wrSd = Math.sqrt(wrVariance);
-    const wrP10 = Math.max(0.01, wrP50 - 1.28 * wrSd);
-    const wrP90 = Math.min(0.99, wrP50 + 1.28 * wrSd);
 
     drivers.push({
       variable: 'win_rate',
@@ -146,10 +153,10 @@ export function computeVarianceDrivers(
       downsideImpact,
       totalVariance: Math.abs(upP50 - baseP50) + Math.abs(downP50 - baseP50),
       assumption: {
-        label: 'Win rate (Beta distribution fitted per stage, weighted average)',
+        label: 'Win rate (Kaplan-Meier survival curve terminal rate)',
         value: fmtPct(wrP50),
-        low: fmtPct(wrP10),
-        high: fmtPct(wrP90),
+        low: fmtPct(confidenceLower),
+        high: fmtPct(confidenceUpper),
         unit: 'percent',
         skew: computeSkew(upsideImpact, downsideImpact),
         implication: computeImplication('win_rate', upsideImpact, downsideImpact),
