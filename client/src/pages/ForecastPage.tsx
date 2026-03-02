@@ -84,7 +84,22 @@ export default function ForecastPage() {
   const [tteData, setTteData] = useState<any>(null);
   const [seriesLoading, setSeriesLoading] = useState(false);
 
-  const { annotations, grouped, dismiss, snooze } = useForecastAnnotations(wsId);
+  // Sales roster for filtering reps
+  const [roster, setRoster] = useState<any[]>([]);
+
+  const { annotations, grouped, dismiss, snooze} = useForecastAnnotations(wsId);
+
+  // Fetch sales roster
+  useEffect(() => {
+    if (!wsId) return;
+    api.get('/sales-reps/roster')
+      .then((data: any) => {
+        setRoster(data.reps || []);
+      })
+      .catch(() => {
+        setRoster([]);
+      });
+  }, [wsId]);
 
   useEffect(() => {
     if (!wsId) return;
@@ -596,9 +611,18 @@ export default function ForecastPage() {
   }, [repRows, isAdmin, hasRepRow, viewInitialized]);
 
   const visibleRepRows = useMemo(() => {
-    if (isAdmin) return repRows;
-    return repRows.filter(r => r.rep_email === userEmail);
-  }, [repRows, isAdmin, userEmail]);
+    // Filter by roster: only include reps who are quota_eligible
+    const eligibleReps = repRows.filter(r => {
+      const rosterEntry = roster.find(rr =>
+        rr.rep_email === r.rep_email || rr.rep_name === r.rep_name
+      );
+      // Include if in roster with quota_eligible = true, or if not in roster at all (legacy data)
+      return !rosterEntry || (rosterEntry.quota_eligible && rosterEntry.is_rep !== false);
+    });
+
+    if (isAdmin) return eligibleReps;
+    return eligibleReps.filter(r => r.rep_email === userEmail);
+  }, [repRows, roster, isAdmin, userEmail]);
 
   const weekInfo = useMemo(() => {
     const now = new Date();
@@ -900,7 +924,34 @@ export default function ForecastPage() {
                   quota={quota}
                   isRefreshing={runningForecast}
                   onPointClick={(snapshot, metric) => {
-                    console.log('Chart point clicked:', metric, snapshot.snapshot_date);
+                    // Get the value for the clicked metric
+                    const value = snapshot[metric as keyof typeof snapshot];
+                    if (value == null || typeof value !== 'number') return;
+
+                    // Build context based on metric
+                    let context: any = {
+                      period: fiscalYearStartMonth,
+                      quota: liveQuota,
+                    };
+
+                    // For specific metrics, add relevant deals
+                    if (metric === 'attainment' || metric === 'closed_won') {
+                      // Closed won deals up to this snapshot date
+                      const snapshotDate = new Date(snapshot.snapshot_date);
+                      const closedDeals = deals.filter(d =>
+                        d.stage_normalized === 'closed_won' &&
+                        d.close_date &&
+                        new Date(d.close_date) <= snapshotDate
+                      );
+                      context.deals = closedDeals;
+                      context.closedWon = value;
+                    }
+
+                    setMathPanel({
+                      metric,
+                      value,
+                      context,
+                    });
                   }}
                 />
               </SectionErrorBoundary>

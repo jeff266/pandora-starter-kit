@@ -321,31 +321,58 @@ export function getBreakdownData(
     }
 
     case 'pipe_gen': {
-      // Filter to deals created in the trailing 8 weeks
-      const eightWeeksAgo = new Date();
-      eightWeeksAgo.setDate(eightWeeksAgo.getDate() - 56);
+      // If context.deals is provided (specific week click), use those
+      // Otherwise filter to deals created in the trailing 8 weeks
+      let pipeGenDeals;
+      if ((ctx as any).deals && Array.isArray((ctx as any).deals)) {
+        pipeGenDeals = (ctx as any).deals
+          .map((d: any) => {
+            const created = getDealCreatedDate(d);
+            const amount = getDealAmount(d);
+            return { ...d, amount, created };
+          })
+          .sort((a: any, b: any) => b.amount - a.amount);
+      } else {
+        const eightWeeksAgo = new Date();
+        eightWeeksAgo.setDate(eightWeeksAgo.getDate() - 56);
 
-      const pipeGenDeals = deals
-        .map(d => {
-          const created = getDealCreatedDate(d);
-          const amount = getDealAmount(d);
-          return { ...d, amount, created };
-        })
-        .filter(d => d.created && d.created >= eightWeeksAgo)
-        .sort((a, b) => b.amount - a.amount);
+        pipeGenDeals = deals
+          .map(d => {
+            const created = getDealCreatedDate(d);
+            const amount = getDealAmount(d);
+            return { ...d, amount, created };
+          })
+          .filter(d => d.created && d.created >= eightWeeksAgo)
+          .sort((a, b) => b.amount - a.amount);
+      }
 
       const totalCreated = pipeGenDeals.reduce((s, d) => s + d.amount, 0);
       const weeklyAvg = pipeGenDeals.length > 0 ? totalCreated / 8 : 0;
 
+      const isSpecificWeek = (ctx as any).week_label;
+      const title = isSpecificWeek
+        ? `Pipeline Generated: ${fmt(value)} (Week of ${(ctx as any).week_label})`
+        : `Pipeline Generated: ${fmt(value)}`;
+      const explanation = isSpecificWeek
+        ? `Sum of amount for all deals created within the week ending ${(ctx as any).week_label}, regardless of current stage or status.`
+        : 'Sum of amount for all deals created within the trailing 8-week window, regardless of current stage or status. This measures raw pipeline creation velocity.';
+      const inputs = isSpecificWeek
+        ? [
+            { label: 'Week ending', value: (ctx as any).week_label },
+            { label: 'Total created', value: fmt(totalCreated) },
+            { label: 'Deals created', value: String(pipeGenDeals.length) },
+          ]
+        : [
+            { label: 'Trailing period', value: '8 weeks' },
+            { label: 'Total created', value: fmt(totalCreated) },
+            { label: 'Weekly average', value: weeklyAvg > 0 ? `${fmt(weeklyAvg)}/wk` : 'N/A' },
+            { label: 'Deals created', value: String(pipeGenDeals.length) },
+          ];
+
       return {
-        title: `Pipeline Generated: ${fmt(value)}`,
-        explanation: 'Sum of amount for all deals created within the trailing 8-week window, regardless of current stage or status. This measures raw pipeline creation velocity.',
-        inputs: [
-          { label: 'Trailing period', value: '8 weeks' },
-          { label: 'Total created', value: fmt(totalCreated) },
-          { label: 'Weekly average', value: weeklyAvg > 0 ? `${fmt(weeklyAvg)}/wk` : 'N/A' },
-          { label: 'Deals created', value: String(pipeGenDeals.length) },
-        ],
+        title,
+        explanation,
+        inputs,
         deals: pipeGenDeals.map(d => ({
           id: d.id,
           name: d.name || (d as any).dealname || (d as any).deal_name || 'Unnamed',
