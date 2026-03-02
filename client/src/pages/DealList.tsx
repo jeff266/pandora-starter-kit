@@ -5,7 +5,6 @@ import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import { formatCurrency, formatDate, formatTimeAgo, severityColor } from '../lib/format';
 import Skeleton from '../components/Skeleton';
-import QuotaBanner from '../components/QuotaBanner';
 import { useDemoMode } from '../contexts/DemoModeContext';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { useIsMobile } from '../hooks/useIsMobile';
@@ -339,7 +338,6 @@ export default function DealList() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <QuotaBanner />
       {/* Header */}
       <div style={{
         background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, padding: 16,

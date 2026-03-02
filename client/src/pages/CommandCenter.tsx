@@ -5,7 +5,6 @@ import { colors, fonts } from '../styles/theme';
 import { formatCurrency, formatNumber, formatPercent, formatTimeAgo, severityColor } from '../lib/format';
 import Skeleton, { SkeletonCard } from '../components/Skeleton';
 import { SeverityDot } from '../components/shared';
-import QuotaBanner from '../components/QuotaBanner';
 import { useWorkspace } from '../context/WorkspaceContext';
 import SectionErrorBoundary from '../components/SectionErrorBoundary';
 import MonteCarloPanel from '../components/MonteCarloPanel';
@@ -659,7 +658,6 @@ export default function CommandCenter() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-      <QuotaBanner />
       <PushBanner />
 
       {greetingData && (
