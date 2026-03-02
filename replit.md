@@ -89,6 +89,16 @@ Pandora is built on Node.js 20 with TypeScript 5+, utilizing Express.js and Post
     - **skill_governance table** (migration `124_skill_governance.sql`): full lifecycle tracking with 35+ columns covering all agent outputs, status_history JSONB array, trial/monitoring/rollback state.
     - **Self-heal wiring**: `agent-feedback.ts` review endpoint now fire-and-forgets `processGovernanceProposal` for each suggestion after returning the API response.
     - **Monitoring cron**: `server/index.ts` runs `checkForAutoRollback` every 6 hours across all active workspaces.
+    - **Integration test results (2026-03-02):** All 8 routes verified — approve→monitoring→rollback flow end-to-end; review agent correctly rejects low-evidence auto-suggestions (score 0.26 < 0.3 threshold); status_history audit trail confirmed.
+
+-   **Contextual Opening Brief (`server/context/opening-brief.ts`):** Synthesizes role-scoped pipeline data into a Claude-written greeting on every new conversation (no `thread_id` in POST body).
+    - `computeTemporalContext(workspaceId)`: fiscal quarter/phase from `configLoader.getQuotaPeriod()`. Derives `weekOfQuarter`, `phase` (early/mid/late/final_week), `isWeekStart`, `isMonthEnd`, `dayOfWeek`.
+    - `assembleOpeningBrief(workspaceId, userId)`: 14 parallel queries via `Promise.allSettled()` — workspace name, user name/email, role-scoped headline target, open pipeline totals, deals closing this week/month, new deals this week, period attainment (using actual quota period start), finding counts/top 3 findings, last skill run, movement since anchor (yesterday or last Friday on Mondays), deal stats (avg size/cycle for sales motion), conversation count. Attainment uses `quotaPeriod.start` (not 365-day fallback).
+    - `buildDealScopeFilter(workspaceId, pandoraRole, workspaceRole, userEmail)`: CRO/RevOps/admin roles get full visibility; AE role scopes to `rep_name` matched via `sales_reps.rep_email`; null/unknown pandoraRole also gets full visibility.
+    - `renderBriefContext()`: fills named template with all assembled data. Returns formatted context string prepended to the user's message.
+    - `BRIEF_SYSTEM_PROMPT`: VP Sales-calibrated prompt with sales motion awareness and 1024 token budget.
+    - 5-minute in-memory cache keyed by `workspaceId:userId`.
+    - Wired into `conversation-stream.ts`: new conversations detected by `!thread_id` → brief assembled, prepended to message, routed directly through Anthropic with `BRIEF_SYSTEM_PROMPT`.
 
 ## TypeScript Health
 - **Status (Feb 2026):** 0 non-test server errors maintained. All server files pass `tsc --noEmit`.

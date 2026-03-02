@@ -13,6 +13,7 @@ import { getSkillRuntime } from '../skills/runtime.js';
 import { getSkillRegistry } from '../skills/registry.js';
 import { createConversationState, getConversationState, appendMessage } from '../chat/conversation-state.js';
 import { buildWorkspaceContextBlock } from '../context/workspace-memory.js';
+import { getOrAssembleBrief, renderBriefContext, BRIEF_SYSTEM_PROMPT } from '../context/opening-brief.js';
 import type { InvestigationStep } from '../goals/types.js';
 
 const router = Router();
@@ -92,7 +93,72 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
   const userId = (req as any).user?.user_id as string | undefined;
   const contextBlock = await buildWorkspaceContextBlock(workspaceId, userId).catch(() => '');
 
+  // ── Opening brief (new conversations only) ──────────────────────────────────
+  // A new conversation has no thread_id in the request. We assemble a role-scoped
+  // brief (cached 5 min) and prepend it to the user message so Claude synthesizes
+  // the brief AND answers any question in a single pass.
+  const isNewConversation = !thread_id;
+  let briefContextBlock = '';
+  let effectiveMessage = message;
+
+  if (isNewConversation && userId) {
+    try {
+      const briefData = await getOrAssembleBrief(workspaceId, userId);
+      briefContextBlock = renderBriefContext(briefData);
+      effectiveMessage = briefContextBlock + '\n\n' + message;
+    } catch (briefErr) {
+      console.warn('[conversation-stream] Opening brief assembly failed (non-fatal):', briefErr);
+    }
+  }
+
+  // Combined system context: workspace memory + optional brief instructions
+  const fullContextBlock = briefContextBlock
+    ? `${BRIEF_SYSTEM_PROMPT}\n\n${contextBlock}`
+    : contextBlock;
+
   try {
+    // ── Opening brief delivery (new conversation + brief assembled) ─────────
+    // When a user opens a new conversation and we have a brief, skip normal
+    // Tier routing and route directly through the Anthropic stream so Claude
+    // has full token budget and unmodified synthesis instructions.
+    if (isNewConversation && briefContextBlock && userId) {
+      sse(res, { type: 'synthesis_start' });
+      const { default: Anthropic } = await import('@anthropic-ai/sdk');
+      const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY || process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY });
+      const systemForBrief = [
+        BRIEF_SYSTEM_PROMPT,
+        contextBlock,
+      ].filter(Boolean).join('\n\n');
+      const stream = anthropic.messages.stream({
+        model: 'claude-sonnet-4-5',
+        max_tokens: 1024,
+        system: systemForBrief,
+        messages: [{ role: 'user', content: effectiveMessage }],
+      });
+      let fullBriefText = '';
+      for await (const event of stream) {
+        if (event.type === 'content_block_delta' && event.delta.type === 'text_delta' && event.delta.text) {
+          fullBriefText += event.delta.text;
+          sse(res, { type: 'synthesis_chunk', text: event.delta.text });
+        }
+      }
+      const briefRespId = randomUUID();
+      sse(res, { type: 'synthesis_done', full_text: fullBriefText, response_id: briefRespId });
+      sse(res, {
+        type: 'deliverable_options',
+        options: [
+          { id: 'slides', label: 'Slides', icon: '📊', sub: 'Board-ready deck' },
+          { id: 'doc', label: 'Doc', icon: '📄', sub: 'Written briefing' },
+          { id: 'slack', label: 'Slack', icon: '💬', sub: 'Team summary' },
+          { id: 'email', label: 'Email', icon: '📧', sub: 'Executive update' },
+        ],
+      });
+      await persistExchange(workspaceId, workingThreadId, message, fullBriefText);
+      sse(res, { type: 'done', thread_id: workingThreadId });
+      res.end();
+      return;
+    }
+
     // ── Brief resolver — cache-first, zero tokens ─────────────────────────────
     const briefAnswer = await resolveFromBrief(workspaceId, message).catch(() => null);
     if (briefAnswer) {
