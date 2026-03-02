@@ -69,6 +69,9 @@ export default function ForecastPage() {
   const [mathPanel, setMathPanel] = useState<{ metric: string; value: number; context: MathContext } | null>(null);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [dealsLoading, setDealsLoading] = useState(true);
+  const [pipelines, setPipelines] = useState<string[]>([]);
+  const [selectedPipeline, setSelectedPipeline] = useState<string>('all');
+  const [liveQuota, setLiveQuota] = useState<number | null>(null);
   const [runningForecast, setRunningForecast] = useState(false);
   const [forecastRunStatus, setForecastRunStatus] = useState<string | null>(null);
 
@@ -90,11 +93,34 @@ export default function ForecastPage() {
       .finally(() => setLoading(false));
   }, [wsId]);
 
-  // Fetch deals for Show the Math and live snapshot
+  // Fetch pipelines list once
+  useEffect(() => {
+    if (!wsId) return;
+    api.get('/deals/pipelines')
+      .then((data: any) => {
+        const list: string[] = Array.isArray(data) ? data : data.data || data.pipelines || [];
+        setPipelines(list.filter(Boolean));
+      })
+      .catch(() => {});
+  }, [wsId]);
+
+  // Fetch current-period quota for live snapshot
+  useEffect(() => {
+    if (!wsId) return;
+    api.get('/quotas')
+      .then((data: any) => {
+        const q = data.period?.teamQuota || data.teamTotal || null;
+        setLiveQuota(q > 0 ? q : null);
+      })
+      .catch(() => {});
+  }, [wsId]);
+
+  // Fetch deals for Show the Math and live snapshot; re-fetch when pipeline filter changes
   useEffect(() => {
     if (!wsId) return;
     setDealsLoading(true);
-    api.get('/deals')
+    const qs = selectedPipeline !== 'all' ? `?pipelineName=${encodeURIComponent(selectedPipeline)}&limit=2000` : '?limit=2000';
+    api.get(`/deals${qs}`)
       .then((data: any) => {
         const dealList = Array.isArray(data) ? data : data.data || data.deals || [];
         setDeals(dealList);
@@ -103,7 +129,7 @@ export default function ForecastPage() {
         console.error('[ForecastPage] Failed to load deals:', err);
       })
       .finally(() => setDealsLoading(false));
-  }, [wsId]);
+  }, [wsId, selectedPipeline]);
 
   // Deduplicate snapshots by week (keep latest per week)
   const weeklySnapshots = useMemo(() => {
@@ -142,9 +168,16 @@ export default function ForecastPage() {
     if (fiscalQStart > now) fiscalQStart.setFullYear(fiscalQStart.getFullYear() - 1);
     const fiscalQEnd = new Date(fiscalQStart.getFullYear(), fiscalQStart.getMonth() + 3, 1);
 
+    // Pipe gen: deals created since last Monday
+    const monday = new Date(now);
+    const dayOfWeek = now.getDay();
+    monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+    monday.setHours(0, 0, 0, 0);
+
     let closedWon = 0;
     let totalPipeline = 0;
     let stageWeighted = 0;
+    let pipeGenThisWeek = 0;
 
     for (const d of deals) {
       const amt = typeof (d as any).amount === 'string'
@@ -159,15 +192,21 @@ export default function ForecastPage() {
         totalPipeline += amt;
         const prob = d.probability > 1 ? d.probability / 100 : (d.probability > 0 ? d.probability : 0.3);
         stageWeighted += amt * prob;
+        const createdAt = (d as any).created_at ? new Date((d as any).created_at) : null;
+        if (createdAt && createdAt >= monday) {
+          pipeGenThisWeek += amt;
+        }
       }
     }
 
     const openCount = deals.filter(d => !['closed_won', 'closed_lost'].includes(d.stage_normalized)).length;
+    const quota = liveQuota;
+    const coverageRatio = quota && totalPipeline ? totalPipeline / quota : null;
 
     return {
       run_id: 'live-today',
       snapshot_date: now.toISOString(),
-      scope_id: null,
+      scope_id: selectedPipeline !== 'all' ? selectedPipeline : null,
       stage_weighted_forecast: stageWeighted + closedWon,
       category_weighted_forecast: null,
       monte_carlo_p50: null,
@@ -176,18 +215,18 @@ export default function ForecastPage() {
       monte_carlo_p10: null,
       monte_carlo_p90: null,
       attainment: closedWon,
-      quota: null,
+      quota,
       total_pipeline: totalPipeline,
       weighted_pipeline: stageWeighted,
       deal_count: openCount,
-      pipe_gen_this_week: null,
+      pipe_gen_this_week: pipeGenThisWeek || null,
       pipe_gen_avg: null,
-      coverage_ratio: null,
+      coverage_ratio: coverageRatio,
       by_rep: [],
       annotation_count: 0,
       isLive: true,
     };
-  }, [deals, dealsLoading, fiscalYearStartMonth]);
+  }, [deals, dealsLoading, fiscalYearStartMonth, liveQuota, selectedPipeline]);
 
   // Augment weekly snapshots with a live "Today" point when we don't have enough for a trend line
   const augmentedSnapshots = useMemo((): SnapshotData[] => {
@@ -199,9 +238,11 @@ export default function ForecastPage() {
     return [...weeklySnapshots, liveSnapshot];
   }, [weeklySnapshots, liveSnapshot]);
 
-  const latest = augmentedSnapshots.length > 0 ? augmentedSnapshots[augmentedSnapshots.length - 1] : null;
-  const previous = augmentedSnapshots.length > 1 ? augmentedSnapshots[augmentedSnapshots.length - 2] : null;
-  const quota = latest?.quota || null;
+  // MetricCards always reads from real snapshots — live snapshot is chart-only
+  const latestReal = weeklySnapshots.length > 0 ? weeklySnapshots[weeklySnapshots.length - 1] : null;
+  const latest = latestReal ?? liveSnapshot;
+  const previous = weeklySnapshots.length > 1 ? weeklySnapshots[weeklySnapshots.length - 2] : null;
+  const quota = latest?.quota || liveQuota || null;
 
   const currentMetrics = useMemo(() => {
     if (!latest) return null;
@@ -212,12 +253,12 @@ export default function ForecastPage() {
       mc_p75: latest.monte_carlo_p75 ?? undefined,
       closed_won: latest.attainment ?? undefined,
       pipeline_total: latest.total_pipeline ?? undefined,
-      quota: latest.quota ?? undefined,
-      pipe_gen: latest.pipe_gen_this_week ?? undefined,
+      quota: latest.quota ?? liveQuota ?? undefined,
+      pipe_gen: latest.pipe_gen_this_week ?? liveSnapshot?.pipe_gen_this_week ?? undefined,
       forecast_weighted: latest.stage_weighted_forecast ?? undefined,
       category_weighted: latest.category_weighted_forecast ?? undefined,
     };
-  }, [latest]);
+  }, [latest, liveQuota, liveSnapshot]);
 
   const previousMetrics = useMemo(() => {
     if (!previous) return null;
@@ -482,7 +523,29 @@ export default function ForecastPage() {
             {weekInfo.label} · Week {weekInfo.weekNum} of {weekInfo.totalWeeks}
           </span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          {pipelines.length > 0 && (
+            <select
+              value={selectedPipeline}
+              onChange={(e) => setSelectedPipeline(e.target.value)}
+              style={{
+                padding: '5px 10px',
+                fontSize: 12,
+                fontFamily: fonts.sans,
+                borderRadius: 6,
+                border: `1px solid ${selectedPipeline !== 'all' ? colors.accent : colors.border}`,
+                background: colors.surface,
+                color: selectedPipeline !== 'all' ? colors.accent : colors.textSecondary,
+                cursor: 'pointer',
+                outline: 'none',
+              }}
+            >
+              <option value="all">All Pipelines</option>
+              {pipelines.map(p => (
+                <option key={p} value={p}>{p}</option>
+              ))}
+            </select>
+          )}
           {showViewTabs && (
             <div style={{ display: 'flex', gap: 4 }}>
               <button style={tabStyle(forecastView === 'company')} onClick={() => setForecastView('company')}>Company</button>
