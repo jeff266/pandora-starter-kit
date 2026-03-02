@@ -122,6 +122,9 @@ export default function ForecastPage() {
       api.get(`/workspaces/${wsId}/forecast/tte-series?quarter=${quarter}`),
     ])
       .then(([stageData, categoryData, tte]) => {
+        console.log('[ForecastPage] Stage Weighted Data:', stageData);
+        console.log('[ForecastPage] Category Weighted Data:', categoryData);
+        console.log('[ForecastPage] TTE Data:', tte);
         setStageWeightedData(stageData);
         setCategoryWeightedData(categoryData);
         setTteData(tte);
@@ -390,6 +393,15 @@ export default function ForecastPage() {
       const stageWeek = stageWeightedData?.series?.[w];
       const categoryWeek = categoryWeightedData?.series?.[w];
       const tteWeek = tteData?.series?.[w];
+
+      if (w === 0) {
+        console.log('[QuarterSeries] Week 0 data:', {
+          stageWeek,
+          categoryWeek,
+          tteWeek,
+          totalSeriesLength: stageWeightedData?.series?.length,
+        });
+      }
 
       series.push({
         run_id: isCurrentWeek ? 'live-today' : `week-${w + 1}`,
