@@ -15,7 +15,7 @@ export async function resolveFromBrief(workspaceId: string, message: string): Pr
   const lower = message.toLowerCase().trim();
 
   // Hard pass: causal, predictive, or open-ended questions always need investigation
-  if (/\bwhy\b|\bbecause\b|\bgoing to\b|\bwill we\b|\bshould we\b|\bwhat if\b|\bcompare\b|\bvs\b|\bversus\b|\bwhere will\b|\bwill (she|he|they)\b|\bend (the|this) quarter\b|\bon track (to|for)\b|\bby (end of|quarter end)\b|\bproject(ed)?\b/.test(lower)) return null;
+  if (/\bwhy\b|\bbecause\b|\bgoing to\b|\bwill we\b|\bshould we\b|\bwhat if\b|\bcompare\b|\bvs\b|\bversus\b|\bwhere will\b|\bwill (she|he|they)\b|\bend (the|this) quarter\b|\bon track (to|for)\b|\bby (end of|quarter end)\b|\bproject(ed)?\b|\bclosed.?won\b|\bhow (many|much) did\b|\bdid.*close\b|\bwin rate\b|\brev(enue)? from\b|\brep.*history\b/.test(lower)) return null;
   if (lower.split(' ').length > 20) return null;
 
   const brief = await getLatestReadyBrief(workspaceId);

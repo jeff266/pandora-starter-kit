@@ -1,14 +1,15 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { colors } from '../../styles/theme';
 import { useConversationStream } from './useConversationStream';
-import { getWorkspaceId } from '../../lib/api';
+import { getWorkspaceId, getAuthToken } from '../../lib/api';
 import AgentChip from './AgentChip';
 import EvidenceCard from './EvidenceCard';
 import ActionCard from './ActionCard';
 import DeliverablePicker from './DeliverablePicker';
 import StickyInput from './StickyInput';
+import MessageFeedback from './MessageFeedback';
 
 interface ConversationViewProps {
   initialMessage?: string;
@@ -20,6 +21,27 @@ export default function ConversationView({ initialMessage, onBack }: Conversatio
   const bottomRef = useRef<HTMLDivElement>(null);
   const sentRef = useRef(false);
   const historyLoadedRef = useRef(false);
+  const sentMessagesRef = useRef<Set<string>>(new Set());
+
+  const checkRepeatedQuestion = useCallback(async (text: string) => {
+    const workspaceId = getWorkspaceId();
+    const token = getAuthToken();
+    if (!workspaceId) return;
+    const key = text.trim().toLowerCase();
+    if (sentMessagesRef.current.has(key)) {
+      fetch(`/api/workspaces/${workspaceId}/chat/repeated-question`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ message: text }),
+      }).catch(() => null);
+    }
+    sentMessagesRef.current.add(key);
+  }, []);
+
+  const handleSendWithTracking = useCallback((text: string) => {
+    checkRepeatedQuestion(text);
+    sendMessage(text);
+  }, [checkRepeatedQuestion, sendMessage]);
 
   useEffect(() => {
     if (historyLoadedRef.current) return;
@@ -29,14 +51,14 @@ export default function ConversationView({ initialMessage, onBack }: Conversatio
       loadHistory(workspaceId).then(() => {
         if (initialMessage && !sentRef.current) {
           sentRef.current = true;
-          sendMessage(initialMessage);
+          handleSendWithTracking(initialMessage);
         }
       });
     } else if (initialMessage && !sentRef.current) {
       sentRef.current = true;
-      sendMessage(initialMessage);
+      handleSendWithTracking(initialMessage);
     }
-  }, [initialMessage, sendMessage, loadHistory]);
+  }, [initialMessage, handleSendWithTracking, loadHistory]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -100,38 +122,46 @@ export default function ConversationView({ initialMessage, onBack }: Conversatio
             key={msg.id}
             style={{
               display: 'flex',
-              justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
+              flexDirection: 'column',
+              alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start',
               marginBottom: 12,
             }}
           >
-            {msg.role === 'assistant' && (
+            <div style={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start', width: '100%' }}>
+              {msg.role === 'assistant' && (
+                <div style={{
+                  width: 26, height: 26, borderRadius: '50%', flexShrink: 0, marginRight: 8, marginTop: 2,
+                  background: 'linear-gradient(135deg, #48af9b 0%, #3a7fc1 100%)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 11, color: '#fff', fontWeight: 700,
+                }}>✦</div>
+              )}
               <div style={{
-                width: 26, height: 26, borderRadius: '50%', flexShrink: 0, marginRight: 8, marginTop: 2,
-                background: 'linear-gradient(135deg, #48af9b 0%, #3a7fc1 100%)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 11, color: '#fff', fontWeight: 700,
-              }}>✦</div>
-            )}
-            <div style={{
-              maxWidth: '75%', padding: '10px 14px', borderRadius: 10, fontSize: 13, lineHeight: 1.6,
-              background: msg.role === 'user' ? colors.accentSoft : colors.surface,
-              color: msg.role === 'user' ? colors.accent : colors.text,
-              border: `1px solid ${msg.role === 'user' ? colors.accent + '40' : colors.border}`,
-            }}>
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                components={{
-                  p: ({ children }) => <p style={{ margin: '0 0 8px 0' }}>{children}</p>,
-                  strong: ({ children }) => <strong style={{ fontWeight: 700 }}>{children}</strong>,
-                  em: ({ children }) => <em style={{ fontStyle: 'italic' }}>{children}</em>,
-                  ul: ({ children }) => <ul style={{ margin: '0 0 8px 0', paddingLeft: 20 }}>{children}</ul>,
-                  ol: ({ children }) => <ol style={{ margin: '0 0 8px 0', paddingLeft: 20 }}>{children}</ol>,
-                  li: ({ children }) => <li style={{ margin: '2px 0' }}>{children}</li>,
-                }}
-              >
-                {msg.content}
-              </ReactMarkdown>
+                maxWidth: '75%', padding: '10px 14px', borderRadius: 10, fontSize: 13, lineHeight: 1.6,
+                background: msg.role === 'user' ? colors.accentSoft : colors.surface,
+                color: msg.role === 'user' ? colors.accent : colors.text,
+                border: `1px solid ${msg.role === 'user' ? colors.accent + '40' : colors.border}`,
+              }}>
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    p: ({ children }) => <p style={{ margin: '0 0 8px 0' }}>{children}</p>,
+                    strong: ({ children }) => <strong style={{ fontWeight: 700 }}>{children}</strong>,
+                    em: ({ children }) => <em style={{ fontStyle: 'italic' }}>{children}</em>,
+                    ul: ({ children }) => <ul style={{ margin: '0 0 8px 0', paddingLeft: 20 }}>{children}</ul>,
+                    ol: ({ children }) => <ol style={{ margin: '0 0 8px 0', paddingLeft: 20 }}>{children}</ol>,
+                    li: ({ children }) => <li style={{ margin: '2px 0' }}>{children}</li>,
+                  }}
+                >
+                  {msg.content}
+                </ReactMarkdown>
+              </div>
             </div>
+            {msg.role === 'assistant' && msg.response_id && (
+              <div style={{ paddingLeft: 34 }}>
+                <MessageFeedback responseId={msg.response_id} />
+              </div>
+            )}
           </div>
         ))}
 
@@ -214,7 +244,7 @@ export default function ConversationView({ initialMessage, onBack }: Conversatio
         <div ref={bottomRef} />
       </div>
 
-      <StickyInput onSend={sendMessage} disabled={inProgress} />
+      <StickyInput onSend={handleSendWithTracking} disabled={inProgress} />
     </div>
   );
 }

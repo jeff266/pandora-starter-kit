@@ -12,6 +12,7 @@ import {
   getOrCreateSession,
 } from '../chat/session-service.js';
 import { query } from '../db.js';
+import { processFeedback, type AgentFeedback } from '../agents/feedback-processor.js';
 
 const router = Router();
 
@@ -309,6 +310,105 @@ router.delete('/:workspaceId/chat/sessions/:sessionId', async (req: Request, res
   } catch (err) {
     console.error('[chat] Delete session error:', err);
     res.status(500).json({ error: 'Failed to delete session' });
+  }
+});
+
+/**
+ * POST /api/workspaces/:workspaceId/chat/feedback
+ * Submit thumbs up/down on a chat response
+ */
+async function getChatAgentId(workspaceId: string): Promise<string> {
+  const existing = await query(
+    `SELECT id FROM agents WHERE workspace_id = $1 AND template_id = 'pandora_chat' LIMIT 1`,
+    [workspaceId]
+  );
+  if (existing.rows.length > 0) return existing.rows[0].id;
+  const created = await query(
+    `INSERT INTO agents (workspace_id, name, template_id, icon, skill_ids)
+     VALUES ($1, 'Pandora Chat', 'pandora_chat', '✦', '{}')
+     ON CONFLICT DO NOTHING
+     RETURNING id`,
+    [workspaceId]
+  );
+  if (created.rows.length > 0) return created.rows[0].id;
+  const refetch = await query(`SELECT id FROM agents WHERE workspace_id = $1 AND template_id = 'pandora_chat' LIMIT 1`, [workspaceId]);
+  return refetch.rows[0].id;
+}
+
+router.post('/:workspaceId/chat/feedback', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const workspaceId = req.params.workspaceId as string;
+    const userId = req.user?.user_id;
+    const { response_id, signal, comment } = req.body as { response_id: string; signal: 'thumbs_up' | 'thumbs_down'; comment?: string };
+
+    if (!response_id || !signal || !['thumbs_up', 'thumbs_down'].includes(signal)) {
+      res.status(400).json({ error: 'response_id and signal (thumbs_up|thumbs_down) required' });
+      return;
+    }
+
+    const agentId = await getChatAgentId(workspaceId);
+    const rating = signal === 'thumbs_up' ? 5 : 1;
+
+    const result = await query(
+      `INSERT INTO agent_feedback
+        (workspace_id, agent_id, generation_id, user_id, feedback_type, signal, rating, comment)
+       VALUES ($1, $2, $3, $4, 'overall', $5, $6, $7)
+       RETURNING *`,
+      [workspaceId, agentId, response_id, userId ?? null, signal, rating, comment ?? null]
+    );
+
+    const feedback = result.rows[0] as AgentFeedback;
+    await processFeedback(feedback).catch(() => null);
+
+    res.json({ ok: true, feedback_id: feedback.id });
+  } catch (err) {
+    console.error('[chat] feedback error:', err);
+    res.status(500).json({ error: 'Failed to record feedback' });
+  }
+});
+
+/**
+ * POST /api/workspaces/:workspaceId/chat/repeated-question
+ * Internal: record implicit negative signal when a question is repeated
+ */
+router.post('/:workspaceId/chat/repeated-question', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const workspaceId = req.params.workspaceId as string;
+    const { message } = req.body as { message: string };
+
+    if (!message) {
+      res.status(400).json({ error: 'message required' });
+      return;
+    }
+
+    const prevResult = await query(
+      `SELECT cm.content, cm.metadata
+       FROM chat_messages cm
+       WHERE cm.workspace_id = $1 AND cm.role = 'user'
+       AND cm.created_at > NOW() - INTERVAL '7 days'
+       AND LOWER(cm.content) = LOWER($2)
+       ORDER BY cm.created_at DESC
+       LIMIT 1`,
+      [workspaceId, message]
+    );
+
+    if (prevResult.rows.length === 0) {
+      res.json({ ok: true, found: false });
+      return;
+    }
+
+    const agentId = await getChatAgentId(workspaceId);
+    await query(
+      `INSERT INTO agent_feedback
+        (workspace_id, agent_id, generation_id, feedback_type, signal, rating, comment)
+       VALUES ($1, $2, $3, 'overall', 'repeated_question', 1, $4)`,
+      [workspaceId, agentId, randomUUID(), `User repeated this question — previous answer was likely unsatisfactory: "${message.substring(0, 200)}"`]
+    );
+
+    res.json({ ok: true, found: true });
+  } catch (err) {
+    console.error('[chat] repeated-question error:', err);
+    res.status(500).json({ error: 'Failed to record signal' });
   }
 });
 

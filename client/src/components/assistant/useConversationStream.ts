@@ -10,6 +10,7 @@ export interface ConversationMessage {
   role: 'user' | 'assistant';
   content: string;
   timestamp: number;
+  response_id?: string;
 }
 
 export interface ConversationState {
@@ -122,7 +123,7 @@ function reducer(state: ConversationState, action: Action): ConversationState {
           ...state,
           synthesisText: ev.full_text,
           synthesisComplete: true,
-          messages: [...state.messages, { id: makeId(), role: 'assistant', content: ev.full_text, timestamp: Date.now() }],
+          messages: [...state.messages, { id: makeId(), role: 'assistant', content: ev.full_text, timestamp: Date.now(), response_id: ev.response_id ?? undefined }],
         };
       }
       case 'evidence': {

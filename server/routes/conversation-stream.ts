@@ -96,10 +96,11 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
     // ── Brief resolver — cache-first, zero tokens ─────────────────────────────
     const briefAnswer = await resolveFromBrief(workspaceId, message).catch(() => null);
     if (briefAnswer) {
+      const briefResponseId = randomUUID();
       console.log(JSON.stringify({ event: 'brief_resolver_hit', workspace_id: workspaceId, section: briefAnswer.section, tokens_used: 0, timestamp: new Date().toISOString() }));
       sse(res, { type: 'synthesis_start' });
       sse(res, { type: 'synthesis_chunk', text: briefAnswer.answer });
-      sse(res, { type: 'synthesis_done', full_text: briefAnswer.answer });
+      sse(res, { type: 'synthesis_done', full_text: briefAnswer.answer, response_id: briefResponseId });
       sse(res, {
         type: 'deliverable_options',
         options: [
@@ -177,9 +178,10 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
         if (dataResult.footnote) responseText += `\n_${dataResult.footnote}_`;
         responseText += `\n\n_(${dataResult.query_ms}ms)_`;
 
+        const dataResponseId = randomUUID();
         sse(res, { type: 'synthesis_start' });
         sse(res, { type: 'synthesis_chunk', text: responseText });
-        sse(res, { type: 'synthesis_done', full_text: responseText });
+        sse(res, { type: 'synthesis_done', full_text: responseText, response_id: dataResponseId });
         sse(res, {
           type: 'deliverable_options',
           options: [
@@ -252,12 +254,14 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
       if (skillRun) {
         const synthesis = await synthesizeSingleSkill(workspaceId, message, skillRun, { goalContext: hasGoals, contextBlock });
         assistantResponse = synthesis.text;
+        const tier1ResponseId = randomUUID();
         sse(res, { type: 'synthesis_chunk', text: synthesis.text });
-        sse(res, { type: 'synthesis_done', full_text: synthesis.text });
+        sse(res, { type: 'synthesis_done', full_text: synthesis.text, response_id: tier1ResponseId });
       } else {
         assistantResponse = 'I don\'t have recent data for that — try running a skill scan first.';
+        const tier1NoRunId = randomUUID();
         sse(res, { type: 'synthesis_chunk', text: assistantResponse });
-        sse(res, { type: 'synthesis_done', full_text: assistantResponse });
+        sse(res, { type: 'synthesis_done', full_text: assistantResponse, response_id: tier1NoRunId });
       }
     }
 
@@ -312,7 +316,8 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
           }
         }
         assistantResponse = fullText;
-        sse(res, { type: 'synthesis_done', full_text: fullText });
+        const fallbackResponseId = randomUUID();
+        sse(res, { type: 'synthesis_done', full_text: fullText, response_id: fallbackResponseId });
       } else {
         // Investigation path (Tier 2 or Tier 3)
         for (const step of plan!.steps) {
@@ -366,7 +371,8 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
         }, contextBlock || undefined);
 
         assistantResponse = result.synthesis;
-        sse(res, { type: 'synthesis_done', full_text: result.synthesis });
+        const investigationResponseId = randomUUID();
+        sse(res, { type: 'synthesis_done', full_text: result.synthesis, response_id: investigationResponseId });
 
         const recentFindings = await query(
           `SELECT f.id, f.category AS headline, f.severity, f.skill_id AS operator_name, f.message AS body, f.skill_run_id

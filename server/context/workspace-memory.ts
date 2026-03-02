@@ -142,6 +142,22 @@ export async function buildWorkspaceContextBlock(workspaceId: string, userId?: s
       const periodStr = t.period_label || (t.period_start ? `${t.period_start} to ${t.period_end}` : '');
       lines.push(`- ${pipelineLabel} ${periodStr}: ${amountStr} ${metricStr}`);
     }
+
+    // Critical scoping rule: targets only apply to their named pipeline
+    const namedPipelines = targets.filter((t: any) => t.pipeline_name);
+    if (namedPipelines.length > 0) {
+      lines.push('');
+      lines.push('ATTAINMENT SCOPING RULE (CRITICAL):');
+      for (const t of namedPipelines) {
+        lines.push(`- The ${t.period_label ?? ''} target of ${fmt(Number(t.amount ?? 0))} applies ONLY to the "${t.pipeline_name}" pipeline.`);
+        lines.push(`  Do NOT include closed-won deals from other pipelines when calculating attainment against this target.`);
+        lines.push(`  When reporting attainment or gap-to-quota, only count deals where pipeline = "${t.pipeline_name}".`);
+      }
+      const unnamedTargets = targets.filter((t: any) => !t.pipeline_name);
+      if (unnamedTargets.length === 0) {
+        lines.push('- Pipelines without a named target have NO quota. Do not compare them to any target number.');
+      }
+    }
   }
 
   // Goals from goals table (supplement targets)

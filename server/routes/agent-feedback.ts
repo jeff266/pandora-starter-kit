@@ -5,6 +5,7 @@
  */
 
 import express from 'express';
+import { randomUUID } from 'crypto';
 import { query } from '../db.js';
 import { createLogger } from '../utils/logger.js';
 import { processFeedback, getFeedbackSummary, type AgentFeedback } from '../agents/feedback-processor.js';
@@ -207,6 +208,110 @@ router.get('/:workspaceId/generations/:generationId/feedback-summary', async (re
     res.json(summary);
   } catch (err) {
     logger.error('[AgentFeedback] Failed to fetch feedback summary', err as Error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * POST /:workspaceId/agents/pandora_chat/feedback/review
+ * LLM reviews recent feedback patterns and generates self-heal suggestions
+ */
+router.post('/:workspaceId/agents/pandora_chat/feedback/review', async (req, res) => {
+  try {
+    const { workspaceId } = req.params;
+
+    const agentRow = await query(
+      `SELECT id FROM agents WHERE workspace_id = $1 AND template_id = 'pandora_chat' LIMIT 1`,
+      [workspaceId]
+    );
+    if (agentRow.rows.length === 0) {
+      res.json({ suggestions: [], message: 'No feedback data yet — suggestions will appear after users interact with the assistant.' });
+      return;
+    }
+    const agentId = agentRow.rows[0].id;
+
+    const feedbackResult = await query(
+      `SELECT signal, comment, rating, created_at, tuning_key
+       FROM agent_feedback
+       WHERE workspace_id = $1 AND agent_id = $2
+       AND created_at > NOW() - INTERVAL '30 days'
+       ORDER BY created_at DESC
+       LIMIT 50`,
+      [workspaceId, agentId]
+    );
+
+    const records = feedbackResult.rows;
+
+    if (records.length === 0) {
+      res.json({ suggestions: [], message: 'No feedback data yet — suggestions will appear after users interact with the assistant.' });
+      return;
+    }
+
+    const thumbsDown = records.filter((r: any) => r.signal === 'thumbs_down');
+    const repeated = records.filter((r: any) => r.signal === 'repeated_question');
+    const thumbsUp = records.filter((r: any) => r.signal === 'thumbs_up');
+
+    const summary = [
+      `Total feedback records: ${records.length}`,
+      `Thumbs up: ${thumbsUp.length}`,
+      `Thumbs down: ${thumbsDown.length} (${thumbsDown.map((r: any) => r.comment || 'no comment').join(' | ')})`,
+      `Repeated questions: ${repeated.length} (${repeated.map((r: any) => (r.comment || '').substring(0, 100)).join(' | ')})`,
+    ].join('\n');
+
+    const { default: Anthropic } = await import('@anthropic-ai/sdk');
+    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY || process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY });
+
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-5',
+      max_tokens: 1024,
+      messages: [{
+        role: 'user',
+        content: `You are reviewing user feedback for Pandora, a RevOps assistant that answers sales pipeline questions.
+
+Here is a summary of feedback patterns from the last 30 days:
+${summary}
+
+For each clear pattern of dissatisfaction (thumbs-down with comments, or repeated questions), suggest ONE specific improvement from these categories:
+1. "resolver_pattern" — a new question pattern the resolver should handle (regex + response shape)
+2. "context_addition" — a fact or rule to inject into the LLM system context
+3. "named_filter" — a common deal/rep/segment filter to pre-compute
+
+Only suggest improvements where you see a clear signal. Be specific and actionable.
+
+Output as JSON with this exact structure:
+{"suggestions": [{"type": "resolver_pattern|context_addition|named_filter", "description": "What the problem is", "implementation_hint": "Specific change to make", "confidence": 0.0-1.0}]}`,
+      }],
+    });
+
+    const content = response.content[0];
+    let suggestions: any[] = [];
+    if (content.type === 'text') {
+      try {
+        const parsed = JSON.parse(content.text.replace(/```json\n?|\n?```/g, '').trim());
+        suggestions = parsed.suggestions ?? [];
+      } catch {
+        suggestions = [{ type: 'context_addition', description: 'Unable to parse suggestions', implementation_hint: content.text.substring(0, 200), confidence: 0.1 }];
+      }
+    }
+
+    for (const s of suggestions) {
+      await query(
+        `INSERT INTO agent_feedback
+          (workspace_id, agent_id, generation_id, feedback_type, signal, rating, comment, tuning_key)
+         VALUES ($1, $2, $3, 'overall', 'self_heal_suggestion', NULL, $4, 'self_heal_suggestion')`,
+        [workspaceId, agentId, randomUUID(), JSON.stringify(s)]
+      ).catch(() => null);
+    }
+
+    res.json({
+      suggestions,
+      feedback_analyzed: records.length,
+      thumbs_up: thumbsUp.length,
+      thumbs_down: thumbsDown.length,
+      repeated_questions: repeated.length,
+    });
+  } catch (err) {
+    logger.error('[AgentFeedback] Self-heal review failed', err as Error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
