@@ -74,13 +74,15 @@ export function getFiscalQuarterNumber(date: Date, fiscalStartMonth: number = 1)
 
 /**
  * Return the fiscal year number for a given date.
- * Fiscal year is named after the calendar year in which it STARTS.
- * e.g. with April start: April 2025 → FY2025, March 2026 → FY2025.
+ * Fiscal year is named after the calendar year in which it ENDS.
+ * e.g. with February start: March 2026 → FY2027 (ends Jan 2027).
+ * With January start fiscal year = calendar year.
  */
 export function getFiscalYear(date: Date, fiscalStartMonth: number = 1): number {
+  if (fiscalStartMonth === 1) return date.getFullYear();
   const month = date.getMonth() + 1;
   const year = date.getFullYear();
-  return month >= fiscalStartMonth ? year : year - 1;
+  return month >= fiscalStartMonth ? year + 1 : year;
 }
 
 /**

@@ -354,7 +354,7 @@ export function formatQuarterLabel(date: Date, fiscalStartMonth: number = 1): st
   const month = date.getMonth() + 1;
   const fiscalOffset = ((month - fiscalStartMonth + 12) % 12);
   const quarter = Math.floor(fiscalOffset / 3) + 1;
-  const fiscalYear = month >= fiscalStartMonth ? date.getFullYear() : date.getFullYear() - 1;
+  const fiscalYear = month >= fiscalStartMonth ? date.getFullYear() + 1 : date.getFullYear();
   return `Q${quarter} FY${fiscalYear}`;
 }
 
