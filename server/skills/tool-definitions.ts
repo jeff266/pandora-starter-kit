@@ -3310,14 +3310,15 @@ const prepareForecastSummary: ToolDefinition = {
       const byPipeline: Array<{ pipeline_id: string; pipeline_name: string; quota: number }> = quotaConfig?.byPipeline || [];
       if (byPipeline.length > 0) {
         const closedWonByPipeline: Record<string, number> = forecast.closedWonByPipeline || {};
+        const toSlug = (s: string) => s.toLowerCase().replace(/\s+/g, '-');
         const lines: string[] = byPipeline.map((p) => {
-          const cw = closedWonByPipeline[p.pipeline_id] || 0;
+          const cw = closedWonByPipeline[p.pipeline_id] ?? closedWonByPipeline[toSlug(p.pipeline_id)] ?? 0;
           const pct = p.quota > 0 ? Math.round((cw / p.quota) * 100) : null;
           return `${p.pipeline_name}: ${fmt(cw)} closed / ${fmt(p.quota)} quota${pct !== null ? ` (${pct}% attained)` : ''}`;
         });
-        const quotedIds = new Set(byPipeline.map((p) => p.pipeline_id));
+        const quotedSlugs = new Set([...byPipeline.map((p) => p.pipeline_id), ...byPipeline.map((p) => toSlug(p.pipeline_id))]);
         for (const [pid, amount] of Object.entries(closedWonByPipeline)) {
-          if (!quotedIds.has(pid) && (amount as number) > 0) {
+          if (!quotedSlugs.has(pid) && (amount as number) > 0) {
             lines.push(`${pid}: ${fmt(amount as number)} closed won / no quota set`);
           }
         }

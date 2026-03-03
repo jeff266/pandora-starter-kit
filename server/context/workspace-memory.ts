@@ -305,6 +305,33 @@ export async function buildWorkspaceContextBlock(workspaceId: string, userId?: s
     // Never block context generation if brief fetch fails
   }
 
+  // ─── Current quarter date range (T005) ───────────────────────────────────────
+  try {
+    const fyStartMonthNum = Number(fyMonth ?? 1);
+    const todayForQ = new Date();
+    const todayMonth = todayForQ.getMonth() + 1;
+    const todayYear = todayForQ.getFullYear();
+    const monthsFromFYStart = (todayMonth - fyStartMonthNum + 12) % 12;
+    const qIdx = Math.floor(monthsFromFYStart / 3);
+    const qStartMonthNum = ((fyStartMonthNum - 1 + qIdx * 3) % 12) + 1;
+    const qStartYearNum = qStartMonthNum > todayMonth ? todayYear - 1 : todayYear;
+    const qEndDate = new Date(qStartYearNum, qStartMonthNum - 1 + 3, 0);
+    const qStartStr = `${qStartYearNum}-${String(qStartMonthNum).padStart(2, '0')}-01`;
+    const qEndStr = `${qEndDate.getFullYear()}-${String(qEndDate.getMonth() + 1).padStart(2, '0')}-${String(qEndDate.getDate()).padStart(2, '0')}`;
+    const qNum = qIdx + 1;
+    const qLabel = fyStartMonthNum === 1
+      ? `Q${qNum} ${qStartYearNum}`
+      : `Q${qNum} FY${qEndDate.getFullYear()}`;
+    lines.push('');
+    lines.push(`CURRENT QUARTER: ${qLabel} (${qStartStr} to ${qEndStr})`);
+    lines.push(`When querying closed won deals for the current quarter, always filter:`);
+    lines.push(`  close_date_from: ${qStartStr}  close_date_to: ${qEndStr}`);
+    lines.push(`Core Sales Pipeline scope_ids: 'core-sales-pipeline' AND 'default'`);
+    lines.push(`(Deals with scope_id='default' are legacy Core Sales records — include them in Core Sales totals.)`);
+  } catch {
+    // Non-fatal — skip quarter block if computation fails
+  }
+
   lines.push('=== END WORKSPACE CONTEXT ===');
 
   // If nothing meaningful was added (only the header + footer), return empty string

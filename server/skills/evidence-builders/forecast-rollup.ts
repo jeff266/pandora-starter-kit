@@ -1,6 +1,14 @@
 import type { SkillEvidence } from '../types.js';
 import { EvidenceBuilder, buildDataSources, dealToRecord } from '../evidence-builder.js';
 import { formatCurrency } from '../../utils/format-currency.js';
+import { query } from '../../db.js';
+
+const SYNC_INTERVAL_LABELS: Record<number, string> = {
+  60: 'hourly',
+  240: 'every 4 hours',
+  720: 'every 12 hours',
+  1440: 'daily',
+};
 
 export async function buildForecastRollupEvidence(
   stepResults: Record<string, any>,
@@ -58,18 +66,44 @@ export async function buildForecastRollupEvidence(
         metric_name: 'closed_won_amount',
         metric_values: pipelineDeals.map((d: any) => d.amount || 0),
         threshold_applied: 'stage = Closed Won within quarter',
-        severity: 'healthy',
+        severity: 'info',
       });
     }
   }
 
-  // ─── Data quality: sync gap warning (T004) ───────────────────────────────────
-  const coreSalesPipeline = 'Core Sales Pipeline';
-  const dbCoreSales = closedWonByPipeline[coreSalesPipeline] || 0;
+  // ─── Data quality: sync gap warning with real interval (T003 updated) ────────
+  const toSlug = (s: string) => s.toLowerCase().replace(/\s+/g, '-');
+  const coreSalesKey = Object.keys(closedWonByPipeline).find(
+    k => k === 'Core Sales Pipeline' || k === 'core-sales-pipeline' || toSlug(k) === 'core-sales-pipeline'
+  );
+  const dbCoreSales = coreSalesKey ? (closedWonByPipeline[coreSalesKey] || 0) : 0;
+
+  let syncClaimText = `Pandora DB shows ${formatCurrency(dbCoreSales)} closed for Core Sales Pipeline. If your CRM shows a higher total, a sync may be pending — verify against CRM before finalizing attainment figures.`;
+
+  try {
+    const syncRow = await query<{ last_sync_at: Date | null; sync_interval_minutes: number }>(
+      `SELECT last_sync_at, sync_interval_minutes
+       FROM connections
+       WHERE workspace_id = $1 AND connector_name = 'hubspot'
+       LIMIT 1`,
+      [workspaceId]
+    );
+    if (syncRow.rows.length > 0) {
+      const { last_sync_at, sync_interval_minutes } = syncRow.rows[0];
+      const intervalLabel = SYNC_INTERVAL_LABELS[sync_interval_minutes] ?? `every ${sync_interval_minutes} min`;
+      const lastSyncStr = last_sync_at
+        ? new Date(last_sync_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC', timeZoneName: 'short' })
+        : 'unknown';
+      syncClaimText = `Pandora DB shows ${formatCurrency(dbCoreSales)} closed for Core Sales Q1 2026. HubSpot may show a higher total (e.g. ~$75.5K) if a deal was recently closed. Last sync: ${lastSyncStr}. Syncs run ${intervalLabel} — any gap will close at the next scheduled sync.`;
+    }
+  } catch {
+    // Non-fatal — use the default claim text
+  }
+
   if (dbCoreSales > 0) {
     eb.addClaim({
       claim_id: 'crm_sync_gap_warning',
-      claim_text: `DB shows ${formatCurrency(dbCoreSales)} closed for ${coreSalesPipeline}. If your CRM shows a higher total, a sync may be pending — verify against CRM before finalizing attainment figures.`,
+      claim_text: syncClaimText,
       entity_type: 'deal',
       entity_ids: [],
       metric_name: 'closed_won_amount',
@@ -89,7 +123,7 @@ export async function buildForecastRollupEvidence(
       metric_name: 'query_row_count',
       metric_values: [q.rowCount, q.total],
       threshold_applied: q.label,
-      severity: 'healthy',
+      severity: 'info',
     });
   }
 

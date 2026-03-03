@@ -358,14 +358,29 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
         sse(res, { type: 'synthesis_chunk', text: pandoraT1.answer });
         sse(res, { type: 'synthesis_done', full_text: pandoraT1.answer, response_id: tier1NoRunId });
         if (pandoraT1.evidence.cited_records.length > 0) {
-          sse(res, {
-            type: 'evidence',
-            cards: pandoraT1.evidence.cited_records.slice(0, 3).map(r => ({
-              id: r.id, title: r.name, severity: 'info' as const,
-              operator_name: 'Pandora',
-              body: Object.entries(r.key_fields).map(([k, v]) => `${k}: ${v}`).join(', '),
-            })),
-          });
+          const t1DealRecs = pandoraT1.evidence.cited_records.filter((r: any) => r.type === 'deal');
+          if (t1DealRecs.length > 0) {
+            const t1Total = t1DealRecs.reduce((s: number, r: any) => s + (Number(r.key_fields?.amount) || 0), 0);
+            const fmtK = (n: number) => n >= 1000 ? `$${Math.round(n / 1000)}K` : `$${n}`;
+            sse(res, {
+              type: 'evidence',
+              cards: [{
+                id: `pandora-deals-${randomUUID().slice(0, 8)}`,
+                title: `${t1DealRecs.length} deal${t1DealRecs.length !== 1 ? 's' : ''} · ${fmtK(t1Total)}`,
+                severity: 'info',
+                operator_name: 'Pandora',
+                operator_icon: '✦',
+                operator_color: '#48af9b',
+                body: `Live query · ${t1DealRecs.length} records`,
+                records: t1DealRecs.map((r: any) => ({
+                  Name: r.name || '—',
+                  Amount: r.key_fields?.amount != null ? `$${Number(r.key_fields.amount).toLocaleString()}` : '—',
+                  Stage: r.key_fields?.stage || '—',
+                  'Close Date': r.key_fields?.close_date || '—',
+                })),
+              }],
+            });
+          }
         }
       }
     }
@@ -418,14 +433,29 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
         sse(res, { type: 'synthesis_chunk', text: pandoraFallback.answer });
         sse(res, { type: 'synthesis_done', full_text: pandoraFallback.answer, response_id: fallbackResponseId });
         if (pandoraFallback.evidence.cited_records.length > 0) {
-          sse(res, {
-            type: 'evidence',
-            cards: pandoraFallback.evidence.cited_records.slice(0, 3).map(r => ({
-              id: r.id, title: r.name, severity: 'info' as const,
-              operator_name: 'Pandora',
-              body: Object.entries(r.key_fields).map(([k, v]) => `${k}: ${v}`).join(', '),
-            })),
-          });
+          const fbDealRecs = pandoraFallback.evidence.cited_records.filter((r: any) => r.type === 'deal');
+          if (fbDealRecs.length > 0) {
+            const fbTotal = fbDealRecs.reduce((s: number, r: any) => s + (Number(r.key_fields?.amount) || 0), 0);
+            const fmtKfb = (n: number) => n >= 1000 ? `$${Math.round(n / 1000)}K` : `$${n}`;
+            sse(res, {
+              type: 'evidence',
+              cards: [{
+                id: `pandora-deals-${randomUUID().slice(0, 8)}`,
+                title: `${fbDealRecs.length} deal${fbDealRecs.length !== 1 ? 's' : ''} · ${fmtKfb(fbTotal)}`,
+                severity: 'info',
+                operator_name: 'Pandora',
+                operator_icon: '✦',
+                operator_color: '#48af9b',
+                body: `Live query · ${fbDealRecs.length} records`,
+                records: fbDealRecs.map((r: any) => ({
+                  Name: r.name || '—',
+                  Amount: r.key_fields?.amount != null ? `$${Number(r.key_fields.amount).toLocaleString()}` : '—',
+                  Stage: r.key_fields?.stage || '—',
+                  'Close Date': r.key_fields?.close_date || '—',
+                })),
+              }],
+            });
+          }
         }
       } else {
         // Investigation path (Tier 2 or Tier 3)

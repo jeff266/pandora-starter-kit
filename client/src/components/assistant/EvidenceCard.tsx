@@ -22,6 +22,7 @@ export interface EvidenceCardData {
   skill_run_id?: string | null;
   assumptions?: FindingAssumptionData[];
   workspaceId?: string;
+  records?: Array<Record<string, any>>;
 }
 
 interface EvidenceCardProps {
@@ -94,10 +95,68 @@ function AssumptionRow({ assumption, findingId, workspaceId }: {
   );
 }
 
+function RecordsTable({ records }: { records: Array<Record<string, any>> }) {
+  const [showAll, setShowAll] = useState(false);
+  const LIMIT = 8;
+  const cols = records.length > 0 ? Object.keys(records[0]) : [];
+  const visible = showAll ? records : records.slice(0, LIMIT);
+  const hidden = records.length - LIMIT;
+
+  if (cols.length === 0) return null;
+
+  return (
+    <div style={{ marginTop: 10, overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+        <thead>
+          <tr>
+            {cols.map(col => (
+              <th key={col} style={{
+                textAlign: 'left', padding: '3px 8px 3px 0',
+                color: colors.textMuted, fontWeight: 600, letterSpacing: '0.05em',
+                borderBottom: `1px solid ${colors.border}`, whiteSpace: 'nowrap',
+              }}>
+                {col}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {visible.map((row, i) => (
+            <tr key={i} style={{ borderBottom: `1px solid ${colors.border}28` }}>
+              {cols.map(col => (
+                <td key={col} style={{
+                  padding: '3px 8px 3px 0', color: colors.textSecondary,
+                  whiteSpace: col === 'Name' ? 'normal' : 'nowrap',
+                  maxWidth: col === 'Name' ? 180 : undefined,
+                  overflow: 'hidden', textOverflow: 'ellipsis',
+                }}>
+                  {String(row[col] ?? '—')}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {!showAll && hidden > 0 && (
+        <button
+          onClick={() => setShowAll(true)}
+          style={{
+            marginTop: 6, fontSize: 11, color: colors.accent,
+            background: 'transparent', border: 'none', cursor: 'pointer', padding: 0,
+          }}
+        >
+          Show all {records.length} →
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function EvidenceCard({ card }: EvidenceCardProps) {
   const [expanded, setExpanded] = useState(false);
   const sevColor = SEV_COLOR[card.severity] ?? colors.accent;
   const hasAssumptions = Array.isArray(card.assumptions) && card.assumptions.length > 0;
+  const hasRecords = Array.isArray(card.records) && card.records.length > 0;
 
   return (
     <div style={{
@@ -130,10 +189,11 @@ export default function EvidenceCard({ card }: EvidenceCardProps) {
       {expanded && (
         <div style={{ padding: '0 14px 12px 32px', borderTop: `1px solid ${colors.border}` }}>
           <p style={{ fontSize: 12, color: colors.textSecondary, margin: '10px 0 8px 0', lineHeight: 1.5 }}>{card.body}</p>
+          {hasRecords && <RecordsTable records={card.records!} />}
           {card.skill_run_id && (
             <a
               href={`/findings`}
-              style={{ fontSize: 12, color: colors.accent, textDecoration: 'none' }}
+              style={{ fontSize: 12, color: colors.accent, textDecoration: 'none', display: 'inline-block', marginTop: hasRecords ? 8 : 0 }}
               onMouseEnter={e => (e.target as HTMLAnchorElement).style.textDecoration = 'underline'}
               onMouseLeave={e => (e.target as HTMLAnchorElement).style.textDecoration = 'none'}
             >
