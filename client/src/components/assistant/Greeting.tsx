@@ -1,6 +1,31 @@
 import React from 'react';
 import { colors } from '../../styles/theme';
 
+export interface InvestigationPath {
+  question: string;
+  reasoning: string;
+  skill_id?: string;
+  priority: 'high' | 'medium' | 'low';
+}
+
+export interface TopFinding {
+  severity: 'critical' | 'warning';
+  headline: string;
+  entity?: string;
+  amount?: number;
+  category?: string;
+}
+
+export interface ProactiveBriefing {
+  mode: 'investigation_ready' | 'none';
+  investigation_title: string;
+  findings_count: number;
+  top_finding?: TopFinding;
+  investigation_paths: InvestigationPath[];
+  can_escalate: boolean;
+  escalation_path?: string;
+}
+
 export interface GreetingPayload {
   headline: string;
   subline: string;
@@ -16,6 +41,7 @@ export interface GreetingPayload {
     warning_count: number;
     deals_moved: number;
   };
+  proactive_briefing?: ProactiveBriefing;
 }
 
 export type GreetingPhase = 'blank' | 'headline' | 'subline' | 'context' | 'questions' | 'pills' | 'browsing';

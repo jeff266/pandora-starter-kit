@@ -1,0 +1,375 @@
+import React, { useState } from 'react';
+import { colors, fonts } from '../../styles/theme';
+
+export interface InvestigationPath {
+  question: string;
+  reasoning: string;
+  skill_id?: string;
+  priority: 'high' | 'medium' | 'low';
+}
+
+export interface TopFinding {
+  severity: 'critical' | 'warning';
+  headline: string;
+  entity?: string;
+  amount?: number;
+  category?: string;
+}
+
+export interface ProactiveBriefingData {
+  mode: 'investigation_ready' | 'none';
+  investigation_title: string;
+  findings_count: number;
+  top_finding?: TopFinding;
+  investigation_paths: InvestigationPath[];
+  can_escalate: boolean;
+  escalation_path?: string;
+}
+
+export interface GreetingData {
+  headline: string;
+  subline: string;
+  state_summary: string;
+  recency_label: string;
+  severity: 'calm' | 'attention' | 'urgent';
+  week_context: string;
+  questions: string[];
+  metrics: {
+    pipeline_value: number;
+    coverage_ratio: number;
+    critical_count: number;
+    warning_count: number;
+    deals_moved: number;
+  };
+  proactive_briefing?: ProactiveBriefingData;
+}
+
+interface ProactiveBriefingProps {
+  greeting: GreetingData;
+  onInvestigatePath: (path: InvestigationPath) => void;
+  onEscalate?: () => void;
+  onAskPandora: () => void;
+}
+
+function formatCurrency(val: number): string {
+  if (val >= 1_000_000) return `$${(val / 1_000_000).toFixed(1)}M`;
+  if (val >= 1_000) return `$${(val / 1_000).toFixed(0)}K`;
+  return `$${val.toFixed(0)}`;
+}
+
+function getSeverityColor(severity: 'calm' | 'attention' | 'urgent'): string {
+  switch (severity) {
+    case 'urgent':
+      return colors.red;
+    case 'attention':
+      return colors.yellow;
+    default:
+      return colors.green;
+  }
+}
+
+function getSeverityIcon(severity: 'calm' | 'attention' | 'urgent'): string {
+  switch (severity) {
+    case 'urgent':
+      return '🔴';
+    case 'attention':
+      return '🟡';
+    default:
+      return '🟢';
+  }
+}
+
+export default function ProactiveBriefing({
+  greeting,
+  onInvestigatePath,
+  onEscalate,
+  onAskPandora,
+}: ProactiveBriefingProps) {
+  const [expandedPath, setExpandedPath] = useState<number | null>(null);
+  const briefing = greeting.proactive_briefing;
+
+  return (
+    <div
+      style={{
+        background: colors.surface,
+        border: `1px solid ${colors.border}`,
+        borderRadius: 12,
+        padding: 24,
+        maxWidth: 800,
+        margin: '0 auto',
+      }}
+    >
+      {/* Header */}
+      <div style={{ marginBottom: 20 }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginBottom: 8,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 14, color: colors.textSecondary }}>
+              {getSeverityIcon(greeting.severity)} VP RevOps Brief
+            </span>
+            <span
+              style={{
+                fontSize: 12,
+                color: colors.textMuted,
+                padding: '2px 8px',
+                background: colors.surfaceRaised,
+                borderRadius: 4,
+              }}
+            >
+              {greeting.recency_label}
+            </span>
+          </div>
+          {greeting.week_context && (
+            <div style={{ fontSize: 12, color: colors.textMuted }}>
+              {greeting.week_context}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Greeting */}
+      <div style={{ marginBottom: 20 }}>
+        <h2 style={{ ...fonts.h2, margin: '0 0 8px 0' }}>{greeting.headline}</h2>
+        <p style={{ ...fonts.body, color: colors.textSecondary, margin: 0 }}>
+          {greeting.subline}
+        </p>
+      </div>
+
+      {/* State Summary */}
+      <div
+        style={{
+          padding: 16,
+          background: colors.surfaceRaised,
+          borderRadius: 8,
+          borderLeft: `4px solid ${getSeverityColor(greeting.severity)}`,
+          marginBottom: 20,
+        }}
+      >
+        <p style={{ ...fonts.body, margin: 0 }}>{greeting.state_summary}</p>
+      </div>
+
+      {/* Top Finding Card */}
+      {briefing?.top_finding && (
+        <div
+          style={{
+            padding: 16,
+            background:
+              briefing.top_finding.severity === 'critical'
+                ? 'rgba(239, 68, 68, 0.1)'
+                : 'rgba(251, 191, 36, 0.1)',
+            border: `1px solid ${
+              briefing.top_finding.severity === 'critical' ? colors.red : colors.yellow
+            }`,
+            borderRadius: 8,
+            marginBottom: 20,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+            <span style={{ fontSize: 18 }}>
+              {briefing.top_finding.severity === 'critical' ? '🔴' : '🟡'}
+            </span>
+            <div style={{ flex: 1 }}>
+              <h3 style={{ ...fonts.h3, margin: '0 0 4px 0' }}>
+                {briefing.top_finding.headline}
+              </h3>
+              {briefing.top_finding.entity && (
+                <p style={{ ...fonts.bodySmall, color: colors.textMuted, margin: 0 }}>
+                  {briefing.top_finding.entity}
+                  {briefing.top_finding.amount && ` · ${formatCurrency(briefing.top_finding.amount)}`}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Investigation Paths */}
+      {briefing && briefing.investigation_paths.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <h3 style={{ ...fonts.h3, margin: '0 0 12px 0' }}>
+            {briefing.investigation_title}
+          </h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {briefing.investigation_paths.map((path, index) => (
+              <button
+                key={index}
+                onClick={() => {
+                  setExpandedPath(expandedPath === index ? null : index);
+                }}
+                onDoubleClick={() => onInvestigatePath(path)}
+                style={{
+                  padding: 12,
+                  background: colors.surfaceRaised,
+                  border: `1px solid ${
+                    path.priority === 'high'
+                      ? colors.red
+                      : path.priority === 'medium'
+                      ? colors.yellow
+                      : colors.border
+                  }`,
+                  borderRadius: 8,
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  transition: 'all 0.2s',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = colors.surface;
+                  e.currentTarget.style.borderColor = colors.accent;
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = colors.surfaceRaised;
+                  e.currentTarget.style.borderColor =
+                    path.priority === 'high'
+                      ? colors.red
+                      : path.priority === 'medium'
+                      ? colors.yellow
+                      : colors.border;
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                  <span style={{ fontSize: 14 }}>
+                    {path.priority === 'high' ? '⚡' : '💡'}
+                  </span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ ...fonts.body, fontWeight: 500 }}>
+                      {path.question}
+                    </div>
+                    {expandedPath === index && (
+                      <div
+                        style={{
+                          ...fonts.bodySmall,
+                          color: colors.textMuted,
+                          marginTop: 4,
+                        }}
+                      >
+                        {path.reasoning}
+                        {path.skill_id && ` · Uses ${path.skill_id}`}
+                      </div>
+                    )}
+                  </div>
+                  <span style={{ fontSize: 12, color: colors.textMuted }}>
+                    {expandedPath === index ? '▲' : '▼'}
+                  </span>
+                </div>
+              </button>
+            ))}
+          </div>
+          <p
+            style={{
+              ...fonts.bodySmall,
+              color: colors.textMuted,
+              marginTop: 8,
+              textAlign: 'center',
+            }}
+          >
+            Click to expand · Double-click to investigate
+          </p>
+        </div>
+      )}
+
+      {/* Escalation Warning */}
+      {briefing?.can_escalate && briefing.escalation_path && (
+        <div
+          style={{
+            padding: 16,
+            background: 'rgba(239, 68, 68, 0.1)',
+            border: `1px solid ${colors.red}`,
+            borderRadius: 8,
+            marginBottom: 20,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+            <span style={{ fontSize: 18 }}>⚠️</span>
+            <div style={{ flex: 1 }}>
+              <h3 style={{ ...fonts.h3, margin: '0 0 4px 0', color: colors.red }}>
+                Escalation Recommended
+              </h3>
+              <p style={{ ...fonts.body, margin: '0 0 12px 0' }}>
+                {briefing.escalation_path}
+              </p>
+              {onEscalate && (
+                <button
+                  onClick={onEscalate}
+                  style={{
+                    padding: '8px 16px',
+                    background: colors.red,
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                    ...fonts.body,
+                    fontWeight: 600,
+                  }}
+                >
+                  Alert Executive Team
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Suggested Questions */}
+      <div style={{ marginBottom: 20 }}>
+        <h3 style={{ ...fonts.h3, margin: '0 0 12px 0', color: colors.textMuted }}>
+          Or ask me anything:
+        </h3>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {greeting.questions.slice(0, 4).map((question, index) => (
+            <button
+              key={index}
+              onClick={() => onAskPandora()}
+              style={{
+                padding: '8px 12px',
+                background: colors.surfaceRaised,
+                border: `1px solid ${colors.border}`,
+                borderRadius: 6,
+                cursor: 'pointer',
+                ...fonts.bodySmall,
+                color: colors.textSecondary,
+                transition: 'all 0.2s',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = colors.surface;
+                e.currentTarget.style.borderColor = colors.accent;
+                e.currentTarget.style.color = colors.accent;
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = colors.surfaceRaised;
+                e.currentTarget.style.borderColor = colors.border;
+                e.currentTarget.style.color = colors.textSecondary;
+              }}
+            >
+              {question}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Action Buttons */}
+      <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+        <button
+          onClick={onAskPandora}
+          style={{
+            padding: '10px 20px',
+            background: colors.accent,
+            color: '#fff',
+            border: 'none',
+            borderRadius: 8,
+            cursor: 'pointer',
+            ...fonts.body,
+            fontWeight: 600,
+          }}
+        >
+          Ask Pandora
+        </button>
+      </div>
+    </div>
+  );
+}

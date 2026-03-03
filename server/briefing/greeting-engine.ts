@@ -2,6 +2,31 @@ import { query } from '../db.js';
 import type { TemporalContext } from '../context/opening-brief.js';
 import type { PandolaRole } from '../context/pandora-role.js';
 
+export interface InvestigationPath {
+  question: string;
+  reasoning: string;
+  skill_id?: string;
+  priority: 'high' | 'medium' | 'low';
+}
+
+export interface TopFinding {
+  severity: 'critical' | 'warning';
+  headline: string;
+  entity?: string;
+  amount?: number;
+  category?: string;
+}
+
+export interface ProactiveBriefing {
+  mode: 'investigation_ready' | 'none';
+  investigation_title: string;
+  findings_count: number;
+  top_finding?: TopFinding;
+  investigation_paths: InvestigationPath[];
+  can_escalate: boolean;
+  escalation_path?: string;
+}
+
 export interface GreetingPayload {
   headline: string;
   subline: string;
@@ -17,6 +42,7 @@ export interface GreetingPayload {
     warning_count: number;
     deals_moved: number;
   };
+  proactive_briefing?: ProactiveBriefing;
 }
 
 function getTimeOfDay(localHour?: number): 'morning' | 'afternoon' | 'evening' {
@@ -218,6 +244,192 @@ function formatCurrencyShort(n: number): string {
   return `$${n.toFixed(0)}`;
 }
 
+// ─── Investigation path generation ────────────────────────────────────────────
+
+function generateInvestigationPaths(
+  role: PandolaRole,
+  phase: QuarterPhase,
+  metrics: {
+    critical_count: number;
+    warning_count: number;
+    coverage_ratio: number;
+    pipeline_value: number;
+    deals_moved: number;
+  },
+  temporal?: TemporalContext
+): InvestigationPath[] {
+  const paths: InvestigationPath[] = [];
+  const daysRemaining = temporal?.daysRemainingInQuarter ?? 30;
+
+  // High-risk signals detection
+  const hasHighRisk = metrics.critical_count >= 3;
+  const hasLowCoverage = metrics.coverage_ratio < 1.5 && phase === 'late';
+  const hasStagnation = metrics.deals_moved === 0 && temporal?.dayOfWeekLabel === 'Friday';
+  const isFinalWeek = phase === 'final_week';
+
+  // Role-specific investigation paths
+  if (role === 'revops') {
+    if (isFinalWeek) {
+      paths.push({
+        question: "Is the forecast input defensible for the board call?",
+        reasoning: `${metrics.critical_count} data quality issues flagged`,
+        skill_id: 'data-quality-audit',
+        priority: 'high',
+      });
+      paths.push({
+        question: "Which deals failed close-date validation?",
+        reasoning: "Final week requires date discipline",
+        skill_id: 'pipeline-hygiene',
+        priority: 'high',
+      });
+    } else if (phase === 'late') {
+      paths.push({
+        question: "Are stage definitions being honored?",
+        reasoning: "Late quarter hygiene check",
+        skill_id: 'data-quality-audit',
+        priority: 'medium',
+      });
+    } else if (phase === 'early') {
+      paths.push({
+        question: "Are quotas and territories configured correctly?",
+        reasoning: "New quarter setup validation",
+        priority: 'medium',
+      });
+    }
+  }
+
+  if (role === 'manager') {
+    if (isFinalWeek) {
+      paths.push({
+        question: "Which commit deals are at risk of slipping?",
+        reasoning: `${daysRemaining} days left in quarter`,
+        skill_id: 'deal-risk-review',
+        priority: 'high',
+      });
+      paths.push({
+        question: "Who needs executive help to close?",
+        reasoning: "Final push requires escalation paths",
+        priority: 'high',
+      });
+    } else if (hasLowCoverage) {
+      paths.push({
+        question: "Which reps are below minimum coverage?",
+        reasoning: `Team at ${metrics.coverage_ratio.toFixed(1)}x coverage`,
+        priority: 'high',
+      });
+    } else if (phase === 'early') {
+      paths.push({
+        question: "Does each rep have 3-4x coverage?",
+        reasoning: "Early quarter coverage check",
+        priority: 'medium',
+      });
+    }
+  }
+
+  if (role === 'cro' || role === null) {
+    if (isFinalWeek) {
+      paths.push({
+        question: "What's the realistic range of outcomes?",
+        reasoning: `${daysRemaining} days to close`,
+        skill_id: 'forecast-rollup',
+        priority: 'high',
+      });
+      paths.push({
+        question: "Which deals need my direct involvement?",
+        reasoning: "Executive sponsorship needed",
+        priority: 'high',
+      });
+    } else if (hasLowCoverage) {
+      paths.push({
+        question: "Where's the biggest pipeline gap?",
+        reasoning: `Coverage at ${metrics.coverage_ratio.toFixed(1)}x`,
+        priority: 'high',
+      });
+    }
+  }
+
+  if (role === 'ae') {
+    if (isFinalWeek) {
+      paths.push({
+        question: "Which deals can actually close before quarter end?",
+        reasoning: `${daysRemaining} days left`,
+        priority: 'high',
+      });
+    } else if (phase === 'early') {
+      paths.push({
+        question: "Do I have 3x coverage on my gap?",
+        reasoning: "Early quarter coverage check",
+        priority: 'medium',
+      });
+    }
+  }
+
+  // Risk-driven paths (apply to all roles)
+  if (hasHighRisk) {
+    paths.push({
+      question: "Which deals are blocking the quarter close?",
+      reasoning: `${metrics.critical_count} critical findings`,
+      skill_id: 'deal-risk-review',
+      priority: 'high',
+    });
+  }
+
+  if (hasStagnation) {
+    paths.push({
+      question: "Why hasn't the pipeline moved this week?",
+      reasoning: "No deal movement in 24 hours",
+      priority: 'medium',
+    });
+  }
+
+  // Return top 3 paths, prioritized
+  return paths
+    .sort((a, b) => {
+      const priorityOrder = { high: 0, medium: 1, low: 2 };
+      return priorityOrder[a.priority] - priorityOrder[b.priority];
+    })
+    .slice(0, 3);
+}
+
+function detectEscalationPath(
+  role: PandolaRole,
+  phase: QuarterPhase,
+  metrics: { critical_count: number; coverage_ratio: number },
+  daysRemaining: number
+): { needed: boolean; path?: string } {
+  // RevOps escalation rules
+  if (role === 'revops' && phase === 'final_week') {
+    if (metrics.critical_count >= 5) {
+      return {
+        needed: true,
+        path: "Forecast inputs may not be defensible for board call. Recommend alerting Controller to review data quality.",
+      };
+    }
+  }
+
+  // Manager escalation rules
+  if (role === 'manager' && phase === 'late') {
+    if (metrics.coverage_ratio < 1.2 && daysRemaining < 15) {
+      return {
+        needed: true,
+        path: `Team coverage below 1.2x with <2 weeks left. Recommend alerting CRO about gap coverage risk.`,
+      };
+    }
+  }
+
+  // CRO escalation rules (escalate to board)
+  if ((role === 'cro' || role === null) && phase === 'final_week') {
+    if (metrics.coverage_ratio < 1.0 && daysRemaining < 7) {
+      return {
+        needed: true,
+        path: "Coverage below 1.0x with <1 week left. Recommend preparing board for potential miss.",
+      };
+    }
+  }
+
+  return { needed: false };
+}
+
 export async function generateGreeting(
   workspaceId: string,
   userName?: string,
@@ -351,6 +563,67 @@ export async function generateGreeting(
     state_summary = `${actCount} item${actCount > 1 ? 's' : ''} need${actCount === 1 ? 's' : ''} attention.`;
   }
 
+  // Generate proactive investigation hints
+  const daysRemaining = temporal?.daysRemainingInQuarter ?? 30;
+
+  const investigationPaths = generateInvestigationPaths(
+    pandoraRole ?? null,
+    phase,
+    {
+      critical_count,
+      warning_count,
+      coverage_ratio: 0, // TODO: Calculate actual coverage from pipeline/quota
+      pipeline_value,
+      deals_moved,
+    },
+    temporal
+  );
+
+  const escalation = detectEscalationPath(
+    pandoraRole ?? null,
+    phase,
+    { critical_count, coverage_ratio: 0 },
+    daysRemaining
+  );
+
+  // Build top finding from greetingFindings
+  let topFinding: TopFinding | undefined;
+  if (greetingFindings.length > 0) {
+    const finding = greetingFindings[0];
+    topFinding = {
+      severity: 'critical',
+      headline: finding.message || 'Critical issue detected',
+      category: finding.category ?? undefined,
+      amount: finding.total_amount > 0 ? finding.total_amount : undefined,
+    };
+  }
+
+  // Decide if we should show proactive briefing
+  const shouldShowProactiveBriefing =
+    investigationPaths.length > 0 ||
+    critical_count >= 2 ||
+    escalation.needed ||
+    (phase === 'final_week' && daysRemaining <= 7);
+
+  const proactive_briefing: ProactiveBriefing | undefined = shouldShowProactiveBriefing
+    ? {
+        mode: 'investigation_ready',
+        investigation_title:
+          phase === 'final_week'
+            ? 'Final Week Priority Check'
+            : phase === 'late'
+            ? 'Late Quarter Risk Assessment'
+            : critical_count >= 3
+            ? 'Critical Issues Requiring Attention'
+            : 'Proactive Analysis',
+        findings_count: critical_count + warning_count,
+        top_finding: topFinding,
+        investigation_paths: investigationPaths,
+        can_escalate: escalation.needed,
+        escalation_path: escalation.path,
+      }
+    : undefined;
+
   return {
     headline,
     subline,
@@ -366,5 +639,6 @@ export async function generateGreeting(
       warning_count,
       deals_moved,
     },
+    proactive_briefing,
   };
 }
