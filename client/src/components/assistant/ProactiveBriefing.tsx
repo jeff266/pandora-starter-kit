@@ -153,7 +153,6 @@ export default function ProactiveBriefing({
   const [hoveredPath, setHoveredPath] = useState<number | null>(null);
   const [hoveredQuestion, setHoveredQuestion] = useState<number | null>(null);
   const [resultsModal, setResultsModal] = useState<{ skillId: string; runId: string } | null>(null);
-  const navigate = useNavigate();
   const briefing = greeting.proactive_briefing;
   const isStreaming = phase && !['pills', 'browsing'].includes(phase);
 
