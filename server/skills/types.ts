@@ -167,6 +167,11 @@ export interface SkillExecutionContext {
   params?: Record<string, any>;
   scopeFilters?: string[];
 
+  /** Canonical per-request query scope — fiscal quarter bounds, user role,
+   *  owner SQL fragment, pipeline names.  Resolved once by the runtime before
+   *  any steps run; every tool reads from here instead of recomputing. */
+  queryScope: import('../context/query-scope.js').QueryScope;
+
   /** Execution metadata */
   metadata: {
     startedAt: Date;

@@ -240,12 +240,23 @@ export interface TimeConfig {
   trendComparison: 'previous_period' | 'same_period_last_quarter' | 'none';
 }
 
-function getQuarterBounds(date: Date): { start: Date; end: Date } {
-  const month = date.getMonth();
+function getQuarterBounds(date: Date, fiscalStartMonth: number = 1): { start: Date; end: Date } {
+  if (fiscalStartMonth === 1) {
+    const month = date.getMonth();
+    const year = date.getFullYear();
+    const quarterStartMonth = Math.floor(month / 3) * 3;
+    const start = new Date(year, quarterStartMonth, 1);
+    const end = new Date(year, quarterStartMonth + 3, 0, 23, 59, 59);
+    return { start, end };
+  }
+  const month = date.getMonth() + 1;
   const year = date.getFullYear();
-  const quarterStartMonth = Math.floor(month / 3) * 3;
-  const start = new Date(year, quarterStartMonth, 1);
-  const end = new Date(year, quarterStartMonth + 3, 0, 23, 59, 59);
+  const fiscalOffset = ((month - fiscalStartMonth + 12) % 12);
+  const quarterStartFiscalOffset = Math.floor(fiscalOffset / 3) * 3;
+  const quarterStartCalMonth = ((quarterStartFiscalOffset + fiscalStartMonth - 1) % 12) + 1;
+  const startYear = quarterStartCalMonth > month ? year - 1 : year;
+  const start = new Date(startYear, quarterStartCalMonth - 1, 1);
+  const end = new Date(startYear, quarterStartCalMonth - 1 + 3, 0, 23, 59, 59);
   return { start, end };
 }
 
@@ -335,9 +346,16 @@ export function resolveTimeWindows(
   };
 }
 
-export function formatQuarterLabel(date: Date): string {
-  const q = Math.floor(date.getMonth() / 3) + 1;
-  return `Q${q} ${date.getFullYear()}`;
+export function formatQuarterLabel(date: Date, fiscalStartMonth: number = 1): string {
+  if (fiscalStartMonth === 1) {
+    const q = Math.floor(date.getMonth() / 3) + 1;
+    return `Q${q} ${date.getFullYear()}`;
+  }
+  const month = date.getMonth() + 1;
+  const fiscalOffset = ((month - fiscalStartMonth + 12) % 12);
+  const quarter = Math.floor(fiscalOffset / 3) + 1;
+  const fiscalYear = month >= fiscalStartMonth ? date.getFullYear() : date.getFullYear() - 1;
+  return `Q${quarter} FY${fiscalYear}`;
 }
 
 // ============================================================================

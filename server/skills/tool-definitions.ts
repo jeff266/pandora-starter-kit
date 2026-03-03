@@ -99,7 +99,6 @@ import { filterResolver } from '../tools/filter-resolver.js';
 import type { FilterResolutionMetadata } from '../types/workspace-config.js';
 import { computeForecastAnnotations } from '../analysis/forecast-annotations.js';
 import { mergeAnnotationsWithUserState } from '../analysis/annotation-merge.js';
-import { getPandoraRole, getHeadlineTarget } from '../context/pandora-role.js';
 
 // ============================================================================
 // Helper: Safe Tool Execution
@@ -1235,7 +1234,6 @@ const resolveTimeWindowsTool: ToolDefinition = {
   },
   execute: async (params, context) => {
     return safeExecute('resolveTimeWindows', async () => {
-      // Use merged timeConfig from context (skill defaults + runtime overrides)
       const contextTimeConfig = (context.businessContext as any).timeConfig || {};
       const config: TimeConfig = {
         analysisWindow: params.analysisWindow || contextTimeConfig.analysisWindow || 'current_quarter',
@@ -1243,27 +1241,64 @@ const resolveTimeWindowsTool: ToolDefinition = {
         trendComparison: params.trendComparison || contextTimeConfig.trendComparison || 'previous_period',
       };
 
-      // Query last successful run
+      // For current_quarter, use the pre-resolved fiscal-aware bounds from queryScope
+      // rather than recomputing with calendar-only math. This ensures fiscal year
+      // configuration (workspace_config.cadence.fiscal_year_start_month) is respected.
+      if (config.analysisWindow === 'current_quarter' && context.queryScope) {
+        const scope = context.queryScope;
+
+        // Last run still needed for change window calculation
+        const lastRunResult = await query(
+          `SELECT completed_at FROM skill_runs
+           WHERE workspace_id = $1 AND skill_id = $2 AND status = 'completed'
+           ORDER BY completed_at DESC LIMIT 1`,
+          [context.workspaceId, context.skillId]
+        );
+        const lastRunAt = lastRunResult.rows[0]?.completed_at || null;
+        const now = new Date();
+        const changeDays = config.changeWindow === 'last_30d' ? 30
+          : config.changeWindow === 'last_14d' ? 14 : 7;
+        const changeStart = config.changeWindow === 'since_last_run' && lastRunAt
+          ? new Date(lastRunAt)
+          : new Date(now.getTime() - changeDays * 24 * 60 * 60 * 1000);
+
+        return {
+          analysisRange: {
+            start: scope.quarterStart.toISOString(),
+            end: scope.quarterEnd.toISOString(),
+            quarter: formatQuarterLabel(scope.quarterStart, scope.fiscalYearStartMonth),
+          },
+          changeRange: {
+            start: changeStart.toISOString(),
+            end: now.toISOString(),
+          },
+          previousPeriodRange: {
+            start: scope.previousQuarterStart.toISOString(),
+            end: scope.previousQuarterEnd.toISOString(),
+          },
+          lastRunAt: lastRunAt ? new Date(lastRunAt).toISOString() : null,
+          config,
+        };
+      }
+
+      // Non-quarter windows: fall back to the utility resolver
       const lastRunResult = await query(
-        `SELECT completed_at
-         FROM skill_runs
-         WHERE workspace_id = $1
-           AND skill_id = $2
-           AND status = 'completed'
-         ORDER BY completed_at DESC
-         LIMIT 1`,
+        `SELECT completed_at FROM skill_runs
+         WHERE workspace_id = $1 AND skill_id = $2 AND status = 'completed'
+         ORDER BY completed_at DESC LIMIT 1`,
         [context.workspaceId, context.skillId]
       );
-
       const lastRunAt = lastRunResult.rows[0]?.completed_at || null;
-
       const windows = resolveTimeWindows(config, lastRunAt);
 
       return {
         analysisRange: {
           start: windows.analysisRange.start.toISOString(),
           end: windows.analysisRange.end.toISOString(),
-          quarter: formatQuarterLabel(windows.analysisRange.start),
+          quarter: formatQuarterLabel(
+            windows.analysisRange.start,
+            context.queryScope?.fiscalYearStartMonth ?? 1,
+          ),
         },
         changeRange: {
           start: windows.changeRange.start.toISOString(),
@@ -2687,41 +2722,17 @@ const forecastRollup: ToolDefinition = {
     return safeExecute('forecastRollup', async () => {
       const nameMap = await resolveOwnerNames(context.workspaceId);
 
-      // Resolve current-quarter bounds for closed won attainment scoping.
-      // Reads from the upstream resolveTimeWindows step result when available;
-      // falls back to computing from today so the tool works standalone.
-      const timeWindows = (context.stepResults as any)?.time_windows;
-      const quarterStart: string = timeWindows?.analysisRange?.start
-        ? new Date(timeWindows.analysisRange.start).toISOString().split('T')[0]
-        : (() => {
-            const now = new Date();
-            const qMonth = Math.floor(now.getMonth() / 3) * 3;
-            return new Date(now.getFullYear(), qMonth, 1).toISOString().split('T')[0];
-          })();
-      const quarterEnd: string = timeWindows?.analysisRange?.end
-        ? new Date(timeWindows.analysisRange.end).toISOString().split('T')[0]
-        : (() => {
-            const now = new Date();
-            const qMonth = Math.floor(now.getMonth() / 3) * 3;
-            return new Date(now.getFullYear(), qMonth + 3, 0).toISOString().split('T')[0];
-          })();
-      // Closed-won deals are attainment — only count those closed in the current quarter.
-      // Open-pipeline categories (commit, best_case, pipeline) are unrestricted: they
-      // show current forecast regardless of close date.
-      const closedWonDateClause = `AND (forecast_category != 'closed' OR (close_date >= '${quarterStart}' AND close_date <= '${quarterEnd}'))`;
+      // Quarter bounds and ownership come from the pre-resolved QueryScope.
+      // This is fiscal-year-aware (reads workspace_config.cadence.fiscal_year_start_month)
+      // and never re-queries the database for role/email.
+      const scope = context.queryScope;
+      const quarterStart: string = scope.quarterStart.toISOString().split('T')[0];
+      const quarterEnd: string = scope.quarterEnd.toISOString().split('T')[0];
+      const dealOwnerClause: string = scope.ownerLiteral;
 
-      // Build deal-owner filter for user-scoped roles (AE sees own deals; Manager falls back to all)
-      let dealOwnerClause = '';
-      if (context.userId) {
-        try {
-          const roleInfo = await getPandoraRole(context.workspaceId, context.userId);
-          if (roleInfo.pandoraRole === 'ae' && roleInfo.userEmail) {
-            const esc = roleInfo.userEmail.replace(/'/g, "''");
-            dealOwnerClause = ` AND owner_email = '${esc}'`;
-          }
-          // Manager: team-structure-based filtering deferred — falls back to unfiltered
-        } catch { /* non-fatal */ }
-      }
+      // Closed-won deals are attainment — only count those closed in the current quarter.
+      // Open-pipeline categories (commit, best_case, pipeline) are unrestricted.
+      const closedWonDateClause = `AND (forecast_category != 'closed' OR (close_date >= '${quarterStart}' AND close_date <= '${quarterEnd}'))`;
 
       // Stage-normalized attainment: counts ALL closed_won deals in the quarter
       // regardless of forecast_category. This picks up pipelines (e.g. Fellowship
@@ -6885,18 +6896,7 @@ const mcLoadOpenDeals: ToolDefinition = {
       const params: any[] = [context.workspaceId];
       let pipelineClause = '';
 
-      // Build deal-owner filter for user-scoped roles (AE sees own deals; Manager falls back to all)
-      let ownerClause = '';
-      if (context.userId) {
-        try {
-          const roleInfo = await getPandoraRole(context.workspaceId, context.userId);
-          if (roleInfo.pandoraRole === 'ae' && roleInfo.userEmail) {
-            const esc = roleInfo.userEmail.replace(/'/g, "''");
-            ownerClause = ` AND owner_email = '${esc}'`;
-          }
-          // Manager: team-structure-based filtering deferred — falls back to unfiltered
-        } catch { /* non-fatal */ }
-      }
+      const ownerClause: string = context.queryScope?.ownerLiteral ?? '';
 
       if (pipelineFilter && pipelineFilter !== 'all' && pipelineFilter !== 'default') {
         // Check if the filter value matches a confirmed analysis scope

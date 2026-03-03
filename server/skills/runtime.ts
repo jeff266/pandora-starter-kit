@@ -47,6 +47,7 @@ import { getConsultantContext } from './consultant-context.js';
 import { goalService } from '../goals/goal-service.js';
 import { motionService } from '../goals/motion-service.js';
 import pool from '../db.js';
+import { buildQueryScope } from '../context/query-scope.js';
 
 // ============================================================================
 // Skill Runtime
@@ -102,7 +103,7 @@ export class SkillRuntime {
 
     console.log(`[Skill Runtime] Starting ${skill.id} for workspace ${workspaceId}, runId: ${runId}`);
 
-    const [contextData, dataFreshness, activeTargetsResult, workspaceContextBlock] = await Promise.all([
+    const [contextData, dataFreshness, activeTargetsResult, workspaceContextBlock, queryScope] = await Promise.all([
       getContext(workspaceId),
       getDataFreshness(workspaceId),
       query(
@@ -112,6 +113,7 @@ export class SkillRuntime {
         [workspaceId]
       ).catch(() => ({ rows: [] })),
       buildWorkspaceContextBlock(workspaceId, userId).catch(() => ''),
+      buildQueryScope(workspaceId, userId),
     ]);
 
     // Merge skill timeConfig with runtime overrides from params
@@ -218,6 +220,7 @@ export class SkillRuntime {
       stepResults: {},
       params: params || {},
       scopeFilters,
+      queryScope,
       metadata: {
         startedAt: new Date(),
         tokenUsage: {
