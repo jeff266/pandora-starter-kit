@@ -5,7 +5,7 @@ const router = Router();
 const jobQueue = getJobQueue();
 
 // Get job status by ID
-router.get('/:jobId', async (req: Request, res: Response): Promise<void> => {
+router.get('/:workspaceId/jobs/:jobId', async (req: Request, res: Response): Promise<void> => {
   try {
     const jobId = req.params.jobId as string;
     const job = await jobQueue.getJob(jobId);
