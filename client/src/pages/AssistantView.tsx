@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { api } from '../lib/api';
 import Greeting, { type GreetingPhase, type GreetingPayload } from '../components/assistant/Greeting';
+import ProactiveBriefing, { type InvestigationPath } from '../components/assistant/ProactiveBriefing';
 import MorningBrief from '../components/assistant/MorningBrief';
 import OperatorStrip from '../components/assistant/OperatorStrip';
 import StickyInput from '../components/assistant/StickyInput';
@@ -299,15 +300,34 @@ export default function AssistantView() {
       }}
     >
       <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 8 }}>
-        <Greeting
-          data={greeting ?? undefined}
-          phase={phase}
-          typedHeadline={phase === 'blank' ? '' : typedHeadline}
-          typedSubline={['blank', 'headline'].includes(phase) ? '' : typedSubline}
-          typedContext={['blank', 'headline', 'subline'].includes(phase) ? '' : typedContext}
-          visibleQuestions={visibleQuestions}
-          cursorTarget={cursorTarget}
-        />
+        {greeting?.proactive_briefing && phase === 'pills' ? (
+          <ProactiveBriefing
+            greeting={greeting}
+            onInvestigatePath={(path: InvestigationPath) => {
+              // Send investigation question to Pandora
+              handleSend(path.question);
+            }}
+            onEscalate={() => {
+              // TODO: Implement escalation alert
+              alert('Escalation feature coming soon');
+            }}
+            onAskPandora={() => {
+              // Focus input
+              const input = document.querySelector('input[type="text"]') as HTMLInputElement;
+              if (input) input.focus();
+            }}
+          />
+        ) : (
+          <Greeting
+            data={greeting ?? undefined}
+            phase={phase}
+            typedHeadline={phase === 'blank' ? '' : typedHeadline}
+            typedSubline={['blank', 'headline'].includes(phase) ? '' : typedSubline}
+            typedContext={['blank', 'headline', 'subline'].includes(phase) ? '' : typedContext}
+            visibleQuestions={visibleQuestions}
+            cursorTarget={cursorTarget}
+          />
+        )}
 
         <QuickActionPills
           onSend={handleSend}
