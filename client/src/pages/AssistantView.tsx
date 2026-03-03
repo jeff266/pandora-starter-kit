@@ -100,6 +100,14 @@ export default function AssistantView() {
   const [phase, setPhase] = useState<GreetingPhase>('blank');
   const [visibleQuestions, setVisibleQuestions] = useState(0);
   const [openSections, setOpenSections] = useState<string[]>([]);
+  const [investigationJobs, setInvestigationJobs] = useState<Map<string, {
+    jobId: string;
+    skillId: string;
+    question: string;
+    status: 'pending' | 'running' | 'completed' | 'failed';
+    runId?: string;
+    error?: string;
+  }>>(new Map());
   const phaseRef = useRef<GreetingPhase>('blank');
   phaseRef.current = phase;
 
@@ -227,6 +235,85 @@ export default function AssistantView() {
     setViewMode('conversation');
   }, []);
 
+  const handleInvestigateSkill = async (path: InvestigationPath) => {
+    if (!path.skill_id) {
+      // No skill mapped, just send question to chat
+      handleSend(path.question);
+      return;
+    }
+
+    try {
+      // Trigger background skill execution
+      const response = await api.post(
+        `/workspaces/${workspace?.id}/investigation/trigger-skill`,
+        {
+          skillId: path.skill_id,
+          investigationPath: path,
+          metadata: {
+            role: greeting?.metrics ? 'detected_from_greeting' : undefined,
+            triggeredFrom: 'proactive_briefing',
+          },
+        }
+      );
+
+      const { jobId } = response;
+
+      // Track job
+      setInvestigationJobs(prev => new Map(prev).set(path.skill_id!, {
+        jobId,
+        skillId: path.skill_id!,
+        question: path.question,
+        status: 'pending',
+      }));
+
+      // Start polling for status
+      pollInvestigationStatus(jobId, path.skill_id!);
+    } catch (err) {
+      console.error('Failed to trigger investigation:', err);
+      alert('Failed to start investigation. Please try again.');
+    }
+  };
+
+  const pollInvestigationStatus = async (jobId: string, skillId: string) => {
+    const maxPolls = 120;  // 4 minutes (2s interval)
+    let polls = 0;
+
+    const poll = async () => {
+      try {
+        const job = await api.get(`/jobs/${jobId}`);
+
+        setInvestigationJobs(prev => {
+          const updated = new Map(prev);
+          const existing = updated.get(skillId);
+          if (existing) {
+            updated.set(skillId, {
+              ...existing,
+              status: job.status,
+              runId: job.result?.runId,
+              error: job.error,
+            });
+          }
+          return updated;
+        });
+
+        if (job.status === 'completed' || job.status === 'failed') {
+          // Stop polling
+          return;
+        }
+
+        // Continue polling
+        polls++;
+        if (polls < maxPolls) {
+          setTimeout(poll, 2000);
+        }
+      } catch (err) {
+        console.error('Polling error:', err);
+      }
+    };
+
+    poll();
+  };
+
   const handleBack = useCallback(() => {
     setViewMode('home');
     setInitialMessage(undefined);
@@ -303,10 +390,8 @@ export default function AssistantView() {
         {greeting?.proactive_briefing && phase === 'pills' ? (
           <ProactiveBriefing
             greeting={greeting}
-            onInvestigatePath={(path: InvestigationPath) => {
-              // Send investigation question to Pandora
-              handleSend(path.question);
-            }}
+            onInvestigatePath={handleInvestigateSkill}
+            investigationStatus={investigationJobs}
             onEscalate={() => {
               // TODO: Implement escalation alert
               alert('Escalation feature coming soon');

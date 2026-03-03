@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { colors, fonts } from '../../styles/theme';
+import InvestigationResults from './InvestigationResults';
 
 export interface InvestigationPath {
   question: string;
@@ -49,6 +50,12 @@ interface ProactiveBriefingProps {
   onInvestigatePath: (path: InvestigationPath) => void;
   onEscalate?: () => void;
   onAskPandora: () => void;
+  investigationStatus?: Map<string, {
+    jobId: string;
+    status: 'pending' | 'running' | 'completed' | 'failed';
+    runId?: string;
+    error?: string;
+  }>;
 }
 
 function formatCurrency(val: number): string {
@@ -84,10 +91,12 @@ export default function ProactiveBriefing({
   onInvestigatePath,
   onEscalate,
   onAskPandora,
+  investigationStatus,
 }: ProactiveBriefingProps) {
   const [expandedPath, setExpandedPath] = useState<number | null>(null);
   const [hoveredPath, setHoveredPath] = useState<number | null>(null);
   const [hoveredQuestion, setHoveredQuestion] = useState<number | null>(null);
+  const [resultsModal, setResultsModal] = useState<{ skillId: string; runId: string } | null>(null);
   const briefing = greeting.proactive_briefing;
 
   return (
@@ -238,6 +247,7 @@ export default function ProactiveBriefing({
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {briefing.investigation_paths.map((path, index) => {
               const isHovered = hoveredPath === index;
+              const status = investigationStatus?.get(path.skill_id || '');
               const borderColor = path.priority === 'high'
                 ? colors.red
                 : path.priority === 'medium'
@@ -248,24 +258,40 @@ export default function ProactiveBriefing({
                 <button
                   key={index}
                   onClick={() => {
-                    setExpandedPath(expandedPath === index ? null : index);
+                    // If completed, show results modal
+                    if (status?.status === 'completed' && status.runId) {
+                      setResultsModal({ skillId: path.skill_id!, runId: status.runId });
+                    } else {
+                      // Otherwise just expand/collapse
+                      setExpandedPath(expandedPath === index ? null : index);
+                    }
                   }}
-                  onDoubleClick={() => onInvestigatePath(path)}
+                  onDoubleClick={() => {
+                    // Don't allow double-click if already running
+                    if (status?.status !== 'running') {
+                      onInvestigatePath(path);
+                    }
+                  }}
                   onMouseEnter={() => setHoveredPath(index)}
                   onMouseLeave={() => setHoveredPath(null)}
+                  disabled={status?.status === 'running'}
                   style={{
                     padding: 12,
                     background: isHovered ? colors.surface : colors.surfaceRaised,
                     border: `1px solid ${isHovered ? colors.accent : borderColor}`,
                     borderRadius: 8,
-                    cursor: 'pointer',
+                    cursor: status?.status === 'running' ? 'wait' : status?.status === 'completed' ? 'pointer' : 'pointer',
                     textAlign: 'left',
                     transition: 'all 0.2s',
+                    opacity: status?.status === 'running' ? 0.7 : 1,
                   }}
                 >
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
                   <span style={{ fontSize: 14 }}>
-                    {path.priority === 'high' ? '⚡' : '💡'}
+                    {status?.status === 'running' ? '⏳' :
+                     status?.status === 'completed' ? '✅' :
+                     status?.status === 'failed' ? '❌' :
+                     path.priority === 'high' ? '⚡' : '💡'}
                   </span>
                   <div style={{ flex: 1 }}>
                     <div style={{
@@ -289,6 +315,9 @@ export default function ProactiveBriefing({
                       >
                         {path.reasoning}
                         {path.skill_id && ` · Uses ${path.skill_id}`}
+                        {status?.status === 'running' && ' · Investigating...'}
+                        {status?.status === 'completed' && ' · Ready to view'}
+                        {status?.status === 'failed' && ` · Failed: ${status.error}`}
                       </div>
                     )}
                   </div>
@@ -435,6 +464,15 @@ export default function ProactiveBriefing({
           Ask Pandora
         </button>
       </div>
+
+      {/* Investigation Results Modal */}
+      {resultsModal && (
+        <InvestigationResults
+          skillId={resultsModal.skillId}
+          runId={resultsModal.runId}
+          onClose={() => setResultsModal(null)}
+        />
+      )}
     </div>
   );
 }
