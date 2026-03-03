@@ -30,6 +30,7 @@ export interface ProactiveBriefing {
   deltas?: {
     since_label: string;  // e.g., "Since yesterday 8am"
     new_critical_count: number;
+    total_at_risk: number;  // Total at-risk deals across all investigations
     improved_count: number;
     worsened_investigations: string[];  // skill names that got worse
   };
