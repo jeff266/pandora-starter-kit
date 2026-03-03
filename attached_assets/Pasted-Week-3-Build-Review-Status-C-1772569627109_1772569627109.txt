@@ -1,0 +1,142 @@
+Week 3 Build Review ✅                     
+                                             
+  Status: Complete and production-ready with 
+  one fix applied                            
+                                             
+  What Was Built (All 5 Deliverables         
+  Complete):                                 
+                                             
+  Backend Infrastructure:                    
+  1. ✅ Scheduled Investigations (server/brie
+  fing/scheduled-investigations.ts)          
+    - 3 auto-scheduled investigations with   
+  dev/prod cron expressions                  
+    - Environment-aware: every 5-10 min in   
+  dev, daily/weekly in prod                  
+  2. ✅ Delta Detection                      
+  (server/briefing/investigation-delta.ts)   
+    - Compares current vs previous           
+  investigation runs                         
+    - Tracks new high-risk deals, improved   
+  deals, severity changes                    
+    - Fixed: Correct field mappings          
+  (severity, entity_name, fields.amount)     
+  3. ✅ Scheduler Integration                
+  (server/sync/skill-scheduler.ts)           
+    - Registers scheduled investigations on  
+  server startup                             
+    - Queues investigate_skill jobs for all  
+  active workspaces                          
+  4. ✅ Enhanced Greeting                    
+  (server/briefing/greeting-engine.ts)       
+    - Fetches investigation deltas with      
+  last_run_at timestamps                     
+    - Calculates since_label ("Since         
+  yesterday 8am")                            
+    - Prioritizes delta-based top findings   
+    - Fixed: Added total_at_risk field to    
+  interface                                  
+                                             
+  Frontend Enhancements:                     
+  5. ✅ ProactiveBriefing UI (client/src/comp
+  onents/assistant/ProactiveBriefing.tsx)    
+  - 🆕 Delta alert card with dual states:    
+    - "X new issues detected since..."       
+  (new_critical_count > 0)                   
+    - "X deals at risk since..."             
+  (total_at_risk > 0)                        
+  - 🏷️ NEW badge on top findings from        
+  auto-investigation                         
+  - ⏱️ "Last run: X hours ago" on            
+  investigation paths                        
+  - ✨ Typing animation with blinking cursor 
+  (Replit enhancement)                       
+  - 🎨 Formatting improvements (headline     
+  cleanup, uppercase labels)                 
+                                             
+  Issues Fixed Today:                        
+                                             
+  1. Field Mapping Bugs (T001) ✅            
+  - Risk filter: d.severity ===              
+  'warning'/'critical' (was: d.risk_score)   
+  - Deal name: d.entity_name (was:           
+  d.deal_name || d.name)                     
+  - Amount: Number(d.fields?.amount || 0)    
+  (was: d.amount)                            
+  - Findings count: Only at-risk records     
+  (was: all records)                         
+                                             
+  2. TypeScript Interface ✅                 
+  - Added total_at_risk field to             
+  ProactiveBriefing.deltas interface         
+  - Resolves compilation error from Replit   
+  enhancements                               
+                                             
+  Build Status:                              
+                                             
+  ✅ No Week 3-related TypeScript errors     
+  ⚠️  Pre-existing errors unrelated to Week 3
+   (goals, governance, etc.)                 
+  ✅ Server starts and registers scheduled   
+  investigations                             
+  ✅ Delta data flows through greeting →     
+  frontend (verified in Replit)              
+                                             
+  What's Working:                            
+                                             
+  Autonomous Monitoring:                     
+  - Investigations run automatically on cron 
+  schedules                                  
+  - Each workspace gets separate scheduled   
+  runs                                       
+  - Duplicate prevention via 6-hour window   
+                                             
+  Delta Detection:                           
+  - Compares findings between runs           
+  - Identifies new vs improved high-risk     
+  deals                                      
+  - Calculates time-based labels             
+                                             
+  Proactive Alerts:                          
+  - Shows "X new issues" or "X deals at risk"
+   based on delta state                      
+  - NEW badge highlights auto-investigation  
+  findings                                   
+  - Last run timestamps provide context      
+                                             
+  Recommendations for Week 3+:               
+                                             
+  No critical updates needed, but potential  
+  enhancements:                              
+                                             
+  1. Optional: Dev Mode Flag                 
+    - Add NODE_ENV=development to .env for   
+  faster cron testing locally                
+    - Currently using prod schedules         
+  (daily/weekly) in local environment        
+  2. Optional: Logging Improvements          
+    - Add delta comparison details to server 
+  logs                                       
+    - Track when deltas change state (new    
+  issues → resolved)                         
+  3. Optional: Error Handling                
+    - Add retry logic for failed scheduled   
+  investigations                             
+    - Alert if investigations consistently   
+  fail                                       
+  4. Ready for Week 4 if desired:            
+    - Email/Slack notifications when deltas  
+  worsen                                     
+    - Investigation history dashboard        
+    - Custom scheduling UI                   
+    - Per-user alert preferences             
+                                             
+  Summary:                                   
+                                             
+  Week 3 is complete and working. The        
+  scheduled investigations infrastructure is 
+  solid, delta detection is accurate (bugs   
+  fixed), and the UI displays all intended   
+  features. Replit testing confirmed all UI  
+  elements render correctly with real data.  
+  Ready to move forward!
