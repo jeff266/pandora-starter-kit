@@ -2687,6 +2687,29 @@ const forecastRollup: ToolDefinition = {
     return safeExecute('forecastRollup', async () => {
       const nameMap = await resolveOwnerNames(context.workspaceId);
 
+      // Resolve current-quarter bounds for closed won attainment scoping.
+      // Reads from the upstream resolveTimeWindows step result when available;
+      // falls back to computing from today so the tool works standalone.
+      const timeWindows = (context.stepResults as any)?.time_windows;
+      const quarterStart: string = timeWindows?.analysisRange?.start
+        ? new Date(timeWindows.analysisRange.start).toISOString().split('T')[0]
+        : (() => {
+            const now = new Date();
+            const qMonth = Math.floor(now.getMonth() / 3) * 3;
+            return new Date(now.getFullYear(), qMonth, 1).toISOString().split('T')[0];
+          })();
+      const quarterEnd: string = timeWindows?.analysisRange?.end
+        ? new Date(timeWindows.analysisRange.end).toISOString().split('T')[0]
+        : (() => {
+            const now = new Date();
+            const qMonth = Math.floor(now.getMonth() / 3) * 3;
+            return new Date(now.getFullYear(), qMonth + 3, 0).toISOString().split('T')[0];
+          })();
+      // Closed-won deals are attainment — only count those closed in the current quarter.
+      // Open-pipeline categories (commit, best_case, pipeline) are unrestricted: they
+      // show current forecast regardless of close date.
+      const closedWonDateClause = `AND (forecast_category != 'closed' OR (close_date >= '${quarterStart}' AND close_date <= '${quarterEnd}'))`;
+
       // Build deal-owner filter for user-scoped roles (AE sees own deals; Manager falls back to all)
       let dealOwnerClause = '';
       if (context.userId) {
@@ -2709,7 +2732,8 @@ const forecastRollup: ToolDefinition = {
         FROM deals
         WHERE workspace_id = $1
           AND forecast_category IS NOT NULL
-          AND stage_normalized NOT IN ('closed_lost')${dealOwnerClause}
+          AND stage_normalized NOT IN ('closed_lost')
+          ${closedWonDateClause}${dealOwnerClause}
         GROUP BY forecast_category`,
         [context.workspaceId]
       );
@@ -2804,7 +2828,8 @@ const forecastRollup: ToolDefinition = {
         WHERE workspace_id = $1
           AND forecast_category IS NOT NULL
           AND stage_normalized NOT IN ('closed_lost')
-          AND owner IS NOT NULL${excludeClause}${dealOwnerClause}
+          AND owner IS NOT NULL
+          ${closedWonDateClause}${excludeClause}${dealOwnerClause}
         GROUP BY owner, forecast_category
         ORDER BY owner`,
         [context.workspaceId, ...excludedOwners]
