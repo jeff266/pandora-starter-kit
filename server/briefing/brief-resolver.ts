@@ -15,7 +15,7 @@ export async function resolveFromBrief(workspaceId: string, message: string): Pr
   const lower = message.toLowerCase().trim();
 
   // Hard pass: causal, predictive, or open-ended questions always need investigation
-  if (/\bwhy\b|\bbecause\b|\bgoing to\b|\bwill we\b|\bshould we\b|\bwhat if\b|\bcompare\b|\bvs\b|\bversus\b|\bwhere will\b|\bwill (she|he|they)\b|\bend (the|this) quarter\b|\bon track (to|for)\b|\bby (end of|quarter end)\b|\bproject(ed)?\b|\bclosed.?won\b|\bhow (many|much) did\b|\bdid.*close\b|\bwin rate\b|\brev(enue)? from\b|\brep.*history\b/.test(lower)) return null;
+  if (/\bwhy\b|\bbecause\b|\bgoing to\b|\bwill we\b|\bshould we\b|\bwhat if\b|\bcompare\b|\bvs\b|\bversus\b|\bwhere will\b|\bwill (she|he|they)\b|\bend (the|this) quarter\b|\bon track (to|for)\b|\bby (end of|quarter end)\b|\bproject(ed)?\b|\bclosed.?won\b|\bhow (many|much) did\b|\bdid.*close\b|\bwin rate\b|\brev(enue)? from\b|\brep.*history\b|\bwon\b|\bwin\b|\bwon.*(pipeline|quarter|year|month|fiscal)\b|\bhow much.*win\b/.test(lower)) return null;
   if (lower.split(' ').length > 20) return null;
 
   const brief = await getLatestReadyBrief(workspaceId);
@@ -51,7 +51,8 @@ export async function resolveFromBrief(workspaceId: string, message: string): Pr
 
   // ── 3. Segment-specific pipeline question ───────────────────────────────────
   const segMatch = segments.find(s => lower.includes(s.label.toLowerCase()));
-  if (segMatch && /pipeline|deals?|how much/.test(lower)) {
+  const isClosedWonQuestion = /\b(won|win|winning|closed|attain|revenue from)\b/.test(lower);
+  if (segMatch && !isClosedWonQuestion && /pipeline|deals?|how much/.test(lower)) {
     return {
       section: 'segments',
       display_hint: 'value',
