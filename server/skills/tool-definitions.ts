@@ -2723,6 +2723,21 @@ const forecastRollup: ToolDefinition = {
         } catch { /* non-fatal */ }
       }
 
+      // Stage-normalized attainment: counts ALL closed_won deals in the quarter
+      // regardless of forecast_category. This picks up pipelines (e.g. Fellowship
+      // Pipeline) where HubSpot does not assign a forecast_category, which would
+      // otherwise be invisible to the category-based query below.
+      const stageAttainmentResult = await query(
+        `SELECT COALESCE(SUM(amount), 0) AS total
+         FROM deals
+         WHERE workspace_id = $1
+           AND stage_normalized = 'closed_won'
+           AND close_date >= '${quarterStart}'
+           AND close_date <= '${quarterEnd}'${dealOwnerClause}`,
+        [context.workspaceId]
+      );
+      const stageClosedWon = Number((stageAttainmentResult.rows[0] as any)?.total ?? 0);
+
       const teamResult = await query(
         `SELECT
           forecast_category,
@@ -2757,7 +2772,10 @@ const forecastRollup: ToolDefinition = {
         }
       }
 
-      const closedWon = categories.closed.amount;
+      // Use the higher of the two attainment signals: forecast_category='closed' deals
+      // (Core Sales Pipeline) vs stage_normalized='closed_won' deals in the quarter
+      // (captures Fellowship Pipeline and any pipeline without forecast_category mapping).
+      const closedWon = Math.max(categories.closed.amount, stageClosedWon);
       const commit = categories.commit.amount;
       const bestCase = categories.best_case.amount;
       const pipelineAmt = categories.pipeline.amount;
