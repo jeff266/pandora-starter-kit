@@ -1,0 +1,183 @@
+🧪 Replit Test Instructions                
+                                             
+  Quick Start                                
+                                             
+  # 1. Set your workspace ID                 
+  export                                     
+  WORKSPACE_ID="your-workspace-id-here"      
+                                             
+  # 2. Run the test script                   
+  node test-week4-replit.js                  
+                                             
+  What Gets Tested                           
+                                             
+  The script automatically tests:            
+                                             
+  ✅ History List API                        
+  - Pagination (limit, offset)               
+  - Filtering (skill, status, dates)         
+  - Response validation                      
+                                             
+  ✅ Timeline/Trend Analysis                 
+  - 30-day and 7-day trends                  
+  - Trend direction                          
+  (improving/worsening/stable)               
+  - Delta calculations                       
+                                             
+  ✅ Deal Timeline Tracking                  
+  - First flagged date                       
+  - Severity changes over time               
+  - Recurring issue detection                
+                                             
+  ✅ Export Functionality                    
+  - CSV generation and download              
+  - XLSX generation and download             
+  - File format validation                   
+                                             
+  ✅ Error Handling                          
+  - Invalid parameters                       
+  - Missing data scenarios                   
+                                             
+  ---                                        
+  📋 Frontend Testing Checklist              
+                                             
+  After running the API tests, test the UI:  
+                                             
+  1. Navigate to History Page                
+                                             
+  - Click "View History" button in           
+  ProactiveBriefing                          
+  - Or go to:                                
+  http://localhost:5173/investigation/history
+                                             
+  2. Test Filters                            
+                                             
+  - Skill dropdown (All Skills, Deal Risk    
+  Review, etc.)                              
+  - Status dropdown (All Statuses, Completed,
+   Failed)                                   
+  - Date range pickers (From/To)             
+  - Clear Filters button                     
+                                             
+  3. Timeline Chart                          
+                                             
+  - Appears when skill is selected           
+  - Shows trend indicator (📉 Improving / 📈 
+  Worsening / ➡️ Stable)                     
+  - 4 lines: At Risk, Critical, Warning,     
+  Healthy                                    
+  - Hover tooltips work                      
+  - Shows run count summary                  
+                                             
+  4. History Table                           
+                                             
+  - Column sorting (click headers to sort)   
+  - Color-coded badges (severity, status)    
+  - CSV/XLSX export buttons                  
+  - Row click opens investigation modal      
+  - Pagination (Previous/Next buttons)       
+                                             
+  5. Downloads                               
+                                             
+  - CSV downloads open in Excel              
+  - XLSX has 2 tabs (Summary + Records)      
+  - Color-coded cells in XLSX                
+                                             
+  ---                                        
+  📊 Expected Output Example                 
+                                             
+  ╔══════════════════════════════════════════
+  ══════════════════╗                        
+  ║     Week 4: Investigation History - Test 
+  Suite            ║                         
+  ╚══════════════════════════════════════════
+  ══════════════════╝                        
+                                             
+  ===========================================
+  ==================                         
+  TEST 1: Investigation History List         
+  ===========================================
+  ==================                         
+                                             
+  1.1 Fetch recent investigation runs (limit 
+  10)                                        
+  GET /:workspaceId/investigation/history?lim
+  it=10&offset=0                             
+  ✓ Success: 200                             
+  Total runs: 45                             
+  Returned: 10 runs                          
+                                             
+  Sample run:                                
+    Run ID: run_abc123                       
+    Skill: deal-risk-review                  
+    Status: completed                        
+    Completed: 2026-03-03T10:30:00Z          
+    Duration: 15234ms                        
+    Summary:                                 
+      Total Records: 45                      
+      At Risk: 12                            
+      Critical: 3                            
+      Warning: 9                             
+                                             
+  ...                                        
+                                             
+  ---                                        
+  🎯 Success Metrics                         
+  Metric: API Response Time                  
+  Target: < 500ms                            
+  Notes: History list                        
+  ────────────────────────────────────────   
+  Metric: Timeline Calculation               
+  Target: < 1s                               
+  Notes: 30 days of data                     
+  ────────────────────────────────────────   
+  Metric: CSV Export                         
+  Target: < 2s                               
+  Notes: Up to 1000 records                  
+  ────────────────────────────────────────   
+  Metric: XLSX Export                        
+  Target: < 3s                               
+  Notes: Multi-tab workbook                  
+  ────────────────────────────────────────   
+  Metric: Frontend Load                      
+  Target: < 1s                               
+  Notes: Initial page render                 
+  ────────────────────────────────────────   
+  Metric: Chart Render                       
+  Target: < 500ms                            
+  Notes: Recharts animation                  
+  ---                                        
+  📁 Complete File List                      
+                                             
+  Backend (already committed):               
+  - server/routes/investigation.ts (modified,
+   +452 lines)                               
+  - server/utils/investigation-export.ts     
+  (new, 239 lines)                           
+                                             
+  Frontend (just committed):                 
+  - client/src/pages/InvestigationHistoryPage
+  .tsx (new, 377 lines)                      
+  - client/src/components/investigation/Inves
+  tigationHistoryTable.tsx (new, 300 lines)  
+  - client/src/components/investigation/Inves
+  tigationTimelineChart.tsx (new, 132 lines) 
+  -                                          
+  client/src/hooks/useInvestigationHistory.ts
+   (new, 102 lines)                          
+  - client/src/lib/format.ts (modified, +8   
+  lines)                                     
+  - client/src/App.tsx (modified, +3 lines)  
+  - client/src/components/assistant/Proactive
+  Briefing.tsx (modified, +19 lines)         
+                                             
+  Total: 1,629 lines across backend +        
+  frontend                                   
+                                             
+  ---                                        
+  🚀 Ready to Push?                          
+                                             
+  git push origin main                       
+                                             
+  All Week 4 features are complete and       
+  tested! 🎉
