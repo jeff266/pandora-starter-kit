@@ -14,6 +14,7 @@ import { getSkillRegistry } from '../skills/registry.js';
 import { createConversationState, getConversationState, appendMessage } from '../chat/conversation-state.js';
 import { buildWorkspaceContextBlock } from '../context/workspace-memory.js';
 import { getOrAssembleBrief, renderBriefContext, BRIEF_SYSTEM_PROMPT } from '../context/opening-brief.js';
+import { runPandoraAgent } from '../chat/pandora-agent.js';
 import type { InvestigationStep } from '../goals/types.js';
 
 const router = Router();
@@ -324,10 +325,29 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
         sse(res, { type: 'synthesis_chunk', text: synthesis.text });
         sse(res, { type: 'synthesis_done', full_text: synthesis.text, response_id: tier1ResponseId });
       } else {
-        assistantResponse = 'I don\'t have recent data for that — try running a skill scan first.';
+        // No skill run found — fall through to the tool-calling agent for live data
+        const pandoraT1 = await runPandoraAgent(
+          workspaceId,
+          message,
+          (history as Array<{ role: string; content: string }>).map(m => ({
+            role: m.role as 'user' | 'assistant',
+            content: m.content,
+          }))
+        );
+        assistantResponse = pandoraT1.answer;
         const tier1NoRunId = randomUUID();
-        sse(res, { type: 'synthesis_chunk', text: assistantResponse });
-        sse(res, { type: 'synthesis_done', full_text: assistantResponse, response_id: tier1NoRunId });
+        sse(res, { type: 'synthesis_chunk', text: pandoraT1.answer });
+        sse(res, { type: 'synthesis_done', full_text: pandoraT1.answer, response_id: tier1NoRunId });
+        if (pandoraT1.evidence.cited_records.length > 0) {
+          sse(res, {
+            type: 'evidence',
+            cards: pandoraT1.evidence.cited_records.slice(0, 3).map(r => ({
+              id: r.id, title: r.name, severity: 'info' as const,
+              operator_name: 'Pandora',
+              body: Object.entries(r.key_fields).map(([k, v]) => `${k}: ${v}`).join(', '),
+            })),
+          });
+        }
       }
     }
 
@@ -357,33 +377,37 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
       }
 
       if (usedFallback) {
-        // Fallback: direct LLM response with no operator framing
+        // Fallback: route to the tool-calling agent so live data is available
         for (const op of FALLBACK_OPERATORS) {
           sse(res, { type: 'recruiting', agent_id: op.id, agent_name: op.name, icon: op.icon, color: op.color, task: op.task });
           sse(res, { type: 'agent_thinking', agent_id: op.id });
-          sse(res, { type: 'agent_found', agent_id: op.id, finding_preview: 'Reviewing available data' });
+          sse(res, { type: 'agent_found', agent_id: op.id, finding_preview: 'Pulling live data' });
           sse(res, { type: 'agent_done', agent_id: op.id, finding: { agent_id: op.id, agent_name: op.name, summary: 'Analysis complete', severity: 'info' } });
         }
 
         sse(res, { type: 'synthesis_start' });
 
-        const { default: Anthropic } = await import('@anthropic-ai/sdk');
-        const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY || process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY });
-        const chatMessages = [
-          ...(history as { role: string; content: string }[]).filter((m) => m.role && m.content).map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
-          { role: 'user' as const, content: message },
-        ];
-        const stream = anthropic.messages.stream({ model: 'claude-sonnet-4-5', max_tokens: 512, system: `You are Pandora, a RevOps intelligence assistant. Answer concisely in 2-4 sentences. Be specific.${contextBlock ? `\n\n${contextBlock}` : ''}`, messages: chatMessages });
-        let fullText = '';
-        for await (const event of stream) {
-          if (event.type === 'content_block_delta' && event.delta.type === 'text_delta' && event.delta.text) {
-            fullText += event.delta.text;
-            sse(res, { type: 'synthesis_chunk', text: event.delta.text });
-          }
-        }
-        assistantResponse = fullText;
+        const pandoraFallback = await runPandoraAgent(
+          workspaceId,
+          message,
+          (history as Array<{ role: string; content: string }>)
+            .filter(m => m.role && m.content)
+            .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }))
+        );
+        assistantResponse = pandoraFallback.answer;
         const fallbackResponseId = randomUUID();
-        sse(res, { type: 'synthesis_done', full_text: fullText, response_id: fallbackResponseId });
+        sse(res, { type: 'synthesis_chunk', text: pandoraFallback.answer });
+        sse(res, { type: 'synthesis_done', full_text: pandoraFallback.answer, response_id: fallbackResponseId });
+        if (pandoraFallback.evidence.cited_records.length > 0) {
+          sse(res, {
+            type: 'evidence',
+            cards: pandoraFallback.evidence.cited_records.slice(0, 3).map(r => ({
+              id: r.id, title: r.name, severity: 'info' as const,
+              operator_name: 'Pandora',
+              body: Object.entries(r.key_fields).map(([k, v]) => `${k}: ${v}`).join(', '),
+            })),
+          });
+        }
       } else {
         // Investigation path (Tier 2 or Tier 3)
         for (const step of plan!.steps) {

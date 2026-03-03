@@ -10,6 +10,7 @@
 import { callLLM, type ToolDef, type LLMCallOptions } from '../utils/llm-router.js';
 import { executeDataTool } from './data-tools.js';
 import type { ConversationMessage } from './conversation-state.js';
+import { buildWorkspaceContextBlock } from '../context/workspace-memory.js';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -713,6 +714,29 @@ You have tools that query the company's live data. When someone asks a question,
 
 23. DEAL OUTCOMES: When asked about closed deals, win/loss patterns, or score validation, use query_deal_outcomes. Returns historical outcome data with scores at time of close. Useful for understanding what score ranges predict wins vs losses.
 
+## Output Structure
+
+For pipeline, forecast, and performance questions — three parts:
+1. State of play: what the numbers actually show, including what is working. One to two sentences.
+2. The gap or risk: what is behind, stale, or exposed. Specific — name the deals, reps, amounts.
+3. Options: two or three concrete moves the person can make this week. Not generic advice. Actual choices: which deals to push, which reps to call, which numbers to pull.
+
+For deal questions: current state (stage, age, amount, owner) then the risk or concern, then what to do about it.
+For rep questions: who is on pace and why, then who is behind and by how much, then specific coaching moves.
+
+## Language
+
+- Write short declarative sentences. Use periods. No em dashes.
+- No antithesis constructions ("X is not Y, it is Z" / "That is not a data problem, it is a pipeline problem").
+- No dramatic setup phrases ("But the data tells a different story", "Here is the reality", "What this reveals is").
+- No rhetorical conclusions ("Either way", "The bottom line is", "Ultimately", "What this means is").
+- No filler openers ("Worth noting that", "Notably", "It is worth mentioning").
+- No indirect hedges when the data is available ("This suggests", "This indicates", "This appears to") — if you called a tool, state what it shows.
+- No performative summaries that restate what was just said in a more dramatic form.
+- Numbers and specifics first. Context after. Never bury the lead.
+- If the picture is mixed, say so plainly: "Three reps are on pace. Two are behind — Reed at 34% with 8 weeks left, Carter at 41%."
+- Do not start your response by echoing back the question or task.
+
 ## Follow-Up Questions
 
 After your answer, on a new line starting with "FOLLOWUPS:", suggest 2-3 natural follow-up questions the user might ask next, separated by pipes (|). Questions must be answerable by your available tools — do not suggest questions requiring data you cannot access. Cap at 3 questions.
@@ -825,6 +849,11 @@ export async function runPandoraAgent(
   const toolTrace: PandoraToolCall[] = [];
   let totalTokens = 0;
 
+  const contextBlock = await buildWorkspaceContextBlock(workspaceId).catch(() => '');
+  const effectiveSystemPrompt = contextBlock
+    ? `${PANDORA_SYSTEM_PROMPT}\n\n${contextBlock}`
+    : PANDORA_SYSTEM_PROMPT;
+
   const classification = await classifyQuestion(workspaceId, message);
   console.log(`[PandoraAgent] classification:`, JSON.stringify(classification));
   const dynamicMaxTokens = classification.token_budget;
@@ -851,7 +880,7 @@ export async function runPandoraAgent(
     console.log(`[PandoraAgent] tools:`, PANDORA_TOOLS.map(t => t.name).join(', '));
 
     const response = await callLLM(workspaceId, 'reason', {
-      systemPrompt: PANDORA_SYSTEM_PROMPT,
+      systemPrompt: effectiveSystemPrompt,
       messages,
       tools: PANDORA_TOOLS,
       maxTokens: dynamicMaxTokens,
@@ -967,7 +996,7 @@ export async function runPandoraAgent(
 
   // Hit max iterations — force a final synthesis with no tools
   const finalResponse = await callLLM(workspaceId, 'reason', {
-    systemPrompt: PANDORA_SYSTEM_PROMPT,
+    systemPrompt: effectiveSystemPrompt,
     messages: [
       ...messages,
       { role: 'user', content: 'You have reached the maximum number of tool calls. Synthesize your best answer from the data gathered so far.' },
