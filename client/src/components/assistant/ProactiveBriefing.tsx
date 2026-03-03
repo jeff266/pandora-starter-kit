@@ -50,6 +50,7 @@ interface ProactiveBriefingProps {
   onInvestigatePath: (path: InvestigationPath) => void;
   onEscalate?: () => void;
   onAskPandora: () => void;
+  onQuestionClick?: (question: string) => void;
   investigationStatus?: Map<string, {
     jobId: string;
     status: 'pending' | 'running' | 'completed' | 'failed';
@@ -91,6 +92,7 @@ export default function ProactiveBriefing({
   onInvestigatePath,
   onEscalate,
   onAskPandora,
+  onQuestionClick,
   investigationStatus,
 }: ProactiveBriefingProps) {
   const [expandedPath, setExpandedPath] = useState<number | null>(null);
@@ -420,7 +422,7 @@ export default function ProactiveBriefing({
             return (
               <button
                 key={index}
-                onClick={() => onAskPandora()}
+                onClick={() => onQuestionClick ? onQuestionClick(question) : onAskPandora()}
                 onMouseEnter={() => setHoveredQuestion(index)}
                 onMouseLeave={() => setHoveredQuestion(null)}
                 style={{

@@ -392,6 +392,7 @@ export default function AssistantView() {
             greeting={greeting}
             onInvestigatePath={handleInvestigateSkill}
             investigationStatus={investigationJobs}
+            onQuestionClick={handleSend}
             onEscalate={() => {
               // TODO: Implement escalation alert
               alert('Escalation feature coming soon');
