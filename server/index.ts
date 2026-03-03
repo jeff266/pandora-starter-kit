@@ -117,6 +117,7 @@ import forecastCategoryWeightedRouter from './routes/forecast-category-weighted.
 import forecastTTERouter from './routes/forecast-tte.js';
 import briefingRouter from './routes/briefing.js';
 import investigationRouter from './routes/investigation.js';
+import jobsRouter from './routes/jobs.js';
 import briefsRouter from './routes/briefs.js';
 import onboardingRouter from './routes/onboarding.js';
 import viewPreferenceRouter from './routes/view-preference.js';
@@ -353,6 +354,9 @@ app.use("/api/workspaces", workspaceApiRouter);
 
 // Webhooks router - intentionally public with token validation in handlers
 app.use("/api/webhooks", webhooksRouter);
+
+// Jobs router - global job status endpoint
+app.use("/api/jobs", jobsRouter);
 
 // Quotas router - has requireWorkspaceAccess middleware internally
 app.use("/api", quotasRouter);

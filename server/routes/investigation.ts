@@ -1,10 +1,10 @@
 import { Router, Request, Response } from 'express';
-import { JobQueue } from '../jobs/queue.js';
+import { getJobQueue } from '../jobs/queue.js';
 import { query } from '../db.js';
 import type { InvestigationPath } from '../briefing/greeting-engine.js';
 
 const router = Router();
-const jobQueue = new JobQueue();
+const jobQueue = getJobQueue();
 
 router.post('/:workspaceId/investigation/trigger-skill', async (req: Request, res: Response): Promise<void> => {
   try {
