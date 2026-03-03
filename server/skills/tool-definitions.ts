@@ -2251,10 +2251,31 @@ const checkQuotaConfig: ToolDefinition = {
         }
 
         if (targetsQuota > 0) {
+          const pipelineRows = await query<{ pipeline_id: string; pipeline_name: string; pipeline_quota: string }>(
+            `SELECT
+               COALESCE(pipeline_id, '__workspace__') AS pipeline_id,
+               COALESCE(pipeline_name, 'All Pipelines') AS pipeline_name,
+               COALESCE(SUM(amount), 0)::numeric AS pipeline_quota
+             FROM targets
+             WHERE workspace_id = $1
+               AND is_active = true
+               AND period_start <= CURRENT_DATE
+               AND period_end >= CURRENT_DATE
+             GROUP BY pipeline_id, pipeline_name`,
+            [context.workspaceId]
+          );
+          const byPipeline = pipelineRows.rows
+            .filter((r: any) => r.pipeline_id !== '__workspace__')
+            .map((r: any) => ({
+              pipeline_id: r.pipeline_id,
+              pipeline_name: r.pipeline_name,
+              quota: Number(r.pipeline_quota),
+            }));
           return {
             hasQuotas: true,
             hasRepQuotas: false,
             teamQuota: targetsQuota,
+            byPipeline: byPipeline.length > 0 ? byPipeline : null,
             repQuotas: null,
             coverageTarget,
             source: 'targets_table' as const,
@@ -2749,6 +2770,42 @@ const forecastRollup: ToolDefinition = {
       );
       const stageClosedWon = Number((stageAttainmentResult.rows[0] as any)?.total ?? 0);
 
+      // Per-pipeline closed won (for attainment breakdown)
+      const cwByPipelineResult = await query(
+        `SELECT COALESCE(scope_id, 'unknown') AS scope_id, COALESCE(SUM(amount), 0) AS total
+         FROM deals
+         WHERE workspace_id = $1
+           AND stage_normalized = 'closed_won'
+           AND close_date >= '${quarterStart}'
+           AND close_date <= '${quarterEnd}'${dealOwnerClause}
+         GROUP BY scope_id`,
+        [context.workspaceId]
+      );
+      const closedWonByPipeline: Record<string, number> = {};
+      for (const row of (cwByPipelineResult as any).rows) {
+        if (row.scope_id) closedWonByPipeline[row.scope_id] = Number(row.total);
+      }
+
+      // Deal-level rows backing the closed won total (for evidence transparency)
+      const closedWonDealsResult = await query(
+        `SELECT name, amount, scope_id, owner, close_date, forecast_category
+         FROM deals
+         WHERE workspace_id = $1
+           AND stage_normalized = 'closed_won'
+           AND close_date >= '${quarterStart}'
+           AND close_date <= '${quarterEnd}'${dealOwnerClause}
+         ORDER BY close_date DESC, amount DESC`,
+        [context.workspaceId]
+      );
+      const closedWonDeals = (closedWonDealsResult as any).rows.map((r: any) => ({
+        name: r.name,
+        amount: Number(r.amount),
+        scope_id: r.scope_id,
+        owner: r.owner,
+        close_date: r.close_date ? new Date(r.close_date).toISOString().split('T')[0] : null,
+        forecast_category: r.forecast_category,
+      }));
+
       const teamResult = await query(
         `SELECT
           forecast_category,
@@ -3113,6 +3170,22 @@ const forecastRollup: ToolDefinition = {
         byRep,
         icpForecast,
         rfmQuality,
+        closedWonByPipeline,
+        closedWonDeals,
+        queriesRun: [
+          {
+            label: `Stage: Closed Won (${quarterStart} to ${quarterEnd})`,
+            description: `Deals where stage_normalized = closed_won and close_date within quarter`,
+            rowCount: closedWonDeals.length,
+            total: stageClosedWon,
+          },
+          {
+            label: `Forecast Category: Closed (${quarterStart} to ${quarterEnd})`,
+            description: `Deals with forecast_category = 'closed' and close_date within quarter (Core Sales Pipeline method)`,
+            rowCount: categories.closed.count,
+            total: categories.closed.amount,
+          },
+        ],
       };
     }, params);
   },
@@ -3232,6 +3305,27 @@ const prepareForecastSummary: ToolDefinition = {
         quotaNote = 'NOTE: Team quota is set but per-rep quotas are not configured. Rep-level attainment is unavailable.';
       }
 
+      // Pipeline-scoped attainment breakdown
+      let pipelineAttainment = '';
+      const byPipeline: Array<{ pipeline_id: string; pipeline_name: string; quota: number }> = quotaConfig?.byPipeline || [];
+      if (byPipeline.length > 0) {
+        const closedWonByPipeline: Record<string, number> = forecast.closedWonByPipeline || {};
+        const lines: string[] = byPipeline.map((p) => {
+          const cw = closedWonByPipeline[p.pipeline_id] || 0;
+          const pct = p.quota > 0 ? Math.round((cw / p.quota) * 100) : null;
+          return `${p.pipeline_name}: ${fmt(cw)} closed / ${fmt(p.quota)} quota${pct !== null ? ` (${pct}% attained)` : ''}`;
+        });
+        const quotedIds = new Set(byPipeline.map((p) => p.pipeline_id));
+        for (const [pid, amount] of Object.entries(closedWonByPipeline)) {
+          if (!quotedIds.has(pid) && (amount as number) > 0) {
+            lines.push(`${pid}: ${fmt(amount as number)} closed won / no quota set`);
+          }
+        }
+        pipelineAttainment = lines.join('\n');
+        const quotedPipelineNames = byPipeline.map((p) => p.pipeline_name).join(', ');
+        quotaNote = `NOTE: Quota applies to ${quotedPipelineNames} only. Other pipelines contribute to closed won totals but have no quota — exclude them from attainment calculations.`;
+      }
+
       const dealCounts = forecast.dealCount;
       let countsLine = `Deals — Closed: ${dealCounts.closed} | Commit: ${dealCounts.commit} | Best Case: ${dealCounts.bestCase} | Pipeline: ${dealCounts.pipeline} | Not Forecasted: ${dealCounts.notForecasted} | Total: ${dealCounts.total}`;
 
@@ -3294,6 +3388,7 @@ const prepareForecastSummary: ToolDefinition = {
 
       const result: Record<string, any> = {
         quotaNote,
+        pipelineAttainment: pipelineAttainment || null,
         teamSummary,
         dealCounts: countsLine,
         repTable: repRows || 'No rep data available.',

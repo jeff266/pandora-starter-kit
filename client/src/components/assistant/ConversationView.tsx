@@ -19,6 +19,8 @@ interface ConversationViewProps {
 export default function ConversationView({ initialMessage, onBack }: ConversationViewProps) {
   const { state, sendMessage, dismissAction, loadHistory, startNewThread } = useConversationStream();
   const bottomRef = useRef<HTMLDivElement>(null);
+  const latestAnswerRef = useRef<HTMLDivElement>(null);
+  const prevPhaseRef = useRef<string>('idle');
   const sentRef = useRef(false);
   const historyLoadedRef = useRef(false);
   const sentMessagesRef = useRef<Set<string>>(new Set());
@@ -61,8 +63,18 @@ export default function ConversationView({ initialMessage, onBack }: Conversatio
   }, [initialMessage, handleSendWithTracking, loadHistory]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [state.messages, state.synthesisText, state.evidenceCards, state.actions, state.deliverableOptions]);
+    const justCompleted =
+      prevPhaseRef.current !== 'complete' &&
+      prevPhaseRef.current !== 'idle' &&
+      state.phase === 'complete';
+    prevPhaseRef.current = state.phase;
+
+    if (justCompleted) {
+      setTimeout(() => latestAnswerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
+    } else if (state.phase !== 'complete' && state.phase !== 'idle') {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [state.messages, state.synthesisText, state.evidenceCards, state.actions, state.deliverableOptions, state.phase]);
 
   const handleBack = () => {
     onBack();
@@ -166,7 +178,7 @@ export default function ConversationView({ initialMessage, onBack }: Conversatio
         ))}
 
         {state.activeOperators.length > 0 && (
-          <div style={{ marginBottom: 16 }}>
+          <div ref={latestAnswerRef} style={{ marginBottom: 16 }}>
             <div style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
               Consulting Operators
             </div>
@@ -179,7 +191,7 @@ export default function ConversationView({ initialMessage, onBack }: Conversatio
         )}
 
         {(state.phase === 'synthesis' || (state.synthesisComplete && state.synthesisText)) && state.messages.every(m => m.role !== 'assistant' || m.content !== state.synthesisText) && (
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 12 }}>
+          <div ref={state.activeOperators.length === 0 ? latestAnswerRef : undefined} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 12 }}>
             <div style={{
               width: 26, height: 26, borderRadius: '50%', flexShrink: 0, marginTop: 2,
               background: 'linear-gradient(135deg, #48af9b 0%, #3a7fc1 100%)',

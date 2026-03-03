@@ -190,6 +190,12 @@ Note: Forecast based on file-imported data, not live CRM sync.
 
 {{forecast_summary.quotaNote}}
 
+{{#if forecast_summary.pipelineAttainment}}
+PIPELINE-SCOPED ATTAINMENT:
+{{forecast_summary.pipelineAttainment}}
+(Quota applies only to the pipeline(s) listed with a quota. Pipelines without a quota should never be used in attainment calculations.)
+{{/if}}
+
 TIME WINDOW:
 {{time_windows.analysisRange.quarter}} ({{time_windows.analysisRange.start}} to {{time_windows.analysisRange.end}})
 
@@ -260,7 +266,7 @@ OUTPUT GUIDANCE:
 STRUCTURE YOUR REPORT:
 1. Forecast summary: closed-won to date, commit pipeline, best case, total open. Compare each to last week.
 2. Category movement: deals that changed forecast category this week (upgrades and downgrades). Only the meaningful ones.
-3. Pacing: are we ahead or behind where we should be at this point in the quarter? Simple math, no drama.
+3. Pacing: use the PIPELINE-SCOPED ATTAINMENT block above. For pipelines with a quota, show closed-won vs. quota with the percentage. For pipelines without a quota, state their closed-won total separately — never roll them into the attainment percentage. The combined closed-won total is informative context, not an attainment number.
 4. Concentration: if any single deal represents >20% of remaining quota, note it factually. It's worth knowing, not worth panicking about.
 5. Reps at risk: anyone pacing below 70% of their target with less than adequate pipeline. Pair with what they'd need to close the gap.
 6. Key deals to watch: the 3-5 deals whose outcomes will most affect the quarter. Include amount, stage, forecast category, and next step.

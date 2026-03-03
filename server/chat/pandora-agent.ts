@@ -1084,6 +1084,12 @@ function compressToolResult(toolName: string, result: any): any {
           account_name: d.account_name,
           forecast_category: d.forecast_category,
         }));
+        const rowsAmount = result.deals.reduce((s: number, d: any) => s + (Number(d.amount) || 0), 0);
+        compressed._computed = {
+          rows_shown: result.deals.length,
+          sum_of_rows_shown: rowsAmount,
+          note: `IMPORTANT: Use rows_shown=${result.deals.length} and sum_of_rows_shown=$${rowsAmount.toLocaleString()} for this response. Do NOT carry over totals from earlier in the conversation.`,
+        };
       }
       return compressed;
     }
