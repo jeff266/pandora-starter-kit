@@ -6682,7 +6682,14 @@ const mcResolveForecastWindow: ToolDefinition = {
   execute: async (_params, context) => {
     return safeExecute('mcResolveForecastWindow', async () => {
       const today = new Date();
-      const forecastWindowEnd = new Date(today.getFullYear(), 11, 31);
+      // Default to calendar year-end; honour any forecastWindowEnd passed via context.params
+      // (e.g. when triggered for a specific fiscal quarter from the UI or the pipeline cron).
+      let forecastWindowEnd = new Date(today.getFullYear(), 11, 31);
+      const paramEnd = context.params?.forecastWindowEnd;
+      if (paramEnd) {
+        const parsed = new Date(paramEnd);
+        if (!isNaN(parsed.getTime())) forecastWindowEnd = parsed;
+      }
       const daysRemaining = Math.max(0, Math.floor((forecastWindowEnd.getTime() - today.getTime()) / 86400000));
       const monthsRemaining = daysRemaining / 30;
 

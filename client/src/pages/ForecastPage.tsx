@@ -740,7 +740,7 @@ export default function ForecastPage() {
       await new Promise<void>((resolve) => {
         const poll = setInterval(async () => {
           try {
-            const path = `/monte-carlo/latest?pipeline=${encodeURIComponent(selectedPipeline)}&quarterEnd=${encodeURIComponent(weekInfo.quarterEndISO)}`;
+            const path = `/monte-carlo/latest?pipeline=${encodeURIComponent(selectedPipeline)}`;
             const res: any = await api.get(path);
             const cc = res?.commandCenter;
             if (cc && typeof cc.p50 === 'number') {
@@ -769,7 +769,7 @@ export default function ForecastPage() {
       return;
     }
     const { quarterEndISO } = weekInfo;
-    const path = `/monte-carlo/latest?pipeline=${encodeURIComponent(selectedPipeline)}&quarterEnd=${encodeURIComponent(quarterEndISO)}`;
+    const path = `/monte-carlo/latest?pipeline=${encodeURIComponent(selectedPipeline)}`;
     api.get(path)
       .then((res: any) => {
         const cc = res?.commandCenter;
@@ -802,7 +802,7 @@ export default function ForecastPage() {
       if (data.fiscal_year_start_month) setFiscalYearStartMonth(data.fiscal_year_start_month);
       // Re-fetch pipeline MC now that a fresh run exists
       if (selectedPipeline !== 'all') {
-        const path = `/monte-carlo/latest?pipeline=${encodeURIComponent(selectedPipeline)}&quarterEnd=${encodeURIComponent(weekInfo.quarterEndISO)}`;
+        const path = `/monte-carlo/latest?pipeline=${encodeURIComponent(selectedPipeline)}`;
         api.get(path)
           .then((res: any) => {
             const cc = res?.commandCenter;

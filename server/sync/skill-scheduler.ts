@@ -182,6 +182,85 @@ export async function runScheduledSkills(
   return results;
 }
 
+// ─── Per-pipeline MC helpers ──────────────────────────────────────────────────
+
+/** Returns the last day of the current calendar quarter as YYYY-MM-DD. */
+function currentQuarterEnd(): string {
+  const now = new Date();
+  const m = now.getMonth(); // 0-based
+  const y = now.getFullYear();
+  if (m < 3)  return `${y}-03-31`;
+  if (m < 6)  return `${y}-06-30`;
+  if (m < 9)  return `${y}-09-30`;
+  return `${y}-12-31`;
+}
+
+/**
+ * Run monte-carlo-forecast once per confirmed pipeline scope for a workspace.
+ * Skips the hasRecentRun and pre-skill-sync guards (the global run already synced).
+ * Called after the regular scheduled batch when MC is included in that batch.
+ */
+async function runMcForPipelines(workspaceId: string, workspaceName: string): Promise<void> {
+  const scopes = await getActiveScopes(workspaceId).catch(() => [DEFAULT_SCOPE]);
+  const nonDefault = scopes.filter(s => s.scope_id !== 'default');
+  if (nonDefault.length === 0) return;
+
+  const registry = getSkillRegistry();
+  const skill = registry.get('monte-carlo-forecast');
+  if (!skill) return;
+
+  const runtime = getSkillRuntime();
+  const quarterEnd = currentQuarterEnd();
+
+  console.log(`[MC Scheduler] Running pipeline-scoped MC for workspace ${workspaceName} — ${nonDefault.length} pipeline(s), quarterEnd=${quarterEnd}`);
+
+  for (const scope of nonDefault) {
+    console.log(`[MC Scheduler] Pipeline: ${scope.name} (${scope.scope_id})`);
+    try {
+      const params = {
+        pipelineFilter: scope.scope_id,
+        forecastWindowEnd: quarterEnd,
+      };
+      const result = await runtime.executeSkill(skill, workspaceId, params);
+      await query(
+        `INSERT INTO skill_runs (
+          run_id, workspace_id, skill_id, status, trigger_type, params,
+          result, output, output_text, steps, token_usage, duration_ms,
+          error, started_at, completed_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        ON CONFLICT (run_id) DO UPDATE SET
+          status = EXCLUDED.status, result = EXCLUDED.result, output = EXCLUDED.output,
+          output_text = EXCLUDED.output_text, steps = EXCLUDED.steps,
+          token_usage = EXCLUDED.token_usage, duration_ms = EXCLUDED.duration_ms,
+          error = EXCLUDED.error, completed_at = EXCLUDED.completed_at`,
+        [
+          result.runId, workspaceId, skill.id, result.status, 'scheduled',
+          JSON.stringify(params),
+          result.stepData ? JSON.stringify(result.stepData) : null,
+          result.output ? JSON.stringify(result.output) : null,
+          result.output ? (typeof result.output === 'string' ? result.output : JSON.stringify(result.output)) : null,
+          JSON.stringify(result.steps),
+          JSON.stringify(result.totalTokenUsage),
+          result.totalDuration_ms,
+          result.errors?.length ? result.errors.map((e: any) => `${e.step}: ${e.error}`).join('; ') : null,
+          result.completedAt,
+          result.completedAt,
+        ]
+      );
+      console.log(`[MC Scheduler] ✓ ${scope.name} pipeline MC completed (runId: ${result.runId})`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[MC Scheduler] ✗ ${scope.name} pipeline MC failed:`, msg);
+    }
+
+    // 60s gap between pipeline runs to avoid LLM rate limits
+    if (scope !== nonDefault[nonDefault.length - 1]) {
+      await new Promise(resolve => setTimeout(resolve, 60_000));
+    }
+  }
+}
+
 /**
  * Start the skill scheduler
  */
@@ -238,6 +317,12 @@ export function startSkillScheduler(): void {
             const scopeLabel = scope.scope_id !== 'default' ? ` [scope: ${scope.name}]` : '';
             console.log(`[Skill Scheduler] Processing workspace: ${workspace.name}${scopeLabel} (${workspace.id})`);
             await runScheduledSkills(workspace.id, skillIds, 'scheduled', scope);
+          }
+
+          // After the global MC run, fire one pipeline-scoped MC run per confirmed pipeline.
+          // This ensures MC P50/Range is pre-populated for every pipeline filter on the Forecast page.
+          if (skillIds.includes('monte-carlo-forecast')) {
+            await runMcForPipelines(workspace.id, workspace.name);
           }
         }
 
