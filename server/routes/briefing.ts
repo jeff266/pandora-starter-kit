@@ -1,9 +1,10 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { generateGreeting } from '../briefing/greeting-engine.js';
 import { getOperatorStatuses } from '../briefing/operator-status.js';
 import { query } from '../db.js';
-import { getPandoraRole } from '../context/pandora-role.js';
+import { getPandoraRole, type PandolaRole } from '../context/pandora-role.js';
 import { computeTemporalContext } from '../context/opening-brief.js';
+import { requireWorkspaceAccess } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -22,19 +23,56 @@ async function getUserFirstName(workspaceId: string, userId?: string): Promise<s
   return undefined;
 }
 
-router.get('/:workspaceId/briefing/greeting', async (req: Request, res: Response): Promise<void> => {
+// Optional auth middleware for development testing
+const optionalAuth = (req: Request, res: Response, next: NextFunction) => {
+  // In development, allow unauthenticated access if test params present
+  const hasTestParams = req.query.role || req.query.quarterPhase || req.query.daysRemaining;
+  const isDev = process.env.NODE_ENV !== 'production';
+
+  if (isDev && hasTestParams) {
+    return next(); // Skip auth for testing
+  }
+
+  // Otherwise require normal auth
+  return requireWorkspaceAccess(req, res, next);
+};
+
+router.get('/:workspaceId/briefing/greeting', optionalAuth, async (req: Request, res: Response): Promise<void> => {
   try {
     const workspaceId = req.params.workspaceId as string;
     const userId = (req as any).user?.user_id;
-    const [firstName, roleResult, temporal] = await Promise.all([
-      getUserFirstName(workspaceId, userId),
-      userId ? getPandoraRole(workspaceId, userId).catch(() => null) : Promise.resolve(null),
-      computeTemporalContext(workspaceId).catch(() => null),
-    ]);
-    const pandoraRole = roleResult?.pandoraRole ?? null;
+
+    // Parse query params
     const rawHour = parseInt(req.query.localHour as string, 10);
     const localHour = (!isNaN(rawHour) && rawHour >= 0 && rawHour <= 23) ? rawHour : undefined;
-    const payload = await generateGreeting(workspaceId, firstName, localHour, pandoraRole, temporal ?? undefined);
+
+    // Test parameter overrides
+    const roleOverride = req.query.role as PandolaRole | undefined;
+    const quarterPhaseOverride = req.query.quarterPhase as 'early' | 'mid' | 'late' | 'final_week' | undefined;
+    const daysRemainingOverride = req.query.daysRemaining ? parseInt(req.query.daysRemaining as string, 10) : undefined;
+
+    // Fetch real data (with conditional userId for test mode)
+    const [firstName, roleResult, temporal] = await Promise.all([
+      getUserFirstName(workspaceId, userId),
+      roleOverride ? Promise.resolve({ pandoraRole: roleOverride }) :
+        (userId ? getPandoraRole(workspaceId, userId).catch(() => null) : Promise.resolve(null)),
+      computeTemporalContext(workspaceId).catch(() => null),
+    ]);
+
+    // Apply overrides
+    let finalRole: PandolaRole | null = roleOverride ?? roleResult?.pandoraRole ?? null;
+    let finalTemporal = temporal ?? undefined;
+
+    // If temporal overrides provided, patch the temporal context
+    if ((quarterPhaseOverride || daysRemainingOverride !== undefined) && temporal) {
+      finalTemporal = {
+        ...temporal,
+        ...(quarterPhaseOverride && { quarterPhase: quarterPhaseOverride }),
+        ...(daysRemainingOverride !== undefined && { daysRemainingInQuarter: daysRemainingOverride }),
+      };
+    }
+
+    const payload = await generateGreeting(workspaceId, firstName, localHour, finalRole, finalTemporal);
     res.json(payload);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
