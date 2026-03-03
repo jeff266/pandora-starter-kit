@@ -64,8 +64,8 @@ export interface GreetingData {
   state_summary: string;
   recency_label: string;
   severity: 'calm' | 'attention' | 'urgent';
-  week_context: string;
-  questions: string[];
+  week_context?: string;
+  questions?: string[];
   metrics: {
     pipeline_value: number;
     coverage_ratio: number;
@@ -558,7 +558,7 @@ export default function ProactiveBriefing({
           Or ask me anything
         </p>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {greeting.questions.slice(0, 4).map((question, index) => {
+          {(greeting.questions ?? []).slice(0, 4).map((question, index) => {
             const isHovered = hoveredQuestion === index;
             return (
               <button

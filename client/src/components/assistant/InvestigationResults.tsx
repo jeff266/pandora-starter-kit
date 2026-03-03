@@ -25,7 +25,7 @@ export default function InvestigationResults({
   runId,
   onClose,
 }: InvestigationResultsProps) {
-  const { workspace } = useWorkspace();
+  const { currentWorkspace: workspace } = useWorkspace();
   const [results, setResults] = React.useState<any>(null);
   const [loading, setLoading] = React.useState(true);
 

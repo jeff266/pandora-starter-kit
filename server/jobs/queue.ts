@@ -501,7 +501,7 @@ export class JobQueue {
     console.log(`[jobs] Investigation skill completed: ${skillId}`, {
       runId: result.runId,
       status: result.status,
-      duration_ms: result.duration_ms,
+      duration_ms: result.totalDuration_ms,
     });
 
     return {
@@ -509,7 +509,7 @@ export class JobQueue {
       skillId: skillId,
       status: result.status,
       output_text: result.output?.narrative || 'Investigation completed',
-      error: result.error,
+      error: result.errors?.[0]?.error ?? null,
     };
   }
 }
