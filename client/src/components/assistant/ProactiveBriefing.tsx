@@ -263,26 +263,26 @@ export default function ProactiveBriefing({
                     // If completed, show results modal
                     if (status?.status === 'completed' && status.runId) {
                       setResultsModal({ skillId: path.skill_id!, runId: status.runId });
-                    } else {
-                      // Otherwise just expand/collapse
+                    }
+                    // If running, just toggle expand to see progress
+                    else if (status?.status === 'running') {
                       setExpandedPath(expandedPath === index ? null : index);
                     }
-                  }}
-                  onDoubleClick={() => {
-                    // Don't allow double-click if already running
-                    if (status?.status !== 'running') {
+                    // If not started, trigger investigation and auto-expand
+                    else {
                       onInvestigatePath(path);
+                      setExpandedPath(index);
                     }
                   }}
                   onMouseEnter={() => setHoveredPath(index)}
                   onMouseLeave={() => setHoveredPath(null)}
-                  disabled={status?.status === 'running'}
+                  disabled={false}
                   style={{
                     padding: 12,
                     background: isHovered ? colors.surface : colors.surfaceRaised,
                     border: `1px solid ${isHovered ? colors.accent : borderColor}`,
                     borderRadius: 8,
-                    cursor: status?.status === 'running' ? 'wait' : status?.status === 'completed' ? 'pointer' : 'pointer',
+                    cursor: status?.status === 'running' ? 'wait' : 'pointer',
                     textAlign: 'left',
                     transition: 'all 0.2s',
                     opacity: status?.status === 'running' ? 0.7 : 1,
@@ -342,7 +342,7 @@ export default function ProactiveBriefing({
               textAlign: 'center',
             }}
           >
-            Click to expand · Double-click to investigate
+            Click to investigate · Results appear here when ready
           </p>
         </div>
       )}
