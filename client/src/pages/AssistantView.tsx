@@ -245,7 +245,7 @@ export default function AssistantView() {
     try {
       // Trigger background skill execution
       const response = await api.post(
-        `/workspaces/${wsId}/investigation/trigger-skill`,
+        `/investigation/trigger-skill`,
         {
           skillId: path.skill_id,
           investigationPath: path,
