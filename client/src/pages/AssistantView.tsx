@@ -236,13 +236,18 @@ export default function AssistantView() {
   }, []);
 
   const handleInvestigateSkill = async (path: InvestigationPath) => {
+    console.log('[handleInvestigateSkill] Called with path:', path);
+
     if (!path.skill_id) {
       // No skill mapped, just send question to chat
+      console.log('[handleInvestigateSkill] No skill_id, sending to chat');
       handleSend(path.question);
       return;
     }
 
     try {
+      console.log('[handleInvestigateSkill] Triggering investigation for skill:', path.skill_id);
+
       // Trigger background skill execution
       const response = await api.post(
         `/investigation/trigger-skill`,
@@ -257,14 +262,19 @@ export default function AssistantView() {
       );
 
       const { jobId } = response;
+      console.log('[handleInvestigateSkill] Job created:', jobId);
 
       // Track job
-      setInvestigationJobs(prev => new Map(prev).set(path.skill_id!, {
-        jobId,
-        skillId: path.skill_id!,
-        question: path.question,
-        status: 'pending',
-      }));
+      setInvestigationJobs(prev => {
+        const updated = new Map(prev).set(path.skill_id!, {
+          jobId,
+          skillId: path.skill_id!,
+          question: path.question,
+          status: 'pending',
+        });
+        console.log('[handleInvestigateSkill] Updated investigationJobs:', updated);
+        return updated;
+      });
 
       // Start polling for status
       pollInvestigationStatus(jobId, path.skill_id!);

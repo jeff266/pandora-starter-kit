@@ -260,16 +260,22 @@ export default function ProactiveBriefing({
                 <button
                   key={index}
                   onClick={() => {
+                    console.log('[ProactiveBriefing] Investigation path clicked:', path.question);
+                    console.log('[ProactiveBriefing] Current status:', status);
+
                     // If completed, show results modal
                     if (status?.status === 'completed' && status.runId) {
+                      console.log('[ProactiveBriefing] Showing results modal');
                       setResultsModal({ skillId: path.skill_id!, runId: status.runId });
                     }
                     // If running, just toggle expand to see progress
                     else if (status?.status === 'running') {
+                      console.log('[ProactiveBriefing] Toggling expand while running');
                       setExpandedPath(expandedPath === index ? null : index);
                     }
                     // If not started, trigger investigation and auto-expand
                     else {
+                      console.log('[ProactiveBriefing] Triggering investigation');
                       onInvestigatePath(path);
                       setExpandedPath(index);
                     }
