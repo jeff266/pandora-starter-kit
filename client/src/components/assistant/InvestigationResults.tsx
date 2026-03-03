@@ -30,15 +30,22 @@ export default function InvestigationResults({
   const [loading, setLoading] = React.useState(true);
 
   React.useEffect(() => {
+    if (!workspace?.id) return;
     async function fetchResults() {
       try {
-        const response = await fetch(
-          `/api/workspaces/${workspace?.id}/investigation/results/${runId}`
-        );
+        const url = `/api/workspaces/${workspace!.id}/investigation/results/${runId}`;
+        console.log('[InvestigationResults] Fetching:', url);
+        const response = await fetch(url);
+        if (!response.ok) {
+          console.error('[InvestigationResults] HTTP error:', response.status);
+          setResults({ error: `HTTP ${response.status}` });
+          return;
+        }
         const data = await response.json();
         setResults(data);
       } catch (err) {
-        console.error('Failed to fetch results:', err);
+        console.error('[InvestigationResults] Failed to fetch results:', err);
+        setResults({ error: 'Network error' });
       } finally {
         setLoading(false);
       }

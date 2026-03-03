@@ -29,6 +29,7 @@ export interface ProactiveBriefingData {
   deltas?: {
     since_label: string;
     new_critical_count: number;
+    total_at_risk: number;
     improved_count: number;
     worsened_investigations: string[];
   };
@@ -205,7 +206,7 @@ export default function ProactiveBriefing({
       </div>
 
       {/* Delta Alert */}
-      {briefing?.deltas && briefing.deltas.new_critical_count > 0 && (
+      {briefing?.deltas && (briefing.deltas.new_critical_count > 0 || (briefing.deltas.total_at_risk ?? 0) > 0) && (
         <div
           style={{
             padding: 12,
@@ -218,7 +219,7 @@ export default function ProactiveBriefing({
             gap: 8,
           }}
         >
-          <span style={{ fontSize: 16 }}>🆕</span>
+          <span style={{ fontSize: 16 }}>{briefing.deltas.new_critical_count > 0 ? '🆕' : '⚠️'}</span>
           <div style={{ flex: 1 }}>
             <div style={{
               fontFamily: fonts.sans,
@@ -227,7 +228,10 @@ export default function ProactiveBriefing({
               lineHeight: 1.4,
               color: colors.text,
             }}>
-              {briefing.deltas.new_critical_count} new issue{briefing.deltas.new_critical_count > 1 ? 's' : ''} detected {briefing.deltas.since_label.toLowerCase()}
+              {briefing.deltas.new_critical_count > 0
+                ? `${briefing.deltas.new_critical_count} new issue${briefing.deltas.new_critical_count > 1 ? 's' : ''} detected ${briefing.deltas.since_label.toLowerCase()}`
+                : `${briefing.deltas.total_at_risk} deal${(briefing.deltas.total_at_risk ?? 0) > 1 ? 's' : ''} at risk ${briefing.deltas.since_label.toLowerCase()}`
+              }
             </div>
             {briefing.deltas.improved_count > 0 && (
               <div style={{

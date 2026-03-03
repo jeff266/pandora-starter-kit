@@ -625,6 +625,9 @@ export async function generateGreeting(
   const improved_count = deltas.reduce((sum, d) =>
     sum + d.improvedDeals.length, 0
   );
+  const total_at_risk = deltas.reduce((sum, d) =>
+    sum + d.currentFindings, 0
+  );
   const worsened_investigations = deltas
     .filter(d => d.deltaSeverity === 'worsened')
     .map(d => d.skillId);
@@ -689,9 +692,10 @@ export async function generateGreeting(
         investigation_paths: investigationPaths,
         can_escalate: escalation.needed,
         escalation_path: escalation.path,
-        deltas: deltas.length > 0 ? {
+        deltas: deltas.length > 0 && total_at_risk > 0 ? {
           since_label,
           new_critical_count,
+          total_at_risk,
           improved_count,
           worsened_investigations,
         } : undefined,
