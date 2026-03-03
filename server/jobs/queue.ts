@@ -302,6 +302,8 @@ export class JobQueue {
         return await this.handleSyncJob(job);
       case 'salesforce_sync':
         return await this.handleSalesforceSyncJob(job);
+      case 'investigate_skill':
+        return await this.handleInvestigateSkillJob(job);
       default:
         throw new Error(`Unknown job type: ${job.job_type}`);
     }
@@ -423,7 +425,81 @@ export class JobQueue {
       errors: result.errors,
     };
   }
+
+  private async handleInvestigateSkillJob(job: Job): Promise<any> {
+    const { skillId, investigationPath, metadata } = job.payload;
+
+    console.log(`[jobs] Executing investigation skill: ${skillId}`, {
+      question: investigationPath.question,
+      priority: investigationPath.priority,
+    });
+
+    // Update progress: Starting
+    await this.updateProgress(job.id, {
+      current: 0,
+      total: 100,
+      message: `Starting investigation: ${investigationPath.question.substring(0, 60)}...`,
+    });
+
+    // Import skill runtime and registry
+    const { getSkillRuntime } = await import('../skills/runtime.js');
+    const { getSkillRegistry } = await import('../skills/registry.js');
+
+    const runtime = getSkillRuntime();
+    const registry = getSkillRegistry();
+
+    // Get skill definition
+    const skill = registry.get(skillId);
+    if (!skill) {
+      throw new Error(`Skill not found: ${skillId}`);
+    }
+
+    // Update progress: Running
+    await this.updateProgress(job.id, {
+      current: 50,
+      total: 100,
+      message: `Running ${skillId} skill...`,
+    });
+
+    // Execute skill with investigation context
+    const result = await runtime.executeSkill(
+      skill,
+      job.workspace_id,
+      {
+        // Pass investigation context as params
+        investigationContext: {
+          question: investigationPath.question,
+          reasoning: investigationPath.reasoning,
+          priority: investigationPath.priority,
+          ...metadata,
+        },
+      },
+      metadata.userId  // Optional user context
+    );
+
+    // Update progress: Completed
+    await this.updateProgress(job.id, {
+      current: 100,
+      total: 100,
+      message: 'Investigation completed',
+    });
+
+    console.log(`[jobs] Investigation skill completed: ${skillId}`, {
+      runId: result.runId,
+      status: result.status,
+      duration_ms: result.duration_ms,
+    });
+
+    return {
+      runId: result.runId,
+      skillId: skillId,
+      status: result.status,
+      output_text: result.output?.narrative || 'Investigation completed',
+      error: result.error,
+    };
+  }
 }
+
 
 // ============================================================================
 // Singleton Instance
