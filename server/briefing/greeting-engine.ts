@@ -1,12 +1,14 @@
 import { query } from '../db.js';
 import type { TemporalContext } from '../context/opening-brief.js';
 import type { PandolaRole } from '../context/pandora-role.js';
+import { getInvestigationDeltas } from './investigation-delta.js';
 
 export interface InvestigationPath {
   question: string;
   reasoning: string;
   skill_id?: string;
   priority: 'high' | 'medium' | 'low';
+  last_run_at?: string | null;  // Timestamp of last completed run
 }
 
 export interface TopFinding {
@@ -25,6 +27,12 @@ export interface ProactiveBriefing {
   investigation_paths: InvestigationPath[];
   can_escalate: boolean;
   escalation_path?: string;
+  deltas?: {
+    since_label: string;  // e.g., "Since yesterday 8am"
+    new_critical_count: number;
+    improved_count: number;
+    worsened_investigations: string[];  // skill names that got worse
+  };
 }
 
 export interface GreetingPayload {
@@ -246,7 +254,8 @@ function formatCurrencyShort(n: number): string {
 
 // ─── Investigation path generation ────────────────────────────────────────────
 
-function generateInvestigationPaths(
+async function generateInvestigationPaths(
+  workspaceId: string,
   role: PandolaRole,
   phase: QuarterPhase,
   metrics: {
@@ -257,14 +266,14 @@ function generateInvestigationPaths(
     deals_moved: number;
   },
   temporal?: TemporalContext
-): InvestigationPath[] {
+): Promise<InvestigationPath[]> {
   const paths: InvestigationPath[] = [];
   const daysRemaining = temporal?.daysRemainingInQuarter ?? 30;
 
   // High-risk signals detection
   const hasHighRisk = metrics.critical_count >= 3;
   const hasLowCoverage = metrics.coverage_ratio < 1.5 && phase === 'late';
-  const hasStagnation = metrics.deals_moved === 0 && temporal?.dayOfWeekLabel === 'Friday';
+  const hasStagnation = metrics.deals_moved === 0 && temporal?.dayOfWeek === 'Friday';
   const isFinalWeek = phase === 'final_week';
 
   // Role-specific investigation paths
@@ -382,13 +391,34 @@ function generateInvestigationPaths(
     });
   }
 
-  // Return top 3 paths, prioritized
-  return paths
+  // Sort and prioritize
+  const sortedPaths = paths
     .sort((a, b) => {
       const priorityOrder = { high: 0, medium: 1, low: 2 };
       return priorityOrder[a.priority] - priorityOrder[b.priority];
     })
     .slice(0, 3);
+
+  // Fetch last_run_at timestamps for each path
+  const pathsWithTimestamps = await Promise.all(
+    sortedPaths.map(async (path) => {
+      if (!path.skill_id) return path;
+
+      const lastRun = await query<{ completed_at: string }>(
+        `SELECT completed_at FROM skill_runs
+         WHERE workspace_id = $1 AND skill_id = $2 AND status = 'completed'
+         ORDER BY completed_at DESC LIMIT 1`,
+        [workspaceId, path.skill_id]
+      );
+
+      return {
+        ...path,
+        last_run_at: lastRun.rows[0]?.completed_at || null,
+      };
+    })
+  );
+
+  return pathsWithTimestamps;
 }
 
 function detectEscalationPath(
@@ -566,7 +596,8 @@ export async function generateGreeting(
   // Generate proactive investigation hints
   const daysRemaining = temporal?.daysRemainingInQuarter ?? 30;
 
-  const investigationPaths = generateInvestigationPaths(
+  const investigationPaths = await generateInvestigationPaths(
+    workspaceId,
     pandoraRole ?? null,
     phase,
     {
@@ -586,9 +617,46 @@ export async function generateGreeting(
     daysRemaining
   );
 
-  // Build top finding from greetingFindings
+  // Get investigation deltas
+  const deltas = await getInvestigationDeltas(workspaceId);
+  const new_critical_count = deltas.reduce((sum, d) =>
+    sum + d.newHighRiskDeals.length, 0
+  );
+  const improved_count = deltas.reduce((sum, d) =>
+    sum + d.improvedDeals.length, 0
+  );
+  const worsened_investigations = deltas
+    .filter(d => d.deltaSeverity === 'worsened')
+    .map(d => d.skillId);
+
+  // Determine since_label based on most recent investigation
+  let since_label = '';
+  if (deltas.length > 0) {
+    const mostRecentDelta = deltas.sort((a, b) =>
+      new Date(b.previousCompletedAt!).getTime() - new Date(a.previousCompletedAt!).getTime()
+    )[0];
+
+    if (mostRecentDelta) {
+      const hoursSince = Math.round(
+        (Date.now() - new Date(mostRecentDelta.previousCompletedAt!).getTime()) / (1000 * 60 * 60)
+      );
+      if (hoursSince < 12) since_label = 'Since this morning';
+      else if (hoursSince < 24) since_label = 'Since yesterday';
+      else since_label = `Since ${Math.round(hoursSince / 24)} days ago`;
+    }
+  }
+
+  // Build top finding - prefer delta-based finding if available
   let topFinding: TopFinding | undefined;
-  if (greetingFindings.length > 0) {
+  if (deltas.length > 0 && new_critical_count > 0) {
+    topFinding = {
+      severity: 'critical',
+      headline: `${new_critical_count} new high-risk deal${new_critical_count > 1 ? 's' : ''} detected`,
+      entity: deltas[0].newHighRiskDeals[0]?.name,
+      amount: deltas[0].newHighRiskDeals[0]?.amount,
+      category: `${since_label} (auto-investigation)`,
+    };
+  } else if (greetingFindings.length > 0) {
     const finding = greetingFindings[0];
     topFinding = {
       severity: 'critical',
@@ -621,6 +689,12 @@ export async function generateGreeting(
         investigation_paths: investigationPaths,
         can_escalate: escalation.needed,
         escalation_path: escalation.path,
+        deltas: deltas.length > 0 ? {
+          since_label,
+          new_critical_count,
+          improved_count,
+          worsened_investigations,
+        } : undefined,
       }
     : undefined;
 

@@ -15,6 +15,8 @@ import { getAgentRegistry } from '../agents/registry.js';
 import { getAgentRuntime } from '../agents/runtime.js';
 import { runDealScoreSnapshots } from '../scoring/deal-score-snapshot.js';
 import { getActiveScopes, DEFAULT_SCOPE, type ActiveScope } from '../config/scope-loader.js';
+import { SCHEDULED_INVESTIGATIONS } from '../briefing/scheduled-investigations.js';
+import { getJobQueue } from '../jobs/queue.js';
 
 interface ScheduledSkill {
   skillId: string;
@@ -507,6 +509,60 @@ export function startSkillScheduler(): void {
   );
   scheduledSkills.push({ skillId: 'brief-daily', cronExpression: '0 7 * * *', job: briefJob });
   console.log('[BriefScheduler] Registered daily brief assembly on cron 0 7 * * * (7am UTC)');
+
+  // Register scheduled investigations
+  const jobQueue = getJobQueue();
+
+  for (const investigation of SCHEDULED_INVESTIGATIONS) {
+    const investigationJob = cron.schedule(
+      investigation.cronExpression,
+      async () => {
+        console.log(`[Scheduled Investigations] Running: ${investigation.name}`);
+
+        const workspacesResult = await query<{ id: string; name: string }>(
+          `SELECT DISTINCT w.id, w.name
+           FROM workspaces w
+           INNER JOIN connections c ON c.workspace_id = w.id
+           WHERE c.status IN ('connected', 'synced', 'error')
+             AND w.status = 'active'
+           ORDER BY w.name`
+        );
+
+        for (const workspace of workspacesResult.rows) {
+          console.log(`[Scheduled Investigations] Queuing ${investigation.skillId} for ${workspace.name}`);
+
+          await jobQueue.createJob({
+            workspaceId: workspace.id,
+            jobType: 'investigate_skill',
+            payload: {
+              skillId: investigation.skillId,
+              investigationPath: {
+                question: investigation.description,
+                reasoning: `Scheduled ${investigation.name}`,
+                skill_id: investigation.skillId,
+                priority: investigation.priority,
+              },
+              metadata: {
+                triggeredFrom: 'scheduled',
+                scheduledAt: new Date().toISOString(),
+              },
+            },
+            priority: investigation.priority === 'high' ? 10 : 5,
+            maxAttempts: 1,
+          });
+        }
+      },
+      { timezone: 'UTC' }
+    );
+
+    scheduledSkills.push({
+      skillId: `investigation:${investigation.skillId}`,
+      cronExpression: investigation.cronExpression,
+      job: investigationJob,
+    });
+
+    console.log(`[Scheduled Investigations] Registered ${investigation.name} on cron ${investigation.cronExpression}`);
+  }
 
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   console.log(`[Skill Scheduler] Server timezone: ${timezone}`);

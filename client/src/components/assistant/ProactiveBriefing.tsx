@@ -7,6 +7,7 @@ export interface InvestigationPath {
   reasoning: string;
   skill_id?: string;
   priority: 'high' | 'medium' | 'low';
+  last_run_at?: string | null;
 }
 
 export interface TopFinding {
@@ -25,6 +26,12 @@ export interface ProactiveBriefingData {
   investigation_paths: InvestigationPath[];
   can_escalate: boolean;
   escalation_path?: string;
+  deltas?: {
+    since_label: string;
+    new_critical_count: number;
+    improved_count: number;
+    worsened_investigations: string[];
+  };
 }
 
 export interface GreetingData {
@@ -63,6 +70,17 @@ function formatCurrency(val: number): string {
   if (val >= 1_000_000) return `$${(val / 1_000_000).toFixed(1)}M`;
   if (val >= 1_000) return `$${(val / 1_000).toFixed(0)}K`;
   return `$${val.toFixed(0)}`;
+}
+
+function formatLastRunTime(timestamp: string): string {
+  const hoursSince = Math.round(
+    (Date.now() - new Date(timestamp).getTime()) / (1000 * 60 * 60)
+  );
+  if (hoursSince < 1) return 'less than an hour ago';
+  if (hoursSince === 1) return '1 hour ago';
+  if (hoursSince < 24) return `${hoursSince} hours ago`;
+  const daysSince = Math.round(hoursSince / 24);
+  return `${daysSince} day${daysSince > 1 ? 's' : ''} ago`;
 }
 
 function getSeverityColor(severity: 'calm' | 'attention' | 'urgent'): string {
@@ -186,6 +204,47 @@ export default function ProactiveBriefing({
         }}>{greeting.state_summary}</p>
       </div>
 
+      {/* Delta Alert */}
+      {briefing?.deltas && briefing.deltas.new_critical_count > 0 && (
+        <div
+          style={{
+            padding: 12,
+            background: 'rgba(251, 191, 36, 0.1)',
+            border: `1px solid ${colors.yellow}`,
+            borderRadius: 8,
+            marginBottom: 12,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+          }}
+        >
+          <span style={{ fontSize: 16 }}>🆕</span>
+          <div style={{ flex: 1 }}>
+            <div style={{
+              fontFamily: fonts.sans,
+              fontSize: 14,
+              fontWeight: 600,
+              lineHeight: 1.4,
+              color: colors.text,
+            }}>
+              {briefing.deltas.new_critical_count} new issue{briefing.deltas.new_critical_count > 1 ? 's' : ''} detected {briefing.deltas.since_label.toLowerCase()}
+            </div>
+            {briefing.deltas.improved_count > 0 && (
+              <div style={{
+                fontFamily: fonts.sans,
+                fontSize: 12,
+                fontWeight: 400,
+                lineHeight: 1.5,
+                color: colors.textMuted,
+                marginTop: 2,
+              }}>
+                ✅ {briefing.deltas.improved_count} issue{briefing.deltas.improved_count > 1 ? 's' : ''} resolved
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Top Finding Card */}
       {briefing?.top_finding && (
         <div
@@ -207,15 +266,29 @@ export default function ProactiveBriefing({
               {briefing.top_finding.severity === 'critical' ? '🔴' : '🟡'}
             </span>
             <div style={{ flex: 1 }}>
-              <h3 style={{
-                fontFamily: fonts.sans,
-                fontSize: 16,
-                fontWeight: 600,
-                lineHeight: 1.4,
-                margin: '0 0 4px 0'
-              }}>
-                {briefing.top_finding.headline}
-              </h3>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <h3 style={{
+                  fontFamily: fonts.sans,
+                  fontSize: 16,
+                  fontWeight: 600,
+                  lineHeight: 1.4,
+                  margin: '0 0 4px 0'
+                }}>
+                  {briefing.top_finding.headline}
+                </h3>
+                {briefing.top_finding.category?.includes('auto-investigation') && (
+                  <span style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: colors.yellow,
+                    background: 'rgba(251, 191, 36, 0.2)',
+                    padding: '2px 6px',
+                    borderRadius: 4,
+                  }}>
+                    NEW
+                  </span>
+                )}
+              </div>
               {briefing.top_finding.entity && (
                 <p style={{
                   fontFamily: fonts.sans,
@@ -326,6 +399,11 @@ export default function ProactiveBriefing({
                         {status?.status === 'running' && ' · Investigating...'}
                         {status?.status === 'completed' && ' · Ready to view'}
                         {status?.status === 'failed' && ` · Failed: ${status.error}`}
+                        {!status && path.last_run_at && (
+                          <span style={{ color: colors.textMuted }}>
+                            {' · Last run: '}{formatLastRunTime(path.last_run_at)}
+                          </span>
+                        )}
                       </div>
                     )}
                   </div>
