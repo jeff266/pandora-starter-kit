@@ -66,9 +66,14 @@ export async function compareInvestigationRuns(
     ? await getPreviousRun(workspaceId, skillId, currentRun.rows[0].completed_at)
     : null;
 
-  // Extract findings counts
-  const currentFindings = currentOutput?.evidence?.evaluated_records?.length || 0;
-  const previousFindings = previousRun?.output?.evidence?.evaluated_records?.length || 0;
+  // Extract findings counts - count only at-risk records (warning/critical severity)
+  const currentAtRiskRecords = (currentOutput?.evidence?.evaluated_records || [])
+    .filter((d: any) => d.severity === 'warning' || d.severity === 'critical');
+  const previousAtRiskRecords = (previousRun?.output?.evidence?.evaluated_records || [])
+    .filter((d: any) => d.severity === 'warning' || d.severity === 'critical');
+
+  const currentFindings = currentAtRiskRecords.length;
+  const previousFindings = previousAtRiskRecords.length;
   const deltaFindings = currentFindings - previousFindings;
 
   // Determine severity change
@@ -77,13 +82,11 @@ export async function compareInvestigationRuns(
   else if (deltaFindings < 0) deltaSeverity = 'improved';
 
   // Identify new high-risk deals
-  const currentHighRisk = (currentOutput?.evidence?.evaluated_records || [])
-    .filter((d: any) => d.risk_score === 'high' || d.risk_level === 'high')
-    .map((d: any) => ({ name: d.deal_name || d.name, amount: d.amount || 0 }));
+  const currentHighRisk = currentAtRiskRecords
+    .map((d: any) => ({ name: d.entity_name, amount: Number(d.fields?.amount || 0) }));
 
-  const previousHighRisk = (previousRun?.output?.evidence?.evaluated_records || [])
-    .filter((d: any) => d.risk_score === 'high' || d.risk_level === 'high')
-    .map((d: any) => ({ name: d.deal_name || d.name, amount: d.amount || 0 }));
+  const previousHighRisk = previousAtRiskRecords
+    .map((d: any) => ({ name: d.entity_name, amount: Number(d.fields?.amount || 0) }));
 
   const newHighRiskDeals = currentHighRisk.filter(
     (d: any) => !previousHighRisk.find((p: any) => p.name === d.name)
