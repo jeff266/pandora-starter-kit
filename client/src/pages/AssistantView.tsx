@@ -397,18 +397,21 @@ export default function AssistantView() {
       }}
     >
       <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 8 }}>
-        {greeting?.proactive_briefing && phase === 'pills' ? (
+        {greeting?.proactive_briefing && phase !== 'blank' ? (
           <ProactiveBriefing
             greeting={greeting}
+            phase={phase}
+            typedHeadline={typedHeadline}
+            typedSubline={['blank', 'headline'].includes(phase) ? '' : typedSubline}
+            typedContext={['blank', 'headline', 'subline'].includes(phase) ? '' : typedContext}
+            cursorTarget={cursorTarget}
             onInvestigatePath={handleInvestigateSkill}
             investigationStatus={investigationJobs}
             onQuestionClick={handleSend}
             onEscalate={() => {
-              // TODO: Implement escalation alert
               alert('Escalation feature coming soon');
             }}
             onAskPandora={() => {
-              // Focus input
               const input = document.querySelector('input[type="text"]') as HTMLInputElement;
               if (input) input.focus();
             }}

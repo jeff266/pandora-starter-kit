@@ -1,6 +1,29 @@
 import React, { useState } from 'react';
 import { colors, fonts } from '../../styles/theme';
 import InvestigationResults from './InvestigationResults';
+import { type GreetingPhase } from './Greeting';
+
+const CURSOR_STYLE: React.CSSProperties = {
+  display: 'inline-block',
+  width: 2,
+  height: '1em',
+  background: '#48af9b',
+  marginLeft: 2,
+  verticalAlign: 'text-bottom',
+  animation: 'pandora-blink 0.7s step-end infinite',
+};
+
+function formatFindingHeadline(headline: string): string {
+  const parts = headline.split(' \u2014 ');
+  if (parts.length < 2) return headline;
+  const last = parts[parts.length - 1];
+  if (/^[a-z][a-z_]+$/.test(last)) {
+    const human = last.replace(/_/g, ' ');
+    const capitalized = human.charAt(0).toUpperCase() + human.slice(1);
+    return [...parts.slice(0, -1), capitalized].join(' \u2014 ');
+  }
+  return headline;
+}
 
 export interface InvestigationPath {
   question: string;
@@ -55,6 +78,11 @@ export interface GreetingData {
 
 interface ProactiveBriefingProps {
   greeting: GreetingData;
+  phase?: GreetingPhase;
+  typedHeadline?: string;
+  typedSubline?: string;
+  typedContext?: string;
+  cursorTarget?: 'headline' | 'subline' | 'context' | null;
   onInvestigatePath: (path: InvestigationPath) => void;
   onEscalate?: () => void;
   onAskPandora: () => void;
@@ -108,6 +136,11 @@ function getSeverityIcon(severity: 'calm' | 'attention' | 'urgent'): string {
 
 export default function ProactiveBriefing({
   greeting,
+  phase,
+  typedHeadline,
+  typedSubline,
+  typedContext,
+  cursorTarget,
   onInvestigatePath,
   onEscalate,
   onAskPandora,
@@ -119,6 +152,7 @@ export default function ProactiveBriefing({
   const [hoveredQuestion, setHoveredQuestion] = useState<number | null>(null);
   const [resultsModal, setResultsModal] = useState<{ skillId: string; runId: string } | null>(null);
   const briefing = greeting.proactive_briefing;
+  const isStreaming = phase && !['pills', 'browsing'].includes(phase);
 
   return (
     <div
@@ -131,6 +165,7 @@ export default function ProactiveBriefing({
         margin: '0 auto',
       }}
     >
+      <style>{`@keyframes pandora-blink { 50% { opacity: 0; } }`}</style>
       {/* Header */}
       <div style={{ marginBottom: 20 }}>
         <div
@@ -172,38 +207,51 @@ export default function ProactiveBriefing({
           fontSize: 22,
           fontWeight: 700,
           lineHeight: 1.3,
-          margin: '0 0 8px 0'
-        }}>{greeting.headline}</h2>
-        <p style={{
-          fontFamily: fonts.sans,
-          fontSize: 14,
-          fontWeight: 400,
-          lineHeight: 1.5,
-          color: colors.textSecondary,
-          margin: 0
+          margin: '0 0 8px 0',
+          minHeight: '1.3em',
         }}>
-          {greeting.subline}
-        </p>
+          {typedHeadline ?? greeting.headline}
+          {cursorTarget === 'headline' && <span style={CURSOR_STYLE} />}
+        </h2>
+        {(typedSubline || (!isStreaming && greeting.subline)) && (
+          <p style={{
+            fontFamily: fonts.sans,
+            fontSize: 14,
+            fontWeight: 400,
+            lineHeight: 1.5,
+            color: colors.textSecondary,
+            margin: 0,
+          }}>
+            {typedSubline ?? greeting.subline}
+            {cursorTarget === 'subline' && <span style={CURSOR_STYLE} />}
+          </p>
+        )}
       </div>
 
       {/* State Summary */}
-      <div
-        style={{
-          padding: 16,
-          background: colors.surfaceRaised,
-          borderRadius: 8,
-          borderLeft: `4px solid ${getSeverityColor(greeting.severity)}`,
-          marginBottom: 20,
-        }}
-      >
-        <p style={{
-          fontFamily: fonts.sans,
-          fontSize: 14,
-          fontWeight: 400,
-          lineHeight: 1.5,
-          margin: 0
-        }}>{greeting.state_summary}</p>
-      </div>
+      {(typedContext || !isStreaming) && (
+        <div
+          style={{
+            padding: '4px 0 4px 12px',
+            borderLeft: `3px solid ${getSeverityColor(greeting.severity)}`,
+            marginBottom: 20,
+          }}
+        >
+          <p style={{
+            fontFamily: fonts.sans,
+            fontSize: 13,
+            fontWeight: 400,
+            lineHeight: 1.6,
+            color: colors.textSecondary,
+            margin: 0,
+          }}>
+            {typedContext ?? greeting.state_summary}
+            {cursorTarget === 'context' && <span style={CURSOR_STYLE} />}
+          </p>
+        </div>
+      )}
+
+      {!isStreaming && <>
 
       {/* Delta Alert */}
       {briefing?.deltas && (briefing.deltas.new_critical_count > 0 || (briefing.deltas.total_at_risk ?? 0) > 0) && (
@@ -273,12 +321,12 @@ export default function ProactiveBriefing({
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <h3 style={{
                   fontFamily: fonts.sans,
-                  fontSize: 16,
+                  fontSize: 14,
                   fontWeight: 600,
                   lineHeight: 1.4,
                   margin: '0 0 4px 0'
                 }}>
-                  {briefing.top_finding.headline}
+                  {formatFindingHeadline(briefing.top_finding.headline)}
                 </h3>
                 {briefing.top_finding.category?.includes('auto-investigation') && (
                   <span style={{
@@ -314,15 +362,18 @@ export default function ProactiveBriefing({
       {/* Investigation Paths */}
       {briefing && briefing.investigation_paths.length > 0 && (
         <div style={{ marginBottom: 20 }}>
-          <h3 style={{
+          <p style={{
             fontFamily: fonts.sans,
-            fontSize: 16,
+            fontSize: 10,
             fontWeight: 600,
             lineHeight: 1.4,
-            margin: '0 0 12px 0'
+            margin: '0 0 10px 0',
+            textTransform: 'uppercase',
+            letterSpacing: '0.08em',
+            color: colors.textMuted,
           }}>
             {briefing.investigation_title}
-          </h3>
+          </p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {briefing.investigation_paths.map((path, index) => {
               const isHovered = hoveredPath === index;
@@ -494,16 +545,18 @@ export default function ProactiveBriefing({
 
       {/* Suggested Questions */}
       <div style={{ marginBottom: 20 }}>
-        <h3 style={{
+        <p style={{
           fontFamily: fonts.sans,
-          fontSize: 16,
+          fontSize: 10,
           fontWeight: 600,
           lineHeight: 1.4,
-          margin: '0 0 12px 0',
-          color: colors.textMuted
+          margin: '0 0 8px 0',
+          color: colors.textMuted,
+          textTransform: 'uppercase',
+          letterSpacing: '0.08em',
         }}>
-          Or ask me anything:
-        </h3>
+          Or ask me anything
+        </p>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           {greeting.questions.slice(0, 4).map((question, index) => {
             const isHovered = hoveredQuestion === index;
@@ -554,6 +607,8 @@ export default function ProactiveBriefing({
           Ask Pandora
         </button>
       </div>
+
+      </>}
 
       {/* Investigation Results Modal */}
       {resultsModal && (
