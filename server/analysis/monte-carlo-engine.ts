@@ -308,7 +308,11 @@ function runIterationWithDetail(
 
   // ── Component A: Existing pipeline ──
   for (const deal of inputs.openDeals) {
-    const curve = inputs.distributions.stageCurves?.get(deal.stageNormalized)
+    const _sc = inputs.distributions.stageCurves;
+    const curve = (_sc == null ? undefined :
+      typeof (_sc as any).get === 'function'
+        ? (_sc as any).get(deal.stageNormalized)
+        : (_sc as any)[deal.stageNormalized])
       ?? inputs.distributions.survivalCurve;
     const dealAgeDays = deal.createdAt
       ? daysBetween(toDate(deal.createdAt), today)

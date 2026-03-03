@@ -7077,7 +7077,8 @@ const mcRunSimulation: ToolDefinition = {
       // stageCurves is built as a Map<string, SurvivalCurve> in mcFitDistributions but the skill
       // pipeline JSON-serializes step outputs between steps, turning the Map into a plain object.
       // Reconstruct the Map so simulation loop calls to .get() work correctly.
-      if (distributions.stageCurves !== null && !(distributions.stageCurves instanceof Map)) {
+      if (distributions.stageCurves != null &&
+          typeof (distributions.stageCurves as any).get !== 'function') {
         distributions.stageCurves = new Map(
           Object.entries(distributions.stageCurves as Record<string, unknown>)
         );
