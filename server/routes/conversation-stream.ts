@@ -324,6 +324,25 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
         const tier1ResponseId = randomUUID();
         sse(res, { type: 'synthesis_chunk', text: synthesis.text });
         sse(res, { type: 'synthesis_done', full_text: synthesis.text, response_id: tier1ResponseId });
+
+        // Emit evidence cards from findings linked to this skill run
+        const t1Findings = await query(
+          `SELECT f.id, f.category AS headline, f.severity, f.skill_id AS operator_name, f.message AS body, f.skill_run_id
+           FROM findings f
+           WHERE f.workspace_id = $1 AND f.skill_run_id = $2 AND f.resolved_at IS NULL
+           ORDER BY f.created_at DESC LIMIT 5`,
+          [workspaceId, skillRun.id],
+        ).catch(() => ({ rows: [] }));
+
+        if (t1Findings.rows.length > 0) {
+          sse(res, {
+            type: 'evidence',
+            cards: t1Findings.rows.map((row: any) => ({
+              id: row.id, title: row.headline, severity: row.severity,
+              operator_name: row.operator_name, body: row.body, skill_run_id: row.skill_run_id,
+            })),
+          });
+        }
       } else {
         // No skill run found — fall through to the tool-calling agent for live data
         const pandoraT1 = await runPandoraAgent(
