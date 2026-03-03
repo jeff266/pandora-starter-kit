@@ -176,7 +176,12 @@ function ScoringProcessingBanner({ step, scored, total }: { step: string | null;
   );
 }
 
-function ScoringActiveBanner({ onRefresh, activating }: { onRefresh: () => void; activating: boolean }) {
+function ScoringActiveBanner({
+  onRefresh, activating, onEnrichAll, enrichingAll,
+}: {
+  onRefresh: () => void; activating: boolean;
+  onEnrichAll: () => void; enrichingAll: boolean;
+}) {
   return (
     <div style={{
       background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10,
@@ -186,17 +191,30 @@ function ScoringActiveBanner({ onRefresh, activating }: { onRefresh: () => void;
         <span style={{ fontSize: 13, color: '#16a34a' }}>●</span>
         <span style={{ fontSize: 12, color: colors.textSecondary }}>ICP-based scoring active</span>
       </div>
-      <button
-        onClick={onRefresh}
-        disabled={activating}
-        style={{
-          fontSize: 11, padding: '4px 12px', borderRadius: 4, cursor: activating ? 'default' : 'pointer',
-          background: 'none', color: colors.textSecondary, border: `1px solid ${colors.border}`,
-          opacity: activating ? 0.6 : 1,
-        }}
-      >
-        {activating ? 'Refreshing...' : 'Refresh ICP'}
-      </button>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button
+          onClick={onEnrichAll}
+          disabled={enrichingAll}
+          style={{
+            fontSize: 11, padding: '4px 12px', borderRadius: 4, cursor: enrichingAll ? 'default' : 'pointer',
+            background: 'none', color: colors.textSecondary, border: `1px solid ${colors.border}`,
+            opacity: enrichingAll ? 0.6 : 1,
+          }}
+        >
+          {enrichingAll ? 'Starting...' : 'Enrich All'}
+        </button>
+        <button
+          onClick={onRefresh}
+          disabled={activating}
+          style={{
+            fontSize: 11, padding: '4px 12px', borderRadius: 4, cursor: activating ? 'default' : 'pointer',
+            background: 'none', color: colors.textSecondary, border: `1px solid ${colors.border}`,
+            opacity: activating ? 0.6 : 1,
+          }}
+        >
+          {activating ? 'Refreshing...' : 'Refresh ICP'}
+        </button>
+      </div>
     </div>
   );
 }
@@ -451,6 +469,7 @@ export default function AccountList() {
   const isMobile = useIsMobile();
   const { activeLens } = useLens();
   const { scoringState, activating, activateScoring, refreshIcp } = useScoringState();
+  const [enrichingAll, setEnrichingAll] = useState(false);
   const { crmInfo } = useCrmInfo();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
@@ -547,6 +566,19 @@ export default function AccountList() {
     if (!loadingMore && hasMore) {
       fetchAccounts(false);
     }
+  };
+
+  const enrichAll = async () => {
+    setEnrichingAll(true);
+    try {
+      await api.post('/accounts/enrich/batch', { limit: 200 });
+    } catch (err) {
+      console.error('[AccountList] enrich all error:', err);
+    }
+    setTimeout(async () => {
+      setEnrichingAll(false);
+      await fetchAccounts(true);
+    }, 3000);
   };
 
   const uniqueIndustries = useMemo(() =>
@@ -713,7 +745,7 @@ export default function AccountList() {
         />
       )}
       {scoringState?.state === 'active' && (
-        <ScoringActiveBanner onRefresh={refreshIcp} activating={activating} />
+        <ScoringActiveBanner onRefresh={refreshIcp} activating={activating} onEnrichAll={enrichAll} enrichingAll={enrichingAll} />
       )}
 
       {/* Filter Bar - Simplified: Has Open Deals + Score + Signals */}
