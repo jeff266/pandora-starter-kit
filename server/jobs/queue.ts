@@ -249,7 +249,21 @@ export class JobQueue {
   private async executeJob(job: Job): Promise<void> {
     console.log(`[JobQueue] Executing job ${job.id} (${job.job_type}, attempt ${job.attempts + 1}/${job.max_attempts}, timeout: ${job.timeout_ms}ms)`);
 
-    await this.markRunning(job.id);
+    try {
+      await this.markRunning(job.id);
+    } catch (err: any) {
+      if (err?.code === '23505') {
+        // Another job of the same type is already running for this workspace.
+        // Defer this job 30s so it won't be immediately re-selected.
+        console.log(`[JobQueue] Deferring job ${job.id} (${job.job_type}): another job of same type is already running for workspace ${job.workspace_id}`);
+        await query(
+          `UPDATE jobs SET run_after = NOW() + interval '30 seconds' WHERE id = $1`,
+          [job.id]
+        );
+        return;
+      }
+      throw err;
+    }
 
     try {
       // Wrap execution with timeout enforcement
