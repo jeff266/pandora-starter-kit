@@ -137,8 +137,21 @@ export default function ProactiveBriefing({
 
       {/* Greeting */}
       <div style={{ marginBottom: 20 }}>
-        <h2 style={{ ...fonts.h2, margin: '0 0 8px 0' }}>{greeting.headline}</h2>
-        <p style={{ ...fonts.body, color: colors.textSecondary, margin: 0 }}>
+        <h2 style={{
+          fontFamily: fonts.sans,
+          fontSize: 22,
+          fontWeight: 700,
+          lineHeight: 1.3,
+          margin: '0 0 8px 0'
+        }}>{greeting.headline}</h2>
+        <p style={{
+          fontFamily: fonts.sans,
+          fontSize: 14,
+          fontWeight: 400,
+          lineHeight: 1.5,
+          color: colors.textSecondary,
+          margin: 0
+        }}>
           {greeting.subline}
         </p>
       </div>
@@ -153,7 +166,13 @@ export default function ProactiveBriefing({
           marginBottom: 20,
         }}
       >
-        <p style={{ ...fonts.body, margin: 0 }}>{greeting.state_summary}</p>
+        <p style={{
+          fontFamily: fonts.sans,
+          fontSize: 14,
+          fontWeight: 400,
+          lineHeight: 1.5,
+          margin: 0
+        }}>{greeting.state_summary}</p>
       </div>
 
       {/* Top Finding Card */}
@@ -177,11 +196,24 @@ export default function ProactiveBriefing({
               {briefing.top_finding.severity === 'critical' ? '🔴' : '🟡'}
             </span>
             <div style={{ flex: 1 }}>
-              <h3 style={{ ...fonts.h3, margin: '0 0 4px 0' }}>
+              <h3 style={{
+                fontFamily: fonts.sans,
+                fontSize: 16,
+                fontWeight: 600,
+                lineHeight: 1.4,
+                margin: '0 0 4px 0'
+              }}>
                 {briefing.top_finding.headline}
               </h3>
               {briefing.top_finding.entity && (
-                <p style={{ ...fonts.bodySmall, color: colors.textMuted, margin: 0 }}>
+                <p style={{
+                  fontFamily: fonts.sans,
+                  fontSize: 12,
+                  fontWeight: 400,
+                  lineHeight: 1.5,
+                  color: colors.textMuted,
+                  margin: 0
+                }}>
                   {briefing.top_finding.entity}
                   {briefing.top_finding.amount && ` · ${formatCurrency(briefing.top_finding.amount)}`}
                 </p>
@@ -194,7 +226,13 @@ export default function ProactiveBriefing({
       {/* Investigation Paths */}
       {briefing && briefing.investigation_paths.length > 0 && (
         <div style={{ marginBottom: 20 }}>
-          <h3 style={{ ...fonts.h3, margin: '0 0 12px 0' }}>
+          <h3 style={{
+            fontFamily: fonts.sans,
+            fontSize: 16,
+            fontWeight: 600,
+            lineHeight: 1.4,
+            margin: '0 0 12px 0'
+          }}>
             {briefing.investigation_title}
           </h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -230,13 +268,21 @@ export default function ProactiveBriefing({
                     {path.priority === 'high' ? '⚡' : '💡'}
                   </span>
                   <div style={{ flex: 1 }}>
-                    <div style={{ ...fonts.body, fontWeight: 500 }}>
+                    <div style={{
+                      fontFamily: fonts.sans,
+                      fontSize: 14,
+                      fontWeight: 500,
+                      lineHeight: 1.5
+                    }}>
                       {path.question}
                     </div>
                     {expandedPath === index && (
                       <div
                         style={{
-                          ...fonts.bodySmall,
+                          fontFamily: fonts.sans,
+                          fontSize: 12,
+                          fontWeight: 400,
+                          lineHeight: 1.5,
                           color: colors.textMuted,
                           marginTop: 4,
                         }}
@@ -256,7 +302,10 @@ export default function ProactiveBriefing({
           </div>
           <p
             style={{
-              ...fonts.bodySmall,
+              fontFamily: fonts.sans,
+              fontSize: 12,
+              fontWeight: 400,
+              lineHeight: 1.5,
               color: colors.textMuted,
               marginTop: 8,
               textAlign: 'center',
@@ -281,10 +330,23 @@ export default function ProactiveBriefing({
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
             <span style={{ fontSize: 18 }}>⚠️</span>
             <div style={{ flex: 1 }}>
-              <h3 style={{ ...fonts.h3, margin: '0 0 4px 0', color: colors.red }}>
+              <h3 style={{
+                fontFamily: fonts.sans,
+                fontSize: 16,
+                fontWeight: 600,
+                lineHeight: 1.4,
+                margin: '0 0 4px 0',
+                color: colors.red
+              }}>
                 Escalation Recommended
               </h3>
-              <p style={{ ...fonts.body, margin: '0 0 12px 0' }}>
+              <p style={{
+                fontFamily: fonts.sans,
+                fontSize: 14,
+                fontWeight: 400,
+                lineHeight: 1.5,
+                margin: '0 0 12px 0'
+              }}>
                 {briefing.escalation_path}
               </p>
               {onEscalate && (
@@ -297,8 +359,10 @@ export default function ProactiveBriefing({
                     border: 'none',
                     borderRadius: 6,
                     cursor: 'pointer',
-                    ...fonts.body,
+                    fontFamily: fonts.sans,
+                    fontSize: 14,
                     fontWeight: 600,
+                    lineHeight: 1.5,
                   }}
                 >
                   Alert Executive Team
@@ -311,7 +375,14 @@ export default function ProactiveBriefing({
 
       {/* Suggested Questions */}
       <div style={{ marginBottom: 20 }}>
-        <h3 style={{ ...fonts.h3, margin: '0 0 12px 0', color: colors.textMuted }}>
+        <h3 style={{
+          fontFamily: fonts.sans,
+          fontSize: 16,
+          fontWeight: 600,
+          lineHeight: 1.4,
+          margin: '0 0 12px 0',
+          color: colors.textMuted
+        }}>
           Or ask me anything:
         </h3>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -329,7 +400,10 @@ export default function ProactiveBriefing({
                   border: `1px solid ${isHovered ? colors.accent : colors.border}`,
                   borderRadius: 6,
                   cursor: 'pointer',
-                  ...fonts.bodySmall,
+                  fontFamily: fonts.sans,
+                  fontSize: 12,
+                  fontWeight: 400,
+                  lineHeight: 1.5,
                   color: isHovered ? colors.accent : colors.textSecondary,
                   transition: 'all 0.2s',
                 }}
@@ -352,8 +426,10 @@ export default function ProactiveBriefing({
             border: 'none',
             borderRadius: 8,
             cursor: 'pointer',
-            ...fonts.body,
+            fontFamily: fonts.sans,
+            fontSize: 14,
             fontWeight: 600,
+            lineHeight: 1.5,
           }}
         >
           Ask Pandora
