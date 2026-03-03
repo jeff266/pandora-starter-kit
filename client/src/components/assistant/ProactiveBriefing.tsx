@@ -86,6 +86,8 @@ export default function ProactiveBriefing({
   onAskPandora,
 }: ProactiveBriefingProps) {
   const [expandedPath, setExpandedPath] = useState<number | null>(null);
+  const [hoveredPath, setHoveredPath] = useState<number | null>(null);
+  const [hoveredQuestion, setHoveredQuestion] = useState<number | null>(null);
   const briefing = greeting.proactive_briefing;
 
   return (
@@ -196,42 +198,33 @@ export default function ProactiveBriefing({
             {briefing.investigation_title}
           </h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {briefing.investigation_paths.map((path, index) => (
-              <button
-                key={index}
-                onClick={() => {
-                  setExpandedPath(expandedPath === index ? null : index);
-                }}
-                onDoubleClick={() => onInvestigatePath(path)}
-                style={{
-                  padding: 12,
-                  background: colors.surfaceRaised,
-                  border: `1px solid ${
-                    path.priority === 'high'
-                      ? colors.red
-                      : path.priority === 'medium'
-                      ? colors.yellow
-                      : colors.border
-                  }`,
-                  borderRadius: 8,
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  transition: 'all 0.2s',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = colors.surface;
-                  e.currentTarget.style.borderColor = colors.accent;
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = colors.surfaceRaised;
-                  e.currentTarget.style.borderColor =
-                    path.priority === 'high'
-                      ? colors.red
-                      : path.priority === 'medium'
-                      ? colors.yellow
-                      : colors.border;
-                }}
-              >
+            {briefing.investigation_paths.map((path, index) => {
+              const isHovered = hoveredPath === index;
+              const borderColor = path.priority === 'high'
+                ? colors.red
+                : path.priority === 'medium'
+                ? colors.yellow
+                : colors.border;
+
+              return (
+                <button
+                  key={index}
+                  onClick={() => {
+                    setExpandedPath(expandedPath === index ? null : index);
+                  }}
+                  onDoubleClick={() => onInvestigatePath(path)}
+                  onMouseEnter={() => setHoveredPath(index)}
+                  onMouseLeave={() => setHoveredPath(null)}
+                  style={{
+                    padding: 12,
+                    background: isHovered ? colors.surface : colors.surfaceRaised,
+                    border: `1px solid ${isHovered ? colors.accent : borderColor}`,
+                    borderRadius: 8,
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    transition: 'all 0.2s',
+                  }}
+                >
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
                   <span style={{ fontSize: 14 }}>
                     {path.priority === 'high' ? '⚡' : '💡'}
@@ -258,7 +251,8 @@ export default function ProactiveBriefing({
                   </span>
                 </div>
               </button>
-            ))}
+              );
+            })}
           </div>
           <p
             style={{
@@ -321,34 +315,29 @@ export default function ProactiveBriefing({
           Or ask me anything:
         </h3>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {greeting.questions.slice(0, 4).map((question, index) => (
-            <button
-              key={index}
-              onClick={() => onAskPandora()}
-              style={{
-                padding: '8px 12px',
-                background: colors.surfaceRaised,
-                border: `1px solid ${colors.border}`,
-                borderRadius: 6,
-                cursor: 'pointer',
-                ...fonts.bodySmall,
-                color: colors.textSecondary,
-                transition: 'all 0.2s',
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = colors.surface;
-                e.currentTarget.style.borderColor = colors.accent;
-                e.currentTarget.style.color = colors.accent;
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = colors.surfaceRaised;
-                e.currentTarget.style.borderColor = colors.border;
-                e.currentTarget.style.color = colors.textSecondary;
-              }}
-            >
-              {question}
-            </button>
-          ))}
+          {greeting.questions.slice(0, 4).map((question, index) => {
+            const isHovered = hoveredQuestion === index;
+            return (
+              <button
+                key={index}
+                onClick={() => onAskPandora()}
+                onMouseEnter={() => setHoveredQuestion(index)}
+                onMouseLeave={() => setHoveredQuestion(null)}
+                style={{
+                  padding: '8px 12px',
+                  background: isHovered ? colors.surface : colors.surfaceRaised,
+                  border: `1px solid ${isHovered ? colors.accent : colors.border}`,
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  ...fonts.bodySmall,
+                  color: isHovered ? colors.accent : colors.textSecondary,
+                  transition: 'all 0.2s',
+                }}
+              >
+                {question}
+              </button>
+            );
+          })}
         </div>
       </div>
 
