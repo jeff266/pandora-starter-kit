@@ -2,6 +2,8 @@ import { Router, Request, Response } from 'express';
 import { generateGreeting } from '../briefing/greeting-engine.js';
 import { getOperatorStatuses } from '../briefing/operator-status.js';
 import { query } from '../db.js';
+import { getPandoraRole } from '../context/pandora-role.js';
+import { computeTemporalContext } from '../context/opening-brief.js';
 
 const router = Router();
 
@@ -24,10 +26,15 @@ router.get('/:workspaceId/briefing/greeting', async (req: Request, res: Response
   try {
     const workspaceId = req.params.workspaceId as string;
     const userId = (req as any).user?.user_id;
-    const firstName = await getUserFirstName(workspaceId, userId);
+    const [firstName, roleResult, temporal] = await Promise.all([
+      getUserFirstName(workspaceId, userId),
+      userId ? getPandoraRole(workspaceId, userId).catch(() => null) : Promise.resolve(null),
+      computeTemporalContext(workspaceId).catch(() => null),
+    ]);
+    const pandoraRole = roleResult?.pandoraRole ?? null;
     const rawHour = parseInt(req.query.localHour as string, 10);
     const localHour = (!isNaN(rawHour) && rawHour >= 0 && rawHour <= 23) ? rawHour : undefined;
-    const payload = await generateGreeting(workspaceId, firstName, localHour);
+    const payload = await generateGreeting(workspaceId, firstName, localHour, pandoraRole, temporal ?? undefined);
     res.json(payload);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

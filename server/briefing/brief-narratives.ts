@@ -3,6 +3,17 @@ import { callLLM } from '../utils/llm-router.js';
 import { formatCompact } from './brief-utils.js';
 import { buildWorkspaceContextBlock } from '../context/workspace-memory.js';
 
+type QuarterPhase = 'early' | 'mid' | 'late' | 'final_week';
+
+function getTemporalFocus(phase: QuarterPhase): string {
+  switch (phase) {
+    case 'early':     return 'Focus: pipeline build and qualification. Coverage ratio is the leading indicator.';
+    case 'mid':       return 'Focus: deal velocity and advancement. Flag stalled deals, reinforce commit discipline.';
+    case 'late':      return 'Focus: close plan rigor. Question every close date, name the pull-in opportunities.';
+    case 'final_week':return 'Focus: landing the quarter. Name exactly what must close and what executive action is needed.';
+  }
+}
+
 export async function generateBriefNarratives(
   workspaceId: string,
   briefType: BriefType,
@@ -10,17 +21,29 @@ export async function generateBriefNarratives(
   whatChanged: any,
   reps: any[],
   deals: any[],
-  editorialFocus: EditorialFocus
+  editorialFocus: EditorialFocus,
+  weekOfQuarter?: number,
+  quarterPhase?: QuarterPhase,
+  pctQuarterComplete?: number
 ): Promise<AiBlurbs> {
   const contextBlock = await buildWorkspaceContextBlock(workspaceId).catch(() => '');
 
-  const systemPrompt = `You are Pandora, a virtual VP of Revenue Operations writing a daily briefing for a CRO.
+  const phase: QuarterPhase = quarterPhase ?? 'mid';
+  const temporalFocus = getTemporalFocus(phase);
+  const quarterPositionLine = weekOfQuarter != null
+    ? `Quarter position: Week ${weekOfQuarter}, ${phase} phase, ${Math.round(pctQuarterComplete ?? 0)}% through the quarter.`
+    : '';
+
+  const systemPrompt = `You are Pandora, writing a ${briefType} revenue briefing for a sales leadership team.
+
+TEMPORAL CONTEXT:
+${temporalFocus}
 
 TONE RULES:
 - Calm, specific, professional. Trusted advisor, not an alarm system.
 - Use actual names, dollar amounts, and timeframes from the data.
 - Never say "terrifying", "flying blind", "alarming", "vanity metrics", "CRITICAL", or "urgent action required".
-- Be prescriptive: tell the CRO exactly what needs to happen this week, not just what occurred. Name the deal, name the rep, name the action.
+- Be prescriptive: tell them exactly what needs to happen this week, not just what occurred. Name the deal, name the rep, name the action.
 - Give a forecast, not just a status report. Tell them if they're on track and what has to happen to stay on track.
 - Short is better. Total output under 200 words.
 - If data is sparse, work with what's there. Never refuse.
@@ -53,7 +76,7 @@ Return a valid JSON object only. No markdown fences. No explanation outside the 
   let requestedKeys = '';
   if (briefType === 'monday_setup') {
     requestedKeys = `Return JSON with exactly these keys:
-{"overall_summary":"1-2 sentences: where we stand entering the week and whether we're on pace. Reference the coverage ratio and what it means for the week ahead.","rep_conversation":"2-3 sentences. Which rep needs attention and specifically what they need to do this week — name the deal, name the action, name the stakes.","deal_recommendation":"2-3 sentences. The ONE deal to focus on today. Name it, state the specific risk, and tell the CRO exactly what question to ask."}`;
+{"overall_summary":"1-2 sentences: where we stand entering the week and whether we're on pace. Reference the coverage ratio and what it means for the week ahead.","rep_conversation":"2-3 sentences. Which rep needs attention and specifically what they need to do this week — name the deal, name the action, name the stakes.","deal_recommendation":"2-3 sentences. The ONE deal to focus on today. Name it, state the specific risk, and tell them exactly what question to ask."}`;
   } else if (briefType === 'pulse') {
     requestedKeys = `Return JSON with exactly these keys:
 {"pulse_summary":"1-2 sentences: what changed since Monday AND whether the forecast still shows we hit target. Reference coverage ratio if available.","key_action":"1 sentence: the single most important thing to do today — specific deal or rep, specific action, specific reason why it matters to hitting the number."}`;
@@ -67,7 +90,7 @@ Return a valid JSON object only. No markdown fences. No explanation outside the 
 
   const userPrompt = `Brief Type: ${briefType}
 Editorial Focus: ${editorialFocus.primary} — ${editorialFocus.reason}
-
+${quarterPositionLine ? `${quarterPositionLine}\n` : ''}
 DATA:
 ${numberLine}
 ${pipelineDelta ? `Pipeline change: ${pipelineDelta}` : ''}${whatChanged.streak ? ` (${whatChanged.streak})` : ''}

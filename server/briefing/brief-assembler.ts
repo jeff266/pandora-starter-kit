@@ -7,6 +7,7 @@ import {
 import { determineBriefType, determineEditorialFocus } from './editorial-engine.js';
 import { generateBriefNarratives } from './brief-narratives.js';
 import { annotateBriefNarrative } from './brief-annotator.js';
+import { computeTemporalContext } from '../context/opening-brief.js';
 import type { BriefType, TheNumber, WhatChanged, Segments, Reps, DealsToWatch, AssembledBrief } from './brief-types.js';
 
 // ─── Entry point ─────────────────────────────────────────────────────────────
@@ -293,15 +294,16 @@ async function assembleMondaySetup(workspaceId: string, now: Date, briefType: Br
   const monday = getMonday(now);
   const priorMonday = subDays(monday, 7);
   const wonLostStages = await getWonLostStages(workspaceId);
-  const [theNumber, whatChanged, segments, reps, deals] = await Promise.all([
+  const [theNumber, whatChanged, segments, reps, deals, temporal] = await Promise.all([
     getTheNumber(workspaceId, wonLostStages, now),
     getWhatChanged(workspaceId, wonLostStages, monday, priorMonday, monday),
     getSegments(workspaceId, wonLostStages),
     getReps(workspaceId, wonLostStages),
     getDealsToWatch(workspaceId, wonLostStages, subDays(now, 7)),
+    computeTemporalContext(workspaceId).catch(() => null),
   ]);
   const editorialFocus = determineEditorialFocus(briefType, theNumber, whatChanged as any, reps, deals, theNumber.days_remaining);
-  const rawBlurbs = await generateBriefNarratives(workspaceId, briefType, theNumber, whatChanged, reps.items, deals.items, editorialFocus);
+  const rawBlurbs = await generateBriefNarratives(workspaceId, briefType, theNumber, whatChanged, reps.items, deals.items, editorialFocus, temporal?.weekOfQuarter, temporal?.quarterPhase as any, temporal?.pctQuarterComplete);
   const aiBlurbs = await annotateBriefNarrative(workspaceId, rawBlurbs, { theNumber, whatChanged, reps: reps.items, deals: deals.items });
   return saveBrief(workspaceId, briefType, now, { theNumber, whatChanged, segments, reps, deals, aiBlurbs, editorialFocus, startTime });
 }
@@ -340,8 +342,9 @@ async function assemblePulse(workspaceId: string, now: Date, briefType: BriefTyp
     (reps as any).reason = `No rep changes since ${sinceLabel}`;
   }
 
+  const temporal = await computeTemporalContext(workspaceId).catch(() => null);
   const editorialFocus = determineEditorialFocus(briefType, theNumber, whatChanged as any, reps, deals, theNumber.days_remaining);
-  const rawBlurbs = await generateBriefNarratives(workspaceId, briefType, theNumber, whatChanged, reps.items, deals.items, editorialFocus);
+  const rawBlurbs = await generateBriefNarratives(workspaceId, briefType, theNumber, whatChanged, reps.items, deals.items, editorialFocus, temporal?.weekOfQuarter, temporal?.quarterPhase as any, temporal?.pctQuarterComplete);
   const aiBlurbs = await annotateBriefNarrative(workspaceId, rawBlurbs, { theNumber, whatChanged, reps: reps.items, deals: deals.items });
   return saveBrief(workspaceId, briefType, now, { theNumber, whatChanged, segments, reps, deals, aiBlurbs, editorialFocus, startTime });
 }
@@ -363,8 +366,9 @@ async function assembleFridayRecap(workspaceId: string, now: Date, briefType: Br
   const wonThisWeek = await query<any>(`SELECT id::text, name, amount, stage, COALESCE(owner,'') as owner FROM deals WHERE workspace_id = $1 AND stage_normalized = 'closed_won' AND close_date >= $2 ORDER BY amount DESC LIMIT 5`, [workspaceId, monday.toISOString().split('T')[0]]);
   (deals as any).won_this_week = wonThisWeek.rows.map((d: any) => ({ id: d.id, name: d.name, amount: parseFloat(d.amount||'0'), owner: d.owner }));
 
+  const temporal = await computeTemporalContext(workspaceId).catch(() => null);
   const editorialFocus = determineEditorialFocus(briefType, theNumber, whatChanged as any, reps, deals, theNumber.days_remaining);
-  const rawBlurbs = await generateBriefNarratives(workspaceId, briefType, theNumber, whatChanged, reps.items, deals.items, editorialFocus);
+  const rawBlurbs = await generateBriefNarratives(workspaceId, briefType, theNumber, whatChanged, reps.items, deals.items, editorialFocus, temporal?.weekOfQuarter, temporal?.quarterPhase as any, temporal?.pctQuarterComplete);
   const aiBlurbs = await annotateBriefNarrative(workspaceId, rawBlurbs, { theNumber, whatChanged, reps: reps.items, deals: deals.items });
   return saveBrief(workspaceId, briefType, now, { theNumber, whatChanged, segments, reps, deals, aiBlurbs, editorialFocus, startTime });
 }
@@ -393,8 +397,9 @@ async function assembleQuarterClose(workspaceId: string, now: Date, briefType: B
 
   const whatChanged: WhatChanged = { created: { count: 0, amount: 0 }, won: { count: 0, amount: 0 }, lost: { count: 0, amount: 0 }, pushed: { count: 0, amount: 0 } };
   const segments: any = { omitted: true, reason: 'Not shown during quarter-close' };
+  const temporal = await computeTemporalContext(workspaceId).catch(() => null);
   const editorialFocus = determineEditorialFocus(briefType, theNumber, whatChanged, reps, deals, theNumber.days_remaining);
-  const rawBlurbs = await generateBriefNarratives(workspaceId, briefType, theNumber, whatChanged, reps.items, deals.items, editorialFocus);
+  const rawBlurbs = await generateBriefNarratives(workspaceId, briefType, theNumber, whatChanged, reps.items, deals.items, editorialFocus, temporal?.weekOfQuarter, temporal?.quarterPhase as any, temporal?.pctQuarterComplete);
   const aiBlurbs = await annotateBriefNarrative(workspaceId, rawBlurbs, { theNumber, whatChanged, reps: reps.items, deals: deals.items });
   return saveBrief(workspaceId, briefType, now, { theNumber, whatChanged, segments, reps, deals, aiBlurbs, editorialFocus, startTime });
 }
