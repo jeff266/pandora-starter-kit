@@ -1,0 +1,208 @@
+Server-Side Test                                 
+                                                   
+  Run these curl commands to test the backend:     
+                                                   
+  1. Test Investigation Trigger:                   
+  curl -X POST "http://localhost:3000/api/workspace
+  s/4160191d-73bc-414b-97dd-5a1853190378/investigat
+  ion/trigger-skill" \                             
+    -H "Content-Type: application/json" \          
+    -H "Authorization: Bearer YOUR_TOKEN_HERE" \   
+    -d '{                                          
+      "skillId": "deal-risk-review",               
+      "investigationPath": {                       
+        "question": "Which deals are blocking the  
+  quarter close?",                                 
+        "reasoning": "19 critical findings         
+  flagged",                                        
+        "skill_id": "deal-risk-review",            
+        "priority": "high"                         
+      },                                           
+      "metadata": {                                
+        "triggeredFrom": "test"                    
+      }                                            
+    }'                                             
+                                                   
+  Expected response:                               
+  {                                                
+    "jobId": "some-uuid-here",                     
+    "message": "Investigation job queued for skill:
+   deal-risk-review"                               
+  }                                                
+                                                   
+  2. Test Job Status (use jobId from above):       
+  curl                                             
+  "http://localhost:3000/api/workspaces/4160191d-73
+  bc-414b-97dd-5a1853190378/jobs/YOUR_JOB_ID_HERE" 
+  \                                                
+    -H "Authorization: Bearer YOUR_TOKEN_HERE"     
+                                                   
+  Expected response progression:                   
+  // Initially:                                    
+  {                                                
+    "id": "job-id",                                
+    "status": "pending",                           
+    "result": null,                                
+    "error": null,                                 
+    "progress": null                               
+  }                                                
+                                                   
+  // After a few seconds:                          
+  {                                                
+    "id": "job-id",                                
+    "status": "running",                           
+    "progress": {                                  
+      "current": 50,                               
+      "total": 100,                                
+      "message": "Running deal-risk-review         
+  skill..."                                        
+    }                                              
+  }                                                
+                                                   
+  // After 10-60 seconds:                          
+  {                                                
+    "id": "job-id",                                
+    "status": "completed",                         
+    "result": {                                    
+      "runId": "run-uuid",                         
+      "skillId": "deal-risk-review",               
+      "status": "completed",                       
+      "output_text": "Found 19 deals at risk..."   
+    }                                              
+  }                                                
+                                                   
+  3. Check server logs:                            
+  # Look for these log messages in your Replit     
+  console:                                         
+  [JobQueue] Created job {jobId}                   
+  (investigate_skill)                              
+  [jobs] Executing investigation skill:            
+  deal-risk-review                                 
+  [jobs] Investigation skill completed:            
+  deal-risk-review                                 
+                                                   
+  ---                                              
+  Visual Frontend Test                             
+                                                   
+  Step-by-step what you should see:                
+                                                   
+  Initial State (T=0s)                             
+                                                   
+  ┌─────────────────────────────────────────────┐  
+  │ Critical Issues Requiring Attention         │  
+  ├─────────────────────────────────────────────┤  
+  │ ⚡ Which deals are blocking the quarter     │  
+  │    close?                                   │  
+  │                                        ▼    │  
+  └─────────────────────────────────────────────┘  
+  - Lightning bolt icon (⚡)                       
+  - Arrow pointing down (▼)                        
+  - Button has hover effect                        
+                                                   
+  After Click (T=0.1s)                             
+                                                   
+  ┌─────────────────────────────────────────────┐  
+  │ Critical Issues Requiring Attention         │  
+  ├─────────────────────────────────────────────┤  
+  │ ⏳ Which deals are blocking the quarter     │  
+  │    close?                                   │  
+  │    19 critical findings · Uses              │  
+  │    deal-risk-review · Investigating...  ▲   │  
+  └─────────────────────────────────────────────┘  
+  - Icon changes to ⏳ (hourglass)                 
+  - Card auto-expands (▲ arrow)                    
+  - Shows "Investigating..." message               
+  - Button becomes slightly transparent (opacity:  
+  0.7)                                             
+  - Cursor changes to 'wait'                       
+                                                   
+  While Running (T=5-60s)                          
+                                                   
+  ┌─────────────────────────────────────────────┐  
+  │ Critical Issues Requiring Attention         │  
+  ├─────────────────────────────────────────────┤  
+  │ ⏳ Which deals are blocking the quarter     │  
+  │    close?                                   │  
+  │    19 critical findings · Uses              │  
+  │    deal-risk-review · Investigating...  ▲   │  
+  └─────────────────────────────────────────────┘  
+  - Same as above                                  
+  - If you click again, it toggles expand/collapse 
+  - No error messages in console                   
+                                                   
+  After Completion (T=60s)                         
+                                                   
+  ┌─────────────────────────────────────────────┐  
+  │ Critical Issues Requiring Attention         │  
+  ├─────────────────────────────────────────────┤  
+  │ ✅ Which deals are blocking the quarter     │  
+  │    close?                                   │  
+  │    19 critical findings · Uses              │  
+  │    deal-risk-review · Ready to view     ▲   │  
+  └─────────────────────────────────────────────┘  
+  - Icon changes to ✅ (checkmark)                 
+  - Message changes to "Ready to view"             
+  - Button becomes clickable again (no wait cursor)
+  - Full opacity restored                          
+                                                   
+  After Clicking Completed Investigation           
+                                                   
+  ┌─────────────────────────────────────────────┐  
+  │         Investigation Results          ✕    │  
+  ├─────────────────────────────────────────────┤  
+  │ Investigation completed                     │  
+  ├─────────────────────────────────────────────┤  
+  │ Analysis                                    │  
+  │ Found 19 deals at risk of slipping...      │   
+  ├─────────────────────────────────────────────┤  
+  │ Key Findings (19)                           │  
+  │ • Acme Corp - $500K - Negotiation          │   
+  │ • Beta Inc - $250K - Proposal              │   
+  │ ...                                         │  
+  ├─────────────────────────────────────────────┤  
+  │ Completed in 45s · 12,345 tokens used      │   
+  └─────────────────────────────────────────────┘  
+  - Modal overlay appears                          
+  - Shows summary, findings, token usage           
+  - Close button (✕) dismisses modal               
+                                                   
+  ---                                              
+  Console Logs (Expected)                          
+                                                   
+  When you click, you should see:                  
+  [ProactiveBriefing] Investigation path clicked:  
+  Which deals are blocking the quarter close?      
+  [ProactiveBriefing] Current status: undefined    
+  [ProactiveBriefing] Triggering investigation     
+  [handleInvestigateSkill] Called with path:       
+  {question: "Which deals...", skill_id:           
+  "deal-risk-review", ...}                         
+  [handleInvestigateSkill] Triggering investigation
+   for skill: deal-risk-review                     
+  [handleInvestigateSkill] Job created:            
+  9e4b1c06-a2c6-4af0-b314-afa2c79ee770             
+  [handleInvestigateSkill] Updated                 
+  investigationJobs: Map(1) {"deal-risk-review" => 
+  {jobId: "...", status: "pending", ...}}          
+                                                   
+  No errors should appear!                         
+                                                   
+  ---                                              
+  Week 2 Completion Checklist                      
+                                                   
+  ✅ Backend:                                      
+  - POST /investigation/trigger-skill returns jobId
+  - GET /jobs/:jobId returns job status            
+  - Job status progresses: pending → running →     
+  completed                                        
+  - Server logs show job execution                 
+  - No 404 errors in server logs                   
+                                                   
+  ✅ Frontend:                                     
+  - Icon changes ⚡ → ⏳ immediately on click      
+  - Card auto-expands showing "Investigating..."   
+  - Icon changes ⏳ → ✅ after completion          
+  - Clicking ✅ opens results modal                
+  - Modal shows findings and summary               
+  - No errors in browser console                   
+  - No "Failed to trigger investigation" alert 
