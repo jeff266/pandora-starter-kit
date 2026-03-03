@@ -66,6 +66,15 @@ export function severityBg(severity: string): string {
   }
 }
 
+export function formatDuration(ms: number | null | undefined): string {
+  if (!ms || ms <= 0) return '--';
+  if (ms < 1000) return '< 1s';
+  if (ms < 60000) return `${Math.round(ms / 1000)}s`;
+  const m = Math.floor(ms / 60000);
+  const s = Math.round((ms % 60000) / 1000);
+  return s > 0 ? `${m}m ${s}s` : `${m}m`;
+}
+
 export function formatSchedule(schedule: any): string {
   if (!schedule) return 'On demand';
   if (typeof schedule === 'string') {

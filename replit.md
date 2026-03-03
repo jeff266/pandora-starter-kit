@@ -133,6 +133,24 @@ Pandora is built on Node.js 20 with TypeScript 5+, utilizing Express.js and Post
     - **Forecast "Go to Skills" button**: Replaced with "Generate First Forecast ▶" that runs `forecast-rollup` then `monte-carlo-forecast` inline, shows live status ("Running Forecast Rollup..." / "Running Monte Carlo Simulation..." / "Done — reloading forecast data..."), and refreshes snapshot data without navigation.
     - **forecastRollup excluded_owners filter**: `byRep` query now applies `excluded_owners` from business context (same pattern as `coverageByRep`), removing admin/test accounts like Jack McArdle and Carter McKay from rep breakdown table.
 
+## Week 4: Investigation History (Frontend Complete)
+
+-   **New Pages/Components:**
+    - `client/src/pages/InvestigationHistoryPage.tsx`: Full audit-trail page at `/investigation/history`. Filters bar (skill, status, date range), timeline chart when skill selected, sortable history table, modal for viewing individual run results. Back button, dark theme.
+    - `client/src/components/investigation/InvestigationTimelineChart.tsx`: Recharts `LineChart` with 4 series (atRisk/critical/warning/healthy). Trend badge (📉 Improving / 📈 Worsening / ➡️ Stable). Run summary. Loading/empty states.
+    - `client/src/components/investigation/InvestigationHistoryTable.tsx`: Sortable 7-column table. Color-coded status + at-risk badges. CSV/XLSX export buttons (calls `POST /investigation/export` + opens download URL). Row click fires modal callback. Previous/Next pagination with "Showing X–Y of Z".
+
+-   **New Hooks:**
+    - `client/src/hooks/useInvestigationHistory.ts`: `useInvestigationHistory(filters, limit)` — fetches `/investigation/history` with full filter support (skillId, status, fromDate, toDate), pagination, refetch. `useInvestigationTimeline(skillId, days)` — fetches `/investigation/timeline` for chart data.
+
+-   **Format Utility:** `formatDuration(ms)` added to `client/src/lib/format.ts` — converts milliseconds to `--`, `< 1s`, `23s`, `1m 45s`.
+
+-   **Routing + Nav:**
+    - `App.tsx`: Route `<Route path="/investigation/history" element={<InvestigationHistoryPage />} />` registered.
+    - `ProactiveBriefing.tsx`: "View full history →" link added below investigation paths section, navigates to `/investigation/history`.
+
+-   **Test Script:** `test-week4-replit.cjs` — 16-test API suite covering history list (pagination + filtering), timeline (30d/7d), deal timeline, export (CSV/XLSX + error handling). Run with `PANDORA_TEST_TOKEN=<token> node test-week4-replit.cjs`. Passes 15/16 (timeline cold-start timing note only).
+
 ## TypeScript Health
 - **Status (Feb 2026):** 0 non-test server errors maintained. All server files pass `tsc --noEmit`.
 - **Remaining:** 4 errors in `server/workflows/__tests__/` test mocks + 1 duplicate property in `server/routes/findings.ts` — all pre-existing, out of scope.

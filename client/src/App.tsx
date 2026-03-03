@@ -48,6 +48,7 @@ import GovernancePage from './pages/GovernancePage';
 import FiltersPage from './pages/FiltersPage';
 import SQLWorkspace from './pages/SQLWorkspace';
 import ForecastPage from './pages/ForecastPage';
+import InvestigationHistoryPage from './pages/InvestigationHistoryPage';
 import { colors, fonts } from './styles/theme';
 import { useIsMobile } from './hooks/useIsMobile';
 
@@ -285,6 +286,7 @@ export default function App() {
             <Route path="/skills" element={<SkillsPage />} />
             <Route path="/governance" element={<GovernancePage />} />
             <Route path="/skills/:skillId/runs" element={<SkillRunsPage />} />
+            <Route path="/investigation/history" element={<InvestigationHistoryPage />} />
             <Route path="/connectors" element={<ConnectorsPage />} />
             <Route path="/enrichment" element={<EnrichmentConnectorsPage />} />
             <Route path="/insights" element={<InsightsPage />} />

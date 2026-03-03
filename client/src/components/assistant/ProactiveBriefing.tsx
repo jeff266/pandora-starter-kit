@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { colors, fonts } from '../../styles/theme';
 import InvestigationResults from './InvestigationResults';
 import { type GreetingPhase } from './Greeting';
@@ -151,6 +152,7 @@ export default function ProactiveBriefing({
   const [hoveredPath, setHoveredPath] = useState<number | null>(null);
   const [hoveredQuestion, setHoveredQuestion] = useState<number | null>(null);
   const [resultsModal, setResultsModal] = useState<{ skillId: string; runId: string } | null>(null);
+  const navigate = useNavigate();
   const briefing = greeting.proactive_briefing;
   const isStreaming = phase && !['pills', 'browsing'].includes(phase);
 
@@ -483,6 +485,20 @@ export default function ProactiveBriefing({
           >
             Click to investigate · Results appear here when ready
           </p>
+          <div style={{ textAlign: 'right', marginTop: 4 }}>
+            <button
+              onClick={() => navigate('/investigation/history')}
+              style={{
+                background: 'none', border: 'none', padding: 0,
+                color: colors.accent, fontSize: 11, cursor: 'pointer',
+                fontFamily: fonts.sans, opacity: 0.8,
+              }}
+              onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
+              onMouseLeave={e => (e.currentTarget.style.opacity = '0.8')}
+            >
+              View full history →
+            </button>
+          </div>
         </div>
       )}
 
