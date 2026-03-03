@@ -148,6 +148,7 @@ export default function ProactiveBriefing({
   onQuestionClick,
   investigationStatus,
 }: ProactiveBriefingProps) {
+  const navigate = useNavigate();
   const [expandedPath, setExpandedPath] = useState<number | null>(null);
   const [hoveredPath, setHoveredPath] = useState<number | null>(null);
   const [hoveredQuestion, setHoveredQuestion] = useState<number | null>(null);
@@ -605,6 +606,23 @@ export default function ProactiveBriefing({
 
       {/* Action Buttons */}
       <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+        <button
+          onClick={() => navigate('/investigation/history')}
+          style={{
+            padding: '10px 20px',
+            background: colors.surface,
+            color: colors.text,
+            border: `1px solid ${colors.border}`,
+            borderRadius: 8,
+            cursor: 'pointer',
+            fontFamily: fonts.sans,
+            fontSize: 14,
+            fontWeight: 600,
+            lineHeight: 1.5,
+          }}
+        >
+          View History
+        </button>
         <button
           onClick={onAskPandora}
           style={{

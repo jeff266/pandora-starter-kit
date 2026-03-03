@@ -69,6 +69,7 @@ const pageTitles: Record<string, string> = {
   '/insights': 'Insights Feed',
   '/actions': 'Actions',
   '/reports': 'Reports',
+  '/investigation/history': 'Investigation History',
   '/connectors': 'Connectors',
   '/connectors/health': 'Connector Health',
   '/enrichment': 'Enrichment Connectors',
