@@ -490,7 +490,7 @@ const PANDORA_TOOLS: ToolDef[] = [
   {
     name: 'query_activity_signals',
     description:
-      'Query pre-extracted signals from CRM activities (emails, notes, meetings). Use this when the user asks about qualification framework coverage (MEDDIC/BANT/SPICED), notable prospect quotes, blockers, untracked email participants, or buyer signals captured in CRM activity body content. Faster and more structured than reading raw activity bodies. Each signal includes confidence score, source quote, speaker attribution, and framework field mapping.',
+      'Query pre-extracted signals from CRM activities (emails, notes, meetings). Use this when the user asks about qualification framework coverage (MEDDIC/BANT/SPICED), notable prospect quotes, blockers, untracked email participants, or buyer signals captured in CRM activity body content. Faster and more structured than reading raw activity bodies. Each signal includes confidence score, source quote, speaker attribution, and framework field mapping. Use deal_name (not deal_id) when the user refers to a deal by name — it resolves automatically via fuzzy match, no prior deal lookup needed.',
     parameters: {
       type: 'object',
       properties: {
@@ -520,9 +520,13 @@ const PANDORA_TOOLS: ToolDef[] = [
           enum: ['prospect', 'rep', 'unknown'],
           description: 'Filter by who said it — prospect (inbound emails/quotes), rep (outbound emails), or unknown',
         },
+        deal_name: {
+          type: 'string',
+          description: 'Fuzzy deal name to filter signals (e.g. "MPC", "Apricott", "Hellenic Petroleum"). Matches via partial ILIKE — use this when the user mentions a deal by name. Returns signals for all workspace deals whose name contains this string. Prefer this over deal_id unless you already have the exact UUID from a prior tool call.',
+        },
         deal_id: {
           type: 'string',
-          description: 'Filter signals to a specific deal',
+          description: 'Filter signals to a specific deal by exact UUID. Use deal_name instead if you only have a deal name.',
         },
         account_id: {
           type: 'string',
@@ -903,7 +907,7 @@ Rules:
 - "analytical": multi-step analysis within one domain (e.g. "which reps have the best win rate?", "why is deal X stuck?")
 - "strategic": cross-domain, open-ended, advisory (e.g. "create a messaging framework", "what should we focus on this quarter?", "build an ABM playbook")
 
-Available tools: query_deals, query_accounts, query_conversations, get_skill_evidence, compute_metric, query_contacts, query_leads, query_activity_timeline, query_stage_history, compute_stage_benchmarks, query_field_history, compute_metric_segmented, search_transcripts, compute_forecast_accuracy, compute_close_probability, compute_pipeline_creation, compute_inqtr_close_rate, compute_competitive_rates, compute_activity_trend, compute_shrink_rate, infer_contact_role
+Available tools: query_deals, query_accounts, query_conversations, get_skill_evidence, compute_metric, query_contacts, query_leads, query_activity_timeline, query_stage_history, compute_stage_benchmarks, query_field_history, compute_metric_segmented, search_transcripts, compute_forecast_accuracy, compute_close_probability, compute_pipeline_creation, compute_inqtr_close_rate, compute_competitive_rates, compute_activity_trend, compute_shrink_rate, infer_contact_role, query_activity_signals
 
 Return ONLY valid JSON, no markdown:
 {"question_type":"discrete|analytical|strategic","tools_likely_needed":["tool1","tool2"],"estimated_complexity":"low|medium|high"}`;

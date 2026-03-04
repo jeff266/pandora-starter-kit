@@ -39,6 +39,7 @@ export interface ActivitySignalQueryFilters {
   signal_value?: string;  // Partial match (ILIKE)
   framework_field?: string;  // e.g., 'metrics', 'economic_buyer', 'timeline'
   speaker_type?: 'prospect' | 'rep' | 'unknown';
+  deal_name?: string;  // Fuzzy deal name (ILIKE) — resolves to deal_ids internally
   deal_id?: string;
   account_id?: string;
   from_date?: string;  // ISO date
@@ -133,6 +134,10 @@ function buildWhereClause(workspaceId: string, filters: ActivitySignalQueryFilte
   if (filters.deal_id !== undefined) {
     conditions.push(`asig.deal_id = $${idx}`);
     params.push(filters.deal_id);
+    idx++;
+  } else if (filters.deal_name !== undefined) {
+    conditions.push(`asig.deal_id IN (SELECT id FROM deals WHERE workspace_id = $1 AND name ILIKE $${idx})`);
+    params.push(`%${filters.deal_name}%`);
     idx++;
   }
 
