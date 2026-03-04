@@ -1,6 +1,7 @@
 import React from 'react';
 import { colors, fonts } from '../../styles/theme';
 import { useWorkspace } from '../../context/WorkspaceContext';
+import { getAuthToken } from '../../lib/api';
 
 interface InvestigationResultsProps {
   skillId: string;
@@ -57,7 +58,9 @@ export default function InvestigationResults({
       try {
         const url = `/api/workspaces/${workspace!.id}/investigation/results/${runId}`;
         console.log('[InvestigationResults] Fetching:', url);
-        const response = await fetch(url);
+        const response = await fetch(url, {
+          headers: { Authorization: `Bearer ${getAuthToken()}` },
+        });
         if (!response.ok) {
           console.error('[InvestigationResults] HTTP error:', response.status);
           setResults({ error: `HTTP ${response.status}` });
