@@ -1390,9 +1390,15 @@ export default function DealDetail() {
                     {item.type === 'activity' && <span style={{ fontSize: 12, width: 20, textAlign: 'center', flexShrink: 0, marginTop: 2 }}>{item.icon}</span>}
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                        <p style={{ fontSize: item.type === 'conversation' ? 13 : 12, fontWeight: item.type === 'conversation' ? 500 : 400, color: colors.text, margin: 0, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {anon.text(item.label)}
-                        </p>
+                        {item.type === 'conversation' ? (
+                          <Link to={`/conversations/${item.id}`} style={{ fontSize: 13, fontWeight: 500, color: colors.text, margin: 0, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: 'none' }}>
+                            {anon.text(item.label)}
+                          </Link>
+                        ) : (
+                          <p style={{ fontSize: 12, fontWeight: 400, color: colors.text, margin: 0, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {anon.text(item.label)}
+                          </p>
+                        )}
                         <span style={{ fontSize: 9, fontWeight: 600, padding: '1px 6px', borderRadius: 4, background: badge.bg, color: badge.color, flexShrink: 0 }}>{badge.label}</span>
                         {item.type === 'conversation' && (() => {
                           const url = buildConversationUrl(item.source, item.source_id, item.source_data, item.custom_fields);
