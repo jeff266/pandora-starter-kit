@@ -637,6 +637,84 @@ export default function DealDetail() {
     })),
   ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
+  // Stage-annotated timeline: merge stage history with timeline events
+  const stageAnnotatedTimeline = (() => {
+    if (!stageHistory || stageHistory.length === 0) return timeline;
+
+    // Step 1: Pre-process stageHistory - filter sub-1-day transitions, merge consecutive same stages
+    const processedStages: Array<{
+      stage: string;
+      stage_normalized: string;
+      entered_at: string;
+      exited_at: string | null;
+      days_in_stage: number;
+    }> = [];
+
+    for (const stage of stageHistory) {
+      const enteredAt = new Date(stage.entered_at).getTime();
+      const exitedAt = stage.exited_at ? new Date(stage.exited_at).getTime() : null;
+      const daysInStage = exitedAt ? (exitedAt - enteredAt) / (1000 * 60 * 60 * 24) : stage.days_in_stage;
+
+      // Skip sub-1-day transitions (except current stage where exited_at === null)
+      if (exitedAt && daysInStage < 1) continue;
+
+      // Merge with previous if same stage_normalized
+      const prev = processedStages[processedStages.length - 1];
+      if (prev && prev.stage_normalized === stage.stage_normalized) {
+        prev.exited_at = stage.exited_at;
+        prev.days_in_stage = (prev.exited_at ? new Date(prev.exited_at).getTime() : Date.now()) - new Date(prev.entered_at).getTime();
+        prev.days_in_stage = prev.days_in_stage / (1000 * 60 * 60 * 24);
+      } else {
+        processedStages.push({
+          stage: stage.stage,
+          stage_normalized: stage.stage_normalized || stage.stage,
+          entered_at: stage.entered_at,
+          exited_at: stage.exited_at,
+          days_in_stage: daysInStage,
+        });
+      }
+    }
+
+    // Step 2: Walk timeline (DESC), find active stage for each item
+    const annotated: any[] = [];
+    let lastStage: string | null = null;
+
+    for (const item of timeline) {
+      const itemDate = new Date(item.date).getTime();
+
+      // Find active stage span (last span where entered_at <= item.date)
+      const activeStage = processedStages
+        .filter(s => new Date(s.entered_at).getTime() <= itemDate)
+        .sort((a, b) => new Date(b.entered_at).getTime() - new Date(a.entered_at).getTime())[0];
+
+      const currentStage = activeStage?.stage_normalized || null;
+
+      // Insert stage marker when stage changes
+      if (currentStage && currentStage !== lastStage) {
+        const enteredAt = activeStage.entered_at;
+        const exitedAt = activeStage.exited_at;
+        const daysInStage = Math.round(activeStage.days_in_stage);
+        const isCurrent = exitedAt === null;
+
+        annotated.push({
+          type: 'stage_marker',
+          id: `stage-${activeStage.entered_at}`,
+          stage: activeStage.stage,
+          stage_normalized: currentStage,
+          entered_at: enteredAt,
+          exited_at: exitedAt,
+          days_in_stage: daysInStage,
+          isCurrent,
+        });
+        lastStage = currentStage;
+      }
+
+      annotated.push(item);
+    }
+
+    return annotated;
+  })();
+
   const sourceBadge = (source: string) => {
     switch (source.toLowerCase()) {
       case 'crm':
@@ -1266,19 +1344,48 @@ export default function DealDetail() {
           </div>
         </Accordion>
 
-        {/* Timeline accordion */}
-        <Accordion title="Timeline" badge={timeline.length}>
+        {/* Activity Timeline accordion - merged with stage markers */}
+        <Accordion title="Activity Timeline" badge={timeline.length}>
           <div style={{ paddingTop: 12 }}>
           {timeline.length === 0 ? (
             <p style={{ fontSize: 13, color: colors.textMuted, lineHeight: 1.6 }}>
               No activity or conversation records found. Connect a conversation intelligence tool (Gong, Fireflies) for richer deal context.
             </p>
           ) : (
-            timeline.slice(0, 30).map((item: any) => {
+            stageAnnotatedTimeline.slice(0, 50).map((item: any) => {
+              // Render stage marker as section header
+              if (item.type === 'stage_marker') {
+                const dateRange = item.exited_at
+                  ? `${formatDate(item.entered_at)} → ${formatDate(item.exited_at)}`
+                  : `${formatDate(item.entered_at)} → Present`;
+                return (
+                  <div key={item.id} style={{
+                    padding: '10px 12px',
+                    background: item.isCurrent ? `${colors.accent}08` : colors.surfaceHover,
+                    border: `1px solid ${item.isCurrent ? colors.accent : colors.border}`,
+                    borderRadius: 6,
+                    marginBottom: 8,
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: item.isCurrent ? colors.accent : colors.text }}>
+                        {item.stage}
+                      </span>
+                      <span style={{ fontSize: 10, color: colors.textMuted }}>
+                        {item.days_in_stage} day{item.days_in_stage !== 1 ? 's' : ''}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 10, color: colors.textMuted, marginTop: 2 }}>
+                      {dateRange}
+                    </div>
+                  </div>
+                );
+              }
+
+              // Render regular activity/conversation
               const badge = sourceBadge(item.source);
               const isExpanded = expandedSummaries.has(item.id);
               return (
-                <div key={item.id} style={{ padding: '8px 0', borderBottom: `1px solid ${colors.border}` }}>
+                <div key={item.id} style={{ padding: '8px 0 8px 12px', borderLeft: `2px solid ${colors.borderLight}`, marginLeft: 8 }}>
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
                     {item.type === 'activity' && <span style={{ fontSize: 12, width: 20, textAlign: 'center', flexShrink: 0, marginTop: 2 }}>{item.icon}</span>}
                     <div style={{ flex: 1, minWidth: 0 }}>
