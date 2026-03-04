@@ -8,6 +8,7 @@ interface QuickActionPillsProps {
   openSections: string[];
   hasBrief: boolean;
   phase: GreetingPhase;
+  hasBriefing?: boolean;
 }
 
 const SECTION_PILLS = [
@@ -28,9 +29,10 @@ function getActionPills(): string[] {
   return DOW_ACTIONS[dow] ?? MID_WEEK;
 }
 
-export default function QuickActionPills({ onSend, onSection, openSections, hasBrief, phase }: QuickActionPillsProps) {
+export default function QuickActionPills({ onSend, onSection, openSections, hasBrief, phase, hasBriefing }: QuickActionPillsProps) {
   const visible = ['pills', 'browsing'].includes(phase);
   if (!visible) return null;
+  if (hasBriefing) return null;
 
   const actionPills = getActionPills();
 

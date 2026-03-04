@@ -159,6 +159,7 @@ export default function ProactiveBriefing({
 }: ProactiveBriefingProps) {
   const navigate = useNavigate();
   const [resultsModal, setResultsModal] = useState<{ skillId: string; runId: string } | null>(null);
+  const [deltaExpanded, setDeltaExpanded] = useState(false);
   const briefing = greeting.proactive_briefing;
   const isStreaming = phase && !['pills', 'browsing'].includes(phase);
   const severityColor = getSeverityColor(greeting.severity);
@@ -226,15 +227,21 @@ export default function ProactiveBriefing({
         )}
       </div>
 
-      {/* ── State Summary ── */}
+      {/* ── State Summary — clickable, navigates to history ── */}
       {(typedContext || !isStreaming) && (
         <div
+          onClick={!isStreaming ? () => navigate('/investigation/history') : undefined}
           style={{
             padding: '8px 12px',
             borderLeft: `3px solid ${severityColor}`,
             background: colors.surfaceRaised,
             borderRadius: '0 6px 6px 0',
             marginBottom: 20,
+            cursor: !isStreaming ? 'pointer' : 'default',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 8,
           }}
         >
           <p style={{
@@ -244,10 +251,14 @@ export default function ProactiveBriefing({
             lineHeight: 1.6,
             color: colors.textSecondary,
             margin: 0,
+            flex: 1,
           }}>
             {typedContext ?? greeting.state_summary}
             {cursorTarget === 'context' && <span style={CURSOR_STYLE} />}
           </p>
+          {!isStreaming && (
+            <span style={{ fontSize: 12, color: colors.textMuted, flexShrink: 0 }}>→</span>
+          )}
         </div>
       )}
 
@@ -257,49 +268,101 @@ export default function ProactiveBriefing({
       {briefing?.deltas && (briefing.deltas.new_critical_count > 0 || (briefing.deltas.total_at_risk ?? 0) > 0) && (
         <div
           style={{
-            padding: '8px 12px',
             background: colors.bg,
             border: `1px solid ${colors.border}`,
             borderLeft: `3px solid ${colors.yellow}`,
             borderRadius: '0 6px 6px 0',
             marginBottom: 12,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
+            overflow: 'hidden',
           }}
         >
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <span style={{
-              fontFamily: fonts.sans,
-              fontSize: 13,
-              fontWeight: 600,
-              color: colors.text,
-            }}>
-              {briefing.deltas.new_critical_count > 0
-                ? `↑ ${briefing.deltas.new_critical_count} new issue${briefing.deltas.new_critical_count > 1 ? 's' : ''} ${briefing.deltas.since_label.toLowerCase()}`
-                : `↑ ${briefing.deltas.total_at_risk} deal${(briefing.deltas.total_at_risk ?? 0) > 1 ? 's' : ''} at risk ${briefing.deltas.since_label.toLowerCase()}`
+          <div
+            style={{
+              padding: '8px 12px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              cursor: (briefing.deltas.worsened_investigations?.length ?? 0) > 0 ? 'pointer' : 'default',
+            }}
+            onClick={() => {
+              if ((briefing.deltas!.worsened_investigations?.length ?? 0) > 0) {
+                setDeltaExpanded(e => !e);
+              } else {
+                navigate('/investigation/history');
               }
-            </span>
-            {briefing.deltas.improved_count > 0 && (
+            }}
+          >
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               <span style={{
-                fontSize: 11,
-                color: colors.green,
-                background: colors.greenSoft,
-                padding: '1px 7px',
-                borderRadius: 10,
                 fontFamily: fonts.sans,
-                fontWeight: 500,
+                fontSize: 13,
+                fontWeight: 600,
+                color: colors.text,
               }}>
-                ✓ {briefing.deltas.improved_count} resolved
+                {briefing.deltas.new_critical_count > 0
+                  ? `↑ ${briefing.deltas.new_critical_count} new issue${briefing.deltas.new_critical_count > 1 ? 's' : ''} ${briefing.deltas.since_label.toLowerCase()}`
+                  : `↑ ${briefing.deltas.total_at_risk} deal${(briefing.deltas.total_at_risk ?? 0) > 1 ? 's' : ''} at risk ${briefing.deltas.since_label.toLowerCase()}`
+                }
               </span>
+              {briefing.deltas.improved_count > 0 && (
+                <span style={{
+                  fontSize: 11,
+                  color: colors.green,
+                  background: colors.greenSoft,
+                  padding: '1px 7px',
+                  borderRadius: 10,
+                  fontFamily: fonts.sans,
+                  fontWeight: 500,
+                }}>
+                  ✓ {briefing.deltas.improved_count} resolved
+                </span>
+              )}
+            </div>
+            {(briefing.deltas.worsened_investigations?.length ?? 0) > 0 ? (
+              <span style={{ fontSize: 11, color: colors.textMuted, flexShrink: 0 }}>
+                {deltaExpanded ? '▴ Hide' : '▾ Details'}
+              </span>
+            ) : (
+              <span style={{ fontSize: 12, color: colors.textMuted, flexShrink: 0 }}>→</span>
             )}
           </div>
+          {deltaExpanded && (briefing.deltas.worsened_investigations?.length ?? 0) > 0 && (
+            <div style={{
+              borderTop: `1px solid ${colors.border}`,
+              padding: '8px 12px 10px 16px',
+            }}>
+              <div style={{
+                fontSize: 10,
+                fontWeight: 600,
+                letterSpacing: '0.07em',
+                textTransform: 'uppercase',
+                color: colors.textMuted,
+                marginBottom: 6,
+                fontFamily: fonts.sans,
+              }}>
+                Worsened since last check
+              </div>
+              <ul style={{ margin: 0, padding: '0 0 0 14px', listStyle: 'disc' }}>
+                {briefing.deltas.worsened_investigations.map((name, i) => (
+                  <li key={i} style={{
+                    fontFamily: fonts.sans,
+                    fontSize: 12,
+                    color: colors.textSecondary,
+                    lineHeight: 1.7,
+                  }}>
+                    {name}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
 
-      {/* ── Top Finding Card ── */}
+      {/* ── Top Finding Card — clickable, links to history ── */}
       {briefing?.top_finding && (
         <div
+          onClick={() => navigate('/investigation/history')}
           style={{
             padding: '12px 14px',
             background: colors.bg,
@@ -307,17 +370,18 @@ export default function ProactiveBriefing({
             borderLeft: `3px solid ${briefing.top_finding.severity === 'critical' ? colors.red : colors.yellow}`,
             borderRadius: '0 8px 8px 0',
             marginBottom: 20,
+            cursor: 'pointer',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
             <div style={{ flex: 1 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                 <h3 style={{
                   fontFamily: fonts.sans,
                   fontSize: 14,
                   fontWeight: 600,
                   lineHeight: 1.4,
-                  margin: '0 0 4px 0',
+                  margin: 0,
                 }}>
                   {formatFindingHeadline(briefing.top_finding.headline)}
                 </h3>
@@ -348,6 +412,15 @@ export default function ProactiveBriefing({
                 </p>
               )}
             </div>
+            <span style={{
+              fontSize: 11,
+              color: colors.textMuted,
+              flexShrink: 0,
+              whiteSpace: 'nowrap',
+              marginTop: 2,
+            }}>
+              View in history →
+            </span>
           </div>
         </div>
       )}

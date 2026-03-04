@@ -396,7 +396,7 @@ export default function AssistantView() {
         if (!['pills', 'browsing'].includes(phase)) skipToReady();
       }}
     >
-      <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 8 }}>
+      <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 120 }}>
         {greeting?.proactive_briefing && phase !== 'blank' ? (
           <ProactiveBriefing
             greeting={greeting}
@@ -434,6 +434,7 @@ export default function AssistantView() {
           openSections={openSections}
           hasBrief={!!brief && !briefLoading}
           phase={phase}
+          hasBriefing={!!(greeting?.proactive_briefing)}
         />
 
         {/* Brief cards — revealed on demand */}

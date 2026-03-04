@@ -179,6 +179,7 @@ export default function InvestigationHistoryPage() {
           loading={loading}
           onPageChange={newOffset => setPage(newOffset)}
           onRowClick={run => setSelectedRun(run)}
+          selectedRunId={selectedRun?.runId}
         />
       </div>
 
@@ -186,6 +187,7 @@ export default function InvestigationHistoryPage() {
         <InvestigationResults
           skillId={selectedRun.skillId}
           runId={selectedRun.runId}
+          completedAt={selectedRun.completedAt ?? undefined}
           onClose={() => setSelectedRun(null)}
         />
       )}

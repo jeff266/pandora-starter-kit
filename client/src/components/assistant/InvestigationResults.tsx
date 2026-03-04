@@ -5,6 +5,7 @@ import { useWorkspace } from '../../context/WorkspaceContext';
 interface InvestigationResultsProps {
   skillId: string;
   runId: string;
+  completedAt?: string;
   onClose: () => void;
 }
 
@@ -20,9 +21,30 @@ const riskLabel: Record<string, string> = {
   low: 'LOW RISK',
 };
 
+function formatRunTimestamp(ts?: string): string {
+  if (!ts) return '';
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleString('en-US', {
+    month: 'short', day: 'numeric',
+    hour: 'numeric', minute: '2-digit',
+    hour12: true,
+  });
+}
+
+function humanizeSkillId(id: string): string {
+  const map: Record<string, string> = {
+    'deal-risk-review':    'Deal Risk Review',
+    'data-quality-audit':  'Data Quality Audit',
+    'forecast-rollup':     'Forecast Rollup',
+  };
+  return map[id] ?? id.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
 export default function InvestigationResults({
   skillId,
   runId,
+  completedAt,
   onClose,
 }: InvestigationResultsProps) {
   const { currentWorkspace: workspace } = useWorkspace();
@@ -64,7 +86,7 @@ export default function InvestigationResults({
           background: colors.surface, padding: 40, borderRadius: 12,
           fontSize: 16, color: colors.text,
         }}>
-          Loading investigation results...
+          Loading investigation results…
         </div>
       </div>
     );
@@ -75,6 +97,10 @@ export default function InvestigationResults({
   const dataSources: any[] = results?.dataSources || [];
   const atRisk = findings.filter((f) => f.severity === 'medium' || f.severity === 'high');
   const durationSec = Math.round((results?.durationMs || 0) / 1000);
+  const hasContent = findings.length > 0 || narrativeItems.length > 0;
+  const summaryText = results?.summary || '';
+  const isFallbackSummary = summaryText === 'Investigation completed' || summaryText === '';
+  const runTs = completedAt ?? results?.completedAt;
 
   return (
     <div
@@ -105,7 +131,10 @@ export default function InvestigationResults({
               Investigation Results
             </h2>
             <p style={{ fontFamily: fonts.sans, fontSize: 12, margin: 0, color: colors.textMuted }}>
-              {skillId.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
+              {humanizeSkillId(skillId)}
+              {runTs && (
+                <span style={{ color: colors.textDim }}> · {formatRunTimestamp(runTs)}</span>
+              )}
             </p>
           </div>
           <button
@@ -123,7 +152,7 @@ export default function InvestigationResults({
           borderLeft: `3px solid ${atRisk.length > 0 ? colors.yellow || '#f59e0b' : '#22c55e'}`,
         }}>
           <p style={{ fontFamily: fonts.sans, fontSize: 14, fontWeight: 500, lineHeight: 1.5, margin: 0, color: colors.text }}>
-            {results?.summary || 'Investigation completed'}
+            {summaryText || 'Investigation completed'}
           </p>
         </div>
 
@@ -192,7 +221,7 @@ export default function InvestigationResults({
         {findings.length > 0 && narrativeItems.length === 0 && (
           <div style={{ marginBottom: 20 }}>
             <h3 style={{ fontFamily: fonts.sans, fontSize: 15, fontWeight: 600, margin: '0 0 12px 0', color: colors.text }}>
-              Deals Reviewed ({findings.length})
+              Records Reviewed ({findings.length})
             </h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {findings.map((f: any, i: number) => (
@@ -214,6 +243,11 @@ export default function InvestigationResults({
                         {f.message}
                       </div>
                     )}
+                    {f.owner && (
+                      <div style={{ fontFamily: fonts.sans, fontSize: 11, color: colors.textMuted, marginTop: 1 }}>
+                        {f.owner}{f.stage ? ` · ${f.stage}` : ''}
+                      </div>
+                    )}
                   </div>
                   <span style={{
                     fontFamily: fonts.sans, fontSize: 10, fontWeight: 700,
@@ -227,13 +261,24 @@ export default function InvestigationResults({
           </div>
         )}
 
-        {/* No data state */}
-        {findings.length === 0 && narrativeItems.length === 0 && (
+        {/* Empty state — only show if summary is also the fallback */}
+        {!hasContent && isFallbackSummary && (
           <div style={{
             padding: 24, textAlign: 'center',
             color: colors.textMuted, fontFamily: fonts.sans, fontSize: 14,
           }}>
-            No findings available for this investigation.
+            No detailed findings were recorded for this run.
+          </div>
+        )}
+
+        {/* Empty state — has summary text but no structured findings */}
+        {!hasContent && !isFallbackSummary && (
+          <div style={{
+            padding: '16px 0 8px',
+            color: colors.textSecondary, fontFamily: fonts.sans, fontSize: 13,
+            lineHeight: 1.6,
+          }}>
+            No structured findings to display — the summary above contains the full result.
           </div>
         )}
 
@@ -243,9 +288,12 @@ export default function InvestigationResults({
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
           flexWrap: 'wrap', gap: 8,
         }}>
-          <div style={{ fontFamily: fonts.sans, fontSize: 11, color: colors.textMuted }}>
-            {durationSec > 0 ? `Completed in ${durationSec}s` : 'Completed'}
-            {results?.tokenUsage?.total && ` · ${Number(results.tokenUsage.total).toLocaleString()} tokens`}
+          <div style={{ fontFamily: fonts.sans, fontSize: 11, color: colors.textMuted, display: 'flex', gap: 12 }}>
+            <span>{durationSec > 0 ? `Completed in ${durationSec}s` : 'Completed'}</span>
+            {results?.tokenUsage?.total && (
+              <span>{Number(results.tokenUsage.total).toLocaleString()} tokens</span>
+            )}
+            <span style={{ color: colors.textDim }}>Run {runId.slice(0, 8)}…</span>
           </div>
           {dataSources.length > 0 && (
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>

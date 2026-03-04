@@ -10,6 +10,7 @@ interface Props {
   loading: boolean;
   onPageChange: (offset: number) => void;
   onRowClick: (run: InvestigationRun) => void;
+  selectedRunId?: string;
 }
 
 type SortKey = 'completedAt' | 'skillId' | 'status' | 'durationMs' | 'atRiskCount' | 'criticalCount' | 'warningCount';
@@ -61,7 +62,7 @@ const COLS: { key: SortKey; label: string; align?: 'right' }[] = [
 ];
 
 export default function InvestigationHistoryTable({
-  runs, pagination, loading, onPageChange, onRowClick,
+  runs, pagination, loading, onPageChange, onRowClick, selectedRunId,
 }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>('completedAt');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -149,6 +150,7 @@ export default function InvestigationHistoryTable({
             {!loading && sorted.map(run => {
               const sb = statusBadge(run.status);
               const arb = atRiskBadge(run.summary.atRiskCount);
+              const isSelected = run.runId === selectedRunId;
               return (
                 <tr
                   key={run.runId}
@@ -157,9 +159,16 @@ export default function InvestigationHistoryTable({
                     borderBottom: `1px solid ${colors.borderLight}`,
                     cursor: 'pointer',
                     transition: 'background 0.12s',
+                    background: isSelected ? colors.surfaceActive : 'transparent',
+                    outline: isSelected ? `2px solid ${colors.accent}40` : 'none',
+                    outlineOffset: -2,
                   }}
-                  onMouseEnter={e => (e.currentTarget.style.background = colors.surfaceHover)}
-                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                  onMouseEnter={e => {
+                    if (!isSelected) e.currentTarget.style.background = colors.surfaceHover;
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.background = isSelected ? colors.surfaceActive : 'transparent';
+                  }}
                 >
                   <td style={{ padding: '10px 14px', fontSize: 12, color: colors.textSecondary, whiteSpace: 'nowrap' }}>
                     {run.completedAt ? formatDateTime(run.completedAt) : '—'}
