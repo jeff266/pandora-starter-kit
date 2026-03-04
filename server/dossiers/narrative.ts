@@ -74,6 +74,33 @@ function buildDealContext(dossier: DealDossier): string {
     }
   }
 
+  if (dossier.activities.length > 0) {
+    lines.push(`\nRecent CRM activities: ${dossier.activities.length} logged`);
+    const recentActivities = dossier.activities.slice(0, 5);
+    for (const act of recentActivities) {
+      const dateStr = act.date?.split('T')[0] || '?';
+      const actType = act.type || 'activity';
+
+      // Use subject if present, else strip-HTML preview of body (120 char max)
+      let content = act.subject || '';
+      if (!content && act.body) {
+        const stripped = act.body
+          .replace(/<[^>]+>/g, '')
+          .replace(/&amp;/g, '&')
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/&nbsp;/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+        content = stripped.slice(0, 120) + (stripped.length > 120 ? '...' : '');
+      }
+
+      if (content) {
+        lines.push(`  [${actType}] "${content}" on ${dateStr}`);
+      }
+    }
+  }
+
   return lines.join('\n');
 }
 
