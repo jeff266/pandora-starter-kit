@@ -510,6 +510,166 @@ export function startSkillScheduler(): void {
   scheduledSkills.push({ skillId: 'brief-daily', cronExpression: '0 7 * * *', job: briefJob });
   console.log('[BriefScheduler] Registered daily brief assembly on cron 0 7 * * * (7am UTC)');
 
+  // Weekly digest cron: Monday 9am UTC — investigation summary email/Slack
+  const digestJob = cron.schedule(
+    '0 9 * * 1',
+    async () => {
+      console.log('[InvestigationDigest] Monday 9am weekly digest triggered');
+      const { generateWeeklyDigest } = await import('../briefing/investigation-digest.js');
+      const { formatDigestEmail } = await import('../briefing/digest-email-formatter.js');
+      const { formatDigestSlack } = await import('../briefing/digest-slack-formatter.js');
+      const { Resend } = await import('resend');
+      const { WebClient } = await import('@slack/web-api');
+
+      const workspacesResult = await query<{ id: string; name: string }>(
+        `SELECT DISTINCT w.id, w.name
+         FROM workspaces w
+         INNER JOIN connections c ON c.workspace_id = w.id
+         WHERE c.status IN ('connected', 'synced', 'error')
+           AND w.status = 'active'
+         ORDER BY w.name`
+      );
+
+      for (const workspace of workspacesResult.rows) {
+        try {
+          // Check if digest subscription exists and is enabled
+          const subResult = await query<{
+            email_recipients: string[];
+            slack_channel_id: string | null;
+            enabled: boolean;
+          }>(
+            `SELECT email_recipients, slack_channel_id, enabled
+             FROM investigation_digest_subscriptions
+             WHERE workspace_id = $1`,
+            [workspace.id]
+          );
+
+          if (subResult.rows.length === 0 || !subResult.rows[0].enabled) {
+            console.log(`[InvestigationDigest] Skipping ${workspace.name} — no active subscription`);
+            continue;
+          }
+
+          const subscription = subResult.rows[0];
+          const hasEmailRecipients = subscription.email_recipients && subscription.email_recipients.length > 0;
+          const hasSlackChannel = !!subscription.slack_channel_id;
+
+          if (!hasEmailRecipients && !hasSlackChannel) {
+            console.log(`[InvestigationDigest] Skipping ${workspace.name} — no recipients configured`);
+            continue;
+          }
+
+          // Generate digest
+          console.log(`[InvestigationDigest] Generating digest for ${workspace.name}`);
+          const digest = await generateWeeklyDigest(workspace.id);
+
+          const deliveryStatus: any = {};
+
+          // Send email using Resend
+          if (hasEmailRecipients) {
+            try {
+              const resendApiKey = process.env.RESEND_API_KEY;
+              if (resendApiKey) {
+                const resend = new Resend(resendApiKey);
+                const { error } = await resend.emails.send({
+                  from: process.env.RESEND_FROM_EMAIL || 'Pandora <reports@pandora.app>',
+                  to: subscription.email_recipients,
+                  subject: `Weekly Investigation Digest — ${workspace.name}`,
+                  html: formatDigestEmail(digest),
+                });
+                if (error) throw new Error(error.message);
+                deliveryStatus.email = 'sent';
+                console.log(`[InvestigationDigest] ✓ Email sent to ${subscription.email_recipients.join(', ')}`);
+              } else {
+                deliveryStatus.email = 'failed';
+                console.error('[InvestigationDigest] ✗ RESEND_API_KEY not configured');
+              }
+            } catch (emailErr: any) {
+              deliveryStatus.email = 'failed';
+              console.error(`[InvestigationDigest] ✗ Email failed for ${workspace.name}:`, emailErr.message);
+            }
+          }
+
+          // Send to Slack
+          if (hasSlackChannel) {
+            try {
+              // Get Slack bot token
+              const slackConfigResult = await query<{ credentials: any }>(
+                `SELECT credentials FROM connector_configs
+                 WHERE workspace_id = $1 AND connector_type = 'slack' AND status = 'active'
+                 LIMIT 1`,
+                [workspace.id]
+              );
+
+              if (slackConfigResult.rows.length > 0) {
+                const credentials = slackConfigResult.rows[0].credentials;
+                const token = credentials.botToken || credentials.bot_token || credentials.accessToken || credentials.access_token;
+
+                if (token) {
+                  const slackClient = new WebClient(token);
+                  await slackClient.chat.postMessage({
+                    channel: subscription.slack_channel_id!,
+                    blocks: formatDigestSlack(digest),
+                    text: `Weekly Investigation Digest — ${workspace.name}`,
+                    unfurl_links: false,
+                    unfurl_media: false,
+                  });
+                  deliveryStatus.slack = 'sent';
+                  console.log(`[InvestigationDigest] ✓ Slack message sent to ${subscription.slack_channel_id}`);
+                } else {
+                  deliveryStatus.slack = 'failed';
+                  console.error('[InvestigationDigest] ✗ No Slack bot token found');
+                }
+              } else {
+                deliveryStatus.slack = 'failed';
+                console.error('[InvestigationDigest] ✗ Slack not connected');
+              }
+            } catch (slackErr: any) {
+              deliveryStatus.slack = 'failed';
+              console.error(`[InvestigationDigest] ✗ Slack failed for ${workspace.name}:`, slackErr.message);
+            }
+          }
+
+          // Update last_sent_at
+          await query(
+            `UPDATE investigation_digest_subscriptions
+             SET last_sent_at = NOW(), updated_at = NOW()
+             WHERE workspace_id = $1`,
+            [workspace.id]
+          );
+
+          // Log to alert history
+          await query(
+            `INSERT INTO investigation_alert_history (
+               workspace_id, skill_id, alert_type, alert_severity,
+               alert_channels, delivery_status, metadata, created_at
+             )
+             VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
+            [
+              workspace.id,
+              'weekly-digest',
+              'weekly_digest',
+              'info',
+              JSON.stringify(Object.keys(deliveryStatus)),
+              JSON.stringify(deliveryStatus),
+              JSON.stringify({
+                periodStart: digest.periodStart,
+                periodEnd: digest.periodEnd,
+                totalInvestigations: digest.investigations.length,
+              }),
+            ]
+          );
+
+          console.log(`[InvestigationDigest] ✓ ${workspace.name} digest completed`);
+        } catch (err: any) {
+          console.error(`[InvestigationDigest] ✗ ${workspace.name}:`, err.message);
+        }
+      }
+    },
+    { timezone: 'UTC' }
+  );
+  scheduledSkills.push({ skillId: 'investigation-digest-weekly', cronExpression: '0 9 * * 1', job: digestJob });
+  console.log('[InvestigationDigest] Registered weekly digest on cron 0 9 * * 1 (Monday 9am UTC)');
+
   // Register scheduled investigations
   const jobQueue = getJobQueue();
 
