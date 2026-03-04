@@ -5,7 +5,7 @@ import cors from "cors";
 import rateLimit from "express-rate-limit";
 import cookieParser from "cookie-parser";
 import { verifyConnection, query } from "./db.js";
-import { requireWorkspaceAccess, requireUserSession } from "./middleware/auth.js";
+import { requireWorkspaceAccess, requireUserSession, requireAdmin } from "./middleware/auth.js";
 import { attachWorkspaceContext } from "./middleware/workspace-context.js";
 import healthRouter, { setAPHealthChecker, setServerReady } from "./routes/health.js";
 import workspacesRouter from "./routes/workspaces.js";
@@ -201,6 +201,20 @@ const heavyOpLimiter = rateLimit({
   message: { error: 'Too many requests for this operation, please try again later' },
 });
 
+const chatLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: { ip: false, trustProxy: false, xForwardedForHeader: false },
+  keyGenerator: (req: any): string => {
+    return req.params?.workspaceId
+      ?? req.path.match(/\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i)?.[1]
+      ?? 'global';
+  },
+  message: { error: 'Chat rate limit exceeded — max 20 messages per minute per workspace' },
+});
+
 app.use(express.json({
   limit: '10mb',
   verify: (req: any, _res, buf) => {
@@ -248,6 +262,16 @@ app.use("/api/auth", userAuthRouter);
 app.use("/api/users/me/notifications", requireUserSession, userNotificationsRouter);
 
 app.use("/api/consultant", consultantRouter);
+
+app.post('/api/admin/migrate-credentials', requireAdmin, async (_req, res) => {
+  try {
+    const { migrateCredentials } = await import('./lib/migrate-credentials.js');
+    const result = await migrateCredentials();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
 
 app.use("/api/workspaces", workspacesRouter);
 
@@ -328,6 +352,7 @@ workspaceApiRouter.use(workspaceNotificationsRouter);
 workspaceApiRouter.use(notificationPreferencesRouter);
 workspaceApiRouter.use(dealIntelligenceRouter);
 workspaceApiRouter.use(toolsRouter);
+workspaceApiRouter.use('/:workspaceId/chat', chatLimiter);
 workspaceApiRouter.use(chatRouter);
 workspaceApiRouter.use(documentsRouter);
 workspaceApiRouter.use(feedbackRouter);
@@ -494,6 +519,13 @@ async function initializeAfterStart(t0: number, tDb: number): Promise<void> {
   }
 
   const tMigration = performance.now();
+
+  try {
+    const { runMigrationIfEnabled } = await import('./lib/migrate-credentials.js');
+    await runMigrationIfEnabled();
+  } catch (err) {
+    console.warn('[server] Credential migration check failed (non-fatal):', err instanceof Error ? err.message : err);
+  }
 
   await Promise.all([
     Promise.resolve(registerAdapters()),

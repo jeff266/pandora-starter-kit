@@ -8,6 +8,9 @@ import {
   queryContacts, getContact, getContactsForDeal, getStakeholderMap,
 } from '../tools/contact-query.js';
 import {
+  queryLeads, getLead, getLeadsForAccount, getLeadFromConvertedContact,
+} from '../tools/lead-query.js';
+import {
   queryAccounts, getAccount, getAccountHealth,
 } from '../tools/account-query.js';
 import {
@@ -318,11 +321,18 @@ router.get('/:id/contacts', async (req: Request, res: Response): Promise<void> =
   try {
     const q = req.query;
     const lens = await resolveLens(req, 'contacts');
+
+    const rawStage = q.lifecycle_stage as string | undefined;
+    const lifecycleStage = rawStage
+      ? rawStage.includes(',') ? rawStage.split(',').map(s => s.trim()) : rawStage
+      : undefined;
+
     const result = await queryContacts(req.params.id as string, {
       email: q.email as string | undefined,
       accountId: q.accountId as string | undefined,
       seniority: q.seniority as string | undefined,
       department: q.department as string | undefined,
+      lifecycleStage,
       lastActivityAfter: parseDate(q.lastActivityAfter),
       search: q.search as string | undefined,
       sortBy: q.sortBy as any,
@@ -337,6 +347,70 @@ router.get('/:id/contacts', async (req: Request, res: Response): Promise<void> =
     res.status(500).json({ error: msg });
   }
 });
+
+// ─── Leads Routes ────────────────────────────────────────────────────────────
+
+router.get('/:id/leads', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const q = req.query;
+    const result = await queryLeads(req.params.id as string, {
+      status: q.status as string | undefined,
+      isConverted: q.isConverted === 'true' ? true : q.isConverted === 'false' ? false : undefined,
+      leadSource: q.leadSource as string | undefined,
+      ownerEmail: q.ownerEmail as string | undefined,
+      company: q.company as string | undefined,
+      search: q.search as string | undefined,
+      sortBy: q.sortBy as any,
+      sortDir: q.sortDir as any,
+      limit: parseNum(q.limit),
+      offset: parseNum(q.offset),
+    });
+    res.json({ data: result.leads, total: result.total, limit: result.limit, offset: result.offset });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.get('/:id/leads/:leadId', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const lead = await getLead(req.params.id as string, req.params.leadId as string);
+    if (!lead) {
+      res.status(404).json({ error: 'Lead not found' });
+      return;
+    }
+    res.json({ data: lead });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.get('/:id/accounts/:accountId/leads', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const leads = await getLeadsForAccount(req.params.id as string, req.params.accountId as string);
+    res.json({ data: leads, total: leads.length });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.get('/:id/contacts/:contactId/converted-from', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const lead = await getLeadFromConvertedContact(req.params.id as string, req.params.contactId as string);
+    if (!lead) {
+      res.status(404).json({ error: 'No lead found for this contact' });
+      return;
+    }
+    res.json({ data: lead });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
+// ─── Account Routes ───────────────────────────────────────────────────────────
 
 router.get('/:id/accounts/:accountId/health', async (req: Request, res: Response): Promise<void> => {
   try {

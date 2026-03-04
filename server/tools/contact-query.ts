@@ -28,6 +28,7 @@ export interface ContactFilters {
   owner?: string;
   seniority?: string;
   department?: string;
+  lifecycleStage?: string | string[];
   lastActivityAfter?: Date;
   search?: string;
   sortBy?: 'name' | 'email' | 'engagement_score' | 'last_activity_date' | 'created_at';
@@ -65,6 +66,17 @@ function buildWhereClause(workspaceId: string, filters: ContactFilters) {
   if (filters.department !== undefined) {
     conditions.push(`department = $${idx}`);
     params.push(filters.department);
+    idx++;
+  }
+
+  if (filters.lifecycleStage !== undefined) {
+    if (Array.isArray(filters.lifecycleStage)) {
+      conditions.push(`lifecycle_stage = ANY($${idx}::text[])`);
+      params.push(filters.lifecycleStage);
+    } else {
+      conditions.push(`lifecycle_stage = $${idx}`);
+      params.push(filters.lifecycleStage);
+    }
     idx++;
   }
 

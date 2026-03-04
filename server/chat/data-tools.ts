@@ -194,6 +194,8 @@ export async function executeDataTool(
         result = await computeMetric(workspaceId, params); break;
       case 'query_contacts':
         result = await queryContacts(workspaceId, params); break;
+      case 'query_leads':
+        result = await queryLeadsAI(workspaceId, params); break;
       case 'query_activity_timeline':
         result = await queryActivityTimeline(workspaceId, params); break;
       case 'query_stage_history':
@@ -1280,6 +1282,21 @@ async function queryContacts(workspaceId: string, params: Record<string, any>): 
     descParts.push('with conversations');
   }
 
+  if (params.lifecycle_stage) {
+    conditions.push(`c.lifecycle_stage = ${addParam(params.lifecycle_stage)}`);
+    descParts.push(`stage~"${params.lifecycle_stage}"`);
+  }
+
+  if (params.seniority) {
+    conditions.push(`c.seniority = ${addParam(params.seniority)}`);
+    descParts.push(`seniority~"${params.seniority}"`);
+  }
+
+  if (params.department) {
+    conditions.push(`c.department = ${addParam(params.department)}`);
+    descParts.push(`dept~"${params.department}"`);
+  }
+
   const limit = Math.min(params.limit || 50, 200);
   const where = conditions.join(' AND ');
 
@@ -1324,6 +1341,93 @@ async function queryContacts(workspaceId: string, params: Record<string, any>): 
     })),
     total_count: totalCount,
     query_description: `Contacts (${descParts.length > 0 ? descParts.join(', ') : 'all'}) — ${totalCount} total`,
+  };
+}
+
+// ─── Tool 6b: query_leads ────────────────────────────────────────────────────
+
+async function queryLeadsAI(workspaceId: string, params: Record<string, any>): Promise<any> {
+  const conditions: string[] = ['workspace_id = $1'];
+  const values: any[] = [workspaceId];
+  const descParts: string[] = [];
+
+  function addParam(val: any): string {
+    values.push(val);
+    return `$${values.length}`;
+  }
+
+  if (params.status) {
+    conditions.push(`status = ${addParam(params.status)}`);
+    descParts.push(`status="${params.status}"`);
+  }
+
+  if (params.is_converted !== undefined && params.is_converted !== null) {
+    conditions.push(`is_converted = ${addParam(params.is_converted)}`);
+    descParts.push(params.is_converted ? 'converted' : 'not converted');
+  }
+
+  if (params.lead_source) {
+    conditions.push(`lead_source ILIKE ${addParam(`%${params.lead_source}%`)}`);
+    descParts.push(`source~"${params.lead_source}"`);
+  }
+
+  if (params.owner_email) {
+    conditions.push(`owner_email ILIKE ${addParam(`%${params.owner_email}%`)}`);
+    descParts.push(`owner~"${params.owner_email}"`);
+  }
+
+  if (params.company) {
+    conditions.push(`company ILIKE ${addParam(`%${params.company}%`)}`);
+    descParts.push(`company~"${params.company}"`);
+  }
+
+  if (params.search) {
+    conditions.push(
+      `(first_name ILIKE ${addParam(`%${params.search}%`)} OR last_name ILIKE $${values.length} OR email ILIKE $${values.length} OR company ILIKE $${values.length})`
+    );
+    descParts.push(`search~"${params.search}"`);
+  }
+
+  const limit = Math.min(params.limit || 50, 200);
+  const where = conditions.join(' AND ');
+
+  const countResult = await query<{ cnt: string }>(
+    `SELECT COUNT(*)::text as cnt FROM leads WHERE ${where}`,
+    values
+  );
+  const totalCount = parseInt(countResult.rows[0]?.cnt || '0');
+
+  const rows = await query<any>(
+    `SELECT id,
+            COALESCE(first_name, '') || ' ' || COALESCE(last_name, '') as name,
+            email, title, company, status, lead_source, is_converted,
+            owner_name, owner_email,
+            source_data->>'CreatedDate' as created_date,
+            sf_converted_opportunity_id
+     FROM leads
+     WHERE ${where}
+     ORDER BY (source_data->>'CreatedDate') DESC NULLS LAST
+     LIMIT ${addParam(limit)}`,
+    values
+  );
+
+  return {
+    leads: rows.rows.map((r: any) => ({
+      id: r.id,
+      name: r.name?.trim() || 'Unknown',
+      email: r.email,
+      title: r.title,
+      company: r.company,
+      status: r.status,
+      lead_source: r.lead_source,
+      is_converted: r.is_converted,
+      owner_name: r.owner_name,
+      owner_email: r.owner_email,
+      created_date: r.created_date,
+      converted_opportunity_id: r.sf_converted_opportunity_id,
+    })),
+    total_count: totalCount,
+    query_description: `Leads (${descParts.length > 0 ? descParts.join(', ') : 'all'}) — ${totalCount} total`,
   };
 }
 

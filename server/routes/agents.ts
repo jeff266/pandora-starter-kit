@@ -11,7 +11,7 @@ import { requireAdmin } from '../middleware/auth.js';
 const agentsGlobalRouter = Router();
 const agentsWorkspaceRouter = Router();
 
-agentsGlobalRouter.get('/agents', (_req: Request, res: Response) => {
+agentsGlobalRouter.get('/agents', requireAdmin, (_req: Request, res: Response) => {
   const registry = getAgentRegistry();
   const agents = registry.list().map(a => ({
     id: a.id,
@@ -28,7 +28,7 @@ agentsGlobalRouter.get('/agents', (_req: Request, res: Response) => {
   res.json({ agents });
 });
 
-agentsGlobalRouter.get('/agents/:agentId', (req: Request, res: Response) => {
+agentsGlobalRouter.get('/agents/:agentId', requireAdmin, (req: Request, res: Response) => {
   const registry = getAgentRegistry();
   const agent = registry.get(req.params.agentId as string);
   if (!agent) {

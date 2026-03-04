@@ -181,3 +181,65 @@ Pandora is built on Node.js 20 with TypeScript 5+, utilizing Express.js and Post
 -   **Fireworks AI (DeepSeek V3):** AI classification and extraction.
 -   **Apollo API:** Contact and company enrichment.
 -   **Serper API:** Google search results for company signal intelligence.
+## Security Hardening (March 2026)
+
+### S001: IDOR Fix in `requireWorkspaceAccess`
+- **Root cause**: Middleware ran before Express parsed `:workspaceId` param; `req.params.workspaceId` was always `undefined`
+- **Fix**: `extractWorkspaceId()` helper — checks `req.params.workspaceId` first, then falls back to UUID regex on `req.path`
+- **Also added**: UUID format validation before any DB query; invalid UUIDs return 400
+- **File**: `server/middleware/auth.ts`
+
+### S002: Credential Migration Script
+- **Tool**: `server/lib/migrate-credentials.ts` — encrypts plaintext JSONB credentials to AES-256-GCM (`enc:` prefix)
+- **Admin endpoint**: `POST /api/admin/migrate-credentials` (requires `PANDORA_ADMIN_KEY`)
+- **Auto-run**: Set `AUTO_MIGRATE_CREDENTIALS=true` env var to run on startup
+- **Note**: All credentials were already in encrypted/legacy-base64 format; script is idempotent
+
+### S003: LLM Cost Amplification Protection
+- Added `chatLimiter`: 20 LLM calls/minute per workspace (per-workspace key, not per-IP)
+- Applied via `workspaceApiRouter.use('/:workspaceId/chat', chatLimiter)` before chat router
+- **File**: `server/index.ts`
+
+### S004: Session Rotation
+- Already correctly implemented: `revokeRefreshToken` + new `generateRefreshToken` + new `generateAccessToken` (JWT, different `iat`) on every `/auth/refresh` call
+- No change needed
+
+### S005: UUID Validation in SQL Workspace
+- Added `UUID_RE.test(workspaceId)` check at top of both `/sql/execute` and `/sql/saved/:queryId/run` handlers
+- Converted `SET LOCAL app.current_workspace_id = '${workspaceId}'` string interpolation to parameterized `SET LOCAL ... = $1`
+- **File**: `server/routes/sql-workspace.ts`
+
+### S006: Auth on `/api/agents` Public Routes
+- Added `requireAdmin` middleware to `GET /agents` and `GET /agents/:agentId` — no longer publicly readable
+- **File**: `server/routes/agents.ts`
+
+### S007: Prompt Injection Guard
+- Added `## Data Integrity Guard` section to `PANDORA_SYSTEM_PROMPT`
+- Added rule 24 (LEADS) clarifying HubSpot vs Salesforce lead tools
+- **File**: `server/chat/pandora-agent.ts`
+
+## Lead & Contact Querying (March 2026)
+
+### Q001: `lifecycle_stage` Filter Added to Contacts
+- **`server/tools/contact-query.ts`**: Added `lifecycleStage?: string | string[]` to `ContactFilters`; single value or array (`ANY($N::text[])`) support
+- **`server/routes/data.ts`**: `GET /:id/contacts` now accepts `lifecycle_stage` query param (comma-separated for arrays)
+- **`server/chat/data-tools.ts`**: `query_contacts` tool now filters by `lifecycle_stage`, `seniority`, `department`
+- **`server/chat/pandora-agent.ts`**: `query_contacts` tool definition extended with all three new params
+
+### Q002: `server/tools/lead-query.ts` — New Full Query Layer
+- Exports: `Lead` interface, `LeadFilters`, `queryLeads()`, `getLead()`, `getLeadsForAccount()`, `getLeadFromConvertedContact()`
+- Filters: `status`, `isConverted`, `leadSource`, `ownerId`, `ownerEmail`, `company` (ILIKE), `search`, `createdAfter`, `lastModifiedAfter`, `sortBy`, `sortDir`, `limit`, `offset`
+- All queries scoped to `workspace_id = $1`
+
+### Q003: Leads REST Routes
+Added to `server/routes/data.ts`:
+- `GET /:id/leads` — list with all filters
+- `GET /:id/leads/:leadId` — single lead detail
+- `GET /:id/accounts/:accountId/leads` — leads linked to an account
+- `GET /:id/contacts/:contactId/converted-from` — lead this contact was converted from
+
+### Q004: `query_leads` AI Agent Tool
+- Added `query_leads` tool to `server/chat/data-tools.ts` (function `queryLeadsAI`)
+- Registered in `case` switch alongside `query_deals`, `query_contacts`
+- Added to `PANDORA_TOOLS` array and both system prompt tool lists
+- Differentiates HubSpot leads (use `query_contacts` with `lifecycle_stage="lead"`) vs Salesforce leads (use `query_leads`)

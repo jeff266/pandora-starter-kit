@@ -26,9 +26,15 @@ const BLOCKED_KEYWORDS = [
  * - Timeout after 30 seconds
  * - Maximum 10,000 rows returned
  */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 router.post('/:workspaceId/sql/execute', async (req: Request, res: Response) => {
   const { workspaceId } = req.params;
   const { sql } = req.body;
+
+  if (!UUID_RE.test(workspaceId)) {
+    return res.status(400).json({ error: 'Invalid workspace ID format' });
+  }
 
   if (!sql || typeof sql !== 'string') {
     return res.status(400).json({
@@ -82,7 +88,7 @@ router.post('/:workspaceId/sql/execute', async (req: Request, res: Response) => 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query(`SET LOCAL app.current_workspace_id = '${workspaceId}'`);
+    await client.query('SET LOCAL app.current_workspace_id = $1', [workspaceId]);
     await client.query(`SET LOCAL statement_timeout = ${QUERY_TIMEOUT_MS}`);
     await client.query(`SET LOCAL ROLE pandora_rls_user`);
 
@@ -346,6 +352,10 @@ router.delete('/:workspaceId/sql/saved/:queryId', async (req: Request, res: Resp
 router.post('/:workspaceId/sql/saved/:queryId/run', async (req: Request, res: Response) => {
   const { workspaceId, queryId } = req.params;
 
+  if (!UUID_RE.test(workspaceId)) {
+    return res.status(400).json({ error: 'Invalid workspace ID format' });
+  }
+
   try {
     // Fetch the saved query
     const savedQueryResult = await query(
@@ -368,7 +378,7 @@ router.post('/:workspaceId/sql/saved/:queryId/run', async (req: Request, res: Re
     try {
       // CRITICAL: Set workspace_id session variable for Row-Level Security
       await client.query('BEGIN');
-      await client.query(`SET LOCAL app.current_workspace_id = '${workspaceId}'`);
+      await client.query('SET LOCAL app.current_workspace_id = $1', [workspaceId]);
       await client.query(`SET LOCAL statement_timeout = ${QUERY_TIMEOUT_MS}`);
 
       const startTime = Date.now();

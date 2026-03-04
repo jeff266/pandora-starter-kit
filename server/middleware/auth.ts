@@ -102,6 +102,14 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   }
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function extractWorkspaceId(req: Request): string | undefined {
+  if (req.params.workspaceId) return req.params.workspaceId;
+  const match = req.path.match(/\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+  return match?.[1];
+}
+
 export async function requireWorkspaceAccess(req: Request, res: Response, next: NextFunction): Promise<void> {
   const token = extractBearerToken(req);
   if (!token) {
@@ -109,11 +117,15 @@ export async function requireWorkspaceAccess(req: Request, res: Response, next: 
     return;
   }
 
-  const workspaceId = req.params.workspaceId;
+  const workspaceId = extractWorkspaceId(req);
 
   try {
     const workspace = await lookupWorkspaceByKey(token);
     if (workspace) {
+      if (workspaceId && !UUID_RE.test(workspaceId)) {
+        res.status(400).json({ error: 'Invalid workspace ID format' });
+        return;
+      }
       if (workspaceId && workspace.id !== workspaceId) {
         res.status(403).json({ error: 'API key does not have access to this workspace' });
         return;
