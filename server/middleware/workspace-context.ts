@@ -73,7 +73,8 @@ export async function attachWorkspaceContext(
     // This is informational only - doesn't block access
     if (req.user?.user_id) {
       const memberResult = await query<WorkspaceMemberRow>(
-        `SELECT id, user_id, role, display_name, is_active
+        `SELECT id, user_id, pandora_role AS role, NULL::text AS display_name,
+                (status = 'active') AS is_active, role_id
          FROM workspace_members
          WHERE workspace_id = $1 AND user_id = $2`,
         [workspaceId, req.user.user_id]
@@ -84,7 +85,7 @@ export async function attachWorkspaceContext(
         req.workspaceMember = {
           id: member.id,
           userId: member.user_id,
-          roleId: '', // Will be populated by requirePermission if needed
+          roleId: (member as any).role_id || '',
           role: member.role,
           displayName: member.display_name,
           isActive: member.is_active,

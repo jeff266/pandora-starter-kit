@@ -46,19 +46,17 @@ export async function getWorkspaceMember(
   permissions: PermissionSet | null;
 }> {
   const result = await query<WorkspaceMemberResult>(
-    `SELECT 
+    `SELECT
       wm.id,
       wm.user_id,
-      wm.role,
-      wm.display_name,
-      wm.is_active,
-      wr.id as role_id,
+      wm.pandora_role AS role,
+      NULL::text AS display_name,
+      (wm.status = 'active') AS is_active,
+      wr.id AS role_id,
       wr.permissions
     FROM workspace_members wm
-    LEFT JOIN workspace_roles wr 
-      ON wr.workspace_id = wm.workspace_id 
-      AND wr.system_type = wm.role
-    WHERE wm.workspace_id = $1 
+    LEFT JOIN workspace_roles wr ON wr.id = wm.role_id
+    WHERE wm.workspace_id = $1
       AND wm.user_id = $2`,
     [workspaceId, userId]
   );

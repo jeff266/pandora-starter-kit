@@ -1,5 +1,4 @@
 import { Router, type Request, type Response } from 'express';
-import { requirePermission } from '../middleware/permissions.js';
 import { query } from '../db.js';
 import { runProspectScoring } from '../scoring/prospect-scorer.js';
 
@@ -191,7 +190,7 @@ router.get('/:workspaceId/prospect-scores', async (req: Request, res: Response):
 // ── POST /:id/prospect-scores/run ─────────────────────────────────────────────
 // Triggers a fresh scoring run for the workspace.
 
-router.post('/:workspaceId/prospect-scores/run', requirePermission('deals.edit'), async (req: Request, res: Response): Promise<void> => {
+router.post('/:workspaceId/prospect-scores/run', async (req: Request, res: Response): Promise<void> => {
   const workspaceId = req.params.workspaceId;
   try {
     const result = await runProspectScoring(workspaceId);
