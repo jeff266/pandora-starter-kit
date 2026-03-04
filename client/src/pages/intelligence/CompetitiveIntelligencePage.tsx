@@ -225,8 +225,10 @@ export default function CompetitiveIntelligencePage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedCompetitor, setSelectedCompetitor] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<SortOption>('Deal Value');
+  const [running, setRunning] = useState(false);
+  const [runMessage, setRunMessage] = useState<string | null>(null);
 
-  useEffect(() => {
+  const loadData = () => {
     if (!workspaceId) return;
     setLoading(true);
     setError(null);
@@ -234,7 +236,24 @@ export default function CompetitiveIntelligencePage() {
       .then((res: any) => { setData(res); })
       .catch((err: any) => { setError(err.message ?? 'Failed to load data'); })
       .finally(() => setLoading(false));
-  }, [workspaceId]);
+  };
+
+  useEffect(() => { loadData(); }, [workspaceId]);
+
+  const runAnalysis = async () => {
+    if (running) return;
+    setRunning(true);
+    setRunMessage(null);
+    try {
+      await api.post('/skills/competitive-intelligence/run', {});
+      setRunMessage('Analysis complete — refreshing data');
+      loadData();
+    } catch (err: any) {
+      setRunMessage(err.message ?? 'Run failed');
+    } finally {
+      setRunning(false);
+    }
+  };
 
   const toggleCompetitor = (name: string) => {
     setSelectedCompetitor(prev => prev === name ? null : name);
@@ -264,6 +283,9 @@ export default function CompetitiveIntelligencePage() {
           0%   { background-position: 200% 0; }
           100% { background-position: -200% 0; }
         }
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
       `}</style>
 
       {/* ── Page Header ───────────────────────────────────────────────────── */}
@@ -285,25 +307,57 @@ export default function CompetitiveIntelligencePage() {
               : loading ? 'Loading…' : 'No analysis run yet · 90-day trailing window'}
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {selectedCompetitor && (
-            <button onClick={() => setSelectedCompetitor(null)} style={{
-              background: C.surfaceRaised, border: `1px solid ${C.borderLight}`,
-              color: C.textSecondary, fontSize: 13, padding: '7px 14px',
-              borderRadius: 7, cursor: 'pointer', fontFamily: font,
-            }}>
-              Clear filter
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {selectedCompetitor && (
+              <button onClick={() => setSelectedCompetitor(null)} style={{
+                background: C.surfaceRaised, border: `1px solid ${C.borderLight}`,
+                color: C.textSecondary, fontSize: 13, padding: '7px 14px',
+                borderRadius: 7, cursor: 'pointer', fontFamily: font,
+              }}>
+                Clear filter
+              </button>
+            )}
+            <button
+              onClick={runAnalysis}
+              disabled={running}
+              style={{
+                background: running ? C.surfaceRaised : C.accentSoft,
+                border: `1px solid ${running ? C.borderLight : C.accent}`,
+                color: running ? C.textMuted : C.accent,
+                fontSize: 13, fontWeight: 600, padding: '7px 14px',
+                borderRadius: 7, cursor: running ? 'not-allowed' : 'pointer',
+                fontFamily: font, display: 'flex', alignItems: 'center', gap: 6,
+                transition: 'all 0.15s',
+              }}
+            >
+              {running && (
+                <span style={{
+                  width: 10, height: 10, borderRadius: '50%',
+                  border: `2px solid ${C.accent}`, borderTopColor: 'transparent',
+                  animation: 'spin 0.7s linear infinite', display: 'inline-block',
+                }} />
+              )}
+              {running ? 'Running…' : '▶ Run Analysis'}
             </button>
-          )}
-          <div style={{
-            background: C.surfaceRaised, border: `1px solid ${C.borderLight}`,
-            borderRadius: 7, padding: '7px 13px',
-            fontSize: 12, color: C.textMuted, display: 'flex', alignItems: 'center', gap: 6,
-            fontFamily: font,
-          }}>
-            <span style={{ width: 6, height: 6, borderRadius: '50%', background: C.green, boxShadow: `0 0 5px ${C.green}88` }} />
-            Auto-runs 1st of each month
+            <div style={{
+              background: C.surfaceRaised, border: `1px solid ${C.borderLight}`,
+              borderRadius: 7, padding: '7px 13px',
+              fontSize: 12, color: C.textMuted, display: 'flex', alignItems: 'center', gap: 6,
+              fontFamily: font,
+            }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: C.green, boxShadow: `0 0 5px ${C.green}88` }} />
+              Auto-runs 1st of each month
+            </div>
           </div>
+          {runMessage && (
+            <div style={{
+              fontSize: 12, color: runMessage.includes('failed') || runMessage.includes('Failed') ? C.red : C.green,
+              fontFamily: font,
+            }}>
+              {runMessage}
+            </div>
+          )}
         </div>
       </div>
 
