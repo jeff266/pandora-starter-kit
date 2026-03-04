@@ -1,0 +1,33 @@
+This is a solid audit, Jeff. The findings are well-confirmed with real test evidence, and the fixes are appropriately scoped. Here's my review:
+
+**T001 (Cross-Workspace IDOR) — Good fix, one concern**
+
+The regex fallback approach is pragmatic and avoids touching route files. But I'd add a defensive check: if the regex extraction *also* fails (no UUID found in path), the middleware should **deny by default** rather than proceeding with `workspaceId = undefined`. The current bug exists precisely because `undefined` silently bypasses the check. Make sure the fix includes an explicit `if (!workspaceId) return res.status(400)` after the fallback extraction.
+
+Also worth confirming: are there any routes under `/api/workspaces` that legitimately don't have a workspace UUID in the path? If so, the regex fallback could incorrectly block them. Quick grep of the route mounts would confirm.
+
+**T002 (SQL Injection in SET LOCAL) — Clean and correct**
+
+UUID regex validation before interpolation is the right call. One addition: consider using parameterized queries for the SET LOCAL if Neon/pg supports it (`SET LOCAL app.current_workspace_id = $1`). If not, the UUID regex guard is sufficient since a valid UUID can't contain SQL metacharacters. Either way, this is a must-ship fix.
+
+**T003 (Unauthenticated /api/agents) — Agree with requireAdmin**
+
+Since this is a platform-level registry, admin-only is correct. Just verify that `requireAdmin` checks the admin API key header and not session auth, since this is likely called programmatically.
+
+**T004 (Prompt Injection Hardening) — Good baseline, but manage expectations**
+
+The proposed constraint block is the right starting point. Two additions I'd suggest:
+
+First, wrap DB-retrieved content in explicit delimiters when injecting into the prompt context (e.g., `<retrieved_data>...</retrieved_data>`), so the model has a structural signal separating trusted instructions from untrusted data. The text-only constraint works but delimiters make it significantly harder to break.
+
+Second, apply the same hardening to any skill-level prompts that interpolate deal names, contact names, or conversation summaries — not just the top-level system prompt.
+
+**What's missing from the plan**
+
+The audit correctly identifies the issues but doesn't mention a **regression test** strategy. Given that T001 is a one-line middleware change that affects every workspace-scoped route, I'd want a quick smoke test hitting 3-4 representative endpoints (deals, contacts, skills, agents) with both valid-workspace and cross-workspace tokens after deployment. Even a simple shell script would catch any regressions.
+
+**Scoping decisions — agree**
+
+Deferring RBAC granularity (Finding 5) is the right call for now. Your workspace membership model is "small team, high trust" at this stage. The RLS coverage (Finding 6) is a strong safety net once T002 lands.
+
+Overall: T001 and T002 are ship-blockers. T003 is a quick win. T004 is defense-in-depth. The plan is ready to execute — just add the deny-by-default guard on T001 and the delimiter wrapping on T004.
