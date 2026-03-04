@@ -1,3 +1,26 @@
+/**
+ * ⚠️ DEPRECATED - SCHEDULED FOR DELETION ⚠️
+ *
+ * This file contains the legacy Contact Engagement scorer that is being phased out.
+ * All callers have been rewired in Prospect Score Consolidation Step 1.
+ *
+ * REPLACEMENT: Use Lead Scoring v1 (server/skills/compute/lead-scoring.ts)
+ * - Reads from lead_scores table where entity_type='contact'
+ * - ICP-integrated role weighting
+ * - Activity engagement scoring
+ *
+ * DELETION DATE: 2026-04-01 (if no references remain)
+ * Last verified: 2026-03-04 - no remaining imports
+ *
+ * CALLERS SHOULD:
+ * - Read from lead_scores table directly
+ * - Return null if no score exists (weekly cron will catch it)
+ * - Do NOT call computeContactEngagement() directly
+ *
+ * DEPRECATION DATE: 2026-03-04
+ * REMOVAL TARGET: Phase 1 completion (2 weeks)
+ */
+
 export interface ContactRow {
   id: string;
   last_activity_date: string | null;

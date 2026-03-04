@@ -5,11 +5,37 @@
  * Integrates with custom field discovery to automatically weight
  * high-signal fields discovered in the workspace's data.
  *
+ * REFACTORED FOR PROMPT 3: Factor Emission + Pillar Aggregation
+ * Now emits detailed ScoreFactor[] for every dimension and aggregates
+ * into 4 pillars (fit/engagement/intent/timing) with weight redistribution.
+ *
  * No external APIs, no ICP model required — works day 1.
  */
 
 import { query } from '../../db.js';
 import { createLogger } from '../../utils/logger.js';
+import {
+  ScoreFactor,
+  ProspectScoreResult,
+  PillarCategory,
+  DIMENSION_TO_PILLAR,
+  determineDirection,
+} from '../../scoring/prospect-score-types.js';
+import {
+  aggregatePillars,
+  computeComposite,
+  sortFactorsByImpact,
+  assignGrade,
+} from '../../scoring/pillar-aggregator.js';
+import {
+  generateTopFactors,
+  generateScoreSummary,
+  generateRecommendedAction,
+} from '../../scoring/score-summary.js';
+import {
+  computeConfidence,
+  determineScoringMethod,
+} from '../../scoring/score-confidence.js';
 
 const logger = createLogger('LeadScoring');
 
@@ -122,6 +148,7 @@ interface ScoreComponent {
   weight: number;
 }
 
+// Legacy interface for backward compatibility
 interface LeadScore {
   entityType: 'deal' | 'contact';
   entityId: string;
@@ -138,13 +165,19 @@ interface LeadScore {
 }
 
 interface ScoringResult {
-  dealScores: LeadScore[];
-  contactScores: LeadScore[];
+  dealScores: ProspectScoreResult[];
+  contactScores: ProspectScoreResult[];
   summaryStats: {
     totalDeals: number;
     totalContacts: number;
     gradeDistribution: Record<string, number>;
     avgDealScore: number;
+    pillarAverages: {
+      fit: number;
+      engagement: number;
+      intent: number;
+      timing: number;
+    };
     topDeals: Array<{ id: string; name: string; score: number; grade: string }>;
     bottomDeals: Array<{ id: string; name: string; score: number; grade: string }>;
     movers: Array<{ id: string; name: string; change: number; from: number; to: number }>;
@@ -809,7 +842,605 @@ function mapICPToScoringWeights(profile: ICPProfile): ICPWeights {
 }
 
 // ============================================================================
-// Scoring Engine
+// Dimension Scoring Functions (Factor Emission)
+// ============================================================================
+
+/**
+ * Scores the Engagement dimension for deals.
+ * Returns factors for: activity recency, activity volume, multi-channel, active days
+ */
+function scoreDealEngagement(deal: DealFeatures): { score: number; max: number; factors: ScoreFactor[] } {
+  const factors: ScoreFactor[] = [];
+  let score = 0;
+  const max = 25;
+  const category: PillarCategory = 'engagement';
+
+  // Activity recency (max 8 points)
+  const daysSince = deal.daysSinceLastActivity ?? 999;
+  let recencyPts = 0;
+  if (daysSince < 7) recencyPts = 8;
+  else if (daysSince < 14) recencyPts = 5;
+  else if (daysSince < 30) recencyPts = 2;
+  score += recencyPts;
+
+  factors.push({
+    field: 'days_since_last_activity',
+    label: 'Activity Recency',
+    value: `${daysSince} days`,
+    contribution: recencyPts,
+    maxPossible: 8,
+    direction: determineDirection(recencyPts, 8),
+    category,
+    explanation: daysSince < 7 ? 'Active within the last week — strong engagement signal.' :
+                 daysSince > 30 ? `No activity in ${daysSince} days — deal going cold.` : undefined,
+  });
+
+  // Activity volume (max 7 points)
+  const activityPts = Math.min(7, Math.floor(deal.totalActivities / 5));
+  score += activityPts;
+  factors.push({
+    field: 'total_activities',
+    label: 'Activity Volume',
+    value: `${deal.totalActivities} activities`,
+    contribution: activityPts,
+    maxPossible: 7,
+    direction: determineDirection(activityPts, 7),
+    category,
+  });
+
+  // Multi-channel (max 5 points)
+  const channels = [deal.emails > 0, deal.calls > 0, deal.meetings > 0].filter(Boolean).length;
+  const channelPts = channels >= 3 ? 5 : channels === 2 ? 3 : channels === 1 ? 1 : 0;
+  score += channelPts;
+  factors.push({
+    field: 'engagement_channels',
+    label: 'Multi-Channel Engagement',
+    value: `${channels} channels`,
+    contribution: channelPts,
+    maxPossible: 5,
+    direction: determineDirection(channelPts, 5),
+    category,
+    explanation: channels >= 3 ? 'Engaging across email, calls, and meetings.' : undefined,
+  });
+
+  // Active days (max 5 points)
+  const activeDaysPts = Math.min(5, Math.floor(deal.activeDays / 3));
+  score += activeDaysPts;
+  factors.push({
+    field: 'active_days',
+    label: 'Active Days',
+    value: `${deal.activeDays} days`,
+    contribution: activeDaysPts,
+    maxPossible: 5,
+    direction: determineDirection(activeDaysPts, 5),
+    category,
+  });
+
+  return { score, max, factors };
+}
+
+/**
+ * Scores the Threading dimension for deals.
+ * Returns factors for: multi-threading, champion presence, economic buyer, role diversity
+ */
+function scoreDealThreading(deal: DealFeatures): { score: number; max: number; factors: ScoreFactor[] } {
+  const factors: ScoreFactor[] = [];
+  let score = 0;
+  const max = 20;
+  const category: PillarCategory = 'intent';
+
+  // Multi-threaded (max 6 points)
+  const contacts = deal.totalContacts;
+  const multiThreadPts = contacts >= 3 ? 6 : contacts === 2 ? 3 : 0;
+  score += multiThreadPts;
+  factors.push({
+    field: 'total_contacts',
+    label: 'Multi-Threading',
+    value: `${contacts} contacts`,
+    contribution: multiThreadPts,
+    maxPossible: 6,
+    direction: determineDirection(multiThreadPts, 6),
+    category,
+    explanation: contacts >= 3 ? 'Deal is multi-threaded with 3+ contacts.' :
+                 contacts === 1 ? 'Single-threaded — high risk.' : undefined,
+  });
+
+  // Champion presence (max 5 points)
+  const championPts = deal.champions > 0 ? 5 : 0;
+  score += championPts;
+  factors.push({
+    field: 'champion_present',
+    label: 'Champion Identified',
+    value: deal.champions > 0 ? 'Yes' : 'No',
+    contribution: championPts,
+    maxPossible: 5,
+    direction: determineDirection(championPts, 5),
+    category,
+    explanation: deal.champions > 0 ? 'Champion identified — internal advocate present.' : undefined,
+  });
+
+  // Economic buyer / decision maker (max 5 points)
+  const hasEB = deal.rolesPresent.some(r => r === 'economic_buyer' || r === 'decision_maker');
+  const ebPts = hasEB ? 5 : 0;
+  score += ebPts;
+  factors.push({
+    field: 'economic_buyer_present',
+    label: 'Economic Buyer',
+    value: hasEB ? 'Yes' : 'No',
+    contribution: ebPts,
+    maxPossible: 5,
+    direction: determineDirection(ebPts, 5),
+    category,
+    explanation: hasEB ? 'Economic buyer engaged in deal.' : undefined,
+  });
+
+  // Role diversity (max 4 points)
+  const roles = deal.uniqueRoles;
+  const roleDiversityPts = roles >= 3 ? 4 : roles === 2 ? 2 : 0;
+  score += roleDiversityPts;
+  factors.push({
+    field: 'unique_roles',
+    label: 'Role Diversity',
+    value: `${roles} roles`,
+    contribution: roleDiversityPts,
+    maxPossible: 4,
+    direction: determineDirection(roleDiversityPts, 4),
+    category,
+  });
+
+  return { score, max, factors };
+}
+
+/**
+ * Scores the Deal Quality dimension.
+ * Returns factors for: amount presence, amount tier, probability, stage advancement
+ */
+function scoreDealQuality(deal: DealFeatures): { score: number; max: number; factors: ScoreFactor[] } {
+  const factors: ScoreFactor[] = [];
+  let score = 0;
+  const max = 20;
+  const category: PillarCategory = 'intent';
+
+  // Amount present (max 3 points)
+  const amountPresentPts = deal.amount && deal.amount > 0 ? 3 : 0;
+  score += amountPresentPts;
+  factors.push({
+    field: 'amount_present',
+    label: 'Deal Value Present',
+    value: deal.amount ? `$${deal.amount.toLocaleString()}` : 'Not set',
+    contribution: amountPresentPts,
+    maxPossible: 3,
+    direction: determineDirection(amountPresentPts, 3),
+    category,
+  });
+
+  // Amount tier (max 7 points)
+  let amountTierPts = 0;
+  if (deal.amount && deal.amount > 0) {
+    amountTierPts = deal.amount >= 100000 ? 7 : deal.amount >= 50000 ? 4 : 2;
+  }
+  score += amountTierPts;
+  factors.push({
+    field: 'deal_amount',
+    label: 'Deal Size',
+    value: deal.amount ? `$${deal.amount.toLocaleString()}` : '$0',
+    contribution: amountTierPts,
+    maxPossible: 7,
+    direction: determineDirection(amountTierPts, 7),
+    category,
+    explanation: deal.amount && deal.amount >= 100000 ? 'High-value deal ($100K+).' : undefined,
+  });
+
+  // Probability (max 5 points)
+  const probabilityPts = deal.probability ? Math.round((deal.probability / 100) * 5) : 0;
+  score += probabilityPts;
+  factors.push({
+    field: 'probability',
+    label: 'Win Probability',
+    value: deal.probability ? `${deal.probability}%` : 'Not set',
+    contribution: probabilityPts,
+    maxPossible: 5,
+    direction: determineDirection(probabilityPts, 5),
+    category,
+  });
+
+  // Stage advanced (max 5 points)
+  const stageOrder = ['awareness', 'qualification', 'evaluation', 'decision', 'negotiation'];
+  const stageIndex = stageOrder.indexOf(deal.stageNormalized);
+  const stagePts = stageIndex >= 0 ? Math.round((stageIndex / 4) * 5) : 0;
+  score += stagePts;
+  factors.push({
+    field: 'deal_stage',
+    label: 'Deal Stage',
+    value: deal.stageNormalized || 'Unknown',
+    contribution: stagePts,
+    maxPossible: 5,
+    direction: determineDirection(stagePts, 5),
+    category,
+  });
+
+  return { score, max, factors };
+}
+
+/**
+ * Scores the Velocity dimension.
+ * Returns factors for: close date set, close date reasonable, recency penalty, stage velocity
+ */
+function scoreDealVelocity(deal: DealFeatures): { score: number; max: number; factors: ScoreFactor[] } {
+  const factors: ScoreFactor[] = [];
+  let score = 0;
+  const max = 15;
+  const category: PillarCategory = 'timing';
+
+  // Close date set (max 3 points)
+  const closeDateSetPts = deal.closeDate ? 3 : 0;
+  score += closeDateSetPts;
+  factors.push({
+    field: 'close_date_set',
+    label: 'Close Date Set',
+    value: deal.closeDate ? deal.closeDate.toISOString().split('T')[0] : 'Not set',
+    contribution: closeDateSetPts,
+    maxPossible: 3,
+    direction: determineDirection(closeDateSetPts, 3),
+    category,
+  });
+
+  // Close date reasonable (max 4 points)
+  const daysUntilClose = deal.daysUntilClose ?? null;
+  const reasonable = daysUntilClose !== null && daysUntilClose > 0 && daysUntilClose < 180;
+  const closeReasonablePts = reasonable ? 4 : 0;
+  score += closeReasonablePts;
+  factors.push({
+    field: 'days_until_close',
+    label: 'Close Timeframe',
+    value: daysUntilClose !== null ? `${daysUntilClose} days` : 'Not set',
+    contribution: closeReasonablePts,
+    maxPossible: 4,
+    direction: determineDirection(closeReasonablePts, 4),
+    category,
+  });
+
+  // Days since activity (NEGATIVE, max -8 points)
+  const daysSince = deal.daysSinceLastActivity ?? 999;
+  const weeks = Math.floor(daysSince / 7);
+  const recencyPenalty = Math.max(-8, -2 * weeks);
+  score += recencyPenalty;
+  factors.push({
+    field: 'activity_recency_penalty',
+    label: 'Inactivity Penalty',
+    value: `${daysSince} days`,
+    contribution: recencyPenalty,
+    maxPossible: -8,
+    direction: 'negative',
+    category,
+    explanation: daysSince > 21 ? `Deal has been inactive for ${daysSince} days.` : undefined,
+  });
+
+  // Stage velocity (max 8 points)
+  const velocityPts = deal.daysSinceCreation < 30 ? 8 : deal.daysSinceCreation < 60 ? 4 : 0;
+  score += velocityPts;
+  factors.push({
+    field: 'days_since_creation',
+    label: 'Deal Age',
+    value: `${deal.daysSinceCreation} days`,
+    contribution: velocityPts,
+    maxPossible: 8,
+    direction: determineDirection(velocityPts, 8),
+    category,
+    explanation: deal.daysSinceCreation < 30 ? 'Recently created deal — high velocity.' : undefined,
+  });
+
+  return { score, max, factors };
+}
+
+/**
+ * Scores the Conversations dimension (requires conversation connector).
+ * Returns factors for: has calls, recent call, call volume, no calls in late stage
+ */
+function scoreDealConversations(deal: DealFeatures, hasConversationConnector: boolean): { score: number; max: number; factors: ScoreFactor[] } {
+  const factors: ScoreFactor[] = [];
+  let score = 0;
+  const max = 30;
+  const category: PillarCategory = 'engagement';
+
+  if (!hasConversationConnector) {
+    return { score: 0, max: 0, factors: [] };
+  }
+
+  // Has calls (max 5 points)
+  const hasCallsPts = (deal.totalCalls || 0) > 0 ? 5 : 0;
+  score += hasCallsPts;
+  factors.push({
+    field: 'has_calls',
+    label: 'Calls Present',
+    value: (deal.totalCalls || 0) > 0 ? 'Yes' : 'No',
+    contribution: hasCallsPts,
+    maxPossible: 5,
+    direction: determineDirection(hasCallsPts, 5),
+    category,
+  });
+
+  // Recent call (max 5 points)
+  const hasRecentCall = deal.lastCall && (Date.now() - deal.lastCall.getTime()) < 14 * 24 * 60 * 60 * 1000;
+  const recentCallPts = hasRecentCall ? 5 : 0;
+  score += recentCallPts;
+  factors.push({
+    field: 'recent_call',
+    label: 'Recent Call',
+    value: hasRecentCall ? 'Last 14 days' : 'No recent calls',
+    contribution: recentCallPts,
+    maxPossible: 5,
+    direction: determineDirection(recentCallPts, 5),
+    category,
+  });
+
+  // Call volume (max 2 points)
+  const callVolumePts = (deal.totalCalls || 0) >= 3 ? 2 : 0;
+  score += callVolumePts;
+  factors.push({
+    field: 'call_volume',
+    label: 'Call Volume',
+    value: `${deal.totalCalls || 0} calls`,
+    contribution: callVolumePts,
+    maxPossible: 2,
+    direction: determineDirection(callVolumePts, 2),
+    category,
+  });
+
+  // No calls in late stage (NEGATIVE, max -5 points)
+  const isLateStage = ['decision', 'negotiation'].includes(deal.stageNormalized);
+  const noCalls = (deal.totalCalls || 0) === 0;
+  const lateStagePenalty = isLateStage && noCalls ? -5 : 0;
+  score += lateStagePenalty;
+  factors.push({
+    field: 'late_stage_no_calls',
+    label: 'Late Stage without Calls',
+    value: isLateStage && noCalls ? 'Yes' : 'No',
+    contribution: lateStagePenalty,
+    maxPossible: -5,
+    direction: 'negative',
+    category,
+    explanation: isLateStage && noCalls ? 'Deal in late stage but no calls recorded.' : undefined,
+  });
+
+  // Conversation intelligence features (if transcripts available)
+  if (deal.callsWithTranscript) {
+    const callEngagementPts = (deal.callsWithTranscript || 0) >= 2 ? 8 : 0;
+    score += callEngagementPts;
+    factors.push({
+      field: 'call_engagement',
+      label: 'Call Engagement',
+      value: `${deal.callsWithTranscript} calls with transcript`,
+      contribution: callEngagementPts,
+      maxPossible: 8,
+      direction: determineDirection(callEngagementPts, 8),
+      category,
+      explanation: callEngagementPts > 0 ? 'Multiple calls with transcripts — deep engagement.' : undefined,
+    });
+
+    const championDetectedPts = deal.championDetected ? 3 : 0;
+    score += championDetectedPts;
+    factors.push({
+      field: 'champion_detected_conversation',
+      label: 'Champion Language Detected',
+      value: deal.championDetected ? 'Yes' : 'No',
+      contribution: championDetectedPts,
+      maxPossible: 3,
+      direction: determineDirection(championDetectedPts, 3),
+      category,
+    });
+
+    const nextStepsPts = deal.nextStepsExplicit ? 2 : 0;
+    score += nextStepsPts;
+    factors.push({
+      field: 'next_steps_explicit',
+      label: 'Next Steps Defined',
+      value: deal.nextStepsExplicit ? 'Yes' : 'No',
+      contribution: nextStepsPts,
+      maxPossible: 2,
+      direction: determineDirection(nextStepsPts, 2),
+      category,
+    });
+
+    const sentimentPenalty = deal.sentimentDeclining ? -8 : 0;
+    score += sentimentPenalty;
+    factors.push({
+      field: 'sentiment_declining',
+      label: 'Sentiment Declining',
+      value: deal.sentimentDeclining ? 'Yes' : 'No',
+      contribution: sentimentPenalty,
+      maxPossible: -8,
+      direction: 'negative',
+      category,
+      explanation: deal.sentimentDeclining ? 'Sentiment declining in recent calls.' : undefined,
+    });
+
+    const competitorPenalty = deal.competitorHeavy ? -3 : 0;
+    score += competitorPenalty;
+    factors.push({
+      field: 'competitor_heavy',
+      label: 'Competitor Mentions',
+      value: deal.competitorHeavy ? 'High' : 'Low',
+      contribution: competitorPenalty,
+      maxPossible: -3,
+      direction: 'negative',
+      category,
+    });
+
+    const longGapPenalty = (deal.daysSinceLastCall !== undefined && deal.daysSinceLastCall !== null && deal.daysSinceLastCall > 21) ? -5 : 0;
+    score += longGapPenalty;
+    factors.push({
+      field: 'long_gap_since_call',
+      label: 'Call Recency',
+      value: deal.daysSinceLastCall ? `${deal.daysSinceLastCall} days` : 'Unknown',
+      contribution: longGapPenalty,
+      maxPossible: -5,
+      direction: 'negative',
+      category,
+      explanation: longGapPenalty < 0 ? `No call in ${deal.daysSinceLastCall} days.` : undefined,
+    });
+  }
+
+  return { score, max, factors };
+}
+
+/**
+ * Scores the Enrichment dimension (firmographic fit).
+ * Returns factors for: company size, industry, buying committee, seniority, etc.
+ */
+function scoreDealEnrichmentFirmographic(deal: DealFeatures): { score: number; max: number; factors: ScoreFactor[] } {
+  const factors: ScoreFactor[] = [];
+  let score = 0;
+  const max = 15;
+  const category: PillarCategory = 'fit';
+
+  if (!deal.hasEnrichmentData) {
+    return { score: 0, max: 0, factors: [] };
+  }
+
+  // Buying committee complete (max 5 points)
+  const committeePts = deal.buyingCommitteeComplete ? 5 : 0;
+  score += committeePts;
+  factors.push({
+    field: 'buying_committee_complete',
+    label: 'Buying Committee',
+    value: deal.buyingCommitteeComplete ? 'Complete' : 'Incomplete',
+    contribution: committeePts,
+    maxPossible: 5,
+    direction: determineDirection(committeePts, 5),
+    category,
+    explanation: deal.buyingCommitteeComplete ? '3+ contacts with 3+ identified buying roles.' : undefined,
+  });
+
+  // C-level present (max 4 points)
+  const clevelPts = deal.seniorityClevelPresent ? 4 : 0;
+  score += clevelPts;
+  factors.push({
+    field: 'seniority_c_level',
+    label: 'C-Level Engaged',
+    value: deal.seniorityClevelPresent ? 'Yes' : 'No',
+    contribution: clevelPts,
+    maxPossible: 4,
+    direction: determineDirection(clevelPts, 4),
+    category,
+  });
+
+  // Decision maker count (max 6 points, 2 pts per decision maker up to 3)
+  const dmCount = deal.decisionMakerCount || 0;
+  const dmPts = Math.min(6, dmCount * 2);
+  score += dmPts;
+  factors.push({
+    field: 'decision_maker_count',
+    label: 'Decision Makers',
+    value: `${dmCount}`,
+    contribution: dmPts,
+    maxPossible: 6,
+    direction: determineDirection(dmPts, 6),
+    category,
+  });
+
+  return { score, max, factors };
+}
+
+/**
+ * Scores the Enrichment Signals dimension (account signals).
+ * Returns factors for: signal score, funding, hiring, expansion, risk
+ */
+function scoreDealEnrichmentSignals(deal: DealFeatures): { score: number; max: number; factors: ScoreFactor[] } {
+  const factors: ScoreFactor[] = [];
+  let score = 0;
+  const max = 15;
+  const category: PillarCategory = 'timing';
+
+  if (!deal.hasEnrichmentData) {
+    return { score: 0, max: 0, factors: [] };
+  }
+
+  // Signal score positive (max 4 points)
+  const signalPositivePts = (deal.signalScore || 0) > 0.5 ? 4 : 0;
+  score += signalPositivePts;
+  factors.push({
+    field: 'signal_score_positive',
+    label: 'Account Signals',
+    value: deal.signalScore ? deal.signalScore.toFixed(2) : '0.00',
+    contribution: signalPositivePts,
+    maxPossible: 4,
+    direction: determineDirection(signalPositivePts, 4),
+    category,
+  });
+
+  // Signal score very positive (max 8 points)
+  const signalVeryPositivePts = (deal.signalScore || 0) > 0.8 ? 8 : 0;
+  score += signalVeryPositivePts;
+  factors.push({
+    field: 'signal_score_very_positive',
+    label: 'Strong Account Signals',
+    value: (deal.signalScore || 0) > 0.8 ? 'Yes' : 'No',
+    contribution: signalVeryPositivePts,
+    maxPossible: 8,
+    direction: determineDirection(signalVeryPositivePts, 8),
+    category,
+    explanation: signalVeryPositivePts > 0 ? 'Very strong account signals (0.8+).' : undefined,
+  });
+
+  // Funding signal (max 3 points)
+  const fundingPts = deal.hasFundingSignal ? 3 : 0;
+  score += fundingPts;
+  factors.push({
+    field: 'funding_signal',
+    label: 'Recent Funding',
+    value: deal.hasFundingSignal ? 'Yes' : 'No',
+    contribution: fundingPts,
+    maxPossible: 3,
+    direction: determineDirection(fundingPts, 3),
+    category,
+  });
+
+  // Hiring signal (max 2 points)
+  const hiringPts = deal.hasHiringSignal ? 2 : 0;
+  score += hiringPts;
+  factors.push({
+    field: 'hiring_signal',
+    label: 'Hiring Activity',
+    value: deal.hasHiringSignal ? 'Yes' : 'No',
+    contribution: hiringPts,
+    maxPossible: 2,
+    direction: determineDirection(hiringPts, 2),
+    category,
+  });
+
+  // Expansion signal (max 3 points)
+  const expansionPts = deal.hasExpansionSignal ? 3 : 0;
+  score += expansionPts;
+  factors.push({
+    field: 'expansion_signal',
+    label: 'Expansion Activity',
+    value: deal.hasExpansionSignal ? 'Yes' : 'No',
+    contribution: expansionPts,
+    maxPossible: 3,
+    direction: determineDirection(expansionPts, 3),
+    category,
+  });
+
+  // Risk signal (NEGATIVE, max -5 points)
+  const riskPenalty = deal.hasRiskSignal ? -5 : 0;
+  score += riskPenalty;
+  factors.push({
+    field: 'risk_signal',
+    label: 'Risk Signals',
+    value: deal.hasRiskSignal ? 'Yes' : 'No',
+    contribution: riskPenalty,
+    maxPossible: -5,
+    direction: 'negative',
+    category,
+    explanation: deal.hasRiskSignal ? 'Risk signals detected on account.' : undefined,
+  });
+
+  return { score, max, factors };
+}
+
+// ============================================================================
+// Scoring Engine (Legacy Single-Feature Evaluation)
 // ============================================================================
 
 function evaluateDealFeature(feature: string, deal: DealFeatures, maxWeight: number): { points: number; rawValue: any } {
@@ -990,44 +1621,34 @@ function scoreDeal(
   workspaceMedianAmount: number,
   hasConversationConnector: boolean,
   icpWeights: ICPWeights | null = null,
-  gradeThresholds = DEFAULT_GRADE_THRESHOLDS
-): LeadScore {
-  const breakdown: Record<string, ScoreComponent> = {};
-  let totalPoints = 0;
-  let maxPossible = 0;
+  gradeThresholds = DEFAULT_GRADE_THRESHOLDS,
+  icpProfileId: string | null = null
+): ProspectScoreResult {
+  const allFactors: ScoreFactor[] = [];
 
-  const conversationFeatures = new Set([
-    'has_calls', 'recent_call', 'call_volume', 'no_calls_late_stage',
-    'call_engagement', 'champion_detected', 'next_steps_explicit',
-    'sentiment_declining', 'competitor_heavy', 'long_gap_since_call',
-  ]);
+  // Score each dimension and collect factors
+  const engagementResult = scoreDealEngagement(deal);
+  allFactors.push(...engagementResult.factors);
 
-  const enrichmentFeatures = new Set([
-    'buying_committee_complete', 'has_champion_identified', 'seniority_c_level_present',
-    'decision_maker_count', 'signal_score_positive', 'signal_score_very_positive',
-    'has_funding_signal', 'has_hiring_signal', 'has_expansion_signal', 'has_risk_signal',
-  ]);
+  const threadingResult = scoreDealThreading(deal);
+  allFactors.push(...threadingResult.factors);
 
-  const hasEnrichmentData = deal.hasEnrichmentData || false;
+  const qualityResult = scoreDealQuality(deal);
+  allFactors.push(...qualityResult.factors);
 
-  for (const [feature, maxWeight] of Object.entries(DEFAULT_WEIGHTS.deal)) {
-    if (conversationFeatures.has(feature) && !hasConversationConnector) {
-      continue;
-    }
+  const velocityResult = scoreDealVelocity(deal);
+  allFactors.push(...velocityResult.factors);
 
-    if (enrichmentFeatures.has(feature) && !hasEnrichmentData) {
-      continue;
-    }
+  const conversationsResult = scoreDealConversations(deal, hasConversationConnector);
+  allFactors.push(...conversationsResult.factors);
 
-    const { points, rawValue } = evaluateDealFeature(feature, deal, maxWeight);
-    breakdown[feature] = { value: rawValue, points, weight: maxWeight };
-    totalPoints += points;
+  const enrichmentFirmographicResult = scoreDealEnrichmentFirmographic(deal);
+  allFactors.push(...enrichmentFirmographicResult.factors);
 
-    if (maxWeight > 0) {
-      maxPossible += maxWeight;
-    }
-  }
+  const enrichmentSignalsResult = scoreDealEnrichmentSignals(deal);
+  allFactors.push(...enrichmentSignalsResult.factors);
 
+  // Add custom field factors
   for (const cfw of customFieldWeights) {
     if (cfw.entityType !== 'deal' && cfw.entityType !== 'account') continue;
 
@@ -1036,33 +1657,49 @@ function scoreDeal(
 
     if (value !== null && value !== undefined) {
       const points = cfw.valueScores[String(value)] || 0;
-      breakdown[`custom_${cfw.fieldKey}`] = {
-        value,
-        points,
-        weight: cfw.maxPoints,
-      };
-      totalPoints += points;
-      maxPossible += cfw.maxPoints;
+      allFactors.push({
+        field: `custom_${cfw.fieldKey}`,
+        label: `Custom: ${cfw.fieldKey}`,
+        value: String(value),
+        contribution: points,
+        maxPossible: cfw.maxPoints,
+        direction: determineDirection(points, cfw.maxPoints),
+        category: 'fit', // Custom fields generally map to fit
+      });
     }
   }
 
-  // ICP-specific scoring (Lead Scoring V2)
+  // ICP-specific factors
   if (icpWeights) {
     // Company fit scoring (employee count + industry)
     for (const rule of icpWeights.companyFitRules) {
       if (rule.field === 'employee_count' && rule.range && deal.employeeCount) {
         const [min, max] = rule.range;
         if (deal.employeeCount >= min && deal.employeeCount <= max) {
-          breakdown['icp_company_size'] = { value: deal.employeeCount, points: rule.points, weight: 15 };
-          totalPoints += rule.points;
-          maxPossible += 15;
+          allFactors.push({
+            field: 'icp_company_size',
+            label: 'ICP Company Size',
+            value: `${deal.employeeCount} employees`,
+            contribution: rule.points,
+            maxPossible: 15,
+            direction: determineDirection(rule.points, 15),
+            category: 'fit',
+            explanation: rule.points > 10 ? `Company size (${deal.employeeCount}) matches ICP profile.` : undefined,
+          });
           break;
         }
       } else if (rule.field === 'industry' && rule.value && deal.industry) {
         if (deal.industry.toLowerCase() === rule.value.toLowerCase()) {
-          breakdown['icp_industry'] = { value: deal.industry, points: rule.points, weight: 15 };
-          totalPoints += rule.points;
-          maxPossible += 15;
+          allFactors.push({
+            field: 'icp_industry',
+            label: 'ICP Industry Match',
+            value: deal.industry,
+            contribution: rule.points,
+            maxPossible: 15,
+            direction: determineDirection(rule.points, 15),
+            category: 'fit',
+            explanation: rule.points > 10 ? `Industry (${deal.industry}) matches ICP profile.` : undefined,
+          });
           break;
         }
       }
@@ -1072,13 +1709,16 @@ function scoreDeal(
     const rolesPresent = new Set(deal.rolesPresent.map(r => r.toLowerCase()));
     for (const combo of icpWeights.committeeBonuses) {
       if (combo.roles.every(r => rolesPresent.has(r.toLowerCase()))) {
-        breakdown[`icp_committee_${combo.roles.join('+')}`] = {
+        allFactors.push({
+          field: `icp_committee_${combo.roles.join('_')}`,
+          label: 'ICP Committee Match',
           value: combo.roles.join(' + '),
-          points: combo.bonusPoints,
-          weight: 8,
-        };
-        totalPoints += combo.bonusPoints;
-        maxPossible += 8;
+          contribution: combo.bonusPoints,
+          maxPossible: 8,
+          direction: determineDirection(combo.bonusPoints, 8),
+          category: 'intent',
+          explanation: `Buying committee matches ICP pattern: ${combo.roles.join(', ')}.`,
+        });
         break; // Only award highest combo bonus
       }
     }
@@ -1087,12 +1727,18 @@ function scoreDeal(
     const leadSource = deal.customFields?.LeadSource || deal.customFields?.lead_source || deal.customFields?.hs_analytics_source;
     if (leadSource && icpWeights.leadSourceWeights[leadSource.toLowerCase()]) {
       const points = icpWeights.leadSourceWeights[leadSource.toLowerCase()];
-      breakdown['icp_lead_source'] = { value: leadSource, points, weight: 8 };
-      totalPoints += points;
-      maxPossible += 8;
+      allFactors.push({
+        field: 'icp_lead_source',
+        label: 'Lead Source',
+        value: leadSource,
+        contribution: points,
+        maxPossible: 8,
+        direction: determineDirection(points, 8),
+        category: 'fit',
+      });
     }
 
-    // Persona-weighted threading (override default has_champion, etc.)
+    // Persona-weighted threading
     if (Object.keys(icpWeights.personaWeights).length > 0) {
       let personaPoints = 0;
       for (const role of deal.rolesPresent) {
@@ -1100,119 +1746,232 @@ function scoreDeal(
         personaPoints += weight;
       }
       personaPoints = Math.min(20, personaPoints); // Cap at threading budget
-      breakdown['icp_persona_fit'] = { value: deal.rolesPresent.join(', '), points: personaPoints, weight: 20 };
-      totalPoints += personaPoints;
-      maxPossible += 20;
-    }
-
-    // Apply ICP-derived enrichment weights (if available and deal has enrichment data)
-    if (icpWeights.enrichmentWeights && deal.hasEnrichmentData) {
-      for (const [feature, weight] of Object.entries(icpWeights.enrichmentWeights)) {
-        const { points, rawValue } = evaluateDealFeature(feature, deal, weight);
-        if (points !== 0 || rawValue !== null) {
-          breakdown[`icp_${feature}`] = { value: rawValue, points, weight };
-          totalPoints += points;
-          if (weight > 0) {
-            maxPossible += weight;
-          }
-        }
-      }
+      allFactors.push({
+        field: 'icp_persona_fit',
+        label: 'ICP Persona Fit',
+        value: deal.rolesPresent.join(', '),
+        contribution: personaPoints,
+        maxPossible: 20,
+        direction: determineDirection(personaPoints, 20),
+        category: 'fit',
+        explanation: personaPoints > 15 ? 'Contact personas match ICP profile.' : undefined,
+      });
     }
   }
 
-  const normalizedScore = maxPossible > 0
-    ? Math.max(0, Math.min(100, Math.round((totalPoints / maxPossible) * 100)))
-    : 0;
+  // Aggregate factors into pillars
+  const { pillars, effectiveWeights, availablePillars } = aggregatePillars(allFactors);
 
-  // Assign grade using custom thresholds
-  const grade = calculateGrade(normalizedScore, gradeThresholds);
+  // Compute composite score
+  const totalScore = computeComposite(pillars);
+  const grade = assignGrade(totalScore);
 
-  const icpComponents = Object.entries(breakdown)
-    .filter(([key]) => key.startsWith('icp_'))
-    .reduce((acc, [key, val]) => { acc[key] = val; return acc; }, {} as Record<string, ScoreComponent>);
+  // Extract pillar scores
+  const fitScore = pillars.find(p => p.category === 'fit')?.score || 0;
+  const engagementScore = pillars.find(p => p.category === 'engagement')?.score || 0;
+  const intentScore = pillars.find(p => p.category === 'intent')?.score || 0;
+  const timingScore = pillars.find(p => p.category === 'timing')?.score || 0;
 
-  const icpFitScore = Object.values(icpComponents).reduce((sum, c) => sum + c.points, 0);
+  // Generate top factors and summary
+  const { topPositive, topNegative } = generateTopFactors(allFactors);
+  const scoreSummary = generateScoreSummary(
+    { fitScore, engagementScore, intentScore, timingScore, factors: allFactors, grade },
+    { name: deal.name, company: deal.accountName || undefined, dealStage: deal.stageNormalized }
+  );
+
+  // Determine scoring method
+  const scoringMethod = determineScoringMethod(!!icpWeights);
+
+  // Compute confidence
+  const confidence = computeConfidence(availablePillars, scoringMethod, allFactors.length);
+
+  // Generate recommended action
+  const recommendedAction = generateRecommendedAction(fitScore, engagementScore, intentScore, timingScore);
+
+  // Sort factors by impact for storage
+  const sortedFactors = sortFactorsByImpact(allFactors);
 
   return {
     entityType: 'deal',
     entityId: deal.id,
-    totalScore: normalizedScore,
-    scoreBreakdown: breakdown,
-    scoreGrade: grade,
-    scoringMethod: icpWeights ? 'icp_point_based' : 'point_based',
-    scoredAt: new Date(),
-    icpFitScore: icpWeights ? icpFitScore : undefined,
-    icpFitDetails: icpWeights ? icpComponents : undefined,
+    totalScore,
+    grade,
+    fitScore,
+    engagementScore,
+    intentScore,
+    timingScore,
+    pillars,
+    factors: sortedFactors,
+    topPositiveFactor: topPositive,
+    topNegativeFactor: topNegative,
+    scoreSummary,
+    scoreMethod: scoringMethod,
+    scoreConfidence: confidence,
+    availablePillars,
+    effectiveWeights,
+    previousScore: null, // Will be populated from database
+    scoreChange: null, // Will be populated from database
+    recommendedAction,
+    icpProfileId: icpProfileId || undefined,
+    sourceObject: 'deal',
   };
 }
 
-function scoreContact(contact: ContactFeatures, dealScore: number | undefined, gradeThresholds = DEFAULT_GRADE_THRESHOLDS): LeadScore {
-  const breakdown: Record<string, ScoreComponent> = {};
-  let totalPoints = 0;
-  let maxPossible = 0;
-
+function scoreContact(
+  contact: ContactFeatures,
+  dealScore: number | undefined,
+  gradeThresholds = DEFAULT_GRADE_THRESHOLDS
+): ProspectScoreResult {
+  const allFactors: ScoreFactor[] = [];
   const weights = DEFAULT_WEIGHTS.contact;
 
-  // has_email
+  // has_email (role_weight / fit dimension)
   const hasEmail = !!contact.email;
-  breakdown.has_email = { value: hasEmail, points: hasEmail ? weights.has_email : 0, weight: weights.has_email };
-  totalPoints += hasEmail ? weights.has_email : 0;
-  maxPossible += weights.has_email;
+  const emailPts = hasEmail ? weights.has_email : 0;
+  allFactors.push({
+    field: 'has_email',
+    label: 'Email Present',
+    value: hasEmail ? 'Yes' : 'No',
+    contribution: emailPts,
+    maxPossible: weights.has_email,
+    direction: determineDirection(emailPts, weights.has_email),
+    category: 'fit',
+  });
 
-  // has_phone
+  // has_phone (role_weight / fit dimension)
   const hasPhone = !!contact.phone;
-  breakdown.has_phone = { value: hasPhone, points: hasPhone ? weights.has_phone : 0, weight: weights.has_phone };
-  totalPoints += hasPhone ? weights.has_phone : 0;
-  maxPossible += weights.has_phone;
+  const phonePts = hasPhone ? weights.has_phone : 0;
+  allFactors.push({
+    field: 'has_phone',
+    label: 'Phone Present',
+    value: hasPhone ? 'Yes' : 'No',
+    contribution: phonePts,
+    maxPossible: weights.has_phone,
+    direction: determineDirection(phonePts, weights.has_phone),
+    category: 'fit',
+  });
 
-  // has_title
+  // has_title (role_weight / fit dimension)
   const hasTitle = !!contact.title;
-  breakdown.has_title = { value: hasTitle, points: hasTitle ? weights.has_title : 0, weight: weights.has_title };
-  totalPoints += hasTitle ? weights.has_title : 0;
-  maxPossible += weights.has_title;
+  const titlePts = hasTitle ? weights.has_title : 0;
+  allFactors.push({
+    field: 'has_title',
+    label: 'Title Present',
+    value: contact.title || 'Not set',
+    contribution: titlePts,
+    maxPossible: weights.has_title,
+    direction: determineDirection(titlePts, weights.has_title),
+    category: 'fit',
+  });
 
-  // role_assigned
+  // role_assigned (role_weight / fit dimension)
   const roleAssigned = !!contact.buyingRole;
-  breakdown.role_assigned = { value: roleAssigned, points: roleAssigned ? weights.role_assigned : 0, weight: weights.role_assigned };
-  totalPoints += roleAssigned ? weights.role_assigned : 0;
-  maxPossible += weights.role_assigned;
+  const rolePts = roleAssigned ? weights.role_assigned : 0;
+  allFactors.push({
+    field: 'buying_role',
+    label: 'Buying Role',
+    value: contact.buyingRole || 'Not assigned',
+    contribution: rolePts,
+    maxPossible: weights.role_assigned,
+    direction: determineDirection(rolePts, weights.role_assigned),
+    category: 'fit',
+  });
 
-  // is_power_role
+  // is_power_role (role_weight / fit dimension)
   const isPowerRole = ['champion', 'economic_buyer', 'decision_maker'].includes(contact.buyingRole || '');
-  breakdown.is_power_role = { value: isPowerRole, points: isPowerRole ? weights.is_power_role : 0, weight: weights.is_power_role };
-  totalPoints += isPowerRole ? weights.is_power_role : 0;
-  maxPossible += weights.is_power_role;
+  const powerRolePts = isPowerRole ? weights.is_power_role : 0;
+  allFactors.push({
+    field: 'is_power_role',
+    label: 'Power Role',
+    value: isPowerRole ? 'Yes' : 'No',
+    contribution: powerRolePts,
+    maxPossible: weights.is_power_role,
+    direction: determineDirection(powerRolePts, weights.is_power_role),
+    category: 'fit',
+    explanation: isPowerRole ? `${contact.buyingRole} is a high-value role.` : undefined,
+  });
 
-  // seniority_high
+  // seniority_high (role_weight / fit dimension)
   const seniorityHigh = contact.seniorityVerified && ['vp', 'c_level', 'director'].includes(contact.seniorityVerified);
-  breakdown.seniority_high = { value: seniorityHigh, points: seniorityHigh ? weights.seniority_high : 0, weight: weights.seniority_high };
-  totalPoints += seniorityHigh ? weights.seniority_high : 0;
-  maxPossible += weights.seniority_high;
+  const seniorityPts = seniorityHigh ? weights.seniority_high : 0;
+  allFactors.push({
+    field: 'seniority',
+    label: 'Seniority Level',
+    value: contact.seniorityVerified || 'Not verified',
+    contribution: seniorityPts,
+    maxPossible: weights.seniority_high,
+    direction: determineDirection(seniorityPts, weights.seniority_high),
+    category: 'fit',
+    explanation: seniorityHigh ? 'VP/C-level/Director seniority.' : undefined,
+  });
 
-  // TODO: activity_on_deals, multi_deal_contact require additional queries
+  // deal_quality (deal_score_inheritance / intent dimension)
+  const dealQualityPts = dealScore ? Math.round((dealScore / 100) * weights.deal_quality) : 0;
+  allFactors.push({
+    field: 'associated_deal_score',
+    label: 'Associated Deal Quality',
+    value: dealScore ? `${dealScore}/100` : 'No deal score',
+    contribution: dealQualityPts,
+    maxPossible: weights.deal_quality,
+    direction: determineDirection(dealQualityPts, weights.deal_quality),
+    category: 'intent',
+  });
 
-  // deal_quality (weighted average of associated deal scores)
-  const dealQualityPoints = dealScore ? Math.round((dealScore / 100) * weights.deal_quality) : 0;
-  breakdown.deal_quality = { value: dealScore, points: dealQualityPoints, weight: weights.deal_quality };
-  totalPoints += dealQualityPoints;
-  maxPossible += weights.deal_quality;
+  // Aggregate factors into pillars
+  const { pillars, effectiveWeights, availablePillars } = aggregatePillars(allFactors);
 
-  // Normalize to 0-100
-  const normalizedScore = Math.max(0, Math.min(100,
-    Math.round((totalPoints / maxPossible) * 100)
-  ));
+  // Compute composite score
+  const totalScore = computeComposite(pillars);
+  const grade = assignGrade(totalScore);
 
-  // Assign grade using custom thresholds
-  const grade = calculateGrade(normalizedScore, gradeThresholds);
+  // Extract pillar scores
+  const fitScore = pillars.find(p => p.category === 'fit')?.score || 0;
+  const engagementScore = pillars.find(p => p.category === 'engagement')?.score || 0;
+  const intentScore = pillars.find(p => p.category === 'intent')?.score || 0;
+  const timingScore = pillars.find(p => p.category === 'timing')?.score || 0;
+
+  // Generate top factors and summary
+  const { topPositive, topNegative } = generateTopFactors(allFactors);
+  const contactName = [contact.firstName, contact.lastName].filter(Boolean).join(' ') || 'Unknown';
+  const scoreSummary = generateScoreSummary(
+    { fitScore, engagementScore, intentScore, timingScore, factors: allFactors, grade },
+    { name: contactName, title: contact.title || undefined }
+  );
+
+  // Determine scoring method
+  const scoringMethod = determineScoringMethod(false); // Contacts don't use ICP currently
+
+  // Compute confidence
+  const confidence = computeConfidence(availablePillars, scoringMethod, allFactors.length);
+
+  // Generate recommended action
+  const recommendedAction = generateRecommendedAction(fitScore, engagementScore, intentScore, timingScore);
+
+  // Sort factors by impact
+  const sortedFactors = sortFactorsByImpact(allFactors);
 
   return {
     entityType: 'contact',
     entityId: contact.id,
-    totalScore: normalizedScore,
-    scoreBreakdown: breakdown,
-    scoreGrade: grade,
-    scoringMethod: 'point_based',
-    scoredAt: new Date(),
+    totalScore,
+    grade,
+    fitScore,
+    engagementScore,
+    intentScore,
+    timingScore,
+    pillars,
+    factors: sortedFactors,
+    topPositiveFactor: topPositive,
+    topNegativeFactor: topNegative,
+    scoreSummary,
+    scoreMethod: scoringMethod,
+    scoreConfidence: confidence,
+    availablePillars,
+    effectiveWeights,
+    previousScore: null,
+    scoreChange: null,
+    recommendedAction,
+    sourceObject: 'contact',
   };
 }
 
@@ -1220,23 +1979,49 @@ function scoreContact(contact: ContactFeatures, dealScore: number | undefined, g
 // Persistence
 // ============================================================================
 
-async function persistScore(workspaceId: string, score: LeadScore): Promise<void> {
+async function persistScore(workspaceId: string, score: ProspectScoreResult): Promise<void> {
+  // Fetch previous score for change calculation
+  const previousResult = await query<{ total_score: number }>(`
+    SELECT total_score FROM lead_scores
+    WHERE workspace_id = $1 AND entity_type = $2 AND entity_id = $3
+  `, [workspaceId, score.entityType, score.entityId]);
+
+  const previousScore = previousResult.rows[0]?.total_score ?? null;
+  const scoreChange = previousScore !== null ? score.totalScore - previousScore : null;
+
+  // Build legacy score_breakdown for backward compatibility
+  const legacyBreakdown: Record<string, ScoreComponent> = {};
+  for (const factor of score.factors) {
+    legacyBreakdown[factor.field] = {
+      value: factor.value,
+      points: factor.contribution,
+      weight: factor.maxPossible,
+    };
+  }
+
   await query(`
     INSERT INTO lead_scores (
       workspace_id, entity_type, entity_id, total_score,
       score_breakdown, score_grade, scoring_method, scored_at,
-      icp_profile_id, icp_fit_score, icp_fit_details,
-      previous_score, score_change, created_at, updated_at
+      icp_profile_id,
+      fit_score, engagement_score_component, intent_score, timing_score,
+      score_factors, score_summary,
+      top_positive_factor, top_negative_factor,
+      score_confidence,
+      available_pillars, effective_weights,
+      recommended_action, source_object,
+      previous_score, score_change,
+      created_at, updated_at
     ) VALUES (
       $1, $2, $3, $4, $5, $6, $7, NOW(),
-      $8, $9, $10,
-      (SELECT total_score FROM lead_scores
-       WHERE workspace_id = $1 AND entity_type = $2 AND entity_id = $3),
-      $4 - COALESCE(
-        (SELECT total_score FROM lead_scores
-         WHERE workspace_id = $1 AND entity_type = $2 AND entity_id = $3),
-        $4
-      ),
+      $8,
+      $9, $10, $11, $12,
+      $13, $14,
+      $15, $16,
+      $17,
+      $18, $19,
+      $20, $21,
+      $22, $23,
       NOW(), NOW()
     )
     ON CONFLICT (workspace_id, entity_type, entity_id)
@@ -1246,8 +2031,19 @@ async function persistScore(workspaceId: string, score: LeadScore): Promise<void
       score_grade = EXCLUDED.score_grade,
       scoring_method = EXCLUDED.scoring_method,
       icp_profile_id = EXCLUDED.icp_profile_id,
-      icp_fit_score = EXCLUDED.icp_fit_score,
-      icp_fit_details = EXCLUDED.icp_fit_details,
+      fit_score = EXCLUDED.fit_score,
+      engagement_score_component = EXCLUDED.engagement_score_component,
+      intent_score = EXCLUDED.intent_score,
+      timing_score = EXCLUDED.timing_score,
+      score_factors = EXCLUDED.score_factors,
+      score_summary = EXCLUDED.score_summary,
+      top_positive_factor = EXCLUDED.top_positive_factor,
+      top_negative_factor = EXCLUDED.top_negative_factor,
+      score_confidence = EXCLUDED.score_confidence,
+      available_pillars = EXCLUDED.available_pillars,
+      effective_weights = EXCLUDED.effective_weights,
+      recommended_action = EXCLUDED.recommended_action,
+      source_object = EXCLUDED.source_object,
       previous_score = lead_scores.total_score,
       score_change = EXCLUDED.total_score - lead_scores.total_score,
       scored_at = NOW(),
@@ -1257,12 +2053,48 @@ async function persistScore(workspaceId: string, score: LeadScore): Promise<void
     score.entityType,
     score.entityId,
     score.totalScore,
-    JSON.stringify(score.scoreBreakdown),
-    score.scoreGrade,
-    score.scoringMethod,
+    JSON.stringify(legacyBreakdown), // Legacy breakdown for backward compat
+    score.grade,
+    score.scoreMethod,
     score.icpProfileId || null,
-    score.icpFitScore ?? null,
-    score.icpFitDetails ? JSON.stringify(score.icpFitDetails) : null,
+    score.fitScore,
+    score.engagementScore,
+    score.intentScore,
+    score.timingScore,
+    JSON.stringify(score.factors),
+    score.scoreSummary,
+    score.topPositiveFactor,
+    score.topNegativeFactor,
+    score.scoreConfidence,
+    score.availablePillars,
+    JSON.stringify(score.effectiveWeights),
+    score.recommendedAction || null,
+    score.sourceObject || null,
+    previousScore,
+    scoreChange,
+  ]);
+
+  // Write to score history
+  await query(`
+    INSERT INTO prospect_score_history (
+      workspace_id, entity_type, entity_id,
+      total_score, grade,
+      fit_score, engagement_score, intent_score, timing_score,
+      score_method, scored_at
+    ) VALUES (
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW()
+    )
+  `, [
+    workspaceId,
+    score.entityType,
+    score.entityId,
+    score.totalScore,
+    score.grade,
+    score.fitScore,
+    score.engagementScore,
+    score.intentScore,
+    score.timingScore,
+    score.scoreMethod,
   ]);
 }
 
@@ -1305,19 +2137,24 @@ export async function scoreLeads(workspaceId: string): Promise<ScoringResult> {
 
   const icpProfileIdRef = icpProfile?.profile.id || null;
 
-  const dealScores: LeadScore[] = [];
+  const dealScores: ProspectScoreResult[] = [];
   for (const deal of dealFeatures) {
-    const score = scoreDeal(deal, customFieldWeights, workspaceMedianAmount, hasConversationConnector, icpWeights, gradeThresholds);
-    if (icpProfileIdRef) {
-      score.icpProfileId = icpProfileIdRef;
-    }
+    const score = scoreDeal(
+      deal,
+      customFieldWeights,
+      workspaceMedianAmount,
+      hasConversationConnector,
+      icpWeights,
+      gradeThresholds,
+      icpProfileIdRef
+    );
     dealScores.push(score);
     await persistScore(workspaceId, score);
   }
 
   // 4. Score all contacts (using deal scores)
   const dealScoreMap = new Map(dealScores.map(s => [s.entityId, s.totalScore]));
-  const contactScores: LeadScore[] = [];
+  const contactScores: ProspectScoreResult[] = [];
   for (const contact of contactFeatures) {
     const dealScore = dealScoreMap.get(contact.dealId);
     const score = scoreContact(contact, dealScore, gradeThresholds);
@@ -1328,19 +2165,35 @@ export async function scoreLeads(workspaceId: string): Promise<ScoringResult> {
   // 5. Compute summary stats
   const gradeDistribution: Record<string, number> = { A: 0, B: 0, C: 0, D: 0, F: 0 };
   for (const score of dealScores) {
-    gradeDistribution[score.scoreGrade]++;
+    gradeDistribution[score.grade]++;
   }
 
   const avgDealScore = dealScores.length > 0
     ? dealScores.reduce((sum, s) => sum + s.totalScore, 0) / dealScores.length
     : 0;
 
+  // Compute pillar averages
+  const pillarAverages = {
+    fit: dealScores.length > 0
+      ? dealScores.reduce((sum, s) => sum + s.fitScore, 0) / dealScores.length
+      : 0,
+    engagement: dealScores.length > 0
+      ? dealScores.reduce((sum, s) => sum + s.engagementScore, 0) / dealScores.length
+      : 0,
+    intent: dealScores.length > 0
+      ? dealScores.reduce((sum, s) => sum + s.intentScore, 0) / dealScores.length
+      : 0,
+    timing: dealScores.length > 0
+      ? dealScores.reduce((sum, s) => sum + s.timingScore, 0) / dealScores.length
+      : 0,
+  };
+
   const sortedDeals = dealScores
     .map(s => ({
       id: s.entityId,
       name: dealFeatures.find(d => d.id === s.entityId)?.name || '',
       score: s.totalScore,
-      grade: s.scoreGrade,
+      grade: s.grade,
     }))
     .sort((a, b) => b.score - a.score);
 
@@ -1349,12 +2202,12 @@ export async function scoreLeads(workspaceId: string): Promise<ScoringResult> {
 
   // Movers
   const movers = dealScores
-    .filter(s => Math.abs(s.scoreChange || 0) > 10)
+    .filter(s => s.scoreChange !== null && Math.abs(s.scoreChange) > 10)
     .map(s => ({
       id: s.entityId,
       name: dealFeatures.find(d => d.id === s.entityId)?.name || '',
       change: s.scoreChange || 0,
-      from: (s.previousScore || 0),
+      from: s.previousScore || 0,
       to: s.totalScore,
     }))
     .sort((a, b) => Math.abs(b.change) - Math.abs(a.change))
@@ -1386,34 +2239,35 @@ export async function scoreLeads(workspaceId: string): Promise<ScoringResult> {
   }> = [];
 
   for (const cfw of customFieldWeights) {
-    const scores = dealScores
-      .map(s => s.scoreBreakdown[`custom_${cfw.fieldKey}`])
-      .filter(Boolean);
+    const fieldKey = `custom_${cfw.fieldKey}`;
+    const relevantFactors = dealScores
+      .flatMap(s => s.factors)
+      .filter(f => f.field === fieldKey);
 
-    if (scores.length === 0) continue;
+    if (relevantFactors.length === 0) continue;
 
-    const avgPoints = scores.reduce((sum, s) => sum + s.points, 0) / scores.length;
+    const avgPoints = relevantFactors.reduce((sum, f) => sum + f.contribution, 0) / relevantFactors.length;
 
     // Find top value
     const valueCounts = new Map<string, { count: number; totalPoints: number }>();
-    for (const s of scores) {
-      const value = String(s.value);
+    for (const factor of relevantFactors) {
+      const value = factor.value;
       const existing = valueCounts.get(value) || { count: 0, totalPoints: 0 };
       valueCounts.set(value, {
         count: existing.count + 1,
-        totalPoints: existing.totalPoints + s.points,
+        totalPoints: existing.totalPoints + factor.contribution,
       });
     }
 
     let topValue = '';
     let topValueScore = 0;
-    for (const [value, stats] of valueCounts.entries()) {
+    valueCounts.forEach((stats, value) => {
       const avgScore = stats.totalPoints / stats.count;
       if (avgScore > topValueScore) {
         topValue = value;
         topValueScore = avgScore;
       }
-    }
+    });
 
     customFieldContributions.push({
       fieldKey: cfw.fieldKey,
@@ -1428,6 +2282,12 @@ export async function scoreLeads(workspaceId: string): Promise<ScoringResult> {
     contactsScored: contactScores.length,
     avgScore: Math.round(avgDealScore),
     gradeDistribution,
+    pillarAverages: {
+      fit: Math.round(pillarAverages.fit),
+      engagement: Math.round(pillarAverages.engagement),
+      intent: Math.round(pillarAverages.intent),
+      timing: Math.round(pillarAverages.timing),
+    },
   });
 
   return {
@@ -1438,6 +2298,7 @@ export async function scoreLeads(workspaceId: string): Promise<ScoringResult> {
       totalContacts: contactScores.length,
       gradeDistribution,
       avgDealScore: Math.round(avgDealScore),
+      pillarAverages,
       topDeals,
       bottomDeals,
       movers,
