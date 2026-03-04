@@ -48,14 +48,6 @@ export function formatDateTime(dateStr: string): string {
   });
 }
 
-export function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-  const minutes = Math.floor(ms / 60000);
-  const seconds = Math.floor((ms % 60000) / 1000);
-  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
-}
-
 export function severityColor(severity: string): string {
   switch (severity) {
     case 'act': return '#ef4444';
