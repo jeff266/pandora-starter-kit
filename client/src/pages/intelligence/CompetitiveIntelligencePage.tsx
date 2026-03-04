@@ -97,6 +97,7 @@ interface PageData {
   competitors: Competitor[];
   open_deals: OpenDeal[];
   field_intel: FieldIntel[];
+  exclusions: string[];
 }
 
 type SortOption = 'Deal Value' | 'Risk' | 'Last Mention';
@@ -227,13 +228,18 @@ export default function CompetitiveIntelligencePage() {
   const [sortBy, setSortBy] = useState<SortOption>('Deal Value');
   const [running, setRunning] = useState(false);
   const [runMessage, setRunMessage] = useState<string | null>(null);
+  const [exclusions, setExclusions] = useState<string[]>([]);
+  const [excludeHover, setExcludeHover] = useState<string | null>(null);
 
   const loadData = () => {
     if (!workspaceId) return;
     setLoading(true);
     setError(null);
     api.get('/intelligence/competitive')
-      .then((res: any) => { setData(res); })
+      .then((res: any) => {
+        setData(res);
+        setExclusions(res.exclusions ?? []);
+      })
       .catch((err: any) => { setError(err.message ?? 'Failed to load data'); })
       .finally(() => setLoading(false));
   };
@@ -259,20 +265,38 @@ export default function CompetitiveIntelligencePage() {
     setSelectedCompetitor(prev => prev === name ? null : name);
   };
 
+  const excludeCompetitor = (name: string) => {
+    const key = name.toLowerCase().trim();
+    setExclusions(prev => prev.includes(key) ? prev : [...prev, key]);
+    if (selectedCompetitor?.toLowerCase() === key) setSelectedCompetitor(null);
+    api.post('/intelligence/competitive/exclusions', { name }).catch(() => {});
+  };
+
+  const restoreCompetitor = (key: string) => {
+    setExclusions(prev => prev.filter(e => e !== key));
+    api.delete(`/intelligence/competitive/exclusions/${encodeURIComponent(key)}`).catch(() => {});
+  };
+
+  const isExcluded = (name: string) => exclusions.includes(name.toLowerCase().trim());
+
+  const visibleCompetitors = (data?.competitors ?? []).filter(c => !isExcluded(c.name));
+
   const sortedDeals = (() => {
     if (!data) return [];
-    const deals = selectedCompetitor
+    const deals = (selectedCompetitor
       ? data.open_deals.filter(d => d.competitor_name === selectedCompetitor)
-      : [...data.open_deals];
+      : [...data.open_deals]
+    ).filter(d => !isExcluded(d.competitor_name));
     if (sortBy === 'Deal Value') return deals.sort((a, b) => b.amount - a.amount);
     if (sortBy === 'Risk') return deals.sort((a, b) => RISK_ORDER[a.risk] - RISK_ORDER[b.risk]);
     if (sortBy === 'Last Mention') return deals.sort((a, b) => new Date(b.last_mention_at).getTime() - new Date(a.last_mention_at).getTime());
     return deals;
   })();
 
-  const filteredFeed = data
+  const filteredFeed = (data
     ? (selectedCompetitor ? data.field_intel.filter(f => f.competitor_name === selectedCompetitor) : data.field_intel)
-    : [];
+    : []
+  ).filter(f => !isExcluded(f.competitor_name));
 
   const noData = !loading && data && data.competitors.length === 0 && data.field_intel.length === 0;
 
@@ -453,8 +477,16 @@ export default function CompetitiveIntelligencePage() {
             <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 14 }}>
               <thead>
                 <tr style={{ borderBottom: `1px solid ${C.border}` }}>
-                  {['Deal', 'Competitor', 'Amount', 'Stage', 'Calls w/ Mention', 'Last Mention', 'Risk'].map(h => (
-                    <th key={h} style={{ padding: '8px 22px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: C.textMuted, letterSpacing: '0.06em', textTransform: 'uppercase', fontFamily: font }}>{h}</th>
+                  {[
+                    { label: 'Deal', pad: '8px 22px' },
+                    { label: 'Competitor', pad: '8px 22px' },
+                    { label: 'Amount', pad: '8px 14px' },
+                    { label: 'Stage', pad: '8px 22px' },
+                    { label: 'Mentions', pad: '8px 14px' },
+                    { label: 'Last Mention', pad: '8px 14px' },
+                    { label: 'Risk', pad: '8px 22px' },
+                  ].map(h => (
+                    <th key={h.label} style={{ padding: h.pad, textAlign: 'left', fontSize: 11, fontWeight: 600, color: C.textMuted, letterSpacing: '0.06em', textTransform: 'uppercase', fontFamily: font, whiteSpace: 'nowrap' }}>{h.label}</th>
                   ))}
                 </tr>
               </thead>
@@ -477,16 +509,16 @@ export default function CompetitiveIntelligencePage() {
                     onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
                     <td style={{ padding: '11px 22px', fontSize: 13, fontWeight: 500, color: C.text, fontFamily: font }}>{d.deal_name}</td>
                     <td style={{ padding: '11px 22px' }}>
-                      <button onClick={() => toggleCompetitor(d.competitor_name)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: font }}>
+                      <button onClick={() => toggleCompetitor(d.competitor_name)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: font, textAlign: 'left', display: 'block' }}>
                         <span style={{ fontSize: 13, color: C.accent, fontWeight: 600 }}>{d.competitor_name}</span>
                       </button>
                     </td>
-                    <td style={{ padding: '11px 22px', fontSize: 13, fontFamily: mono, color: C.text, fontWeight: 600 }}>{formatCurrency(d.amount)}</td>
+                    <td style={{ padding: '11px 14px', fontSize: 13, fontFamily: mono, color: C.text, fontWeight: 600, whiteSpace: 'nowrap' }}>{formatCurrency(d.amount)}</td>
                     <td style={{ padding: '11px 22px' }}>
                       <span style={{ fontSize: 12, color: C.textSecondary, background: C.surfaceRaised, border: `1px solid ${C.border}`, borderRadius: 4, padding: '2px 8px', fontFamily: font }}>{d.stage}</span>
                     </td>
-                    <td style={{ padding: '11px 22px', fontSize: 13, fontFamily: mono, color: C.textSecondary }}>{d.mention_count}</td>
-                    <td style={{ padding: '11px 22px', fontSize: 13, color: C.textMuted, fontFamily: font }}>{formatTimeAgo(d.last_mention_at)}</td>
+                    <td style={{ padding: '11px 14px', fontSize: 13, fontFamily: mono, color: C.textSecondary }}>{d.mention_count}</td>
+                    <td style={{ padding: '11px 14px', fontSize: 13, color: C.textMuted, fontFamily: font, whiteSpace: 'nowrap' }}>{formatTimeAgo(d.last_mention_at)}</td>
                     <td style={{ padding: '11px 22px' }}><RiskDot risk={d.risk} /></td>
                   </tr>
                 ))}
@@ -514,20 +546,20 @@ export default function CompetitiveIntelligencePage() {
             <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 14 }}>
               <thead>
                 <tr style={{ borderBottom: `1px solid ${C.border}` }}>
-                  {['Competitor', 'Deals', 'Win Rate', 'vs. Baseline', 'Trend', 'Pattern'].map(h => (
-                    <th key={h} style={{ padding: '8px 16px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: C.textMuted, letterSpacing: '0.06em', textTransform: 'uppercase', fontFamily: font }}>{h}</th>
+                  {['Competitor', 'Deals', 'Win Rate', 'vs. Baseline', 'Trend', 'Pattern', ''].map(h => (
+                    <th key={h} style={{ padding: '8px 16px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: C.textMuted, letterSpacing: '0.06em', textTransform: 'uppercase', fontFamily: font, whiteSpace: 'nowrap' }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {loading && [0,1,2,3].map(i => (
                   <tr key={i} style={{ borderBottom: `1px solid ${C.border}` }}>
-                    {[0,1,2,3,4,5].map(j => (
+                    {[0,1,2,3,4,5,6].map(j => (
                       <td key={j} style={{ padding: '13px 16px' }}><SkeletonBlock h={12} w={j === 0 ? '80px' : '50px'} /></td>
                     ))}
                   </tr>
                 ))}
-                {!loading && (data?.competitors ?? []).map((c) => (
+                {!loading && visibleCompetitors.map((c) => (
                   <tr key={c.name}
                     onClick={() => toggleCompetitor(c.name)}
                     style={{
@@ -535,8 +567,8 @@ export default function CompetitiveIntelligencePage() {
                       background: selectedCompetitor === c.name ? C.surfaceActive : 'transparent',
                       transition: 'background 0.15s',
                     }}
-                    onMouseEnter={e => { if (selectedCompetitor !== c.name) e.currentTarget.style.background = C.surfaceHover; }}
-                    onMouseLeave={e => { if (selectedCompetitor !== c.name) e.currentTarget.style.background = 'transparent'; }}>
+                    onMouseEnter={e => { if (selectedCompetitor !== c.name) e.currentTarget.style.background = C.surfaceHover; setExcludeHover(c.name); }}
+                    onMouseLeave={e => { if (selectedCompetitor !== c.name) e.currentTarget.style.background = 'transparent'; setExcludeHover(null); }}>
                     <td style={{ padding: '11px 16px', fontSize: 13, fontWeight: 600, color: C.text, fontFamily: font }}>{c.name}</td>
                     <td style={{ padding: '11px 16px', fontSize: 13, fontFamily: mono, color: C.textSecondary }}>{c.deal_count}</td>
                     <td style={{ padding: '11px 16px', fontSize: 13, fontFamily: mono, fontWeight: 600, color: c.win_rate < 50 ? C.red : C.green }}>{c.win_rate}%</td>
@@ -548,11 +580,22 @@ export default function CompetitiveIntelligencePage() {
                       </div>
                     </td>
                     <td style={{ padding: '11px 16px' }}><PatternBadge pattern={c.pattern} /></td>
+                    <td style={{ padding: '11px 16px', textAlign: 'right', width: 80 }}>
+                      {excludeHover === c.name && (
+                        <button
+                          onClick={e => { e.stopPropagation(); excludeCompetitor(c.name); }}
+                          onMouseEnter={e => (e.currentTarget.style.color = C.red)}
+                          onMouseLeave={e => (e.currentTarget.style.color = C.textMuted)}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: C.textMuted, fontFamily: font, padding: '2px 6px', borderRadius: 4, transition: 'color 0.15s' }}>
+                          ⊘ Exclude
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
-                {!loading && (data?.competitors ?? []).length === 0 && (
+                {!loading && visibleCompetitors.length === 0 && (
                   <tr>
-                    <td colSpan={6} style={{ padding: '32px 16px', textAlign: 'center', fontSize: 13, color: C.textMuted, fontFamily: font }}>
+                    <td colSpan={7} style={{ padding: '32px 16px', textAlign: 'center', fontSize: 13, color: C.textMuted, fontFamily: font }}>
                       No competitive data yet. The skill runs on the 1st of each month.
                     </td>
                   </tr>
@@ -560,6 +603,25 @@ export default function CompetitiveIntelligencePage() {
               </tbody>
             </table>
           </div>
+
+          {/* Exclusions panel */}
+          {exclusions.length > 0 && (
+            <div style={{ background: C.surfaceRaised, border: `1px solid ${C.borderLight}`, borderRadius: 10, padding: '10px 18px', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+              <span style={{ fontSize: 11, color: C.textMuted, fontFamily: font, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', marginRight: 4, whiteSpace: 'nowrap' }}>Excluded from analysis</span>
+              {exclusions.map(key => (
+                <span key={key} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, padding: '3px 10px' }}>
+                  <span style={{ fontSize: 12, color: C.textSecondary, fontFamily: font, fontWeight: 500, textTransform: 'capitalize' }}>{key}</span>
+                  <button
+                    onClick={() => restoreCompetitor(key)}
+                    onMouseEnter={e => (e.currentTarget.style.color = C.accent)}
+                    onMouseLeave={e => (e.currentTarget.style.color = C.textMuted)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: C.textMuted, fontFamily: font, padding: 0, transition: 'color 0.15s', lineHeight: 1 }}>
+                    ↩ Restore
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
 
           {/* Field Intel Feed */}
           <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden' }}>
