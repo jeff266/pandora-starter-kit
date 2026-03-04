@@ -91,6 +91,7 @@ export default function ConversationsPage() {
   const [selectedOwner, setSelectedOwner] = useState<string | null>(null);
   const [selectedScope, setSelectedScope] = useState<string | null>(null);
   const [selectedQuarter, setSelectedQuarter] = useState<string | null>(null);
+  const [chartMode, setChartMode] = useState<'health' | 'meddic'>('health');
 
   // Activity signal coverage and buyer quotes for coaching tab
   type CoverageEntry = { fields_covered: number; covered_fields: string[] };
@@ -1073,6 +1074,24 @@ export default function ConversationsPage() {
         };
         const SIGNAL_BUCKETS = ['critical', 'at_risk', 'watch', 'healthy'] as const;
 
+        const MEDDIC_FIELDS = ['metrics', 'economic_buyer', 'decision_criteria', 'decision_process', 'identify_pain', 'champion'] as const;
+        const MEDDIC_COLOR: Record<string, string> = {
+          metrics:           '#2B6CB0',
+          economic_buyer:    '#2C7A7B',
+          decision_criteria: '#276749',
+          decision_process:  '#744210',
+          identify_pain:     '#553C9A',
+          champion:          '#97266D',
+        };
+        const MEDDIC_LABEL: Record<string, string> = {
+          metrics:           'Metrics',
+          economic_buyer:    'Economic Buyer',
+          decision_criteria: 'Decision Criteria',
+          decision_process:  'Decision Process',
+          identify_pain:     'Identify Pain',
+          champion:          'Champion',
+        };
+
         const shortenStage = (s: string) =>
           s.replace('Discovery and Alignment', 'Discovery')
            .replace('Discovery/Qualification', 'Discovery')
@@ -1121,7 +1140,7 @@ export default function ConversationsPage() {
           allCoachingConvs.map(c => c.deal_owner).filter(Boolean) as string[]
         )].sort();
 
-        // Owner + quarter subset drives the chart (stage + signal filters stay as list-only)
+        // Owner + quarter + MEDDIC gap subset drives the chart (stage + signal filters stay as list-only)
         const ownerFilteredConvs = allCoachingConvs.filter(c => {
           if (selectedOwner && c.deal_owner !== selectedOwner) return false;
           if (quarterRange && c.call_date) {
@@ -1130,10 +1149,18 @@ export default function ConversationsPage() {
           } else if (quarterRange && !c.call_date) {
             return false;
           }
+          if (selectedMeddicGap) {
+            if (selectedMeddicGap === 'none') {
+              if (c.deal_id && coverageData[c.deal_id]) return false;
+            } else {
+              const covered = c.deal_id ? (coverageData[c.deal_id]?.covered_fields ?? []) : [];
+              if (covered.includes(selectedMeddicGap)) return false;
+            }
+          }
           return true;
         });
 
-        // Build chart data — pivot owner+quarter-filtered conversations by stage × signal
+        // Build health chart data — pivot by stage × signal bucket (ARR)
         type StageEntry = { critical: number; at_risk: number; watch: number; healthy: number; critical_count: number; at_risk_count: number; watch_count: number; healthy_count: number; total: number; originalStage: string };
         const stageMap = new Map<string, StageEntry>();
         for (const conv of ownerFilteredConvs) {
@@ -1149,13 +1176,50 @@ export default function ConversationsPage() {
           (entry as any)[`${meta.signal_type}_count`] = ((entry as any)[`${meta.signal_type}_count`] ?? 0) + 1;
           entry.total += val;
         }
-        const chartData = [...stageMap.entries()]
-          .sort((a, b) => {
+        const sortEntries = (entries: [string, { originalStage: string }][]) =>
+          entries.sort((a, b) => {
             const orderA = stageDisplayOrder.get(a[1].originalStage) ?? 999;
             const orderB = stageDisplayOrder.get(b[1].originalStage) ?? 999;
             return orderA !== orderB ? orderA - orderB : a[0].localeCompare(b[0]);
-          })
+          });
+        const chartData = sortEntries([...stageMap.entries()])
           .map(([stage, vals]) => ({ stage, ...vals }));
+
+        // Build MEDDIC chart data — pivot by stage × field, value = deal count with field covered
+        // De-duplicate by deal_id per stage so each deal is counted once per field
+        type MeddicStageEntry = { originalStage: string; [field: string]: number | string };
+        const meddicStageMap = new Map<string, MeddicStageEntry>();
+        const seenDealStageField = new Set<string>();
+        for (const conv of ownerFilteredConvs) {
+          const meta = coachingConvMeta.get(conv.id);
+          if (!meta || !conv.deal_id) continue;
+          const key = shortenStage(meta.stage);
+          if (!meddicStageMap.has(key)) {
+            const init: MeddicStageEntry = { originalStage: meta.stage };
+            for (const f of MEDDIC_FIELDS) init[f] = 0;
+            meddicStageMap.set(key, init);
+          }
+          const entry = meddicStageMap.get(key)!;
+          const covered = coverageData[conv.deal_id]?.covered_fields ?? [];
+          for (const field of MEDDIC_FIELDS) {
+            const dedupeKey = `${conv.deal_id}|${key}|${field}`;
+            if (!seenDealStageField.has(dedupeKey) && covered.includes(field)) {
+              seenDealStageField.add(dedupeKey);
+              (entry as any)[field] = ((entry as any)[field] as number) + 1;
+            }
+          }
+        }
+        const meddicChartData = sortEntries([...meddicStageMap.entries()])
+          .map(([stage, vals]) => ({ stage, ...vals }));
+
+        // Filtered headline numbers (used when MEDDIC gap filter is active)
+        const filteredAtRiskConvs = filteredCoachingConvs.filter(c => {
+          const meta = coachingConvMeta.get(c.id);
+          return meta && (meta.signal_type === 'critical' || meta.signal_type === 'at_risk');
+        });
+        const filteredAtRiskAmt = filteredAtRiskConvs.reduce((sum, c) => sum + (c.deal_amount ?? 0), 0);
+        const filteredAtRiskCount = new Set(filteredAtRiskConvs.map(c => c.deal_id).filter(Boolean)).size;
+        const useFilteredHeadline = selectedMeddicGap !== null;
 
         const filteredCoachingConvsBase = allCoachingConvs.filter(c => {
           const meta = coachingConvMeta.get(c.id);
@@ -1269,13 +1333,15 @@ export default function ConversationsPage() {
                 {/* Summary headline */}
                 <div style={{ marginBottom: 20 }}>
                   <div style={{ fontSize: 22, fontWeight: 700, color: colors.text, fontFamily: fonts.sans }}>
-                    {fmt(breakdownTotalAtRisk)}
+                    {fmt(useFilteredHeadline ? filteredAtRiskAmt : breakdownTotalAtRisk)}
                     <span style={{ fontSize: 14, fontWeight: 400, color: colors.textMuted, marginLeft: 8 }}>
-                      critical or at-risk · {breakdownTotalAtRiskCount} deal{breakdownTotalAtRiskCount !== 1 ? 's' : ''}
+                      critical or at-risk · {useFilteredHeadline ? filteredAtRiskCount : breakdownTotalAtRiskCount} deal{(useFilteredHeadline ? filteredAtRiskCount : breakdownTotalAtRiskCount) !== 1 ? 's' : ''}
                     </span>
                   </div>
                   <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 4, fontFamily: fonts.sans }}>
-                    Benchmarked against time in each stage for your own closed deals — click a bar to filter
+                    {useFilteredHeadline
+                      ? `Filtered to deals missing ${MEDDIC_LABEL[selectedMeddicGap!] ?? selectedMeddicGap} — click a bar to further filter`
+                      : 'Benchmarked against time in each stage for your own closed deals — click a bar to filter'}
                   </div>
                 </div>
 
@@ -1412,19 +1478,39 @@ export default function ConversationsPage() {
                   padding: '20px 16px 16px',
                   marginBottom: 28,
                 }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 16 }}>
-                    Pipeline by Stage · Urgency
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.5px', flex: 1 }}>
+                      Pipeline by Stage · {chartMode === 'health' ? 'Urgency' : 'MEDDIC Coverage'}
+                    </div>
+                    {/* View mode toggle */}
+                    <div style={{ display: 'flex', borderRadius: 6, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>
+                      {(['health', 'meddic'] as const).map(mode => (
+                        <button
+                          key={mode}
+                          onClick={() => setChartMode(mode)}
+                          style={{
+                            padding: '4px 10px', fontSize: 11, fontWeight: 600,
+                            fontFamily: fonts.sans, cursor: 'pointer', border: 'none',
+                            background: chartMode === mode ? colors.accent : 'transparent',
+                            color: chartMode === mode ? '#fff' : colors.textMuted,
+                            transition: 'all 0.15s',
+                          }}
+                        >
+                          {mode === 'health' ? 'Health' : 'MEDDIC'}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                  <ResponsiveContainer width="100%" height={Math.max(chartData.length * 52, 160)}>
+                  <ResponsiveContainer width="100%" height={Math.max((chartMode === 'health' ? chartData : meddicChartData).length * 52, 160)}>
                     <BarChart
                       layout="vertical"
-                      data={chartData}
+                      data={chartMode === 'health' ? chartData : meddicChartData}
                       margin={{ top: 0, right: 20, left: 0, bottom: 0 }}
                       barCategoryGap="28%"
                     >
                       <XAxis
                         type="number"
-                        tickFormatter={fmt}
+                        tickFormatter={chartMode === 'health' ? fmt : v => String(v)}
                         tick={{ fontSize: 11, fill: colors.textMuted, fontFamily: fonts.sans }}
                         axisLine={false}
                         tickLine={false}
@@ -1438,34 +1524,65 @@ export default function ConversationsPage() {
                         tickLine={false}
                       />
                       <Tooltip content={<CustomTooltip />} cursor={{ fill: `${colors.accent}08` }} />
-                      {SIGNAL_BUCKETS.map((sig, i) => (
-                        <Bar
-                          key={sig}
-                          dataKey={sig}
-                          stackId="s"
-                          fill={SIGNAL_COLOR[sig]}
-                          fillOpacity={!selectedSignal || selectedSignal === sig ? 1 : 0.25}
-                          radius={i === SIGNAL_BUCKETS.length - 1 ? [0, 4, 4, 0] : [0, 0, 0, 0]}
-                          cursor="pointer"
-                          onClick={(data: any) => {
-                            const orig = (data as any).originalStage ?? null;
-                            setSelectedStage(s => s === orig ? null : orig);
-                            setSelectedSignal(v => v === sig ? null : sig);
-                          }}
-                        />
-                      ))}
+                      {chartMode === 'health'
+                        ? SIGNAL_BUCKETS.map((sig, i) => (
+                            <Bar
+                              key={sig}
+                              dataKey={sig}
+                              stackId="s"
+                              fill={SIGNAL_COLOR[sig]}
+                              fillOpacity={!selectedSignal || selectedSignal === sig ? 1 : 0.25}
+                              radius={i === SIGNAL_BUCKETS.length - 1 ? [0, 4, 4, 0] : [0, 0, 0, 0]}
+                              cursor="pointer"
+                              onClick={(data: any) => {
+                                const orig = (data as any).originalStage ?? null;
+                                setSelectedStage(s => s === orig ? null : orig);
+                                setSelectedSignal(v => v === sig ? null : sig);
+                              }}
+                            />
+                          ))
+                        : MEDDIC_FIELDS.map((field, i) => (
+                            <Bar
+                              key={field}
+                              dataKey={field}
+                              stackId="m"
+                              fill={MEDDIC_COLOR[field]}
+                              fillOpacity={1}
+                              radius={i === MEDDIC_FIELDS.length - 1 ? [0, 4, 4, 0] : [0, 0, 0, 0]}
+                              cursor="pointer"
+                              onClick={(data: any) => {
+                                const orig = (data as any).originalStage ?? null;
+                                setSelectedStage(s => s === orig ? null : orig);
+                                setSelectedMeddicGap(v => v === field ? null : field);
+                              }}
+                            />
+                          ))
+                      }
                     </BarChart>
                   </ResponsiveContainer>
 
-                  {/* Static color legend */}
+                  {/* Dynamic color legend */}
                   <div style={{ display: 'flex', gap: 16, marginTop: 12, paddingLeft: 105, flexWrap: 'wrap' }}>
-                    {SIGNAL_BUCKETS.map(sig => (
-                      <div key={sig} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: colors.textMuted, fontFamily: fonts.sans }}>
-                        <span style={{ width: 8, height: 8, borderRadius: '50%', background: SIGNAL_COLOR[sig], display: 'inline-block' }} />
-                        {SIGNAL_LABEL[sig]}
-                      </div>
-                    ))}
+                    {chartMode === 'health'
+                      ? SIGNAL_BUCKETS.map(sig => (
+                          <div key={sig} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: colors.textMuted, fontFamily: fonts.sans }}>
+                            <span style={{ width: 8, height: 8, borderRadius: '50%', background: SIGNAL_COLOR[sig], display: 'inline-block' }} />
+                            {SIGNAL_LABEL[sig]}
+                          </div>
+                        ))
+                      : MEDDIC_FIELDS.map(field => (
+                          <div key={field} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: colors.textMuted, fontFamily: fonts.sans }}>
+                            <span style={{ width: 8, height: 8, borderRadius: '50%', background: MEDDIC_COLOR[field], display: 'inline-block' }} />
+                            {MEDDIC_LABEL[field]}
+                          </div>
+                        ))
+                    }
                   </div>
+                  {chartMode === 'meddic' && (
+                    <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 8, paddingLeft: 105, fontFamily: fonts.sans }}>
+                      Shows deals with each field covered. Click a segment to filter list to deals <em>missing</em> that field.
+                    </div>
+                  )}
                 </div>
 
                 {/* Conversation list header + search + sort */}

@@ -737,12 +737,16 @@ Be specific. Never be generic. Every sentence must reference the actual deal dat
       }],
     });
 
-    const responseText = message.content[0].type === 'text' ? message.content[0].text : '{}';
+    const rawText = message.content[0].type === 'text' ? message.content[0].text : '{}';
+    const responseText = rawText
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```\s*$/m, '')
+      .trim();
     let script: unknown;
     try {
       script = JSON.parse(responseText);
     } catch {
-      script = { opener: responseText, points: [], closing_note: '' };
+      script = { opener: rawText, points: [], closing_note: '' };
     }
 
     res.json({ script });
