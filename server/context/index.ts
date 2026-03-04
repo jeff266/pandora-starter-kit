@@ -87,6 +87,34 @@ export async function getMaturity(workspaceId: string): Promise<Record<string, u
   return result.rows[0]?.operational_maturity ?? {};
 }
 
+export interface QualificationFramework {
+  framework: 'MEDDIC' | 'BANT' | 'SPICED';
+  fields: {
+    MEDDIC: string[];
+    BANT: string[];
+    SPICED: string[];
+  };
+}
+
+export async function getQualificationFramework(workspaceId: string): Promise<QualificationFramework> {
+  const definitions = await getDefinitions(workspaceId);
+  const frameworkConfig = (definitions.qualification_framework as any)?.value;
+
+  // Return default if not configured
+  if (!frameworkConfig) {
+    return {
+      framework: 'MEDDIC',
+      fields: {
+        MEDDIC: ['metrics', 'economic_buyer', 'decision_criteria', 'decision_process', 'identify_pain', 'champion'],
+        BANT: ['budget', 'authority', 'need', 'timeline'],
+        SPICED: ['situation', 'pain', 'impact', 'critical_event', 'decision'],
+      },
+    };
+  }
+
+  return frameworkConfig as QualificationFramework;
+}
+
 export async function updateContext(
   workspaceId: string,
   section: ContextSection,
@@ -159,6 +187,20 @@ export async function onboardWorkspace(
     qualified_definition: answers.qualified_stages,
     stage_mapping: {},
     terminology_map: {},
+    qualification_framework: {
+      value: {
+        framework: 'MEDDIC',
+        fields: {
+          MEDDIC: ['metrics', 'economic_buyer', 'decision_criteria', 'decision_process', 'identify_pain', 'champion'],
+          BANT: ['budget', 'authority', 'need', 'timeline'],
+          SPICED: ['situation', 'pain', 'impact', 'critical_event', 'decision'],
+        },
+      },
+      _meta: {
+        source: 'default',
+        last_validated: new Date().toISOString(),
+      },
+    },
   };
 
   const result = await query<ContextLayer>(
