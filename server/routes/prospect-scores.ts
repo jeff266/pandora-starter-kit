@@ -8,8 +8,8 @@ const router = Router();
 // ── GET /:id/prospect-scores ──────────────────────────────────────────────────
 // Returns paginated, filtered, sorted list of scored prospects + aggregate stats.
 
-router.get('/:id/prospect-scores', async (req: Request, res: Response): Promise<void> => {
-  const workspaceId = req.params.id;
+router.get('/:workspaceId/prospect-scores', async (req: Request, res: Response): Promise<void> => {
+  const workspaceId = req.params.workspaceId;
   const {
     grade,
     action,
@@ -191,8 +191,8 @@ router.get('/:id/prospect-scores', async (req: Request, res: Response): Promise<
 // ── POST /:id/prospect-scores/run ─────────────────────────────────────────────
 // Triggers a fresh scoring run for the workspace.
 
-router.post('/:id/prospect-scores/run', requirePermission('deals.edit'), async (req: Request, res: Response): Promise<void> => {
-  const workspaceId = req.params.id;
+router.post('/:workspaceId/prospect-scores/run', requirePermission('deals.edit'), async (req: Request, res: Response): Promise<void> => {
+  const workspaceId = req.params.workspaceId;
   try {
     const result = await runProspectScoring(workspaceId);
     res.json(result);
