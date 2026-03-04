@@ -620,6 +620,7 @@ export default function DealDetail() {
       label: a.subject || a.type || 'Activity',
       meta: a.owner_email,
       icon: activityIcon(a.type),
+      body: a.body ?? null,
     })),
     ...conversations.map((c: any) => ({
       id: c.id,
@@ -1301,6 +1302,18 @@ export default function DealDetail() {
                             {isExpanded ? 'Hide summary' : 'Show summary'}
                           </button>
                           {isExpanded && <p style={{ fontSize: 12, color: colors.textSecondary, marginTop: 4, lineHeight: 1.4 }}>{anon.text(item.summary)}</p>}
+                        </div>
+                      )}
+                      {item.body && item.type === 'activity' && (
+                        <div style={{ marginTop: 4 }}>
+                          <button onClick={() => { const n = new Set(expandedSummaries); isExpanded ? n.delete(item.id) : n.add(item.id); setExpandedSummaries(n); }}
+                            style={{ background: 'none', border: 'none', color: colors.accent, fontSize: 11, cursor: 'pointer', padding: 0, textDecoration: 'underline' }}>
+                            {isExpanded ? 'Hide note' : 'Show note'}
+                          </button>
+                          {isExpanded && <p style={{ fontSize: 12, color: colors.textSecondary, marginTop: 4, lineHeight: 1.4 }}>{anon.text((() => {
+                            const stripped = item.body.replace(/<[^>]+>/g, '').replace(/&[a-z]+;/gi, ' ').trim();
+                            return stripped.length > 400 ? stripped.slice(0, 400) + '…' : stripped;
+                          })())}</p>}
                         </div>
                       )}
                     </div>
