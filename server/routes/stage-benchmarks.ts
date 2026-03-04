@@ -540,7 +540,7 @@ router.get('/:workspaceId/deals/:dealId/coaching', async (req: Request, res: Res
           : daysSinceCall <= 30 ? 'cooling'
             : 'dark';
 
-    // Multi-threading: unique participants from last 60 days
+    // Multi-threading: unique external participants from last 60 days
     const participantsResult = await query<{ cnt: string }>(
       `SELECT COUNT(DISTINCT part->>'email') AS cnt
        FROM conversations c,
@@ -548,7 +548,8 @@ router.get('/:workspaceId/deals/:dealId/coaching', async (req: Request, res: Res
               CASE jsonb_typeof(c.participants) WHEN 'array' THEN c.participants ELSE '[]'::jsonb END
             ) AS part
        WHERE c.deal_id = $1 AND c.workspace_id = $2
-         AND c.call_date > NOW() - INTERVAL '60 days'`,
+         AND c.call_date > NOW() - INTERVAL '60 days'
+         AND COALESCE(part->>'affiliation', 'External') != 'Internal'`,
       [dealId, workspaceId]
     );
     const contactCount = parseInt(participantsResult.rows[0]?.cnt ?? '0', 10);
