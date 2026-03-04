@@ -1519,6 +1519,89 @@ async function queryActivityTimeline(workspaceId: string, params: Record<string,
     }
   }
 
+  // CRM activities from activities table (notes, emails, meetings, calls, tasks)
+  if (includeType('note') || includeType('email') || includeType('meeting') || includeType('call') || includeType('task')) {
+    const actConditions: string[] = ['a.workspace_id = $1'];
+    const actValues: any[] = [workspaceId];
+
+    if (params.deal_id) { actValues.push(params.deal_id); actConditions.push(`a.deal_id = $${actValues.length}`); }
+    else if (params.account_id) { actValues.push(params.account_id); actConditions.push(`a.account_id = $${actValues.length}`); }
+
+    if (params.since) { actValues.push(params.since); actConditions.push(`a.timestamp >= $${actValues.length}`); }
+    if (params.until) { actValues.push(params.until); actConditions.push(`a.timestamp <= $${actValues.length}`); }
+
+    // Filter by activity types if specified
+    if (activityTypes) {
+      const typesList = activityTypes.filter(t => ['note', 'email', 'meeting', 'call', 'task'].includes(t));
+      if (typesList.length > 0) {
+        actValues.push(typesList);
+        actConditions.push(`a.activity_type = ANY($${actValues.length})`);
+      }
+    }
+
+    try {
+      const actResult = await query<any>(
+        `SELECT a.timestamp as date, a.activity_type, a.subject, a.body, a.actor
+         FROM activities a
+         WHERE ${actConditions.join(' AND ')}
+         ORDER BY a.timestamp DESC
+         LIMIT $${actValues.push(limit)}`,
+        actValues
+      );
+
+      for (const r of actResult.rows) {
+        // Use subject if present, else strip-HTML preview of body (100 chars)
+        let description = r.subject || '';
+        if (!description && r.body) {
+          const stripped = r.body
+            .replace(/<[^>]+>/g, '')
+            .replace(/&amp;/g, '&')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&nbsp;/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+          description = stripped.slice(0, 100) + (stripped.length > 100 ? '...' : '');
+        }
+        if (!description) description = r.activity_type;
+
+        // Map activity_type to type
+        const typeMap: Record<string, string> = {
+          note: 'note',
+          email: 'email',
+          meeting: 'meeting',
+          call: 'call',
+          task: 'task',
+        };
+        const eventType = typeMap[r.activity_type] || 'note';
+
+        // Include full stripped body in metadata
+        const fullBody = r.body
+          ? r.body
+              .replace(/<[^>]+>/g, '')
+              .replace(/&amp;/g, '&')
+              .replace(/&lt;/g, '<')
+              .replace(/&gt;/g, '>')
+              .replace(/&nbsp;/g, ' ')
+              .replace(/\s+/g, ' ')
+              .trim()
+          : null;
+
+        events.push({
+          date: r.date,
+          type: eventType,
+          description,
+          actor: r.actor,
+          deal_name: null, // Activities don't include deal name in result
+          metadata: { body: fullBody, source: 'crm' },
+        });
+      }
+    } catch (err) {
+      // Activities table may not exist or query may fail
+      console.error('[queryActivityTimeline] Activities query failed:', err);
+    }
+  }
+
   // Sort all events by date descending
   events.sort((a, b) => {
     const da = new Date(a.date || 0).getTime();
