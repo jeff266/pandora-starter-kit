@@ -60,6 +60,7 @@ export interface DealDossier {
     date: string;
     subject: string | null;
     owner_email: string;
+    body: string | null;
   }>;
   stage_history: Array<{
     stage: string;
@@ -188,7 +189,7 @@ async function getConversationsForDeal(workspaceId: string, dealId: string) {
 
 async function getActivitiesForDeal(workspaceId: string, dealId: string) {
   const result = await query(
-    `SELECT a.id, a.activity_type, a.timestamp, a.subject, a.actor
+    `SELECT a.id, a.activity_type, a.timestamp, a.subject, a.actor, a.body
      FROM activities a
      WHERE a.workspace_id = $1 AND a.deal_id = $2
      ORDER BY a.timestamp DESC
@@ -559,6 +560,7 @@ export async function assembleDealDossier(
       date: a.timestamp ? new Date(a.timestamp).toISOString() : '',
       subject: a.subject ?? null,
       owner_email: a.actor || '',
+      body: a.body ?? null,
     })),
     stage_history: stageHistory.map((sh: any) => ({
       stage: sh.stage || '',
