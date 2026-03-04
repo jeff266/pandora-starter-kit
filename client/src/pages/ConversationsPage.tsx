@@ -1212,15 +1212,6 @@ export default function ConversationsPage() {
         const meddicChartData = sortEntries([...meddicStageMap.entries()])
           .map(([stage, vals]) => ({ stage, ...vals }));
 
-        // Filtered headline numbers (used when MEDDIC gap filter is active)
-        const filteredAtRiskConvs = filteredCoachingConvs.filter(c => {
-          const meta = coachingConvMeta.get(c.id);
-          return meta && (meta.signal_type === 'critical' || meta.signal_type === 'at_risk');
-        });
-        const filteredAtRiskAmt = filteredAtRiskConvs.reduce((sum, c) => sum + (c.deal_amount ?? 0), 0);
-        const filteredAtRiskCount = new Set(filteredAtRiskConvs.map(c => c.deal_id).filter(Boolean)).size;
-        const useFilteredHeadline = selectedMeddicGap !== null;
-
         const filteredCoachingConvsBase = allCoachingConvs.filter(c => {
           const meta = coachingConvMeta.get(c.id);
           if (!meta) return false;
@@ -1269,6 +1260,15 @@ export default function ConversationsPage() {
 
         const hasFilter = selectedStage !== null || selectedSignal !== null || selectedOwner !== null || selectedQuarter !== null || selectedMeddicGap !== null || coachingSearch !== '';
         const clearAllFilters = () => { setSelectedStage(null); setSelectedSignal(null); setSelectedOwner(null); setSelectedQuarter(null); setSelectedMeddicGap(null); setCoachingSearch(''); };
+
+        // Filtered headline numbers (used when MEDDIC gap filter is active)
+        const filteredAtRiskConvs = filteredCoachingConvs.filter(c => {
+          const meta = coachingConvMeta.get(c.id);
+          return meta && (meta.signal_type === 'critical' || meta.signal_type === 'at_risk');
+        });
+        const filteredAtRiskAmt = filteredAtRiskConvs.reduce((sum, c) => sum + (c.deal_amount ?? 0), 0);
+        const filteredAtRiskCount = new Set(filteredAtRiskConvs.map(c => c.deal_id).filter(Boolean)).size;
+        const useFilteredHeadline = selectedMeddicGap !== null;
 
         const CustomTooltip = ({ active, payload, label }: any) => {
           if (!active || !payload?.length) return null;
