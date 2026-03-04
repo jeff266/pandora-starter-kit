@@ -107,6 +107,12 @@ export default function ConversationsPage() {
   const [stageFilter, setStageFilter] = useState('');
   const [linkedFilter, setLinkedFilter] = useState<'all' | 'linked' | 'unlinked'>('all');
   const [coachingFilter, setCoachingFilter] = useState(false);
+  const [dateRangeFilter, setDateRangeFilter] = useState<'all' | '30d' | '60d' | '90d'>('all');
+
+  // Coaching tab additional filters
+  const [selectedMeddicGap, setSelectedMeddicGap] = useState<string | null>(null);
+  const [coachingSort, setCoachingSort] = useState<'recent' | 'coverage_asc' | 'coverage_desc'>('recent');
+  const [coachingSearch, setCoachingSearch] = useState('');
 
   // Server-mode specific
   const [filterOptions, setFilterOptions] = useState<FilterOptions>({ owners: [], stages: [] });
@@ -241,6 +247,7 @@ export default function ConversationsPage() {
     stage: string,
     linked: 'all' | 'linked' | 'unlinked',
     coaching: boolean,
+    dateRange: 'all' | '30d' | '60d' | '90d',
   ) => {
     if (filterMode !== 'server') return;
     setServerLoading(true);
@@ -252,6 +259,12 @@ export default function ConversationsPage() {
       if (linked === 'linked') params.set('has_deal', 'true');
       if (linked === 'unlinked') params.set('has_deal', 'false');
       if (coaching) params.set('has_coaching', 'true');
+      if (dateRange !== 'all') {
+        const days = dateRange === '30d' ? 30 : dateRange === '60d' ? 60 : 90;
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - days);
+        params.set('from_date', cutoff.toISOString());
+      }
 
       const res = await api.get(`/conversations/list?${params}`);
       setConversations(res.conversations || []);
@@ -268,12 +281,12 @@ export default function ConversationsPage() {
     if (filterMode !== 'server') return;
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     searchDebounceRef.current = setTimeout(() => {
-      fetchServerFiltered(searchQuery, ownerFilter, stageFilter, linkedFilter, coachingFilter);
+      fetchServerFiltered(searchQuery, ownerFilter, stageFilter, linkedFilter, coachingFilter, dateRangeFilter);
     }, searchQuery ? 300 : 0);
     return () => {
       if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     };
-  }, [filterMode, searchQuery, ownerFilter, stageFilter, linkedFilter, coachingFilter, fetchServerFiltered]);
+  }, [filterMode, searchQuery, ownerFilter, stageFilter, linkedFilter, coachingFilter, dateRangeFilter, fetchServerFiltered]);
 
   // ─── Client-side filtering ────────────────────────────────────────────────
 
@@ -286,9 +299,15 @@ export default function ConversationsPage() {
       if (linkedFilter === 'linked' && !c.deal_id) return false;
       if (linkedFilter === 'unlinked' && c.deal_id) return false;
       if (coachingFilter && !c.has_coaching) return false;
+      if (dateRangeFilter !== 'all') {
+        const days = dateRangeFilter === '30d' ? 30 : dateRangeFilter === '60d' ? 60 : 90;
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - days);
+        if (!c.call_date || new Date(c.call_date) < cutoff) return false;
+      }
       return true;
     });
-  }, [filterMode, conversations, searchQuery, ownerFilter, stageFilter, linkedFilter, coachingFilter]);
+  }, [filterMode, conversations, searchQuery, ownerFilter, stageFilter, linkedFilter, coachingFilter, dateRangeFilter]);
 
   const displayedConversations = filterMode === 'client' ? filteredConversations : conversations;
 
@@ -317,7 +336,7 @@ export default function ConversationsPage() {
     [nextActionGaps, gapOwnerFilter]
   );
 
-  const anyFilterActive = searchQuery || ownerFilter || stageFilter || linkedFilter !== 'all' || coachingFilter;
+  const anyFilterActive = searchQuery || ownerFilter || stageFilter || linkedFilter !== 'all' || coachingFilter || dateRangeFilter !== 'all';
 
   function clearAllFilters() {
     setSearchQuery('');
@@ -325,6 +344,7 @@ export default function ConversationsPage() {
     setStageFilter('');
     setLinkedFilter('all');
     setCoachingFilter(false);
+    setDateRangeFilter('all');
   }
 
   // ─── Utility functions ────────────────────────────────────────────────────
@@ -680,6 +700,18 @@ export default function ConversationsPage() {
               <option value="all">All Calls</option>
               <option value="linked">Linked to Deal</option>
               <option value="unlinked">Unlinked</option>
+            </select>
+
+            {/* Date range */}
+            <select
+              value={dateRangeFilter}
+              onChange={e => setDateRangeFilter(e.target.value as 'all' | '30d' | '60d' | '90d')}
+              style={selectStyle}
+            >
+              <option value="all">All Time</option>
+              <option value="30d">Last 30 days</option>
+              <option value="60d">Last 60 days</option>
+              <option value="90d">Last 90 days</option>
             </select>
 
             {/* Coaching filter */}
@@ -1125,7 +1157,7 @@ export default function ConversationsPage() {
           })
           .map(([stage, vals]) => ({ stage, ...vals }));
 
-        const filteredCoachingConvs = allCoachingConvs.filter(c => {
+        const filteredCoachingConvsBase = allCoachingConvs.filter(c => {
           const meta = coachingConvMeta.get(c.id);
           if (!meta) return false;
           if (selectedStage && meta.stage !== selectedStage) return false;
@@ -1137,11 +1169,42 @@ export default function ConversationsPage() {
           } else if (quarterRange && !c.call_date) {
             return false;
           }
+          if (coachingSearch) {
+            const q = coachingSearch.toLowerCase();
+            const matchTitle = c.title?.toLowerCase().includes(q);
+            const matchAccount = c.account_name?.toLowerCase().includes(q);
+            const matchOwner = c.deal_owner?.toLowerCase().includes(q);
+            if (!matchTitle && !matchAccount && !matchOwner) return false;
+          }
+          if (selectedMeddicGap) {
+            if (selectedMeddicGap === 'none') {
+              if (c.deal_id && coverageData[c.deal_id]) return false;
+            } else {
+              const covered = c.deal_id ? (coverageData[c.deal_id]?.covered_fields ?? []) : [];
+              if (covered.includes(selectedMeddicGap)) return false;
+            }
+          }
           return true;
         });
 
-        const hasFilter = selectedStage !== null || selectedSignal !== null || selectedOwner !== null || selectedQuarter !== null;
-        const clearAllFilters = () => { setSelectedStage(null); setSelectedSignal(null); setSelectedOwner(null); setSelectedQuarter(null); };
+        const filteredCoachingConvs = [...filteredCoachingConvsBase].sort((a, b) => {
+          if (coachingSort === 'coverage_asc') {
+            const aN = a.deal_id ? (coverageData[a.deal_id]?.fields_covered ?? -1) : -1;
+            const bN = b.deal_id ? (coverageData[b.deal_id]?.fields_covered ?? -1) : -1;
+            return aN - bN;
+          }
+          if (coachingSort === 'coverage_desc') {
+            const aN = a.deal_id ? (coverageData[a.deal_id]?.fields_covered ?? -1) : -1;
+            const bN = b.deal_id ? (coverageData[b.deal_id]?.fields_covered ?? -1) : -1;
+            return bN - aN;
+          }
+          const aD = a.call_date ? new Date(a.call_date).getTime() : 0;
+          const bD = b.call_date ? new Date(b.call_date).getTime() : 0;
+          return bD - aD;
+        });
+
+        const hasFilter = selectedStage !== null || selectedSignal !== null || selectedOwner !== null || selectedQuarter !== null || selectedMeddicGap !== null || coachingSearch !== '';
+        const clearAllFilters = () => { setSelectedStage(null); setSelectedSignal(null); setSelectedOwner(null); setSelectedQuarter(null); setSelectedMeddicGap(null); setCoachingSearch(''); };
 
         const CustomTooltip = ({ active, payload, label }: any) => {
           if (!active || !payload?.length) return null;
@@ -1272,6 +1335,23 @@ export default function ConversationsPage() {
                     </select>
                   )}
 
+                  {/* MEDDIC gap filter */}
+                  <select
+                    value={selectedMeddicGap ?? ''}
+                    onChange={e => setSelectedMeddicGap(e.target.value || null)}
+                    style={selectStyle}
+                    title="Filter to deals missing a specific MEDDIC qualification field"
+                  >
+                    <option value="">Any Coverage</option>
+                    <option value="metrics">Missing Metrics</option>
+                    <option value="economic_buyer">Missing Economic Buyer</option>
+                    <option value="decision_criteria">Missing Decision Criteria</option>
+                    <option value="decision_process">Missing Decision Process</option>
+                    <option value="identify_pain">Missing Identify Pain</option>
+                    <option value="champion">Missing Champion</option>
+                    <option value="none">No Signals Yet</option>
+                  </select>
+
                   {/* Divider */}
                   {(availableScopes.length > 1 || fiscalQuarters.length > 0 || availableOwners.length > 0) && (
                     <div style={{ width: 1, height: 20, background: colors.border, flexShrink: 0 }} />
@@ -1388,12 +1468,41 @@ export default function ConversationsPage() {
                   </div>
                 </div>
 
-                {/* Conversation list header */}
-                <div style={{ fontSize: 13, fontWeight: 600, color: colors.text, fontFamily: fonts.sans, marginBottom: 12 }}>
-                  Conversations with coaching signals
-                  <span style={{ fontSize: 12, fontWeight: 400, color: colors.textMuted, marginLeft: 8 }}>
-                    {filteredCoachingConvs.length}{hasFilter ? ` of ${allCoachingConvs.length}` : ''} calls
-                  </span>
+                {/* Conversation list header + search + sort */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: colors.text, fontFamily: fonts.sans, marginRight: 4 }}>
+                    Conversations with coaching signals
+                    <span style={{ fontSize: 12, fontWeight: 400, color: colors.textMuted, marginLeft: 8 }}>
+                      {filteredCoachingConvs.length}{hasFilter ? ` of ${allCoachingConvs.length}` : ''} calls
+                    </span>
+                  </div>
+                  <div style={{ flex: 1 }} />
+                  {/* Search */}
+                  <div style={{ position: 'relative' }}>
+                    <span style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', fontSize: 12, color: colors.textMuted, pointerEvents: 'none' }}>🔍</span>
+                    <input
+                      type="text"
+                      placeholder="Search calls..."
+                      value={coachingSearch}
+                      onChange={e => setCoachingSearch(e.target.value)}
+                      style={{
+                        paddingLeft: 28, paddingRight: 10, paddingTop: 5, paddingBottom: 5,
+                        fontSize: 12, border: `1px solid ${colors.border}`, borderRadius: 6,
+                        background: colors.surface, color: colors.text, outline: 'none',
+                        fontFamily: fonts.sans, width: 190, boxSizing: 'border-box' as const,
+                      }}
+                    />
+                  </div>
+                  {/* Sort */}
+                  <select
+                    value={coachingSort}
+                    onChange={e => setCoachingSort(e.target.value as 'recent' | 'coverage_asc' | 'coverage_desc')}
+                    style={{ ...selectStyle, fontSize: 12 }}
+                  >
+                    <option value="recent">Most Recent</option>
+                    <option value="coverage_asc">Weakest Coverage</option>
+                    <option value="coverage_desc">Strongest Coverage</option>
+                  </select>
                 </div>
 
                 <div style={{
