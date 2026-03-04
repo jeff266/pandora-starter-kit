@@ -92,6 +92,12 @@ export default function ConversationsPage() {
   const [selectedScope, setSelectedScope] = useState<string | null>(null);
   const [selectedQuarter, setSelectedQuarter] = useState<string | null>(null);
 
+  // Activity signal coverage and buyer quotes for coaching tab
+  type CoverageEntry = { fields_covered: number; covered_fields: string[] };
+  type BuyerQuote = { id: string; signal_value: string | null; source_quote: string | null; deal_name?: string; confidence: number };
+  const [coverageData, setCoverageData] = useState<Record<string, CoverageEntry>>({});
+  const [buyerQuotes, setBuyerQuotes] = useState<BuyerQuote[]>([]);
+
   // Needs Attention filter
   const [gapOwnerFilter, setGapOwnerFilter] = useState('');
 
@@ -200,6 +206,30 @@ export default function ConversationsPage() {
         const scopes: AnalysisScope[] = (data.scopes || []).map((s: any) => ({ scope_id: s.scope_id, name: s.name }));
         setAvailableScopes(scopes);
       })
+      .catch(() => {});
+  }, [activeTab, workspaceId]);
+
+  // ─── Fetch MEDDIC coverage for coaching deals ─────────────────────────────
+
+  useEffect(() => {
+    if (activeTab !== 'coaching' || !workspaceId || coachingConvMeta.size === 0) return;
+    const dealIds = [...new Set(
+      conversations
+        .filter(c => coachingConvMeta.has(c.id) && c.deal_id)
+        .map(c => c.deal_id as string)
+    )];
+    if (dealIds.length === 0) return;
+    api.post('/activity-signals/coverage', { deal_ids: dealIds })
+      .then((data: any) => setCoverageData(data.coverage ?? {}))
+      .catch(() => {});
+  }, [activeTab, workspaceId, coachingConvMeta]);
+
+  // ─── Fetch buyer quotes for "What Prospects Are Saying" panel ────────────
+
+  useEffect(() => {
+    if (activeTab !== 'coaching' || !workspaceId) return;
+    api.get('/activity-signals?signal_type=notable_quote&speaker_type=prospect&min_confidence=0.75&limit=10')
+      .then((data: any) => setBuyerQuotes(data.signals ?? []))
       .catch(() => {});
   }, [activeTab, workspaceId]);
 
@@ -1375,7 +1405,7 @@ export default function ConversationsPage() {
                   {/* Table header */}
                   <div style={{
                     display: 'grid',
-                    gridTemplateColumns: '2fr 1.2fr 1fr 1fr 90px 90px',
+                    gridTemplateColumns: '2fr 1.2fr 1fr 1fr 90px 70px 90px',
                     gap: 12,
                     padding: '10px 16px',
                     background: colors.surface,
@@ -1391,6 +1421,7 @@ export default function ConversationsPage() {
                     <div>Stage</div>
                     <div>Owner</div>
                     <div>Health</div>
+                    <div title="MEDDIC framework fields covered by extracted CRM activity signals">Coverage</div>
                     <div>Date</div>
                   </div>
 
@@ -1409,13 +1440,20 @@ export default function ConversationsPage() {
                     filteredCoachingConvs.map(conv => {
                       const meta = coachingConvMeta.get(conv.id);
                       const sigType = meta?.signal_type ?? '';
+                      const cov = conv.deal_id ? coverageData[conv.deal_id] : undefined;
+                      const covN = cov?.fields_covered ?? null;
+                      const covColor = covN === null ? colors.textMuted
+                        : covN >= 5 ? '#38A169'
+                        : covN >= 3 ? '#D69E2E'
+                        : '#DD6B20';
+                      const covTip = cov?.covered_fields?.join(', ') ?? 'No signals extracted';
                       return (
                         <div
                           key={conv.id}
                           onClick={() => navigate(`/conversations/${conv.id}`)}
                           style={{
                             display: 'grid',
-                            gridTemplateColumns: '2fr 1.2fr 1fr 1fr 90px 90px',
+                            gridTemplateColumns: '2fr 1.2fr 1fr 1fr 90px 70px 90px',
                             gap: 12,
                             padding: '12px 16px',
                             borderBottom: `1px solid ${colors.border}`,
@@ -1454,6 +1492,23 @@ export default function ConversationsPage() {
                               </span>
                             )}
                           </div>
+                          <div title={covTip}>
+                            {conv.deal_id ? (
+                              <span style={{
+                                display: 'inline-block',
+                                padding: '2px 7px',
+                                borderRadius: 10,
+                                fontSize: 11,
+                                fontWeight: 600,
+                                background: covN !== null ? `${covColor}18` : 'transparent',
+                                color: covColor,
+                                fontFamily: fonts.mono,
+                                whiteSpace: 'nowrap',
+                              }}>
+                                {covN !== null ? `${covN}/6` : '—'}
+                              </span>
+                            ) : <span style={{ fontSize: 12, color: colors.textMuted }}>—</span>}
+                          </div>
                           <div style={{ fontSize: 12, color: colors.textMuted, fontFamily: fonts.sans, whiteSpace: 'nowrap' }}>
                             {conv.call_date ? new Date(conv.call_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'}
                           </div>
@@ -1464,6 +1519,54 @@ export default function ConversationsPage() {
                 </div>
               </>
             )}
+
+            {/* What Prospects Are Saying */}
+            <div style={{ marginTop: 32 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: colors.text, fontFamily: fonts.sans, marginBottom: 4 }}>
+                What Prospects Are Saying
+              </div>
+              <div style={{ fontSize: 12, color: colors.textMuted, fontFamily: fonts.sans, marginBottom: 16 }}>
+                Top verbatim quotes from buyers across pipeline deals, extracted from CRM activity notes and emails.
+              </div>
+              {buyerQuotes.length === 0 ? (
+                <div style={{ padding: '20px 0', fontSize: 13, color: colors.textMuted, fontFamily: fonts.sans }}>
+                  No prospect quotes extracted yet. Signals are extracted automatically after activities sync.
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  {buyerQuotes.map(q => (
+                    <div key={q.id} style={{
+                      padding: '14px 16px',
+                      background: colors.surface,
+                      border: `1px solid ${colors.border}`,
+                      borderLeft: `3px solid ${colors.accent}`,
+                      borderRadius: 8,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 8,
+                    }}>
+                      <div style={{ fontSize: 13, color: colors.text, fontStyle: 'italic', lineHeight: 1.5 }}>
+                        "{q.source_quote || q.signal_value || '—'}"
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{
+                          width: 7,
+                          height: 7,
+                          borderRadius: '50%',
+                          background: q.confidence >= 0.85 ? '#38A169' : '#D69E2E',
+                          flexShrink: 0,
+                        }} />
+                        {(q as any).deal_name && (
+                          <span style={{ fontSize: 11, color: colors.textMuted, fontFamily: fonts.sans }}>
+                            {(q as any).deal_name}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         );
       })()}

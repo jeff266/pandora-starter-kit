@@ -11,6 +11,7 @@ import { requirePermission, requireAnyPermission } from '../middleware/permissio
 import { extractConversationSignals } from '../conversations/signal-extractor.js';
 import { extractConversationSignals as extractStructuredSignals } from '../signals/extract-conversation-signals.js';
 import { queryConversationSignals } from '../signals/query-conversation-signals.js';
+import { queryActivitySignals } from '../signals/query-activity-signals.js';
 import { query } from '../db.js';
 import { computeFieldsForDeal } from '../computed-fields/engine.js';
 import { generateConversationSummary } from '../conversations/summarizer.js';
@@ -1250,6 +1251,100 @@ router.get('/:id/deals/:dealId/conversation-arc', async (req: Request, res: Resp
     console.error('[ConversationArc]', err);
     const msg = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: 'Failed to load conversation arc' });
+  }
+});
+
+// ============================================================================
+// CRM Activity Signals — query endpoints for UI pages
+// ============================================================================
+
+/**
+ * GET /api/workspaces/:id/activity-signals
+ * Query pre-extracted CRM activity signals with optional filters.
+ */
+router.get('/:id/activity-signals', async (req: Request, res: Response) => {
+  try {
+    const workspaceId = req.params.id as string;
+    const {
+      deal_id,
+      deal_name,
+      account_id,
+      signal_type,
+      framework_field,
+      speaker_type,
+      from_date,
+      to_date,
+      min_confidence,
+      verbatim_only,
+      limit,
+      offset,
+    } = req.query as Record<string, string | undefined>;
+
+    const result = await queryActivitySignals(workspaceId, {
+      deal_id,
+      deal_name,
+      account_id,
+      signal_type: signal_type as any,
+      framework_field,
+      speaker_type: speaker_type as any,
+      from_date,
+      to_date,
+      min_confidence: min_confidence ? parseFloat(min_confidence) : undefined,
+      verbatim_only: verbatim_only === 'true',
+      limit: limit ? Math.min(parseInt(limit, 10), 200) : 50,
+      offset: offset ? parseInt(offset, 10) : 0,
+    });
+
+    return res.json(result);
+  } catch (err) {
+    console.error('[ActivitySignals] Query error:', err);
+    return res.status(500).json({ error: 'Failed to query activity signals' });
+  }
+});
+
+/**
+ * POST /api/workspaces/:id/activity-signals/coverage
+ * Returns MEDDIC/framework field coverage per deal.
+ * Body: { deal_ids: string[] }
+ */
+router.post('/:id/activity-signals/coverage', async (req: Request, res: Response) => {
+  try {
+    const workspaceId = req.params.id as string;
+    const { deal_ids } = req.body as { deal_ids: string[] };
+
+    if (!Array.isArray(deal_ids) || deal_ids.length === 0) {
+      return res.json({ coverage: {} });
+    }
+
+    const result = await query<{
+      deal_id: string;
+      fields_covered: string;
+      covered_fields: string[];
+    }>(
+      `SELECT deal_id::text,
+              COUNT(DISTINCT framework_field)::text AS fields_covered,
+              array_agg(DISTINCT framework_field) AS covered_fields
+       FROM activity_signals
+       WHERE workspace_id = $1
+         AND signal_type = 'framework_signal'
+         AND deal_id = ANY($2::uuid[])
+         AND framework_field IS NOT NULL
+       GROUP BY deal_id`,
+      [workspaceId, deal_ids]
+    );
+
+    const coverage: Record<string, { fields_covered: number; covered_fields: string[] }> = {};
+    for (const row of result.rows) {
+      coverage[row.deal_id] = {
+        fields_covered: parseInt(row.fields_covered, 10),
+        covered_fields: row.covered_fields ?? [],
+      };
+    }
+
+    return res.json({ coverage });
+  } catch (err) {
+    console.error('[ActivitySignals] Coverage error:', err);
+    return res.status(500).json({ error: 'Failed to compute signal coverage' });
   }
 });
 

@@ -63,7 +63,8 @@ export type SignalType =
   | 'buyer_signal'
   | 'timeline_mention'
   | 'stakeholder_mention'
-  | 'untracked_participant';
+  | 'untracked_participant'
+  | 'competitor_mention';
 
 interface ActivityRecord {
   id: string;
@@ -373,6 +374,16 @@ Respond with a JSON object:
       "speaker_confidence": 0.9,
       "verbatim": false,
       "confidence": 0.88
+    },
+    {
+      "signal_type": "competitor_mention",
+      "signal_value": "Aspen Technology",
+      "framework_field": null,
+      "source_quote": "We're also evaluating Aspen Technology for this",
+      "speaker_type": "prospect",
+      "speaker_confidence": 0.95,
+      "verbatim": true,
+      "confidence": 0.92
     }
   ]
 }
@@ -384,6 +395,7 @@ Signal type definitions:
 - buyer_signal: Positive purchase intent (asking about contracts, implementation, pricing, next steps)
 - timeline_mention: Specific date, quarter, or deadline mentioned (Q3, Jan 15, end of year, etc.)
 - stakeholder_mention: Reference to additional stakeholders not logged in CRM (VP mentioned, CFO needs to approve, etc.)
+- competitor_mention: Named competitor, alternative vendor, or "do nothing" option mentioned. Set signal_value to the competitor/vendor name. Include "do nothing" or "status quo" if the prospect mentions not changing their current approach.
 
 Speaker attribution rules:
 - If direction is "inbound" (${participants.direction}), speaker_type = "prospect"

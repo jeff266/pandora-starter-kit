@@ -504,6 +504,7 @@ const PANDORA_TOOLS: ToolDef[] = [
             'timeline_mention',
             'stakeholder_mention',
             'untracked_participant',
+            'competitor_mention',
           ],
           description: 'Filter to a specific signal type. Omit to return all types.',
         },

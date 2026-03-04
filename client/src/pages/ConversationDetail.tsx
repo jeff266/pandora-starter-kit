@@ -120,6 +120,17 @@ interface ConversationArcEntry {
   summary_one_liner: string | null;
 }
 
+interface ActivitySignalLocal {
+  id: string;
+  signal_type: string;
+  signal_value: string | null;
+  framework_field: string | null;
+  source_quote: string | null;
+  speaker_type: string | null;
+  confidence: number;
+  verbatim: boolean;
+}
+
 interface ConversationDossier {
   conversation: {
     id: string;
@@ -379,6 +390,8 @@ export default function ConversationDetail() {
   const [coachingData, setCoachingData] = useState<CoachingData | null>(null);
   const [coachingLoading, setCoachingLoading] = useState(false);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
+  const [activitySignals, setActivitySignals] = useState<ActivitySignalLocal[]>([]);
+  const [signalsLoading, setSignalsLoading] = useState(false);
 
   const toggleSection = (key: string) =>
     setExpandedSections(prev => ({ ...prev, [key]: !prev[key] }));
@@ -422,6 +435,20 @@ export default function ConversationDetail() {
       .catch(() => setCoachingData(null))
       .finally(() => setCoachingLoading(false));
   }, [dossier?.deal_context?.deal_id, workspaceId]);
+
+  useEffect(() => {
+    const dealId = dossier?.deal_context?.deal_id;
+    const startedAt = dossier?.conversation?.started_at;
+    if (!dealId || !startedAt || !workspaceId) return;
+    const ts = new Date(startedAt);
+    const from = new Date(ts.getTime() - 3 * 86400000).toISOString().split('T')[0];
+    const to = new Date(ts.getTime() + 3 * 86400000).toISOString().split('T')[0];
+    setSignalsLoading(true);
+    api.get(`/activity-signals?deal_id=${dealId}&from_date=${from}&to_date=${to}&limit=100`)
+      .then((data: any) => setActivitySignals(data.signals ?? []))
+      .catch(() => setActivitySignals([]))
+      .finally(() => setSignalsLoading(false));
+  }, [dossier?.deal_context?.deal_id, dossier?.conversation?.started_at, workspaceId]);
 
   if (loading) {
     return (
@@ -779,7 +806,20 @@ export default function ConversationDetail() {
           </Accordion>
         )}
 
-        {/* 3c: Skill Findings — only if data exists */}
+        {/* 3c: Signal Coverage — MEDDIC/buyer signals from this call's time window */}
+        {(activitySignals.length > 0 || signalsLoading) && deal_context && (
+          <Accordion
+            sectionKey="signal_coverage"
+            title="Signal Coverage"
+            badge={signalsLoading ? null : activitySignals.length}
+            expanded={expandedSections['signal_coverage'] ?? activitySignals.length > 0}
+            onToggle={() => toggleSection('signal_coverage')}
+          >
+            <SignalCoverageContent signals={activitySignals} loading={signalsLoading} />
+          </Accordion>
+        )}
+
+        {/* 3d: Skill Findings — only if data exists */}
         {skill_findings && skill_findings.length > 0 && (
           <Accordion
             sectionKey="skill_findings"
@@ -840,6 +880,177 @@ export default function ConversationDetail() {
         </Accordion>
 
       </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Signal Coverage Component
+// ============================================================================
+
+const MEDDIC_FIELDS = [
+  { key: 'metrics', label: 'Metrics' },
+  { key: 'economic_buyer', label: 'Econ. Buyer' },
+  { key: 'decision_criteria', label: 'Dec. Criteria' },
+  { key: 'decision_process', label: 'Dec. Process' },
+  { key: 'identify_pain', label: 'Identify Pain' },
+  { key: 'champion', label: 'Champion' },
+];
+
+function SignalCoverageContent({ signals, loading }: { signals: ActivitySignalLocal[]; loading: boolean }) {
+  const [expandedField, setExpandedField] = useState<string | null>(null);
+
+  if (loading) {
+    return (
+      <div style={{ padding: '16px 0', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <Skeleton height={28} width={400} />
+        <Skeleton height={60} />
+      </div>
+    );
+  }
+
+  if (signals.length === 0) {
+    return (
+      <div style={{ padding: '16px 0', fontSize: 13, color: colors.textMuted }}>
+        No signals extracted for this time window. Signals are extracted automatically after CRM activities sync.
+      </div>
+    );
+  }
+
+  const frameworkSignals = signals.filter(s => s.signal_type === 'framework_signal');
+  const prospectQuotes = signals.filter(s => s.signal_type === 'notable_quote' && s.speaker_type === 'prospect');
+  const blockers = signals.filter(s => s.signal_type === 'blocker_mention');
+  const competitors = signals.filter(s => s.signal_type === 'competitor_mention');
+  const timelines = signals.filter(s => s.signal_type === 'timeline_mention');
+
+  const coveredFields = new Set(frameworkSignals.map(s => s.framework_field).filter(Boolean));
+
+  const otherGroups: { label: string; emoji: string; items: ActivitySignalLocal[]; color: string }[] = [
+    { label: 'Blockers', emoji: '🚧', items: blockers, color: colors.orange },
+    { label: 'Competitors', emoji: '⚔️', items: competitors, color: colors.purple ?? colors.accent },
+    { label: 'Timelines', emoji: '📅', items: timelines, color: colors.blue ?? colors.textSecondary },
+  ].filter(g => g.items.length > 0);
+
+  return (
+    <div style={{ padding: '12px 0', display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+      {/* MEDDIC Coverage Strip */}
+      {frameworkSignals.length > 0 && (
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: colors.textMuted, marginBottom: 10 }}>
+            Framework Coverage · {coveredFields.size}/{MEDDIC_FIELDS.length} fields
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {MEDDIC_FIELDS.map(field => {
+              const covered = coveredFields.has(field.key);
+              const isExpanded = expandedField === field.key;
+              const topSignal = frameworkSignals.find(s => s.framework_field === field.key);
+              return (
+                <div key={field.key}>
+                  <button
+                    onClick={() => covered ? setExpandedField(isExpanded ? null : field.key) : undefined}
+                    style={{
+                      padding: '5px 12px',
+                      borderRadius: 20,
+                      border: `1px solid ${covered ? colors.accent : colors.border}`,
+                      background: covered ? `${colors.accent}18` : colors.surface,
+                      color: covered ? colors.accent : colors.textMuted,
+                      fontSize: 12,
+                      fontWeight: covered ? 600 : 400,
+                      fontFamily: fonts.sans,
+                      cursor: covered ? 'pointer' : 'default',
+                      opacity: covered ? 1 : 0.6,
+                    }}
+                  >
+                    {covered && <span style={{ marginRight: 5 }}>✓</span>}
+                    {field.label}
+                  </button>
+                  {isExpanded && topSignal?.source_quote && (
+                    <div style={{
+                      marginTop: 6,
+                      padding: '8px 12px',
+                      background: colors.surface,
+                      border: `1px solid ${colors.border}`,
+                      borderRadius: 6,
+                      fontSize: 12,
+                      color: colors.textSecondary,
+                      fontStyle: 'italic',
+                      maxWidth: 360,
+                    }}>
+                      "{topSignal.source_quote}"
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Voice of the Buyer */}
+      {prospectQuotes.length > 0 && (
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: colors.textMuted, marginBottom: 10 }}>
+            Voice of the Buyer · {prospectQuotes.length} quote{prospectQuotes.length !== 1 ? 's' : ''}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {prospectQuotes.slice(0, 5).map(q => (
+              <div key={q.id} style={{
+                padding: '10px 14px',
+                background: colors.surface,
+                border: `1px solid ${colors.border}`,
+                borderLeft: `3px solid ${colors.accent}`,
+                borderRadius: 6,
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 10,
+              }}>
+                <span style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  background: q.confidence >= 0.85 ? colors.green : colors.yellow,
+                  flexShrink: 0,
+                  marginTop: 4,
+                }} />
+                <span style={{ fontSize: 13, color: colors.text, fontStyle: 'italic', lineHeight: 1.5 }}>
+                  "{q.source_quote || q.signal_value}"
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Blockers, Competitors, Timelines */}
+      {otherGroups.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {otherGroups.map(group => (
+            <div key={group.label}>
+              <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: colors.textMuted, marginBottom: 8 }}>
+                {group.emoji} {group.label} · {group.items.length}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {group.items.slice(0, 4).map(s => (
+                  <div key={s.id} style={{
+                    padding: '6px 12px',
+                    background: colors.surface,
+                    border: `1px solid ${colors.border}`,
+                    borderRadius: 6,
+                    fontSize: 12,
+                    color: colors.text,
+                  }}>
+                    <span style={{ fontWeight: 600, color: group.color }}>{s.signal_value || '—'}</span>
+                    {s.source_quote && s.source_quote !== s.signal_value && (
+                      <span style={{ color: colors.textMuted, marginLeft: 8 }}>· {s.source_quote.slice(0, 80)}{s.source_quote.length > 80 ? '…' : ''}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
