@@ -46,16 +46,20 @@ interface FieldIntelRow {
   created_at: string;
 }
 
-function deriveRisk(row: { stage_normalized: string; mention_count: number; last_mention_at: string }, patterns: Record<string, CompetitorPattern | null>, competitorName: string): RiskLevel {
+const OPEN_STAGES = ['closed_won', 'closed_lost'];
+
+function deriveRisk(
+  row: { stage_normalized: string; mention_count: number; last_mention_at: string },
+  patternByName: Record<string, CompetitorPattern | null>,
+  competitorName: string
+): RiskLevel {
   const daysSinceLastMention = row.last_mention_at
     ? (Date.now() - new Date(row.last_mention_at).getTime()) / (1000 * 60 * 60 * 24)
     : 999;
-
-  const pattern = patterns[competitorName.toLowerCase()] ?? null;
+  const pattern = patternByName[competitorName.toLowerCase()] ?? null;
   const lateStages = ['evaluation', 'decision', 'negotiation'];
   const isLateStage = lateStages.includes(row.stage_normalized);
   const isHighRiskPattern = pattern === 'displacement_threat' || pattern === 'emerging_threat';
-
   if (isHighRiskPattern && daysSinceLastMention <= 7 && isLateStage) return 'high';
   if (isLateStage && daysSinceLastMention <= 7) return 'high';
   if (daysSinceLastMention <= 14 || row.mention_count >= 2) return 'med';
@@ -75,8 +79,16 @@ router.get('/:workspaceId/intelligence/competitive', async (req: Request, res: R
   const workspaceId = req.params.workspaceId as string;
 
   try {
-    const [skillRunsResult, openDealsResult, fieldIntelResult] = await Promise.all([
-      // Query 1: last 2 completed skill runs
+    const [
+      skillRunsResult,
+      openDealsResult,
+      fieldIntelResult,
+      competitorWinRatesResult,
+      baselineResult,
+      prevMentionTotalsResult,
+    ] = await Promise.all([
+
+      // Query 1: last 2 completed skill runs (for last_run_at + pattern extraction from steps)
       query<any>(
         `SELECT output, steps, created_at
          FROM skill_runs
@@ -88,7 +100,7 @@ router.get('/:workspaceId/intelligence/competitive', async (req: Request, res: R
         [workspaceId]
       ).catch(() => ({ rows: [] as any[] })),
 
-      // Query 2: open deal exposure via conversations.competitor_mentions JSONB
+      // Query 2: open deal exposure — uses stage_normalized NOT IN closed states
       query<any>(
         `SELECT
            d.id AS deal_id,
@@ -104,7 +116,7 @@ router.get('/:workspaceId/intelligence/competitive', async (req: Request, res: R
          JOIN conversations cv ON cv.deal_id = d.id AND cv.workspace_id = $1
          CROSS JOIN LATERAL jsonb_array_elements_text(cv.competitor_mentions) AS comp_name
          WHERE d.workspace_id = $1
-           AND d.is_closed = false
+           AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
            AND cv.competitor_mentions IS NOT NULL
            AND jsonb_array_length(cv.competitor_mentions) > 0
          GROUP BY d.id, d.name, d.amount, d.stage, d.stage_normalized, d.owner, comp_name
@@ -112,7 +124,7 @@ router.get('/:workspaceId/intelligence/competitive', async (req: Request, res: R
         [workspaceId]
       ).catch(() => ({ rows: [] as any[] })),
 
-      // Query 3: field intel from deal_insights (competition type, has source quote)
+      // Query 3: field intel from deal_insights
       query<any>(
         `SELECT
            di.insight_value AS competitor_name,
@@ -132,66 +144,109 @@ router.get('/:workspaceId/intelligence/competitive', async (req: Request, res: R
          LIMIT 20`,
         [workspaceId]
       ).catch(() => ({ rows: [] as any[] })),
+
+      // Query 4: competitor win rates computed directly from DB
+      query<any>(
+        `SELECT
+           comp_name AS competitor_name,
+           COUNT(DISTINCT d.id)::int AS deals_mentioned,
+           COUNT(DISTINCT CASE WHEN d.stage_normalized = 'closed_won' THEN d.id END)::float /
+             NULLIF(COUNT(DISTINCT CASE WHEN d.stage_normalized IN ('closed_won','closed_lost') THEN d.id END), 0)
+             AS win_rate
+         FROM deals d
+         JOIN conversations cv ON cv.deal_id = d.id AND cv.workspace_id = $1
+         CROSS JOIN LATERAL jsonb_array_elements_text(cv.competitor_mentions) AS comp_name
+         WHERE d.workspace_id = $1
+           AND cv.competitor_mentions IS NOT NULL
+           AND jsonb_array_length(cv.competitor_mentions) > 0
+         GROUP BY comp_name
+         ORDER BY deals_mentioned DESC`,
+        [workspaceId]
+      ).catch(() => ({ rows: [] as any[] })),
+
+      // Query 5: baseline win rate (all closed deals, no filter)
+      query<any>(
+        `SELECT
+           COUNT(CASE WHEN stage_normalized = 'closed_won' THEN 1 END)::float /
+             NULLIF(COUNT(CASE WHEN stage_normalized IN ('closed_won','closed_lost') THEN 1 END), 0)
+             AS baseline_win_rate
+         FROM deals
+         WHERE workspace_id = $1`,
+        [workspaceId]
+      ).catch(() => ({ rows: [] as any[] })),
+
+      // Query 6: previous period mention totals (30–60 days ago) for change pct
+      query<any>(
+        `SELECT COUNT(DISTINCT cv.id)::int AS prev_mention_count
+         FROM conversations cv
+         CROSS JOIN LATERAL jsonb_array_elements_text(cv.competitor_mentions) AS comp_name
+         WHERE cv.workspace_id = $1
+           AND cv.competitor_mentions IS NOT NULL
+           AND jsonb_array_length(cv.competitor_mentions) > 0
+           AND cv.call_date BETWEEN NOW() - INTERVAL '60 days' AND NOW() - INTERVAL '30 days'`,
+        [workspaceId]
+      ).catch(() => ({ rows: [] as any[] })),
     ]);
 
-    // ── Extract from skill run output ──────────────────────────────────────
+    // ── Skill run metadata (last_run_at + patterns from steps) ─────────────
     const newestRun = skillRunsResult.rows[0] ?? null;
-    const prevRun = skillRunsResult.rows[1] ?? null;
     const lastRunAt: string | null = newestRun?.created_at ?? null;
-
-    let competitors: CompetitorRow[] = [];
-    let baselineWinRate = 0;
     const patternByName: Record<string, CompetitorPattern | null> = {};
 
     if (newestRun) {
-      const output = newestRun.output ?? {};
-      const evidence = output.evidence ?? {};
-      const records: any[] = evidence.evaluated_records ?? [];
-
-      // Build leaderboard from evidence records
-      if (records.length > 0) {
-        baselineWinRate = records[0]?.win_rate_without ?? 0;
-        competitors = records.map((r: any) => ({
-          name: r.competitor_name ?? '',
-          deal_count: r.deals_mentioned ?? 0,
-          win_rate: r.win_rate ?? 0,
-          win_rate_without: r.win_rate_without ?? baselineWinRate,
-          delta: r.win_rate_delta ?? 0,
-          trend: 'stable' as Trend,
-          mention_trend: '',
-          pattern: null,
-        }));
-      }
-
-      // Extract patterns from steps JSONB
-      const steps = newestRun.steps ?? {};
-      const patternStepKey = Object.keys(steps).find(k => k.includes('pattern') || k.includes('analyze'));
-      if (patternStepKey) {
-        const patternOutput = steps[patternStepKey]?.output ?? steps[patternStepKey] ?? [];
-        const patternArr: any[] = Array.isArray(patternOutput) ? patternOutput : (patternOutput.patterns ?? []);
+      const steps: any[] = Array.isArray(newestRun.steps) ? newestRun.steps : [];
+      const patternStep = steps.find(
+        (s: any) => s.stepId === 'analyze-competitive-patterns' && s.output
+      );
+      if (patternStep) {
+        const patternArr: any[] = Array.isArray(patternStep.output)
+          ? patternStep.output
+          : (patternStep.output?.patterns ?? []);
         for (const p of patternArr) {
           const key = (p.competitor_name ?? '').toLowerCase().trim();
-          if (key) {
-            patternByName[key] = p.pattern ?? null;
-            const trend = p.trend === 'increasing' ? 'up' : p.trend === 'decreasing' ? 'down' : 'stable';
-            const comp = competitors.find(c => c.name.toLowerCase() === key);
-            if (comp) {
-              comp.pattern = p.pattern ?? null;
-              comp.trend = trend;
-            }
-          }
+          if (key) patternByName[key] = p.pattern ?? null;
         }
       }
     }
 
-    // ── Trend: mention change between runs ─────────────────────────────────
-    let mentionChangePctVal: number | null = null;
-    if (newestRun && prevRun) {
-      const getTotal = (run: any) => {
-        const records: any[] = run.output?.evidence?.evaluated_records ?? [];
-        return records.reduce((sum: number, r: any) => sum + (r.deals_mentioned ?? 0), 0);
+    // ── Baseline win rate ──────────────────────────────────────────────────
+    const rawBaseline = baselineResult.rows[0]?.baseline_win_rate;
+    const baselineWinRate = rawBaseline != null ? Math.round(parseFloat(rawBaseline) * 100) : 0;
+
+    // ── Competitor leaderboard (from DB win rates) ─────────────────────────
+    const competitors: CompetitorRow[] = competitorWinRatesResult.rows.map((r: any) => {
+      const winRate = r.win_rate != null ? Math.round(parseFloat(r.win_rate) * 100) : 0;
+      const delta = winRate - baselineWinRate;
+      const key = (r.competitor_name ?? '').toLowerCase().trim();
+      const pattern = patternByName[key] ?? null;
+      return {
+        name: r.competitor_name ?? '',
+        deal_count: r.deals_mentioned ?? 0,
+        win_rate: winRate,
+        win_rate_without: baselineWinRate,
+        delta,
+        trend: 'stable' as Trend,
+        mention_trend: delta > 0 ? '+MoM' : delta < 0 ? '-MoM' : 'stable',
+        pattern,
       };
-      mentionChangePctVal = mentionChangePct(getTotal(newestRun), getTotal(prevRun));
+    });
+
+    // ── Mention change pct (current 30d vs prev 30d) ───────────────────────
+    let mentionChangePctVal: number | null = null;
+    const prevMentionCount: number = prevMentionTotalsResult.rows[0]?.prev_mention_count ?? 0;
+    if (prevMentionCount > 0) {
+      const currentMentionCountResult = await query<any>(
+        `SELECT COUNT(DISTINCT cv.id)::int AS current_mention_count
+         FROM conversations cv
+         CROSS JOIN LATERAL jsonb_array_elements_text(cv.competitor_mentions) AS comp_name
+         WHERE cv.workspace_id = $1
+           AND cv.competitor_mentions IS NOT NULL
+           AND jsonb_array_length(cv.competitor_mentions) > 0
+           AND cv.call_date >= NOW() - INTERVAL '30 days'`,
+        [workspaceId]
+      ).catch(() => ({ rows: [] as any[] }));
+      const currentMentionCount: number = currentMentionCountResult.rows[0]?.current_mention_count ?? 0;
+      mentionChangePctVal = mentionChangePct(currentMentionCount, prevMentionCount);
     }
 
     // ── Open deal exposure ─────────────────────────────────────────────────
@@ -203,17 +258,24 @@ router.get('/:workspaceId/intelligence/competitive', async (req: Request, res: R
       stage: r.stage ?? '',
       owner_email: r.owner_email ?? '',
       mention_count: r.mention_count ?? 1,
-      last_mention_at: r.last_mention_at ? new Date(r.last_mention_at).toISOString() : new Date().toISOString(),
+      last_mention_at: r.last_mention_at
+        ? new Date(r.last_mention_at).toISOString()
+        : new Date().toISOString(),
       risk: deriveRisk(
-        { stage_normalized: r.stage_normalized ?? '', mention_count: r.mention_count ?? 1, last_mention_at: r.last_mention_at },
+        {
+          stage_normalized: r.stage_normalized ?? '',
+          mention_count: r.mention_count ?? 1,
+          last_mention_at: r.last_mention_at,
+        },
         patternByName,
         r.competitor_name ?? ''
       ),
     }));
 
-    // ── Pipeline stats ──────────────────────────────────────────────────────
     const pipelineAtRisk = openDeals.reduce((sum, d) => sum + d.amount, 0);
-    const highRiskPipeline = openDeals.filter(d => d.risk === 'high').reduce((sum, d) => sum + d.amount, 0);
+    const highRiskPipeline = openDeals
+      .filter(d => d.risk === 'high')
+      .reduce((sum, d) => sum + d.amount, 0);
 
     // ── Hardest competitor (most negative delta) ───────────────────────────
     let hardestCompetitor: string | null = null;
@@ -221,7 +283,7 @@ router.get('/:workspaceId/intelligence/competitive', async (req: Request, res: R
     if (competitors.length > 0) {
       const sorted = [...competitors].sort((a, b) => a.delta - b.delta);
       hardestCompetitor = sorted[0].name;
-      hardestCompetitorDelta = Math.round(sorted[0].delta * 100); // convert fraction to pp
+      hardestCompetitorDelta = sorted[0].delta;
     }
 
     // ── Field intel ─────────────────────────────────────────────────────────
@@ -233,27 +295,28 @@ router.get('/:workspaceId/intelligence/competitive', async (req: Request, res: R
         owner_email: r.owner_email ?? '',
         source_quote: r.source_quote,
         confidence_score: parseFloat(r.confidence ?? '0') || 0,
-        created_at: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
+        created_at: r.created_at
+          ? new Date(r.created_at).toISOString()
+          : new Date().toISOString(),
       }));
-
-    // ── Baseline from open deals fallback (if no skill run) ───────────────
-    // If no skill run data but we have open deals, we can at least show pipeline
-    // baseline_win_rate stays 0 if skill hasn't run
 
     return res.json({
       last_run_at: lastRunAt,
       competitors_tracked: competitors.length,
-      baseline_win_rate: Math.round(baselineWinRate * 100),
+      baseline_win_rate: baselineWinRate,
       mention_change_pct: mentionChangePctVal,
       pipeline_at_risk: pipelineAtRisk,
       high_risk_pipeline: highRiskPipeline,
       hardest_competitor: hardestCompetitor,
       hardest_competitor_delta: hardestCompetitorDelta,
       competitors: competitors.map(c => ({
-        ...c,
-        win_rate: Math.round(c.win_rate * 100),
-        delta: Math.round(c.delta * 100),
-        mention_trend: c.trend === 'up' ? '+MoM' : c.trend === 'down' ? '-MoM' : 'stable',
+        name: c.name,
+        deal_count: c.deal_count,
+        win_rate: c.win_rate,
+        delta: c.delta,
+        trend: c.trend,
+        mention_trend: c.mention_trend,
+        pattern: c.pattern,
       })),
       open_deals: openDeals,
       field_intel: fieldIntel,
