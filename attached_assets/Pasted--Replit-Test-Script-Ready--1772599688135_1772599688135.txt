@@ -1,0 +1,63 @@
+✅ Replit Test Script Ready!                       
+                                                     
+  Created comprehensive test script:                 
+  TEST_ACTIVITY_SIGNALS.md                           
+                                                     
+  What's Included:                                   
+                                                     
+  8 Test Parts:                                      
+  1. Database State - Verify migrations applied,     
+  check activity body coverage                       
+  2. Preprocessing Utils - 5 tests for HTML          
+  stripping, reply removal, header parsing, direction
+   classification                                    
+  3. Signal Extraction - Manual run on 10 activities 
+  to verify extraction works                         
+  4. Dossier API - Confirm body field present in API 
+  response                                           
+  5. Query Tool - 4 filter scenarios (framework      
+  field, speaker type, untracked participants)       
+  6. Ask Pandora - 5 chat queries to test tool       
+  integration                                        
+  7. Frontend Timeline - Visual verification of "Show
+   note" toggle                                      
+  8. Full Extraction - (Optional) Process all 7,515  
+  activities (~$1.35 cost)                           
+                                                     
+  Quick Start on Replit:                             
+                                                     
+  # 1. Check migrations                              
+  psql $DATABASE_URL -c "\dt activity_signals"       
+                                                     
+  # 2. Verify activity bodies exist                  
+  psql $DATABASE_URL -c "SELECT COUNT(*), COUNT(body)
+   FROM activities;"                                 
+                                                     
+  # 3. Run preprocessing tests                       
+  npx tsx server/test-activity-text.ts               
+                                                     
+  # 4. Run extraction on 10 activities               
+  npx tsx server/test-signal-extraction.ts           
+                                                     
+  # 5. Test query interface                          
+  npx tsx server/test-query-signals.ts               
+                                                     
+  # 6. Test in chat UI                               
+  # Navigate to chat and ask: "Show me MEDDIC signals
+   for top deals"                                    
+                                                     
+  Expected Results:                                  
+                                                     
+  - ✅ 7,515 activities with body content (100%      
+  coverage)                                          
+  - ✅ 6,421 activities eligible for extraction (>100
+   chars)                                            
+  - ✅ 1,454 previously invisible notes now visible  
+  - ✅ ~15-20K signals extracted after full run      
+  - ✅ Framework signals mapped to MEDDIC/BANT/SPICED
+  - ✅ Untracked participants detected from email    
+  headers                                            
+  - ✅ Speaker attribution working (prospect vs rep) 
+                                                     
+  The test script is in your repo and ready to run on
+   Replit! 🚀 
