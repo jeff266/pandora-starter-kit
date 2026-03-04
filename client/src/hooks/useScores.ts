@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
+import type { RFMSegmentData } from '../components/account/AccountRFMSegment';
 
 export interface AccountScores {
   account_id: string;
@@ -16,6 +17,7 @@ export interface AccountScores {
     positive: Array<{ factor: string; impact: number; reason: string }>;
     negative: Array<{ factor: string; impact: number; reason: string }>;
   };
+  rfmSegment?: RFMSegmentData | null;
 }
 
 interface UseScoresOptions {
@@ -28,7 +30,7 @@ export function useScores(options: UseScoresOptions = {}) {
   const {
     accountId,
     autoRefresh = false,
-    refreshInterval = 600000, // 10 minutes
+    refreshInterval = 600000,
   } = options;
 
   const [scores, setScores] = useState<AccountScores | null>(null);

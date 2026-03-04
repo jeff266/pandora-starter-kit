@@ -2,6 +2,7 @@ import React from 'react';
 import { useScores } from '../../hooks/useScores';
 import { colors } from '../../styles/theme';
 import { TrendingUp, Target, Zap, Users, Calendar, RefreshCw } from 'lucide-react';
+import AccountRFMSegment from './AccountRFMSegment';
 
 interface AccountScorecardProps {
   accountId: string;
@@ -117,6 +118,42 @@ export function AccountScorecard({ accountId, workspaceId, className }: AccountS
       </div>
 
       <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+        {/* RFM Engagement Segment — top of scorecard */}
+        {scores.rfmSegment ? (
+          <div>
+            <AccountRFMSegment data={scores.rfmSegment} />
+          </div>
+        ) : (
+          <div style={{
+            padding: '10px 14px',
+            background: colors.surfaceRaised,
+            border: `1px solid ${colors.border}`,
+            borderRadius: 8,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}>
+            <span style={{ fontSize: 12, color: colors.textMuted }}>
+              Engagement segment not yet computed
+            </span>
+            <button
+              onClick={handleRecalculate}
+              style={{
+                fontSize: 11,
+                color: colors.accent,
+                background: 'transparent',
+                border: `1px solid ${colors.border}`,
+                borderRadius: 5,
+                padding: '3px 10px',
+                cursor: 'pointer',
+              }}
+            >
+              Compute
+            </button>
+          </div>
+        )}
+
         {/* Primary Scores */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16 }}>
           {/* ICP Score */}

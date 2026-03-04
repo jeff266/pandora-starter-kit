@@ -26,6 +26,7 @@ import { FilterResolver } from '../tools/filter-resolver.js';
 import { configLoader } from '../config/workspace-config-loader.js';
 import { query } from '../db.js';
 import { setDealScopeOverride } from '../config/scope-stamper.js';
+import { computeAccountRFM, persistAccountRFM } from '../analysis/account-rfm.js';
 
 const router = Router();
 const filterResolver = new FilterResolver();
@@ -500,7 +501,15 @@ router.get('/:id/accounts/:accountId/scores', async (req: Request, res: Response
          s.relationship_score,
          s.scored_at as last_scored_at,
          s.score_breakdown,
-         s.synthesis_text
+         s.synthesis_text,
+         s.rfm_segment,
+         s.rfm_r,
+         s.rfm_f,
+         s.rfm_m,
+         s.rfm_recency_days,
+         s.rfm_unique_contacts,
+         s.rfm_open_deal_value,
+         s.rfm_computed_at
        FROM account_scores s
        WHERE s.workspace_id = $1 AND s.account_id = $2`,
       [workspaceId, accountId]
@@ -511,7 +520,20 @@ router.get('/:id/accounts/:accountId/scores', async (req: Request, res: Response
       return;
     }
 
-    res.json(result.rows[0]);
+    const row = result.rows[0];
+
+    // Compute RFM segment live (persists async)
+    let rfmSegment = null;
+    try {
+      rfmSegment = await computeAccountRFM(workspaceId, accountId);
+      persistAccountRFM(workspaceId, accountId, rfmSegment).catch((e: Error) =>
+        console.error('[account-rfm] persist error:', e.message)
+      );
+    } catch (e) {
+      console.error('[account-rfm] compute error:', e);
+    }
+
+    res.json({ ...row, rfmSegment });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: msg });

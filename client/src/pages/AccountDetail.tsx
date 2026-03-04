@@ -10,6 +10,7 @@ import { DossierNarrative, AnalysisModal } from '../components/shared';
 import { renderMarkdown } from '../lib/render-markdown';
 import { AccountSignalsTimeline } from '../components/account';
 import { AccountPipelinePanel } from '../components/accounts/AccountPipelinePanel';
+import { AccountScorecard } from '../components/account/AccountScorecard';
 import { useDemoMode } from '../contexts/DemoModeContext';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { buildAccountCrmUrl, buildConversationUrl, useCrmInfo } from '../lib/deeplinks';
@@ -678,6 +679,22 @@ export default function AccountDetail() {
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {accountId && (
+            <SectionErrorBoundary fallbackMessage="Unable to load account scores.">
+              <div style={{
+                background: colors.surface,
+                border: `1px solid ${colors.border}`,
+                borderRadius: 10,
+                overflow: 'hidden',
+              }}>
+                <AccountScorecard
+                  accountId={accountId}
+                  workspaceId={api.getWorkspaceId()}
+                />
+              </div>
+            </SectionErrorBoundary>
+          )}
+
           <SectionErrorBoundary fallbackMessage="Unable to load account contacts.">
           <Card title="Contacts" count={contacts.length}>
             {contacts.length === 0 ? (
