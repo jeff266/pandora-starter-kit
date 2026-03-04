@@ -57,6 +57,7 @@ import downloadsRouter from './routes/downloads.js';
 import workspaceDownloadsRouter from './routes/workspace-downloads.js';
 import conversationsRouter from './routes/conversations.js';
 import stageBenchmarksRouter from './routes/stage-benchmarks.js';
+import competitiveIntelligenceRouter from './routes/competitive-intelligence.js';
 import { ActivePiecesClient } from './workflows/ap-client.js';
 import { WorkflowService } from './workflows/workflow-service.js';
 import { seedTemplates } from './workflows/template-seed.js';
@@ -301,6 +302,7 @@ workspaceApiRouter.use(contextRouter);
 workspaceApiRouter.use(syncRouter);
 workspaceApiRouter.use(conversationsRouter); // Mount before dataRouter to match specific routes first
 workspaceApiRouter.use(stageBenchmarksRouter);
+workspaceApiRouter.use(competitiveIntelligenceRouter);
 workspaceApiRouter.use(dataRouter);
 workspaceApiRouter.use(slackSettingsRouter);
 workspaceApiRouter.use(skillsRouter);
