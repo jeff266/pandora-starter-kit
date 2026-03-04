@@ -2138,6 +2138,40 @@ Required weekly pipeline gen: ${weeklyGenStr}`;
           actByDeal.set(did, { types: data.types.join(', '), lastActivity: data.lastDate });
         }
 
+        // Fetch recent activity notes with body content (3 most recent per deal)
+        const notesResult = await query(
+          `SELECT deal_id, activity_type, subject, body, timestamp
+           FROM (
+             SELECT deal_id, activity_type, subject, body, timestamp,
+                    ROW_NUMBER() OVER (PARTITION BY deal_id ORDER BY timestamp DESC) as rn
+             FROM activities
+             WHERE workspace_id = $1 AND deal_id = ANY($2) AND body IS NOT NULL AND LENGTH(body) > 30
+           ) sub
+           WHERE rn <= 3
+           ORDER BY deal_id, timestamp DESC`,
+          [context.workspaceId, dealIds]
+        );
+
+        const notesByDeal = new Map<string, string[]>();
+        for (const row of notesResult.rows) {
+          const key = row.deal_id;
+          if (!notesByDeal.has(key)) notesByDeal.set(key, []);
+
+          // Strip HTML and truncate to 150 chars
+          const stripped = (row.body || '')
+            .replace(/<[^>]+>/g, '')
+            .replace(/&amp;/g, '&')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&nbsp;/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+          const content = stripped.slice(0, 150) + (stripped.length > 150 ? '...' : '');
+
+          const dateStr = row.timestamp ? new Date(row.timestamp).toISOString().split('T')[0] : '?';
+          notesByDeal.get(key)!.push(`[${row.activity_type}, ${dateStr}] "${content}"`);
+        }
+
         const contactsResult = await query(
           `SELECT dc.deal_id, COALESCE(c.first_name || ' ' || c.last_name, c.first_name, c.last_name, c.email) as name, c.title, c.email
            FROM deal_contacts dc
@@ -2157,6 +2191,7 @@ Required weekly pipeline gen: ${weeklyGenStr}`;
         const profiles = deals.map((d: any) => {
           const act = actByDeal.get(d.id);
           const contacts = contactsByDeal.get(d.id) || [];
+          const notes = notesByDeal.get(d.id) || [];
           const daysSinceActivity = act?.lastActivity
             ? Math.floor((Date.now() - new Date(act.lastActivity).getTime()) / 86400000)
             : null;
@@ -2164,10 +2199,16 @@ Required weekly pipeline gen: ${weeklyGenStr}`;
             ? Math.floor((Date.now() - new Date(d.updated_at).getTime()) / 86400000)
             : null;
 
-          return `DEAL: ${d.name} | $${(d.amount || 0).toLocaleString()} | Stage: ${d.stage_normalized || d.stage} | Close: ${d.close_date || 'N/A'} | Owner: ${d.owner_name || 'N/A'}
+          let profile = `DEAL: ${d.name} | $${(d.amount || 0).toLocaleString()} | Stage: ${d.stage_normalized || d.stage} | Close: ${d.close_date || 'N/A'} | Owner: ${d.owner_name || 'N/A'}
   Activity: ${act ? `${act.types} | Last: ${daysSinceActivity}d ago` : `No activities | Updated: ${daysSinceUpdate !== null ? daysSinceUpdate + 'd ago' : 'N/A'}`}
   Contacts (${contacts.length}): ${contacts.length > 0 ? contacts.slice(0, 5).join('; ') : 'None'}${contacts.length > 5 ? ` +${contacts.length - 5} more` : ''}
   Single-threaded: ${contacts.length <= 1 ? 'YES' : 'No'}`;
+
+          if (notes.length > 0) {
+            profile += `\n  Recent notes:\n    ${notes.join('\n    ')}`;
+          }
+
+          return profile;
         });
 
         let signalsSummary = 'No call signals available.';
