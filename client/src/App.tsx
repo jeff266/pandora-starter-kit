@@ -38,6 +38,7 @@ import ConsultantDashboard from './pages/ConsultantDashboard';
 import IcpProfilePage from './pages/IcpProfilePage';
 import BenchmarksGrid from './pages/BenchmarksGrid';
 import CompetitiveIntelligencePage from './pages/intelligence/CompetitiveIntelligencePage';
+import ProspectsPage from './pages/ProspectsPage';
 import AdminScopesPage from './pages/AdminScopesPage';
 import TokenUsagePage from './pages/admin/TokenUsagePage';
 import Targets from './pages/Targets';
@@ -313,6 +314,7 @@ export default function App() {
             <Route path="/icp-profile" element={<IcpProfilePage />} />
             <Route path="/stage-velocity" element={<BenchmarksGrid />} />
             <Route path="/competition" element={<CompetitiveIntelligencePage />} />
+            <Route path="/prospects" element={<ProspectsPage />} />
             <Route path="/admin/scopes" element={<AdminScopesPage />} />
             <Route path="/admin/token-usage" element={<TokenUsagePage />} />
             <Route path="/reports" element={<ReportsPage />} />

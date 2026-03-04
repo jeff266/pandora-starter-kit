@@ -40,6 +40,7 @@ const sections: NavSection[] = [
       { label: 'ICP Profile', path: '/icp-profile', icon: '\u2605' },
       { label: 'Stage Velocity', path: '/stage-velocity', icon: '\u25B6' },
       { label: 'Competition', path: '/competition', icon: '\u229B' },
+      { label: 'Prospects', path: '/prospects', icon: '\u25CE' },
       { label: 'Agents', path: '/agents', icon: '\u25C8' },
       { label: 'Skills', path: '/skills', icon: '\u2699' },
       { label: 'Tools', path: '/tools', icon: '\u29EB' },
