@@ -148,7 +148,7 @@ function ProspectRow({ p, onSelect }: { p: any; onSelect: (p: any) => void }) {
           )}
         </div>
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           {([['FIT', p.fit, 'fit'], ['ENG', p.engagement, 'engagement'], ['INT', p.intent, 'intent'], ['TIM', p.timing, 'timing']] as [string, number, string][]).map(([lbl, val, cat]) => (
             <div key={lbl} style={{ textAlign: 'center', minWidth: 32 }}>
@@ -168,6 +168,7 @@ function ProspectRow({ p, onSelect }: { p: any; onSelect: (p: any) => void }) {
           fontSize: 10, fontWeight: 600, color: ACTION_COLORS[p.recommended_action] || colors.textMuted,
           background: `${ACTION_COLORS[p.recommended_action] || '#64748b'}18`,
           padding: '3px 8px', borderRadius: 4, whiteSpace: 'nowrap', fontFamily: fonts.sans,
+          minWidth: 120, display: 'inline-block', textAlign: 'center',
         }}>
           {ACTION_LABELS[p.recommended_action] || p.recommended_action}
         </span>
@@ -492,6 +493,19 @@ export default function ProspectsPage() {
               <option value="change_desc">Score Change ↓</option>
               <option value="name_asc">Name A–Z</option>
             </select>
+          </div>
+
+          {/* Grade scale legend */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
+            {([['A', '≥58', '#10b981'], ['B', '45–57', '#3b82f6'], ['C', '30–44', '#f59e0b'], ['D', '15–29', '#f97316'], ['F', '<15', '#ef4444']] as [string, string, string][]).map(([g, range, col]) => (
+              <span key={g} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: colors.textMuted, fontFamily: fonts.mono }}>
+                <span style={{ fontWeight: 700, color: col }}>{g}</span>
+                <span>{range}</span>
+              </span>
+            ))}
+            <span style={{ fontSize: 10, color: colors.textMuted, fontFamily: fonts.sans }}>
+              · score/100 &nbsp;·&nbsp; 35% fit · 30% engagement · 25% intent · 10% timing
+            </span>
           </div>
 
           {/* Stat cards */}

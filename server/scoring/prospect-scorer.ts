@@ -97,10 +97,10 @@ function mean(arr: number[]): number {
 }
 
 function toGrade(score: number): string {
-  if (score >= 80) return 'A';
-  if (score >= 60) return 'B';
-  if (score >= 40) return 'C';
-  if (score >= 20) return 'D';
+  if (score >= 58) return 'A';
+  if (score >= 45) return 'B';
+  if (score >= 30) return 'C';
+  if (score >= 15) return 'D';
   return 'F';
 }
 
@@ -111,9 +111,9 @@ function scoreContact(row: ContactRow, preferredIndustries: string[]): ScoredCon
 
   // ── FIT (max 45 raw pts → 0-100) ──────────────────────────────────────────
 
-  const industryRaw = (row.industry_verified || row.industry || '').toLowerCase();
-  const isPreferred = preferredIndustries.some(i => industryRaw.includes(i.toLowerCase()));
-  const isTech = /saas|software|tech|cloud|ai|ml|data/.test(industryRaw);
+  const industryRaw = (row.industry_verified || row.industry || '').toLowerCase().replace(/_/g, ' ');
+  const isPreferred = preferredIndustries.some(i => industryRaw.includes(i.toLowerCase().replace(/_/g, ' ')));
+  const isTech = /saas|software|tech|cloud|ai|ml|data|health|care|hospital|wellness|therapy|behavioral|mental/.test(industryRaw);
   const industryContrib = isPreferred ? 15 : isTech ? 10 : industryRaw ? 4 : 2;
   factors.push({
     field: 'industry',
@@ -246,86 +246,169 @@ function scoreContact(row: ContactRow, preferredIndustries: string[]): ScoredCon
   const engRaw = meetingContrib + recencyContrib + crmEngContrib;
   const engScore = Math.round(Math.min((engRaw / 30) * 100, 100));
 
-  // ── INTENT (max 38 raw pts → 0-100) ────────────────────────────────────────
+  // ── INTENT (dual-path: deal-mode vs prospect-mode) ─────────────────────────
 
   const hasOpenDeal = row.has_open_deal;
-  const dealContrib = hasOpenDeal ? 15 : 0;
-  factors.push({
-    field: 'has_open_deal',
-    label: hasOpenDeal ? 'Active Deal' : 'No Deal Association',
-    value: hasOpenDeal ? 'Yes — in pipeline' : 'No open deal',
-    contribution: hasOpenDeal ? 15 : -8,
-    max_possible: 15,
-    direction: hasOpenDeal ? 'positive' : 'negative',
-    category: 'intent',
-    explanation: hasOpenDeal
-      ? `Contact is associated with an active open deal.`
-      : `High-scoring prospect not on any open deal — potential missed opportunity.`,
-  });
+  let intentRaw = 0;
+  let intentDenominator = 38;
+  const multiThreaded = row.open_deal_contact_count > 1;
 
-  const stageContrib = Math.round((row.deal_stage_score / 5) * 10);
-  if (hasOpenDeal && stageContrib > 0) {
-    const stageLabels = ['', 'Awareness', 'Qualification', 'Evaluation', 'Decision', 'Negotiation'];
+  if (hasOpenDeal) {
+    // ── Deal-mode: contact is already in a pipeline opportunity ──────────────
+    const dealContrib = 15;
+    intentRaw += dealContrib;
     factors.push({
-      field: 'deal_stage',
-      label: 'Deal Stage Depth',
-      value: stageLabels[row.deal_stage_score] || 'Early Stage',
-      contribution: stageContrib,
-      max_possible: 10,
-      direction: stageContrib >= 6 ? 'positive' : 'negative',
-      category: 'intent',
-      explanation: stageContrib >= 6
-        ? `Deal is in a late stage — high probability of close.`
-        : `Deal is in an early stage.`,
-    });
-  }
-
-  const buyingRoleContrib =
-    row.buying_role_score >= 3 ? 8 :
-    row.buying_role_score === 2 ? 6 :
-    row.buying_role_score === 1 ? 3 : 0;
-  if (hasOpenDeal && buyingRoleContrib > 0) {
-    factors.push({
-      field: 'buying_role',
-      label: 'Buying Role',
-      value: row.buying_role_score >= 3 ? 'Champion' : row.buying_role_score >= 2 ? 'Decision Maker' : 'Influencer',
-      contribution: buyingRoleContrib,
-      max_possible: 8,
+      field: 'has_open_deal',
+      label: 'Active Deal',
+      value: 'Yes — in pipeline',
+      contribution: 15,
+      max_possible: 15,
       direction: 'positive',
       category: 'intent',
-      explanation: `Champion and decision-maker contacts are present in 84% of closed-won deals.`,
+      explanation: `Contact is associated with an active open deal.`,
+    });
+
+    const stageContrib = Math.round((row.deal_stage_score / 5) * 10);
+    if (stageContrib > 0) {
+      const stageLabels = ['', 'Awareness', 'Qualification', 'Evaluation', 'Decision', 'Negotiation'];
+      intentRaw += stageContrib;
+      factors.push({
+        field: 'deal_stage',
+        label: 'Deal Stage Depth',
+        value: stageLabels[row.deal_stage_score] || 'Early Stage',
+        contribution: stageContrib,
+        max_possible: 10,
+        direction: stageContrib >= 6 ? 'positive' : 'negative',
+        category: 'intent',
+        explanation: stageContrib >= 6
+          ? `Deal is in a late stage — high probability of close.`
+          : `Deal is in an early stage.`,
+      });
+    }
+
+    const buyingRoleContrib =
+      row.buying_role_score >= 3 ? 8 :
+      row.buying_role_score === 2 ? 6 :
+      row.buying_role_score === 1 ? 3 : 0;
+    if (buyingRoleContrib > 0) {
+      intentRaw += buyingRoleContrib;
+      factors.push({
+        field: 'buying_role',
+        label: 'Buying Role',
+        value: row.buying_role_score >= 3 ? 'Champion' : row.buying_role_score >= 2 ? 'Decision Maker' : 'Influencer',
+        contribution: buyingRoleContrib,
+        max_possible: 8,
+        direction: 'positive',
+        category: 'intent',
+        explanation: `Champion and decision-maker contacts are present in 84% of closed-won deals.`,
+      });
+    }
+
+    const mtContrib = multiThreaded ? 5 : -4;
+    intentRaw += Math.max(0, mtContrib);
+    factors.push({
+      field: 'multi_threaded',
+      label: multiThreaded ? 'Multi-Threaded Deal' : 'Single-Threaded Deal',
+      value: multiThreaded ? `${row.open_deal_contact_count} contacts engaged` : 'Solo contact on deal',
+      contribution: mtContrib,
+      max_possible: 5,
+      direction: multiThreaded ? 'positive' : 'negative',
+      category: 'intent',
+      explanation: multiThreaded
+        ? `Multiple contacts engaged — buying committee alignment detected.`
+        : `Multi-threaded deals close at 2.8x the rate of single-contact deals.`,
+    });
+  } else {
+    // ── Prospect-mode: no open deal — score on ICP resonance signals ─────────
+    intentDenominator = 40;
+
+    const seniorityIntentContrib =
+      seniority === 'c_level' ? 15 :
+      seniority === 'vp' ? 12 :
+      seniority === 'director' ? 8 :
+      seniority === 'manager' ? 5 : 3;
+    intentRaw += seniorityIntentContrib;
+    factors.push({
+      field: 'prospect_seniority',
+      label: 'Seniority Signal',
+      value: row.title || seniority.replace(/_/g, ' '),
+      contribution: seniorityIntentContrib,
+      max_possible: 15,
+      direction: seniorityIntentContrib >= 8 ? 'positive' : 'negative',
+      category: 'intent',
+      explanation: seniorityIntentContrib >= 12
+        ? `C-level and VP contacts initiate or approve purchasing in 78% of closed-won deals.`
+        : seniorityIntentContrib >= 8
+          ? `Director-level contacts frequently drive or sponsor purchasing decisions.`
+          : `Lower seniority reduces the probability of owning a buying decision.`,
+    });
+
+    const industryIntentContrib = isPreferred ? 10 : isTech ? 6 : industryRaw ? 3 : 1;
+    intentRaw += industryIntentContrib;
+    factors.push({
+      field: 'prospect_industry',
+      label: 'ICP Industry Signal',
+      value: row.industry_verified || row.industry || 'Unknown',
+      contribution: industryIntentContrib,
+      max_possible: 10,
+      direction: industryIntentContrib >= 6 ? 'positive' : 'negative',
+      category: 'intent',
+      explanation: industryIntentContrib >= 10
+        ? `This industry is in your core ICP — historically high conversion.`
+        : industryIntentContrib >= 6
+          ? `Adjacent tech/SaaS industry — moderate ICP alignment.`
+          : `Industry is outside your core ICP target.`,
+    });
+
+    const recencyIntentContrib =
+      daysSince <= 7 ? 12 :
+      daysSince <= 14 ? 9 :
+      daysSince <= 30 ? 5 :
+      daysSince <= 60 ? 2 : 0;
+    intentRaw += recencyIntentContrib;
+    factors.push({
+      field: 'prospect_recency',
+      label: 'Recency Signal',
+      value: row.last_activity_date ? `${Math.round(daysSince)}d since last touch` : 'No recorded activity',
+      contribution: recencyIntentContrib,
+      max_possible: 12,
+      direction: recencyIntentContrib >= 5 ? 'positive' : 'negative',
+      category: 'intent',
+      explanation: recencyIntentContrib >= 9
+        ? `Recent engagement — contact is in-motion and receptive.`
+        : recencyIntentContrib >= 5
+          ? `Moderate recency — contact is warm but activity is slowing.`
+          : `Stale or no recent engagement — intent signal is weak.`,
+    });
+
+    const completenessContrib = row.email ? 3 : 0;
+    intentRaw += completenessContrib;
+    if (completenessContrib > 0) {
+      factors.push({
+        field: 'prospect_completeness',
+        label: 'Contact Data Completeness',
+        value: 'Email verified',
+        contribution: completenessContrib,
+        max_possible: 3,
+        direction: 'positive',
+        category: 'intent',
+        explanation: `Verified email enables outreach — contact is actionable.`,
+      });
+    }
+
+    factors.push({
+      field: 'no_open_deal',
+      label: 'Not Yet in Pipeline',
+      value: 'No open deal',
+      contribution: 0,
+      max_possible: 0,
+      direction: 'negative',
+      category: 'intent',
+      explanation: `Scored in prospect mode — intent reflects ICP resonance, not deal progression. Add to pipeline to unlock deal-stage signals.`,
     });
   }
 
-  const multiThreaded = row.open_deal_contact_count > 1;
-  if (hasOpenDeal) {
-    if (multiThreaded) {
-      factors.push({
-        field: 'multi_threaded',
-        label: 'Multi-Threaded Deal',
-        value: `${row.open_deal_contact_count} contacts engaged`,
-        contribution: 5,
-        max_possible: 5,
-        direction: 'positive',
-        category: 'intent',
-        explanation: `Multiple contacts engaged — buying committee alignment detected.`,
-      });
-    } else {
-      factors.push({
-        field: 'multi_threaded',
-        label: 'Single-Threaded Deal',
-        value: 'Solo contact on deal',
-        contribution: -4,
-        max_possible: 5,
-        direction: 'negative',
-        category: 'intent',
-        explanation: `Multi-threaded deals close at 2.8x the rate of single-contact deals.`,
-      });
-    }
-  }
-
-  const intentRaw = dealContrib + stageContrib + buyingRoleContrib + (multiThreaded && hasOpenDeal ? 5 : 0);
-  const intentScore = Math.round(Math.min(Math.max((intentRaw / 38) * 100, 0), 100));
+  const intentScore = Math.round(Math.min(Math.max((intentRaw / intentDenominator) * 100, 0), 100));
 
   // ── TIMING (max 20 raw pts → 0-100) ────────────────────────────────────────
 
@@ -393,18 +476,22 @@ function scoreContact(row: ContactRow, preferredIndustries: string[]): ScoredCon
   // ── RECOMMENDED ACTION ────────────────────────────────────────────────────
 
   let recommendedAction = 'nurture';
-  if (grade === 'D' || grade === 'F') {
-    recommendedAction = 'disqualify';
-  } else if ((grade === 'A' || grade === 'B') && !hasOpenDeal) {
-    recommendedAction = 'prospect';
-  } else if ((grade === 'A' || grade === 'B') && hasOpenDeal && !multiThreaded) {
-    recommendedAction = 'multi_thread';
-  } else if (row.prev_score !== null && composite < (row.prev_score || 0) - 5 && daysSince > 14) {
-    recommendedAction = 'reengage';
-  } else if ((grade === 'A' || grade === 'B')) {
-    recommendedAction = 'prospect';
-  } else if (daysSince > 20) {
-    recommendedAction = 'reengage';
+  if (grade === 'A' || grade === 'B') {
+    if (!hasOpenDeal) {
+      recommendedAction = 'prospect';
+    } else if (!multiThreaded) {
+      recommendedAction = 'multi_thread';
+    } else if (row.prev_score !== null && composite < (row.prev_score || 0) - 5) {
+      recommendedAction = 'reengage';
+    } else {
+      recommendedAction = 'prospect';
+    }
+  } else if (grade === 'C') {
+    recommendedAction = daysSince > 20 ? 'reengage' : 'nurture';
+  } else if (grade === 'D') {
+    recommendedAction = hasOpenDeal ? 'reengage' : (fitScore >= 25 ? 'nurture' : 'disqualify');
+  } else {
+    recommendedAction = fitScore >= 25 ? 'nurture' : 'disqualify';
   }
 
   // ── SUMMARY ───────────────────────────────────────────────────────────────
@@ -520,15 +607,25 @@ export async function runProspectScoring(workspaceId: string): Promise<ScoringRe
   const startTime = Date.now();
   logger.info(`Starting prospect scoring for workspace ${workspaceId}`);
 
-  // 1. Load ICP preferred industries
+  // 1. Load ICP preferred industries from workspace ICP profile
   let preferredIndustries: string[] = ['SaaS', 'Technology', 'Software'];
   try {
     const icpResult = await dbQuery<{ company_profile: any }>(
       `SELECT company_profile FROM icp_profiles WHERE workspace_id = $1 AND status = 'active' LIMIT 1`,
       [workspaceId]
     );
-    if (icpResult.rows[0]?.company_profile?.industries?.length) {
-      preferredIndustries = icpResult.rows[0].company_profile.industries;
+    const cp = icpResult.rows[0]?.company_profile;
+    if (cp) {
+      // Prefer explicit industries array if present
+      if (cp.industries?.length) {
+        preferredIndustries = cp.industries;
+      // Fall back to industryWinRates — take industries with win rate ≥ 25%
+      } else if (cp.industryWinRates?.length) {
+        const extracted = (cp.industryWinRates as Array<{ industry: string; winRate: number }>)
+          .filter(r => r.winRate >= 0.25 && r.industry)
+          .map(r => r.industry.toLowerCase().replace(/_/g, ' '));
+        if (extracted.length > 0) preferredIndustries = extracted;
+      }
     }
   } catch { /* use defaults */ }
 
@@ -540,9 +637,9 @@ export async function runProspectScoring(workspaceId: string): Promise<ScoringRe
       c.department, c.account_id, c.lifecycle_stage, c.last_activity_date,
       c.engagement_score, c.source,
       a.name AS account_name,
-      COALESCE(asig.industry_verified, a.source_data->>'industry') AS industry,
+      COALESCE(asig.industry_verified, a.source_data->'properties'->>'industry', a.source_data->>'industry') AS industry,
       asig.industry_verified,
-      asig.employee_count,
+      COALESCE(asig.employee_count, (a.source_data->'properties'->>'numberofemployees')::int) AS employee_count,
       asig.signal_score::float AS account_signal_score,
       asig.funding_stage,
       CASE WHEN jsonb_array_length(COALESCE(asig.hiring_signals, '[]'::jsonb)) > 0
