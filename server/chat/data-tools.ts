@@ -10,6 +10,7 @@ import { getToolFilters } from '../config/tool-filter-injector.js';
 import { callLLM } from '../utils/llm-router.js';
 import { querySchema, type ObjectType, type FilterMode } from '../tools/schema-query.js';
 import { queryConversationSignals, type SignalQueryFilters } from '../signals/query-conversation-signals.js';
+import { queryActivitySignals, type ActivitySignalQueryFilters } from '../signals/query-activity-signals.js';
 import { getWorkspaceContext } from './workspace-context.js';
 import { getCachedResult, setCachedResult } from './tool-result-cache.js';
 import { shouldCompress, compressToolResult } from './tool-result-compressor.js';
@@ -251,6 +252,30 @@ export async function executeDataTool(
           result = {
             ...signalResult,
             query_description: `Found ${signalResult.total} signal(s) matching the filters`,
+          };
+        }
+        break;
+      case 'query_activity_signals':
+        const activitySignalResult = await queryActivitySignals(
+          workspaceId,
+          params as ActivitySignalQueryFilters
+        );
+
+        // Add user-friendly message for empty results
+        if (activitySignalResult.total === 0) {
+          const signalTypeLabel = params.signal_type
+            ? params.signal_type.replace(/_/g, ' ')
+            : 'activity';
+
+          result = {
+            ...activitySignalResult,
+            message: `No ${signalTypeLabel} signals found. This could mean signal extraction hasn't run yet for this workspace, or no matching signals exist in the selected filters. Activity signal extraction runs automatically after activities are synced.`,
+            query_description: `Searched for ${signalTypeLabel} signals with filters: ${JSON.stringify(params)}`,
+          };
+        } else {
+          result = {
+            ...activitySignalResult,
+            query_description: `Found ${activitySignalResult.total} signal(s) from CRM activities matching the filters`,
           };
         }
         break;

@@ -488,6 +488,77 @@ const PANDORA_TOOLS: ToolDef[] = [
     },
   },
   {
+    name: 'query_activity_signals',
+    description:
+      'Query pre-extracted signals from CRM activities (emails, notes, meetings). Use this when the user asks about qualification framework coverage (MEDDIC/BANT/SPICED), notable prospect quotes, blockers, untracked email participants, or buyer signals captured in CRM activity body content. Faster and more structured than reading raw activity bodies. Each signal includes confidence score, source quote, speaker attribution, and framework field mapping.',
+    parameters: {
+      type: 'object',
+      properties: {
+        signal_type: {
+          type: 'string',
+          enum: [
+            'framework_signal',
+            'notable_quote',
+            'blocker_mention',
+            'buyer_signal',
+            'timeline_mention',
+            'stakeholder_mention',
+            'untracked_participant',
+          ],
+          description: 'Filter to a specific signal type. Omit to return all types.',
+        },
+        signal_value: {
+          type: 'string',
+          description: 'Filter by signal value, e.g. "Q3" for timeline or "legal review" for blockers. Partial match.',
+        },
+        framework_field: {
+          type: 'string',
+          description: 'For framework_signal type: filter by MEDDIC/BANT/SPICED field, e.g. "metrics", "economic_buyer", "timeline", "champion"',
+        },
+        speaker_type: {
+          type: 'string',
+          enum: ['prospect', 'rep', 'unknown'],
+          description: 'Filter by who said it — prospect (inbound emails/quotes), rep (outbound emails), or unknown',
+        },
+        deal_id: {
+          type: 'string',
+          description: 'Filter signals to a specific deal',
+        },
+        account_id: {
+          type: 'string',
+          description: 'Filter signals to a specific account',
+        },
+        from_date: {
+          type: 'string',
+          format: 'date',
+          description: 'Filter signals extracted after this date (ISO format)',
+        },
+        to_date: {
+          type: 'string',
+          format: 'date',
+          description: 'Filter signals extracted before this date (ISO format)',
+        },
+        min_confidence: {
+          type: 'number',
+          description: 'Minimum confidence threshold (0.0-1.0, default 0.7)',
+        },
+        verbatim_only: {
+          type: 'boolean',
+          description: 'If true, return only verbatim quotes (not paraphrased)',
+        },
+        limit: {
+          type: 'number',
+          description: 'Max results to return (default 50, max 200)',
+        },
+        offset: {
+          type: 'number',
+          description: 'Offset for pagination',
+        },
+      },
+      required: [],
+    },
+  },
+  {
     name: 'get_workspace_context',
     description:
       'Get company-specific context for this workspace. Returns business model (GTM motion, segment, industry), deal metrics (ACV range, avg deal size, sales cycle, win rate, open deals), ICP profile (top industries and personas), and conversation signals (top competitors and objections mentioned). Use this to understand the company profile before giving strategic advice or when the user asks about their business context.',

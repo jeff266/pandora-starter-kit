@@ -26,6 +26,7 @@ const COMPRESSION_THRESHOLDS: Record<string, number> = {
   search_transcripts: 5000,
   get_skill_evidence: 6000,
   query_conversation_signals: 3000,
+  query_activity_signals: 3000,
   compute_stage_benchmarks: 4000,
   compute_metric_segmented: 3000,
   compute_close_probability: 5000,
@@ -181,6 +182,17 @@ ${data}`,
 - For each signal: signal_type, signal_value, confidence, source_quote (max 200 chars), sentiment, deal_name, account_name
 - If >30 signals, keep top 20 by confidence
 - Remove: extraction_method, model_version, rep_email unless needed
+
+Output valid JSON only. No markdown.
+
+Data:
+${data}`,
+
+    query_activity_signals: `Extract a summary of activity signals. Include:
+- total, signal_type filter (if present), framework_field filter (if present)
+- For each signal: signal_type, signal_value, framework_field, source_quote (max 200 chars), speaker_type, confidence, verbatim, deal_name, account_name
+- If >30 signals, keep top 20 by confidence
+- Remove: extraction_method, model_version, activity_id, activity_type unless needed
 
 Output valid JSON only. No markdown.
 
