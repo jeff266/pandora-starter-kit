@@ -1501,6 +1501,19 @@ export default function ConversationsPage() {
                       ))}
                     </div>
                   </div>
+                  {chartMode === 'meddic' && Object.keys(coverageData).length === 0 ? (
+                    <div style={{
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                      padding: '40px 20px', gap: 8,
+                    }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: colors.textMuted, fontFamily: fonts.sans }}>
+                        No MEDDIC signal data yet
+                      </div>
+                      <div style={{ fontSize: 12, color: colors.textMuted, fontFamily: fonts.sans, textAlign: 'center', maxWidth: 380 }}>
+                        MEDDIC coverage is extracted from CRM activity notes and emails. Signals are linked to deals automatically during the activity sync — come back after the next sync runs, or use the Health view to see urgency data now.
+                      </div>
+                    </div>
+                  ) : (
                   <ResponsiveContainer width="100%" height={Math.max((chartMode === 'health' ? chartData : meddicChartData).length * 52, 160)}>
                     <BarChart
                       layout="vertical"
@@ -1560,6 +1573,7 @@ export default function ConversationsPage() {
                       }
                     </BarChart>
                   </ResponsiveContainer>
+                  )}
 
                   {/* Dynamic color legend */}
                   <div style={{ display: 'flex', gap: 16, marginTop: 12, paddingLeft: 105, flexWrap: 'wrap' }}>
