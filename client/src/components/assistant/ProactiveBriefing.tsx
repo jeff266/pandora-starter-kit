@@ -26,6 +26,21 @@ function formatFindingHeadline(headline: string): string {
   return headline;
 }
 
+function shortenQuestion(q: string): string {
+  const stripped = q
+    .replace(/^(Will we|Which|What('?s)?|Are|How many|How|Is|Do|Does|Have|Can)\s+/i, '')
+    .replace(/\?$/, '')
+    .trim();
+  if (stripped.length <= 32) return stripped + '?';
+  const words = stripped.split(' ');
+  let label = '';
+  for (const w of words) {
+    if ((label + ' ' + w).trim().length > 30) break;
+    label = (label + ' ' + w).trim();
+  }
+  return label + '?';
+}
+
 export interface InvestigationPath {
   question: string;
   reasoning: string;
@@ -115,23 +130,17 @@ function formatLastRunTime(timestamp: string): string {
 
 function getSeverityColor(severity: 'calm' | 'attention' | 'urgent'): string {
   switch (severity) {
-    case 'urgent':
-      return colors.red;
-    case 'attention':
-      return colors.yellow;
-    default:
-      return colors.green;
+    case 'urgent':    return colors.red;
+    case 'attention': return colors.yellow;
+    default:          return colors.green;
   }
 }
 
-function getSeverityIcon(severity: 'calm' | 'attention' | 'urgent'): string {
-  switch (severity) {
-    case 'urgent':
-      return '🔴';
-    case 'attention':
-      return '🟡';
-    default:
-      return '🟢';
+function getPriorityDot(priority: 'high' | 'medium' | 'low'): { color: string } {
+  switch (priority) {
+    case 'high':   return { color: '#ef4444' };
+    case 'medium': return { color: '#f59e0b' };
+    default:       return { color: colors.textMuted as string };
   }
 }
 
@@ -149,67 +158,54 @@ export default function ProactiveBriefing({
   investigationStatus,
 }: ProactiveBriefingProps) {
   const navigate = useNavigate();
-  const [expandedPath, setExpandedPath] = useState<number | null>(null);
-  const [hoveredPath, setHoveredPath] = useState<number | null>(null);
-  const [hoveredQuestion, setHoveredQuestion] = useState<number | null>(null);
   const [resultsModal, setResultsModal] = useState<{ skillId: string; runId: string } | null>(null);
   const briefing = greeting.proactive_briefing;
   const isStreaming = phase && !['pills', 'browsing'].includes(phase);
+  const severityColor = getSeverityColor(greeting.severity);
 
   return (
     <div
       style={{
         background: colors.surface,
         border: `1px solid ${colors.border}`,
+        borderLeft: `3px solid ${severityColor}`,
         borderRadius: 12,
         padding: 24,
         maxWidth: 800,
         margin: '0 auto',
       }}
     >
-      <style>{`@keyframes pandora-blink { 50% { opacity: 0; } }`}</style>
-      {/* Header */}
-      <div style={{ marginBottom: 20 }}>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            marginBottom: 8,
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 14, color: colors.textSecondary }}>
-              {getSeverityIcon(greeting.severity)} VP RevOps Brief
-            </span>
-            <span
-              style={{
-                fontSize: 12,
-                color: colors.textMuted,
-                padding: '2px 8px',
-                background: colors.surfaceRaised,
-                borderRadius: 4,
-              }}
-            >
-              {greeting.recency_label}
-            </span>
-          </div>
-          {greeting.week_context && (
-            <div style={{ fontSize: 12, color: colors.textMuted }}>
-              {greeting.week_context}
-            </div>
-          )}
+      <style>{`
+        @keyframes pandora-blink { 50% { opacity: 0; } }
+        @keyframes pandora-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+      `}</style>
+
+      {/* ── Header ── */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: colors.textSecondary, fontFamily: fonts.sans }}>
+            VP RevOps Brief
+          </span>
+          <span style={{ color: colors.textDim, fontSize: 12 }}>·</span>
+          <span style={{ fontSize: 12, color: colors.textMuted, fontFamily: fonts.sans }}>
+            {greeting.recency_label}
+          </span>
         </div>
+        {greeting.week_context && (
+          <span style={{ fontSize: 11, color: colors.textDim, fontFamily: fonts.sans }}>
+            {greeting.week_context}
+          </span>
+        )}
       </div>
 
-      {/* Greeting */}
-      <div style={{ marginBottom: 20 }}>
+      {/* ── Greeting ── */}
+      <div style={{ marginBottom: 16 }}>
         <h2 style={{
           fontFamily: fonts.sans,
-          fontSize: 22,
+          fontSize: 20,
           fontWeight: 700,
           lineHeight: 1.3,
-          margin: '0 0 8px 0',
+          margin: '0 0 6px 0',
           minHeight: '1.3em',
         }}>
           {typedHeadline ?? greeting.headline}
@@ -230,12 +226,14 @@ export default function ProactiveBriefing({
         )}
       </div>
 
-      {/* State Summary */}
+      {/* ── State Summary ── */}
       {(typedContext || !isStreaming) && (
         <div
           style={{
-            padding: '4px 0 4px 12px',
-            borderLeft: `3px solid ${getSeverityColor(greeting.severity)}`,
+            padding: '8px 12px',
+            borderLeft: `3px solid ${severityColor}`,
+            background: colors.surfaceRaised,
+            borderRadius: '0 6px 6px 0',
             marginBottom: 20,
           }}
         >
@@ -255,70 +253,63 @@ export default function ProactiveBriefing({
 
       {!isStreaming && <>
 
-      {/* Delta Alert */}
+      {/* ── Delta Alert ── */}
       {briefing?.deltas && (briefing.deltas.new_critical_count > 0 || (briefing.deltas.total_at_risk ?? 0) > 0) && (
         <div
           style={{
-            padding: 12,
-            background: 'rgba(251, 191, 36, 0.1)',
-            border: `1px solid ${colors.yellow}`,
-            borderRadius: 8,
+            padding: '8px 12px',
+            background: colors.bg,
+            border: `1px solid ${colors.border}`,
+            borderLeft: `3px solid ${colors.yellow}`,
+            borderRadius: '0 6px 6px 0',
             marginBottom: 12,
             display: 'flex',
             alignItems: 'center',
-            gap: 8,
+            gap: 10,
           }}
         >
-          <span style={{ fontSize: 16 }}>{briefing.deltas.new_critical_count > 0 ? '🆕' : '⚠️'}</span>
-          <div style={{ flex: 1 }}>
-            <div style={{
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{
               fontFamily: fonts.sans,
-              fontSize: 14,
+              fontSize: 13,
               fontWeight: 600,
-              lineHeight: 1.4,
               color: colors.text,
             }}>
               {briefing.deltas.new_critical_count > 0
-                ? `${briefing.deltas.new_critical_count} new issue${briefing.deltas.new_critical_count > 1 ? 's' : ''} detected ${briefing.deltas.since_label.toLowerCase()}`
-                : `${briefing.deltas.total_at_risk} deal${(briefing.deltas.total_at_risk ?? 0) > 1 ? 's' : ''} at risk ${briefing.deltas.since_label.toLowerCase()}`
+                ? `↑ ${briefing.deltas.new_critical_count} new issue${briefing.deltas.new_critical_count > 1 ? 's' : ''} ${briefing.deltas.since_label.toLowerCase()}`
+                : `↑ ${briefing.deltas.total_at_risk} deal${(briefing.deltas.total_at_risk ?? 0) > 1 ? 's' : ''} at risk ${briefing.deltas.since_label.toLowerCase()}`
               }
-            </div>
+            </span>
             {briefing.deltas.improved_count > 0 && (
-              <div style={{
+              <span style={{
+                fontSize: 11,
+                color: colors.green,
+                background: colors.greenSoft,
+                padding: '1px 7px',
+                borderRadius: 10,
                 fontFamily: fonts.sans,
-                fontSize: 12,
-                fontWeight: 400,
-                lineHeight: 1.5,
-                color: colors.textMuted,
-                marginTop: 2,
+                fontWeight: 500,
               }}>
-                ✅ {briefing.deltas.improved_count} issue{briefing.deltas.improved_count > 1 ? 's' : ''} resolved
-              </div>
+                ✓ {briefing.deltas.improved_count} resolved
+              </span>
             )}
           </div>
         </div>
       )}
 
-      {/* Top Finding Card */}
+      {/* ── Top Finding Card ── */}
       {briefing?.top_finding && (
         <div
           style={{
-            padding: 16,
-            background:
-              briefing.top_finding.severity === 'critical'
-                ? 'rgba(239, 68, 68, 0.1)'
-                : 'rgba(251, 191, 36, 0.1)',
-            border: `1px solid ${
-              briefing.top_finding.severity === 'critical' ? colors.red : colors.yellow
-            }`,
-            borderRadius: 8,
+            padding: '12px 14px',
+            background: colors.bg,
+            border: `1px solid ${colors.border}`,
+            borderLeft: `3px solid ${briefing.top_finding.severity === 'critical' ? colors.red : colors.yellow}`,
+            borderRadius: '0 8px 8px 0',
             marginBottom: 20,
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-            <span style={{ fontSize: 18 }}>
-              {briefing.top_finding.severity === 'critical' ? '🔴' : '🟡'}
-            </span>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
             <div style={{ flex: 1 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <h3 style={{
@@ -326,7 +317,7 @@ export default function ProactiveBriefing({
                   fontSize: 14,
                   fontWeight: 600,
                   lineHeight: 1.4,
-                  margin: '0 0 4px 0'
+                  margin: '0 0 4px 0',
                 }}>
                   {formatFindingHeadline(briefing.top_finding.headline)}
                 </h3>
@@ -335,9 +326,10 @@ export default function ProactiveBriefing({
                     fontSize: 10,
                     fontWeight: 700,
                     color: colors.yellow,
-                    background: 'rgba(251, 191, 36, 0.2)',
-                    padding: '2px 6px',
+                    background: colors.yellowSoft,
+                    padding: '1px 6px',
                     borderRadius: 4,
+                    flexShrink: 0,
                   }}>
                     NEW
                   </span>
@@ -347,10 +339,9 @@ export default function ProactiveBriefing({
                 <p style={{
                   fontFamily: fonts.sans,
                   fontSize: 12,
-                  fontWeight: 400,
-                  lineHeight: 1.5,
                   color: colors.textMuted,
-                  margin: 0
+                  margin: 0,
+                  lineHeight: 1.5,
                 }}>
                   {briefing.top_finding.entity}
                   {briefing.top_finding.amount && ` · ${formatCurrency(briefing.top_finding.amount)}`}
@@ -361,177 +352,155 @@ export default function ProactiveBriefing({
         </div>
       )}
 
-      {/* Investigation Paths */}
+      {/* ── Suggested Investigations ── */}
       {briefing && briefing.investigation_paths.length > 0 && (
         <div style={{ marginBottom: 20 }}>
           <p style={{
             fontFamily: fonts.sans,
             fontSize: 10,
             fontWeight: 600,
-            lineHeight: 1.4,
             margin: '0 0 10px 0',
             textTransform: 'uppercase',
             letterSpacing: '0.08em',
             color: colors.textMuted,
           }}>
-            {briefing.investigation_title}
+            Suggested Investigations
           </p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {briefing.investigation_paths.map((path, index) => {
-              const isHovered = hoveredPath === index;
               const status = investigationStatus?.get(path.skill_id || '');
-              const borderColor = path.priority === 'high'
-                ? colors.red
-                : path.priority === 'medium'
-                ? colors.yellow
-                : colors.border;
+              const dot = getPriorityDot(path.priority);
+              const isRunning = status?.status === 'running' || status?.status === 'pending';
+              const isCompleted = status?.status === 'completed';
+              const isFailed = status?.status === 'failed';
+
+              let actionLabel = 'Run →';
+              let actionColor: string = colors.accent;
+              if (isRunning) { actionLabel = 'Running…'; actionColor = '#eab308'; }
+              else if (isCompleted) { actionLabel = 'View results →'; actionColor = '#22c55e'; }
+              else if (isFailed) { actionLabel = 'Failed'; actionColor = '#ef4444'; }
 
               return (
                 <button
                   key={index}
                   onClick={() => {
-                    console.log('[ProactiveBriefing] Investigation path clicked:', path.question);
-                    console.log('[ProactiveBriefing] Current status:', status);
-
-                    // If completed, show results modal
-                    if (status?.status === 'completed' && status.runId) {
-                      console.log('[ProactiveBriefing] Showing results modal');
+                    if (isCompleted && status?.runId) {
                       setResultsModal({ skillId: path.skill_id!, runId: status.runId });
-                    }
-                    // If running, just toggle expand to see progress
-                    else if (status?.status === 'running') {
-                      console.log('[ProactiveBriefing] Toggling expand while running');
-                      setExpandedPath(expandedPath === index ? null : index);
-                    }
-                    // If not started, trigger investigation and auto-expand
-                    else {
-                      console.log('[ProactiveBriefing] Triggering investigation');
+                    } else if (!isRunning && !isFailed) {
                       onInvestigatePath(path);
-                      setExpandedPath(index);
                     }
                   }}
-                  onMouseEnter={() => setHoveredPath(index)}
-                  onMouseLeave={() => setHoveredPath(null)}
-                  disabled={false}
+                  disabled={isRunning || isFailed}
                   style={{
-                    padding: 12,
-                    background: isHovered ? colors.surface : colors.surfaceRaised,
-                    border: `1px solid ${isHovered ? colors.accent : borderColor}`,
+                    padding: '10px 12px',
+                    background: colors.surfaceRaised,
+                    border: `1px solid ${colors.border}`,
                     borderRadius: 8,
-                    cursor: status?.status === 'running' ? 'wait' : 'pointer',
+                    cursor: isRunning || isFailed ? 'default' : 'pointer',
                     textAlign: 'left',
-                    transition: 'all 0.2s',
-                    opacity: status?.status === 'running' ? 0.7 : 1,
+                    width: '100%',
+                    opacity: isFailed ? 0.5 : 1,
                   }}
                 >
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                  <span style={{ fontSize: 14 }}>
-                    {status?.status === 'running' ? '⏳' :
-                     status?.status === 'completed' ? '✅' :
-                     status?.status === 'failed' ? '❌' :
-                     path.priority === 'high' ? '⚡' : '💡'}
-                  </span>
-                  <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
                     <div style={{
-                      fontFamily: fonts.sans,
-                      fontSize: 14,
-                      fontWeight: 500,
-                      lineHeight: 1.5
-                    }}>
-                      {path.question}
-                    </div>
-                    {expandedPath === index && (
-                      <div
-                        style={{
-                          fontFamily: fonts.sans,
-                          fontSize: 12,
-                          fontWeight: 400,
-                          lineHeight: 1.5,
-                          color: colors.textMuted,
-                          marginTop: 4,
-                        }}
-                      >
-                        {path.reasoning}
-                        {path.skill_id && ` · Uses ${path.skill_id}`}
-                        {status?.status === 'running' && ' · Investigating...'}
-                        {status?.status === 'completed' && ' · Ready to view'}
-                        {status?.status === 'failed' && ` · Failed: ${status.error}`}
-                        {!status && path.last_run_at && (
-                          <span style={{ color: colors.textMuted }}>
-                            {' · Last run: '}{formatLastRunTime(path.last_run_at)}
-                          </span>
-                        )}
+                      width: 7,
+                      height: 7,
+                      borderRadius: '50%',
+                      background: dot.color,
+                      marginTop: 5,
+                      flexShrink: 0,
+                    }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{
+                        fontFamily: fonts.sans,
+                        fontSize: 13,
+                        fontWeight: 500,
+                        lineHeight: 1.4,
+                        color: colors.text,
+                        marginBottom: path.reasoning ? 3 : 0,
+                      }}>
+                        {path.question}
                       </div>
-                    )}
+                      {path.reasoning && (
+                        <div style={{
+                          fontFamily: fonts.sans,
+                          fontSize: 11,
+                          fontStyle: 'italic',
+                          color: colors.textMuted,
+                          lineHeight: 1.4,
+                        }}>
+                          {path.reasoning}
+                          {!status && path.last_run_at && ` · Last run ${formatLastRunTime(path.last_run_at)}`}
+                        </div>
+                      )}
+                    </div>
+                    <span style={{
+                      fontFamily: fonts.sans,
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: actionColor,
+                      flexShrink: 0,
+                      animation: isRunning ? 'pandora-pulse 1.5s ease-in-out infinite' : 'none',
+                      whiteSpace: 'nowrap',
+                    }}>
+                      {actionLabel}
+                    </span>
                   </div>
-                  <span style={{ fontSize: 12, color: colors.textMuted }}>
-                    {expandedPath === index ? '▲' : '▼'}
-                  </span>
-                </div>
-              </button>
+                </button>
               );
             })}
           </div>
-          <p
-            style={{
-              fontFamily: fonts.sans,
-              fontSize: 12,
-              fontWeight: 400,
-              lineHeight: 1.5,
-              color: colors.textMuted,
-              marginTop: 8,
-              textAlign: 'center',
-            }}
-          >
-            Click to investigate · Results appear here when ready
-          </p>
-          <div style={{ textAlign: 'right', marginTop: 4 }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
             <button
               onClick={() => navigate('/investigation/history')}
               style={{
                 background: 'none', border: 'none', padding: 0,
-                color: colors.accent, fontSize: 11, cursor: 'pointer',
-                fontFamily: fonts.sans, opacity: 0.8,
+                color: colors.accent, fontSize: 12, cursor: 'pointer',
+                fontFamily: fonts.sans, opacity: 0.75,
+                display: 'flex', alignItems: 'center', gap: 4,
               }}
               onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
-              onMouseLeave={e => (e.currentTarget.style.opacity = '0.8')}
+              onMouseLeave={e => (e.currentTarget.style.opacity = '0.75')}
             >
-              View full history →
+              ↗ View full history
             </button>
           </div>
         </div>
       )}
 
-      {/* Escalation Warning */}
+      {/* ── Escalation Warning ── */}
       {briefing?.can_escalate && briefing.escalation_path && (
         <div
           style={{
-            padding: 16,
-            background: 'rgba(239, 68, 68, 0.1)',
-            border: `1px solid ${colors.red}`,
-            borderRadius: 8,
+            padding: '12px 14px',
+            background: colors.bg,
+            border: `1px solid ${colors.border}`,
+            borderLeft: `3px solid ${colors.red}`,
+            borderRadius: '0 8px 8px 0',
             marginBottom: 20,
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-            <span style={{ fontSize: 18 }}>⚠️</span>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
             <div style={{ flex: 1 }}>
               <h3 style={{
                 fontFamily: fonts.sans,
-                fontSize: 16,
                 fontWeight: 600,
                 lineHeight: 1.4,
                 margin: '0 0 4px 0',
-                color: colors.red
-              }}>
+                color: colors.red,
+                textTransform: 'uppercase',
+                letterSpacing: '0.04em',
+                fontSize: 10,
+              } as React.CSSProperties}>
                 Escalation Recommended
               </h3>
               <p style={{
                 fontFamily: fonts.sans,
-                fontSize: 14,
-                fontWeight: 400,
+                fontSize: 13,
                 lineHeight: 1.5,
-                margin: '0 0 12px 0'
+                margin: '0 0 10px 0',
+                color: colors.text,
               }}>
                 {briefing.escalation_path}
               </p>
@@ -539,16 +508,15 @@ export default function ProactiveBriefing({
                 <button
                   onClick={onEscalate}
                   style={{
-                    padding: '8px 16px',
-                    background: colors.red,
-                    color: '#fff',
-                    border: 'none',
+                    padding: '6px 14px',
+                    background: 'transparent',
+                    color: colors.red,
+                    border: `1px solid ${colors.red}`,
                     borderRadius: 6,
                     cursor: 'pointer',
                     fontFamily: fonts.sans,
-                    fontSize: 14,
+                    fontSize: 12,
                     fontWeight: 600,
-                    lineHeight: 1.5,
                   }}
                 >
                   Alert Executive Team
@@ -559,91 +527,47 @@ export default function ProactiveBriefing({
         </div>
       )}
 
-      {/* Suggested Questions */}
-      <div style={{ marginBottom: 20 }}>
-        <p style={{
-          fontFamily: fonts.sans,
-          fontSize: 10,
-          fontWeight: 600,
-          lineHeight: 1.4,
-          margin: '0 0 8px 0',
-          color: colors.textMuted,
-          textTransform: 'uppercase',
-          letterSpacing: '0.08em',
-        }}>
-          Or ask me anything
-        </p>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {(greeting.questions ?? []).slice(0, 4).map((question, index) => {
-            const isHovered = hoveredQuestion === index;
-            return (
+      {/* ── Question Pills ── */}
+      {(greeting.questions ?? []).length > 0 && (
+        <div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {(greeting.questions ?? []).slice(0, 4).map((question, index) => (
               <button
                 key={index}
                 onClick={() => onQuestionClick ? onQuestionClick(question) : onAskPandora()}
-                onMouseEnter={() => setHoveredQuestion(index)}
-                onMouseLeave={() => setHoveredQuestion(null)}
                 style={{
-                  padding: '8px 12px',
-                  background: isHovered ? colors.surface : colors.surfaceRaised,
-                  border: `1px solid ${isHovered ? colors.accent : colors.border}`,
-                  borderRadius: 6,
+                  padding: '6px 10px',
+                  background: colors.surfaceRaised,
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: 20,
                   cursor: 'pointer',
                   fontFamily: fonts.sans,
-                  fontSize: 12,
-                  fontWeight: 400,
-                  lineHeight: 1.5,
-                  color: isHovered ? colors.accent : colors.textSecondary,
-                  transition: 'all 0.2s',
+                  fontSize: 11,
+                  color: colors.textSecondary,
+                  transition: 'all 0.15s',
+                  whiteSpace: 'nowrap',
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.borderColor = colors.accent as string;
+                  e.currentTarget.style.color = colors.accent as string;
+                  e.currentTarget.style.background = colors.accentSoft as string;
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.borderColor = colors.border as string;
+                  e.currentTarget.style.color = colors.textSecondary as string;
+                  e.currentTarget.style.background = colors.surfaceRaised as string;
                 }}
               >
-                {question}
+                {shortenQuestion(question)}
               </button>
-            );
-          })}
+            ))}
+          </div>
         </div>
-      </div>
-
-      {/* Action Buttons */}
-      <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
-        <button
-          onClick={() => navigate('/investigation/history')}
-          style={{
-            padding: '10px 20px',
-            background: colors.surface,
-            color: colors.text,
-            border: `1px solid ${colors.border}`,
-            borderRadius: 8,
-            cursor: 'pointer',
-            fontFamily: fonts.sans,
-            fontSize: 14,
-            fontWeight: 600,
-            lineHeight: 1.5,
-          }}
-        >
-          View History
-        </button>
-        <button
-          onClick={onAskPandora}
-          style={{
-            padding: '10px 20px',
-            background: colors.accent,
-            color: '#fff',
-            border: 'none',
-            borderRadius: 8,
-            cursor: 'pointer',
-            fontFamily: fonts.sans,
-            fontSize: 14,
-            fontWeight: 600,
-            lineHeight: 1.5,
-          }}
-        >
-          Ask Pandora
-        </button>
-      </div>
+      )}
 
       </>}
 
-      {/* Investigation Results Modal */}
+      {/* ── Investigation Results Modal ── */}
       {resultsModal && (
         <InvestigationResults
           skillId={resultsModal.skillId}
