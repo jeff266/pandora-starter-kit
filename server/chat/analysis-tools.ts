@@ -323,6 +323,29 @@ export async function detectProcessBlockers(
       }
     }
 
+    // Scan activity body content for blocker keywords
+    for (const act of actRes.rows) {
+      if (act.body) {
+        const stripped = act.body
+          .replace(/<[^>]+>/g, '')
+          .replace(/&amp;/g, '&')
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/&nbsp;/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        for (const kw of blockerKeywords) {
+          if (stripped.toLowerCase().includes(kw.toLowerCase())) {
+            const dateStr = act.timestamp ? new Date(act.timestamp).toISOString().split('T')[0] : '?';
+            const preview = stripped.slice(0, 150) + (stripped.length > 150 ? '...' : '');
+            evidence.push(`CRM note (${dateStr}): "${preview}"`);
+            break;
+          }
+        }
+      }
+    }
+
     if (deal.days_in_current_stage > 30 && deal.stage_normalized && !deal.stage_normalized.includes('closed')) {
       evidence.push(`Deal has been in "${deal.stage}" for ${Math.round(deal.days_in_current_stage)} days (potential stall)`);
     }
@@ -378,7 +401,8 @@ Respond ONLY with JSON:
       type: b.type || 'other',
       description: b.description || '',
       evidence: b.evidence || '',
-      detected_from: b.evidence?.toLowerCase().includes('crm') ? 'crm_field' :
+      detected_from: b.evidence?.toLowerCase().includes('crm note') ? 'crm_note' :
+                     b.evidence?.toLowerCase().includes('crm field') ? 'crm_field' :
                      b.evidence?.toLowerCase().includes('call') ? 'call_transcript' : 'activity_pattern',
       estimated_days: b.estimated_days ?? null,
       status: b.status || 'unknown',
@@ -440,7 +464,7 @@ export async function detectBuyerSignals(
     );
 
     const actRes = await query<any>(
-      `SELECT a.activity_type, a.timestamp, a.subject, a.direction, a.actor
+      `SELECT a.activity_type, a.timestamp, a.subject, a.direction, a.actor, a.body
        FROM activities a
        WHERE a.workspace_id = $1 AND a.deal_id = $2
          AND a.timestamp >= NOW() - INTERVAL '30 days'
@@ -459,9 +483,36 @@ export async function detectBuyerSignals(
 
     const evidenceParts: string[] = [];
 
-    const inboundActivities = actRes.rows.filter((a: any) => a.direction === 'inbound');
-    if (inboundActivities.length > 0) {
-      evidenceParts.push(`Inbound activities (last 30d): ${inboundActivities.length} — types: ${[...new Set(inboundActivities.map((a: any) => a.activity_type))].join(', ')}`);
+    // Count all body-bearing activities (direction is null for all, so count body presence instead)
+    const activitiesWithContent = actRes.rows.filter((a: any) => a.body && a.body.length > 30);
+    if (activitiesWithContent.length > 0) {
+      evidenceParts.push(`Activities with notes (last 30d): ${activitiesWithContent.length} — types: ${[...new Set(activitiesWithContent.map((a: any) => a.activity_type))].join(', ')}`);
+    }
+
+    // Scan activity body content for buyer signal keywords
+    for (const act of actRes.rows) {
+      if (act.body) {
+        const stripped = act.body
+          .replace(/<[^>]+>/g, '')
+          .replace(/&amp;/g, '&')
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/&nbsp;/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        const signalKeywords = ['procurement', 'security questionnaire', 'legal review', 'contract sent',
+          'verbal commit', 'budget approved', 'reference check', 'selected vendor', 'RFP', 'SOW'];
+
+        for (const kw of signalKeywords) {
+          if (stripped.toLowerCase().includes(kw.toLowerCase())) {
+            const dateStr = act.timestamp ? new Date(act.timestamp).toISOString().split('T')[0] : '?';
+            const preview = stripped.slice(0, 150) + (stripped.length > 150 ? '...' : '');
+            evidenceParts.push(`CRM note (${dateStr}): "${preview}"`);
+            break;
+          }
+        }
+      }
     }
 
     for (const conv of convRes.rows) {
