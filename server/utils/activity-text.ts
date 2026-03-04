@@ -15,7 +15,9 @@ export function stripHtml(html: string): string {
   if (!html) return '';
 
   return html
-    .replace(/<[^>]+>/g, '') // Remove HTML tags
+    .replace(/<\/(p|div|h[1-6]|li|ul|ol|tr|td|th|br|section|article|header|footer)[^>]*>/gi, ' ') // block elements → space
+    .replace(/<br\s*\/?>/gi, ' ') // <br> → space
+    .replace(/<[^>]+>/g, '') // Remove remaining HTML tags
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
@@ -75,7 +77,8 @@ export function parseEmailHeaders(rawBody: string): EmailHeaders {
   }
 
   // Check if this looks like an email with headers (starts with "To:")
-  const headerPattern = /^To:\s*(.+?)(?:\nCC:\s*(.+?))?(?:\nBCC:\s*(.+?))?(?:\nAttachment:\s*.+?)?\nSubject:\s*(.+?)\nBody:\s*(.+)/is;
+  // Use [^\n]* for each header field to prevent cross-line matching
+  const headerPattern = /^To:[^\S\n]*([^\n]+?)(?:\nCC:[^\S\n]*([^\n]*))?(?:\nBCC:[^\S\n]*([^\n]*))?(?:\nAttachment:[^\n]*)?\nSubject:[^\S\n]*([^\n]+)\nBody:[^\S\n]*([\s\S]+)/i;
   const match = rawBody.match(headerPattern);
 
   if (!match) {

@@ -79,6 +79,19 @@ Pandora is built on Node.js 20 with TypeScript 5+, utilizing Express.js and Post
     - `client/src/components/assistant/`: Greeting, QuickActionPills, MorningBrief, OperatorStrip, StickyInput, AgentChip, EvidenceCard, ActionCard, DeliverablePicker, useConversationStream, ConversationView.
     - CommandCenter: slim greeting bar at top (fetches `/briefing/greeting`; shows headline + state_summary + two quick-action buttons that open Ask Pandora drawer).
 
+-   **Activity Signals Extraction Layer (Coaching Intelligence V2 — Phase 2):**
+    - Two-pass extraction pipeline: Pass 1 = zero-cost email header parsing (untracked CC/BCC contacts); Pass 2 = DeepSeek V3.1 via Fireworks body classification (~$0.21/MTok blended).
+    - `server/utils/activity-text.ts`: preprocessing utilities — `stripHtml` (block elements → space, entity decode), `stripReplyThreads` (removes `<blockquote>`, "On X wrote:" chains, `-----Original Message-----`), `parseEmailHeaders` (parses HubSpot-injected `To:/CC:/BCC:/Subject:/Body:` header block using `[^\S\n]*` regex to prevent cross-line capture), `classifyEmailParticipants` (inbound/outbound direction from To: domain), `cleanActivityBody`, `activityPreview`.
+    - `server/signals/extract-activity-signals.ts`: `extractActivitySignals(workspaceId, { limit, force })` — batch processing, MEDDIC/BANT/SPICED framework awareness, DeepSeek prompt with signal schema, `maxTokens: 2000`, JSON parse guard (`Array.isArray(parsed.signals)`), writes to `activity_signals` + `activity_signal_runs` tables.
+    - `server/signals/query-activity-signals.ts`: `queryActivitySignals(workspaceId, filters)` — filters by `deal_id`, `signal_type`, `framework_field`, `speaker_type`, `min_confidence`, `limit`; returns signals with activity metadata.
+    - `activity_signals` table: one row per signal per activity. Columns: `signal_type` (framework_signal|notable_quote|blocker_mention|buyer_signal|timeline_mention|stakeholder_mention|untracked_participant), `framework_field` (MEDDIC/BANT/SPICED field name), `source_quote`, `speaker_type` (prospect|rep|unknown), `speaker_confidence`, `verbatim` bool, `confidence`, `extraction_method` (header_parse|deepseek).
+    - `activity_signal_runs` table: one row per activity with `status` (completed|skipped|failed), `signals_extracted`, `tokens_used`, `skip_reason`. ON CONFLICT (activity_id) DO UPDATE.
+    - `server/chat/data-tools.ts`: `query_activity_signals` chat tool wired to `queryActivitySignals`.
+    - Bug fixes: `getRepDomain` changed from `users.workspace_id` (column doesn't exist) to `sales_reps.rep_email` with `user_workspaces JOIN users` fallback.
+    - Operational scripts: `server/bulk-extract-signals.ts` (batch extraction for all workspaces), `server/retry-failed-signals.ts` (retry DeepSeek JSON failures after code fix).
+    - Verification scripts: `server/test-activity-text.ts` (34/34), `server/test-signal-extraction.ts`, `server/test-query-signals.ts`, `server/test-t006-chat-integration.ts` (8/8).
+    - Production state: ~7,000+ signals across email workspace deals; MPC deal has 206 framework signals, 69 timeline signals, 48 blockers, 26 notable quotes; bulk extraction ongoing.
+
 -   **Autonomous Skill Governance Layer (Phase 2):** Safety system between self-heal suggestions and deployed changes. Five governance agents:
     - **Shape Validator** (`server/governance/shape-validator.ts`): structural/syntax checks per change_type (resolver_pattern, workspace_context, named_filter, skill_definition). Validates regex syntax, test_inputs match, field names against `information_schema`, injection_point values.
     - **Review Agent** (`server/governance/review-agent.ts`): LLM quality review scoring 5 dimensions (specificity, evidence_strength, risk, clarity, reversibility). Auto-rejects if score < 0.3. Direct Anthropic SDK call.

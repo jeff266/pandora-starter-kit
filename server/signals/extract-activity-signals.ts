@@ -233,11 +233,11 @@ async function findUnprocessedActivities(
 }
 
 async function getRepDomain(workspaceId: string): Promise<string> {
-  // Get rep domain from first rep email (most workspaces have single company domain)
+  // Get rep domain from sales_reps table (has workspace scoping)
   const result = await query<RepDomain>(
-    `SELECT SPLIT_PART(email, '@', 2) as domain
-     FROM users
-     WHERE workspace_id = $1 AND email IS NOT NULL
+    `SELECT SPLIT_PART(rep_email, '@', 2) as domain
+     FROM sales_reps
+     WHERE workspace_id = $1 AND rep_email IS NOT NULL AND rep_email LIKE '%@%'
      LIMIT 1`,
     [workspaceId]
   );
@@ -246,16 +246,17 @@ async function getRepDomain(workspaceId: string): Promise<string> {
     return result.rows[0].domain;
   }
 
-  // Fallback: get from connection owner email
-  const connResult = await query<RepDomain>(
-    `SELECT SPLIT_PART(created_by_email, '@', 2) as domain
-     FROM connections
-     WHERE workspace_id = $1 AND created_by_email IS NOT NULL
+  // Fallback: get from user_workspaces → users join
+  const uwResult = await query<RepDomain>(
+    `SELECT SPLIT_PART(u.email, '@', 2) as domain
+     FROM user_workspaces uw
+     JOIN users u ON u.id = uw.user_id
+     WHERE uw.workspace_id = $1 AND u.email IS NOT NULL AND u.email LIKE '%@%'
      LIMIT 1`,
     [workspaceId]
   );
 
-  return connResult.rows[0]?.domain || 'unknown.com';
+  return uwResult.rows[0]?.domain || 'unknown.com';
 }
 
 // ============================================================================
@@ -396,7 +397,7 @@ Respond with ONLY valid JSON.`;
 
   const response = await callLLM(workspaceId, 'classify', {
     messages: [{ role: 'user', content: prompt }],
-    maxTokens: 1200,
+    maxTokens: 2000,
     temperature: 0.1,
     _tracking: {
       feature: 'activity_signal_extraction',
@@ -415,7 +416,9 @@ Respond with ONLY valid JSON.`;
 
   try {
     const parsed = JSON.parse(cleaned) as ActivitySignalBatch;
-    const validSignals = parsed.signals.filter(s => s.confidence >= 0.7);
+    // Guard: DeepSeek sometimes returns {} or omits "signals" key
+    const signals: ExtractedSignal[] = Array.isArray(parsed.signals) ? parsed.signals : [];
+    const validSignals = signals.filter(s => s.confidence >= 0.7);
     return { signals: validSignals, tokensUsed: estimatedTokens };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
