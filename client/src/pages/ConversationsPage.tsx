@@ -111,7 +111,7 @@ export default function ConversationsPage() {
   const [dateRangeFilter, setDateRangeFilter] = useState<'all' | '30d' | '60d' | '90d'>('all');
 
   // Coaching tab additional filters
-  const [selectedMeddicGap, setSelectedMeddicGap] = useState<string | null>(null);
+  const [selectedMeddicGaps, setSelectedMeddicGaps] = useState<string[]>([]);
   const [coachingSort, setCoachingSort] = useState<'recent' | 'coverage_asc' | 'coverage_desc'>('recent');
   const [coachingSearch, setCoachingSearch] = useState('');
 
@@ -1149,13 +1149,12 @@ export default function ConversationsPage() {
           } else if (quarterRange && !c.call_date) {
             return false;
           }
-          if (selectedMeddicGap) {
-            if (selectedMeddicGap === 'none') {
-              if (c.deal_id && coverageData[c.deal_id]) return false;
-            } else {
-              const covered = c.deal_id ? (coverageData[c.deal_id]?.covered_fields ?? []) : [];
-              if (covered.includes(selectedMeddicGap)) return false;
-            }
+          if (selectedMeddicGaps.length > 0) {
+            const covered = c.deal_id ? (coverageData[c.deal_id]?.covered_fields ?? []) : [];
+            const missingAny = selectedMeddicGaps.some(gap =>
+              gap === 'none' ? !(c.deal_id && coverageData[c.deal_id]) : !covered.includes(gap)
+            );
+            if (!missingAny) return false;
           }
           return true;
         });
@@ -1231,13 +1230,12 @@ export default function ConversationsPage() {
             const matchOwner = c.deal_owner?.toLowerCase().includes(q);
             if (!matchTitle && !matchAccount && !matchOwner) return false;
           }
-          if (selectedMeddicGap) {
-            if (selectedMeddicGap === 'none') {
-              if (c.deal_id && coverageData[c.deal_id]) return false;
-            } else {
-              const covered = c.deal_id ? (coverageData[c.deal_id]?.covered_fields ?? []) : [];
-              if (covered.includes(selectedMeddicGap)) return false;
-            }
+          if (selectedMeddicGaps.length > 0) {
+            const covered = c.deal_id ? (coverageData[c.deal_id]?.covered_fields ?? []) : [];
+            const missingAny = selectedMeddicGaps.some(gap =>
+              gap === 'none' ? !(c.deal_id && coverageData[c.deal_id]) : !covered.includes(gap)
+            );
+            if (!missingAny) return false;
           }
           return true;
         });
@@ -1258,8 +1256,8 @@ export default function ConversationsPage() {
           return bD - aD;
         });
 
-        const hasFilter = selectedStage !== null || selectedSignal !== null || selectedOwner !== null || selectedQuarter !== null || selectedMeddicGap !== null || coachingSearch !== '';
-        const clearAllFilters = () => { setSelectedStage(null); setSelectedSignal(null); setSelectedOwner(null); setSelectedQuarter(null); setSelectedMeddicGap(null); setCoachingSearch(''); };
+        const hasFilter = selectedStage !== null || selectedSignal !== null || selectedOwner !== null || selectedQuarter !== null || selectedMeddicGaps.length > 0 || coachingSearch !== '';
+        const clearAllFilters = () => { setSelectedStage(null); setSelectedSignal(null); setSelectedOwner(null); setSelectedQuarter(null); setSelectedMeddicGaps([]); setCoachingSearch(''); };
 
         // Filtered headline numbers (used when MEDDIC gap filter is active)
         const filteredAtRiskConvs = filteredCoachingConvs.filter(c => {
@@ -1268,7 +1266,7 @@ export default function ConversationsPage() {
         });
         const filteredAtRiskAmt = filteredAtRiskConvs.reduce((sum, c) => sum + (c.deal_amount ?? 0), 0);
         const filteredAtRiskCount = new Set(filteredAtRiskConvs.map(c => c.deal_id).filter(Boolean)).size;
-        const useFilteredHeadline = selectedMeddicGap !== null;
+        const useFilteredHeadline = selectedMeddicGaps.length > 0;
 
         const CustomTooltip = ({ active, payload, label }: any) => {
           if (!active || !payload?.length) return null;
@@ -1340,7 +1338,7 @@ export default function ConversationsPage() {
                   </div>
                   <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 4, fontFamily: fonts.sans }}>
                     {useFilteredHeadline
-                      ? `Filtered to deals missing ${MEDDIC_LABEL[selectedMeddicGap!] ?? selectedMeddicGap} — click a bar to further filter`
+                      ? `Filtered to deals missing ${selectedMeddicGaps.filter(g => g !== 'none').map(g => MEDDIC_LABEL[g] ?? g).join(', ')}${selectedMeddicGaps.includes('none') ? (selectedMeddicGaps.length > 1 ? ', No Signals' : 'No Signals') : ''} — click a bar to further filter`
                       : 'Benchmarked against time in each stage for your own closed deals — click a bar to filter'}
                   </div>
                 </div>
@@ -1401,22 +1399,35 @@ export default function ConversationsPage() {
                     </select>
                   )}
 
-                  {/* MEDDIC gap filter */}
-                  <select
-                    value={selectedMeddicGap ?? ''}
-                    onChange={e => setSelectedMeddicGap(e.target.value || null)}
-                    style={selectStyle}
-                    title="Filter to deals missing a specific MEDDIC qualification field"
-                  >
-                    <option value="">Any Coverage</option>
-                    <option value="metrics">Missing Metrics</option>
-                    <option value="economic_buyer">Missing Economic Buyer</option>
-                    <option value="decision_criteria">Missing Decision Criteria</option>
-                    <option value="decision_process">Missing Decision Process</option>
-                    <option value="identify_pain">Missing Identify Pain</option>
-                    <option value="champion">Missing Champion</option>
-                    <option value="none">No Signals Yet</option>
-                  </select>
+                  {/* MEDDIC gap pills (multi-select — selects deals missing that field) */}
+                  {([...MEDDIC_FIELDS, 'none'] as const).map(field => {
+                    const active = selectedMeddicGaps.includes(field);
+                    const label = field === 'none' ? "No Signals Yet" : MEDDIC_LABEL[field];
+                    const color = field === 'none' ? colors.textMuted : MEDDIC_COLOR[field];
+                    return (
+                      <button
+                        key={field}
+                        onClick={() => setSelectedMeddicGaps(prev =>
+                          prev.includes(field) ? prev.filter(f => f !== field) : [...prev, field]
+                        )}
+                        title={field === 'none' ? 'Show deals with no signal coverage yet' : `Show deals missing ${label}`}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 5,
+                          padding: '4px 10px', borderRadius: 20,
+                          border: `1px solid ${active ? color : colors.border}`,
+                          background: active ? `${color}22` : 'transparent',
+                          color: active ? color : colors.textMuted,
+                          fontSize: 12, cursor: 'pointer', fontFamily: fonts.sans,
+                          transition: 'all 0.15s', whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {field !== 'none' && (
+                          <span style={{ width: 7, height: 7, borderRadius: '50%', background: color, display: 'inline-block', flexShrink: 0 }} />
+                        )}
+                        {label}
+                      </button>
+                    );
+                  })}
 
                   {/* Divider */}
                   {(availableScopes.length > 1 || fiscalQuarters.length > 0 || availableOwners.length > 0) && (

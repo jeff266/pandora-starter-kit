@@ -1316,29 +1316,46 @@ router.post('/:id/activity-signals/coverage', async (req: Request, res: Response
       return res.json({ coverage: {} });
     }
 
-    const result = await query<{
-      deal_id: string;
-      fields_covered: string;
-      covered_fields: string[];
-    }>(
-      `SELECT deal_id::text,
-              COUNT(DISTINCT framework_field)::text AS fields_covered,
-              array_agg(DISTINCT framework_field) AS covered_fields
-       FROM activity_signals
-       WHERE workspace_id = $1
-         AND signal_type = 'framework_signal'
-         AND deal_id = ANY($2::uuid[])
-         AND framework_field IS NOT NULL
-       GROUP BY deal_id`,
-      [workspaceId, deal_ids]
-    );
+    const [activityResult, convSignalResult] = await Promise.all([
+      query<{ deal_id: string; framework_field: string }>(
+        `SELECT deal_id::text, framework_field
+         FROM activity_signals
+         WHERE workspace_id = $1
+           AND signal_type = 'framework_signal'
+           AND deal_id = ANY($2::uuid[])
+           AND framework_field IS NOT NULL`,
+        [workspaceId, deal_ids]
+      ).catch(() => ({ rows: [] as any[] })),
+
+      query<{ deal_id: string; framework_field: string }>(
+        `SELECT deal_id::text,
+                CASE signal_type
+                  WHEN 'decision_criteria' THEN 'decision_criteria'
+                  WHEN 'champion_signal'   THEN 'champion'
+                  WHEN 'budget_mentioned'  THEN 'metrics'
+                  WHEN 'buying_signal'     THEN 'decision_process'
+                  WHEN 'objection'         THEN 'identify_pain'
+                END AS framework_field
+         FROM conversation_signals
+         WHERE workspace_id = $1
+           AND deal_id = ANY($2::uuid[])
+           AND deal_id IS NOT NULL
+           AND signal_type IN ('decision_criteria','champion_signal','budget_mentioned','buying_signal','objection')`,
+        [workspaceId, deal_ids]
+      ).catch(() => ({ rows: [] as any[] })),
+    ]);
+
+    const coverageMap = new Map<string, Set<string>>();
+    for (const row of [...activityResult.rows, ...convSignalResult.rows]) {
+      if (!row.deal_id || !row.framework_field) continue;
+      if (!coverageMap.has(row.deal_id)) coverageMap.set(row.deal_id, new Set());
+      coverageMap.get(row.deal_id)!.add(row.framework_field);
+    }
 
     const coverage: Record<string, { fields_covered: number; covered_fields: string[] }> = {};
-    for (const row of result.rows) {
-      coverage[row.deal_id] = {
-        fields_covered: parseInt(row.fields_covered, 10),
-        covered_fields: row.covered_fields ?? [],
-      };
+    for (const [dealId, fields] of coverageMap.entries()) {
+      const covered_fields = [...fields];
+      coverage[dealId] = { fields_covered: covered_fields.length, covered_fields };
     }
 
     return res.json({ coverage });
