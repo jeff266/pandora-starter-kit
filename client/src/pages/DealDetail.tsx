@@ -308,6 +308,8 @@ export default function DealDetail() {
   const pipelineDropdownRef = useRef<HTMLDivElement>(null);
   const scopeDropdownRef = useRef<HTMLDivElement>(null);
   const [dealComposite, setDealComposite] = useState<{ label: string; color: string } | null>(null);
+  const [coachingNextStep, setCoachingNextStep] = useState<string | null>(null);
+  const [meddicCoverage, setMeddicCoverage] = useState<{ covered_fields: string[]; field_signal_counts?: Record<string, number> } | null>(null);
 
   useEffect(() => {
     if (!pipelineEditing) return;
@@ -360,8 +362,18 @@ export default function DealDetail() {
     api.get(`/deals/${dealId}/coaching`)
       .then((data: any) => {
         if (data?.composite?.label) setDealComposite({ label: data.composite.label, color: data.composite.color });
+        if (data?.composite?.next_step) setCoachingNextStep(data.composite.next_step);
       })
       .catch(() => {});
+  }, [dealId]);
+
+  useEffect(() => {
+    if (!dealId) return;
+    api.post('/activity-signals/coverage', { deal_ids: [dealId] })
+      .then((data: any) => {
+        setMeddicCoverage(data.coverage?.[dealId] ?? { covered_fields: [] });
+      })
+      .catch(() => { setMeddicCoverage({ covered_fields: [] }); });
   }, [dealId]);
 
   useEffect(() => {
@@ -805,6 +817,30 @@ export default function DealDetail() {
     const unknownRoles = contactsList.filter((c: any) => !c.buying_role || c.buying_role === 'unknown');
     if (unknownRoles.length > 0) nextSteps.push({ priority: 'P2', action: `Classify ${unknownRoles.length} contact${unknownRoles.length > 1 ? 's' : ''} with unknown buying roles.` });
   }
+  // Coaching velocity next step (from stage-specific benchmark)
+  if (coachingNextStep && nextSteps.length < 5) {
+    nextSteps.push({ priority: 'P1', action: coachingNextStep });
+  }
+  // MEDDIC gap next steps — only when data has loaded (not null)
+  if (meddicCoverage !== null) {
+    const meddicGapCopy: Record<string, string> = {
+      economic_buyer: 'Economic buyer not confirmed in calls — get them on a call before advancing stage',
+      champion: 'No internal champion identified in calls — establish an internal sponsor who will advocate for this deal',
+      metrics: 'Success metrics not established — quantify ROI and business impact with the prospect',
+      decision_criteria: 'Decision criteria not captured — ask how they will evaluate and select a vendor',
+      decision_process: 'Decision process unknown — map out evaluation steps from POC to signed contract',
+      identify_pain: 'Pain not documented in calls — ensure the core business problem is articulated and agreed',
+    };
+    const priorityOrder = ['economic_buyer', 'champion', 'metrics', 'decision_criteria', 'decision_process', 'identify_pain'];
+    let meddicAdded = 0;
+    for (const field of priorityOrder) {
+      if (meddicAdded >= 2 || nextSteps.length >= 5) break;
+      if (!meddicCoverage.covered_fields.includes(field)) {
+        nextSteps.push({ priority: 'P1', action: meddicGapCopy[field] });
+        meddicAdded++;
+      }
+    }
+  }
   const priorityMeta = {
     P0: { color: colors.red, bg: `${colors.red}15` },
     P1: { color: colors.yellow, bg: `${colors.yellow}12` },
@@ -1186,7 +1222,7 @@ export default function DealDetail() {
             Recommended Next Steps
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {nextSteps.slice(0, 3).map((step, i) => {
+            {nextSteps.slice(0, 5).map((step, i) => {
               const pm = priorityMeta[step.priority];
               return (
                 <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
@@ -1270,6 +1306,57 @@ export default function DealDetail() {
           )}
           </div>
         </Accordion>
+
+        {/* MEDDIC Coverage accordion */}
+        {(() => {
+          const MEDDIC_FIELDS: Array<{ key: string; label: string }> = [
+            { key: 'metrics', label: 'Metrics' },
+            { key: 'economic_buyer', label: 'Economic Buyer' },
+            { key: 'decision_criteria', label: 'Decision Criteria' },
+            { key: 'decision_process', label: 'Decision Process' },
+            { key: 'identify_pain', label: 'Identify Pain' },
+            { key: 'champion', label: 'Champion' },
+          ];
+          const covered = meddicCoverage?.covered_fields ?? [];
+          const coveredCount = covered.length;
+          return (
+            <Accordion title="MEDDIC Coverage" badge={`${coveredCount}/6`}>
+              <div style={{ paddingTop: 12 }}>
+                <div style={{ fontSize: 11, color: colors.textMuted, marginBottom: 14, lineHeight: 1.5 }}>
+                  Confirmed from call signals extracted across conversations with this account
+                </div>
+                {meddicCoverage === null ? (
+                  <div style={{ fontSize: 12, color: colors.textMuted }}>Loading…</div>
+                ) : coveredCount === 0 ? (
+                  <div style={{ fontSize: 12, color: colors.textMuted, lineHeight: 1.6 }}>
+                    No MEDDIC signals extracted from conversations yet. Signals populate automatically when call recordings are processed.
+                  </div>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 24px' }}>
+                    {MEDDIC_FIELDS.map(({ key, label }) => {
+                      const isCovered = covered.includes(key);
+                      const sigCount = meddicCoverage.field_signal_counts?.[key];
+                      return (
+                        <div key={key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                          <span style={{ fontSize: 12, color: colors.textSecondary }}>{label}</span>
+                          {isCovered ? (
+                            <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 600, color: colors.green, background: `${colors.green}18`, padding: '2px 8px', borderRadius: 10, whiteSpace: 'nowrap' }}>
+                              ✓ Covered{sigCount ? <span style={{ fontWeight: 400, color: colors.textMuted }}> · {sigCount}</span> : null}
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: 11, fontWeight: 500, color: colors.textMuted, background: colors.surfaceHover, padding: '2px 8px', borderRadius: 10 }}>
+                              Gap
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </Accordion>
+          );
+        })()}
 
         {/* Findings accordion — only show if there are findings */}
         {findingsList.length > 0 && (
