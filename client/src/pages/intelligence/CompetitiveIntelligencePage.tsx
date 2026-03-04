@@ -300,6 +300,40 @@ export default function CompetitiveIntelligencePage() {
 
   const noData = !loading && data && data.competitors.length === 0 && data.field_intel.length === 0;
 
+  const [showMath, setShowMath] = useState(false);
+
+  // ── Filtered KPI values (update when a competitor is selected) ────────────
+  const kpiPipelineAtRisk = sortedDeals.reduce((s, d) => s + d.amount, 0);
+  const kpiHighRisk       = sortedDeals.filter(d => d.risk === 'high').reduce((s, d) => s + d.amount, 0);
+  const kpiHardest = selectedCompetitor
+    ? visibleCompetitors.find(c => c.name === selectedCompetitor) ?? null
+    : (visibleCompetitors.length > 0 ? [...visibleCompetitors].sort((a, b) => a.delta - b.delta)[0] : null);
+  const kpiMentionCount = selectedCompetitor
+    ? (visibleCompetitors.find(c => c.name === selectedCompetitor)?.deal_count ?? '—')
+    : data?.mention_change_pct;
+
+  // ── CSV export ────────────────────────────────────────────────────────────
+  const exportCsv = () => {
+    const rows: string[][] = [];
+    rows.push(['=== Competitor Win Rate Breakdown ===']);
+    rows.push(['Competitor', 'Deals Mentioned', 'Win Rate %', 'Baseline %', 'Delta pp', 'Pattern']);
+    for (const c of visibleCompetitors) {
+      rows.push([c.name, String(c.deal_count), String(c.win_rate), String(data?.baseline_win_rate ?? 0), String(c.delta), c.pattern ?? '']);
+    }
+    rows.push([]);
+    rows.push(['=== Open Deal Exposure ===']);
+    rows.push(['Deal', 'Competitor', 'Amount', 'Stage', 'Mentions', 'Last Mention', 'Risk']);
+    for (const d of sortedDeals) {
+      rows.push([d.deal_name, d.competitor_name, String(d.amount), d.stage, String(d.mention_count), d.last_mention_at, d.risk]);
+    }
+    const csv = rows.map(r => r.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'competitive-intelligence.csv'; a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div style={{ background: C.bg, minHeight: '100vh', fontFamily: font, color: C.text, padding: '28px 32px' }}>
       <style>{`
@@ -393,7 +427,7 @@ export default function CompetitiveIntelligencePage() {
       )}
 
       {/* ── KPI Strip ─────────────────────────────────────────────────────── */}
-      <div style={{ display: 'flex', gap: 14, marginBottom: 28 }}>
+      <div style={{ display: 'flex', gap: 14, marginBottom: showMath ? 16 : 28, alignItems: 'flex-end' }}>
         {loading ? (
           <>
             {[0,1,2,3].map(i => (
@@ -413,29 +447,109 @@ export default function CompetitiveIntelligencePage() {
               accent={C.green}
             />
             <StatCard
-              label="Open pipeline at risk"
-              value={data ? formatCurrency(data.pipeline_at_risk) : '—'}
-              sub={data ? `${formatCurrency(data.high_risk_pipeline)} flagged high-risk` : undefined}
+              label={selectedCompetitor ? `${selectedCompetitor} pipeline` : 'Open pipeline at risk'}
+              value={data ? formatCurrency(kpiPipelineAtRisk) : '—'}
+              sub={data ? `${formatCurrency(kpiHighRisk)} flagged high-risk` : undefined}
               valueColor={C.red}
               accent={C.red}
             />
             <StatCard
-              label="Hardest to beat"
-              value={data?.hardest_competitor ?? '—'}
-              sub={data?.hardest_competitor_delta != null ? `${data.hardest_competitor_delta > 0 ? '+' : ''}${data.hardest_competitor_delta}pp vs. baseline` : 'No data yet'}
-              valueColor={C.red}
+              label={selectedCompetitor ? 'Win rate vs. baseline' : 'Hardest to beat'}
+              value={selectedCompetitor
+                ? (kpiHardest ? `${kpiHardest.win_rate}%` : '—')
+                : (kpiHardest?.name ?? '—')}
+              sub={kpiHardest
+                ? (selectedCompetitor
+                    ? `${kpiHardest.delta > 0 ? '+' : ''}${kpiHardest.delta}pp vs. ${data?.baseline_win_rate}% baseline`
+                    : `${kpiHardest.delta > 0 ? '+' : ''}${kpiHardest.delta}pp vs. baseline`)
+                : 'No data yet'}
+              valueColor={selectedCompetitor && kpiHardest && kpiHardest.win_rate < (data?.baseline_win_rate ?? 50) ? C.red : (selectedCompetitor ? C.green : C.red)}
               accent={C.purple}
             />
             <StatCard
-              label="Competitor mentions"
-              value={data?.mention_change_pct != null ? `${data.mention_change_pct > 0 ? '+' : ''}${data.mention_change_pct}%` : 'First run'}
-              sub="vs. prior 90-day period"
+              label={selectedCompetitor ? `${selectedCompetitor} deal count` : 'Competitor mentions'}
+              value={selectedCompetitor
+                ? String(kpiMentionCount ?? '—')
+                : (data?.mention_change_pct != null ? `${data.mention_change_pct > 0 ? '+' : ''}${data.mention_change_pct}%` : 'First run')}
+              sub={selectedCompetitor ? 'Deals with at least one mention' : 'vs. prior 90-day period'}
               valueColor={C.orange}
               accent={C.orange}
             />
           </>
         )}
+        {!loading && data && (
+          <button
+            onClick={() => setShowMath(v => !v)}
+            style={{
+              flexShrink: 0, alignSelf: 'flex-end',
+              background: showMath ? C.accentSoft : 'transparent',
+              border: `1px solid ${showMath ? C.accent : C.borderLight}`,
+              color: showMath ? C.accent : C.textMuted,
+              fontSize: 12, fontFamily: font, fontWeight: 500,
+              padding: '7px 13px', borderRadius: 7, cursor: 'pointer',
+              transition: 'all 0.15s', whiteSpace: 'nowrap', marginBottom: 0,
+            }}>
+            {showMath ? '✕ Hide math' : '∑ Show math'}
+          </button>
+        )}
       </div>
+
+      {/* ── Math breakdown panel ───────────────────────────────────────────── */}
+      {showMath && data && (
+        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, marginBottom: 28, overflow: 'hidden' }}>
+          <div style={{ padding: '14px 20px', borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <span style={{ fontSize: 13, fontWeight: 600, color: C.text, fontFamily: font }}>
+                Win rate math{selectedCompetitor ? ` · ${selectedCompetitor}` : ''}
+              </span>
+              <span style={{ fontSize: 12, color: C.textMuted, fontFamily: font, marginLeft: 10 }}>
+                Baseline {data.baseline_win_rate}% · {visibleCompetitors.length} competitor{visibleCompetitors.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+            <button
+              onClick={exportCsv}
+              style={{
+                background: C.accentSoft, border: `1px solid ${C.accent}`,
+                color: C.accent, fontSize: 12, fontFamily: font, fontWeight: 600,
+                padding: '5px 12px', borderRadius: 6, cursor: 'pointer',
+              }}>
+              ↓ Export CSV
+            </button>
+          </div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${C.border}` }}>
+                  {['Competitor', 'Deals Mentioned', 'Win Rate', 'Baseline', 'Delta', 'Pipeline at Risk', 'High-Risk Pipeline', 'Pattern'].map(h => (
+                    <th key={h} style={{ padding: '8px 16px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: C.textMuted, letterSpacing: '0.06em', textTransform: 'uppercase', fontFamily: font, whiteSpace: 'nowrap' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {visibleCompetitors
+                  .filter(c => !selectedCompetitor || c.name === selectedCompetitor)
+                  .map(c => {
+                    const cDeals = sortedDeals.filter(d => d.competitor_name === c.name);
+                    const cPipeline = cDeals.reduce((s, d) => s + d.amount, 0);
+                    const cHighRisk = cDeals.filter(d => d.risk === 'high').reduce((s, d) => s + d.amount, 0);
+                    return (
+                      <tr key={c.name} style={{ borderBottom: `1px solid ${C.border}` }}>
+                        <td style={{ padding: '10px 16px', fontSize: 13, fontWeight: 600, color: C.text, fontFamily: font }}>{c.name}</td>
+                        <td style={{ padding: '10px 16px', fontSize: 13, fontFamily: mono, color: C.textSecondary }}>{c.deal_count}</td>
+                        <td style={{ padding: '10px 16px', fontSize: 13, fontFamily: mono, fontWeight: 600, color: c.win_rate < data.baseline_win_rate ? C.red : C.green }}>{c.win_rate}%</td>
+                        <td style={{ padding: '10px 16px', fontSize: 13, fontFamily: mono, color: C.textMuted }}>{data.baseline_win_rate}%</td>
+                        <td style={{ padding: '10px 16px' }}><Delta value={c.delta} /></td>
+                        <td style={{ padding: '10px 16px', fontSize: 13, fontFamily: mono, color: C.text, fontWeight: 600 }}>{formatCurrency(cPipeline)}</td>
+                        <td style={{ padding: '10px 16px', fontSize: 13, fontFamily: mono, color: cHighRisk > 0 ? C.red : C.textMuted }}>{formatCurrency(cHighRisk)}</td>
+                        <td style={{ padding: '10px 16px' }}><PatternBadge pattern={c.pattern} /></td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* ── No-data empty state ────────────────────────────────────────────── */}
       {noData && (
@@ -546,7 +660,7 @@ export default function CompetitiveIntelligencePage() {
             <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 14 }}>
               <thead>
                 <tr style={{ borderBottom: `1px solid ${C.border}` }}>
-                  {['Competitor', 'Deals', 'Win Rate', 'vs. Baseline', 'Trend', 'Pattern', ''].map(h => (
+                  {['Competitor', 'Deals', 'Win Rate', 'vs. Baseline', 'Trend', 'Pattern'].map(h => (
                     <th key={h} style={{ padding: '8px 16px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: C.textMuted, letterSpacing: '0.06em', textTransform: 'uppercase', fontFamily: font, whiteSpace: 'nowrap' }}>{h}</th>
                   ))}
                 </tr>
@@ -554,7 +668,7 @@ export default function CompetitiveIntelligencePage() {
               <tbody>
                 {loading && [0,1,2,3].map(i => (
                   <tr key={i} style={{ borderBottom: `1px solid ${C.border}` }}>
-                    {[0,1,2,3,4,5,6].map(j => (
+                    {[0,1,2,3,4,5].map(j => (
                       <td key={j} style={{ padding: '13px 16px' }}><SkeletonBlock h={12} w={j === 0 ? '80px' : '50px'} /></td>
                     ))}
                   </tr>
@@ -579,23 +693,25 @@ export default function CompetitiveIntelligencePage() {
                         <span style={{ fontSize: 11, color: C.textMuted, fontFamily: mono }}>{c.mention_trend}</span>
                       </div>
                     </td>
-                    <td style={{ padding: '11px 16px' }}><PatternBadge pattern={c.pattern} /></td>
-                    <td style={{ padding: '11px 16px', textAlign: 'right', width: 80 }}>
-                      {excludeHover === c.name && (
-                        <button
-                          onClick={e => { e.stopPropagation(); excludeCompetitor(c.name); }}
-                          onMouseEnter={e => (e.currentTarget.style.color = C.red)}
-                          onMouseLeave={e => (e.currentTarget.style.color = C.textMuted)}
-                          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: C.textMuted, fontFamily: font, padding: '2px 6px', borderRadius: 4, transition: 'color 0.15s' }}>
-                          ⊘ Exclude
-                        </button>
-                      )}
+                    <td style={{ padding: '11px 16px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                        <PatternBadge pattern={c.pattern} />
+                        {excludeHover === c.name && (
+                          <button
+                            onClick={e => { e.stopPropagation(); excludeCompetitor(c.name); }}
+                            onMouseEnter={e => (e.currentTarget.style.color = C.red)}
+                            onMouseLeave={e => (e.currentTarget.style.color = C.textMuted)}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: C.textMuted, fontFamily: font, padding: '2px 6px', borderRadius: 4, transition: 'color 0.15s', flexShrink: 0 }}>
+                            ⊘ Exclude
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
                 {!loading && visibleCompetitors.length === 0 && (
                   <tr>
-                    <td colSpan={7} style={{ padding: '32px 16px', textAlign: 'center', fontSize: 13, color: C.textMuted, fontFamily: font }}>
+                    <td colSpan={6} style={{ padding: '32px 16px', textAlign: 'center', fontSize: 13, color: C.textMuted, fontFamily: font }}>
                       No competitive data yet. The skill runs on the 1st of each month.
                     </td>
                   </tr>
