@@ -103,6 +103,7 @@ export async function discoverWinPatterns(
        AND d.stage_normalized IN ('closed_won', 'closed_lost')
        AND d.created_at > NOW() - INTERVAL '12 months'
        AND d.close_date IS NOT NULL
+       AND EXTRACT(days FROM d.close_date::timestamp - d.created_at::timestamp) > 0
      ORDER BY d.close_date DESC`,
     [workspaceId]
   );
