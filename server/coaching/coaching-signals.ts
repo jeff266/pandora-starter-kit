@@ -98,6 +98,8 @@ interface SignalCopy {
   action_sentence: string;
 }
 
+const dayStr = (n: number) => `${n} ${n === 1 ? 'day' : 'days'}`;
+
 function getSignalCopy(
   dimension: string,
   type: 'action' | 'positive',
@@ -108,15 +110,15 @@ function getSignalCopy(
   const copies: Record<string, Record<string, SignalCopy>> = {
     sales_cycle_days: {
       action: {
-        label: `${Math.round(currentValue)} days in — ${Math.round(currentValue / Math.max(wonMedian, 1))}× your typical close pace`,
-        action_sentence: `Your wins at this price point close in ${Math.round(wonMedian)} days. At ${Math.round(currentValue)} days, this deal needs a direct conversation about timeline and next steps.`,
+        label: `${dayStr(Math.round(currentValue))} in — ${Math.round(currentValue / Math.max(wonMedian, 1))}× your typical close pace`,
+        action_sentence: `Your wins at this price point close in ${dayStr(Math.round(wonMedian))}. At ${Math.round(currentValue)} days, this deal needs a direct conversation about timeline and next steps.`,
       },
       positive: {
-        label: `Closing fast — ${Math.round(currentValue)} days`,
+        label: `Closing fast — ${dayStr(Math.round(currentValue))}`,
         action_sentence:
           mode === 'retrospective'
-            ? `Closed in ${Math.round(currentValue)} days vs a ${Math.round(wonMedian)}-day pace. Worth capturing what drove this speed.`
-            : `Ahead of pace at ${Math.round(currentValue)} days — your wins at this size take ${Math.round(wonMedian)} days. Keep the momentum.`,
+            ? `Closed in ${dayStr(Math.round(currentValue))} vs a ${Math.round(wonMedian)}-day pace. Worth capturing what drove this speed.`
+            : `Ahead of pace at ${dayStr(Math.round(currentValue))} — your wins at this size take ${dayStr(Math.round(wonMedian))}. Keep the momentum.`,
       },
     },
 

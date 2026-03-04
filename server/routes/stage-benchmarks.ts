@@ -84,7 +84,7 @@ router.get('/:workspaceId/stage-benchmarks', async (req: Request, res: Response)
          WHERE dsh.workspace_id = $1
            AND d.stage_normalized IN ('closed_won', 'closed_lost')
            AND dsh.stage_normalized NOT IN ('closed_won', 'closed_lost', 'unknown')
-           AND dsh.duration_days IS NOT NULL
+           AND dsh.duration_days > 0
            AND sc.stage_name IS NOT NULL
            AND sc.is_active = true
            ${pipelineFilter ? 'AND d.pipeline = $2' : ''}
