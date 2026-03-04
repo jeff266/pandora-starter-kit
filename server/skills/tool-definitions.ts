@@ -5742,6 +5742,24 @@ const ciCompGatherMentions: ToolDefinition = {
     return safeExecute('ciCompGatherMentions', async () => {
       const lookbackMonths = params.lookback_months || 6;
 
+      // Primary source: conversation_signals (populated by AI signal extractor)
+      const signalResult = await query<any>(
+        `SELECT DISTINCT ON (cv.deal_id, cs.signal_value)
+                cv.deal_id, cv.call_date,
+                d.name as deal_name, d.amount, d.stage, d.stage_normalized, d.owner,
+                cs.signal_value as comp_name, cs.confidence, cs.source_quote
+         FROM conversation_signals cs
+         JOIN conversations cv ON cv.id = cs.conversation_id AND cv.workspace_id = $1
+         LEFT JOIN deals d ON d.id = cv.deal_id AND d.workspace_id = $1
+         WHERE cs.workspace_id = $1
+           AND cs.signal_type = 'competitor_mention'
+           AND cv.call_date >= NOW() - ($2 || ' months')::interval
+         ORDER BY cv.deal_id, cs.signal_value, cv.call_date DESC
+         LIMIT 500`,
+        [context.workspaceId, String(lookbackMonths)]
+      ).catch(() => ({ rows: [] as any[] }));
+
+      // Fallback: conversations.competitor_mentions JSONB (legacy path)
       const convResult = await query<any>(
         `SELECT DISTINCT ON (cv.deal_id, comp_name)
                 cv.deal_id, cv.call_date,
@@ -5771,7 +5789,7 @@ const ciCompGatherMentions: ToolDefinition = {
         [context.workspaceId, String(lookbackMonths)]
       ).catch(() => ({ rows: [] as any[] }));
 
-      // Aggregate by competitor
+      // Aggregate by competitor across all sources
       const compMap = new Map<string, { deal_ids: Set<string>; deals: any[] }>();
       const addMention = (name: string, deal: any) => {
         const key = name.toLowerCase().trim();
@@ -5786,6 +5804,7 @@ const ciCompGatherMentions: ToolDefinition = {
         }
       };
 
+      for (const r of signalResult.rows) { if (r.comp_name) addMention(r.comp_name, r); }
       for (const r of convResult.rows) { if (r.comp_name) addMention(r.comp_name, r); }
       for (const r of insightResult.rows) {
         const val = typeof r.insight_value === 'string' ? r.insight_value : JSON.stringify(r.insight_value);
@@ -5803,8 +5822,8 @@ const ciCompGatherMentions: ToolDefinition = {
 
       return {
         competitors,
-        total_deals_with_competition: new Set([...convResult.rows, ...insightResult.rows].map(r => r.deal_id)).size,
-        data_sources: { conversations: convResult.rows.length, deal_insights: insightResult.rows.length },
+        total_deals_with_competition: new Set([...signalResult.rows, ...convResult.rows, ...insightResult.rows].map(r => r.deal_id)).size,
+        data_sources: { conversation_signals: signalResult.rows.length, conversations: convResult.rows.length, deal_insights: insightResult.rows.length },
       };
     }, params);
   },

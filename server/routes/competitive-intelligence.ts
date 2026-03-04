@@ -46,8 +46,6 @@ interface FieldIntelRow {
   created_at: string;
 }
 
-const OPEN_STAGES = ['closed_won', 'closed_lost'];
-
 function deriveRisk(
   row: { stage_normalized: string; mention_count: number; last_mention_at: string },
   patternByName: Record<string, CompetitorPattern | null>,
@@ -74,6 +72,8 @@ function mentionChangePct(current: number, prev: number): number | null {
 /**
  * GET /:workspaceId/intelligence/competitive
  * Returns the full competitive intelligence page payload.
+ * Primary data source: conversation_signals (signal_type = 'competitor_mention')
+ * Supplementary: skill_runs (for last_run_at + patterns), deal_insights (for field intel)
  */
 router.get('/:workspaceId/intelligence/competitive', async (req: Request, res: Response) => {
   const workspaceId = req.params.workspaceId as string;
@@ -85,10 +85,11 @@ router.get('/:workspaceId/intelligence/competitive', async (req: Request, res: R
       fieldIntelResult,
       competitorWinRatesResult,
       baselineResult,
-      prevMentionTotalsResult,
+      prevPeriodResult,
+      currentPeriodResult,
     ] = await Promise.all([
 
-      // Query 1: last 2 completed skill runs (for last_run_at + pattern extraction from steps)
+      // Q1: last 2 skill runs — for last_run_at and pattern step output
       query<any>(
         `SELECT output, steps, created_at
          FROM skill_runs
@@ -100,7 +101,7 @@ router.get('/:workspaceId/intelligence/competitive', async (req: Request, res: R
         [workspaceId]
       ).catch(() => ({ rows: [] as any[] })),
 
-      // Query 2: open deal exposure — uses stage_normalized NOT IN closed states
+      // Q2: open deal exposure — via conversation_signals (not conversations.competitor_mentions)
       query<any>(
         `SELECT
            d.id AS deal_id,
@@ -109,62 +110,60 @@ router.get('/:workspaceId/intelligence/competitive', async (req: Request, res: R
            d.stage,
            d.stage_normalized,
            d.owner AS owner_email,
-           comp_name AS competitor_name,
+           cs.signal_value AS competitor_name,
            COUNT(DISTINCT cv.id)::int AS mention_count,
            MAX(cv.call_date) AS last_mention_at
-         FROM deals d
-         JOIN conversations cv ON cv.deal_id = d.id AND cv.workspace_id = $1
-         CROSS JOIN LATERAL jsonb_array_elements_text(cv.competitor_mentions) AS comp_name
-         WHERE d.workspace_id = $1
+         FROM conversation_signals cs
+         JOIN conversations cv ON cv.id = cs.conversation_id AND cv.workspace_id = $1
+         JOIN deals d ON d.id = cv.deal_id AND d.workspace_id = $1
+         WHERE cs.workspace_id = $1
+           AND cs.signal_type = 'competitor_mention'
            AND d.stage_normalized NOT IN ('closed_won', 'closed_lost')
-           AND cv.competitor_mentions IS NOT NULL
-           AND jsonb_array_length(cv.competitor_mentions) > 0
-         GROUP BY d.id, d.name, d.amount, d.stage, d.stage_normalized, d.owner, comp_name
+         GROUP BY d.id, d.name, d.amount, d.stage, d.stage_normalized, d.owner, cs.signal_value
          ORDER BY d.amount DESC NULLS LAST`,
         [workspaceId]
       ).catch(() => ({ rows: [] as any[] })),
 
-      // Query 3: field intel from deal_insights
+      // Q3: field intel — from conversation_signals source_quotes + deal_insights
       query<any>(
         `SELECT
-           di.insight_value AS competitor_name,
-           di.source_quote,
-           di.confidence,
-           di.extracted_at AS created_at,
+           cs.signal_value AS competitor_name,
+           cs.source_quote,
+           cs.confidence,
+           cs.created_at,
            d.name AS deal_name,
            d.owner AS owner_email
-         FROM deal_insights di
-         JOIN deals d ON d.id = di.deal_id AND d.workspace_id = $1
-         WHERE di.workspace_id = $1
-           AND di.insight_type = 'competition'
-           AND di.source_quote IS NOT NULL
-           AND di.source_quote != ''
-           AND di.is_current = true
-         ORDER BY di.confidence DESC, di.extracted_at DESC
-         LIMIT 20`,
+         FROM conversation_signals cs
+         JOIN conversations cv ON cv.id = cs.conversation_id AND cv.workspace_id = $1
+         JOIN deals d ON d.id = cv.deal_id AND d.workspace_id = $1
+         WHERE cs.workspace_id = $1
+           AND cs.signal_type = 'competitor_mention'
+           AND cs.source_quote IS NOT NULL
+           AND cs.source_quote != ''
+         ORDER BY cs.confidence DESC, cs.created_at DESC
+         LIMIT 30`,
         [workspaceId]
       ).catch(() => ({ rows: [] as any[] })),
 
-      // Query 4: competitor win rates computed directly from DB
+      // Q4: competitor win rates from conversation_signals + deals
       query<any>(
         `SELECT
-           comp_name AS competitor_name,
+           cs.signal_value AS competitor_name,
            COUNT(DISTINCT d.id)::int AS deals_mentioned,
            COUNT(DISTINCT CASE WHEN d.stage_normalized = 'closed_won' THEN d.id END)::float /
              NULLIF(COUNT(DISTINCT CASE WHEN d.stage_normalized IN ('closed_won','closed_lost') THEN d.id END), 0)
              AS win_rate
-         FROM deals d
-         JOIN conversations cv ON cv.deal_id = d.id AND cv.workspace_id = $1
-         CROSS JOIN LATERAL jsonb_array_elements_text(cv.competitor_mentions) AS comp_name
-         WHERE d.workspace_id = $1
-           AND cv.competitor_mentions IS NOT NULL
-           AND jsonb_array_length(cv.competitor_mentions) > 0
-         GROUP BY comp_name
+         FROM conversation_signals cs
+         JOIN conversations cv ON cv.id = cs.conversation_id AND cv.workspace_id = $1
+         JOIN deals d ON d.id = cv.deal_id AND d.workspace_id = $1
+         WHERE cs.workspace_id = $1
+           AND cs.signal_type = 'competitor_mention'
+         GROUP BY cs.signal_value
          ORDER BY deals_mentioned DESC`,
         [workspaceId]
       ).catch(() => ({ rows: [] as any[] })),
 
-      // Query 5: baseline win rate (all closed deals, no filter)
+      // Q5: baseline win rate (all closed deals)
       query<any>(
         `SELECT
            COUNT(CASE WHEN stage_normalized = 'closed_won' THEN 1 END)::float /
@@ -175,20 +174,30 @@ router.get('/:workspaceId/intelligence/competitive', async (req: Request, res: R
         [workspaceId]
       ).catch(() => ({ rows: [] as any[] })),
 
-      // Query 6: previous period mention totals (30–60 days ago) for change pct
+      // Q6: prev 30-day competitor signal count (for MoM change)
       query<any>(
-        `SELECT COUNT(DISTINCT cv.id)::int AS prev_mention_count
-         FROM conversations cv
-         CROSS JOIN LATERAL jsonb_array_elements_text(cv.competitor_mentions) AS comp_name
-         WHERE cv.workspace_id = $1
-           AND cv.competitor_mentions IS NOT NULL
-           AND jsonb_array_length(cv.competitor_mentions) > 0
+        `SELECT COUNT(DISTINCT cs.id)::int AS count
+         FROM conversation_signals cs
+         JOIN conversations cv ON cv.id = cs.conversation_id AND cv.workspace_id = $1
+         WHERE cs.workspace_id = $1
+           AND cs.signal_type = 'competitor_mention'
            AND cv.call_date BETWEEN NOW() - INTERVAL '60 days' AND NOW() - INTERVAL '30 days'`,
+        [workspaceId]
+      ).catch(() => ({ rows: [] as any[] })),
+
+      // Q7: current 30-day competitor signal count
+      query<any>(
+        `SELECT COUNT(DISTINCT cs.id)::int AS count
+         FROM conversation_signals cs
+         JOIN conversations cv ON cv.id = cs.conversation_id AND cv.workspace_id = $1
+         WHERE cs.workspace_id = $1
+           AND cs.signal_type = 'competitor_mention'
+           AND cv.call_date >= NOW() - INTERVAL '30 days'`,
         [workspaceId]
       ).catch(() => ({ rows: [] as any[] })),
     ]);
 
-    // ── Skill run metadata (last_run_at + patterns from steps) ─────────────
+    // ── Skill run metadata (last_run_at + pattern classification from steps) ─
     const newestRun = skillRunsResult.rows[0] ?? null;
     const lastRunAt: string | null = newestRun?.created_at ?? null;
     const patternByName: Record<string, CompetitorPattern | null> = {};
@@ -213,7 +222,7 @@ router.get('/:workspaceId/intelligence/competitive', async (req: Request, res: R
     const rawBaseline = baselineResult.rows[0]?.baseline_win_rate;
     const baselineWinRate = rawBaseline != null ? Math.round(parseFloat(rawBaseline) * 100) : 0;
 
-    // ── Competitor leaderboard (from DB win rates) ─────────────────────────
+    // ── Competitor leaderboard ─────────────────────────────────────────────
     const competitors: CompetitorRow[] = competitorWinRatesResult.rows.map((r: any) => {
       const winRate = r.win_rate != null ? Math.round(parseFloat(r.win_rate) * 100) : 0;
       const delta = winRate - baselineWinRate;
@@ -231,23 +240,10 @@ router.get('/:workspaceId/intelligence/competitive', async (req: Request, res: R
       };
     });
 
-    // ── Mention change pct (current 30d vs prev 30d) ───────────────────────
-    let mentionChangePctVal: number | null = null;
-    const prevMentionCount: number = prevMentionTotalsResult.rows[0]?.prev_mention_count ?? 0;
-    if (prevMentionCount > 0) {
-      const currentMentionCountResult = await query<any>(
-        `SELECT COUNT(DISTINCT cv.id)::int AS current_mention_count
-         FROM conversations cv
-         CROSS JOIN LATERAL jsonb_array_elements_text(cv.competitor_mentions) AS comp_name
-         WHERE cv.workspace_id = $1
-           AND cv.competitor_mentions IS NOT NULL
-           AND jsonb_array_length(cv.competitor_mentions) > 0
-           AND cv.call_date >= NOW() - INTERVAL '30 days'`,
-        [workspaceId]
-      ).catch(() => ({ rows: [] as any[] }));
-      const currentMentionCount: number = currentMentionCountResult.rows[0]?.current_mention_count ?? 0;
-      mentionChangePctVal = mentionChangePct(currentMentionCount, prevMentionCount);
-    }
+    // ── MoM mention change ─────────────────────────────────────────────────
+    const prevCount: number = prevPeriodResult.rows[0]?.count ?? 0;
+    const currentCount: number = currentPeriodResult.rows[0]?.count ?? 0;
+    const mentionChangePctVal: number | null = mentionChangePct(currentCount, prevCount);
 
     // ── Open deal exposure ─────────────────────────────────────────────────
     const openDeals: OpenDealRow[] = openDealsResult.rows.map((r: any) => ({
@@ -273,11 +269,9 @@ router.get('/:workspaceId/intelligence/competitive', async (req: Request, res: R
     }));
 
     const pipelineAtRisk = openDeals.reduce((sum, d) => sum + d.amount, 0);
-    const highRiskPipeline = openDeals
-      .filter(d => d.risk === 'high')
-      .reduce((sum, d) => sum + d.amount, 0);
+    const highRiskPipeline = openDeals.filter(d => d.risk === 'high').reduce((sum, d) => sum + d.amount, 0);
 
-    // ── Hardest competitor (most negative delta) ───────────────────────────
+    // ── Hardest competitor (most negative delta vs baseline) ───────────────
     let hardestCompetitor: string | null = null;
     let hardestCompetitorDelta: number | null = null;
     if (competitors.length > 0) {
