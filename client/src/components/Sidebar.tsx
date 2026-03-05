@@ -63,8 +63,6 @@ const sections: NavSection[] = [
     items: [
       { label: 'Connectors', path: '/connectors', icon: '\u229E' },
       { label: 'Enrichment', path: '/enrichment', icon: '\u2B22' },
-      { label: 'Connector Health', path: '/connectors/health', icon: '\u2661' },
-      { label: 'Filters', path: '/filters', icon: '\u25A7' },
     ],
   },
   {
@@ -73,8 +71,6 @@ const sections: NavSection[] = [
       { label: 'Members', path: '/members', icon: '\u2295' },
       { label: 'Marketplace', path: '/marketplace', icon: '\u25EB' },
       { label: 'Settings', path: '/settings', icon: '\u229B' },
-      { label: 'Scopes', path: '/admin/scopes', icon: '\u25A4' },
-      { label: 'Token Usage', path: '/admin/token-usage', icon: '\u25A2' },
     ],
   },
 ];
@@ -99,6 +95,36 @@ export default function Sidebar({ badges, showAllClients, collapsed = false, onT
   const [showWsDropdown, setShowWsDropdown] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [unassignedCount, setUnassignedCount] = useState(0);
+
+  const activeSection = sections.find(s => s.title && s.items.some(i => i.path !== '/' ? location.pathname.startsWith(i.path) : location.pathname === '/'))?.title ?? null;
+
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => {
+    try {
+      const stored = localStorage.getItem('sidebar_collapsed_sections');
+      if (stored) return new Set(JSON.parse(stored));
+    } catch {}
+    return new Set(sections.filter(s => s.title && s.title !== activeSection).map(s => s.title!));
+  });
+
+  const toggleSection = (title: string) => {
+    setCollapsedSections(prev => {
+      const next = new Set(prev);
+      if (next.has(title)) next.delete(title); else next.add(title);
+      try { localStorage.setItem('sidebar_collapsed_sections', JSON.stringify([...next])); } catch {}
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    if (activeSection && collapsedSections.has(activeSection)) {
+      setCollapsedSections(prev => {
+        const next = new Set(prev);
+        next.delete(activeSection);
+        try { localStorage.setItem('sidebar_collapsed_sections', JSON.stringify([...next])); } catch {}
+        return next;
+      });
+    }
+  }, [location.pathname]);
 
   useEffect(() => {
     if (!showAllClients || workspaces.length <= 1 || !token) return;
@@ -266,17 +292,32 @@ export default function Sidebar({ badges, showAllClients, collapsed = false, onT
             <div style={{ height: 1, background: colors.border, margin: collapsed ? '4px 8px' : '4px 14px' }} />
           </div>
         )}
-        {sections.map((section, si) => (
+        {sections.map((section, si) => {
+          const isSectionCollapsed = !collapsed && !!section.title && collapsedSections.has(section.title);
+          return (
           <div key={si} style={{ marginBottom: 4 }}>
             {section.title && !collapsed && (
-              <div style={{ fontSize: 10, fontWeight: 600, color: colors.textDim, padding: '12px 16px 4px', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}>
-                {section.title}
+              <div
+                onClick={() => toggleSection(section.title!)}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '10px 16px 4px', cursor: 'pointer', userSelect: 'none',
+                }}
+                onMouseEnter={e => (e.currentTarget.style.opacity = '0.8')}
+                onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
+              >
+                <span style={{ fontSize: 10, fontWeight: 700, color: colors.textSecondary, letterSpacing: '0.08em', whiteSpace: 'nowrap' }}>
+                  {section.title}
+                </span>
+                <span style={{ fontSize: 9, color: colors.textMuted, transition: 'transform 0.15s', display: 'inline-block', transform: isSectionCollapsed ? 'rotate(-90deg)' : 'none' }}>
+                  ▾
+                </span>
               </div>
             )}
             {collapsed && section.title && (
               <div style={{ height: 1, background: colors.border, margin: '6px 10px' }} />
             )}
-            {section.items.map(item => {
+            {!isSectionCollapsed && section.items.map(item => {
               const active = isActive(item.path);
               const badgeCount = badges[item.label.toLowerCase()];
               return (
@@ -318,7 +359,8 @@ export default function Sidebar({ badges, showAllClients, collapsed = false, onT
               );
             })}
           </div>
-        ))}
+          );
+        })}
       </nav>
 
       <div style={{ borderTop: `1px solid ${colors.border}`, padding: collapsed ? '10px 0' : '10px 14px' }}>
