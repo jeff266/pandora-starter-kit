@@ -16,7 +16,7 @@ async function validateWorkspace(workspaceId: string, res: any): Promise<boolean
   return true;
 }
 
-router.post('/:workspaceId/connectors/hubspot/backfill-stage-history', async (req, res) => {
+router.post('/:workspaceId/connectors/hubspot/backfill-stage-history', requirePermission('connectors.trigger_sync'), async (req, res) => {
   try {
     const { workspaceId } = req.params;
     if (!(await validateWorkspace(workspaceId, res))) return;

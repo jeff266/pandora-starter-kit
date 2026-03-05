@@ -1,5 +1,6 @@
 import { query } from '../db.js';
 import { callLLM, assistantMessageFromResponse, toolResultMessage } from '../utils/llm-router.js';
+import { sanitizeForPrompt } from '../utils/sanitize-for-prompt.js';
 import { configLoader } from '../config/workspace-config-loader.js';
 import { assembleDealDossier, type DealDossier } from '../dossiers/deal-dossier.js';
 import { assembleAccountDossier, type AccountDossier } from '../dossiers/account-dossier.js';
@@ -63,10 +64,10 @@ function compressDealContext(dossier: DealDossier): { text: string; sources: str
   const lines: string[] = [];
   const sources: string[] = ['deal'];
 
-  lines.push(`DEAL: ${d.name}`);
+  lines.push(`DEAL: ${sanitizeForPrompt(d.name)}`);
   lines.push(`Amount: ${fmtAmount(d.amount)} | Stage: ${d.stage || d.stage_normalized} (${d.days_in_stage ?? '?'} days) | Close: ${fmtDate(d.close_date)}`);
-  lines.push(`Owner: ${d.owner_name || d.owner_email || 'unknown'}`);
-  if (d.account_name) lines.push(`Account: ${d.account_name}`);
+  lines.push(`Owner: ${sanitizeForPrompt(d.owner_name || d.owner_email || 'unknown')}`);
+  if (d.account_name) lines.push(`Account: ${sanitizeForPrompt(d.account_name)}`);
   if (d.probability != null) {
     const prob = Number(d.probability);
     const probPct = prob > 1 ? Math.round(prob) : Math.round(prob * 100);
@@ -84,8 +85,8 @@ function compressDealContext(dossier: DealDossier): { text: string; sources: str
     sources.push('contacts');
     lines.push(`\nCONTACTS (${dossier.contacts.length}):`);
     for (const c of dossier.contacts) {
-      const parts = [`${c.name}`];
-      if (c.title) parts.push(c.title);
+      const parts = [sanitizeForPrompt(c.name)];
+      if (c.title) parts.push(sanitizeForPrompt(c.title));
       parts.push(c.engagement_level);
       if (c.buying_role && c.buying_role !== 'unknown') parts.push(c.buying_role);
       lines.push(`- ${parts.join(', ')}`);
@@ -98,7 +99,7 @@ function compressDealContext(dossier: DealDossier): { text: string; sources: str
     for (const cv of dossier.conversations.slice(0, 5)) {
       const dur = cv.duration_minutes ? ` (${cv.duration_minutes}min)` : '';
       const method = cv.link_method ? ` — linked via ${cv.link_method}` : '';
-      lines.push(`- ${fmtDate(cv.date)}: "${cv.title}"${dur}${method}`);
+      lines.push(`- ${fmtDate(cv.date)}: "${sanitizeForPrompt(cv.title)}"${dur}${method}`);
     }
   }
 
@@ -107,7 +108,7 @@ function compressDealContext(dossier: DealDossier): { text: string; sources: str
     lines.push(`\nFINDINGS (${dossier.findings.length} active):`);
     for (const f of dossier.findings) {
       const actionStr = f.actionability && f.actionability !== 'unknown' ? ` [${f.actionability}]` : '';
-      lines.push(`- ${f.severity.toUpperCase()}: ${f.message}${actionStr}`);
+      lines.push(`- ${f.severity.toUpperCase()}: ${sanitizeForPrompt(f.message)}${actionStr}`);
     }
   }
 
@@ -115,7 +116,7 @@ function compressDealContext(dossier: DealDossier): { text: string; sources: str
   if (cg.contacts_never_called.length > 0 || cg.unlinked_calls > 0) {
     lines.push(`\nCOVERAGE GAPS:`);
     if (cg.contacts_never_called.length > 0) {
-      const names = cg.contacts_never_called.map(c => `${c.name}${c.title ? ` (${c.title})` : ''}`).join(', ');
+      const names = cg.contacts_never_called.map(c => `${sanitizeForPrompt(c.name)}${c.title ? ` (${sanitizeForPrompt(c.title)})` : ''}`).join(', ');
       lines.push(`- Never called: ${names}`);
     }
     if (cg.days_since_last_call != null) {
@@ -144,7 +145,7 @@ function compressDealContext(dossier: DealDossier): { text: string; sources: str
   if (dossier.annotations.length > 0) {
     lines.push(`\nTEAM NOTES (${dossier.annotations.length}):`);
     for (const a of dossier.annotations.slice(0, 5)) {
-      lines.push(`- [${a.annotation_type}] ${a.content} (${a.source}, ${fmtDate(a.created_at)})`);
+      lines.push(`- [${a.annotation_type}] ${sanitizeForPrompt(a.content)} (${a.source}, ${fmtDate(a.created_at)})`);
     }
   }
 
@@ -167,9 +168,9 @@ function compressAccountContext(dossier: AccountDossier): { text: string; source
   const lines: string[] = [];
   const sources: string[] = ['account'];
 
-  lines.push(`ACCOUNT: ${a.name}`);
+  lines.push(`ACCOUNT: ${sanitizeForPrompt(a.name)}`);
   if (a.domain) lines.push(`Domain: ${a.domain}`);
-  if (a.industry) lines.push(`Industry: ${a.industry}`);
+  if (a.industry) lines.push(`Industry: ${sanitizeForPrompt(a.industry)}`);
   if (a.owner_email) lines.push(`Owner: ${a.owner_email}`);
   if (a.employee_count) lines.push(`Employees: ${a.employee_count}`);
 
@@ -180,7 +181,7 @@ function compressAccountContext(dossier: AccountDossier): { text: string; source
     sources.push('deals');
     lines.push(`\nDEALS (${dossier.deals.length}):`);
     for (const d of dossier.deals) {
-      lines.push(`- ${d.name}: ${fmtAmount(d.amount)} — ${d.stage} (${d.health_status})${d.close_date ? `, close: ${fmtDate(d.close_date)}` : ''}`);
+      lines.push(`- ${sanitizeForPrompt(d.name)}: ${fmtAmount(d.amount)} — ${d.stage} (${d.health_status})${d.close_date ? `, close: ${fmtDate(d.close_date)}` : ''}`);
     }
   }
 
@@ -199,8 +200,8 @@ function compressAccountContext(dossier: AccountDossier): { text: string; source
     const dark = dossier.contacts.filter(c => c.engagement_level === 'dark').length;
     lines.push(`\nCONTACTS (${dossier.contacts.length}: ${active} active, ${fading} fading, ${dark} dark):`);
     for (const c of dossier.contacts.slice(0, 10)) {
-      const parts = [c.name];
-      if (c.title) parts.push(c.title);
+      const parts = [sanitizeForPrompt(c.name)];
+      if (c.title) parts.push(sanitizeForPrompt(c.title));
       parts.push(c.engagement_level);
       if (c.buying_role && c.buying_role !== 'unknown') parts.push(c.buying_role);
       if (c.conversation_count > 0) parts.push(`${c.conversation_count} conversations`);
@@ -213,8 +214,8 @@ function compressAccountContext(dossier: AccountDossier): { text: string; source
     lines.push(`\nCONVERSATIONS (${dossier.conversations.length} recent):`);
     for (const cv of dossier.conversations.slice(0, 5)) {
       const dur = cv.duration_minutes ? ` (${cv.duration_minutes}min)` : '';
-      const deal = cv.linked_deal_name ? ` — deal: ${cv.linked_deal_name}` : '';
-      lines.push(`- ${fmtDate(cv.date)}: "${cv.title}"${dur}${deal}`);
+      const deal = cv.linked_deal_name ? ` — deal: ${sanitizeForPrompt(cv.linked_deal_name)}` : '';
+      lines.push(`- ${fmtDate(cv.date)}: "${sanitizeForPrompt(cv.title)}"${dur}${deal}`);
     }
   }
 
@@ -222,8 +223,8 @@ function compressAccountContext(dossier: AccountDossier): { text: string; source
     sources.push('findings');
     lines.push(`\nFINDINGS (${dossier.findings.length} active):`);
     for (const f of dossier.findings.slice(0, 10)) {
-      const deal = f.deal_name ? ` (${f.deal_name})` : '';
-      lines.push(`- ${f.severity.toUpperCase()}: ${f.message}${deal}`);
+      const deal = f.deal_name ? ` (${sanitizeForPrompt(f.deal_name)})` : '';
+      lines.push(`- ${f.severity.toUpperCase()}: ${sanitizeForPrompt(f.message)}${deal}`);
     }
   }
 
@@ -234,7 +235,7 @@ function compressAccountContext(dossier: AccountDossier): { text: string; source
   if (dossier.annotations.length > 0) {
     lines.push(`\nTEAM NOTES (${dossier.annotations.length}):`);
     for (const an of dossier.annotations.slice(0, 5)) {
-      lines.push(`- [${an.annotation_type}] ${an.content} (${an.source}, ${fmtDate(an.created_at)})`);
+      lines.push(`- [${an.annotation_type}] ${sanitizeForPrompt(an.content)} (${an.source}, ${fmtDate(an.created_at)})`);
     }
   }
 
@@ -537,8 +538,8 @@ function compressRepContext(
   if (findings.length > 0) {
     lines.push(`\nFINDINGS (${findings.length}):`);
     for (const f of findings.slice(0, 15)) {
-      const deal = f.deal_name ? ` (${f.deal_name})` : '';
-      lines.push(`- ${f.severity.toUpperCase()}: ${f.message}${deal}`);
+      const deal = f.deal_name ? ` (${sanitizeForPrompt(f.deal_name)})` : '';
+      lines.push(`- ${f.severity.toUpperCase()}: ${sanitizeForPrompt(f.message)}${deal}`);
     }
   }
 

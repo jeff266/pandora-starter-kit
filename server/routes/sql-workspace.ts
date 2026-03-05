@@ -380,6 +380,7 @@ router.post('/:workspaceId/sql/saved/:queryId/run', async (req: Request, res: Re
       await client.query('BEGIN');
       await client.query('SET LOCAL app.current_workspace_id = $1', [workspaceId]);
       await client.query(`SET LOCAL statement_timeout = ${QUERY_TIMEOUT_MS}`);
+      await client.query('SET LOCAL ROLE pandora_rls_user');
 
       const startTime = Date.now();
       const result = await client.query(sql_text);

@@ -29,7 +29,7 @@ interface AgentRow {
  * POST /:agentId/submit-for-review
  * Submit draft agent for Admin review
  */
-router.post('/:agentId/submit-for-review', async (req: Request, res: Response) => {
+router.post('/:agentId/submit-for-review', requirePermission('agents.draft'), async (req: Request, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId as string;
     const agentId = req.params.agentId as string;
@@ -111,7 +111,7 @@ router.post('/:agentId/submit-for-review', async (req: Request, res: Response) =
  * POST /:agentId/review
  * Approve or reject agent in pending_review status
  */
-router.post('/:agentId/review', async (req: Request, res: Response) => {
+router.post('/:agentId/review', requirePermission('agents.publish'), async (req: Request, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId as string;
     const agentId = req.params.agentId as string;

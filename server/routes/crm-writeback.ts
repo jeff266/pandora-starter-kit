@@ -7,6 +7,7 @@
 import express from 'express';
 import { query } from '../db.js';
 import { createLogger } from '../utils/logger.js';
+import { requirePermission } from '../middleware/permissions.js';
 import { PANDORA_WRITABLE_FIELDS, getFieldByKey } from '../crm-writeback/pandora-fields.js';
 import { discoverCRMProperties } from '../crm-writeback/property-discovery.js';
 import { executeWriteBack } from '../crm-writeback/write-engine.js';
@@ -99,7 +100,7 @@ router.get('/:workspaceId/crm-writeback/mappings', async (req, res) => {
  * POST /:workspaceId/crm-writeback/mappings
  * Create a new mapping
  */
-router.post('/:workspaceId/crm-writeback/mappings', async (req, res) => {
+router.post('/:workspaceId/crm-writeback/mappings', requirePermission('connectors.connect'), async (req, res) => {
   try {
     const { workspaceId } = req.params;
     const {
@@ -184,7 +185,7 @@ router.post('/:workspaceId/crm-writeback/mappings', async (req, res) => {
  * PATCH /:workspaceId/crm-writeback/mappings/:mappingId
  * Update a mapping
  */
-router.patch('/:workspaceId/crm-writeback/mappings/:mappingId', async (req, res) => {
+router.patch('/:workspaceId/crm-writeback/mappings/:mappingId', requirePermission('connectors.connect'), async (req, res) => {
   try {
     const { workspaceId, mappingId } = req.params;
     const updates = req.body;
@@ -244,7 +245,7 @@ router.patch('/:workspaceId/crm-writeback/mappings/:mappingId', async (req, res)
  * DELETE /:workspaceId/crm-writeback/mappings/:mappingId
  * Soft delete: set is_active = false
  */
-router.delete('/:workspaceId/crm-writeback/mappings/:mappingId', async (req, res) => {
+router.delete('/:workspaceId/crm-writeback/mappings/:mappingId', requirePermission('connectors.connect'), async (req, res) => {
   try {
     const { workspaceId, mappingId } = req.params;
 
@@ -272,7 +273,7 @@ router.delete('/:workspaceId/crm-writeback/mappings/:mappingId', async (req, res
  * POST /:workspaceId/crm-writeback/mappings/:mappingId/test
  * Execute a single write-back with trigger_source = 'test'
  */
-router.post('/:workspaceId/crm-writeback/mappings/:mappingId/test', async (req, res) => {
+router.post('/:workspaceId/crm-writeback/mappings/:mappingId/test', requirePermission('connectors.trigger_sync'), async (req, res) => {
   try {
     const { workspaceId, mappingId } = req.params;
     const { crm_record_id } = req.body;
@@ -345,7 +346,7 @@ router.get('/:workspaceId/crm-writeback/log', async (req, res) => {
  * POST /:workspaceId/crm-writeback/sync-all
  * Triggers manual sync of all active mappings for all eligible records
  */
-router.post('/:workspaceId/crm-writeback/sync-all', async (req, res) => {
+router.post('/:workspaceId/crm-writeback/sync-all', requirePermission('connectors.trigger_sync'), async (req, res) => {
   try {
     const { workspaceId } = req.params;
 

@@ -3,6 +3,30 @@
 ## Overview
 Pandora is a multi-tenant, agent-based Go-To-Market (GTM) intelligence platform designed for RevOps teams. It integrates and normalizes GTM data from various sources such as CRM, call intelligence, task management, and document repositories into eight core entities. The platform leverages AI to generate actionable insights, aiming to enhance decision-making, refine GTM strategies, and improve overall business vision and market potential.
 
+## Security Architecture
+
+### Authentication Model
+- **Session JWT** (`Authorization: Bearer <token>`): standard user authentication; subject to full RBAC evaluation.
+- **API Key** (`X-API-Key` header): workspace-scoped key for trusted integrations. By design, `requirePermission` skips the permission check when `req.authMethod === 'api_key'`. This is intentional — API keys represent pre-authorized integration contracts, not interactive users. Do not add permission guards specifically to block API key callers.
+
+### Row-Level Security (RLS)
+- PostgreSQL role `pandora_rls_user` enforces row-level security policies that restrict data access to the active `workspace_id`.
+- Every SQL workspace execution path (both `/sql/execute` and `/sql/saved/:queryId/run`) must call `SET LOCAL ROLE pandora_rls_user` inside the transaction, immediately after setting `statement_timeout`. Omitting this step creates a cross-workspace data leak path.
+- Implementation: `server/routes/sql-workspace.ts`.
+
+### RBAC (Role-Based Access Control)
+- Permission middleware: `requirePermission(key)` and `requireAnyPermission(keys[])` in `server/middleware/permissions.ts`.
+- 33-key permission schema defined in `server/permissions/types.ts`. Three system roles: `admin`, `member`, `viewer`.
+- Every mutating route in `workspaceApiRouter` must carry a `requirePermission` guard — workspace membership alone (enforced by `requireWorkspaceAccess`) is not sufficient.
+- Role summaries and permission assignments: `server/permissions/system-roles.ts`.
+
+### Prompt Injection Defense
+- CRM-sourced strings (deal names, account names, contact names, annotation content, finding messages, conversation titles) must be sanitized before interpolation into AI prompts.
+- Utility: `server/utils/sanitize-for-prompt.ts` — exports `sanitizeForPrompt(value: unknown): string`.
+- Strips 14 injection patterns (case-insensitive) including `IGNORE PREVIOUS INSTRUCTIONS`, `<system>`, `[INST]`, `YOU ARE NOW`, etc., replacing matched text with `[REDACTED]`.
+- Applied at: `server/analysis/scoped-analysis.ts` (deal + account context builders) and `server/agents/runtime.ts` (synthesis template variable substitution).
+- Rule: any new code path that reads CRM field values into an AI prompt string must call `sanitizeForPrompt()` on the value.
+
 ## User Preferences
 - Raw SQL with parameterized queries — no ORM
 - Minimal dependencies — only install what's needed

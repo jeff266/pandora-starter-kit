@@ -15,7 +15,7 @@ const router = Router();
 // ─── POST /:workspaceId/tools/:toolName/run ───────────────────────────────────
 // Runs a tool function directly against the workspace — used by the playground UI.
 
-router.post('/:workspaceId/tools/:toolName/run', async (req, res) => {
+router.post('/:workspaceId/tools/:toolName/run', requirePermission('skills.run_manual'), async (req, res) => {
   const { workspaceId, toolName } = req.params;
   const params: Record<string, any> = req.body || {};
 

@@ -87,7 +87,7 @@ router.get('/', async (req: Request, res: Response) => {
  * PATCH /:flagKey
  * Toggle a feature flag
  */
-router.patch('/:flagKey', async (req: Request, res: Response) => {
+router.patch('/:flagKey', requirePermission('flags.toggle'), async (req: Request, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId as string;
     const flagKey = req.params.flagKey as string;

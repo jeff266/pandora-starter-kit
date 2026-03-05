@@ -28,6 +28,7 @@ import { getSlackAppClient } from '../connectors/slack/slack-app-client.js';
 import { formatAgentWithEvidence } from '../skills/formatters/slack-formatter.js';
 import { deliverToChannels, type DeliveryChannel } from './channels.js';
 import { getConsultantContext } from '../skills/consultant-context.js';
+import { sanitizeForPrompt } from '../utils/sanitize-for-prompt.js';
 
 export class AgentRuntime {
   private static instance: AgentRuntime;
@@ -290,7 +291,7 @@ export class AgentRuntime {
         : content;
       userPrompt = userPrompt.replace(
         new RegExp(`\\{\\{${key}\\}\\}`, 'g'),
-        truncated
+        sanitizeForPrompt(truncated)
       );
     }
 
@@ -300,7 +301,7 @@ export class AgentRuntime {
         const truncated = typeof content === 'string' && content.length > 6000
           ? content.slice(0, 6000) + '\n... [truncated]'
           : content;
-        return `## ${s.skillId}\n${truncated}`;
+        return `## ${s.skillId}\n${sanitizeForPrompt(truncated)}`;
       })
       .join('\n\n---\n\n');
     userPrompt = userPrompt.replace('{{skill_outputs}}', allOutputs);

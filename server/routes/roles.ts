@@ -198,7 +198,7 @@ router.get('/:roleId', async (req: Request, res: Response) => {
  * POST /
  * Create custom role
  */
-router.post('/', requireFeature('feature.custom_roles'), async (req: Request, res: Response) => {
+router.post('/', requireFeature('feature.custom_roles'), requirePermission('members.change_roles'), async (req: Request, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId as string;
     const { name, description, permissions } = req.body;
@@ -285,7 +285,7 @@ router.post('/', requireFeature('feature.custom_roles'), async (req: Request, re
  * PATCH /:roleId
  * Update custom role
  */
-router.patch('/:roleId', requireFeature('feature.custom_roles'), async (req: Request, res: Response) => {
+router.patch('/:roleId', requireFeature('feature.custom_roles'), requirePermission('members.change_roles'), async (req: Request, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId as string;
     const roleId = req.params.roleId as string;
@@ -420,7 +420,7 @@ router.patch('/:roleId', requireFeature('feature.custom_roles'), async (req: Req
  * DELETE /:roleId
  * Delete custom role
  */
-router.delete('/:roleId', async (req: Request, res: Response) => {
+router.delete('/:roleId', requirePermission('members.change_roles'), async (req: Request, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId as string;
     const roleId = req.params.roleId as string;
