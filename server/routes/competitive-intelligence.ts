@@ -262,10 +262,27 @@ router.get('/:workspaceId/intelligence/competitive', async (req: Request, res: R
       ).catch(() => ({ rows: [] as any[] })),
     ]);
 
-    // ── Exclusions ─────────────────────────────────────────────────────────
+    // ── Exclusions (with auto-seed from connected adapters on first load) ──
     let exclusions: string[] = [];
-    if (exclusionsResult.rows[0]?.value) {
+    const exclusionsRowExists = exclusionsResult.rows.length > 0 && exclusionsResult.rows[0]?.value != null;
+    if (exclusionsRowExists) {
       try { exclusions = JSON.parse(exclusionsResult.rows[0].value); } catch { exclusions = []; }
+    } else {
+      // First time this workspace loads competitive intelligence — seed from connected
+      // conversation adapters so recording tools don't appear as competitors by default.
+      const connectedResult = await query<{ connector_name: string }>(
+        `SELECT connector_name FROM connections
+         WHERE workspace_id = $1
+           AND connector_name IN ('gong', 'fireflies', 'chorus')`,
+        [workspaceId]
+      ).catch(() => ({ rows: [] as { connector_name: string }[] }));
+      if (connectedResult.rows.length > 0) {
+        exclusions = connectedResult.rows.map(r => r.connector_name.toLowerCase());
+        await saveExclusions(workspaceId, exclusions);
+      } else {
+        // Save an empty array so next load doesn't re-seed unnecessarily
+        await saveExclusions(workspaceId, []);
+      }
     }
     const isExcluded = (name: string) => exclusions.includes(name.toLowerCase().trim());
 

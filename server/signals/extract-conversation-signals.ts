@@ -15,6 +15,18 @@
 import { query } from '../db.js';
 import { callLLM } from '../utils/llm-router.js';
 
+async function loadWorkspaceExclusions(workspaceId: string): Promise<Set<string>> {
+  const result = await query<{ value: string }>(
+    `SELECT value FROM workspace_settings WHERE workspace_id = $1 AND key = 'competitor_exclusions'`,
+    [workspaceId]
+  ).catch(() => ({ rows: [] as { value: string }[] }));
+  if (!result.rows[0]?.value) return new Set();
+  try {
+    const arr = JSON.parse(result.rows[0].value) as string[];
+    return new Set(arr.map(s => s.toLowerCase().trim()));
+  } catch { return new Set(); }
+}
+
 const BATCH_SIZE = 5;  // Smaller batches than JSONB extraction for precision
 const BATCH_DELAY_MS = 1000;
 const MODEL_VERSION = 'deepseek-chat-v3-2025';
@@ -103,6 +115,9 @@ export async function extractConversationSignals(
 
   result.processed = conversations.length;
 
+  // Load non-competition list once per run — signals matching these names are skipped at write time
+  const nonCompetitionList = await loadWorkspaceExclusions(workspaceId);
+
   // Step 2: Process in batches
   for (let i = 0; i < conversations.length; i += BATCH_SIZE) {
     const batch = conversations.slice(i, i + BATCH_SIZE);
@@ -127,8 +142,8 @@ export async function extractConversationSignals(
         // Call DeepSeek for signal classification
         const signals = await classifySignals(workspaceId, convo, content);
 
-        // Insert signals into conversation_signals table
-        await insertSignals(workspaceId, convo, signals);
+        // Insert signals into conversation_signals table (non-competition list filtered at write time)
+        await insertSignals(workspaceId, convo, signals, nonCompetitionList);
 
         // Record successful run
         await recordSuccessfulRun(workspaceId, convo.id, signals.length);
@@ -244,9 +259,9 @@ Respond with a JSON object:
   "signals": [
     {
       "signal_type": "competitor_mention",
-      "signal_value": "Gong",
+      "signal_value": "Acme Platform",
       "confidence": 0.92,
-      "source_quote": "We're also looking at Gong for this",
+      "source_quote": "We're also evaluating Acme Platform",
       "sentiment": "neutral"
     },
     {
@@ -344,18 +359,25 @@ function buildCallInfo(convo: ConversationRecord, content: string): string {
 async function insertSignals(
   workspaceId: string,
   convo: ConversationRecord,
-  signals: ExtractedSignal[]
+  signals: ExtractedSignal[],
+  nonCompetitionList: Set<string> = new Set()
 ): Promise<void> {
-  if (signals.length === 0) {
+  // Filter out competitor_mention signals for names on the workspace's non-competition list
+  const filtered = signals.filter(s =>
+    s.signal_type !== 'competitor_mention' ||
+    !nonCompetitionList.has(s.signal_value.toLowerCase().trim())
+  );
+  if (filtered.length === 0) {
     return;
   }
+  const signals_to_insert = filtered;
 
   // Build multi-row insert
   const values: any[] = [];
   const placeholders: string[] = [];
   let idx = 1;
 
-  for (const signal of signals) {
+  for (const signal of signals_to_insert) {
     placeholders.push(
       `($${idx}, $${idx + 1}, $${idx + 2}, $${idx + 3}, $${idx + 4}, $${idx + 5}, $${idx + 6}, $${idx + 7}, $${idx + 8}, $${idx + 9}, $${idx + 10})`
     );

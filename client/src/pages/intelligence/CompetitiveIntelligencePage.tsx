@@ -229,7 +229,6 @@ export default function CompetitiveIntelligencePage() {
   const [running, setRunning] = useState(false);
   const [runMessage, setRunMessage] = useState<string | null>(null);
   const [exclusions, setExclusions] = useState<string[]>([]);
-  const [excludeHover, setExcludeHover] = useState<string | null>(null);
 
   const loadData = () => {
     if (!workspaceId) return;
@@ -663,12 +662,13 @@ export default function CompetitiveIntelligencePage() {
                   {['Competitor', 'Deals', 'Win Rate', 'vs. Baseline', 'Trend', 'Pattern'].map(h => (
                     <th key={h} style={{ padding: '8px 16px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: C.textMuted, letterSpacing: '0.06em', textTransform: 'uppercase', fontFamily: font, whiteSpace: 'nowrap' }}>{h}</th>
                   ))}
+                  <th style={{ padding: '8px 12px', width: 40 }} />
                 </tr>
               </thead>
               <tbody>
                 {loading && [0,1,2,3].map(i => (
                   <tr key={i} style={{ borderBottom: `1px solid ${C.border}` }}>
-                    {[0,1,2,3,4,5].map(j => (
+                    {[0,1,2,3,4,5,6].map(j => (
                       <td key={j} style={{ padding: '13px 16px' }}><SkeletonBlock h={12} w={j === 0 ? '80px' : '50px'} /></td>
                     ))}
                   </tr>
@@ -681,8 +681,8 @@ export default function CompetitiveIntelligencePage() {
                       background: selectedCompetitor === c.name ? C.surfaceActive : 'transparent',
                       transition: 'background 0.15s',
                     }}
-                    onMouseEnter={e => { if (selectedCompetitor !== c.name) e.currentTarget.style.background = C.surfaceHover; setExcludeHover(c.name); }}
-                    onMouseLeave={e => { if (selectedCompetitor !== c.name) e.currentTarget.style.background = 'transparent'; setExcludeHover(null); }}>
+                    onMouseEnter={e => { if (selectedCompetitor !== c.name) e.currentTarget.style.background = C.surfaceHover; }}
+                    onMouseLeave={e => { if (selectedCompetitor !== c.name) e.currentTarget.style.background = 'transparent'; }}>
                     <td style={{ padding: '11px 16px', fontSize: 13, fontWeight: 600, color: C.text, fontFamily: font }}>{c.name}</td>
                     <td style={{ padding: '11px 16px', fontSize: 13, fontFamily: mono, color: C.textSecondary }}>{c.deal_count}</td>
                     <td style={{ padding: '11px 16px', fontSize: 13, fontFamily: mono, fontWeight: 600, color: c.win_rate < 50 ? C.red : C.green }}>{c.win_rate}%</td>
@@ -694,24 +694,23 @@ export default function CompetitiveIntelligencePage() {
                       </div>
                     </td>
                     <td style={{ padding: '11px 16px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                        <PatternBadge pattern={c.pattern} />
-                        {excludeHover === c.name && (
-                          <button
-                            onClick={e => { e.stopPropagation(); excludeCompetitor(c.name); }}
-                            onMouseEnter={e => (e.currentTarget.style.color = C.red)}
-                            onMouseLeave={e => (e.currentTarget.style.color = C.textMuted)}
-                            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: C.textMuted, fontFamily: font, padding: '2px 6px', borderRadius: 4, transition: 'color 0.15s', flexShrink: 0 }}>
-                            ⊘ Exclude
-                          </button>
-                        )}
-                      </div>
+                      <PatternBadge pattern={c.pattern} />
+                    </td>
+                    <td style={{ padding: '8px 12px', textAlign: 'right' }}>
+                      <button
+                        onClick={e => { e.stopPropagation(); excludeCompetitor(c.name); }}
+                        onMouseEnter={e => (e.currentTarget.style.color = C.red)}
+                        onMouseLeave={e => (e.currentTarget.style.color = C.textMuted)}
+                        title="Not a competitor"
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 15, color: C.textMuted, padding: '2px 4px', borderRadius: 4, transition: 'color 0.15s', lineHeight: 1 }}>
+                        ⊘
+                      </button>
                     </td>
                   </tr>
                 ))}
                 {!loading && visibleCompetitors.length === 0 && (
                   <tr>
-                    <td colSpan={6} style={{ padding: '32px 16px', textAlign: 'center', fontSize: 13, color: C.textMuted, fontFamily: font }}>
+                    <td colSpan={7} style={{ padding: '32px 16px', textAlign: 'center', fontSize: 13, color: C.textMuted, fontFamily: font }}>
                       No competitive data yet. The skill runs on the 1st of each month.
                     </td>
                   </tr>
@@ -720,22 +719,28 @@ export default function CompetitiveIntelligencePage() {
             </table>
           </div>
 
-          {/* Exclusions panel */}
+          {/* Non-competition list */}
           {exclusions.length > 0 && (
-            <div style={{ background: C.surfaceRaised, border: `1px solid ${C.borderLight}`, borderRadius: 10, padding: '10px 18px', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-              <span style={{ fontSize: 11, color: C.textMuted, fontFamily: font, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', marginRight: 4, whiteSpace: 'nowrap' }}>Excluded from analysis</span>
-              {exclusions.map(key => (
-                <span key={key} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, padding: '3px 10px' }}>
-                  <span style={{ fontSize: 12, color: C.textSecondary, fontFamily: font, fontWeight: 500, textTransform: 'capitalize' }}>{key}</span>
-                  <button
-                    onClick={() => restoreCompetitor(key)}
-                    onMouseEnter={e => (e.currentTarget.style.color = C.accent)}
-                    onMouseLeave={e => (e.currentTarget.style.color = C.textMuted)}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: C.textMuted, fontFamily: font, padding: 0, transition: 'color 0.15s', lineHeight: 1 }}>
-                    ↩ Restore
-                  </button>
-                </span>
-              ))}
+            <div style={{ background: C.surfaceRaised, border: `1px solid ${C.borderLight}`, borderRadius: 10, padding: '12px 18px' }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 8 }}>
+                <span style={{ fontSize: 11, color: C.textMuted, fontFamily: font, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>Non-competition list</span>
+                <span style={{ fontSize: 11, color: C.textDim, fontFamily: font }}>These names are excluded from competitive analysis. Remove a name if it becomes an actual competitor.</span>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {exclusions.map(key => (
+                  <span key={key} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, padding: '3px 10px' }}>
+                    <span style={{ fontSize: 12, color: C.textSecondary, fontFamily: font, fontWeight: 500, textTransform: 'capitalize' }}>{key}</span>
+                    <button
+                      onClick={() => restoreCompetitor(key)}
+                      onMouseEnter={e => (e.currentTarget.style.color = C.accent)}
+                      onMouseLeave={e => (e.currentTarget.style.color = C.textMuted)}
+                      title="Remove from non-competition list"
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: C.textMuted, fontFamily: font, padding: 0, transition: 'color 0.15s', lineHeight: 1 }}>
+                      × Remove
+                    </button>
+                  </span>
+                ))}
+              </div>
             </div>
           )}
 
