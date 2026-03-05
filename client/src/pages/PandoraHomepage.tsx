@@ -154,6 +154,17 @@ function Badge({ children }: { children: React.ReactNode }) {
 
 export default function PandoraHomepage() {
 
+  useEffect(() => {
+    const html = document.documentElement;
+    const body = document.body;
+    html.style.overflow = 'auto';
+    body.style.overflow = 'auto';
+    return () => {
+      html.style.overflow = 'hidden';
+      body.style.overflow = 'hidden';
+    };
+  }, []);
+
   return (
     <div style={{ background: t.bg, color: t.text, fontFamily: display, minHeight: "100vh", overflowX: "hidden" }}>
       <style>{`
