@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
+import HubSpotForm from "../components/HubSpotForm";
 
 const display = "'DM Sans', 'Outfit', system-ui, sans-serif";
 const mono = "'JetBrains Mono', 'Fira Code', monospace";
@@ -152,34 +153,6 @@ function Badge({ children }: { children: React.ReactNode }) {
 }
 
 export default function PandoraHomepage() {
-  const [email, setEmail] = useState("");
-  const [waitlistStatus, setWaitlistStatus] = useState<null | 'sending' | 'success' | 'error'>(null);
-  const [waitlistMsg, setWaitlistMsg] = useState("");
-
-  const handleWaitlist = useCallback(async (e: React.FormEvent | React.KeyboardEvent) => {
-    e.preventDefault();
-    if (!email || !email.includes("@")) return;
-    setWaitlistStatus("sending");
-    try {
-      const res = await fetch("/api/waitlist", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
-      });
-      if (res.ok) {
-        setWaitlistStatus("success");
-        setWaitlistMsg("Thanks — I'll reach out personally to schedule your onboarding.");
-        setEmail("");
-      } else {
-        const data = await res.json().catch(() => ({}));
-        setWaitlistStatus("error");
-        setWaitlistMsg(data.error || "Something went wrong. Try again.");
-      }
-    } catch {
-      setWaitlistStatus("error");
-      setWaitlistMsg("Network error. Try again.");
-    }
-  }, [email]);
 
   return (
     <div style={{ background: t.bg, color: t.text, fontFamily: display, minHeight: "100vh", overflowX: "hidden" }}>
@@ -340,34 +313,12 @@ export default function PandoraHomepage() {
           </Reveal>
 
           <Reveal delay={0.4}>
-            <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap", maxWidth: 460, margin: "0 auto" }}>
-              <input
-                type="email"
-                placeholder="you@company.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleWaitlist(e)}
+            <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
+              <a
+                href="#waitlist"
                 style={{
-                  flex: 1,
-                  minWidth: 220,
-                  padding: "14px 18px",
-                  fontSize: 15,
-                  fontFamily: display,
-                  background: t.surface,
-                  border: `1px solid ${t.border}`,
-                  borderRadius: 10,
-                  color: t.text,
-                  outline: "none",
-                  transition: "border-color 0.2s",
-                }}
-                onFocus={(e) => (e.target.style.borderColor = t.accent)}
-                onBlur={(e) => (e.target.style.borderColor = t.border)}
-              />
-              <button
-                onClick={handleWaitlist}
-                disabled={waitlistStatus === "sending"}
-                style={{
-                  padding: "14px 28px",
+                  display: "inline-block",
+                  padding: "14px 32px",
                   fontSize: 15,
                   fontWeight: 600,
                   fontFamily: display,
@@ -375,25 +326,18 @@ export default function PandoraHomepage() {
                   background: `linear-gradient(135deg, ${t.accent}, ${t.purple})`,
                   border: "none",
                   borderRadius: 10,
-                  cursor: waitlistStatus === "sending" ? "wait" : "pointer",
+                  cursor: "pointer",
                   transition: "all 0.2s",
                   boxShadow: `0 4px 24px ${t.accentGlow}`,
+                  textDecoration: "none",
                   whiteSpace: "nowrap",
                 }}
+                onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.opacity = "0.88")}
+                onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.opacity = "1")}
               >
-                {waitlistStatus === "sending" ? "Joining..." : "Become a Design Partner"}
-              </button>
+                Become a Design Partner →
+              </a>
             </div>
-            {waitlistMsg && (
-              <p style={{
-                marginTop: 12,
-                fontSize: 13,
-                color: waitlistStatus === "success" ? t.green : t.red,
-                fontFamily: mono,
-              }}>
-                {waitlistMsg}
-              </p>
-            )}
           </Reveal>
 
           <Reveal delay={0.5}>
@@ -851,60 +795,7 @@ export default function PandoraHomepage() {
           </Reveal>
 
           <Reveal delay={0.1}>
-            <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
-              <input
-                type="email"
-                placeholder="you@company.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleWaitlist(e)}
-                style={{
-                  flex: 1,
-                  minWidth: 220,
-                  padding: "14px 18px",
-                  fontSize: 15,
-                  fontFamily: display,
-                  background: t.surface,
-                  border: `1px solid ${t.border}`,
-                  borderRadius: 10,
-                  color: t.text,
-                  outline: "none",
-                  transition: "border-color 0.2s",
-                }}
-                onFocus={(e) => (e.target.style.borderColor = t.accent)}
-                onBlur={(e) => (e.target.style.borderColor = t.border)}
-              />
-              <button
-                onClick={handleWaitlist}
-                disabled={waitlistStatus === "sending"}
-                style={{
-                  padding: "14px 28px",
-                  fontSize: 15,
-                  fontWeight: 600,
-                  fontFamily: display,
-                  color: "#fff",
-                  background: `linear-gradient(135deg, ${t.accent}, ${t.purple})`,
-                  border: "none",
-                  borderRadius: 10,
-                  cursor: waitlistStatus === "sending" ? "wait" : "pointer",
-                  transition: "all 0.2s",
-                  boxShadow: `0 4px 24px ${t.accentGlow}`,
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {waitlistStatus === "sending" ? "Joining..." : "Become a Design Partner →"}
-              </button>
-            </div>
-            {waitlistMsg && (
-              <p style={{
-                marginTop: 12,
-                fontSize: 13,
-                color: waitlistStatus === "success" ? t.green : t.red,
-                fontFamily: mono,
-              }}>
-                {waitlistMsg}
-              </p>
-            )}
+            <HubSpotForm />
           </Reveal>
 
           <Reveal delay={0.2}>
