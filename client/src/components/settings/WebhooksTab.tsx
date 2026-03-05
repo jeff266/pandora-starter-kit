@@ -3,6 +3,7 @@ import { useWorkspace } from '../../context/WorkspaceContext';
 import { colors, fonts } from '../../styles/theme';
 import Toast from '../Toast';
 import { api } from '../../lib/api';
+import WebhookEventReference from './WebhookEventReference';
 
 interface WebhookEndpoint {
   id: string;
@@ -458,6 +459,29 @@ export default function WebhooksTab() {
           </button>
         </form>
       </section>
+
+      {/* Event Reference */}
+      <div style={{ position: 'relative', margin: '48px 0 36px' }}>
+        <hr style={{ border: 'none', borderTop: `1px solid ${colors.border}`, margin: 0 }} />
+        <span style={{
+          position: 'absolute',
+          top: -10,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: colors.bg,
+          padding: '0 14px',
+          fontSize: 11,
+          letterSpacing: '0.08em',
+          textTransform: 'uppercase',
+          color: colors.muted,
+          fontFamily: fonts.sans,
+          fontWeight: 600,
+          whiteSpace: 'nowrap',
+        }}>
+          Event Reference
+        </span>
+      </div>
+      <WebhookEventReference />
 
       {/* Secret Reveal Modal */}
       {secretModal && (
