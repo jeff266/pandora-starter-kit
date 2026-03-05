@@ -1083,7 +1083,26 @@ export default function PandoraHomepage() {
           </Reveal>
 
           <Reveal delay={0.1}>
-            <HubSpotForm />
+            <div style={{
+              position: "relative",
+              borderRadius: 16,
+              padding: "36px 32px",
+              background: "rgba(255,255,255,0.97)",
+              boxShadow: "0 8px 48px rgba(99,102,241,0.14), 0 2px 12px rgba(0,0,0,0.10)",
+              textAlign: "left",
+              overflow: "hidden",
+            }}>
+              <div style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                height: 3,
+                background: `linear-gradient(90deg, ${t.purple}, ${t.cyan}, ${t.accentLight})`,
+                borderRadius: "16px 16px 0 0",
+              }} />
+              <HubSpotForm />
+            </div>
           </Reveal>
 
           <Reveal delay={0.2}>
