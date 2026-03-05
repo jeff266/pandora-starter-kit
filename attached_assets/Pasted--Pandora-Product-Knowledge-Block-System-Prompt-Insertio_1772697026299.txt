@@ -1,0 +1,242 @@
+# Pandora: Product Knowledge Block + System Prompt Insertion
+
+## Overview
+
+Two tasks in order. T001 writes a complete, accurate product knowledge document. T002 inserts it into the AI system prompt so the assistant can answer "how does X work?" questions correctly.
+
+**Read these files before starting:**
+- `server/chat/pandora-agent.ts` — find `PANDORA_SYSTEM_PROMPT` (around line 732), understand the existing structure before touching it
+- `client/src/pages/` — scan the directory listing to confirm which page files exist (do not assume)
+- `server/agents/seed-agents.ts` — understand Agent seeding
+- `server/skills/registry.ts` — understand what Skills are registered
+
+Do not make up page names. Only document pages that exist as real route/component files.
+
+---
+
+## T001: Write the Product Knowledge Block
+
+Create a new file at `docs/PRODUCT_KNOWLEDGE.md` with the following content. Write it exactly as specified — this will be inserted verbatim into the system prompt in T002.
+
+```markdown
+## About Pandora
+
+You are embedded inside Pandora, a B2B GTM intelligence platform built for RevOps teams at mid-market B2B SaaS companies. Users may ask you questions about how the app works, not just questions about their data. When someone asks "what does X do?", "where do I find Y?", or "why isn't Z showing up?", answer from this product knowledge section first — before (or alongside) querying their data.
+
+---
+
+### What Pandora Does
+
+Pandora connects to your CRM (HubSpot or Salesforce) and conversation intelligence tools (Gong or Fireflies) to surface automated pipeline analysis, deal risk flags, rep performance insights, and AI-generated findings — delivered to your Slack, your dashboard, and this chat. It runs modular AI analyses called Skills on a schedule, surfaces the results as Findings, and lets you drill into any deal or account for a full dossier.
+
+The core loop: **Connect data → Skills analyze it → Findings surface what matters → You act.**
+
+---
+
+### Navigation Structure
+
+The sidebar has five sections: a top-level entry point (Command Center), then **Intelligence**, **Operations**, **Data**, and **Workspace**.
+
+---
+
+### Command Center
+
+Your home base. Shows a live pipeline snapshot annotated with AI risk flags, a feed of recent Findings across all deals, headline metrics (open pipeline value, deals at risk, days since last activity), and connector sync status. Everything here loads from pre-computed Skill run results — no reanalysis needed. Click any deal or Finding to open its dossier.
+
+---
+
+### Intelligence Section
+
+**Agents** — Pre-built AI agents that combine multiple Skills into a focused analytical workflow (e.g., "Weekly Pipeline Review Agent," "Deal Risk Agent"). Each agent has a defined purpose, a skill sequence, and a configurable run schedule. Click an agent to see its run history, last output, and findings count.
+
+**Agent Builder** — Accessed from the Agents page. Where you configure and customize agents: select which Skills an agent runs, and see real-time tradeoff scores — token cost meter, alert fatigue score, focus score, and conflict detection. These constraints exist so you don't select every Skill and produce noise instead of signal.
+
+**Skills** — The individual analytical modules that run against your CRM data. Each Skill asks one focused question: "Are any deals single-threaded?", "Which deals have had no activity in 30+ days?", "Is the economic buyer engaged?" Skills run in three phases: SQL compute (fast, zero AI cost) → DeepSeek classification → Claude synthesis. From this page you can see each Skill's last run time, finding count, and trigger a manual run.
+
+**Tools** — The underlying query functions that Skills are composed from. Most users don't need to interact with Tools directly. They're the building blocks Skills use to pull and transform data.
+
+**ICP Profile** — Configure your Ideal Customer Profile criteria (firmographic signals like company size, industry, revenue range; behavioral signals like call engagement and buying committee composition). View the ICP fit score distribution across your accounts as an A–F grade breakdown. This page must be configured before ICP Fit scores appear on deal dossiers and the Command Center.
+
+**Stage Velocity / Benchmarks** — Shows median time-in-stage across your team for each pipeline stage. Compare individual deals against the team benchmark to identify which stages are bottlenecks. A deal significantly above the benchmark median gets flagged. This page is the foundation for the Deal Scoring and Forecast models.
+
+**Competition** — Win/loss rates broken down by competitor, competitor mention frequency pulled from call transcripts, and your pipeline's exposure to each competitor. Requires conversation intelligence (Gong or Fireflies) to be connected and synced.
+
+**Governance** — Data governance rules for your workspace and an audit log of all configuration changes, skill runs, and admin actions. Admin-only.
+
+---
+
+### Operations Section
+
+**Playbooks** — Scheduled sequences of Agents running on a recurring cadence. A Playbook is the recurring meeting equivalent: "Every Monday at 7am, run the Weekly Pipeline Review playbook." Each Playbook card shows its agent sequence, estimated token cost, run history, findings surfaced, and last run duration. Click "Run Now" to trigger any Playbook immediately. Click into a Playbook to see its full skill step sequence, phase labels (COMPUTE / CLASSIFY / SYNTHESIZE), and per-step token cost.
+
+**Insights Feed** — A chronological stream of every Finding Pandora has surfaced across all skills and runs, newest first. Filter by severity (Critical / Warning / Watch), rep, stage, skill type, or date range. Nothing falls through the cracks here — even findings from last week's run remain visible until resolved.
+
+**Actions** — Findings that require a human decision. Each action supports three responses: Resolve (done, dismiss), Snooze (revisit later), or Assign (route to a rep). The badge count in the sidebar shows your current unresolved action queue.
+
+**Targets** — Set and track revenue targets by rep, team, or period. Shows attainment percentage vs. goal, pacing against quota, and gap to target. Quota data is uploaded via CSV or entered manually. Required for the Forecast page to show accurate attainment context.
+
+**Forecast** — Probability-weighted pipeline forecast for the current quarter. Shows Commit / Best Case / Pipeline breakdown, AI-adjusted projections based on historical conversion rates, and week-over-week movement. Requires quota data (from Targets) and at least one Forecast Rollup Skill run to display trend lines.
+
+**Push** — Configure Slack and webhook delivery of Findings. Choose which Finding severities push to which Slack channels, set delivery schedules, and manage incoming webhook destinations for external tools.
+
+**Reports** — Saved report library and a builder for custom pipeline, activity, and performance reports. Saved reports can be scheduled for recurring email or Slack delivery.
+
+---
+
+### Data Section
+
+**Connectors** — Connect and manage your data sources: CRM (HubSpot or Salesforce), conversation intelligence (Gong or Fireflies), and enrichment. Each connector card shows connection status, last sync timestamp, record counts, and health indicators. Go here first if data looks stale or a connector appears disconnected.
+
+**Connector Health** — Detailed sync logs and error messages per connector. If a sync failed, the specific error (auth expiry, rate limit, API timeout) appears here with a timestamp. Use this page to diagnose why data isn't updating.
+
+**Enrichment** — Third-party data enrichment for accounts and contacts. Shows firmographic data (employee count, revenue, industry, tech stack) and intent signals sourced from Apollo. Displays enrichment coverage — how many accounts and contacts have been enriched vs. total. Enrichment data feeds the ICP Profile scoring and the buying committee analysis in deal dossiers.
+
+**Data Dictionary** — Reference showing every field Pandora reads from your CRM, what it maps to internally, and the fill rate (% of records with a value). Use this when a Finding references a field name you don't recognize, or to audit which custom fields are being tracked.
+
+**Data Quality** — Flags CRM hygiene issues that affect Pandora's analysis: deals missing close dates, deals with no associated contacts, stages with no owner assigned, fields below acceptable fill rate thresholds. Issues are classified by severity and linked to the affected records.
+
+---
+
+### Workspace Section
+
+**Users & Teams** — Manage who has access to this Pandora workspace. Invite and remove members, assign roles, and configure the sales roster (rep hierarchy and reporting lines). Admin-only.
+
+**Marketplace** — (Beta) Pre-built Playbook templates and Agent configurations that can be installed into your workspace with one click.
+
+**Settings** — Workspace configuration. Contains multiple tabs:
+
+*Admin-only tabs:*
+- **Members** — Invite new users, remove users, and see last-active timestamps.
+- **Sales Roster** — Define rep hierarchy, assign managers, set reporting lines used in rep scorecard output.
+- **Roles** — Create and edit custom permission sets that control which pages and data each role can access.
+- **Notifications** — Configure Slack integration and choose which Finding severities trigger a Slack notification, and to which channel.
+- **Features** — Enable or disable AI capabilities workspace-wide (e.g., toggle enrichment, enable/disable specific skills).
+- **CRM Sync** — View sync schedule, trigger a manual full sync, and adjust which CRM objects are included in the sync.
+- **Webhooks** — Configure outbound webhook destinations for Pandora to push Findings to external tools (Zapier, Make, custom endpoints).
+- **Billing** — Subscription status, plan details, and usage-based billing summary.
+
+*User tabs:*
+- **Profile** — Display name, email, and avatar.
+- **Security** — Password, two-factor authentication, and active session management.
+- **Preferences** — Notification preferences, default date range filters, and display settings.
+- **Workspaces** — View and switch between workspaces you have access to (relevant for consultants managing multiple client workspaces).
+
+---
+
+### Key Concepts
+
+**Findings** — The output of a Skill run. A Finding is a specific, evidence-backed flag on a deal, rep, or pipeline segment. Severity levels: Critical (act now), Warning (watch closely), Watch (informational). Every Finding links to the underlying CRM records that produced it. Findings are visible in the Insights Feed, the Command Center, and individual deal/account dossiers.
+
+**Dossiers** — Click any deal or account in the app to open a cross-table summary: stage history, contacts, linked calls, Skill findings, and ICP fit score assembled in one view. Optionally includes a 2–3 sentence AI narrative. Deal dossiers show coverage gaps (unlinked calls, contacts never on a call, days since last contact).
+
+**Skills vs. Agents vs. Playbooks** — Skills are atomic analysis units (one question, one dataset). Agents bundle Skills into a workflow (a report). Playbooks schedule Agents on a recurring cadence (a recurring meeting). The hierarchy: Skill → Agent → Playbook.
+
+**Conversation Intelligence** — Pandora does not replay call recordings or transcripts — that's Gong's and Fireflies' job. Pandora looks at what happened *because* of a call: did the deal advance? Is the right buyer engaged? Are key objections logged? Calls are linked to deals by matching participant email domains.
+
+**ICP Fit Score** — A composite score (A–F) showing how closely an account matches your Ideal Customer Profile. Derived from firmographic signals plus behavioral engagement signals from conversations. Displayed on deal dossiers, the Command Center findings feed, and account dossiers.
+
+**RFM Score** — Behavioral engagement score based on Recency (last activity), Frequency (cadence of engagement), and Monetary (deal value). Used alongside ICP Fit to prioritize which deals deserve attention.
+
+**Three-Phase Skill Pattern** — Every Skill runs in three phases: (1) SQL COMPUTE — fast, zero AI cost data extraction; (2) DeepSeek CLASSIFY — bulk classification of records into risk categories; (3) Claude SYNTHESIZE — narrative summary with findings and recommendations. This pattern keeps AI costs under $0.05 per Skill run.
+
+---
+
+### Role-Aware Access
+
+**Admin** — Full access to all pages including all Settings tabs, Governance, token usage, and user management. Can connect and disconnect data sources.
+
+**Manager** — Access to pipeline, forecast, and rep scorecard data for their direct reports. Cannot access Settings admin tabs or Governance.
+
+**Rep** — Access limited to their own deals, calls, and personal scorecard. Cannot see other reps' data or admin configuration.
+
+---
+
+### Common "How Do I...?" Answers
+
+**Connect my CRM** → Go to Data → Connectors. Click your CRM type (HubSpot or Salesforce) and complete the OAuth flow.
+
+**Connect Gong or Fireflies** → Data → Connectors → add conversation intelligence source. Gong requires an Access Key and Secret. Fireflies requires an API key.
+
+**See why a deal is flagged** → Click the deal anywhere in the app to open its dossier. Findings are listed with the specific evidence that triggered them (e.g., "87 days in Negotiation, no stage movement since Jan 5").
+
+**Run a Skill or Playbook immediately** → Operations → Playbooks → find the Playbook → click "Run Now." Or go to Intelligence → Skills → find the Skill → click the manual run button.
+
+**Set up Slack alerts** → Workspace → Settings → Notifications. Connect your Slack workspace and choose which Finding severities push to which channels.
+
+**Change what counts as a stale deal** → Workspace → Settings → CRM Sync tab, or update the threshold via the workspace configuration API. The Stage Velocity / Benchmarks page also shows stage-specific thresholds once benchmarks are computed.
+
+**Add a new rep or user** → Workspace → Settings → Members. Enter their email to send an invite. Assign their role on the same page.
+
+**See token and AI cost usage** → Admin only: Workspace → Settings → Features tab shows cumulative token usage. Playbook detail pages show estimated tokens per run.
+
+**Troubleshoot a stale or failed sync** → Data → Connector Health. Find the connector with the issue — the error message and timestamp appear there. Common causes: expired OAuth token (reconnect from Connectors page), rate limit hit (will auto-retry), or CRM permission scope too narrow.
+
+**Skills producing no findings** → Go to Intelligence → Skills, check the last run timestamp. If it's stale, trigger a manual run. If the run succeeds but returns zero findings, the underlying data may be clean — or the connector data may be stale (check Connector Health).
+
+**Configure roles and permissions** → Admin only: Workspace → Settings → Roles. Define custom permission sets. Assign them to users from the Members tab.
+
+**Understand an A/B/C/D/F ICP grade** → Intelligence → ICP Profile shows the scoring rubric and grade distribution. An A account closely matches all configured ICP criteria. An F account fails most criteria. Grades are recalculated on each ICP Discovery Skill run.
+
+**See my forecast for the quarter** → Operations → Forecast. Requires quota data (set in Targets) and at least one Forecast Rollup Skill run.
+```
+
+Save this file as `docs/PRODUCT_KNOWLEDGE.md`.
+
+---
+
+## T002: Insert Product Knowledge into the System Prompt
+
+**File:** `server/chat/pandora-agent.ts`
+
+**Step 1: Locate the constant**
+
+Find `PANDORA_SYSTEM_PROMPT` (approximately line 732). It will look like:
+
+```typescript
+const PANDORA_SYSTEM_PROMPT = `
+  ... existing prompt content ...
+`;
+```
+
+**Step 2: Read the file at `docs/PRODUCT_KNOWLEDGE.md`**
+
+Read the file you just created. You will append its content to the system prompt.
+
+**Step 3: Append the product knowledge block**
+
+At the **end** of the existing system prompt content, before the closing backtick, add the following — substituting the actual file content where indicated:
+
+```
+---
+
+## App Knowledge
+
+If the user's question is about how the app works — what a page shows, how to configure something, why data isn't appearing, or what a concept means — answer from the product knowledge below **before** querying their data. For questions that mix "how do I..." with "show me my...", answer the how-do-I part first, then pull the data.
+
+[INSERT FULL CONTENT OF docs/PRODUCT_KNOWLEDGE.md HERE — everything from "## About Pandora" through the last "How Do I" answer]
+```
+
+**Step 4: Verify the result**
+
+After the edit, confirm:
+1. The existing system prompt content (data analysis instructions, tool definitions, workspace context) is **completely unchanged** — this is additive only.
+2. The new section appears at the very end, after all existing content.
+3. The TypeScript file still compiles without errors (`npx tsc --noEmit`).
+4. The `PANDORA_SYSTEM_PROMPT` string closes correctly (no unterminated template literals).
+
+**Do not restructure, reorder, or remove any existing lines from the system prompt.**
+
+---
+
+## Acceptance Test
+
+After both tasks are complete, verify the AI can correctly answer these questions without hallucinating page names or navigation paths:
+
+1. "What does Stage Velocity show?" → Should describe the Benchmarks page, median time-in-stage, deal comparison vs. benchmark.
+2. "Where do I configure roles?" → Should say Workspace → Settings → Roles tab, describe it as admin-only.
+3. "Why aren't my findings showing up?" → Should walk through: check Skills last run timestamp, trigger manual run, check Connector Health for sync errors.
+4. "What's the difference between a Skill, an Agent, and a Playbook?" → Should give the Skill → Agent → Playbook hierarchy clearly.
+5. "How do I set up Slack alerts?" → Should say Workspace → Settings → Notifications, connect Slack, configure severities.
+6. "What does the ICP score mean?" → Should explain A–F grading, ICP Profile page, how it's derived.
+
+Test by sending each question to the `/api/workspaces/:workspaceId/chat` endpoint (or equivalent) and reviewing the response.
