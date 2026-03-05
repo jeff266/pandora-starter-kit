@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
+import { useDemoMode } from '../contexts/DemoModeContext';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -121,6 +122,7 @@ function FactorRow({ factor, maxContrib }: { factor: any; maxContrib: number }) 
 
 function ProspectRow({ p, onSelect }: { p: any; onSelect: (p: any) => void }) {
   const [hovered, setHovered] = useState(false);
+  const { anon } = useDemoMode();
   const change = p.score_change;
   return (
     <div
@@ -136,11 +138,11 @@ function ProspectRow({ p, onSelect }: { p: any; onSelect: (p: any) => void }) {
       <ScoreRing score={p.score} size={40} stroke={3} grade={p.grade} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: colors.text, fontFamily: fonts.sans }}>{p.name}</span>
+          <span style={{ fontSize: 13, fontWeight: 600, color: colors.text, fontFamily: fonts.sans }}>{anon.person(p.name)}</span>
           {p.title && <><span style={{ fontSize: 10, color: colors.border }}>•</span><span style={{ fontSize: 11, color: colors.textMuted, fontFamily: fonts.sans }}>{p.title}</span></>}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
-          {p.company && <span style={{ fontSize: 11, color: colors.textMuted, fontFamily: fonts.sans }}>{p.company}</span>}
+          {p.company && <span style={{ fontSize: 11, color: colors.textMuted, fontFamily: fonts.sans }}>{anon.company(p.company)}</span>}
           {p.industry && (
             <span style={{ fontSize: 9, color: colors.textMuted, background: colors.surfaceRaised, padding: '1px 6px', borderRadius: 3, fontFamily: fonts.sans }}>
               {p.industry}
@@ -181,6 +183,7 @@ function ProspectRow({ p, onSelect }: { p: any; onSelect: (p: any) => void }) {
 }
 
 function ProspectDetail({ p, onBack }: { p: any; onBack: () => void }) {
+  const { anon } = useDemoMode();
   const change = p.score_change;
   const bm = p.segment_benchmarks || {};
   const factors: any[] = p.factors || [];
@@ -212,7 +215,7 @@ function ProspectDetail({ p, onBack }: { p: any; onBack: () => void }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16 }}>
           <div style={{ flex: 1, minWidth: 200 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-              <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: colors.text, fontFamily: fonts.sans }}>{p.name}</h2>
+              <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: colors.text, fontFamily: fonts.sans }}>{anon.person(p.name)}</h2>
               {p.source && (
                 <span style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, background: colors.surfaceRaised, padding: '2px 8px', borderRadius: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
                   {p.source}
@@ -221,10 +224,10 @@ function ProspectDetail({ p, onBack }: { p: any; onBack: () => void }) {
             </div>
             {(p.title || p.company) && (
               <p style={{ margin: '0 0 2px', fontSize: 13, color: colors.textMuted, fontFamily: fonts.sans }}>
-                {[p.title, p.company].filter(Boolean).join(' at ')}
+                {[p.title, p.company ? anon.company(p.company) : null].filter(Boolean).join(' at ')}
               </p>
             )}
-            {p.email && <p style={{ margin: 0, fontSize: 12, color: colors.textMuted, fontFamily: fonts.mono }}>{p.email}</p>}
+            {p.email && <p style={{ margin: 0, fontSize: 12, color: colors.textMuted, fontFamily: fonts.mono }}>{anon.email(p.email)}</p>}
             {p.recommended_action && (
               <div style={{ marginTop: 10 }}>
                 <span style={{

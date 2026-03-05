@@ -190,6 +190,52 @@ html, body, #root {
 }
 
 /* ============================================================
+   SLATE — cool light gray + blue
+   ============================================================ */
+[data-palette="slate"] {
+  --color-bg: #f1f5f9;
+  --color-bgSidebar: #e2e8f0;
+  --color-surface: #ffffff;
+  --color-surfaceRaised: #f8fafc;
+  --color-surfaceHover: #e9f0f8;
+  --color-surfaceActive: #dbeafe;
+  --color-border: #cbd5e1;
+  --color-borderLight: #e2e8f0;
+  --color-borderFocus: #3b82f6;
+  --color-text: #0f172a;
+  --color-textSecondary: #334155;
+  --color-textMuted: #64748b;
+  --color-textDim: #cbd5e1;
+  --color-textTertiary: #94a3b8;
+  --color-accent: #3b82f6;
+  --color-accentHover: #2563eb;
+  --color-accentSoft: rgba(59,130,246,0.10);
+}
+
+/* ============================================================
+   LINEN — warm cream + amber
+   ============================================================ */
+[data-palette="linen"] {
+  --color-bg: #f5f0eb;
+  --color-bgSidebar: #ece5dc;
+  --color-surface: #fefcf8;
+  --color-surfaceRaised: #f7f2ec;
+  --color-surfaceHover: #ede6db;
+  --color-surfaceActive: #fde68a;
+  --color-border: #d6c9b8;
+  --color-borderLight: #e7ddd0;
+  --color-borderFocus: #b45309;
+  --color-text: #1c1008;
+  --color-textSecondary: #44301a;
+  --color-textMuted: #78614a;
+  --color-textDim: #d6c9b8;
+  --color-textTertiary: #a89070;
+  --color-accent: #b45309;
+  --color-accentHover: #92400e;
+  --color-accentSoft: rgba(180,83,9,0.10);
+}
+
+/* ============================================================
    BASE STYLES — use CSS vars
    ============================================================ */
 body {

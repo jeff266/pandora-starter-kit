@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import { colors } from '../styles/theme';
 import Toast from '../components/Toast';
 import { useWorkspace } from '../context/WorkspaceContext';
+import ConnectorLogo from '../components/ConnectorLogo';
 
 type ConnectorStatus = 'available' | 'coming_soon';
 
@@ -290,26 +291,7 @@ function ConnectorCard({ connector, isConnected, onConnect, onDisconnect }: Conn
     >
       {/* Logo + Name */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <div style={{
-          width: 40,
-          height: 40,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          borderRadius: 8,
-          background: '#1A1F2B',
-          flexShrink: 0,
-        }}>
-          <img
-            src={connector.logo}
-            alt={`${connector.name} logo`}
-            style={{
-              width: 24,
-              height: 24,
-              objectFit: 'contain',
-            }}
-          />
-        </div>
+        <ConnectorLogo type={connector.id} size={40} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 15, fontWeight: 600, color: '#F1F5F9' }}>
             {connector.name}

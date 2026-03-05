@@ -76,7 +76,6 @@ const pageTitles: Record<string, string> = {
   '/connectors/health': 'Connector Health',
   '/enrichment': 'Enrichment Connectors',
   '/filters': 'Named Filters',
-  '/data-dictionary': 'Data Dictionary',
   '/sql-workspace': 'SQL Workspace',
   '/members': 'Members',
   '/marketplace': 'Marketplace',
@@ -305,7 +304,6 @@ export default function App() {
             <Route path="/actions" element={<Actions />} />
             <Route path="/connectors/health" element={<ConnectorHealth />} />
             <Route path="/filters" element={<FiltersPage />} />
-            <Route path="/data-dictionary" element={<Placeholder title="Data Dictionary" />} />
             <Route path="/sql-workspace" element={<SQLWorkspace />} />
             <Route path="/forecast" element={<ForecastPage />} />
             <Route path="/marketplace" element={<MarketplacePage />} />

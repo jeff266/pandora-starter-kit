@@ -5,16 +5,19 @@ export interface PaletteOption {
   name: string;
   bg: string;
   accent: string;
+  mode: 'dark' | 'light';
 }
 
 export const PALETTES: PaletteOption[] = [
-  { id: 'pandora',  name: 'Pandora',  bg: '#0b1014', accent: '#48af9b' },
-  { id: 'midnight', name: 'Midnight', bg: '#0b1b32', accent: '#83a6ce' },
-  { id: 'ember',    name: 'Ember',    bg: '#1b1931', accent: '#ed9e59' },
-  { id: 'crimson',  name: 'Crimson',  bg: '#181a2f', accent: '#fda481' },
-  { id: 'lavender', name: 'Lavender', bg: '#03122f', accent: '#ae7dac' },
-  { id: 'ocean',    name: 'Ocean',    bg: '#031716', accent: '#0c969c' },
-  { id: 'plum',     name: 'Plum',     bg: '#150016', accent: '#845162' },
+  { id: 'pandora',  name: 'Pandora',  bg: '#0b1014', accent: '#48af9b', mode: 'dark' },
+  { id: 'midnight', name: 'Midnight', bg: '#0b1b32', accent: '#83a6ce', mode: 'dark' },
+  { id: 'ember',    name: 'Ember',    bg: '#1b1931', accent: '#ed9e59', mode: 'dark' },
+  { id: 'crimson',  name: 'Crimson',  bg: '#181a2f', accent: '#fda481', mode: 'dark' },
+  { id: 'lavender', name: 'Lavender', bg: '#03122f', accent: '#ae7dac', mode: 'dark' },
+  { id: 'ocean',    name: 'Ocean',    bg: '#031716', accent: '#0c969c', mode: 'dark' },
+  { id: 'plum',     name: 'Plum',     bg: '#150016', accent: '#845162', mode: 'dark' },
+  { id: 'slate',    name: 'Slate',    bg: '#f1f5f9', accent: '#3b82f6', mode: 'light' },
+  { id: 'linen',    name: 'Linen',    bg: '#f5f0eb', accent: '#b45309', mode: 'light' },
 ];
 
 const VALID_IDS = new Set(PALETTES.map(p => p.id));

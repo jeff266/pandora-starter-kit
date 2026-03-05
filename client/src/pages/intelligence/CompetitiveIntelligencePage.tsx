@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { api } from '../../lib/api';
 import { useWorkspace } from '../../context/WorkspaceContext';
+import { useDemoMode } from '../../contexts/DemoModeContext';
 
 const C = {
   bg: '#06080c',
@@ -158,6 +159,7 @@ export default function CompetitiveIntelligencePage() {
   const [runMessage, setRunMessage]         = useState<string | null>(null);
   const [exclusions, setExclusions]         = useState<string[]>([]);
   const [showMath, setShowMath]             = useState(false);
+  const { anon } = useDemoMode();
 
   const loadData = () => {
     if (!workspaceId) return;
@@ -229,11 +231,11 @@ export default function CompetitiveIntelligencePage() {
     const rows: string[][] = [];
     rows.push(['=== Competitor Win Rate Breakdown ===']);
     rows.push(['Competitor', 'Deals Mentioned', 'Win Rate %', 'Baseline %', 'Delta pp', 'Pattern']);
-    for (const c of visibleCompetitors) rows.push([c.name, String(c.deal_count), String(c.win_rate), String(data?.baseline_win_rate ?? 0), String(c.delta), c.pattern ?? '']);
+    for (const c of visibleCompetitors) rows.push([anon.company(c.name), String(c.deal_count), String(c.win_rate), String(data?.baseline_win_rate ?? 0), String(c.delta), c.pattern ?? '']);
     rows.push([]);
     rows.push(['=== Open Deal Exposure ===']);
     rows.push(['Deal', 'Competitor', 'Amount', 'Stage', 'Mentions', 'Last Mention', 'Risk']);
-    for (const d of sortedDeals) rows.push([d.deal_name, d.competitor_name, String(d.amount), d.stage, String(d.mention_count), d.last_mention_at, d.risk]);
+    for (const d of sortedDeals) rows.push([d.deal_name, anon.company(d.competitor_name), String(d.amount), d.stage, String(d.mention_count), d.last_mention_at, d.risk]);
     const csv = rows.map(r => r.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -276,7 +278,7 @@ export default function CompetitiveIntelligencePage() {
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             {selectedCompetitor && (
               <button onClick={() => setSelected(null)} style={{ background: C.surfaceRaised, border: `1px solid ${C.borderLight}`, color: C.textSecondary, fontSize: 13, padding: '7px 14px', borderRadius: 7, cursor: 'pointer', fontFamily: font }}>
-                ✕ {selectedCompetitor}
+                ✕ {anon.company(selectedCompetitor)}
               </button>
             )}
             <button onClick={runAnalysis} disabled={running} style={{ background: running ? C.surfaceRaised : C.accentSoft, border: `1px solid ${running ? C.borderLight : C.accent}`, color: running ? C.textMuted : C.accent, fontSize: 13, fontWeight: 600, padding: '7px 14px', borderRadius: 7, cursor: running ? 'not-allowed' : 'pointer', fontFamily: font, display: 'flex', alignItems: 'center', gap: 6, transition: 'all 0.15s' }}>
@@ -305,16 +307,16 @@ export default function CompetitiveIntelligencePage() {
         ) : (
           <>
             <StatCard label="Baseline win rate" value={data ? `${data.baseline_win_rate}%` : '—'} sub="Deals with no competitors" accent={C.green} />
-            <StatCard label={selectedCompetitor ? `${selectedCompetitor} pipeline` : 'Open pipeline at risk'} value={data ? formatCurrency(kpiPipelineAtRisk) : '—'} sub={data ? `${formatCurrency(kpiHighRisk)} flagged high-risk` : undefined} valueColor={C.red} accent={C.red} />
+            <StatCard label={selectedCompetitor ? `${anon.company(selectedCompetitor)} pipeline` : 'Open pipeline at risk'} value={data ? formatCurrency(kpiPipelineAtRisk) : '—'} sub={data ? `${formatCurrency(kpiHighRisk)} flagged high-risk` : undefined} valueColor={C.red} accent={C.red} />
             <StatCard
               label={selectedCompetitor ? 'Win rate vs. baseline' : 'Hardest to beat'}
-              value={selectedCompetitor ? (kpiHardest ? `${kpiHardest.win_rate}%` : '—') : (kpiHardest?.name ?? '—')}
+              value={selectedCompetitor ? (kpiHardest ? `${kpiHardest.win_rate}%` : '—') : (kpiHardest ? anon.company(kpiHardest.name) : '—')}
               sub={kpiHardest ? (selectedCompetitor ? `${kpiHardest.delta > 0 ? '+' : ''}${kpiHardest.delta}pp vs. ${data?.baseline_win_rate}% baseline` : `${kpiHardest.delta > 0 ? '+' : ''}${kpiHardest.delta}pp vs. baseline`) : 'No data yet'}
               valueColor={selectedCompetitor && kpiHardest && kpiHardest.win_rate < (data?.baseline_win_rate ?? 50) ? C.red : (selectedCompetitor ? C.green : C.red)}
               accent={C.purple}
             />
             <StatCard
-              label={selectedCompetitor ? `${selectedCompetitor} deal count` : 'Competitor mentions'}
+              label={selectedCompetitor ? `${anon.company(selectedCompetitor)} deal count` : 'Competitor mentions'}
               value={selectedCompetitor ? String(kpiMentionCount ?? '—') : (data?.mention_change_pct != null ? `${data.mention_change_pct > 0 ? '+' : ''}${data.mention_change_pct}%` : 'First run')}
               sub={selectedCompetitor ? 'Deals with at least one mention' : 'vs. prior 90-day period'}
               valueColor={C.orange} accent={C.orange}
@@ -351,7 +353,7 @@ export default function CompetitiveIntelligencePage() {
               <div style={{ fontSize: 14, fontWeight: 600, color: C.text, marginBottom: 2, fontFamily: font }}>Open Deal Exposure</div>
               <div style={{ fontSize: 12, color: C.textMuted, fontFamily: font }}>
                 {loading ? 'Loading…' : `${sortedDeals.length} open deal${sortedDeals.length !== 1 ? 's' : ''} with competitor mentions · sorted by ${sortBy.toLowerCase()}`}
-                {selectedCompetitor && <span style={{ color: C.purple }}> · filtered to {selectedCompetitor}</span>}
+                {selectedCompetitor && <span style={{ color: C.purple }}> · filtered to {anon.company(selectedCompetitor)}</span>}
               </div>
             </div>
             <div style={{ display: 'flex', gap: 6 }}>
@@ -382,7 +384,7 @@ export default function CompetitiveIntelligencePage() {
                     <td style={{ padding: '11px 22px', fontSize: 13, fontWeight: 500, color: C.text, fontFamily: font }}>{d.deal_name}</td>
                     <td style={{ padding: '11px 22px' }}>
                       <button onClick={() => { toggleCompetitor(d.competitor_name); setActiveTab('competitors'); }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: font, textAlign: 'left' }}>
-                        <span style={{ fontSize: 13, color: C.accent, fontWeight: 600 }}>{d.competitor_name}</span>
+                        <span style={{ fontSize: 13, color: C.accent, fontWeight: 600 }}>{anon.company(d.competitor_name)}</span>
                       </button>
                     </td>
                     <td style={{ padding: '11px 14px', fontSize: 13, fontFamily: mono, color: C.text, fontWeight: 600, whiteSpace: 'nowrap' }}>{formatCurrency(d.amount)}</td>
@@ -394,7 +396,7 @@ export default function CompetitiveIntelligencePage() {
                 ))}
                 {!loading && sortedDeals.length === 0 && (
                   <tr><td colSpan={7} style={{ padding: '32px 22px', textAlign: 'center', color: C.textMuted, fontSize: 13, fontFamily: font }}>
-                    {selectedCompetitor ? `No open deals with ${selectedCompetitor} mentions` : 'No open deals with competitor mentions'}
+                    {selectedCompetitor ? `No open deals with ${anon.company(selectedCompetitor)} mentions` : 'No open deals with competitor mentions'}
                   </td></tr>
                 )}
               </tbody>
@@ -448,7 +450,7 @@ export default function CompetitiveIntelligencePage() {
                       style={{ borderBottom: `1px solid ${C.border}`, cursor: 'pointer', background: selectedCompetitor === c.name ? C.surfaceActive : 'transparent', transition: 'background 0.15s' }}
                       onMouseEnter={e => { if (selectedCompetitor !== c.name) e.currentTarget.style.background = C.surfaceHover; }}
                       onMouseLeave={e => { if (selectedCompetitor !== c.name) e.currentTarget.style.background = 'transparent'; }}>
-                      <td style={{ padding: '11px 16px', fontSize: 13, fontWeight: 600, color: C.text, fontFamily: font }}>{c.name}</td>
+                      <td style={{ padding: '11px 16px', fontSize: 13, fontWeight: 600, color: C.text, fontFamily: font }}>{anon.company(c.name)}</td>
                       <td style={{ padding: '11px 16px', fontSize: 13, fontFamily: mono, color: C.textSecondary }}>{c.deal_count}</td>
                       <td style={{ padding: '11px 16px', fontSize: 13, fontFamily: mono, fontWeight: 600, color: c.win_rate < (data?.baseline_win_rate ?? 50) ? C.red : C.green }}>{c.win_rate}%</td>
                       <td style={{ padding: '11px 16px' }}><Delta value={c.delta} /></td>
@@ -487,7 +489,7 @@ export default function CompetitiveIntelligencePage() {
               <div style={{ borderTop: `1px solid ${C.border}`, padding: '16px 22px' }}>
                 <div style={{ fontSize: 12, color: C.textMuted, fontFamily: font, marginBottom: 12 }}>
                   Full win rate breakdown · Baseline {data.baseline_win_rate}% · {visibleCompetitors.length} competitor{visibleCompetitors.length !== 1 ? 's' : ''}
-                  {selectedCompetitor && <span style={{ color: C.purple }}> · filtered to {selectedCompetitor}</span>}
+                  {selectedCompetitor && <span style={{ color: C.purple }}> · filtered to {anon.company(selectedCompetitor)}</span>}
                 </div>
                 <div style={{ overflowX: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -505,7 +507,7 @@ export default function CompetitiveIntelligencePage() {
                         const cHighRisk = cDeals.filter(d => d.risk === 'high').reduce((s, d) => s + d.amount, 0);
                         return (
                           <tr key={c.name} style={{ borderBottom: `1px solid ${C.border}` }}>
-                            <td style={{ padding: '9px 14px', fontSize: 13, fontWeight: 600, color: C.text, fontFamily: font }}>{c.name}</td>
+                            <td style={{ padding: '9px 14px', fontSize: 13, fontWeight: 600, color: C.text, fontFamily: font }}>{anon.company(c.name)}</td>
                             <td style={{ padding: '9px 14px', fontSize: 13, fontFamily: mono, color: C.textSecondary }}>{c.deal_count}</td>
                             <td style={{ padding: '9px 14px', fontSize: 13, fontFamily: mono, fontWeight: 600, color: c.win_rate < data.baseline_win_rate ? C.red : C.green }}>{c.win_rate}%</td>
                             <td style={{ padding: '9px 14px', fontSize: 13, fontFamily: mono, color: C.textMuted }}>{data.baseline_win_rate}%</td>
@@ -533,7 +535,7 @@ export default function CompetitiveIntelligencePage() {
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 {exclusions.map(key => (
                   <span key={key} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, padding: '3px 10px' }}>
-                    <span style={{ fontSize: 12, color: C.textSecondary, fontFamily: font, fontWeight: 500, textTransform: 'capitalize' }}>{key}</span>
+                    <span style={{ fontSize: 12, color: C.textSecondary, fontFamily: font, fontWeight: 500, textTransform: 'capitalize' }}>{anon.company(key)}</span>
                     <button onClick={() => restoreCompetitor(key)}
                       onMouseEnter={e => (e.currentTarget.style.color = C.accent)}
                       onMouseLeave={e => (e.currentTarget.style.color = C.textMuted)}
@@ -570,7 +572,7 @@ export default function CompetitiveIntelligencePage() {
             <div style={{ fontSize: 14, fontWeight: 600, color: C.text, marginBottom: 2, fontFamily: font }}>Field Intel Feed</div>
             <div style={{ fontSize: 12, color: C.textMuted, fontFamily: font }}>
               Raw quotes extracted from call transcripts · ranked by confidence
-              {selectedCompetitor && <span style={{ color: C.purple }}> · {selectedCompetitor} only</span>}
+              {selectedCompetitor && <span style={{ color: C.purple }}> · {anon.company(selectedCompetitor)} only</span>}
             </div>
           </div>
           <div style={{ padding: '0 22px 22px', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(480px, 1fr))', gap: 12 }}>
@@ -587,7 +589,7 @@ export default function CompetitiveIntelligencePage() {
               return (
                 <div key={i} style={{ background: C.surfaceRaised, border: `1px solid ${C.borderLight}`, borderRadius: 9, padding: '14px 16px', borderLeft: pMeta ? `3px solid ${pMeta.color}` : `3px solid ${C.accent}` }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-                    <button onClick={() => { toggleCompetitor(item.competitor_name); setActiveTab('competitors'); }} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 12, fontWeight: 700, color: pMeta?.color ?? C.accent, fontFamily: font }}>{item.competitor_name}</button>
+                    <button onClick={() => { toggleCompetitor(item.competitor_name); setActiveTab('competitors'); }} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 12, fontWeight: 700, color: pMeta?.color ?? C.accent, fontFamily: font }}>{anon.company(item.competitor_name)}</button>
                     <span style={{ fontSize: 11, color: C.textMuted }}>→</span>
                     <span style={{ fontSize: 12, color: C.textSecondary, fontWeight: 500, fontFamily: font }}>{item.deal_name}</span>
                     <span style={{ marginLeft: 'auto', fontSize: 11, color: C.textMuted, fontFamily: font }}>{formatDate(item.created_at)}{item.owner_email ? ` · ${item.owner_email.split('@')[0]}` : ''}</span>
@@ -599,7 +601,7 @@ export default function CompetitiveIntelligencePage() {
             })}
             {!loading && filteredFeed.length === 0 && (
               <div style={{ gridColumn: '1 / -1', textAlign: 'center', color: C.textMuted, fontSize: 13, padding: '32px 0', fontFamily: font }}>
-                {selectedCompetitor ? `No intel found for ${selectedCompetitor}` : 'No call transcripts with competitor mentions'}
+                {selectedCompetitor ? `No intel found for ${anon.company(selectedCompetitor)}` : 'No call transcripts with competitor mentions'}
               </div>
             )}
           </div>

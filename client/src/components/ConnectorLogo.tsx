@@ -17,47 +17,70 @@ const logos: Record<string, { bg: string; content: React.ReactNode }> = {
   salesforce: {
     bg: '#00a1e0',
     content: (
-      <svg viewBox="0 0 24 24" width="70%" height="70%" fill="white">
-        <path d="M10 4.5c1-.9 2.3-1.5 3.7-1.5 1.8 0 3.4.9 4.3 2.3.8-.4 1.6-.5 2.5-.5C23 4.8 25 7 25 9.5c0 .4 0 .7-.1 1 1.5.7 2.6 2.3 2.6 4.1 0 2.5-2 4.5-4.5 4.5h-.3c-.7 1.5-2.2 2.4-3.9 2.4-1 0-1.8-.3-2.6-.8-.7 1.2-2 2-3.5 2-1.3 0-2.4-.6-3.2-1.5-.5.2-1 .3-1.5.3-2.2 0-4-1.8-4-4 0-.7.2-1.3.4-1.9C2.6 14.6 1 12.8 1 10.5c0-2.5 2-4.5 4.5-4.5 1.7 0 3.2 1 3.9 2.3.2-.1.4-.1.6-.1v-3.7z" transform="scale(0.85) translate(1.5,2)" />
+      <svg viewBox="0 0 48 48" width="70%" height="70%" fill="white">
+        <path d="M20 9a8 8 0 0 1 6 2.7A9.5 9.5 0 0 1 32.5 10c4 0 7.4 2.5 8.7 6.1.5-.1 1-.2 1.6-.2C46 15.9 48 18 48 20.5c0 2.6-2 4.6-4.5 4.6H7.2C4.3 25.1 2 22.8 2 19.9c0-2.5 1.8-4.6 4.2-5 .4-3.3 3.2-5.9 6.6-5.9 1.2 0 2.3.3 3.2.9A8 8 0 0 1 20 9z" />
       </svg>
     ),
   },
   gong: {
-    bg: '#7c3aed',
+    bg: '#EE5F3D',
     content: (
-      <svg viewBox="0 0 24 24" width="55%" height="55%" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
-        <circle cx="12" cy="12" r="6" />
-        <line x1="12" y1="2" x2="12" y2="4" />
-        <line x1="12" y1="20" x2="12" y2="22" />
-        <line x1="4" y1="8" x2="2" y2="7" />
-        <line x1="20" y1="8" x2="22" y2="7" />
+      <svg viewBox="0 0 24 24" width="65%" height="65%" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="3" y="8" width="3.5" height="10" rx="1.75" fill="white"/>
+        <rect x="10.25" y="5" width="3.5" height="13" rx="1.75" fill="white"/>
+        <rect x="17.5" y="3" width="3.5" height="15" rx="1.75" fill="white"/>
       </svg>
     ),
   },
   fireflies: {
-    bg: '#a855f7',
+    bg: '#7C3AED',
     content: (
-      <svg viewBox="0 0 24 24" width="55%" height="55%" fill="white">
-        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" opacity="0" />
-        <path d="M12 3a1.5 1.5 0 010 3 1.5 1.5 0 010-3zM7 7a1 1 0 012 0 1 1 0 01-2 0zM15 7a1 1 0 012 0 1 1 0 01-2 0zM5 12a1.5 1.5 0 013 0 1.5 1.5 0 01-3 0zM16 12a1.5 1.5 0 013 0 1.5 1.5 0 01-3 0zM9 16a1 1 0 012 0 1 1 0 01-2 0zM13 16a1 1 0 012 0 1 1 0 01-2 0zM11 20a1.5 1.5 0 010 3 1.5 1.5 0 010-3z" />
-        <circle cx="12" cy="12" r="3" />
+      <svg viewBox="0 0 24 24" width="62%" height="62%" fill="white" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 2.5c0 0-1.5 3-1.5 5.5 0 1.5.5 2.5 1.5 3-1-.5-3.5-.5-4.5 2 1-1 2.5-.5 3.5.5-1.5 0-3 1.5-2.5 4 .5-1.5 2-2 3-1.5-1 1-1.5 3-.5 4.5.5-1.5 1.5-2 2.5-1.5-.5 1 0 3 1.5 3.5-.5-1.5 0-2.5 1-3 1 .5 1.5 1.5 1 3 1.5-.5 2-2 1.5-3.5 1 .5 2 1 2.5 2.5.5-2 0-3.5-1-4.5 1 .5 2.5-.5 3-2-1.5.5-2.5 0-3.5-1 1.5-.5 3-2 2.5-4.5-.5 1.5-2 2.5-3.5 2.5 1-1 1.5-3 .5-5-1.5 2-3.5 2-3.5 2s1.5-2.5 0-6z"/>
+      </svg>
+    ),
+  },
+  fathom: {
+    bg: '#1a1a2e',
+    content: (
+      <svg viewBox="0 0 24 24" width="60%" height="60%" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="12" cy="12" r="9" stroke="white" strokeWidth="1.8" fill="none"/>
+        <path d="M8 9h8M8 12h5M8 15h6" stroke="white" strokeWidth="1.8" strokeLinecap="round"/>
+      </svg>
+    ),
+  },
+  notion: {
+    bg: '#2f2f2f',
+    content: (
+      <svg viewBox="0 0 24 24" width="62%" height="62%" fill="white" xmlns="http://www.w3.org/2000/svg">
+        <path d="M4 4.5C4 3.1 5.1 2 6.5 2h7.3c.7 0 1.3.3 1.8.7l3.7 3.7c.5.5.7 1.1.7 1.8v11.3c0 1.4-1.1 2.5-2.5 2.5H6.5C5.1 22 4 20.9 4 19.5V4.5zM8 8v2h8V8H8zm0 4v2h6v-2H8zm0 4v2h5v-2H8z"/>
+      </svg>
+    ),
+  },
+  asana: {
+    bg: '#F06A6A',
+    content: (
+      <svg viewBox="0 0 24 24" width="65%" height="65%" fill="white" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="12" cy="6.5" r="3.5"/>
+        <circle cx="5.5" cy="16" r="3.5"/>
+        <circle cx="18.5" cy="16" r="3.5"/>
       </svg>
     ),
   },
   monday: {
     bg: '#6161ff',
     content: (
-      <svg viewBox="0 0 24 24" width="55%" height="55%" fill="white">
-        <ellipse cx="5" cy="16" rx="2.5" ry="2.5" />
-        <ellipse cx="12" cy="12" rx="2.5" ry="2.5" />
-        <ellipse cx="19" cy="8" rx="2.5" ry="2.5" />
+      <svg viewBox="0 0 24 24" width="65%" height="65%" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="5" cy="15" r="3.5" fill="#ff7575"/>
+        <circle cx="12" cy="11.5" r="3.5" fill="#ffcb00"/>
+        <circle cx="19" cy="8" r="3.5" fill="#00d26a"/>
       </svg>
     ),
   },
-  'google-drive': {
+  google_drive: {
     bg: '#4285f4',
     content: (
-      <svg viewBox="0 0 24 24" width="55%" height="55%" fill="white">
+      <svg viewBox="0 0 24 24" width="60%" height="60%" fill="white">
         <path d="M8 2l8 0 4 7H12L8 2zM2 15l4-7h8l-4 7H2zM14 15l4-7 4 7H14zM6.5 16h11l-2.5 4h-11l2.5-4z" />
       </svg>
     ),
