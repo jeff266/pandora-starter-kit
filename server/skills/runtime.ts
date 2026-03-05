@@ -331,6 +331,9 @@ export class SkillRuntime {
           processFindingPersistence(workspaceId, runId, skill.id, insertedFindings).catch((err) =>
             console.error('[Persistence] engine error:', err instanceof Error ? err.message : err),
           );
+          import('../webhooks/deal-events.js')
+            .then(m => m.emitDealFlaggedEvents(workspaceId, insertedFindings, skill.id))
+            .catch(() => {});
         }
       } catch (err) {
         console.error(`[Findings] Extraction failed for ${skill.id}:`, err instanceof Error ? err.message : err);
@@ -344,6 +347,11 @@ export class SkillRuntime {
               pool, workspaceId, skill.id, runId, null, extractedActions
             );
             console.log(`[Actions] Extracted ${insertedCount} actions from ${skill.id} run ${runId}`);
+            if (insertedCount > 0) {
+              import('../webhooks/action-events.js')
+                .then(m => m.emitActionCreatedEvents(workspaceId, skill.id, runId))
+                .catch(() => {});
+            }
           }
         }
       } catch (err) {

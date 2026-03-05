@@ -693,6 +693,9 @@ export async function initialSync(
       if (stageChanges.length > 0) {
         const recorded = await recordStageChanges(stageChanges, 'sync_detection');
         console.log(`[Stage Tracker] Recorded ${recorded} stage changes for workspace ${workspaceId}`);
+        import('../../webhooks/deal-events.js')
+          .then(m => m.emitDealStageChangedEvents(workspaceId, stageChanges))
+          .catch(() => {});
       }
     } catch (err: any) {
       console.error(`[HubSpot Sync] Stage change detection failed:`, err.message);

@@ -42,6 +42,10 @@ async function runExpiryCheck(db: Pool): Promise<void> {
           VALUES ($1, $2, 'expired', 'scheduler', 'open', 'expired')
         `, [row.workspace_id, row.id]);
       }
+
+      import('../webhooks/action-events.js')
+        .then(m => m.emitActionExpiredEvents(expiredResult.rows))
+        .catch(() => {});
     }
 
     // Clean up ancient terminal actions (90+ days old)

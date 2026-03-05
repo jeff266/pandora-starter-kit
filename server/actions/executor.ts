@@ -127,6 +127,9 @@ export async function executeAction(
         updated_at = now()
       WHERE id = $1 AND workspace_id = $2
     `, [actionId, workspaceId, actor, JSON.stringify(results)]);
+    import('../webhooks/action-events.js')
+      .then(m => m.emitActionCompletedEvent(workspaceId, action, actor))
+      .catch(() => {});
   } else {
     // Partial failure — log results but keep action open/in_progress
     await db.query(`

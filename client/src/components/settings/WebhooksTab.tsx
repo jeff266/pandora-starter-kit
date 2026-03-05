@@ -28,7 +28,14 @@ interface WebhookDelivery {
   delivered_at: string;
 }
 
-const EVENT_TYPE_OPTIONS = ['prospect.scored'];
+const EVENT_TYPE_OPTIONS = [
+  'prospect.scored',
+  'deal.stage_changed',
+  'deal.flagged',
+  'action.created',
+  'action.completed',
+  'action.expired',
+];
 
 export default function WebhooksTab() {
   const { currentWorkspace } = useWorkspace();

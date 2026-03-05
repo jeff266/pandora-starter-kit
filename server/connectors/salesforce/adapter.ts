@@ -1115,6 +1115,10 @@ export class SalesforceAdapter implements CRMAdapter {
     const { recordStageChanges } = await import('../hubspot/stage-tracker.js');
     const recorded = await recordStageChanges(transitions as any, 'salesforce_history');
 
+    import('../webhooks/deal-events.js')
+      .then(m => m.emitDealStageChangedEvents(workspaceId, transitions as any))
+      .catch(() => {});
+
     logger.info('[Salesforce Adapter] Backfilled stage history', {
       historyRecords: historyRecords.length,
       transitions: transitions.length,
@@ -1161,6 +1165,10 @@ export class SalesforceAdapter implements CRMAdapter {
       // Record stage changes using shared utility
       const { recordStageChanges } = await import('../hubspot/stage-tracker.js');
       const recorded = await recordStageChanges(transitions as any, 'salesforce_history');
+
+      import('../webhooks/deal-events.js')
+        .then(m => m.emitDealStageChangedEvents(workspaceId, transitions as any))
+        .catch(() => {});
 
       logger.info('[Salesforce Adapter] Synced stage history', {
         historyRecords: historyRecords.length,
