@@ -4,6 +4,7 @@ import {
   listWebhookEndpoints,
   deleteWebhookEndpoint,
   testWebhookEndpoint,
+  testUrl,
   getEndpointDeliveries,
 } from '../webhooks/service.js';
 
@@ -73,6 +74,35 @@ router.delete('/:workspaceId/webhook-endpoints/:endpointId', async (req: Request
   } catch (err) {
     console.error('[webhook-endpoints] Delete error:', err);
     res.status(500).json({ error: 'Failed to delete webhook endpoint' });
+  }
+});
+
+/**
+ * POST /:workspaceId/webhook-endpoints/test-url
+ * Fire test payloads to an arbitrary URL without registering it.
+ * Generates an ephemeral signing secret (not stored).
+ * If event_types is provided, sends one payload per type sequentially.
+ * Otherwise sends a single generic webhook.test ping.
+ */
+router.post('/:workspaceId/webhook-endpoints/test-url', async (req: Request, res: Response): Promise<void> => {
+  const { workspaceId } = req.params;
+  const { url, event_types } = req.body as { url?: string; event_types?: string[] };
+
+  if (!url) {
+    res.status(400).json({ error: 'url is required' });
+    return;
+  }
+
+  try {
+    const result = await testUrl(workspaceId, url, event_types);
+    res.json(result);
+  } catch (err: any) {
+    if (err.status === 400) {
+      res.status(400).json({ error: err.message });
+      return;
+    }
+    console.error('[webhook-endpoints] Test URL error:', err);
+    res.status(500).json({ error: 'Test delivery failed' });
   }
 });
 

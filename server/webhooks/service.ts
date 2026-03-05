@@ -313,6 +313,55 @@ export async function testWebhookEndpoint(
   return deliverWebhook(endpoint, testEvent, 1);
 }
 
+export interface TestUrlResult {
+  event_type: string;
+  success: boolean;
+  status_code: number | null;
+  duration_ms: number | null;
+  error: string | null;
+}
+
+/**
+ * Fire test payloads to an arbitrary URL without creating an endpoint.
+ * Generates an ephemeral secret (not stored) and signs each payload.
+ * Payloads are sent sequentially — one per event type, or a single generic ping.
+ * Returns the results array and the ephemeral secret so the caller can verify signatures.
+ */
+export async function testUrl(
+  workspaceId: string,
+  url: string,
+  eventTypes?: string[]
+): Promise<{ results: TestUrlResult[]; ephemeral_secret: string }> {
+  const parsed = new URL(url);
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    const err = new Error('Webhook URL must use HTTP or HTTPS') as Error & { status: number };
+    err.status = 400;
+    throw err;
+  }
+
+  const ephemeral_secret = crypto.randomBytes(32).toString('hex');
+  const endpoint = { id: 'ephemeral', url, secret: ephemeral_secret };
+
+  const typesToTest: (string | undefined)[] =
+    eventTypes && eventTypes.length > 0 ? eventTypes : [undefined];
+
+  const results: TestUrlResult[] = [];
+
+  for (const eventType of typesToTest) {
+    const event = buildTestEvent(workspaceId, eventType);
+    const delivery = await deliverWebhook(endpoint, event, 1);
+    results.push({
+      event_type: event.event,
+      success: delivery.success,
+      status_code: delivery.statusCode ?? null,
+      duration_ms: delivery.durationMs ?? null,
+      error: delivery.error ?? null,
+    });
+  }
+
+  return { results, ephemeral_secret };
+}
+
 /**
  * Fetch the last N deliveries for a given endpoint.
  * Verifies endpoint ownership via JOIN to prevent cross-tenant reads.

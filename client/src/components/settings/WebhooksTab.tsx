@@ -60,6 +60,11 @@ export default function WebhooksTab() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [openTestMenu, setOpenTestMenu] = useState<string | null>(null);
+  const [testingUrl, setTestingUrl] = useState(false);
+  const [testUrlResults, setTestUrlResults] = useState<Array<{
+    event_type: string; success: boolean; status_code: number | null;
+    duration_ms: number | null; error: string | null;
+  }> | null>(null);
 
   const loadEndpoints = useCallback(async () => {
     setLoading(true);
@@ -77,9 +82,49 @@ export default function WebhooksTab() {
     if (currentWorkspace?.id) loadEndpoints();
   }, [currentWorkspace?.id, loadEndpoints]);
 
+  const handleTestUrl = async () => {
+    const url = newUrl.trim();
+    if (!url) {
+      setToast({ message: 'Enter a URL to test', type: 'error' });
+      return;
+    }
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      setToast({ message: 'URL must start with http:// or https://', type: 'error' });
+      return;
+    }
+    setTestingUrl(true);
+    setTestUrlResults(null);
+    try {
+      const data = await api.post('/webhook-endpoints/test-url', {
+        url,
+        event_types: newEventTypes.length > 0 ? newEventTypes : undefined,
+      });
+      setTestUrlResults(data.results ?? []);
+      const total = (data.results ?? []).length;
+      const passed = (data.results ?? []).filter((r: any) => r.success).length;
+      if (passed === total) {
+        setToast({ message: `Sent ${total}/${total} — all succeeded`, type: 'success' });
+      } else {
+        setToast({ message: `Sent ${total}/${total} — ${total - passed} failed`, type: 'error' });
+      }
+    } catch (err: any) {
+      setToast({ message: err?.message || 'Test delivery failed', type: 'error' });
+    } finally {
+      setTestingUrl(false);
+    }
+  };
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newUrl.trim()) return;
+    const url = newUrl.trim();
+    if (!url) {
+      setToast({ message: 'Endpoint URL is required', type: 'error' });
+      return;
+    }
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      setToast({ message: 'URL must start with http:// or https://', type: 'error' });
+      return;
+    }
     setSubmitting(true);
     try {
       const data = await api.post('/webhook-endpoints', {
@@ -489,7 +534,7 @@ export default function WebhooksTab() {
             <input
               type="url"
               value={newUrl}
-              onChange={e => setNewUrl(e.target.value)}
+              onChange={e => { setNewUrl(e.target.value); setTestUrlResults(null); }}
               placeholder="https://your-server.example.com/pandora-webhook"
               required
               style={{
@@ -527,13 +572,95 @@ export default function WebhooksTab() {
             </div>
           </div>
 
-          <button
-            type="submit"
-            style={btn('primary')}
-            disabled={submitting || !newUrl.trim()}
-          >
-            {submitting ? 'Creating…' : 'Create Endpoint'}
-          </button>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <button
+              type="button"
+              style={{ ...btn('ghost'), border: `1px solid ${colors.border}` }}
+              onClick={handleTestUrl}
+              disabled={testingUrl || submitting || !newUrl.trim()}
+            >
+              {testingUrl ? 'Testing…' : 'Test URL'}
+            </button>
+            <button
+              type="submit"
+              style={btn('primary')}
+              disabled={submitting || !newUrl.trim()}
+            >
+              {submitting ? 'Creating…' : 'Create Endpoint'}
+            </button>
+          </div>
+
+          {/* Inline test results */}
+          {testUrlResults !== null && (
+            <div style={{ marginTop: 16, border: `1px solid ${colors.border}`, borderRadius: 8, overflow: 'hidden' }}>
+              <div style={{ padding: '10px 14px', background: colors.surface, borderBottom: `1px solid ${colors.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: colors.text, fontFamily: fonts.sans }}>
+                  Test Results
+                </span>
+                <span style={{ fontSize: 11, color: colors.muted, fontFamily: fonts.sans }}>
+                  Signed with one-time ephemeral secret
+                </span>
+              </div>
+              {testUrlResults.length === 0 ? (
+                <div style={{ padding: '12px 14px', fontSize: 12, color: colors.muted, fontFamily: fonts.sans }}>
+                  No test payloads sent.
+                </div>
+              ) : (
+                testUrlResults.map((r, i) => {
+                  const badgeColor: Record<string, string> = {
+                    'prospect.scored': '#7c3aed',
+                    'deal.stage_changed': '#2563eb',
+                    'deal.flagged': '#ea580c',
+                    'action.created': '#16a34a',
+                    'action.completed': '#0891b2',
+                    'action.expired': '#dc2626',
+                    'webhook.test': colors.muted,
+                  };
+                  const color = badgeColor[r.event_type] ?? colors.muted;
+                  return (
+                    <div
+                      key={i}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 12,
+                        padding: '9px 14px',
+                        borderBottom: i < testUrlResults.length - 1 ? `1px solid ${colors.border}` : 'none',
+                        fontFamily: fonts.sans,
+                        fontSize: 12,
+                      }}
+                    >
+                      <span style={{
+                        fontFamily: 'monospace', fontSize: 11, padding: '2px 8px',
+                        borderRadius: 4, background: `${color}18`, color, border: `1px solid ${color}35`,
+                        flexShrink: 0,
+                      }}>
+                        {r.event_type}
+                      </span>
+                      <span style={{
+                        padding: '2px 8px', borderRadius: 4, fontWeight: 600, fontSize: 11, flexShrink: 0,
+                        background: r.success ? '#dcfce7' : '#fee2e2',
+                        color: r.success ? '#16a34a' : '#dc2626',
+                      }}>
+                        {r.success ? 'OK' : 'Failed'}
+                      </span>
+                      {r.status_code != null && (
+                        <span style={{ color: colors.muted, flexShrink: 0 }}>HTTP {r.status_code}</span>
+                      )}
+                      {r.duration_ms != null && (
+                        <span style={{ color: colors.muted, flexShrink: 0 }}>{r.duration_ms}ms</span>
+                      )}
+                      {r.error && (
+                        <span style={{ color: '#dc2626', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {r.error}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
         </form>
       </section>
 
