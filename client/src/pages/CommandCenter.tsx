@@ -799,68 +799,67 @@ export default function CommandCenter() {
         <CompactAlerts workspaceId={wsId} />
       </SectionErrorBoundary>
 
-      {/* Two-column: Pipeline Chart + Actions/Signals */}
-      <SectionErrorBoundary fallbackMessage="Failed to load pipeline chart.">
+      {/* Top row: Critical Findings + Skill Activity side by side */}
+      <SectionErrorBoundary fallbackMessage="Failed to load findings widgets.">
         <div style={{
           display: 'grid',
-          gridTemplateColumns: isMobile ? '1fr' : '1fr 340px',
+          gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
           gap: 16,
           alignItems: 'start',
         }}>
-          {/* Left: Pipeline by Stage */}
-          <div style={{
-            background: colors.surface,
-            border: `1px solid ${colors.border}`,
-            borderRadius: 10,
-            padding: 20,
-          }}>
-            <div style={{ marginBottom: 16 }}>
-              <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>Pipeline by Stage</h3>
-              <p style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
-                {formatCurrency(anon.amount(totalPipeline))} total {'·'} {pipeline?.total_open_deals ?? stageData.reduce((sum, s) => sum + s.deal_count, 0)} deals across {stageData.length} stages
-              </p>
-            </div>
-            {authLoading || loading.pipeline ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} height={40} />)}
-              </div>
-            ) : errors.pipeline ? (
-              <ErrorInline message={errors.pipeline} onRetry={fetchData} />
-            ) : stageData.length === 0 ? (
-              <EmptyInline
-                message="No pipeline data. Connect a CRM to get started."
-                linkText="Go to Connectors"
-                onLink={() => navigate('/connectors')}
-              />
-            ) : (
-              <AnnotatedPipelineChart
-                stages={stageData}
-                findings={findings}
-                totalPipeline={totalPipeline}
-                onStageClick={(stageNorm, stageName) => handleBarClick({ stage: stageName, stage_normalized: stageNorm })}
-                expandedStage={expandedStage}
-                expandedStageDeals={expandedStageDeals}
-                expandedStageLoading={expandedStageLoading}
-                onExpandStage={handleExpandStage}
-                onViewAll={handleViewAllFromPanel}
-                anon={anon}
-              />
-            )}
-          </div>
+          <ActionsWidget
+            summary={pipeline?.findings_summary}
+            loading={loading.pipeline}
+            workspaceId={wsId}
+          />
+          <SignalsWidget
+            summary={pipeline?.skill_activity_summary}
+            loading={loading.pipeline}
+            workspaceId={wsId}
+          />
+        </div>
+      </SectionErrorBoundary>
 
-          {/* Right: Critical Findings + Skill Activity stacked */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <ActionsWidget
-              summary={pipeline?.findings_summary}
-              loading={loading.pipeline}
-              workspaceId={wsId}
-            />
-            <SignalsWidget
-              summary={pipeline?.skill_activity_summary}
-              loading={loading.pipeline}
-              workspaceId={wsId}
-            />
+      {/* Pipeline by Stage — full width */}
+      <SectionErrorBoundary fallbackMessage="Failed to load pipeline chart.">
+        <div style={{
+          background: colors.surface,
+          border: `1px solid ${colors.border}`,
+          borderRadius: 10,
+          padding: 20,
+        }}>
+          <div style={{ marginBottom: 16 }}>
+            <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>Pipeline by Stage</h3>
+            <p style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
+              {formatCurrency(anon.amount(totalPipeline))} total {'·'} {pipeline?.total_open_deals ?? stageData.reduce((sum, s) => sum + s.deal_count, 0)} deals across {stageData.length} stages
+            </p>
           </div>
+          {authLoading || loading.pipeline ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} height={40} />)}
+            </div>
+          ) : errors.pipeline ? (
+            <ErrorInline message={errors.pipeline} onRetry={fetchData} />
+          ) : stageData.length === 0 ? (
+            <EmptyInline
+              message="No pipeline data. Connect a CRM to get started."
+              linkText="Go to Connectors"
+              onLink={() => navigate('/connectors')}
+            />
+          ) : (
+            <AnnotatedPipelineChart
+              stages={stageData}
+              findings={findings}
+              totalPipeline={totalPipeline}
+              onStageClick={(stageNorm, stageName) => handleBarClick({ stage: stageName, stage_normalized: stageNorm })}
+              expandedStage={expandedStage}
+              expandedStageDeals={expandedStageDeals}
+              expandedStageLoading={expandedStageLoading}
+              onExpandStage={handleExpandStage}
+              onViewAll={handleViewAllFromPanel}
+              anon={anon}
+            />
+          )}
         </div>
       </SectionErrorBoundary>
 

@@ -623,16 +623,16 @@ export default function MonteCarloPanel({ wsId, activePipeline }: { wsId?: strin
                     key={sq.label}
                     onClick={() => submitQuestion(sq.label)}
                     style={{
-                      fontSize: 11, padding: '4px 12px', borderRadius: 20,
-                      background: sq.category === 'what-if' ? '#1A2030' : '#1A1F2A',
-                      color: sq.category === 'what-if' ? '#60A5FA' : '#5A6578',
-                      border: sq.category === 'what-if' ? '1px solid #1E3A5F' : '1px solid #2A3040',
+                      fontSize: 11, padding: '5px 13px', borderRadius: 20,
+                      background: colors.surfaceRaised,
+                      color: colors.text,
+                      border: sq.category === 'what-if' ? '1px solid #2A4A7F' : `1px solid ${colors.border}`,
                       cursor: 'pointer', fontFamily: fonts.sans, transition: 'border-color 0.15s',
                     }}
                     onMouseEnter={e => (e.currentTarget.style.borderColor = '#3B82F6')}
-                    onMouseLeave={e => (e.currentTarget.style.borderColor = sq.category === 'what-if' ? '#1E3A5F' : '#2A3040')}
+                    onMouseLeave={e => (e.currentTarget.style.borderColor = sq.category === 'what-if' ? '#2A4A7F' : colors.border)}
                   >
-                    {sq.category === 'what-if' && <span style={{ marginRight: 4, opacity: 0.7 }}>↻</span>}
+                    {sq.category === 'what-if' && <span style={{ marginRight: 4, color: '#60A5FA', opacity: 0.9 }}>↻</span>}
                     {sq.label}
                   </button>
                 ))}
@@ -1229,7 +1229,15 @@ function VarianceDriversColumn({ drivers, anon }: {
                   ±{fmtCompact(anon.amount(maxSwing))}
                 </span>
               </div>
-              <div style={{ fontSize: 10, color: colors.textMuted, lineHeight: 1.4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <div style={{
+                fontSize: 10,
+                color: colors.textMuted,
+                lineHeight: 1.4,
+                overflow: 'hidden',
+                display: '-webkit-box',
+                WebkitLineClamp: 2,
+                WebkitBoxOrient: 'vertical',
+              } as React.CSSProperties}>
                 {explanation}
               </div>
             </div>

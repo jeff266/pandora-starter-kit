@@ -166,12 +166,12 @@ export class WorkspaceConfigLoader {
     const warning =
       typeof t.stale_deal_days === 'number'
         ? t.stale_deal_days
-        : t.stale_deal_days[pipeline || 'default'] || 14;
+        : t.stale_deal_days[pipeline || 'default'] || 7;
 
     const critical =
       typeof t.critical_stale_days === 'number'
         ? t.critical_stale_days
-        : t.critical_stale_days[pipeline || 'default'] || 30;
+        : t.critical_stale_days[pipeline || 'default'] || 21;
 
     return { warning, critical };
   }
