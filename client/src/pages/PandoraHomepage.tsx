@@ -286,29 +286,47 @@ export default function PandoraHomepage() {
 
           <Reveal delay={0.2}>
             <h1 style={{
-              fontSize: "clamp(40px, 6vw, 68px)",
+              fontSize: "clamp(36px, 5.5vw, 64px)",
               fontWeight: 700,
               lineHeight: 1.05,
               letterSpacing: "-0.035em",
               marginBottom: 20,
               fontFamily: "'Outfit', system-ui, sans-serif",
             }}>
-              Stop guessing.<br />
-              <span style={gradText}>Start seeing.</span>
+              The revenue operating system<br />
+              your team has been{" "}
+              <span style={{
+                WebkitTextStroke: "1px rgba(255,255,255,0.28)",
+                WebkitTextFillColor: "transparent",
+                fontStyle: "normal",
+              }}>duct-taping</span><br />
+              together with{" "}
+              <span style={{ ...gradText, position: "relative", display: "inline-block" }}>
+                spreadsheets
+                <span style={{
+                  position: "absolute",
+                  bottom: 4,
+                  left: 0,
+                  right: 0,
+                  height: 3,
+                  background: `linear-gradient(90deg, ${t.accent}, ${t.cyan})`,
+                  borderRadius: 2,
+                  display: "block",
+                }} />
+              </span>.
             </h1>
           </Reveal>
 
           <Reveal delay={0.3}>
             <p style={{
-              fontSize: "clamp(16px, 2vw, 20px)",
+              fontSize: "clamp(16px, 2vw, 19px)",
               color: t.textSec,
-              maxWidth: 540,
+              maxWidth: 560,
               margin: "0 auto 40px",
-              lineHeight: 1.6,
+              lineHeight: 1.65,
             }}>
-              The RevOps analyst your team can't afford to hire.
-              Connects your CRM, conversations, and GTM tools — delivers
-              pipeline intelligence in Slack before your Monday standup.
+              Pandora connects your CRM, your calls, and your pipeline data into a single system
+              that analyzes, alerts, and acts — without anyone asking it to.
             </p>
           </Reveal>
 
@@ -394,6 +412,104 @@ export default function PandoraHomepage() {
               </div>
             </Reveal>
           ))}
+        </div>
+      </section>
+
+      <section style={{ padding: "100px 24px", position: "relative" }}>
+        <div style={{ maxWidth: 900, margin: "0 auto" }}>
+          <Reveal>
+            <div style={{ textAlign: "center", marginBottom: 48 }}>
+              <Badge>Revenue Intelligence Platform</Badge>
+              <h2 style={{ fontSize: "clamp(28px, 4vw, 42px)", fontWeight: 700, marginTop: 16, marginBottom: 12, letterSpacing: "-0.03em", fontFamily: "'Outfit', sans-serif" }}>
+                Know. Decide. Act.
+              </h2>
+              <p style={{ fontSize: 16, color: t.textSec, maxWidth: 500, margin: "0 auto", lineHeight: 1.65 }}>
+                Pandora is more than seeing your pipeline or seeing your data. It's a complete Revenue Intelligence system.
+              </p>
+            </div>
+          </Reveal>
+
+          <Reveal delay={0.15}>
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(3, 1fr)",
+              gap: 2,
+              borderRadius: 16,
+              overflow: "hidden",
+              border: `1px solid ${t.border}`,
+            }}>
+              {[
+                {
+                  verb: "Know",
+                  color: t.accent,
+                  title: "Full revenue visibility",
+                  body: "Pipeline health, rep performance, account signals, and forecast accuracy — surfaced automatically across every deal in your CRM.",
+                  tags: ["Pipeline health", "Rep scorecards", "ICP fit", "Stage velocity"],
+                },
+                {
+                  verb: "Decide",
+                  color: t.purple,
+                  title: "Intelligence that reasons",
+                  body: "Tri-signal scoring across ICP fit, behavioral engagement, and survival probability. Every recommendation is traceable to the data behind it.",
+                  tags: ["Forecast accuracy", "Deal scoring", "Risk detection", "Win patterns"],
+                },
+                {
+                  verb: "Act",
+                  color: t.green,
+                  title: "Automation that closes loops",
+                  body: "CRM writebacks, Slack alerts, agent-driven playbooks. Pandora doesn't stop at the dashboard — it runs the follow-through your team doesn't have time for.",
+                  tags: ["CRM writeback", "Slack delivery", "Agent playbooks", "Auto-cadences"],
+                },
+              ].map((pillar, i) => (
+                <div
+                  key={i}
+                  style={{
+                    background: t.surface,
+                    padding: "40px 32px",
+                    position: "relative",
+                    transition: "background 0.3s ease",
+                    borderRight: i < 2 ? `1px solid ${t.border}` : undefined,
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "#161b2e"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = t.surface; }}
+                >
+                  <div style={{
+                    fontSize: 11,
+                    fontFamily: mono,
+                    fontWeight: 700,
+                    letterSpacing: "0.12em",
+                    textTransform: "uppercase",
+                    color: pillar.color,
+                    marginBottom: 16,
+                  }}>
+                    {pillar.verb}
+                  </div>
+                  <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 12, lineHeight: 1.2, fontFamily: "'Outfit', sans-serif" }}>
+                    {pillar.title}
+                  </div>
+                  <p style={{ fontSize: 14, color: t.textSec, lineHeight: 1.65, marginBottom: 24 }}>
+                    {pillar.body}
+                  </p>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {pillar.tags.map((tag, j) => (
+                      <span key={j} style={{
+                        fontSize: 11,
+                        fontWeight: 500,
+                        color: t.textMuted,
+                        background: "rgba(255,255,255,0.04)",
+                        border: `1px solid ${t.border}`,
+                        borderRadius: 4,
+                        padding: "3px 8px",
+                        letterSpacing: "0.02em",
+                      }}>
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Reveal>
         </div>
       </section>
 
@@ -768,11 +884,177 @@ export default function PandoraHomepage() {
         </div>
       </section>
 
+      <section style={{ padding: "100px 24px", position: "relative" }}>
+        <div style={{ maxWidth: 900, margin: "0 auto" }}>
+          <Reveal>
+            <div style={{ textAlign: "center", marginBottom: 48 }}>
+              <Badge>Early Partners</Badge>
+              <h2 style={{ fontSize: "clamp(28px, 4vw, 42px)", fontWeight: 700, marginTop: 16, marginBottom: 12, letterSpacing: "-0.03em", fontFamily: "'Outfit', sans-serif" }}>
+                What teams are saying
+              </h2>
+            </div>
+          </Reveal>
+
+          <Reveal delay={0.1}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
+              {[
+                {
+                  quote: "We caught three at-risk deals in the first session that weren't on anyone's radar. Our weekly pipeline review used to take 90 minutes. Now it takes 15.",
+                  initials: "RO",
+                  name: "Head of RevOps",
+                  role: "Series B SaaS, 180 employees",
+                },
+                {
+                  quote: "I'm a team of one supporting 12 AEs. Pandora is the only tool that actually gives me time back instead of asking for more of it.",
+                  initials: "SR",
+                  name: "RevOps Manager",
+                  role: "PLG SaaS, 90 employees",
+                },
+                {
+                  quote: "Most tools give you a dashboard and call it insights. Pandora actually tells you what to do next — and shows you exactly why.",
+                  initials: "VP",
+                  name: "VP of Sales",
+                  role: "B2B SaaS, 250 employees",
+                },
+              ].map((card, i) => (
+                <Reveal key={i} delay={i * 0.1}>
+                  <div style={{
+                    background: t.surface,
+                    border: `1px solid ${t.border}`,
+                    borderRadius: 12,
+                    padding: 28,
+                    height: "100%",
+                    display: "flex",
+                    flexDirection: "column",
+                    justifyContent: "space-between",
+                  }}>
+                    <p style={{ fontSize: 14, color: t.textSec, lineHeight: 1.7, marginBottom: 20, fontStyle: "italic" }}>
+                      "{card.quote}"
+                    </p>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{
+                        width: 36,
+                        height: 36,
+                        borderRadius: "50%",
+                        background: `linear-gradient(135deg, ${t.accent}, ${t.cyan})`,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 12,
+                        fontWeight: 700,
+                        color: "white",
+                        flexShrink: 0,
+                        fontFamily: "'Outfit', sans-serif",
+                      }}>
+                        {card.initials}
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 600 }}>{card.name}</div>
+                        <div style={{ fontSize: 12, color: t.textMuted }}>{card.role}</div>
+                      </div>
+                    </div>
+                  </div>
+                </Reveal>
+              ))}
+            </div>
+          </Reveal>
+        </div>
+      </section>
+
+      <section style={{ padding: "80px 24px 100px", background: t.bg2, position: "relative" }}>
+        <div style={{ maxWidth: 900, margin: "0 auto" }}>
+          <Reveal>
+            <div style={{ textAlign: "center", marginBottom: 48 }}>
+              <Badge>Design Partner Benefits</Badge>
+              <h2 style={{ fontSize: "clamp(28px, 4vw, 42px)", fontWeight: 700, marginTop: 16, marginBottom: 12, letterSpacing: "-0.03em", fontFamily: "'Outfit', sans-serif" }}>
+                What you get as a founding partner
+              </h2>
+            </div>
+          </Reveal>
+
+          <Reveal delay={0.1}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+              {[
+                {
+                  icon: "⚡",
+                  iconBg: `rgba(99,102,241,0.12)`,
+                  title: "First analysis in under 10 minutes",
+                  body: "We connect to your CRM, run the full analysis, and walk you through what we found — hands-on, same session.",
+                },
+                {
+                  icon: "🎯",
+                  iconBg: `rgba(167,139,250,0.12)`,
+                  title: "Direct line to the founder",
+                  body: "Private Slack channel with Jeff. Your use case gets real attention — not a support ticket queue and a generic roadmap.",
+                },
+                {
+                  icon: "🗺️",
+                  iconBg: `rgba(52,211,153,0.12)`,
+                  title: "Your input shapes the roadmap",
+                  body: "Design partners don't just use the product — they define it. The features built in the next 90 days come directly from your feedback.",
+                },
+                {
+                  icon: "🔒",
+                  iconBg: `rgba(251,191,36,0.12)`,
+                  title: "Founding partner pricing, locked in forever",
+                  body: "Early partners get access at a rate that never increases — even as Pandora scales into a full RevOps platform.",
+                },
+              ].map((benefit, i) => (
+                <Reveal key={i} delay={i * 0.08}>
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 16,
+                      padding: 28,
+                      background: t.surface,
+                      border: `1px solid ${t.border}`,
+                      borderRadius: 12,
+                      transition: "border-color 0.3s ease, transform 0.2s ease",
+                      cursor: "default",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.borderColor = "rgba(99,102,241,0.3)";
+                      e.currentTarget.style.transform = "translateY(-2px)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.borderColor = t.border;
+                      e.currentTarget.style.transform = "translateY(0)";
+                    }}
+                  >
+                    <div style={{
+                      flexShrink: 0,
+                      width: 44,
+                      height: 44,
+                      borderRadius: 10,
+                      background: benefit.iconBg,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 20,
+                    }}>
+                      {benefit.icon}
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6, fontFamily: "'Outfit', sans-serif" }}>
+                        {benefit.title}
+                      </div>
+                      <p style={{ fontSize: 13.5, color: t.textSec, lineHeight: 1.6 }}>
+                        {benefit.body}
+                      </p>
+                    </div>
+                  </div>
+                </Reveal>
+              ))}
+            </div>
+          </Reveal>
+        </div>
+      </section>
+
       <section
         id="waitlist"
         style={{
           padding: "100px 24px",
-          background: t.bg2,
+          background: t.bg,
           position: "relative",
           textAlign: "center",
         }}
@@ -781,16 +1063,20 @@ export default function PandoraHomepage() {
         <div style={{ maxWidth: 560, margin: "0 auto", position: "relative", zIndex: 1 }}>
           <Reveal>
             <h2 style={{
-              fontSize: "clamp(28px, 4vw, 42px)",
+              fontSize: "clamp(28px, 4vw, 48px)",
               fontWeight: 700,
               letterSpacing: "-0.03em",
               fontFamily: "'Outfit', sans-serif",
-              marginBottom: 12,
+              marginBottom: 16,
+              lineHeight: 1.1,
             }}>
-              Ready to see your pipeline?
+              Your pipeline has a story.<br />
+              <span style={gradText}>Most teams never read it.</span>
             </h2>
-            <p style={{ fontSize: 16, color: t.textSec, marginBottom: 36, lineHeight: 1.6 }}>
-              We onboard design partners hands-on — first analysis in under 10 minutes, direct Slack channel with the founder, and your input shapes the roadmap.
+            <p style={{ fontSize: 16, color: t.textSec, marginBottom: 36, lineHeight: 1.65, maxWidth: 480, margin: "0 auto 36px" }}>
+              Pandora is a Revenue Intelligence solution — not just a dashboard.
+              Connect your CRM in minutes. Get your first analysis before end of day.
+              Direct founder access. Your use case shapes the product.
             </p>
           </Reveal>
 

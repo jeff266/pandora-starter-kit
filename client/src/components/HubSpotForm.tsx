@@ -18,6 +18,10 @@ declare global {
 const STYLE_ID = "hs-pandora-theme";
 
 const CSS = `
+  #hs-form-target * {
+    color: #eeeef5;
+    box-sizing: border-box;
+  }
   #hs-form-target .hs-form {
     font-family: 'DM Sans', 'Outfit', system-ui, sans-serif;
     text-align: left;
@@ -25,11 +29,12 @@ const CSS = `
   #hs-form-target .hs-form-field {
     margin-bottom: 16px;
   }
-  #hs-form-target label.hs-label {
+  #hs-form-target label.hs-label,
+  #hs-form-target .hs-form label {
     display: block;
     font-size: 13px;
     font-weight: 500;
-    color: #8888a8;
+    color: #8888a8 !important;
     margin-bottom: 6px;
     font-family: 'DM Sans', 'Outfit', system-ui, sans-serif;
   }
@@ -47,6 +52,7 @@ const CSS = `
     appearance: none;
     -webkit-appearance: none;
     outline: none !important;
+    color-scheme: dark !important;
   }
   #hs-form-target select.hs-input {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%238888a8' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E") !important;
@@ -54,6 +60,7 @@ const CSS = `
     background-position: right 14px center !important;
     padding-right: 36px !important;
     cursor: pointer !important;
+    color-scheme: dark !important;
   }
   #hs-form-target select.hs-input option {
     background: #0f0f1e;
@@ -96,12 +103,18 @@ const CSS = `
     font-size: 12px !important;
     font-family: 'DM Sans', 'Outfit', system-ui, sans-serif !important;
   }
-  #hs-form-target .hs-richtext {
-    color: #55557a;
+  #hs-form-target .hs-richtext,
+  #hs-form-target .hs-richtext p,
+  #hs-form-target .hs-richtext span,
+  #hs-form-target .hs-richtext div,
+  #hs-form-target .hs-richtext a {
+    color: #55557a !important;
     font-size: 12px;
     margin-bottom: 8px;
   }
-  #hs-form-target .submitted-message {
+  #hs-form-target .submitted-message,
+  #hs-form-target .submitted-message p,
+  #hs-form-target .submitted-message span {
     color: #34d399 !important;
     font-size: 16px !important;
     font-weight: 600 !important;
@@ -123,6 +136,33 @@ const CSS = `
   }
   #hs-form-target .actions {
     margin-top: 8px;
+  }
+  #hs-form-target .legal-consent-container,
+  #hs-form-target .legal-consent-container p,
+  #hs-form-target .legal-consent-container span,
+  #hs-form-target .legal-consent-container div,
+  #hs-form-target .legal-consent-container a,
+  #hs-form-target .legal-consent-container label {
+    color: #55557a !important;
+    font-size: 12px !important;
+  }
+  #hs-form-target .legal-consent-container a:hover {
+    color: #8888a8 !important;
+  }
+  #hs-form-target .hs-form-checkbox label,
+  #hs-form-target .hs-checkbox,
+  #hs-form-target .hs-checkbox-display,
+  #hs-form-target .hs-form-checkbox-display {
+    color: #8888a8 !important;
+  }
+  #hs-form-target .hs-form p,
+  #hs-form-target .hs-form span:not(.hs-form-required),
+  #hs-form-target .hs-form div:not(.hs-form-field):not(.hs-input):not(.submitted-message) {
+    color: #8888a8 !important;
+  }
+  #hs-form-target input[type="checkbox"],
+  #hs-form-target input[type="radio"] {
+    accent-color: #6366f1;
   }
 `;
 
