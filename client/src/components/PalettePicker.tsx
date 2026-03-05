@@ -67,7 +67,7 @@ export default function PalettePicker() {
       {/* Popout panel — opens upward */}
       {open && (
         <div style={{
-          position: 'absolute', bottom: 'calc(100% + 6px)', left: 0,
+          position: 'absolute', bottom: 'calc(100% + 6px)', right: 0,
           background: colors.surface ?? '#0f1219',
           border: `1px solid ${colors.border}`,
           borderRadius: 10, padding: '12px 14px',
