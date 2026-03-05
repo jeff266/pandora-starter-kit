@@ -154,30 +154,6 @@ function Badge({ children }: { children: React.ReactNode }) {
 
 export default function PandoraHomepage() {
 
-  useEffect(() => {
-    const html = document.documentElement;
-    const body = document.body;
-    const root = document.getElementById('root');
-    html.style.overflow = 'auto';
-    html.style.height = 'auto';
-    body.style.overflow = 'auto';
-    body.style.height = 'auto';
-    if (root) {
-      root.style.overflow = 'auto';
-      root.style.height = 'auto';
-    }
-    return () => {
-      html.style.overflow = '';
-      html.style.height = '';
-      body.style.overflow = '';
-      body.style.height = '';
-      if (root) {
-        root.style.overflow = '';
-        root.style.height = '';
-      }
-    };
-  }, []);
-
   return (
     <div style={{ background: t.bg, color: t.text, fontFamily: display, minHeight: "100vh", overflowX: "hidden" }}>
       <style>{`

@@ -213,7 +213,7 @@ export default function AnnotatedPipelineChart({
                 {stage.stage}
               </div>
 
-              <div style={{ flex: 1, position: 'relative', height: 28 }}>
+              <div style={{ flex: 1, position: 'relative', height: 28, minWidth: 0 }}>
                 <div style={{
                   position: 'absolute',
                   left: 0,
@@ -224,30 +224,28 @@ export default function AnnotatedPipelineChart({
                   background: `linear-gradient(90deg, ${barColor}cc, ${barColor}66)`,
                   transition: 'width 0.3s ease',
                 }} />
-                <div style={{
-                  position: 'absolute',
-                  left: `${barPct}%`,
-                  top: 8,
-                  paddingLeft: 8,
-                  fontSize: 10,
-                  fontFamily: fonts.mono,
-                  color: colors.textSecondary,
-                  whiteSpace: 'nowrap',
-                }}>
-                  {formatCurrency(anon.amount(stage.total_value))} · {stage.deal_count}d
-                </div>
               </div>
 
-              <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0 }}>
+              <div style={{
+                width: 110,
+                flexShrink: 0,
+                fontSize: 10,
+                fontFamily: fonts.mono,
+                color: colors.textSecondary,
+                whiteSpace: 'nowrap',
+                textAlign: 'right',
+              }}>
+                {formatCurrency(anon.amount(stage.total_value))} · {stage.deal_count}d
+              </div>
+
+              <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0, minWidth: 90, justifyContent: 'flex-end' }}>
                 {hasAnnotations ? (
                   annotations.map((ann, i) => (
                     <div key={i} onClick={(e) => handleFlagClick(e, stage.stage_normalized || stage.stage)}>
                       <FlagPill annotation={ann} />
                     </div>
                   ))
-                ) : (
-                  <div style={{ width: 80 }} />
-                )}
+                ) : null}
               </div>
             </div>
 
