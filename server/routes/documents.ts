@@ -26,7 +26,7 @@ router.get('/:workspaceId/generated-docs/:filename', async (req: Request, res: R
     }
 
     const ext = path.extname(safeName).toLowerCase();
-    if (!['.docx', '.xlsx'].includes(ext)) {
+    if (!['.docx', '.xlsx', '.pptx'].includes(ext)) {
       res.status(400).json({ error: 'Invalid file type' });
       return;
     }

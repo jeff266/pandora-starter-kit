@@ -244,7 +244,11 @@ export default function ConversationView({ initialMessage, onBack }: Conversatio
         )}
 
         {state.deliverableOptions.length > 0 && state.phase === 'complete' && (
-          <DeliverablePicker options={state.deliverableOptions} />
+          <DeliverablePicker
+            options={state.deliverableOptions}
+            content={state.synthesisText || state.messages.filter(m => m.role === 'assistant').map(m => m.content).join('\n\n')}
+            title="Pandora Analysis"
+          />
         )}
 
         {state.error && (

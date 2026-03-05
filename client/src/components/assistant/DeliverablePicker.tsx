@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { colors } from '../../styles/theme';
+import { colors, fonts } from '../../styles/theme';
 import { api } from '../../lib/api';
 
 export interface DeliverableOption {
@@ -11,30 +11,84 @@ export interface DeliverableOption {
 
 interface DeliverablePickerProps {
   options: DeliverableOption[];
+  content?: string;
+  title?: string;
 }
 
-export default function DeliverablePicker({ options }: DeliverablePickerProps) {
+type ExportState =
+  | { status: 'idle' }
+  | { status: 'generating' }
+  | { status: 'download'; url: string }
+  | { status: 'sent'; to?: string }
+  | { status: 'error'; message: string };
+
+export default function DeliverablePicker({ options, content = '', title = 'Pandora Analysis' }: DeliverablePickerProps) {
   const [selected, setSelected] = useState<string | null>(null);
-  const [generating, setGenerating] = useState(false);
-  const [ready, setReady] = useState(false);
+  const [exportState, setExportState] = useState<ExportState>({ status: 'idle' });
 
   const handleSelect = async (id: string) => {
     setSelected(id);
-    setGenerating(true);
-    setReady(false);
+    setExportState({ status: 'generating' });
+
     try {
-      await api.post('/deliverables/generate', { format: id });
-      setReady(true);
-    } catch {
-      setReady(true);
-    } finally {
-      setGenerating(false);
+      const result = await api.post('/deliverables/generate', { format: id, content, title });
+
+      if (result.downloadUrl) {
+        setExportState({ status: 'download', url: result.downloadUrl });
+        const a = document.createElement('a');
+        a.href = result.downloadUrl;
+        a.download = '';
+        a.target = '_blank';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      } else if (result.sent) {
+        setExportState({ status: 'sent', to: result.to });
+      } else if (result.error) {
+        setExportState({ status: 'error', message: result.error });
+      } else {
+        setExportState({ status: 'idle' });
+      }
+    } catch (err: any) {
+      setExportState({ status: 'error', message: err?.message || 'Export failed' });
+    }
+  };
+
+  const isGenerating = exportState.status === 'generating';
+
+  const statusLine = () => {
+    switch (exportState.status) {
+      case 'generating':
+        return <span style={{ color: colors.textMuted }}>Generating...</span>;
+      case 'download':
+        return (
+          <span>
+            <a
+              href={exportState.url}
+              download
+              style={{ color: colors.accent, textDecoration: 'none', fontWeight: 500 }}
+            >
+              Download ↓
+            </a>
+            <span style={{ color: colors.textMuted }}> — or click again to re-download</span>
+          </span>
+        );
+      case 'sent':
+        return (
+          <span style={{ color: colors.green }}>
+            Sent ✓{exportState.to ? ` to ${exportState.to}` : ''}
+          </span>
+        );
+      case 'error':
+        return <span style={{ color: colors.red }}>{exportState.message}</span>;
+      default:
+        return null;
     }
   };
 
   return (
     <div style={{ marginTop: 4 }}>
-      <div style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
+      <div style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10, fontFamily: fonts.sans }}>
         Export As
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
@@ -43,26 +97,28 @@ export default function DeliverablePicker({ options }: DeliverablePickerProps) {
           return (
             <div
               key={opt.id}
-              onClick={() => !generating && handleSelect(opt.id)}
+              onClick={() => !isGenerating && handleSelect(opt.id)}
               style={{
                 background: isSelected ? colors.accentSoft : colors.surface,
                 border: `1px solid ${isSelected ? colors.accent : colors.border}`,
-                borderRadius: 8, padding: '10px 12px', cursor: generating ? 'default' : 'pointer',
+                borderRadius: 8, padding: '10px 12px',
+                cursor: isGenerating ? 'default' : 'pointer',
                 transition: 'all 0.15s',
+                opacity: isGenerating && !isSelected ? 0.5 : 1,
               }}
-              onMouseEnter={e => { if (!isSelected && !generating) { (e.currentTarget as HTMLDivElement).style.borderColor = colors.accent; } }}
+              onMouseEnter={e => { if (!isSelected && !isGenerating) { (e.currentTarget as HTMLDivElement).style.borderColor = colors.accent; } }}
               onMouseLeave={e => { if (!isSelected) { (e.currentTarget as HTMLDivElement).style.borderColor = colors.border; } }}
             >
               <div style={{ fontSize: 20, marginBottom: 4 }}>{opt.icon}</div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: colors.text }}>{opt.label}</div>
-              <div style={{ fontSize: 11, color: colors.textMuted }}>{opt.sub}</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: colors.text, fontFamily: fonts.sans }}>{opt.label}</div>
+              <div style={{ fontSize: 11, color: colors.textMuted, fontFamily: fonts.sans }}>{opt.sub}</div>
             </div>
           );
         })}
       </div>
-      {selected && (
-        <div style={{ marginTop: 10, fontSize: 12, color: generating ? colors.textMuted : colors.accent }}>
-          {generating ? 'Generating...' : ready ? 'Ready — Download / Preview' : ''}
+      {exportState.status !== 'idle' && (
+        <div style={{ marginTop: 10, fontSize: 12, fontFamily: fonts.sans }}>
+          {statusLine()}
         </div>
       )}
     </div>
