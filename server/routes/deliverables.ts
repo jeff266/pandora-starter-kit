@@ -144,7 +144,7 @@ ${md
  * When called with { format, content, title } → generates the specific export.
  * Legacy: when called without format → runs full deliverable matrix pipeline.
  */
-router.post('/deliverables/generate', async (req: any, res: any) => {
+router.post('/:workspaceId/deliverables/generate', async (req: any, res: any) => {
   const workspaceId = (req.params as any).workspaceId as string;
   const { format, content, title = 'Pandora Analysis', templateType, customDimensions, voiceConfig } = req.body;
 
@@ -235,7 +235,7 @@ router.post('/deliverables/generate', async (req: any, res: any) => {
 /**
  * POST /api/workspaces/:workspaceId/deliverables/preview
  */
-router.post('/deliverables/preview', async (req, res) => {
+router.post('/:workspaceId/deliverables/preview', async (req, res) => {
   const workspaceId = (req.params as any).workspaceId as string;
   const { templateType, customDimensions } = req.body;
 
@@ -259,7 +259,7 @@ router.post('/deliverables/preview', async (req, res) => {
 /**
  * GET /api/workspaces/:workspaceId/deliverables/latest
  */
-router.get('/deliverables/latest', async (req, res) => {
+router.get('/:workspaceId/deliverables/latest', async (req, res) => {
   const workspaceId = (req.params as any).workspaceId as string;
   const { templateType = 'sales_process_map' } = req.query;
 
