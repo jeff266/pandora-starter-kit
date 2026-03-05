@@ -14,7 +14,6 @@ import { useIsMobile } from '../hooks/useIsMobile';
 import { useDashboardPreferences } from '../hooks/useDashboardPreferences';
 import {
   CollapsibleSection,
-  DashboardHeader,
   MetricsRow,
   PipelineChart,
   ActionsWidget,
@@ -660,32 +659,86 @@ export default function CommandCenter() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <PushBanner />
 
-      {greetingData && (
-        <div style={{
-          display: 'flex', alignItems: 'center',
-          background: colors.surface, border: `1px solid ${colors.border}`,
-          borderRadius: 8, padding: '8px 16px', gap: 10,
-        }}>
-          <span style={{ fontSize: 13, fontWeight: 500, color: colors.text, whiteSpace: 'nowrap' }}>
-            {greetingData.headline}
-          </span>
-          <span style={{ color: colors.border }}>·</span>
-          <span style={{ fontSize: 12, color: colors.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {greetingData.state_summary}
-          </span>
+      {/* Combined greeting + controls row */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+        {/* Left: greeting */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
+          {greetingData ? (
+            <>
+              <span style={{ fontSize: 13, fontWeight: 600, color: colors.text, whiteSpace: 'nowrap' }}>
+                {greetingData.headline}
+              </span>
+              <span style={{ color: colors.border, flexShrink: 0 }}>·</span>
+              <span style={{ fontSize: 12, color: colors.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {greetingData.state_summary}
+              </span>
+            </>
+          ) : (
+            <span style={{ fontSize: 13, color: colors.textMuted }}>Loading…</span>
+          )}
         </div>
-      )}
 
-      <DashboardHeader
-        timeRange={preferences?.default_time_range || 'this_week'}
-        onTimeRangeChange={(range) => setTimeRange(range)}
-        lastRefreshed={lastUpdated.toISOString()}
-        onRefresh={() => fetchData(undefined, true)}
-        loading={refreshing}
-        pipelines={availablePipelines}
-        selectedPipeline={selectedPipeline}
-        onPipelineChange={handlePipelineChange}
-      />
+        {/* Right: filters + refresh */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          {(['today', 'this_week', 'this_month', 'this_quarter', 'this_year'] as const).map(val => {
+            const label: Record<string, string> = { today: 'Today', this_week: 'This Week', this_month: 'This Month', this_quarter: 'This Quarter', this_year: 'This Year' };
+            const active = (preferences?.default_time_range || 'this_week') === val;
+            return (
+              <button key={val} onClick={() => setTimeRange(val)} style={{
+                padding: '4px 10px', fontSize: 11, fontWeight: active ? 600 : 400,
+                borderRadius: 6, border: `1px solid ${active ? colors.accent : colors.border}`,
+                background: active ? colors.accentSoft : 'transparent',
+                color: active ? colors.accent : colors.textMuted,
+                cursor: 'pointer', fontFamily: fonts.sans, whiteSpace: 'nowrap',
+              }}>
+                {label[val]}
+              </button>
+            );
+          })}
+
+          {availablePipelines.length > 1 && (
+            <select
+              value={selectedPipeline}
+              onChange={e => handlePipelineChange(e.target.value)}
+              style={{
+                padding: '4px 8px', fontSize: 11, fontFamily: fonts.sans, fontWeight: 500,
+                color: colors.text, background: colors.surface, border: `1px solid ${colors.border}`,
+                borderRadius: 6, outline: 'none', cursor: 'pointer',
+              }}
+            >
+              <option value="all">All Pipelines</option>
+              {availablePipelines.map((p: any) => (
+                <option key={p.name} value={p.name}>
+                  {p.display_name || p.name}{p.deal_count != null ? ` (${p.deal_count})` : ''}
+                </option>
+              ))}
+            </select>
+          )}
+
+          <span style={{ fontSize: 11, color: colors.textMuted, whiteSpace: 'nowrap' }}>
+            {formatTimeAgo(lastUpdated.toISOString())}
+          </span>
+
+          <button
+            onClick={() => fetchData(undefined, true)}
+            disabled={refreshing}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 4,
+              padding: '4px 10px', fontSize: 11, fontWeight: 500, fontFamily: fonts.sans,
+              border: `1px solid ${colors.border}`, borderRadius: 6,
+              background: 'transparent', color: colors.textSecondary,
+              cursor: refreshing ? 'not-allowed' : 'pointer', opacity: refreshing ? 0.6 : 1,
+              transition: 'all 0.15s',
+            }}
+            onMouseEnter={e => { if (!refreshing) { (e.currentTarget as HTMLButtonElement).style.background = colors.surfaceHover; (e.currentTarget as HTMLButtonElement).style.color = colors.text; } }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = colors.textSecondary; }}
+          >
+            <span style={{ display: 'inline-block', animation: refreshing ? 'ccSpin 0.8s linear infinite' : 'none' }}>↻</span>
+            Refresh
+          </button>
+          <style>{`@keyframes ccSpin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      </div>
 
       <SectionErrorBoundary fallbackMessage="Failed to load metrics.">
         <CollapsibleSection
