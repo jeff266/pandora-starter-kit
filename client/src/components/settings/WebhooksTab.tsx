@@ -59,6 +59,7 @@ export default function WebhooksTab() {
   const [testingId, setTestingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [openTestMenu, setOpenTestMenu] = useState<string | null>(null);
 
   const loadEndpoints = useCallback(async () => {
     setLoading(true);
@@ -99,15 +100,17 @@ export default function WebhooksTab() {
     }
   };
 
-  const handleTest = async (endpointId: string) => {
+  const handleTest = async (endpointId: string, eventType?: string) => {
     setTestingId(endpointId);
+    setOpenTestMenu(null);
     try {
-      const result = await api.post(`/webhook-endpoints/${endpointId}/test`);
+      const result = await api.post(`/webhook-endpoints/${endpointId}/test`, eventType ? { event_type: eventType } : {});
       const code = result?.statusCode ?? result?.status_code;
+      const label = eventType ? eventType : 'webhook.test';
       if (result?.success) {
-        setToast({ message: `Test delivered — HTTP ${code}`, type: 'success' });
+        setToast({ message: `Test delivered (${label}) — HTTP ${code}`, type: 'success' });
       } else {
-        setToast({ message: `Test failed — ${result?.error || `HTTP ${code}`}`, type: 'error' });
+        setToast({ message: `Test failed (${label}) — ${result?.error || `HTTP ${code}`}`, type: 'error' });
       }
     } catch {
       setToast({ message: 'Test delivery failed', type: 'error' });
@@ -115,6 +118,13 @@ export default function WebhooksTab() {
       setTestingId(null);
     }
   };
+
+  useEffect(() => {
+    if (!openTestMenu) return;
+    const close = () => setOpenTestMenu(null);
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [openTestMenu]);
 
   const handleDelete = async (endpointId: string) => {
     setDeletingId(endpointId);
@@ -303,14 +313,81 @@ export default function WebhooksTab() {
                       </td>
                       <td style={cell} onClick={e => e.stopPropagation()}>
                         <div style={{ display: 'flex', gap: 6 }}>
-                          <button
-                            style={{ ...btn('ghost'), border: `1px solid ${colors.border}`, padding: '4px 10px', fontSize: 12 }}
-                            onClick={() => handleTest(ep.id)}
-                            disabled={testingId === ep.id}
-                            title="Send a test delivery"
-                          >
-                            {testingId === ep.id ? '…' : 'Test'}
-                          </button>
+                          {/* Test split-button */}
+                          <div style={{ position: 'relative' }}>
+                            <div style={{ display: 'flex', border: `1px solid ${colors.border}`, borderRadius: 5, overflow: 'visible' }}>
+                              <button
+                                style={{ ...btn('ghost'), border: 'none', borderRight: `1px solid ${colors.border}`, borderRadius: '4px 0 0 4px', padding: '4px 10px', fontSize: 12 }}
+                                onClick={() => handleTest(ep.id)}
+                                disabled={testingId === ep.id}
+                                title="Send a generic ping"
+                              >
+                                {testingId === ep.id ? '…' : 'Test'}
+                              </button>
+                              <button
+                                style={{ ...btn('ghost'), border: 'none', borderRadius: '0 4px 4px 0', padding: '4px 7px', fontSize: 11, lineHeight: 1 }}
+                                onClick={e => { e.stopPropagation(); setOpenTestMenu(openTestMenu === ep.id ? null : ep.id); }}
+                                disabled={testingId === ep.id}
+                                title="Test with specific event type"
+                              >
+                                ▾
+                              </button>
+                            </div>
+                            {openTestMenu === ep.id && (
+                              <div
+                                onClick={e => e.stopPropagation()}
+                                style={{
+                                  position: 'absolute',
+                                  top: 'calc(100% + 4px)',
+                                  right: 0,
+                                  zIndex: 200,
+                                  background: colors.surface,
+                                  border: `1px solid ${colors.border}`,
+                                  borderRadius: 8,
+                                  minWidth: 210,
+                                  boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
+                                  overflow: 'hidden',
+                                }}
+                              >
+                                {[
+                                  { label: 'Generic ping', value: undefined, color: colors.muted },
+                                  { label: 'prospect.scored', value: 'prospect.scored', color: '#7c3aed' },
+                                  { label: 'deal.stage_changed', value: 'deal.stage_changed', color: '#2563eb' },
+                                  { label: 'deal.flagged', value: 'deal.flagged', color: '#ea580c' },
+                                  { label: 'action.created', value: 'action.created', color: '#16a34a' },
+                                  { label: 'action.completed', value: 'action.completed', color: '#0891b2' },
+                                  { label: 'action.expired', value: 'action.expired', color: '#dc2626' },
+                                ].map((opt, i, arr) => (
+                                  <button
+                                    key={opt.label}
+                                    onClick={() => handleTest(ep.id, opt.value)}
+                                    style={{
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: 9,
+                                      width: '100%',
+                                      padding: '9px 14px',
+                                      background: 'transparent',
+                                      border: 'none',
+                                      borderBottom: i < arr.length - 1 ? `1px solid ${colors.border}` : 'none',
+                                      cursor: 'pointer',
+                                      textAlign: 'left',
+                                      fontSize: 12,
+                                      fontFamily: fonts.sans,
+                                      color: colors.text,
+                                    }}
+                                    onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = colors.surfaceHover; }}
+                                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}
+                                  >
+                                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: opt.color, flexShrink: 0, display: 'inline-block' }} />
+                                    <span style={{ fontFamily: i === 0 ? fonts.sans : 'monospace', fontSize: i === 0 ? 12 : 11 }}>
+                                      {opt.label}
+                                    </span>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
                           {deleteConfirmId === ep.id ? (
                             <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
                               <button

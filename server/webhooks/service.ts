@@ -98,13 +98,204 @@ export async function deleteWebhookEndpoint(
 }
 
 /**
+ * Build a realistic dummy WebhookEvent for a given event type.
+ * Used by testWebhookEndpoint to send event-specific payloads.
+ * Falls back to a generic webhook.test ping for unrecognised types.
+ */
+function buildTestEvent(workspaceId: string, eventType?: string): WebhookEvent {
+  const now = new Date().toISOString();
+  const uid = () => crypto.randomUUID();
+  const base = {
+    timestamp: now,
+    workspace_id: workspaceId,
+    api_version: '2026-03-01' as const,
+  };
+
+  switch (eventType) {
+    case 'prospect.scored':
+      return {
+        ...base,
+        event: 'prospect.scored',
+        event_id: `evt_test_ps_${uid()}`,
+        data: {
+          workspace_name: 'Acme Corp',
+          prospect: {
+            pandora_id: 'd9e8f7a6-b5c4-3d2e-1f0a-9b8c7d6e5f4a',
+            entity_type: 'deal',
+            source: 'hubspot',
+            source_object: 'deal',
+            source_id: 'hs_deal_8472910',
+            name: 'Acme Corp – Enterprise Platform',
+            pandora_prospect_score: 82,
+            pandora_prospect_grade: 'A',
+            pandora_fit_score: 74,
+            pandora_engagement_score: 91,
+            pandora_intent_score: 80,
+            pandora_timing_score: 85,
+            pandora_score_method: 'icp_point_based',
+            pandora_score_confidence: 0.87,
+            pandora_scored_at: now,
+            pandora_score_summary: 'Strong engagement and tight timeline. Champion identified.',
+            pandora_top_positive_factor: '3 calls with transcript in the last 14 days',
+            pandora_top_negative_factor: 'No mutual action plan documented',
+            pandora_recommended_action: 'Share a mutual action plan before next call',
+            pandora_score_factors: [],
+            previous_score: 71,
+            score_change: 11,
+          },
+        },
+      };
+
+    case 'deal.stage_changed':
+      return {
+        ...base,
+        event: 'deal.stage_changed',
+        event_id: `evt_test_dsc_${uid()}`,
+        data: {
+          workspace_name: 'Acme Corp',
+          deal: {
+            pandora_id: 'd9e8f7a6-b5c4-3d2e-1f0a-9b8c7d6e5f4a',
+            name: 'Acme Corp – Enterprise Platform',
+            amount: 240000,
+            owner_email: 'sarah.chen@acmecorp.io',
+            source: 'hubspot',
+            source_id: 'hs_deal_8472910',
+            from_stage: 'Demo Scheduled',
+            from_stage_normalized: 'demo',
+            to_stage: 'Proposal Sent',
+            to_stage_normalized: 'proposal',
+            changed_at: now,
+          },
+        },
+      };
+
+    case 'deal.flagged':
+      return {
+        ...base,
+        event: 'deal.flagged',
+        event_id: `evt_test_df_${uid()}`,
+        data: {
+          workspace_name: 'Acme Corp',
+          finding: {
+            id: uid(),
+            deal_id: 'd9e8f7a6-b5c4-3d2e-1f0a-9b8c7d6e5f4a',
+            deal_name: 'Globex Industries – Growth',
+            category: 'single_threaded',
+            severity: 'act',
+            message: 'Only 1 contact mapped — no economic buyer or champion identified',
+            source_skill: 'single-thread-alert',
+            skill_run_id: `run_${uid()}`,
+            owner_email: 'james.wright@globex.io',
+            metadata: {
+              contact_count: 1,
+              roles_present: [],
+              risk_level: 'critical',
+              likely_cause: 'Relationship concentrated in a single mid-level contact',
+            },
+          },
+        },
+      };
+
+    case 'action.created':
+      return {
+        ...base,
+        event: 'action.created',
+        event_id: `evt_test_ac_${uid()}`,
+        data: {
+          workspace_name: 'Acme Corp',
+          action: {
+            id: 'c5d6e7f8-a9b0-1c2d-3e4f-5a6b7c8d9e0f',
+            action_type: 're_engage_deal',
+            severity: 'critical',
+            title: 'Re-engage Globex Industries – Growth immediately',
+            summary: 'No activity logged in 34 days. Deal is drifting toward stale.',
+            recommended_steps: [
+              'Send a personal video message to the primary contact this week',
+              'Loop in an exec sponsor to elevate the conversation',
+              'Confirm the proposed close date is still realistic',
+            ],
+            target_deal_id: 'd9e8f7a6-b5c4-3d2e-1f0a-9b8c7d6e5f4a',
+            target_entity_name: 'Globex Industries – Growth',
+            owner_email: 'james.wright@globex.io',
+            impact_amount: 85000,
+            urgency_label: '34 days stale',
+            source_skill: 'pipeline-hygiene',
+            expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+            created_at: now,
+          },
+        },
+      };
+
+    case 'action.completed':
+      return {
+        ...base,
+        event: 'action.completed',
+        event_id: `evt_test_acp_${uid()}`,
+        data: {
+          workspace_name: 'Acme Corp',
+          action: {
+            id: 'c5d6e7f8-a9b0-1c2d-3e4f-5a6b7c8d9e0f',
+            action_type: 're_engage_deal',
+            severity: 'critical',
+            title: 'Re-engage Globex Industries – Growth immediately',
+            target_deal_id: 'd9e8f7a6-b5c4-3d2e-1f0a-9b8c7d6e5f4a',
+            target_entity_name: 'Globex Industries – Growth',
+            owner_email: 'james.wright@globex.io',
+            impact_amount: 85000,
+            source_skill: 'pipeline-hygiene',
+            executed_by: 'james.wright@globex.io',
+            executed_at: now,
+          },
+        },
+      };
+
+    case 'action.expired':
+      return {
+        ...base,
+        event: 'action.expired',
+        event_id: `evt_test_aex_${uid()}`,
+        data: {
+          workspace_name: 'Acme Corp',
+          action: {
+            id: 'c5d6e7f8-a9b0-1c2d-3e4f-5a6b7c8d9e0f',
+            action_type: 're_engage_deal',
+            severity: 'critical',
+            title: 'Re-engage Globex Industries – Growth immediately',
+            target_deal_id: 'd9e8f7a6-b5c4-3d2e-1f0a-9b8c7d6e5f4a',
+            target_entity_name: 'Globex Industries – Growth',
+            owner_email: 'james.wright@globex.io',
+            impact_amount: 85000,
+            source_skill: 'pipeline-hygiene',
+            expired_at: now,
+            days_open: 7,
+          },
+        },
+      };
+
+    default:
+      return {
+        ...base,
+        event: 'webhook.test',
+        event_id: `evt_test_${uid()}`,
+        data: {
+          message: 'This is a test webhook from Pandora.',
+          workspace_id: workspaceId,
+        },
+      };
+  }
+}
+
+/**
  * Send a single test delivery to verify the endpoint is reachable.
+ * Accepts an optional eventType to send a realistic dummy payload for that event.
+ * Falls back to a generic webhook.test ping when eventType is absent or unrecognised.
  * Uses deliverWebhook (single shot, not retried).
  * Throws 404 if endpoint not found or doesn't belong to workspace.
  */
 export async function testWebhookEndpoint(
   workspaceId: string,
-  endpointId: string
+  endpointId: string,
+  eventType?: string
 ) {
   const result = await query<{ id: string; url: string; secret: string }>(
     `SELECT id, url, secret FROM webhook_endpoints WHERE id = $1 AND workspace_id = $2`,
@@ -118,19 +309,7 @@ export async function testWebhookEndpoint(
   }
 
   const endpoint = result.rows[0];
-
-  const testEvent: WebhookEvent = {
-    event: 'webhook.test',
-    event_id: `evt_test_${crypto.randomUUID()}`,
-    timestamp: new Date().toISOString(),
-    workspace_id: workspaceId,
-    api_version: '2026-03-01',
-    data: {
-      message: 'This is a test webhook from Pandora.',
-      workspace_id: workspaceId,
-    },
-  };
-
+  const testEvent = buildTestEvent(workspaceId, eventType);
   return deliverWebhook(endpoint, testEvent, 1);
 }
 

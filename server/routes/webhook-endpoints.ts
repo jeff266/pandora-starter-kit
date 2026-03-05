@@ -82,8 +82,9 @@ router.delete('/:workspaceId/webhook-endpoints/:endpointId', async (req: Request
  */
 router.post('/:workspaceId/webhook-endpoints/:endpointId/test', async (req: Request, res: Response): Promise<void> => {
   const { workspaceId, endpointId } = req.params;
+  const { event_type } = req.body as { event_type?: string };
   try {
-    const result = await testWebhookEndpoint(workspaceId, endpointId);
+    const result = await testWebhookEndpoint(workspaceId, endpointId, event_type);
     res.json(result);
   } catch (err: any) {
     if (err.status === 404) {
