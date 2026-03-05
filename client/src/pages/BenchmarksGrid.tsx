@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
 import { useWorkspace } from '../context/WorkspaceContext';
+import { useDemoMode } from '../contexts/DemoModeContext';
 
 interface StageBenchmark {
   stage: string;
@@ -170,7 +171,7 @@ function csvEscape(val: string | null | undefined): string {
   return `"${s.replace(/"/g, '""')}"`;
 }
 
-function exportModalCsv(modal: MathModalState): void {
+function exportModalCsv(modal: MathModalState, anon: { deal: (n: string) => string; pipeline: (n: string) => string }): void {
   if (!modal.deals || modal.deals.length === 0) return;
   const isOpen = modal.outcome === 'open';
 
@@ -184,8 +185,8 @@ function exportModalCsv(modal: MathModalState): void {
     const exited = d.exited_at ? new Date(d.exited_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' }) : '';
     const amount = d.amount ? String(Math.round(parseFloat(d.amount))) : '';
     return isOpen
-      ? [csvEscape(d.id), csvEscape(d.name), csvEscape(amount), csvEscape(d.stage_display_name), dur, entered]
-      : [csvEscape(d.id), csvEscape(d.name), csvEscape(amount), csvEscape(d.stage_display_name), dur, entered, exited];
+      ? [csvEscape(d.id), csvEscape(anon.deal(d.name)), csvEscape(amount), csvEscape(anon.pipeline(d.stage_display_name)), dur, entered]
+      : [csvEscape(d.id), csvEscape(anon.deal(d.name)), csvEscape(amount), csvEscape(anon.pipeline(d.stage_display_name)), dur, entered, exited];
   });
 
   const slug = modal.stage_normalized.replace(/_/g, '-');
@@ -201,6 +202,7 @@ function exportModalCsv(modal: MathModalState): void {
 }
 
 function MathModal({ modal, onClose }: { modal: MathModalState; onClose: () => void }) {
+  const { anon } = useDemoMode();
   const isOpen = modal.outcome === 'open';
   const outcomeColor = isOpen ? '#D69E2E' : modal.outcome === 'won' ? '#38A169' : '#E53E3E';
   const outcomeLabel = isOpen ? 'Open Now' : modal.outcome === 'won' ? 'Closed-Won' : 'Closed-Lost';
@@ -227,19 +229,19 @@ function MathModal({ modal, onClose }: { modal: MathModalState; onClose: () => v
         <div style={{ padding: '18px 24px', borderBottom: `1px solid ${colors.border}`, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexShrink: 0 }}>
           <div>
             <div style={{ fontSize: 15, fontWeight: 700, color: colors.text, marginBottom: 3 }}>
-              Show Math — <span style={{ color: outcomeColor }}>{outcomeLabel}</span> · {modal.label}
+              Show Math — <span style={{ color: outcomeColor }}>{outcomeLabel}</span> · {anon.pipeline(modal.label)}
             </div>
             <div style={{ fontSize: 12, color: colors.textMuted }}>
               {isOpen
                 ? <>Deals currently in this stage{modal.avg != null ? <> · avg <strong style={{ color: outcomeColor }}>{fmtDays(modal.avg)}</strong></> : ''}</>
-                : <>{segLabel}{modal.pipeline ? ` · ${modal.pipeline}` : ''}{modal.median != null ? ` · median ${fmtDays(modal.median)}` : ''}</>
+                : <>{segLabel}{modal.pipeline ? ` · ${anon.pipeline(modal.pipeline)}` : ''}{modal.median != null ? ` · median ${fmtDays(modal.median)}` : ''}</>
               }
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
             {modal.deals && modal.deals.length > 0 && (
               <button
-                onClick={() => exportModalCsv(modal)}
+                onClick={() => exportModalCsv(modal, anon)}
                 style={{
                   padding: '5px 11px', fontSize: 11, fontFamily: fonts.sans, fontWeight: 500,
                   border: `1px solid ${colors.border}`, borderRadius: 5, background: 'transparent',
@@ -288,11 +290,11 @@ function MathModal({ modal, onClose }: { modal: MathModalState; onClose: () => v
                       }}
                     >
                       <td style={{ padding: '9px 16px', color: colors.text, fontWeight: 500, maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {deal.name}
+                        {anon.deal(deal.name)}
                         {isMedian && <span style={{ marginLeft: 6, fontSize: 10, color: outcomeColor, fontWeight: 600 }}>← median</span>}
                       </td>
                       <td style={{ padding: '9px 12px', textAlign: 'right', color: colors.textSecondary }}>{fmtAmount(deal.amount)}</td>
-                      <td style={{ padding: '9px 12px', color: colors.textMuted, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{deal.stage_display_name}</td>
+                      <td style={{ padding: '9px 12px', color: colors.textMuted, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{anon.pipeline(deal.stage_display_name)}</td>
                       <td style={{ padding: '9px 12px', textAlign: 'center', fontWeight: 600, color: outcomeColor }}>{fmtDays(dur)}</td>
                       <td style={{ padding: '9px 12px', textAlign: 'center', color: colors.textMuted }}>{fmtDate(deal.entered_at)}</td>
                       {!isOpen && <td style={{ padding: '9px 12px', textAlign: 'center', color: colors.textMuted }}>{fmtDate(deal.exited_at)}</td>}
@@ -314,6 +316,7 @@ function MathModal({ modal, onClose }: { modal: MathModalState; onClose: () => v
 
 export default function BenchmarksGrid() {
   const { currentWorkspace } = useWorkspace();
+  const { anon } = useDemoMode();
   const workspaceId = currentWorkspace?.id;
 
   const [data, setData] = useState<BenchmarksResponse | null>(null);
@@ -506,7 +509,7 @@ export default function BenchmarksGrid() {
             <th style={{ padding: '10px 16px', textAlign: 'left', color: colors.textMuted, fontWeight: 600, fontSize: 11, whiteSpace: 'nowrap', width: 140 }}>Metric</th>
             {stageList.map(s => (
               <th key={s.stage_normalized} style={{ padding: '10px 12px', textAlign: 'center', color: colors.textMuted, fontWeight: 600, fontSize: 11, whiteSpace: 'nowrap', minWidth: 110 }}>
-                {stageHeaderLabel(s.stage_normalized, s.stage)}
+                {anon.pipeline(stageHeaderLabel(s.stage_normalized, s.stage))}
               </th>
             ))}
           </tr>
@@ -638,7 +641,7 @@ export default function BenchmarksGrid() {
               style={{ padding: '6px 10px', borderRadius: 6, border: `1px solid ${colors.border}`, background: colors.surface, color: colors.text, fontSize: 12, fontFamily: fonts.sans }}
             >
               <option value="all">All Pipelines</option>
-              {data.pipelines.map(p => <option key={p} value={p}>{formatPipelineName(p)}</option>)}
+              {data.pipelines.map(p => <option key={p} value={p}>{anon.pipeline(formatPipelineName(p))}</option>)}
             </select>
           )}
 
@@ -700,7 +703,7 @@ export default function BenchmarksGrid() {
                     style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 18px', cursor: 'pointer', borderBottom: pipelineCollapsed ? 'none' : `1px solid ${colors.border}`, background: colors.surfaceRaised }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <span style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>{formatPipelineName(pipelineName)}</span>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>{anon.pipeline(formatPipelineName(pipelineName))}</span>
                       <span style={{ fontSize: 10, color: colors.textMuted, background: colors.surfaceHover, padding: '1px 6px', borderRadius: 10 }}>
                         {pipelineStages.length} stage{pipelineStages.length !== 1 ? 's' : ''}
                       </span>
@@ -812,7 +815,7 @@ export default function BenchmarksGrid() {
                             const gapColor = signalGapColor(rb.won_median, rb.lost_median);
                             return (
                               <tr key={`${rb.pipeline}-${rb.stage}`} style={{ borderBottom: `1px solid ${colors.border}` }}>
-                                <td style={{ padding: '10px 16px', color: colors.text, fontWeight: 500 }}>{rb.stage}</td>
+                                <td style={{ padding: '10px 16px', color: colors.text, fontWeight: 500 }}>{anon.pipeline(rb.stage)}</td>
                                 <td style={{ padding: '10px 12px', textAlign: 'center', cursor: rb.won_median != null ? 'pointer' : 'default' }}
                                   onClick={() => rb.won_median != null ? openMath(rb.stage_normalized, 'won', rb.stage, 'all', rb.won_median, rb.pipeline || selectedPipeline) : undefined}>
                                   {wonVal !== null && wonVal !== undefined ? (
@@ -852,7 +855,7 @@ export default function BenchmarksGrid() {
                       onClick={() => setCollapsedSegments(prev => { const next = new Set(prev); next.has(pKey) ? next.delete(pKey) : next.add(pKey); return next; })}
                       style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 18px', cursor: 'pointer', borderBottom: pCollapsed ? 'none' : `1px solid ${colors.border}`, background: colors.surfaceRaised }}
                     >
-                      <span style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>{pName || 'Default Pipeline'}</span>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>{anon.pipeline(pName || 'Default Pipeline')}</span>
                       <span style={{ fontSize: 11, color: colors.textMuted }}>{pCollapsed ? '▼' : '▲'}</span>
                     </div>
                     {!pCollapsed && (
