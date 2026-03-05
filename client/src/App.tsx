@@ -84,6 +84,7 @@ const pageTitles: Record<string, string> = {
   '/icp-profile': 'ICP Profile',
   '/stage-velocity': 'Stage Velocity',
   '/competition': 'Competitive Intelligence',
+  '/prospects': 'Prospects',
   '/admin/scopes': 'Workspace Scopes',
   '/admin/token-usage': 'Token Usage',
   '/forecast': 'Forecast',

@@ -771,8 +771,8 @@ export async function runProspectScoring(workspaceId: string): Promise<ScoringRe
     // History row
     await dbQuery(
       `INSERT INTO prospect_score_history
-        (workspace_id, contact_id, score, grade, fit_score, engagement_score, intent_score, timing_score, segment_id, score_method, scored_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'point_based',$10)`,
+        (workspace_id, entity_type, entity_id, total_score, grade, fit_score, engagement_score, intent_score, timing_score, segment_id, score_method, scored_at)
+       VALUES ($1,'contact',$2,$3,$4,$5,$6,$7,$8,$9,'point_based',$10)`,
       [workspaceId, sc.contactId, sc.score, sc.grade, sc.fit, sc.engagement, sc.intent, sc.timing, sc.segmentLabel, scoredAt]
     );
   }

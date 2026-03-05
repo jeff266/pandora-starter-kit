@@ -424,7 +424,7 @@ export default function ProspectsPage() {
   };
 
   return (
-    <div style={{ fontFamily: fonts.sans, background: colors.bg, color: colors.text, minHeight: '100vh', padding: 24 }}>
+    <div style={{ fontFamily: fonts.sans, color: colors.text }}>
 
       {/* Top bar */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
@@ -535,10 +535,18 @@ export default function ProspectsPage() {
             <div style={{ padding: 40, textAlign: 'center', color: colors.textMuted, fontSize: 13, fontFamily: fonts.sans }}>Loading prospects…</div>
           ) : error ? (
             <div style={{ padding: 20, background: '#450a0a', border: '1px solid #7f1d1d', borderRadius: 8, color: '#fca5a5', fontSize: 13, fontFamily: fonts.sans }}>
-              {error}
+              <div style={{ marginBottom: scoredCount === 0 ? 12 : 0 }}>{error}</div>
               {scoredCount === 0 && (
-                <div style={{ marginTop: 8 }}>
-                  No scores yet. Click <strong>Run Scoring</strong> to score your contacts.
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span style={{ color: '#fca5a5' }}>No scores yet —</span>
+                  <button onClick={handleRunScoring} disabled={running} style={{
+                    padding: '6px 14px', borderRadius: 6, border: '1px solid #3b82f6',
+                    background: '#1e3a5f', color: '#93c5fd', fontSize: 12, fontWeight: 600,
+                    cursor: running ? 'not-allowed' : 'pointer', fontFamily: fonts.sans,
+                    opacity: running ? 0.7 : 1,
+                  }}>
+                    {running ? 'Scoring…' : '▶ Run Scoring'}
+                  </button>
                 </div>
               )}
             </div>
