@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { colors, fonts } from '../../styles/theme';
 import { useWorkspace } from '../../context/WorkspaceContext';
+import { useDemoMode } from '../../contexts/DemoModeContext';
 import { api } from '../../lib/api';
 
 type PandoraRole = 'cro' | 'manager' | 'ae' | 'revops' | 'admin' | null;
@@ -52,6 +53,7 @@ interface InviteModalProps {
 }
 
 function InviteModal({ rep, roles, defaultRoleId, onClose, onInvited }: InviteModalProps) {
+  const { anon } = useDemoMode();
   const [email, setEmail] = useState(rep.rep_email || '');
   const [roleId, setRoleId] = useState(defaultRoleId);
   const [pandoraRole, setPandoraRole] = useState<PandoraRole>(rep.pandora_role ?? 'ae');
@@ -88,7 +90,7 @@ function InviteModal({ rep, roles, defaultRoleId, onClose, onInvited }: InviteMo
         width: 420, fontFamily: fonts.sans, boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
       }}>
         <div style={{ fontSize: 16, fontWeight: 700, color: colors.text, marginBottom: 4 }}>
-          Invite {rep.rep_name}
+          Invite {anon.person(rep.rep_name)}
         </div>
         <div style={{ fontSize: 12, color: colors.textMuted, marginBottom: 20 }}>
           They'll receive an email with a link to join the workspace.
@@ -180,6 +182,7 @@ function InviteModal({ rep, roles, defaultRoleId, onClose, onInvited }: InviteMo
 
 export default function SalesRosterTab() {
   const { currentWorkspace } = useWorkspace();
+  const { anon } = useDemoMode();
   const isAdmin = currentWorkspace?.role === 'admin';
 
   const [reps, setReps] = useState<RosterRep[]>([]);
@@ -260,11 +263,11 @@ export default function SalesRosterTab() {
   };
 
   const handleDelete = async (rep: RosterRep) => {
-    if (!window.confirm(`Remove ${rep.rep_name} from the roster?`)) return;
+    if (!window.confirm(`Remove ${anon.person(rep.rep_name)} from the roster?`)) return;
     try {
       await api.delete(`/sales-reps/${rep.id}`);
       setReps(prev => prev.filter(r => r.id !== rep.id));
-      showToast(`${rep.rep_name} removed`, 'success');
+      showToast(`${anon.person(rep.rep_name)} removed`, 'success');
     } catch {
       showToast('Failed to remove rep', 'error');
     }
@@ -413,9 +416,9 @@ export default function SalesRosterTab() {
                         onMouseEnter={e => (e.currentTarget.style.background = colors.surfaceHover)}
                         onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                       >
-                        <span style={{ fontSize: 13, color: colors.text, fontWeight: 500 }}>{o.rep_name}</span>
+                        <span style={{ fontSize: 13, color: colors.text, fontWeight: 500 }}>{anon.person(o.rep_name)}</span>
                         {o.rep_email && (
-                          <span style={{ fontSize: 11, color: colors.textMuted, marginLeft: 8 }}>{o.rep_email}</span>
+                          <span style={{ fontSize: 11, color: colors.textMuted, marginLeft: 8 }}>{anon.email(o.rep_email)}</span>
                         )}
                       </div>
                     ))}
@@ -506,10 +509,10 @@ export default function SalesRosterTab() {
               padding: '11px 16px', borderBottom: `1px solid ${colors.border}`,
               alignItems: 'center', fontSize: 13,
             }}>
-              <div style={{ fontWeight: 500, color: colors.text }}>{rep.rep_name}</div>
+              <div style={{ fontWeight: 500, color: colors.text }}>{anon.person(rep.rep_name)}</div>
 
               <div style={{ color: colors.textSecondary, fontSize: 12 }}>
-                {rep.rep_email || <span style={{ color: colors.textDim, fontStyle: 'italic' }}>No email</span>}
+                {rep.rep_email ? anon.email(rep.rep_email) : <span style={{ color: colors.textDim, fontStyle: 'italic' }}>No email</span>}
               </div>
 
               <div style={{ color: colors.textMuted, fontSize: 12 }}>
