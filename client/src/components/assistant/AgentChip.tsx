@@ -15,6 +15,7 @@ export interface OperatorProgress {
 
 interface AgentChipProps {
   operator: OperatorProgress;
+  onClick?: () => void;
 }
 
 function PulsingDots() {
@@ -40,8 +41,9 @@ function PulsingDots() {
   );
 }
 
-export default function AgentChip({ operator }: AgentChipProps) {
+export default function AgentChip({ operator, onClick }: AgentChipProps) {
   const { phase, agent_name, icon, color, finding_preview, skills } = operator;
+  const isClickable = !!onClick && phase === 'done';
 
   const borderColor = phase === 'recruiting' ? colors.border
     : phase === 'thinking' ? color
@@ -79,17 +81,26 @@ export default function AgentChip({ operator }: AgentChipProps) {
   };
 
   return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 10,
-      background: colors.surfaceRaised, borderRadius: 6,
-      border: `1px solid ${borderColor}`,
-      padding: '8px 12px', minWidth: 180, maxWidth: 260,
-      transition: 'border-color 0.3s',
-      borderLeft: `3px solid ${borderColor}`,
-    }}>
+    <div
+      onClick={isClickable ? onClick : undefined}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 10,
+        background: colors.surfaceRaised, borderRadius: 6,
+        border: `1px solid ${borderColor}`,
+        padding: '8px 12px', minWidth: 180, maxWidth: 260,
+        transition: 'border-color 0.3s',
+        borderLeft: `3px solid ${borderColor}`,
+        cursor: isClickable ? 'pointer' : 'default',
+      }}
+    >
       <span style={{ fontSize: 16, flexShrink: 0 }}>{icon}</span>
       <div style={{ minWidth: 0, flex: 1 }}>
-        <div style={{ fontSize: 11, fontWeight: 600, color: colors.text, marginBottom: 2 }}>{agent_name}</div>
+        <div style={{ fontSize: 11, fontWeight: 600, color: colors.text, marginBottom: 2 }}>
+          {agent_name}
+          {isClickable && (
+            <span style={{ color: colors.accent, fontWeight: 400, marginLeft: 6, fontSize: 10 }}>View →</span>
+          )}
+        </div>
         {statusText()}
       </div>
     </div>

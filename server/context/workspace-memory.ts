@@ -101,6 +101,9 @@ export async function buildWorkspaceContextBlock(workspaceId: string, userId?: s
   const gat: Record<string, any> = ctx?.goals_and_targets ?? {};
   const def: Record<string, any> = ctx?.definitions ?? {};
 
+  // Extract fiscal year start month early — needed for targets classification and calendar sections
+  const fyMonth = def.cadence_fiscal_year_start_month?.value ?? gat.cadence?.fiscal_year_start_month;
+
   const lines: string[] = ['=== WORKSPACE CONTEXT ==='];
 
   // Company / Business Model
@@ -115,48 +118,88 @@ export async function buildWorkspaceContextBlock(workspaceId: string, userId?: s
 
   // Revenue Quotas from targets table
   if (targets.length > 0) {
-    lines.push('');
-    lines.push('REVENUE QUOTAS (active):');
+    const today = new Date();
 
-    // Compute annual total by summing all active targets
-    const annualTotal = targets.reduce((sum: number, t: any) => sum + Number(t.amount ?? 0), 0);
+    // Classify each target by whether its period is current, upcoming, or past
+    const withStatus = targets.map((t: any) => {
+      const start = t.period_start ? new Date(t.period_start) : null;
+      const end = t.period_end ? new Date(t.period_end) : null;
+      let status: 'current' | 'upcoming' | 'past' | 'undated' = 'undated';
+      if (start && end) {
+        if (today >= start && today <= end) status = 'current';
+        else if (today < start) status = 'upcoming';
+        else status = 'past';
+      }
+      return { ...t, status };
+    });
 
-    // Check if all targets share the same pipeline name
-    const pipelineNames = [...new Set(targets.map((t: any) => t.pipeline_name).filter(Boolean))];
-    const sharedPipeline = pipelineNames.length === 1 ? pipelineNames[0] : null;
+    const currentTargets = withStatus.filter((t: any) => t.status === 'current');
+    const upcomingTargets = withStatus.filter((t: any) => t.status === 'upcoming');
+    const undatedTargets = withStatus.filter((t: any) => t.status === 'undated');
 
-    // Show annual total line when there are multiple targets (otherwise it's redundant)
-    if (targets.length > 1 && annualTotal > 0) {
-      const breakdownParts = targets
-        .map((t: any) => `${t.period_label ?? 'period'} ${fmt(Number(t.amount ?? 0))}`)
-        .join(' + ');
-      const pipelinePrefix = sharedPipeline ? `${sharedPipeline} — ` : '';
-      lines.push(`- ${pipelinePrefix}FY Annual Total: ${fmt(annualTotal)} (${breakdownParts})`);
-    }
-
-    // Individual quarter lines
-    for (const t of targets) {
-      const pipelineLabel = t.pipeline_name ? t.pipeline_name : 'All Pipelines';
-      const amountStr = t.amount != null ? fmt(Number(t.amount)) : '?';
-      const metricStr = t.metric || 'ARR';
-      const periodStr = t.period_label || (t.period_start ? `${t.period_start} to ${t.period_end}` : '');
-      lines.push(`- ${pipelineLabel} ${periodStr}: ${amountStr} ${metricStr}`);
-    }
-
-    // Critical scoping rule: targets only apply to their named pipeline
-    const namedPipelines = targets.filter((t: any) => t.pipeline_name);
-    if (namedPipelines.length > 0) {
+    // Fiscal year note: only relevant when FY doesn't start in January
+    if (fyMonth && Number(fyMonth) !== 1) {
+      const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      const monthName = months[Number(fyMonth) - 1] ?? fyMonth;
       lines.push('');
-      lines.push('ATTAINMENT SCOPING RULE (CRITICAL):');
-      for (const t of namedPipelines) {
-        lines.push(`- The ${t.period_label ?? ''} target of ${fmt(Number(t.amount ?? 0))} applies ONLY to the "${t.pipeline_name}" pipeline.`);
-        lines.push(`  Do NOT include closed-won deals from other pipelines when calculating attainment against this target.`);
-        lines.push(`  When reporting attainment or gap-to-quota, only count deals where pipeline = "${t.pipeline_name}".`);
+      lines.push(`FISCAL YEAR NOTE: This workspace's fiscal year starts in ${monthName}. Fiscal year labels (e.g. "FY2027") refer to fiscal years, NOT calendar years. "Q1 FY2027" means ${monthName} – ${months[(Number(fyMonth) + 1) % 12]} of the calendar year in which that fiscal Q1 falls. Do NOT conflate a fiscal period label with a calendar quarter of the same number.`);
+    }
+
+    lines.push('');
+    lines.push('REVENUE QUOTAS:');
+
+    if (currentTargets.length > 0) {
+      lines.push('  [ACTIVE — period contains today]:');
+      for (const t of currentTargets) {
+        const pipelineLabel = t.pipeline_name ? t.pipeline_name : 'All Pipelines';
+        const periodStr = t.period_label || (t.period_start ? `${t.period_start} to ${t.period_end}` : '');
+        lines.push(`  - ${pipelineLabel} ${periodStr}: ${fmt(Number(t.amount ?? 0))} ${t.metric || 'ARR'}`);
       }
-      const unnamedTargets = targets.filter((t: any) => !t.pipeline_name);
-      if (unnamedTargets.length === 0) {
-        lines.push('- Pipelines without a named target have NO quota. Do not compare them to any target number.');
+    }
+
+    if (upcomingTargets.length > 0) {
+      lines.push('  [UPCOMING — period has NOT started yet]:');
+      for (const t of upcomingTargets) {
+        const pipelineLabel = t.pipeline_name ? t.pipeline_name : 'All Pipelines';
+        const periodStr = t.period_label || (t.period_start ? `${t.period_start} to ${t.period_end}` : '');
+        lines.push(`  - ${pipelineLabel} ${periodStr}: ${fmt(Number(t.amount ?? 0))} ${t.metric || 'ARR'} (starts ${t.period_start ?? '?'})`);
       }
+    }
+
+    if (undatedTargets.length > 0) {
+      lines.push('  [NO DATES SET]:');
+      for (const t of undatedTargets) {
+        const pipelineLabel = t.pipeline_name ? t.pipeline_name : 'All Pipelines';
+        const periodStr = t.period_label || 'unknown period';
+        lines.push(`  - ${pipelineLabel} ${periodStr}: ${fmt(Number(t.amount ?? 0))} ${t.metric || 'ARR'}`);
+      }
+    }
+
+    // Critical scoping rules
+    lines.push('');
+    lines.push('ATTAINMENT SCOPING RULES (CRITICAL — follow exactly):');
+
+    // Rule 1: Named pipelines only count their own deals
+    const namedPipelines = withStatus.filter((t: any) => t.pipeline_name);
+    for (const t of namedPipelines) {
+      lines.push(`- The ${t.period_label ?? ''} target of ${fmt(Number(t.amount ?? 0))} applies ONLY to the "${t.pipeline_name}" pipeline. Do NOT include closed-won deals from other pipelines.`);
+    }
+    const unnamedTargets = withStatus.filter((t: any) => !t.pipeline_name);
+    if (unnamedTargets.length === 0 && namedPipelines.length > 0) {
+      lines.push('- Pipelines without a named target have NO quota. Do not compare them to any target.');
+    }
+
+    // Rule 2: Never calculate attainment against upcoming targets
+    if (upcomingTargets.length > 0) {
+      const upcomingLabels = upcomingTargets.map((t: any) => t.period_label ?? t.period_start ?? 'upcoming').join(', ');
+      lines.push(`- UPCOMING targets (${upcomingLabels}) have NOT started. Do NOT calculate current attainment against them — their period has not begun. Report them as future targets only.`);
+    }
+
+    // Rule 3: Announce what the actual active period is
+    if (currentTargets.length > 0) {
+      lines.push(`- When asked about "this quarter" or "current quota", use only the ACTIVE targets listed above.`);
+    } else if (upcomingTargets.length > 0) {
+      lines.push(`- There is NO active quota target for today's date. The next quota period begins ${upcomingTargets[0].period_start ?? 'soon'}.`);
     }
   }
 
@@ -191,7 +234,7 @@ export async function buildWorkspaceContextBlock(workspaceId: string, userId?: s
   const calParts: string[] = [];
   const quotaPeriod = def.cadence_quota_period?.value ?? gat.cadence?.quota_period ?? gat.quota_period;
   if (quotaPeriod) calParts.push(`${quotaPeriod} quota`);
-  const fyMonth = def.cadence_fiscal_year_start_month?.value ?? gat.cadence?.fiscal_year_start_month;
+  // fyMonth already extracted above
   if (fyMonth) {
     const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     calParts.push(`FY starts ${months[Number(fyMonth) - 1] ?? fyMonth}`);

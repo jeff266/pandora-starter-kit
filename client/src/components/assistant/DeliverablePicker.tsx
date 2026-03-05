@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { colors, fonts } from '../../styles/theme';
-import { api } from '../../lib/api';
+import { api, getAuthToken } from '../../lib/api';
 
 export interface DeliverableOption {
   id: string;
@@ -22,6 +22,22 @@ type ExportState =
   | { status: 'sent'; to?: string }
   | { status: 'error'; message: string };
 
+async function downloadViaAuth(url: string) {
+  const token = getAuthToken();
+  const res = await fetch(url, token ? { headers: { Authorization: `Bearer ${token}` } } : {});
+  if (!res.ok) throw new Error(`Download failed (${res.status})`);
+  const blob = await res.blob();
+  const blobUrl = URL.createObjectURL(blob);
+  const filename = url.split('/').pop() || 'document';
+  const a = document.createElement('a');
+  a.href = blobUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+}
+
 export default function DeliverablePicker({ options, content = '', title = 'Pandora Analysis' }: DeliverablePickerProps) {
   const [selected, setSelected] = useState<string | null>(null);
   const [exportState, setExportState] = useState<ExportState>({ status: 'idle' });
@@ -35,13 +51,7 @@ export default function DeliverablePicker({ options, content = '', title = 'Pand
 
       if (result.downloadUrl) {
         setExportState({ status: 'download', url: result.downloadUrl });
-        const a = document.createElement('a');
-        a.href = result.downloadUrl;
-        a.download = '';
-        a.target = '_blank';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
+        await downloadViaAuth(result.downloadUrl);
       } else if (result.sent) {
         setExportState({ status: 'sent', to: result.to });
       } else if (result.error) {
@@ -63,13 +73,12 @@ export default function DeliverablePicker({ options, content = '', title = 'Pand
       case 'download':
         return (
           <span>
-            <a
-              href={exportState.url}
-              download
-              style={{ color: colors.accent, textDecoration: 'none', fontWeight: 500 }}
+            <span
+              onClick={() => downloadViaAuth(exportState.url).catch(() => {})}
+              style={{ color: colors.accent, textDecoration: 'none', fontWeight: 500, cursor: 'pointer' }}
             >
               Download ↓
-            </a>
+            </span>
             <span style={{ color: colors.textMuted }}> — or click again to re-download</span>
           </span>
         );

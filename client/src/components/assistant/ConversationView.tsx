@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { useNavigate } from 'react-router-dom';
 import { colors } from '../../styles/theme';
 import { useConversationStream } from './useConversationStream';
 import { getWorkspaceId, getAuthToken } from '../../lib/api';
@@ -16,8 +17,19 @@ interface ConversationViewProps {
   onBack: () => void;
 }
 
+const AGENT_ROUTES: Record<string, string> = {
+  'forecast-rollup': '/forecast',
+  'forecast-call-prep': '/forecast',
+  'attainment-vs-goal': '/forecast',
+  'monte-carlo-forecast': '/forecast',
+  'pipeline-state': '/command-center',
+  'pipeline-coverage': '/command-center',
+  'bowtie-review': '/command-center',
+};
+
 export default function ConversationView({ initialMessage, onBack }: ConversationViewProps) {
   const { state, sendMessage, dismissAction, loadHistory, startNewThread } = useConversationStream();
+  const navigate = useNavigate();
   const bottomRef = useRef<HTMLDivElement>(null);
   const latestAnswerRef = useRef<HTMLDivElement>(null);
   const prevPhaseRef = useRef<string>('idle');
@@ -183,9 +195,16 @@ export default function ConversationView({ initialMessage, onBack }: Conversatio
               Consulting Operators
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {state.activeOperators.map(op => (
-                <AgentChip key={op.agent_id} operator={op} />
-              ))}
+              {state.activeOperators.map(op => {
+                const route = AGENT_ROUTES[op.agent_id];
+                return (
+                  <AgentChip
+                    key={op.agent_id}
+                    operator={op}
+                    onClick={route ? () => navigate(route) : undefined}
+                  />
+                );
+              })}
             </div>
           </div>
         )}
