@@ -205,7 +205,7 @@ export default function CompetitiveIntelligencePage() {
     rows.push([]);
     rows.push(['=== Open Deal Exposure ===']);
     rows.push(['Deal', 'Competitor', 'Amount', 'Stage', 'Mentions', 'Last Mention', 'Risk']);
-    for (const d of sortedDeals) rows.push([d.deal_name, anon.company(d.competitor_name), String(d.amount), d.stage, String(d.mention_count), d.last_mention_at, d.risk]);
+    for (const d of sortedDeals) rows.push([anon.deal(d.deal_name), anon.company(d.competitor_name), String(d.amount), d.stage, String(d.mention_count), d.last_mention_at, d.risk]);
     const csv = rows.map(r => r.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -351,7 +351,7 @@ export default function CompetitiveIntelligencePage() {
                   <tr key={`${d.deal_id}-${d.competitor_name}`} style={{ borderBottom: `1px solid ${colors.border}`, transition: 'background 0.15s' }}
                     onMouseEnter={e => (e.currentTarget.style.background = colors.surfaceHover)}
                     onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-                    <td style={{ padding: '11px 22px', fontSize: 13, fontWeight: 500, color: colors.text, fontFamily: font }}>{d.deal_name}</td>
+                    <td style={{ padding: '11px 22px', fontSize: 13, fontWeight: 500, color: colors.text, fontFamily: font }}>{anon.deal(d.deal_name)}</td>
                     <td style={{ padding: '11px 22px' }}>
                       <button onClick={() => { toggleCompetitor(d.competitor_name); setActiveTab('competitors'); }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: font, textAlign: 'left' }}>
                         <span style={{ fontSize: 13, color: colors.accent, fontWeight: 600 }}>{anon.company(d.competitor_name)}</span>
@@ -561,8 +561,8 @@ export default function CompetitiveIntelligencePage() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
                     <button onClick={() => { toggleCompetitor(item.competitor_name); setActiveTab('competitors'); }} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 12, fontWeight: 700, color: pMeta?.color ?? colors.accent, fontFamily: font }}>{anon.company(item.competitor_name)}</button>
                     <span style={{ fontSize: 11, color: colors.textMuted }}>→</span>
-                    <span style={{ fontSize: 12, color: colors.textSecondary, fontWeight: 500, fontFamily: font }}>{item.deal_name}</span>
-                    <span style={{ marginLeft: 'auto', fontSize: 11, color: colors.textMuted, fontFamily: font }}>{formatDate(item.created_at)}{item.owner_email ? ` · ${item.owner_email.split('@')[0]}` : ''}</span>
+                    <span style={{ fontSize: 12, color: colors.textSecondary, fontWeight: 500, fontFamily: font }}>{anon.deal(item.deal_name)}</span>
+                    <span style={{ marginLeft: 'auto', fontSize: 11, color: colors.textMuted, fontFamily: font }}>{formatDate(item.created_at)}{item.owner_email ? ` · ${anon.email(item.owner_email).split('@')[0]}` : ''}</span>
                     <span style={{ fontSize: 11, fontFamily: mono, fontWeight: 700, color: scoreColor, background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 4, padding: '1px 7px' }}>{score}</span>
                   </div>
                   <p style={{ margin: 0, fontSize: 13, lineHeight: 1.55, color: colors.textSecondary, fontStyle: 'italic', fontFamily: font }}>"{item.source_quote}"</p>
