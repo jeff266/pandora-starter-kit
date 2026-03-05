@@ -18,17 +18,38 @@ declare global {
 const STYLE_ID = "hs-pandora-theme";
 
 const CSS = `
+  @keyframes autofill-dark {
+    0%, 100% {
+      background-color: #0f0f1e;
+      color: #eeeef5;
+    }
+  }
+
   #hs-form-target .hs-form {
     font-family: 'DM Sans', 'Outfit', system-ui, sans-serif;
     text-align: left;
   }
-  #hs-form-target .hs-form-field {
-    margin-bottom: 16px;
+  #hs-form-target .hs-form-field,
+  #hs-form-target li.hs-form-field,
+  #hs-form-target .field.hs-form-field {
+    margin-bottom: 16px !important;
+    background: transparent !important;
   }
   #hs-form-target .hs-input:focus {
     border-color: #6366f1 !important;
     box-shadow: 0 0 0 3px rgba(99,102,241,0.15) !important;
     outline: none !important;
+  }
+  #hs-form-target input.hs-input:-webkit-autofill,
+  #hs-form-target input.hs-input:-webkit-autofill:hover,
+  #hs-form-target input.hs-input:-webkit-autofill:focus,
+  #hs-form-target input.hs-input:autofill {
+    -webkit-text-fill-color: #eeeef5 !important;
+    caret-color: #eeeef5 !important;
+    -webkit-box-shadow: 0 0 0 1000px #0f0f1e inset !important;
+    box-shadow: 0 0 0 1000px #0f0f1e inset !important;
+    animation: autofill-dark 1s forwards !important;
+    animation-duration: 5000s !important;
   }
   #hs-form-target .hs-button.primary {
     width: 100%;
@@ -76,6 +97,13 @@ const CSS = `
     padding: 0 !important;
     margin: 0 !important;
     max-width: 100% !important;
+    background: transparent !important;
+  }
+  #hs-form-target ul {
+    list-style: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: transparent !important;
   }
   #hs-form-target .hs_recaptcha { margin-top: 8px; }
   #hs-form-target .actions { margin-top: 8px; }
@@ -93,7 +121,9 @@ const CSS = `
 `;
 
 function applyDarkStyles(root: HTMLElement) {
-  root.querySelectorAll<HTMLElement>("label.hs-label, .hs-form label").forEach(el => {
+  root.querySelectorAll<HTMLElement>(
+    "label.hs-label, .hs-form label"
+  ).forEach(el => {
     el.style.setProperty("color", "#8888a8", "important");
     el.style.setProperty("font-size", "13px", "important");
     el.style.setProperty("font-weight", "500", "important");
@@ -102,7 +132,9 @@ function applyDarkStyles(root: HTMLElement) {
     el.style.setProperty("font-family", "'DM Sans', 'Outfit', system-ui, sans-serif", "important");
   });
 
-  root.querySelectorAll<HTMLElement>("input.hs-input, textarea.hs-input").forEach(el => {
+  root.querySelectorAll<HTMLElement>(
+    "input.hs-input, textarea.hs-input"
+  ).forEach(el => {
     el.style.setProperty("background-color", "#0f0f1e", "important");
     el.style.setProperty("background", "#0f0f1e", "important");
     el.style.setProperty("border", "1px solid #1a1a35", "important");
@@ -116,11 +148,9 @@ function applyDarkStyles(root: HTMLElement) {
     el.style.setProperty("color-scheme", "dark", "important");
     el.style.setProperty("outline", "none", "important");
     el.style.setProperty("-webkit-appearance", "none", "important");
-    (el as HTMLInputElement).setAttribute("autocomplete", (el as HTMLInputElement).autocomplete || "off");
   });
 
   root.querySelectorAll<HTMLSelectElement>("select.hs-input").forEach(el => {
-    el.style.setProperty("background-color", "#0f0f1e", "important");
     el.style.setProperty("background-color", "#0f0f1e", "important");
     el.style.setProperty("border", "1px solid #1a1a35", "important");
     el.style.setProperty("color", "#eeeef5", "important");
@@ -137,6 +167,13 @@ function applyDarkStyles(root: HTMLElement) {
       opt.style.setProperty("background-color", "#0f0f1e", "important");
       opt.style.setProperty("color", "#eeeef5", "important");
     });
+  });
+
+  root.querySelectorAll<HTMLElement>(
+    "li.hs-form-field, .field.hs-form-field, div.hs-input"
+  ).forEach(el => {
+    el.style.setProperty("background", "transparent", "important");
+    el.style.setProperty("background-color", "transparent", "important");
   });
 
   root.querySelectorAll<HTMLElement>(
@@ -174,10 +211,6 @@ export default function HubSpotForm() {
       observer.observe(target, { childList: true, subtree: true, attributes: false });
     }
 
-    const existingScript = document.querySelector(
-      'script[src*="hsforms.net"]'
-    ) as HTMLScriptElement | null;
-
     const mount = () => {
       window.hbspt?.forms.create({
         portalId: "24202132",
@@ -185,7 +218,18 @@ export default function HubSpotForm() {
         region: "na1",
         target: "#hs-form-target",
       });
+
+      let elapsed = 0;
+      const pollId = setInterval(() => {
+        if (target) applyDarkStyles(target);
+        elapsed += 300;
+        if (elapsed >= 5000) clearInterval(pollId);
+      }, 300);
     };
+
+    const existingScript = document.querySelector(
+      'script[src*="hsforms.net"]'
+    ) as HTMLScriptElement | null;
 
     if (existingScript) {
       if (window.hbspt) {

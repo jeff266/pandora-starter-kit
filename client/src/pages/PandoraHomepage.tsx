@@ -362,8 +362,8 @@ export default function PandoraHomepage() {
           </Reveal>
 
           <Reveal delay={0.5}>
-            <p style={{ fontSize: 12, color: t.textMuted, marginTop: 16 }}>
-              Now onboarding design partners · white-glove setup · direct founder access
+            <p style={{ fontSize: 12, color: t.textMuted, marginTop: 16, fontStyle: "italic" }}>
+              First analysis in under 10 minutes. Built for teams of one — or three.
             </p>
           </Reveal>
         </div>
@@ -399,15 +399,15 @@ export default function PandoraHomepage() {
           textAlign: "center",
         }}>
           {[
-            { val: 38, suffix: "s", label: "avg analysis time", color: t.cyan },
-            { val: 16, suffix: "", label: "live skills", color: t.purple },
-            { val: 4, suffix: "\u00A2", label: "per analysis run", color: t.green },
-            { val: 10, suffix: "min", label: "to first insight", color: t.accentLight },
+            { val: "<10m", label: "First analysis", color: t.cyan },
+            { val: "16+", label: "Revenue skills", color: t.purple },
+            { val: "3", label: "CRM + CI integrations", color: t.green },
+            { val: "0", label: "Analysts required", color: t.accentLight },
           ].map((s, i) => (
             <Reveal key={i} delay={i * 0.1}>
               <div>
                 <div style={{ fontSize: "clamp(32px, 5vw, 48px)", fontWeight: 700, fontFamily: "'Outfit', sans-serif", color: s.color, letterSpacing: "-0.03em" }}>
-                  <Counter end={s.val} />{s.suffix}
+                  {s.val}
                 </div>
                 <div style={{ fontSize: 13, color: t.textMuted, fontFamily: mono, marginTop: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>
                   {s.label}
@@ -1077,9 +1077,8 @@ export default function PandoraHomepage() {
               <span style={gradText}>Most teams never read it.</span>
             </h2>
             <p style={{ fontSize: 16, color: t.textSec, marginBottom: 36, lineHeight: 1.65, maxWidth: 480, margin: "0 auto 36px" }}>
-              Pandora is a Revenue Intelligence solution — not just a dashboard.
               Connect your CRM in minutes. Get your first analysis before end of day.
-              Direct founder access. Your use case shapes the product.
+              No slides. No sales calls. Just your data, finally working for you.
             </p>
           </Reveal>
 
