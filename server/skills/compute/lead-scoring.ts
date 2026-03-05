@@ -13,6 +13,7 @@
  */
 
 import { query } from '../../db.js';
+import { emitProspectScoredEvents, type ScoredEntity } from '../../webhooks/prospect-score-events.js';
 import { createLogger } from '../../utils/logger.js';
 import {
   ScoreFactor,
@@ -110,6 +111,10 @@ interface DealFeatures {
   hasHiringSignal?: boolean;
   hasExpansionSignal?: boolean;
   hasRiskSignal?: boolean;
+
+  // CRM source tracking (for webhook outbound)
+  source: string;
+  sourceId: string;
 }
 
 interface ContactFeatures {
@@ -132,6 +137,10 @@ interface ContactFeatures {
   dealAmount: number | null;
   dealStage: string;
   dealScore?: number; // Will be populated after deal scoring
+
+  // CRM source tracking (for webhook outbound)
+  source: string;
+  sourceId: string;
 }
 
 interface CustomFieldWeight {
@@ -286,6 +295,7 @@ async function extractDealFeatures(workspaceId: string): Promise<DealFeatures[]>
     SELECT
       d.id, d.name, d.amount, d.stage_normalized, d.close_date,
       d.probability, d.owner as owner_email, d.owner as owner_name, d.created_at as created_date,
+      d.source, d.source_id,
       d.custom_fields,
       a.name as account_name, a.industry, a.employee_count,
       a.annual_revenue, a.custom_fields as account_custom_fields,
@@ -507,6 +517,8 @@ async function extractDealFeatures(workspaceId: string): Promise<DealFeatures[]>
       hasHiringSignal: enrichmentData.hasHiringSignal,
       hasExpansionSignal: enrichmentData.hasExpansionSignal,
       hasRiskSignal: enrichmentData.hasRiskSignal,
+      source: row.source,
+      sourceId: row.source_id,
     });
   }
 
@@ -524,6 +536,7 @@ async function extractContactFeatures(workspaceId: string): Promise<ContactFeatu
   const result = await query<any>(`
     SELECT
       c.id, c.first_name, c.last_name, c.email, c.title, c.phone,
+      c.source, c.source_id,
       c.custom_fields,
       dc.buying_role, dc.role_confidence,
       dc.tenure_months, dc.seniority_verified,
@@ -551,6 +564,8 @@ async function extractContactFeatures(workspaceId: string): Promise<ContactFeatu
     dealId: row.deal_id,
     dealAmount: row.deal_amount,
     dealStage: row.deal_stage,
+    source: row.source,
+    sourceId: row.source_id,
   }));
 }
 
@@ -2160,6 +2175,72 @@ export async function scoreLeads(workspaceId: string): Promise<ScoringResult> {
     const score = scoreContact(contact, dealScore, gradeThresholds);
     contactScores.push(score);
     await persistScore(workspaceId, score);
+  }
+
+  // 4b. Emit prospect.scored webhook events (fire-and-forget, never blocks scoreLeads)
+  {
+    const dealEntities: ScoredEntity[] = dealScores.map(s => {
+      const f = dealFeatures.find(d => d.id === s.entityId)!;
+      return {
+        entityType: 'deal',
+        entityId: s.entityId,
+        source: f?.source ?? 'unknown',
+        sourceId: f?.sourceId ?? s.entityId,
+        sourceObject: 'deal',
+        name: f?.name ?? undefined,
+        totalScore: s.totalScore,
+        grade: s.grade,
+        fitScore: s.fitScore,
+        engagementScore: s.engagementScore,
+        intentScore: s.intentScore,
+        timingScore: s.timingScore,
+        scoreMethod: s.scoreMethod,
+        scoreConfidence: s.scoreConfidence,
+        scoreSummary: s.scoreSummary,
+        topPositiveFactor: s.topPositiveFactor,
+        topNegativeFactor: s.topNegativeFactor,
+        recommendedAction: s.recommendedAction ?? undefined,
+        scoreFactors: s.scoreFactors ?? [],
+        previousScore: s.previousScore ?? null,
+        scoreChange: s.scoreChange ?? null,
+        scoredAt: s.scoredAt,
+      };
+    });
+    const contactEntities: ScoredEntity[] = contactScores.map(s => {
+      const f = contactFeatures.find(c => c.id === s.entityId)!;
+      return {
+        entityType: 'contact',
+        entityId: s.entityId,
+        source: f?.source ?? 'unknown',
+        sourceId: f?.sourceId ?? s.entityId,
+        sourceObject: (s.sourceObject as string) ?? 'contact',
+        email: f?.email ?? undefined,
+        name: [f?.firstName, f?.lastName].filter(Boolean).join(' ') || undefined,
+        totalScore: s.totalScore,
+        grade: s.grade,
+        fitScore: s.fitScore,
+        engagementScore: s.engagementScore,
+        intentScore: s.intentScore,
+        timingScore: s.timingScore,
+        scoreMethod: s.scoreMethod,
+        scoreConfidence: s.scoreConfidence,
+        scoreSummary: s.scoreSummary,
+        topPositiveFactor: s.topPositiveFactor,
+        topNegativeFactor: s.topNegativeFactor,
+        recommendedAction: s.recommendedAction ?? undefined,
+        scoreFactors: s.scoreFactors ?? [],
+        previousScore: s.previousScore ?? null,
+        scoreChange: s.scoreChange ?? null,
+        scoredAt: s.scoredAt,
+      };
+    });
+    emitProspectScoredEvents(workspaceId, [...dealEntities, ...contactEntities])
+      .then(r => {
+        if (r.emitted > 0) {
+          logger.info(`[Webhooks] Emitted ${r.emitted} prospect.scored events to ${r.endpoints} endpoints`);
+        }
+      })
+      .catch(err => logger.warn('[Webhooks] Failed to emit prospect.scored events', { error: err }));
   }
 
   // 5. Compute summary stats

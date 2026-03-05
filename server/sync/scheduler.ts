@@ -90,8 +90,23 @@ export class SyncScheduler {
     }, { timezone: 'UTC' });
     this.tasks.push(marketSignalsTask);
 
+    // Webhook delivery log retention (daily at 3:00 AM UTC)
+    // Removes rows older than 30 days from webhook_endpoint_deliveries.
+    // At ~600 rows/scoring run daily, 30-day retention keeps the table under ~18k rows.
+    const webhookCleanupTask = cron.schedule('0 3 * * *', async () => {
+      try {
+        const result = await query(
+          `DELETE FROM webhook_endpoint_deliveries WHERE delivered_at < NOW() - INTERVAL '30 days'`
+        );
+        console.log(`[Scheduler] Webhook delivery cleanup: removed ${result.rowCount ?? 0} rows older than 30 days`);
+      } catch (err) {
+        console.error('[Scheduler] Webhook delivery cleanup failed:', err);
+      }
+    }, { timezone: 'UTC' });
+    this.tasks.push(webhookCleanupTask);
+
     const scheduleDescriptions = SYNC_SCHEDULES.map(s => s.label).join(', ');
-    console.log(`[Scheduler] Sync schedules registered: ${scheduleDescriptions}, CRM (dynamic 15-min heartbeat), Consultant (every 6 hours), Agent cleanup (daily at 3 AM), Refresh token cleanup (daily at 3 AM), Market signals (weekly on Monday at 6 AM)`);
+    console.log(`[Scheduler] Sync schedules registered: ${scheduleDescriptions}, CRM (dynamic 15-min heartbeat), Consultant (every 6 hours), Agent cleanup (daily at 3 AM), Refresh token cleanup (daily at 3 AM), Webhook delivery cleanup (daily at 3 AM), Market signals (weekly on Monday at 6 AM)`);
   }
 
   stop(): void {
