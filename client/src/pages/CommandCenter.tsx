@@ -662,42 +662,17 @@ export default function CommandCenter() {
 
       {greetingData && (
         <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          display: 'flex', alignItems: 'center',
           background: colors.surface, border: `1px solid ${colors.border}`,
-          borderRadius: 8, padding: '8px 16px', gap: 12, flexWrap: 'wrap',
+          borderRadius: 8, padding: '8px 16px', gap: 10,
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
-            <span style={{ fontSize: 13, fontWeight: 500, color: colors.text, whiteSpace: 'nowrap' }}>
-              {greetingData.headline}
-            </span>
-            <span style={{ color: colors.border }}>·</span>
-            <span style={{ fontSize: 12, color: colors.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {greetingData.state_summary}
-            </span>
-          </div>
-          <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-            {['Walk me through', 'Week ahead'].map(label => (
-              <button
-                key={label}
-                onClick={() => handleAskPandora(label)}
-                style={{
-                  padding: '4px 10px', fontSize: 11, fontWeight: 500,
-                  border: `1px solid ${colors.border}`, borderRadius: 6,
-                  background: 'transparent', color: colors.textSecondary, cursor: 'pointer',
-                }}
-                onMouseEnter={e => {
-                  (e.currentTarget as HTMLButtonElement).style.borderColor = colors.accent;
-                  (e.currentTarget as HTMLButtonElement).style.color = colors.accent;
-                }}
-                onMouseLeave={e => {
-                  (e.currentTarget as HTMLButtonElement).style.borderColor = colors.border;
-                  (e.currentTarget as HTMLButtonElement).style.color = colors.textSecondary;
-                }}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          <span style={{ fontSize: 13, fontWeight: 500, color: colors.text, whiteSpace: 'nowrap' }}>
+            {greetingData.headline}
+          </span>
+          <span style={{ color: colors.border }}>·</span>
+          <span style={{ fontSize: 12, color: colors.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {greetingData.state_summary}
+          </span>
         </div>
       )}
 

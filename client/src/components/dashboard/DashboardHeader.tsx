@@ -45,27 +45,12 @@ export function DashboardHeader({
       style={{
         display: 'flex',
         alignItems: 'center',
-        justifyContent: 'space-between',
+        justifyContent: 'flex-end',
         marginBottom: 20,
         flexWrap: 'wrap',
-        gap: 16,
+        gap: 10,
       }}
     >
-      {/* Title */}
-      <h1
-        style={{
-          margin: 0,
-          fontSize: 28,
-          fontWeight: 600,
-          color: colors.text,
-          fontFamily: fonts.body,
-        }}
-      >
-        Command Center
-      </h1>
-
-      {/* Controls */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         {/* Time Range Selector */}
         <select
           value={timeRange}
@@ -185,7 +170,6 @@ export function DashboardHeader({
             <Settings size={18} />
           </button>
         )}
-      </div>
 
       <style>{`
         @keyframes spin {
