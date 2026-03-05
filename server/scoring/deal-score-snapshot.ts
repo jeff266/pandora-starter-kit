@@ -1,3 +1,15 @@
+/**
+ * Deal Score Snapshot
+ *
+ * REFACTORED 2026-03-04:
+ * - Now reads health_score from lead_scores table (entity_type='deal')
+ * - Previously read from deals.health_score column (deprecated)
+ * - Continues to write snapshots to deal_score_snapshots table
+ * - Used by Command Center for score history charts
+ *
+ * STATUS: Active (refactored to use unified scoring)
+ */
+
 import { query } from '../db.js';
 import { callLLM } from '../utils/llm-router.js';
 import { createLogger } from '../utils/logger.js';
@@ -19,10 +31,9 @@ export async function runDealScoreSnapshots(
   const dealsResult = await query<{
     id: string;
     name: string;
-    health_score: string | null;
     stage_normalized: string;
   }>(
-    `SELECT id, name, health_score, stage_normalized
+    `SELECT id, name, stage_normalized
      FROM deals
      WHERE workspace_id = $1
        AND stage_normalized NOT IN ('closed_won','closed_lost','closedwon','closedlost')`,
@@ -33,6 +44,18 @@ export async function runDealScoreSnapshots(
   logger.info(`Processing ${deals.length} open deals`, { workspaceId });
 
   const dealIds = deals.map(d => d.id);
+
+  // DEPRECATION NOTE: Read health scores from lead_scores table instead of deals.health_score
+  const leadScoresResult = await query<{ entity_id: string; total_score: string }>(
+    `SELECT entity_id, total_score
+     FROM lead_scores
+     WHERE workspace_id = $1 AND entity_type = 'deal' AND entity_id = ANY($2)`,
+    [workspaceId, dealIds]
+  );
+
+  const healthScoreMap = new Map(
+    leadScoresResult.rows.map(r => [r.entity_id, parseFloat(r.total_score)])
+  );
 
   const [batchFindings, batchSnapshots] = await Promise.all([
     query<{ deal_id: string; severity: string; cnt: string }>(
@@ -75,7 +98,8 @@ export async function runDealScoreSnapshots(
       }
       skillScore = Math.max(0, skillScore);
 
-      const healthScoreVal = deal.health_score != null ? Number(deal.health_score) : 100;
+      // Read health score from lead_scores table (written by Lead Scoring v1)
+      const healthScoreVal = healthScoreMap.get(deal.id) ?? 100;
       const activeScore = Math.min(skillScore, healthScoreVal);
       const activeSource: 'skill' | 'health' = skillScore <= healthScoreVal ? 'skill' : 'health';
       const grade = gradeFromScore(activeScore);
@@ -133,7 +157,7 @@ export async function runDealScoreSnapshots(
         [
           workspaceId,
           deal.id,
-          deal.health_score != null ? Number(deal.health_score) : null,
+          healthScoreVal,
           skillScore,
           activeScore,
           activeSource,

@@ -1,4 +1,35 @@
+/**
+ * ⚠️ PARTIALLY DEPRECATED - SCHEDULED FOR REFACTOR ⚠️
+ *
+ * This file contains multiple scoring functions with different deprecation statuses:
+ *
+ * DEPRECATED (Phase 1):
+ * - computeDealScores() - Deal Health calculation
+ *   REPLACEMENT: Read from lead_scores where entity_type='deal'
+ *   ACTION: Callers should trigger Lead Scoring v1 if no cached score exists
+ *   DELETION DATE: 2026-04-01 (Deal Health portion only)
+ *
+ * KEPT (Composite Score logic extracted):
+ * - computeCompositeScore() - NOW USES weight redistribution utility
+ *   REFACTORED: Uses server/scoring/weight-redistribution.ts
+ *   RETAINED: Still used for blending CRM + Findings + Conversations
+ *   NOTE: Will be absorbed into unified Prospect Score in future phase
+ *
+ * KEPT (Phase inference):
+ * - computeInferredPhase() - Infers deal phase from conversation keywords
+ *   RETAINED: Unique functionality, no duplicate elsewhere
+ *
+ * - computeConversationModifier() - Conversation sentiment scoring
+ *
+ * Last verified: 2026-03-04 - computeDealScores callers rewired
+ *   RETAINED: Unique functionality, no duplicate elsewhere
+ *
+ * DEPRECATION DATE: 2026-03-04
+ * REMOVAL TARGET: Phase 2 completion (3 weeks)
+ */
+
 import { query } from '../db.js';
+import { redistributeWeights, getDegradationState, type DataAvailability } from '../scoring/weight-redistribution.js';
 
 export interface DealRow {
   id: string;
@@ -375,6 +406,10 @@ export interface CompositeScoreResult {
   degradation_state: 'full' | 'no_conversations' | 'no_findings' | 'crm_only';
 }
 
+/**
+ * REFACTORED: Now uses weight redistribution utility
+ * Computes composite score with graceful degradation when data sources are missing
+ */
 export function computeCompositeScore(
   crmScore: number | null,
   skillScore: number | null,
@@ -386,31 +421,22 @@ export function computeCompositeScore(
   const hasFindings = skillScore !== null;
   const hasConvScore = conversationScore !== null && conversationScore !== 0;
 
-  let degradationState: 'full' | 'no_conversations' | 'no_findings' | 'crm_only';
-  if (hasFindings && hasConversations) {
-    degradationState = 'full';
-  } else if (hasFindings && !hasConversations) {
-    degradationState = 'no_conversations';
-  } else if (!hasFindings && hasConversations) {
-    degradationState = 'no_findings';
-  } else {
-    degradationState = 'crm_only';
-  }
+  // Build data availability object for weight redistribution
+  const availability: DataAvailability = {
+    hasCrm,
+    hasFindings,
+    hasConversations,
+    hasConversationScore: hasConvScore,
+  };
 
-  const originalWeights = { ...weights };
+  // Use weight redistribution utility
+  const weightsUsed = redistributeWeights(weights, availability);
 
-  let effectiveConvWeight = 0;
-  if (hasConversations && hasConvScore) {
-    effectiveConvWeight = originalWeights.conversations;
-  } else if (hasConversations && !hasConvScore) {
-    effectiveConvWeight = originalWeights.conversations * 0.5;
-  }
+  // Determine degradation state
+  const degradationState = getDegradationState(availability);
 
-  const availableInputs: Array<'crm' | 'findings'> = [];
-  if (hasCrm) availableInputs.push('crm');
-  if (hasFindings) availableInputs.push('findings');
-
-  if (availableInputs.length === 0 && effectiveConvWeight === 0) {
+  // If no data at all, return default
+  if (Object.values(weightsUsed).every(w => w === 0)) {
     return {
       score: 50,
       grade: 'C',
@@ -419,25 +445,21 @@ export function computeCompositeScore(
     };
   }
 
-  const remainingWeight = 1 - effectiveConvWeight;
-  const totalCrmFindings = availableInputs.reduce((sum, key) => sum + originalWeights[key], 0);
-
-  const weightsUsed = { crm: 0, findings: 0, conversations: effectiveConvWeight };
-  if (totalCrmFindings > 0) {
-    for (const input of availableInputs) {
-      weightsUsed[input] = (originalWeights[input] / totalCrmFindings) * remainingWeight;
-    }
-  } else if (effectiveConvWeight > 0) {
-    weightsUsed.conversations = 1;
-  }
-
+  // Calculate weighted composite score
   let compositeScore = 0;
-  if (hasCrm) compositeScore += crmScore * weightsUsed.crm;
-  if (hasFindings) compositeScore += skillScore * weightsUsed.findings;
-  if (effectiveConvWeight > 0 && conversationScore !== null) {
-    compositeScore += conversationScore * weightsUsed.conversations;
-  } else if (effectiveConvWeight > 0 && hasConversations && !hasConvScore) {
-    compositeScore += 50 * weightsUsed.conversations;
+  if (hasCrm && weightsUsed.crm > 0) {
+    compositeScore += crmScore * weightsUsed.crm;
+  }
+  if (hasFindings && weightsUsed.findings > 0) {
+    compositeScore += skillScore * weightsUsed.findings;
+  }
+  if (weightsUsed.conversations > 0) {
+    if (conversationScore !== null) {
+      compositeScore += conversationScore * weightsUsed.conversations;
+    } else if (hasConversations && !hasConvScore) {
+      // Conversations exist but no score - use neutral 50
+      compositeScore += 50 * weightsUsed.conversations;
+    }
   }
 
   compositeScore = Math.round(compositeScore * 100) / 100;

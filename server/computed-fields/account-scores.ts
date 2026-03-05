@@ -1,3 +1,26 @@
+/**
+ * ⚠️ DEPRECATED - SCHEDULED FOR DELETION ⚠️
+ *
+ * This file contains the legacy Account Health scorer that is being phased out.
+ * All callers have been rewired in Prospect Score Consolidation Step 1.
+ *
+ * REPLACEMENT: Use Account Scorer (server/scoring/account-scorer.ts)
+ * - Reads from account_scores table
+ * - ICP-integrated scoring with full breakdown
+ * - Graceful degradation when data is missing
+ *
+ * DELETION DATE: 2026-04-01 (if no references remain)
+ * Last verified: 2026-03-04 - no remaining imports
+ *
+ * CALLERS SHOULD:
+ * - Read from account_scores table directly
+ * - Trigger Account Scorer if no cached score exists
+ * - Do NOT call computeAccountHealth() directly
+ *
+ * DEPRECATION DATE: 2026-03-04
+ * REMOVAL TARGET: Phase 1 completion (2 weeks)
+ */
+
 export interface AccountRow {
   id: string;
   open_deal_count: number | null;
