@@ -707,37 +707,10 @@ export default function CommandCenter() {
         lastRefreshed={lastUpdated.toISOString()}
         onRefresh={() => fetchData(undefined, true)}
         loading={refreshing}
+        pipelines={availablePipelines}
+        selectedPipeline={selectedPipeline}
+        onPipelineChange={handlePipelineChange}
       />
-
-      {/* Keep pipeline selector for backwards compatibility */}
-      {availablePipelines.length > 1 && (
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: -16 }}>
-          <select
-            value={selectedPipeline}
-            onChange={e => handlePipelineChange(e.target.value)}
-            style={{
-              fontSize: 12,
-              fontFamily: fonts.sans,
-              fontWeight: 500,
-              color: colors.text,
-              background: colors.surfaceRaised,
-              border: `1px solid ${colors.border}`,
-              borderRadius: 6,
-              padding: '5px 10px',
-              outline: 'none',
-              cursor: 'pointer',
-              minWidth: 140,
-            }}
-          >
-            <option value="all">All Pipelines</option>
-            {availablePipelines.map((p: any) => (
-              <option key={p.name} value={p.name}>
-                {p.display_name || p.name} {p.deal_count != null ? `(${p.deal_count})` : ''}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
 
       <SectionErrorBoundary fallbackMessage="Failed to load metrics.">
         <CollapsibleSection

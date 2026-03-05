@@ -5,6 +5,7 @@ import { useDemoMode } from './contexts/DemoModeContext';
 import { setApiCredentials, api } from './lib/api';
 import Sidebar from './components/Sidebar';
 import TopBar from './components/TopBar';
+import NotificationBell from './components/notifications/NotificationBell';
 import Placeholder from './components/Placeholder';
 import ChatPanel from './components/ChatPanel';
 import LoginPage from './pages/LoginPage';
@@ -275,7 +276,7 @@ export default function App() {
       <Sidebar badges={badges} showAllClients={hasMultipleWorkspaces} collapsed={sidebarCollapsed} onToggleCollapse={toggleSidebar} mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} mode={activeView} onModeChange={handleViewChange} />
       <main style={{ marginLeft: isMobile ? 0 : (sidebarCollapsed ? 56 : 220), flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', transition: 'margin-left 0.2s ease' }}>
         <DemoModeBanner />
-        <TopBar title={title} lastRefreshed={lastRefreshed} onRefresh={fetchBadges} onMenuToggle={isMobile ? () => setMobileMenuOpen(true) : undefined} governancePending={governancePending} />
+        <TopBar title={title} lastRefreshed={lastRefreshed} onRefresh={fetchBadges} onMenuToggle={isMobile ? () => setMobileMenuOpen(true) : undefined} governancePending={governancePending} actions={currentWorkspace?.id ? <NotificationBell workspaceId={currentWorkspace.id} /> : undefined} />
         <div style={{ flex: 1, overflow: 'auto', padding: isMobile ? '16px 12px' : '24px 28px' }}>
           <Routes>
             <Route path="/" element={activeView === 'assistant' ? <AssistantView /> : <CommandCenter />} />

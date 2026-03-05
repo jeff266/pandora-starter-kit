@@ -177,59 +177,63 @@ export default function TopBar({
         )}
 
         {/* Refresh Button and Last Refreshed */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {lastRefreshed && (
-            <span style={{ fontSize: 11, color: colors.textDim, whiteSpace: 'nowrap' }}>
-              Updated {formatTimeAgo(lastRefreshed.toISOString())}
-            </span>
-          )}
-          {onRefresh && (
+        {onRefresh && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {lastRefreshed && (
+              <span style={{ fontSize: 11, color: colors.textSecondary, whiteSpace: 'nowrap' }}>
+                Updated {formatTimeAgo(lastRefreshed.toISOString())}
+              </span>
+            )}
             <button
               onClick={handleRefresh}
               disabled={isRefreshing}
               style={{
-                width: 24,
-                height: 24,
-                borderRadius: 4,
-                border: `1px solid ${colors.border}`,
-                background: colors.surface,
-                color: colors.text,
-                fontSize: 12,
-                cursor: isRefreshing ? 'not-allowed' : 'pointer',
                 display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'center',
+                gap: 5,
+                padding: '5px 10px',
+                borderRadius: 6,
+                border: `1px solid ${colors.border}`,
+                background: colors.surface,
+                color: colors.textSecondary,
+                fontSize: 12,
+                fontFamily: fonts.sans,
+                fontWeight: 500,
+                cursor: isRefreshing ? 'not-allowed' : 'pointer',
                 transition: 'all 0.15s ease',
                 opacity: isRefreshing ? 0.6 : 1,
+                whiteSpace: 'nowrap',
               }}
               onMouseEnter={(e) => {
                 if (!isRefreshing) {
                   (e.currentTarget as HTMLButtonElement).style.background = colors.surfaceHover;
+                  (e.currentTarget as HTMLButtonElement).style.color = colors.text;
                   (e.currentTarget as HTMLButtonElement).style.borderColor = colors.borderLight;
                 }
               }}
               onMouseLeave={(e) => {
                 if (!isRefreshing) {
                   (e.currentTarget as HTMLButtonElement).style.background = colors.surface;
+                  (e.currentTarget as HTMLButtonElement).style.color = colors.textSecondary;
                   (e.currentTarget as HTMLButtonElement).style.borderColor = colors.border;
                 }
               }}
-              title="Refresh data"
+              title="Sync navigation badges and counts"
             >
               <span style={{
                 display: 'inline-block',
+                fontSize: 13,
                 animation: isRefreshing ? 'spin 0.8s linear infinite' : 'none',
-              }}>
-                ↻
-              </span>
+              }}>↻</span>
+              Sync
               <style>{`
                 @keyframes spin {
                   to { transform: rotate(360deg); }
                 }
               `}</style>
             </button>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Actions */}
         {actions}

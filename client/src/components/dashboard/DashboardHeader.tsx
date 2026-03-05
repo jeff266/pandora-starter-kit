@@ -3,6 +3,12 @@ import { RefreshCw, Settings } from 'lucide-react';
 import { colors, fonts } from '../../styles/theme';
 import { formatTimeAgo } from '../../lib/format';
 
+interface PipelineOption {
+  name: string;
+  display_name?: string;
+  deal_count?: number;
+}
+
 interface DashboardHeaderProps {
   timeRange: 'today' | 'this_week' | 'this_month' | 'this_quarter' | 'this_year';
   onTimeRangeChange: (range: 'today' | 'this_week' | 'this_month' | 'this_quarter' | 'this_year') => void;
@@ -10,6 +16,9 @@ interface DashboardHeaderProps {
   onRefresh: () => void;
   onConfigureClick?: () => void;
   loading?: boolean;
+  pipelines?: PipelineOption[];
+  selectedPipeline?: string;
+  onPipelineChange?: (pipeline: string) => void;
 }
 
 export function DashboardHeader({
@@ -19,6 +28,9 @@ export function DashboardHeader({
   onRefresh,
   onConfigureClick,
   loading = false,
+  pipelines,
+  selectedPipeline,
+  onPipelineChange,
 }: DashboardHeaderProps) {
   const timeRangeOptions: Array<{ value: typeof timeRange; label: string }> = [
     { value: 'today', label: 'Today' },
@@ -53,18 +65,18 @@ export function DashboardHeader({
       </h1>
 
       {/* Controls */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         {/* Time Range Selector */}
         <select
           value={timeRange}
           onChange={(e) => onTimeRangeChange(e.target.value as typeof timeRange)}
           style={{
-            padding: '8px 12px',
-            borderRadius: 8,
+            padding: '7px 10px',
+            borderRadius: 7,
             border: `1px solid ${colors.border}`,
             background: colors.surface,
             color: colors.text,
-            fontSize: 14,
+            fontSize: 13,
             fontFamily: fonts.body,
             cursor: 'pointer',
             outline: 'none',
@@ -76,6 +88,33 @@ export function DashboardHeader({
             </option>
           ))}
         </select>
+
+        {/* Pipeline Selector — shown inline when multiple pipelines exist */}
+        {pipelines && pipelines.length > 1 && onPipelineChange && (
+          <select
+            value={selectedPipeline || 'all'}
+            onChange={(e) => onPipelineChange(e.target.value)}
+            style={{
+              padding: '7px 10px',
+              borderRadius: 7,
+              border: `1px solid ${colors.border}`,
+              background: colors.surface,
+              color: colors.text,
+              fontSize: 13,
+              fontFamily: fonts.body,
+              cursor: 'pointer',
+              outline: 'none',
+              minWidth: 130,
+            }}
+          >
+            <option value="all">All Pipelines</option>
+            {pipelines.map((p) => (
+              <option key={p.name} value={p.name}>
+                {p.display_name || p.name}{p.deal_count != null ? ` (${p.deal_count})` : ''}
+              </option>
+            ))}
+          </select>
+        )}
 
         {/* Last Updated */}
         {lastRefreshed && (

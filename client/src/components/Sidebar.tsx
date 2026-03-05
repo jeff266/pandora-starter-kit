@@ -3,7 +3,6 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useWorkspace, WorkspaceInfo } from '../context/WorkspaceContext';
 import { useDemoMode } from '../contexts/DemoModeContext';
 import { colors, fonts } from '../styles/theme';
-import NotificationBell from './notifications/NotificationBell';
 import SectionErrorBoundary from './SectionErrorBoundary';
 import { useIsMobile } from '../hooks/useIsMobile';
 import PalettePicker from './PalettePicker';
@@ -323,15 +322,6 @@ export default function Sidebar({ badges, showAllClients, collapsed = false, onT
       </nav>
 
       <div style={{ borderTop: `1px solid ${colors.border}`, padding: collapsed ? '10px 0' : '10px 14px' }}>
-        {/* Notification Bell */}
-        {currentWorkspace?.id && (
-          <SectionErrorBoundary fallbackMessage="">
-            <div style={{ padding: '6px 0', marginBottom: 8, display: 'flex', justifyContent: collapsed ? 'center' : 'flex-start' }}>
-              <NotificationBell workspaceId={currentWorkspace.id} />
-            </div>
-          </SectionErrorBoundary>
-        )}
-
         <div
           onClick={toggleDemoMode}
           title={collapsed ? 'Demo Mode' : undefined}
