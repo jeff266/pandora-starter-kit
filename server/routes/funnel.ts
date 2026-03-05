@@ -112,7 +112,7 @@ router.get('/:workspaceId/funnel', async (req: Request<WorkspaceParams>, res: Re
  * POST /api/workspaces/:workspaceId/funnel/discover
  * Run AI-assisted funnel discovery
  */
-router.post('/:workspaceId/funnel/discover', async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/funnel/discover', requirePermission('config.edit'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
 
@@ -141,7 +141,7 @@ router.post('/:workspaceId/funnel/discover', async (req: Request<WorkspaceParams
  * POST /api/workspaces/:workspaceId/funnel/from-template
  * Create a funnel from a template with optional customizations
  */
-router.post('/:workspaceId/funnel/from-template', async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/funnel/from-template', requirePermission('config.edit'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
     const { model_type, stage_overrides } = req.body as {
@@ -234,7 +234,7 @@ router.put('/:workspaceId/funnel', async (req: Request<WorkspaceParams>, res: Re
  * PATCH /api/workspaces/:workspaceId/funnel/stages
  * Partial update - add, remove, or modify individual stages
  */
-router.patch('/:workspaceId/funnel/stages', async (req: Request<WorkspaceParams>, res: Response) => {
+router.patch('/:workspaceId/funnel/stages', requirePermission('config.edit'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
     const { add, remove, update } = req.body as {
@@ -322,7 +322,7 @@ router.patch('/:workspaceId/funnel/stages', async (req: Request<WorkspaceParams>
  * DELETE /api/workspaces/:workspaceId/funnel
  * Delete the funnel definition
  */
-router.delete('/:workspaceId/funnel', async (req: Request<WorkspaceParams>, res: Response) => {
+router.delete('/:workspaceId/funnel', requirePermission('config.edit'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
 

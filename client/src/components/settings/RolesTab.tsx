@@ -23,6 +23,22 @@ interface PermissionDef {
   description: string;
 }
 
+const ROLE_SUMMARIES: Record<string, string> = {
+  admin:   'Full access',
+  member:  'Standard access',
+  manager: 'All data & ops',
+  analyst: 'Day-to-day analysis',
+  viewer:  'Read-only dashboards',
+};
+
+const ROLE_PERSONAS: Record<string, string> = {
+  admin:   'Workspace owner, RevOps lead',
+  member:  'RevOps analyst, day-to-day operator',
+  manager: 'VP Sales, CRO, senior RevOps',
+  analyst: 'RevOps analyst, day-to-day user',
+  viewer:  'AE, SDR, executive stakeholder',
+};
+
 const PERMISSION_GROUPS: PermissionGroup[] = [
   {
     title: 'Connectors',
@@ -249,11 +265,11 @@ export default function RolesTab() {
                 style={{
                   width: '100%',
                   display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
+                  flexDirection: 'column',
+                  alignItems: 'flex-start',
+                  gap: 2,
                   padding: '8px 12px',
                   marginBottom: 4,
-                  fontSize: 13,
                   fontFamily: fonts.sans,
                   color: selectedRoleId === role.id ? colors.accent : colors.textSecondary,
                   background: selectedRoleId === role.id ? colors.accentSoft : 'transparent',
@@ -261,7 +277,6 @@ export default function RolesTab() {
                   borderRadius: 6,
                   cursor: 'pointer',
                   textAlign: 'left',
-                  textTransform: 'capitalize',
                 }}
                 onMouseEnter={e => {
                   if (selectedRoleId !== role.id) e.currentTarget.style.background = colors.surfaceHover;
@@ -270,8 +285,20 @@ export default function RolesTab() {
                   if (selectedRoleId !== role.id) e.currentTarget.style.background = 'transparent';
                 }}
               >
-                <span style={{ fontSize: 12, opacity: 0.6 }}>🔒</span>
-                <span>{role.name}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 11, opacity: 0.5 }}>🔒</span>
+                  <span style={{ fontSize: 13, fontWeight: 500 }}>{role.name}</span>
+                </div>
+                {role.description && (
+                  <span style={{
+                    fontSize: 11,
+                    color: selectedRoleId === role.id ? colors.accent : colors.textMuted,
+                    lineHeight: 1.3,
+                    opacity: 0.85,
+                  }}>
+                    {ROLE_SUMMARIES[role.name.toLowerCase()] || role.description}
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -365,12 +392,34 @@ export default function RolesTab() {
             <div style={{ marginBottom: 32 }}>
               {selectedRole.is_system ? (
                 <>
-                  <div style={{ fontSize: 20, fontWeight: 600, color: colors.text, marginBottom: 4, textTransform: 'capitalize' }}>
-                    {selectedRole.name}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                    <div style={{ fontSize: 22, fontWeight: 700, color: colors.text }}>
+                      {selectedRole.name}
+                    </div>
+                    <span style={{
+                      fontSize: 10,
+                      fontWeight: 600,
+                      letterSpacing: '0.06em',
+                      color: colors.textMuted,
+                      background: colors.surfaceHover,
+                      border: `1px solid ${colors.border}`,
+                      borderRadius: 4,
+                      padding: '2px 7px',
+                    }}>
+                      SYSTEM ROLE
+                    </span>
                   </div>
-                  <div style={{ fontSize: 13, color: colors.textMuted, marginBottom: 12 }}>
-                    {selectedRole.description || 'System role'}
+                  <div style={{ fontSize: 13, color: colors.textSecondary, marginBottom: 6, lineHeight: 1.5 }}>
+                    {selectedRole.description}
                   </div>
+                  {ROLE_PERSONAS[selectedRole.name.toLowerCase()] && (
+                    <div style={{ fontSize: 12, color: colors.textMuted, marginBottom: 12 }}>
+                      <span style={{ color: colors.textMuted }}>Best for: </span>
+                      <span style={{ color: colors.accent, fontWeight: 500 }}>
+                        {ROLE_PERSONAS[selectedRole.name.toLowerCase()]}
+                      </span>
+                    </div>
+                  )}
                 </>
               ) : (
                 <>

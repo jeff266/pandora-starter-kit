@@ -10,8 +10,7 @@ import { getFlagsForPlan } from './feature-flags.js';
 interface SeedResult {
   roles: {
     admin: string;
-    manager: string;
-    analyst: string;
+    member: string;
     viewer: string;
   };
   memberCreated: boolean;
@@ -35,10 +34,17 @@ export async function seedNewWorkspace(
   try {
     // 1. Insert four workspace_roles rows
     const roleIds: Record<string, string> = {};
-    const systemTypes = ['admin', 'manager', 'analyst', 'viewer'] as const;
+    const systemTypes = ['admin', 'member', 'viewer'] as const;
+
+    const ROLE_META: Record<string, { name: string; description: string }> = {
+      admin:  { name: 'Admin',  description: 'Full access to all workspace settings, connectors, members, and billing.' },
+      member: { name: 'Member', description: 'Run analyses, use AI features, and view pipeline data. Standard workspace access.' },
+      viewer: { name: 'Viewer', description: 'Read-only access to dashboards, deals, and skill results. Best for AEs and executives.' },
+    };
 
     for (const systemType of systemTypes) {
       const permissions = SYSTEM_ROLE_PERMISSIONS[systemType];
+      const meta = ROLE_META[systemType];
       const result = await query(
         `INSERT INTO workspace_roles (
           workspace_id,
@@ -51,8 +57,8 @@ export async function seedNewWorkspace(
         RETURNING id`,
         [
           workspaceId,
-          systemType.charAt(0).toUpperCase() + systemType.slice(1), // Capitalize first letter
-          `System ${systemType} role`,
+          meta.name,
+          meta.description,
           true,
           systemType,
           JSON.stringify(permissions),
@@ -109,8 +115,7 @@ export async function seedNewWorkspace(
     return {
       roles: {
         admin: roleIds.admin,
-        manager: roleIds.manager,
-        analyst: roleIds.analyst,
+        member: roleIds.member,
         viewer: roleIds.viewer,
       },
       memberCreated: true,

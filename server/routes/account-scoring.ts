@@ -118,7 +118,7 @@ router.get('/:workspaceId/accounts/:accountId/score/why', async (req, res) => {
  * POST /:workspaceId/accounts/:accountId/enrich
  * Triggers enrichment + scoring for a single account.
  */
-router.post('/:workspaceId/accounts/:accountId/enrich', async (req, res) => {
+router.post('/:workspaceId/accounts/:accountId/enrich', requirePermission('skills.run_manual'), async (req, res) => {
   try {
     const { workspaceId, accountId } = req.params;
     const { forceApollo } = req.body || {};
@@ -141,7 +141,7 @@ router.post('/:workspaceId/accounts/:accountId/enrich', async (req, res) => {
  * POST /:workspaceId/accounts/enrich/batch
  * Triggers batch enrichment job.
  */
-router.post('/:workspaceId/accounts/enrich/batch', async (req, res) => {
+router.post('/:workspaceId/accounts/enrich/batch', requirePermission('skills.run_manual'), async (req, res) => {
   try {
     const { workspaceId } = req.params;
     const { limit, forceRefresh, accountIds } = req.body || {};

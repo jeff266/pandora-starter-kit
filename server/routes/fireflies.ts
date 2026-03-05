@@ -21,7 +21,7 @@ interface WorkspaceParams {
   workspaceId: string;
 }
 
-router.post('/:workspaceId/connectors/fireflies/connect', async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/connectors/fireflies/connect', requirePermission('connectors.connect'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId;
     const { apiKey } = req.body as { apiKey?: string };
@@ -56,7 +56,7 @@ router.post('/:workspaceId/connectors/fireflies/connect', async (req: Request<Wo
   }
 });
 
-router.post('/:workspaceId/connectors/fireflies/sync', async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/connectors/fireflies/sync', requirePermission('connectors.trigger_sync'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId;
     const { mode = 'initial', since, lookbackDays } = req.body as { mode?: string; since?: string; lookbackDays?: number };
@@ -198,7 +198,7 @@ router.get('/:workspaceId/connectors/fireflies/users', async (req: Request<Works
   }
 });
 
-router.post('/:workspaceId/connectors/fireflies/users/refresh', async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/connectors/fireflies/users/refresh', requirePermission('connectors.trigger_sync'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId;
 
@@ -234,7 +234,7 @@ router.post('/:workspaceId/connectors/fireflies/users/refresh', async (req: Requ
   }
 });
 
-router.post('/:workspaceId/connectors/fireflies/users/track', async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/connectors/fireflies/users/track', requirePermission('connectors.connect'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId;
     const { user_ids } = req.body as { user_ids?: string[] };
@@ -264,7 +264,7 @@ router.get('/:workspaceId/connectors/fireflies/users/track', async (req: Request
   }
 });
 
-router.delete('/:workspaceId/connectors/fireflies/users/track', async (req: Request<WorkspaceParams>, res: Response) => {
+router.delete('/:workspaceId/connectors/fireflies/users/track', requirePermission('connectors.connect'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const workspaceId = req.params.workspaceId;
     await clearTrackedUsers(workspaceId, 'fireflies');

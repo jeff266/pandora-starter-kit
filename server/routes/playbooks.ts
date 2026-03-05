@@ -262,7 +262,7 @@ router.get('/:workspaceId/playbooks/:playbookId', async (req: Request<WorkspaceP
   }
 });
 
-router.post('/:workspaceId/playbooks/:playbookId/run', async (req: Request<WorkspaceParams & { playbookId: string }>, res: Response) => {
+router.post('/:workspaceId/playbooks/:playbookId/run', requirePermission('skills.run_manual'), async (req: Request<WorkspaceParams & { playbookId: string }>, res: Response) => {
   try {
     const { workspaceId, playbookId } = req.params;
     const playbooks = derivePlaybooks();

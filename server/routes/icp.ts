@@ -248,7 +248,7 @@ router.get('/:workspaceId/icp/readiness', async (req: Request, res: Response): P
 
 const ALLOWED_EDIT_FIELDS = ['company_profile', 'conversation_insights', 'scoring_weights'];
 
-router.patch('/:workspaceId/icp/profiles/:profileId', async (req: Request, res: Response): Promise<void> => {
+router.patch('/:workspaceId/icp/profiles/:profileId', requirePermission('config.edit'), async (req: Request, res: Response): Promise<void> => {
   const { workspaceId, profileId } = req.params;
   const { field, value, note, changedBy } = req.body as {
     field: string;
@@ -415,7 +415,7 @@ router.get('/:workspaceId/icp/taxonomy', async (req: Request, res: Response): Pr
 // Export ICP profile via email (HTML and text versions)
 // ============================================================================
 
-router.post('/:workspaceId/icp/export', async (req: Request, res: Response): Promise<void> => {
+router.post('/:workspaceId/icp/export', requirePermission('data.export'), async (req: Request, res: Response): Promise<void> => {
   const { workspaceId } = req.params;
   const { to } = req.body as { to: string };
 

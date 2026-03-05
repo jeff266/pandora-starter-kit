@@ -129,7 +129,7 @@ router.put('/:workspaceId/context/:section', async (req: Request<SectionParams>,
   }
 });
 
-router.post('/:workspaceId/context/onboard', async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/context/onboard', requirePermission('config.edit'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     if (!(await validateWorkspace(req.params.workspaceId, res))) return;
 
@@ -288,7 +288,7 @@ router.get('/:workspaceId/quotas/periods', async (req: Request<WorkspaceParams>,
   }
 });
 
-router.post('/:workspaceId/quotas/periods', async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/quotas/periods', requirePermission('config.edit'), async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     if (!(await validateWorkspace(req.params.workspaceId, res))) return;
 
@@ -320,7 +320,7 @@ router.post('/:workspaceId/quotas/periods', async (req: Request<WorkspaceParams>
   }
 });
 
-router.put('/:workspaceId/quotas/periods/:periodId', async (req: Request<WorkspaceParams & { periodId: string }>, res: Response) => {
+router.put('/:workspaceId/quotas/periods/:periodId', requirePermission('config.edit'), async (req: Request<WorkspaceParams & { periodId: string }>, res: Response) => {
   try {
     if (!(await validateWorkspace(req.params.workspaceId, res))) return;
 
@@ -346,7 +346,7 @@ router.put('/:workspaceId/quotas/periods/:periodId', async (req: Request<Workspa
   }
 });
 
-router.delete('/:workspaceId/quotas/periods/:periodId', async (req: Request<WorkspaceParams & { periodId: string }>, res: Response) => {
+router.delete('/:workspaceId/quotas/periods/:periodId', requirePermission('config.edit'), async (req: Request<WorkspaceParams & { periodId: string }>, res: Response) => {
   try {
     if (!(await validateWorkspace(req.params.workspaceId, res))) return;
 
