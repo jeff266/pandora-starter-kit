@@ -309,7 +309,7 @@ export default function Sidebar({ badges, showAllClients, collapsed = false, onT
                 <span style={{ fontSize: 10, fontWeight: 700, color: colors.textSecondary, letterSpacing: '0.08em', whiteSpace: 'nowrap' }}>
                   {section.title}
                 </span>
-                <span style={{ fontSize: 9, color: colors.textMuted, transition: 'transform 0.15s', display: 'inline-block', transform: isSectionCollapsed ? 'rotate(-90deg)' : 'none' }}>
+                <span style={{ fontSize: 13, color: colors.textSecondary, transition: 'transform 0.2s', display: 'inline-block', transform: isSectionCollapsed ? 'rotate(-90deg)' : 'none', lineHeight: 1 }}>
                   ▾
                 </span>
               </div>
