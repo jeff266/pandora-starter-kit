@@ -7,10 +7,18 @@
  * handlers. The model drives the loop; the loop runs until stop_reason: end_turn.
  */
 
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { join, dirname } from 'path';
 import { callLLM, type ToolDef, type LLMCallOptions } from '../utils/llm-router.js';
 import { executeDataTool } from './data-tools.js';
 import type { ConversationMessage } from './conversation-state.js';
 import { buildWorkspaceContextBlock } from '../context/workspace-memory.js';
+
+const _chatDir = dirname(fileURLToPath(import.meta.url));
+const PRODUCT_KNOWLEDGE = (() => {
+  try { return readFileSync(join(_chatDir, '../../docs/PRODUCT_KNOWLEDGE.md'), 'utf8'); } catch { return ''; }
+})();
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -847,7 +855,15 @@ For rep questions: who is on pace and why, then who is behind and by how much, t
 
 After your answer, on a new line starting with "FOLLOWUPS:", suggest 2-3 natural follow-up questions the user might ask next, separated by pipes (|). Questions must be answerable by your available tools — do not suggest questions requiring data you cannot access. Cap at 3 questions.
 
-Today's date is ${new Date().toISOString().split('T')[0]}.`;
+Today's date is ${new Date().toISOString().split('T')[0]}.
+
+---
+
+## App Knowledge
+
+If the user's question is about how the app works — what a page shows, how to configure something, why data isn't appearing, or what a concept means — answer from the product knowledge below **before** querying their data. For questions that combine "how do I..." with "show me my...", answer the navigational part first, then pull the data.
+
+${PRODUCT_KNOWLEDGE}`;
 
 // ─── Response types ───────────────────────────────────────────────────────────
 
