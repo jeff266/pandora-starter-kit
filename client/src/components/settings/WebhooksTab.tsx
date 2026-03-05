@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useWorkspace } from '../../context/WorkspaceContext';
 import { colors, fonts } from '../../styles/theme';
 import Toast from '../Toast';
@@ -60,6 +60,7 @@ export default function WebhooksTab() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [openTestMenu, setOpenTestMenu] = useState<string | null>(null);
+  const chevronRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const [testingUrl, setTestingUrl] = useState(false);
   const [testUrlResults, setTestUrlResults] = useState<Array<{
     event_type: string; success: boolean; status_code: number | null;
@@ -359,38 +360,40 @@ export default function WebhooksTab() {
                       <td style={cell} onClick={e => e.stopPropagation()}>
                         <div style={{ display: 'flex', gap: 6 }}>
                           {/* Test split-button */}
-                          <div style={{ position: 'relative' }}>
-                            <div style={{ display: 'flex', border: `1px solid ${colors.border}`, borderRadius: 5, overflow: 'visible' }}>
-                              <button
-                                style={{ ...btn('ghost'), border: 'none', borderRight: `1px solid ${colors.border}`, borderRadius: '4px 0 0 4px', padding: '4px 10px', fontSize: 12 }}
-                                onClick={() => handleTest(ep.id)}
-                                disabled={testingId === ep.id}
-                                title="Send a generic ping"
-                              >
-                                {testingId === ep.id ? '…' : 'Test'}
-                              </button>
-                              <button
-                                style={{ ...btn('ghost'), border: 'none', borderRadius: '0 4px 4px 0', padding: '4px 7px', fontSize: 11, lineHeight: 1 }}
-                                onClick={e => { e.stopPropagation(); setOpenTestMenu(openTestMenu === ep.id ? null : ep.id); }}
-                                disabled={testingId === ep.id}
-                                title="Test with specific event type"
-                              >
-                                ▾
-                              </button>
-                            </div>
-                            {openTestMenu === ep.id && (
+                          <div style={{ display: 'flex', borderRadius: 5 }}>
+                            <button
+                              style={{ ...btn('primary'), border: 'none', borderRight: '1px solid rgba(255,255,255,0.25)', borderRadius: '4px 0 0 4px', padding: '4px 10px', fontSize: 12 }}
+                              onClick={() => handleTest(ep.id)}
+                              disabled={testingId === ep.id}
+                              title="Send a generic ping"
+                            >
+                              {testingId === ep.id ? '…' : 'Test'}
+                            </button>
+                            <button
+                              ref={el => { chevronRefs.current[ep.id] = el; }}
+                              style={{ ...btn('primary'), border: 'none', borderRadius: '0 4px 4px 0', padding: '4px 7px', fontSize: 11, lineHeight: 1, opacity: 0.9 }}
+                              onClick={e => { e.stopPropagation(); setOpenTestMenu(openTestMenu === ep.id ? null : ep.id); }}
+                              disabled={testingId === ep.id}
+                              title="Test with specific event type"
+                            >
+                              ▾
+                            </button>
+                          </div>
+                          {openTestMenu === ep.id && (() => {
+                            const rect = chevronRefs.current[ep.id]?.getBoundingClientRect();
+                            return (
                               <div
                                 onClick={e => e.stopPropagation()}
                                 style={{
-                                  position: 'absolute',
-                                  top: 'calc(100% + 4px)',
-                                  right: 0,
-                                  zIndex: 200,
+                                  position: 'fixed',
+                                  top: (rect?.bottom ?? 0) + 4,
+                                  right: window.innerWidth - (rect?.right ?? 0),
+                                  zIndex: 9000,
                                   background: colors.surface,
                                   border: `1px solid ${colors.border}`,
                                   borderRadius: 8,
                                   minWidth: 210,
-                                  boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
+                                  boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
                                   overflow: 'hidden',
                                 }}
                               >
@@ -431,8 +434,8 @@ export default function WebhooksTab() {
                                   </button>
                                 ))}
                               </div>
-                            )}
-                          </div>
+                            );
+                          })()}
                           {deleteConfirmId === ep.id ? (
                             <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
                               <button
@@ -451,7 +454,7 @@ export default function WebhooksTab() {
                             </div>
                           ) : (
                             <button
-                              style={{ ...btn('ghost'), border: `1px solid ${colors.border}`, padding: '4px 10px', fontSize: 12 }}
+                              style={{ ...btn('danger'), padding: '4px 10px', fontSize: 12 }}
                               onClick={() => setDeleteConfirmId(ep.id)}
                             >
                               Delete
@@ -575,7 +578,7 @@ export default function WebhooksTab() {
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
             <button
               type="button"
-              style={{ ...btn('ghost'), border: `1px solid ${colors.border}` }}
+              style={btn('primary')}
               onClick={handleTestUrl}
               disabled={testingUrl || submitting || !newUrl.trim()}
             >
@@ -593,12 +596,9 @@ export default function WebhooksTab() {
           {/* Inline test results */}
           {testUrlResults !== null && (
             <div style={{ marginTop: 16, border: `1px solid ${colors.border}`, borderRadius: 8, overflow: 'hidden' }}>
-              <div style={{ padding: '10px 14px', background: colors.surface, borderBottom: `1px solid ${colors.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ padding: '10px 14px', background: colors.surface, borderBottom: `1px solid ${colors.border}` }}>
                 <span style={{ fontSize: 12, fontWeight: 600, color: colors.text, fontFamily: fonts.sans }}>
                   Test Results
-                </span>
-                <span style={{ fontSize: 11, color: colors.muted, fontFamily: fonts.sans }}>
-                  Signed with one-time ephemeral secret
                 </span>
               </div>
               {testUrlResults.length === 0 ? (
