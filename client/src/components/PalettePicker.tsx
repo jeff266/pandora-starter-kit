@@ -5,7 +5,9 @@ import { colors } from '../styles/theme';
 export default function PalettePicker() {
   const { palette, setPalette } = usePalette();
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const [panelPos, setPanelPos] = useState<{ bottom: number; left: number } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   const active = PALETTES.find(p => p.id === palette) ?? PALETTES[0];
   const darkPalettes  = PALETTES.filter(p => p.mode === 'dark');
@@ -14,38 +16,32 @@ export default function PalettePicker() {
   useEffect(() => {
     if (!open) return;
     function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (
+        panelRef.current && !panelRef.current.contains(e.target as Node) &&
+        buttonRef.current && !buttonRef.current.contains(e.target as Node)
+      ) {
+        setOpen(false);
+      }
     }
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
   }, [open]);
 
-  const Swatch = ({ p }: { p: typeof PALETTES[0] }) => {
-    const isActive = palette === p.id;
-    return (
-      <button
-        title={p.name}
-        onClick={() => { setPalette(p.id); setOpen(false); }}
-        style={{
-          width: 20, height: 20, borderRadius: '50%',
-          background: p.bg,
-          border: isActive ? `2px solid ${active.mode === 'light' ? '#0f172a' : '#fff'}` : '2px solid transparent',
-          boxShadow: isActive
-            ? `0 0 0 1.5px ${p.accent}`
-            : `inset 0 0 0 4px ${p.accent}`,
-          cursor: 'pointer', padding: 0, flexShrink: 0,
-          transition: 'box-shadow 0.15s, border-color 0.15s',
-          outline: 'none',
-        }}
-      />
-    );
-  };
+  function handleToggle() {
+    if (!buttonRef.current) return;
+    const rect = buttonRef.current.getBoundingClientRect();
+    setPanelPos({
+      bottom: window.innerHeight - rect.top + 6,
+      left: rect.left,
+    });
+    setOpen(v => !v);
+  }
 
   return (
-    <div ref={ref} style={{ position: 'relative' }}>
-      {/* Trigger */}
+    <div style={{ position: 'relative' }}>
       <button
-        onClick={() => setOpen(v => !v)}
+        ref={buttonRef}
+        onClick={handleToggle}
         title={`Theme: ${active.name}`}
         style={{
           display: 'flex', alignItems: 'center', gap: 5,
@@ -61,20 +57,24 @@ export default function PalettePicker() {
           flexShrink: 0, display: 'inline-block',
         }} />
         <span style={{ fontSize: 11, color: colors.textMuted, whiteSpace: 'nowrap' }}>{active.name}</span>
-        <span style={{ fontSize: 9, color: colors.textDim }}>▾</span>
+        <span style={{ fontSize: 9, color: colors.textMuted }}>▾</span>
       </button>
 
-      {/* Popout panel — opens upward */}
-      {open && (
-        <div style={{
-          position: 'absolute', bottom: 'calc(100% + 6px)', right: 0,
-          background: colors.surface ?? '#0f1219',
-          border: `1px solid ${colors.border}`,
-          borderRadius: 10, padding: '12px 14px',
-          boxShadow: '0 8px 32px rgba(0,0,0,0.45)',
-          zIndex: 200, minWidth: 220,
-          display: 'flex', gap: 20,
-        }}>
+      {open && panelPos && (
+        <div
+          ref={panelRef}
+          style={{
+            position: 'fixed',
+            bottom: panelPos.bottom,
+            left: panelPos.left,
+            background: colors.surface ?? '#0f1219',
+            border: `1px solid ${colors.border}`,
+            borderRadius: 10, padding: '12px 14px',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.45)',
+            zIndex: 9999,
+            display: 'flex', gap: 20,
+          }}
+        >
           {/* Dark column */}
           <div>
             <div style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 8 }}>Dark</div>
