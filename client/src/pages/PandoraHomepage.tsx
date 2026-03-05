@@ -185,12 +185,15 @@ export default function PandoraHomepage() {
           borderBottom: `1px solid ${t.borderSubtle}`,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <a
+          href="/"
+          style={{ display: "flex", alignItems: "center", gap: 12, textDecoration: "none" }}
+        >
           <img src="/pandora-logo.png" alt="Pandora" style={{ width: 32, height: 32, borderRadius: 8 }} />
           <span style={{ fontSize: 18, fontWeight: 600, letterSpacing: "-0.02em" }}>
             <span style={gradText}>pandora</span>
           </span>
-        </div>
+        </a>
 
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <a

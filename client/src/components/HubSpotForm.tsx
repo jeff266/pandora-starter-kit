@@ -18,10 +18,6 @@ declare global {
 const STYLE_ID = "hs-pandora-theme";
 
 const CSS = `
-  #hs-form-target * {
-    color: #eeeef5;
-    box-sizing: border-box;
-  }
   #hs-form-target .hs-form {
     font-family: 'DM Sans', 'Outfit', system-ui, sans-serif;
     text-align: left;
@@ -29,49 +25,10 @@ const CSS = `
   #hs-form-target .hs-form-field {
     margin-bottom: 16px;
   }
-  #hs-form-target label.hs-label,
-  #hs-form-target .hs-form label {
-    display: block;
-    font-size: 13px;
-    font-weight: 500;
-    color: #8888a8 !important;
-    margin-bottom: 6px;
-    font-family: 'DM Sans', 'Outfit', system-ui, sans-serif;
-  }
-  #hs-form-target .hs-input {
-    width: 100% !important;
-    box-sizing: border-box;
-    background: #0f0f1e !important;
-    border: 1px solid #1a1a35 !important;
-    color: #eeeef5 !important;
-    border-radius: 10px !important;
-    padding: 13px 16px !important;
-    font-size: 15px !important;
-    font-family: 'DM Sans', 'Outfit', system-ui, sans-serif !important;
-    transition: border-color 0.2s, box-shadow 0.2s !important;
-    appearance: none;
-    -webkit-appearance: none;
-    outline: none !important;
-    color-scheme: dark !important;
-  }
-  #hs-form-target select.hs-input {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%238888a8' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E") !important;
-    background-repeat: no-repeat !important;
-    background-position: right 14px center !important;
-    padding-right: 36px !important;
-    cursor: pointer !important;
-    color-scheme: dark !important;
-  }
-  #hs-form-target select.hs-input option {
-    background: #0f0f1e;
-    color: #eeeef5;
-  }
   #hs-form-target .hs-input:focus {
     border-color: #6366f1 !important;
     box-shadow: 0 0 0 3px rgba(99,102,241,0.15) !important;
-  }
-  #hs-form-target input.hs-input::placeholder {
-    color: #55557a !important;
+    outline: none !important;
   }
   #hs-form-target .hs-button.primary {
     width: 100%;
@@ -103,18 +60,7 @@ const CSS = `
     font-size: 12px !important;
     font-family: 'DM Sans', 'Outfit', system-ui, sans-serif !important;
   }
-  #hs-form-target .hs-richtext,
-  #hs-form-target .hs-richtext p,
-  #hs-form-target .hs-richtext span,
-  #hs-form-target .hs-richtext div,
-  #hs-form-target .hs-richtext a {
-    color: #55557a !important;
-    font-size: 12px;
-    margin-bottom: 8px;
-  }
-  #hs-form-target .submitted-message,
-  #hs-form-target .submitted-message p,
-  #hs-form-target .submitted-message span {
+  #hs-form-target .submitted-message {
     color: #34d399 !important;
     font-size: 16px !important;
     font-weight: 600 !important;
@@ -131,40 +77,78 @@ const CSS = `
     margin: 0 !important;
     max-width: 100% !important;
   }
-  #hs-form-target .hs_recaptcha {
-    margin-top: 8px;
-  }
-  #hs-form-target .actions {
-    margin-top: 8px;
-  }
-  #hs-form-target .legal-consent-container,
-  #hs-form-target .legal-consent-container p,
-  #hs-form-target .legal-consent-container span,
-  #hs-form-target .legal-consent-container div,
-  #hs-form-target .legal-consent-container a,
-  #hs-form-target .legal-consent-container label {
-    color: #55557a !important;
-    font-size: 12px !important;
-  }
-  #hs-form-target .legal-consent-container a:hover {
-    color: #8888a8 !important;
-  }
-  #hs-form-target .hs-form-checkbox label,
-  #hs-form-target .hs-checkbox,
-  #hs-form-target .hs-checkbox-display,
-  #hs-form-target .hs-form-checkbox-display {
-    color: #8888a8 !important;
-  }
-  #hs-form-target .hs-form p,
-  #hs-form-target .hs-form span:not(.hs-form-required),
-  #hs-form-target .hs-form div:not(.hs-form-field):not(.hs-input):not(.submitted-message) {
-    color: #8888a8 !important;
-  }
+  #hs-form-target .hs_recaptcha { margin-top: 8px; }
+  #hs-form-target .actions { margin-top: 8px; }
   #hs-form-target input[type="checkbox"],
   #hs-form-target input[type="radio"] {
     accent-color: #6366f1;
   }
+  #hs-form-target select.hs-input {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%238888a8' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E") !important;
+    background-repeat: no-repeat !important;
+    background-position: right 14px center !important;
+    padding-right: 36px !important;
+    cursor: pointer !important;
+  }
 `;
+
+function applyDarkStyles(root: HTMLElement) {
+  root.querySelectorAll<HTMLElement>("label.hs-label, .hs-form label").forEach(el => {
+    el.style.setProperty("color", "#8888a8", "important");
+    el.style.setProperty("font-size", "13px", "important");
+    el.style.setProperty("font-weight", "500", "important");
+    el.style.setProperty("display", "block", "important");
+    el.style.setProperty("margin-bottom", "6px", "important");
+    el.style.setProperty("font-family", "'DM Sans', 'Outfit', system-ui, sans-serif", "important");
+  });
+
+  root.querySelectorAll<HTMLElement>("input.hs-input, textarea.hs-input").forEach(el => {
+    el.style.setProperty("background-color", "#0f0f1e", "important");
+    el.style.setProperty("background", "#0f0f1e", "important");
+    el.style.setProperty("border", "1px solid #1a1a35", "important");
+    el.style.setProperty("color", "#eeeef5", "important");
+    el.style.setProperty("border-radius", "10px", "important");
+    el.style.setProperty("padding", "13px 16px", "important");
+    el.style.setProperty("font-size", "15px", "important");
+    el.style.setProperty("font-family", "'DM Sans', 'Outfit', system-ui, sans-serif", "important");
+    el.style.setProperty("width", "100%", "important");
+    el.style.setProperty("box-sizing", "border-box", "important");
+    el.style.setProperty("color-scheme", "dark", "important");
+    el.style.setProperty("outline", "none", "important");
+    el.style.setProperty("-webkit-appearance", "none", "important");
+    (el as HTMLInputElement).setAttribute("autocomplete", (el as HTMLInputElement).autocomplete || "off");
+  });
+
+  root.querySelectorAll<HTMLSelectElement>("select.hs-input").forEach(el => {
+    el.style.setProperty("background-color", "#0f0f1e", "important");
+    el.style.setProperty("background-color", "#0f0f1e", "important");
+    el.style.setProperty("border", "1px solid #1a1a35", "important");
+    el.style.setProperty("color", "#eeeef5", "important");
+    el.style.setProperty("border-radius", "10px", "important");
+    el.style.setProperty("padding", "13px 36px 13px 16px", "important");
+    el.style.setProperty("font-size", "15px", "important");
+    el.style.setProperty("font-family", "'DM Sans', 'Outfit', system-ui, sans-serif", "important");
+    el.style.setProperty("width", "100%", "important");
+    el.style.setProperty("box-sizing", "border-box", "important");
+    el.style.setProperty("color-scheme", "dark", "important");
+    el.style.setProperty("-webkit-appearance", "none", "important");
+    el.style.setProperty("appearance", "none", "important");
+    el.querySelectorAll("option").forEach(opt => {
+      opt.style.setProperty("background-color", "#0f0f1e", "important");
+      opt.style.setProperty("color", "#eeeef5", "important");
+    });
+  });
+
+  root.querySelectorAll<HTMLElement>(
+    ".hs-richtext, .hs-richtext p, .hs-richtext span, .hs-richtext div, .hs-richtext a," +
+    ".legal-consent-container, .legal-consent-container p, .legal-consent-container span," +
+    ".legal-consent-container label, .legal-consent-container a," +
+    ".hs-form-checkbox label, .hs-checkbox-display"
+  ).forEach(el => {
+    el.style.setProperty("color", "#55557a", "important");
+    el.style.setProperty("font-size", "12px", "important");
+  });
+}
 
 export default function HubSpotForm() {
   const mounted = useRef(false);
@@ -178,6 +162,16 @@ export default function HubSpotForm() {
       style.id = STYLE_ID;
       style.textContent = CSS;
       document.head.appendChild(style);
+    }
+
+    const target = document.getElementById("hs-form-target");
+
+    const observer = new MutationObserver(() => {
+      if (target) applyDarkStyles(target);
+    });
+
+    if (target) {
+      observer.observe(target, { childList: true, subtree: true, attributes: false });
     }
 
     const existingScript = document.querySelector(
@@ -209,6 +203,7 @@ export default function HubSpotForm() {
     }
 
     return () => {
+      observer.disconnect();
       const style = document.getElementById(STYLE_ID);
       if (style) style.remove();
     };
