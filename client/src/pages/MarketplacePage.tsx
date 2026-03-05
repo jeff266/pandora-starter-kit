@@ -279,8 +279,8 @@ function ConnectorCard({ connector, isConnected, onConnect, onDisconnect }: Conn
   return (
     <div
       style={{
-        background: '#0F1319',
-        border: `1px solid ${isConnected ? '#1E3A2F' : '#1A1F2B'}`,
+        background: colors.surface,
+        border: `1px solid ${isConnected ? 'rgba(34,197,94,0.3)' : colors.border}`,
         borderRadius: 12,
         padding: 20,
         display: 'flex',
@@ -293,10 +293,10 @@ function ConnectorCard({ connector, isConnected, onConnect, onDisconnect }: Conn
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <ConnectorLogo type={connector.id} size={40} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 15, fontWeight: 600, color: '#F1F5F9' }}>
+          <div style={{ fontSize: 15, fontWeight: 600, color: colors.text }}>
             {connector.name}
           </div>
-          <div style={{ fontSize: 11, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+          <div style={{ fontSize: 11, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.5 }}>
             {connector.category}
           </div>
         </div>
@@ -307,8 +307,8 @@ function ConnectorCard({ connector, isConnected, onConnect, onDisconnect }: Conn
             fontSize: 11,
             fontWeight: 600,
             color: '#22C55E',
-            background: '#052E16',
-            border: '1px solid #166534',
+            background: 'rgba(34,197,94,0.1)',
+            border: '1px solid rgba(34,197,94,0.35)',
             borderRadius: 20,
             padding: '2px 8px',
           }}>
@@ -319,8 +319,8 @@ function ConnectorCard({ connector, isConnected, onConnect, onDisconnect }: Conn
           <span style={{
             flexShrink: 0,
             fontSize: 11,
-            color: '#64748B',
-            background: '#1A1F2B',
+            color: colors.textMuted,
+            background: colors.surfaceRaised,
             borderRadius: 20,
             padding: '2px 8px',
           }}>
@@ -330,7 +330,7 @@ function ConnectorCard({ connector, isConnected, onConnect, onDisconnect }: Conn
       </div>
 
       {/* Description */}
-      <p style={{ fontSize: 13, color: '#94A3B8', lineHeight: 1.6, margin: 0, flex: 1 }}>
+      <p style={{ fontSize: 13, color: colors.textSecondary, lineHeight: 1.6, margin: 0, flex: 1 }}>
         {connector.description}
       </p>
 
@@ -344,9 +344,9 @@ function ConnectorCard({ connector, isConnected, onConnect, onDisconnect }: Conn
                 width: '100%',
                 padding: '8px 0',
                 background: 'none',
-                border: '1px solid #1A1F2B',
+                border: `1px solid ${colors.border}`,
                 borderRadius: 8,
-                color: '#475569',
+                color: colors.textMuted,
                 fontSize: 13,
                 cursor: 'pointer',
               }}
@@ -359,7 +359,7 @@ function ConnectorCard({ connector, isConnected, onConnect, onDisconnect }: Conn
               style={{
                 width: '100%',
                 padding: '8px 0',
-                background: '#1D4ED8',
+                background: colors.accent,
                 border: 'none',
                 borderRadius: 8,
                 color: '#fff',
@@ -466,10 +466,10 @@ export default function MarketplacePage() {
     <div style={{ padding: '0 0 40px' }}>
       {/* Header */}
       <div style={{ marginBottom: 32 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 700, color: '#F1F5F9', margin: '0 0 8px' }}>
+        <h1 style={{ fontSize: 24, fontWeight: 700, color: colors.text, margin: '0 0 8px' }}>
           Marketplace
         </h1>
-        <p style={{ fontSize: 14, color: '#64748B', maxWidth: 520, margin: 0, lineHeight: 1.6 }}>
+        <p style={{ fontSize: 14, color: colors.textMuted, maxWidth: 520, margin: 0, lineHeight: 1.6 }}>
           Connect your tools to unlock Pandora's full capabilities.
           Each connector enables additional skills and enriches your pipeline intelligence.
         </p>
@@ -486,9 +486,9 @@ export default function MarketplacePage() {
               style={{
                 padding: '6px 16px',
                 borderRadius: 20,
-                border: `1px solid ${isActive ? '#3B82F6' : '#1A1F2B'}`,
-                background: isActive ? '#1E293B' : 'transparent',
-                color: isActive ? '#F1F5F9' : '#64748B',
+                border: `1px solid ${isActive ? colors.accent : colors.border}`,
+                background: isActive ? colors.accentSoft : 'transparent',
+                color: isActive ? colors.accent : colors.textMuted,
                 fontSize: 13,
                 fontWeight: isActive ? 600 : 400,
                 cursor: 'pointer',

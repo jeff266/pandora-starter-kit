@@ -67,7 +67,7 @@ export default function TopBar({
       top: 0,
       zIndex: 50,
       padding: onMenuToggle ? '14px 12px' : '14px 28px',
-      background: 'rgba(6,8,12,0.85)',
+      background: colors.bg,
       backdropFilter: 'blur(12px)',
       borderBottom: `1px solid ${colors.border}`,
       display: 'flex',
