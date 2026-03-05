@@ -374,6 +374,13 @@ export class JobQueue {
     // Pre-warm survival curve cache (fire-and-forget)
     prewarmSurvivalCache(job.workspace_id).catch(() => {});
 
+    // Re-score prospects after sync (fire-and-forget)
+    import('../skills/compute/lead-scoring.js').then(({ scoreLeads }) =>
+      scoreLeads(job.workspace_id)
+    ).catch((err) =>
+      console.warn('[JobQueue] Post-sync scoring failed', { workspaceId: job.workspace_id, err })
+    );
+
     return {
       results,
       totalRecords,
@@ -427,6 +434,13 @@ export class JobQueue {
 
     // Pre-warm survival curve cache (fire-and-forget)
     prewarmSurvivalCache(job.workspace_id).catch(() => {});
+
+    // Re-score prospects after sync (fire-and-forget)
+    import('../skills/compute/lead-scoring.js').then(({ scoreLeads }) =>
+      scoreLeads(job.workspace_id)
+    ).catch((err) =>
+      console.warn('[JobQueue] Post-sync scoring failed', { workspaceId: job.workspace_id, err })
+    );
 
     return {
       success: result.success,

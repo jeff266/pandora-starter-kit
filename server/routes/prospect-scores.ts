@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import { query } from '../db.js';
-import { runProspectScoring } from '../scoring/prospect-scorer.js';
+import { scoreLeads } from '../skills/compute/lead-scoring.js';
 
 const router = Router();
 
@@ -181,8 +181,16 @@ router.get('/:workspaceId/prospect-scores', async (req: Request, res: Response):
 router.post('/:workspaceId/prospect-scores/run', async (req: Request, res: Response): Promise<void> => {
   const workspaceId = req.params.workspaceId;
   try {
-    const result = await runProspectScoring(workspaceId);
-    res.json(result);
+    const result = await scoreLeads(workspaceId);
+    res.json({
+      totalScored: result.summaryStats.totalDeals + result.summaryStats.totalContacts,
+      gradeDistribution: result.summaryStats.gradeDistribution,
+      topMovers: result.summaryStats.movers,
+      scoringMethod: result.dealScores[0]?.scoreMethod
+        ?? result.contactScores[0]?.scoreMethod
+        ?? 'point_based',
+      summaryStats: result.summaryStats,
+    });
   } catch (err) {
     console.error('[prospect-scores] Run error:', err);
     res.status(500).json({ error: 'Scoring run failed' });

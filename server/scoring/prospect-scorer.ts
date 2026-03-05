@@ -1,3 +1,8 @@
+/** @deprecated 2026-03-04 — Replaced by skills/compute/lead-scoring.ts
+ *  This file wrote hardcoded scores to lead_scores, conflicting with
+ *  the ICP-aware skill engine. All callers have been rewired.
+ *  Safe to delete after 2026-04-01. */
+
 import { query as dbQuery } from '../db.js';
 import { createLogger } from '../utils/logger.js';
 
@@ -604,6 +609,7 @@ function computeBenchmarks(scored: ScoredContact[]): ScoredContact[] {
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export async function runProspectScoring(workspaceId: string): Promise<ScoringResult> {
+  console.warn('[DEPRECATED] prospect-scorer.ts called — this engine is retired. Scores should come from lead-scoring.ts');
   const startTime = Date.now();
   logger.info(`Starting prospect scoring for workspace ${workspaceId}`);
 

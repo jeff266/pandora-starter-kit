@@ -101,10 +101,10 @@ export interface WorkspaceConfig {
 // ============================================================================
 
 export const DEFAULT_GRADE_THRESHOLDS: GradeThresholds = {
-  A: 85,
-  B: 70,
-  C: 50,
-  D: 30,
+  A: 80,
+  B: 60,
+  C: 40,
+  D: 20,
   F: 0,
 };
 

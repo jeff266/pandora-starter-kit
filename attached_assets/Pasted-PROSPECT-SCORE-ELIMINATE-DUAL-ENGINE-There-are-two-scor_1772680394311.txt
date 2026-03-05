@@ -1,0 +1,100 @@
+PROSPECT SCORE — ELIMINATE DUAL ENGINE
+
+There are two scoring engines writing to the same lead_scores table:
+  1. lead-scoring.ts (2,310 lines) — runs Monday cron, ICP-aware, 
+     imports pillar-aggregator, weight-loader, score-summary, 
+     score-confidence. This is the canonical engine.
+  2. prospect-scorer.ts (790 lines) — runs from UI button, hardcoded 
+     weights, hardcoded thresholds. This is being retired.
+
+Three changes:
+
+1. REWIRE THE UI BUTTON
+
+In routes/prospect-scores.ts, the POST handler currently calls:
+  runProspectScoring(workspaceId) → scoring/prospect-scorer.ts
+
+Change it to call the skill engine instead:
+  scoreLeads(workspaceId) → skills/compute/lead-scoring.ts
+
+Import scoreLeads from the skill compute module. The function 
+signature may differ — adapt the route handler to match. The 
+response shape should include:
+  { totalScored, gradeDistribution, topMovers, scoringMethod }
+
+If scoreLeads() requires a skill run context that the route 
+doesn't have, extract the pure scoring logic into an exported 
+function that both the skill runner AND the route can call. 
+Don't duplicate scoring logic — one function, two entry points.
+
+2. ADD POST-SYNC TRIGGER
+
+Neither scorer fires after CRM sync. Add a hook in the sync 
+completion path:
+
+After any connector sync completes (HubSpot or Salesforce), 
+queue a scoring run:
+
+  // In sync completion handler (wherever sync success is logged)
+  await queueSkillRun(workspaceId, 'lead-scoring', { 
+    trigger: 'post_sync' 
+  });
+
+Use the existing skill queue if one exists. If not, call 
+scoreLeads() directly but wrap in a try/catch so a scoring 
+failure never blocks a sync.
+
+3. DEPRECATE prospect-scorer.ts
+
+Add to top of scoring/prospect-scorer.ts:
+
+  /** @deprecated 2026-03-04 — Replaced by skills/compute/lead-scoring.ts
+   *  This file wrote hardcoded scores to lead_scores, conflicting with 
+   *  the ICP-aware skill engine. All callers have been rewired.
+   *  Safe to delete after 2026-04-01. */
+
+Add a runtime warning if it somehow gets called:
+
+  console.warn('[DEPRECATED] prospect-scorer.ts called — 
+    this engine is retired. Scores should come from lead-scoring.ts');
+
+Do NOT delete the file yet.
+
+4. FIX GRADE THRESHOLDS
+
+Verify that lead-scoring.ts uses these thresholds (from spec):
+  A >= 80, B >= 60, C >= 40, D >= 20, F < 20
+
+If it reads from getGradeThresholds(workspaceId) and those are 
+configurable, confirm the DEFAULTS match the spec. If any 
+workspace has overridden thresholds to the old A>=58 scale, 
+flag it but don't change workspace-level overrides.
+
+VERIFY:
+
+After changes, test both paths hit the same engine:
+
+  # UI button path
+  POST /api/workspaces/<frontera_id>/prospect-scores/run
+
+  # Check which engine wrote
+  SELECT scoring_method, COUNT(*) 
+  FROM lead_scores 
+  WHERE workspace_id = '<frontera_id>'
+    AND scored_at > NOW() - INTERVAL '5 minutes'
+  GROUP BY scoring_method;
+  
+  -- Should show 'icp_point_based' or 'point_based', 
+  -- NOT a mix of methods
+
+  # Verify grade distribution shifted
+  SELECT score_grade, COUNT(*), ROUND(AVG(total_score)) 
+  FROM lead_scores 
+  WHERE workspace_id = '<frontera_id>'
+  GROUP BY score_grade ORDER BY score_grade;
+
+  # Verify no imports of prospect-scorer remain
+  grep -r "prospect-scorer" server/ --include="*.ts" -l
+  grep -r "runProspectScoring" server/ --include="*.ts" -l
+  -- Should only return the deprecated file itself 
+  -- and the old route (now rewired)
