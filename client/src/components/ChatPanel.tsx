@@ -480,11 +480,11 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
               <div style={styles.messageContent}>
                 {formatMarkdown(anon.text(msg.content))}
               </div>
-              {msg.role === 'assistant' && (
+              {msg.role === 'assistant' && msg.evidence && msg.evidence.tool_calls.length > 0 && (
                 <ChainOfThoughtPanel
                   evidence={msg.evidence}
                   latencyMs={msg.latency_ms}
-                  visible={hoveredMsgIdx === idx}
+                  visible={true}
                 />
               )}
               {msg.role === 'assistant' && msg.evidence && msg.evidence.tool_calls.length > 0 && (
@@ -620,16 +620,7 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
           );
           })}
 
-          {loading && (
-            <div style={{ ...styles.messageBubble, ...styles.assistantBubble }}>
-              <div style={styles.messageRole}>Pandora</div>
-              <div style={styles.thinking}>
-                <span style={styles.dot}>●</span>
-                <span style={{ ...styles.dot, animationDelay: '0.2s' }}>●</span>
-                <span style={{ ...styles.dot, animationDelay: '0.4s' }}>●</span>
-              </div>
-            </div>
-          )}
+          {loading && <ThinkingBubble query={messages[messages.length - 1]?.content || ''} />}
 
               {error && (
                 <div style={styles.errorMsg}>{error}</div>
@@ -664,6 +655,137 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
             </button>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Thinking Bubble (Expanded Chain of Thought) ─────────────────────────────
+
+interface ThinkingStep {
+  label: string;
+  icon: string;
+  delay: number;
+}
+
+function getThinkingSteps(query: string): ThinkingStep[] {
+  const q = query.toLowerCase();
+
+  if (/pipeline|forecast|close|quarter|revenue/i.test(q)) {
+    return [
+      { label: 'Analyzing query intent...', icon: '🔮', delay: 200 },
+      { label: 'Querying deals database...', icon: '💼', delay: 800 },
+      { label: 'Computing pipeline metrics...', icon: '📊', delay: 1600 },
+      { label: 'Aggregating by stage & owner...', icon: '🎯', delay: 2400 },
+      { label: 'Generating insights...', icon: '✨', delay: 3200 },
+    ];
+  }
+
+  if (/risk|stall|dark|churn|lose/i.test(q)) {
+    return [
+      { label: 'Analyzing query intent...', icon: '🔮', delay: 200 },
+      { label: 'Scanning deal activity...', icon: '⚡', delay: 800 },
+      { label: 'Detecting risk signals...', icon: '⚠️', delay: 1600 },
+      { label: 'Scoring engagement levels...', icon: '📈', delay: 2400 },
+      { label: 'Synthesizing recommendations...', icon: '💡', delay: 3200 },
+    ];
+  }
+
+  if (/call|conversation|meeting|transcript/i.test(q)) {
+    return [
+      { label: 'Analyzing query intent...', icon: '🔮', delay: 200 },
+      { label: 'Querying conversation database...', icon: '💬', delay: 800 },
+      { label: 'Analyzing transcript content...', icon: '📝', delay: 1600 },
+      { label: 'Extracting key topics...', icon: '🔍', delay: 2400 },
+      { label: 'Generating summary...', icon: '✨', delay: 3200 },
+    ];
+  }
+
+  if (/contact|stakeholder|champion|buyer/i.test(q)) {
+    return [
+      { label: 'Analyzing query intent...', icon: '🔮', delay: 200 },
+      { label: 'Querying contacts database...', icon: '👥', delay: 800 },
+      { label: 'Analyzing engagement patterns...', icon: '📊', delay: 1600 },
+      { label: 'Mapping stakeholder roles...', icon: '🎭', delay: 2400 },
+      { label: 'Generating insights...', icon: '✨', delay: 3200 },
+    ];
+  }
+
+  // Default generic steps
+  return [
+    { label: 'Analyzing query intent...', icon: '🔮', delay: 200 },
+    { label: 'Searching relevant data...', icon: '🔍', delay: 800 },
+    { label: 'Computing metrics...', icon: '📊', delay: 1600 },
+    { label: 'Synthesizing answer...', icon: '✨', delay: 2400 },
+  ];
+}
+
+function ThinkingBubble({ query }: { query: string }) {
+  const [visibleSteps, setVisibleSteps] = useState<number>(0);
+  const steps = getThinkingSteps(query);
+
+  useEffect(() => {
+    const timers: NodeJS.Timeout[] = [];
+    steps.forEach((step, i) => {
+      const timer = setTimeout(() => {
+        setVisibleSteps(i + 1);
+      }, step.delay);
+      timers.push(timer);
+    });
+
+    return () => timers.forEach(clearTimeout);
+  }, [query]);
+
+  return (
+    <div style={{ ...styles.messageBubble, ...styles.assistantBubble }}>
+      <div style={styles.messageRole}>Pandora</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {steps.slice(0, visibleSteps).map((step, i) => (
+          <div
+            key={i}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              opacity: 0,
+              animation: 'fadeInStep 0.3s ease forwards',
+              animationDelay: '0.05s',
+            }}
+          >
+            <div style={{
+              width: 28,
+              height: 28,
+              borderRadius: '50%',
+              background: 'rgba(100, 136, 234, 0.15)',
+              border: '1px solid rgba(100, 136, 234, 0.3)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 14,
+              flexShrink: 0,
+            }}>
+              {step.icon}
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{
+                fontSize: 13,
+                color: '#cbd5e1',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+              }}>
+                {step.label}
+                {i === visibleSteps - 1 && (
+                  <div style={{ display: 'flex', gap: 3, marginLeft: 4 }}>
+                    <span style={{ ...styles.dot }}>●</span>
+                    <span style={{ ...styles.dot, animationDelay: '0.2s' }}>●</span>
+                    <span style={{ ...styles.dot, animationDelay: '0.4s' }}>●</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -717,34 +839,103 @@ function ChainOfThoughtPanel({ evidence, latencyMs, visible }: {
 
   return (
     <div style={{
-      marginTop: 8,
-      opacity: visible ? 1 : 0,
-      transition: 'opacity 0.15s',
-      pointerEvents: visible ? 'auto' : 'none',
-      borderTop: '1px solid #1e2230',
-      paddingTop: 8,
+      marginTop: 10,
+      borderTop: '1px solid rgba(100, 136, 234, 0.2)',
+      paddingTop: 10,
+      background: 'rgba(100, 136, 234, 0.05)',
+      borderRadius: '0 0 8px 8px',
+      marginLeft: -14,
+      marginRight: -14,
+      marginBottom: -10,
+      paddingLeft: 14,
+      paddingRight: 14,
+      paddingBottom: 10,
     }}>
-      <div style={{ fontSize: 11, color: '#475569', marginBottom: hasTools ? 6 : 0, display: 'flex', alignItems: 'center', gap: 6 }}>
-        <Icon name="filter" size={12} style={{ filter: 'brightness(0) saturate(100%) invert(21%) sepia(9%) saturate(939%) hue-rotate(182deg) brightness(95%) contrast(89%)' }} />
-        {hasTools
-          ? `${toolCalls.length} tool call${toolCalls.length !== 1 ? 's' : ''}${latencyMs != null ? ` · ${(latencyMs / 1000).toFixed(1)}s` : ''}`
-          : `no tools called${latencyMs != null ? ` · ${(latencyMs / 1000).toFixed(1)}s` : ''}`
-        }
+      <div style={{
+        fontSize: 11,
+        color: '#6488ea',
+        marginBottom: hasTools ? 8 : 0,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+        fontWeight: 600,
+        textTransform: 'uppercase',
+        letterSpacing: '0.5px',
+      }}>
+        <Icon name="filter" size={12} style={{ filter: 'brightness(0) saturate(100%) invert(47%) sepia(68%) saturate(1869%) hue-rotate(204deg) brightness(96%) contrast(94%)' }} />
+        Chain of Thought
+        {latencyMs != null && (
+          <span style={{
+            marginLeft: 'auto',
+            fontSize: 10,
+            color: '#64748b',
+            fontWeight: 400,
+            textTransform: 'none',
+            letterSpacing: 'normal',
+          }}>
+            {(latencyMs / 1000).toFixed(1)}s
+          </span>
+        )}
       </div>
       {toolCalls.map((tc, i) => (
-        <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 4, alignItems: 'flex-start' }}>
-          <span style={{ color: '#334155', fontSize: 11, flexShrink: 0, marginTop: 1, display: 'flex', alignItems: 'center', gap: 4 }}>
-            {i + 1}. <Icon name={(TOOL_ICONS[tc.tool] || 'filter') as any} size={11} style={{ filter: 'brightness(0) saturate(100%) invert(21%) sepia(9%) saturate(939%) hue-rotate(182deg) brightness(95%) contrast(89%)' }} />
-          </span>
-          <div style={{ minWidth: 0 }}>
-            <span style={{ color: '#6488ea', fontSize: 11, fontWeight: 600 }}>{tc.tool}</span>
-            {Object.keys(tc.params || {}).length > 0 && (
-              <span style={{ color: '#475569', fontSize: 11, marginLeft: 6 }}>
-                {formatCompactParams(tc.params)}
+        <div key={i} style={{
+          display: 'flex',
+          gap: 8,
+          marginBottom: 8,
+          alignItems: 'flex-start',
+          background: 'rgba(0, 0, 0, 0.2)',
+          padding: '8px 10px',
+          borderRadius: 6,
+          border: '1px solid rgba(100, 136, 234, 0.15)',
+        }}>
+          <div style={{
+            width: 24,
+            height: 24,
+            borderRadius: '50%',
+            background: 'rgba(100, 136, 234, 0.2)',
+            border: '1px solid rgba(100, 136, 234, 0.3)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+            marginTop: 2,
+          }}>
+            <Icon name={(TOOL_ICONS[tc.tool] || 'filter') as any} size={12} style={{ filter: 'brightness(0) saturate(100%) invert(47%) sepia(68%) saturate(1869%) hue-rotate(204deg) brightness(96%) contrast(94%)' }} />
+          </div>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+              <span style={{ color: '#6488ea', fontSize: 12, fontWeight: 600 }}>{tc.tool}</span>
+              <span style={{
+                fontSize: 9,
+                color: '#64748b',
+                background: 'rgba(100, 136, 234, 0.1)',
+                padding: '2px 6px',
+                borderRadius: 4,
+                textTransform: 'uppercase',
+                letterSpacing: '0.5px',
+              }}>
+                Step {i + 1}
               </span>
+            </div>
+            {Object.keys(tc.params || {}).length > 0 && (
+              <div style={{
+                color: '#94a3b8',
+                fontSize: 11,
+                marginBottom: 4,
+                fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+              }}>
+                {formatCompactParams(tc.params)}
+              </div>
             )}
-            <div style={{ color: tc.error ? '#ef4444' : '#64748b', fontSize: 11, marginTop: 1 }}>
-              → {tc.error ? `failed: ${tc.error}` : summarizeResult(tc.tool, tc.result)}
+            <div style={{
+              color: tc.error ? '#ef4444' : '#cbd5e1',
+              fontSize: 12,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+            }}>
+              <span style={{ color: '#6488ea' }}>→</span>
+              {tc.error ? `Failed: ${tc.error}` : summarizeResult(tc.tool, tc.result)}
             </div>
           </div>
         </div>
@@ -1225,6 +1416,17 @@ const thinkingKeyframes = `
 @keyframes pulse {
   0%, 100% { opacity: 0.3; }
   50% { opacity: 1; }
+}
+
+@keyframes fadeInStep {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 `;
 
