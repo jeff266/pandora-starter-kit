@@ -109,10 +109,27 @@ async function safeExecute<T>(
   fn: () => Promise<T>,
   params: any
 ): Promise<T | { error: string }> {
+  const start = Date.now();
   try {
     const result = await fn();
+    const ms = Date.now() - start;
     const resultCount = Array.isArray(result) ? result.length : typeof result === 'object' && result !== null ? Object.keys(result).length : 0;
     console.log(`[Tool] ${toolName} called with ${JSON.stringify(params)} → ${resultCount} results`);
+
+    const isEmpty =
+      result === null ||
+      result === undefined ||
+      (Array.isArray(result) && result.length === 0) ||
+      (typeof result === 'object' && !Array.isArray(result) && Object.keys(result as object).length === 0);
+
+    if (isEmpty) {
+      console.warn(`[ToolWarning] ${toolName} returned empty result — possible schema mismatch or no data for this workspace`);
+    }
+
+    if (ms > 5000) {
+      console.warn(`[ToolSlow] ${toolName} took ${ms}ms — consider query optimization`);
+    }
+
     return result;
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
@@ -5195,6 +5212,12 @@ const prepareStrategyInsightsTool: ToolDefinition = {
     return safeExecute('prepareStrategyInsights', async () => {
       const result = await prepareStrategyInsights(context.workspaceId);
       console.log(`[StrategyInsights] Gathered ${result.recentOutputs.skillCount} skill outputs, ${result.recentOutputs.agentCount} agent outputs`);
+      if (!result.dataAvailable && context.runId) {
+        await query(
+          `UPDATE skill_runs SET status = 'skipped_insufficient_data' WHERE id = $1`,
+          [context.runId]
+        ).catch(() => {});
+      }
       return result;
     }, params);
   },

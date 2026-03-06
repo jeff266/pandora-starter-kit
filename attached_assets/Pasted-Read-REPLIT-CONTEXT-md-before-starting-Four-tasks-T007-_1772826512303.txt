@@ -1,0 +1,191 @@
+Read REPLIT_CONTEXT.md before starting.
+
+Four tasks. T007–T009 are the final outstanding items from the skills 
+bolstering sprint. T010 is a new defensive hardening task surfaced by 
+three consecutive sprints of silent compute failures.
+
+---
+
+## T007 — Confirm: Single Thread Alert + Stage Mismatch Schedules
+
+Check the skill scheduler for both registrations:
+
+  grep -n "single-thread-alert\|stage-mismatch" server/sync/skill-scheduler.ts
+  (or wherever cron jobs are registered)
+
+Expected:
+  single-thread-alert:     cron '0 8 * * 1'   (Monday 8am)
+  stage-mismatch-detector: cron '0 9 1,15 * *' (1st and 15th, 9am)
+
+If either is missing: add it now following the exact same pattern as 
+the other scheduled skills in that file.
+
+Restart the server and confirm both lines appear in startup logs:
+  [Skill Scheduler] Registered single-thread-alert on cron 0 8 * * 1
+  [Skill Scheduler] Registered stage-mismatch-detector on cron 0 9 1,15 * *
+
+Also confirm the summary line count is correct:
+  [Skill Scheduler] X skills registered (Y scheduled, Z on-demand only)
+  Y should include both of these.
+
+---
+
+## T008 — Confirm: Strategy & Insights Actions Engine Emission
+
+Check strategy-insights skill definition and/or its post-run handler 
+for the Actions Engine emission when the freshness guard fires:
+
+  grep -n "ops_process_fix\|strategy-insights\|stale\|freshness" \
+    server/skills/library/strategy-insights.ts \
+    server/actions/engine.ts (or wherever actions are emitted)
+
+Expected behavior when guard fires (fewer than 3 fresh skill runs):
+  1. Skill skips synthesis (existing behavior, confirmed last sprint)
+  2. An action is emitted with:
+       action_type: 'ops_process_fix'
+       title: 'Strategy & Insights needs fresh data to run'
+       source_skill: 'strategy-insights'
+       priority: 'low'
+  3. Dedup check: action only emits once per week per workspace
+
+If the emission code is NOT present: add it now.
+
+Find where the freshness guard exits in strategy-insights.ts. 
+Immediately before or after the skip, add:
+
+  await emitAction(workspaceId, {
+    action_type: 'ops_process_fix',
+    title: 'Strategy & Insights needs fresh data to run',
+    description: `Strategy & Insights requires recent outputs from at 
+      least 3 skills to synthesize cross-functional insights. 
+      Found only ${freshRunCount} fresh skill run(s). 
+      Trigger Pipeline Hygiene, Forecast Rollup, and Pipeline Coverage 
+      first, then re-run Strategy & Insights.`,
+    priority: 'low',
+    source_skill: 'strategy-insights',
+    suggested_skill_ids: ['pipeline-hygiene', 'forecast-rollup', 
+                          'pipeline-coverage']
+  });
+
+Use whatever emitAction / createAction pattern the rest of the codebase 
+uses — don't invent a new pattern.
+
+Dedup: before emitting, check:
+  SELECT id FROM actions 
+  WHERE workspace_id = $1 
+    AND action_type = 'ops_process_fix'
+    AND source_skill = 'strategy-insights'
+    AND created_at > NOW() - INTERVAL '7 days'
+    AND status = 'open'
+  LIMIT 1
+
+If a row exists, skip emission silently.
+
+Also add the UI callout on the Strategy & Insights skill card:
+  If the most recent skill_run for strategy-insights has 
+  status = 'skipped_insufficient_data': show an inline amber callout 
+  below the skill card description:
+    "Waiting for fresh inputs — run Pipeline Hygiene and Forecast 
+     Rollup first"
+  With two small "Run now" buttons for pipeline-hygiene and 
+  forecast-rollup that trigger on-demand runs via the existing 
+  run endpoint.
+
+---
+
+## T009 — Confirm: Project Recap Hidden from Skills Library
+
+Check whether project-recap is hidden from the user-facing Skills library:
+
+  grep -n "isUtility\|project-recap" \
+    server/skills/library/project-recap.ts \
+    client/src/pages/SkillsPage.tsx (or wherever skills are listed)
+
+Expected:
+  - project-recap.ts has isUtility: true in its SkillDefinition
+  - Skills library page filters out isUtility === true skills
+  - Agent Builder skill picker also filters out isUtility === true
+
+If NOT done: add isUtility: true to the project-recap SkillDefinition, 
+then filter it in both the Skills library page and Agent Builder 
+skill picker.
+
+Verify: Skills library shows 29 skills. Agent Builder picker shows 29.
+Friday recap agent still calls project-recap directly and produces 
+correct output (the skill still runs — it's just hidden from users).
+
+---
+
+## T010 — safeExecute Empty Result Warning (NEW)
+
+Context: Three consecutive sprints have had silent compute failures where 
+safeExecute caught an error or a tool returned an empty result — no throw, 
+no log, just missing data downstream. Examples:
+  - persistAccuracyScores reading context.stepOutputs → returned nothing silently
+  - enrichForecastWithAccuracy querying wrong columns → byRep: {} silently
+  - loadVelocityBenchmarks using wrong table/column names → empty silently
+
+Find safeExecute in server/skills/tool-definitions.ts (or wherever it lives).
+
+Current behavior (approximate):
+  async function safeExecute(toolName, fn, params) {
+    try {
+      return await fn();
+    } catch (err) {
+      logger.error(`[Tool Error] ${toolName}: ${err.message}`);
+      return null; // or {} or []
+    }
+  }
+
+Add two enhancements:
+
+1. Empty result warning — after a successful execution (no throw), 
+   check if the result is meaningfully empty:
+
+  const result = await fn();
+  
+  const isEmpty = 
+    result === null || 
+    result === undefined ||
+    (Array.isArray(result) && result.length === 0) ||
+    (typeof result === 'object' && !Array.isArray(result) && 
+     Object.keys(result).length === 0);
+  
+  if (isEmpty) {
+    logger.warn(
+      `[ToolWarning] ${toolName} returned empty result — ` +
+      `possible schema mismatch or no data for this workspace`
+    );
+  }
+  
+  return result;
+
+2. Execution time logging — log how long each tool took:
+
+  const start = Date.now();
+  const result = await fn();
+  const ms = Date.now() - start;
+  
+  if (ms > 5000) {
+    logger.warn(`[ToolSlow] ${toolName} took ${ms}ms — consider query optimization`);
+  }
+
+These are warn-level logs only — never throw, never change return value. 
+The existing behavior is preserved; we're adding observability only.
+
+After adding: restart server and run deal-risk-review on Frontera. 
+Confirm the startup log still shows 30 skills registered. Confirm no 
+new errors from the safeExecute change.
+
+---
+
+## Completion Summary Format
+
+For each task report:
+  T007: schedules confirmed/added — Y/N, startup log lines shown
+  T008: emission code confirmed/added — Y/N, dedup check present — Y/N, 
+        UI callout added — Y/N
+  T009: isUtility flag confirmed/added — Y/N, library count = 29 — Y/N
+  T010: safeExecute enhanced — Y/N, empty warning fires on test run — Y/N
+
+After all four complete, the skills bolstering work is fully closed.

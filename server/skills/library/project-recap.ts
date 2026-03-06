@@ -7,6 +7,7 @@ export const projectRecapSkill: SkillDefinition = {
   version: '1.0.0',
   category: 'reporting',
   tier: 'compute',
+  isUtility: true,
 
   requiredTools: ['prepareProjectRecap'],
   requiredContext: [],

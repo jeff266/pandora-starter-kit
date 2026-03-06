@@ -244,6 +244,11 @@ OUTPUT BUDGET REMINDER: Stay within {{output_budget.complexity}} complexity. If 
 
   outputFormats: ['markdown', 'slack', 'in_app'],
 
+  schedule: {
+    cron: '0 9 1,15 * *',
+    trigger: 'on_demand',
+  },
+
   scheduling: {
     recommendedCadence: 'daily',
     minInterval: '6h',

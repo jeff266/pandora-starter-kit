@@ -216,7 +216,8 @@ Focus on the top 5-10 most impactful single-threaded deals. Example:
   ],
 
   schedule: {
-    trigger: 'post_sync',
+    cron: '0 8 * * 1',
+    trigger: 'on_demand',
   },
 
   outputFormat: 'slack',

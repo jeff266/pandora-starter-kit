@@ -231,6 +231,40 @@ export async function prepareStrategyInsights(workspaceId: string) {
     const freshness = await checkInputFreshness(workspaceId);
 
     if (!freshness.sufficientData) {
+      const freshRunCount = freshness.skillsWithRecentRuns.length;
+      try {
+        const existing = await query(
+          `SELECT id FROM actions
+           WHERE workspace_id = $1
+             AND action_type = 'ops_process_fix'
+             AND source_skill = 'strategy-insights'
+             AND created_at > NOW() - INTERVAL '7 days'
+             AND status = 'open'
+           LIMIT 1`,
+          [workspaceId]
+        );
+        if (existing.rows.length === 0) {
+          await query(
+            `INSERT INTO actions (
+               workspace_id, source_skill, action_type, severity, title, summary,
+               recommended_steps, status
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'open')`,
+            [
+              workspaceId,
+              'strategy-insights',
+              'ops_process_fix',
+              'low',
+              'Strategy & Insights needs fresh data to run',
+              `Strategy & Insights requires recent outputs from at least 3 skills to synthesize cross-functional insights. Found only ${freshRunCount} fresh skill run(s). Trigger Pipeline Hygiene, Forecast Rollup, and Pipeline Coverage first, then re-run Strategy & Insights.`,
+              JSON.stringify(['Run Pipeline Hygiene', 'Run Forecast Rollup', 'Run Pipeline Coverage', 'Re-run Strategy & Insights']),
+            ]
+          );
+          console.log('[StrategyInsights] Emitted ops_process_fix action for workspace', workspaceId);
+        }
+      } catch (actionErr: any) {
+        console.log('[StrategyInsights] Could not emit action:', actionErr.message);
+      }
+
       return {
         recentOutputs: { skills: {}, agents: {}, skillCount: 0, agentCount: 0 },
         crossWorkspace: { workspaces: [], icpProfiles: [], leadScoreDistribution: [] },

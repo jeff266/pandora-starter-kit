@@ -152,7 +152,7 @@ router.get('/:workspaceId/skills/dashboard', async (req, res) => {
     }
 
     const registry = getSkillRegistry();
-    const skills = registry.getAll();
+    const skills = registry.getAll().filter(s => !s.isUtility);
 
     // Fetch last runs
     const lastRuns = await query<{
@@ -300,7 +300,7 @@ router.get('/:workspaceId/skills', async (req, res) => {
     }
 
     const registry = getSkillRegistry();
-    const skills = registry.getAll();
+    const skills = registry.getAll().filter(s => !s.isUtility);
 
     const lastRuns = await query<{
       skill_id: string;

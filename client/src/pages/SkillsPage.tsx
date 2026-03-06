@@ -480,6 +480,22 @@ export default function SkillsPage() {
                       {skill.description}
                     </div>
                   )}
+                  {skill.id === 'strategy-insights' && skill.lastRunStatus === 'skipped_insufficient_data' && (
+                    <div
+                      onClick={e => e.stopPropagation()}
+                      style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 5, padding: '5px 8px', borderRadius: 6, background: '#78350F22', border: '1px solid #78350F44', flexWrap: 'wrap' }}
+                    >
+                      <span style={{ fontSize: 11, color: '#F59E0B' }}>Waiting for fresh inputs — run Pipeline Hygiene and Forecast Rollup first</span>
+                      <button
+                        onClick={e => { e.stopPropagation(); runSkill('pipeline-hygiene', 'Pipeline Hygiene', e); }}
+                        style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, border: '1px solid #F59E0B44', background: '#78350F33', color: '#F59E0B', cursor: 'pointer', fontWeight: 500 }}
+                      >Run now</button>
+                      <button
+                        onClick={e => { e.stopPropagation(); runSkill('forecast-rollup', 'Forecast Rollup', e); }}
+                        style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, border: '1px solid #F59E0B44', background: '#78350F33', color: '#F59E0B', cursor: 'pointer', fontWeight: 500 }}
+                      >Run now</button>
+                    </div>
+                  )}
                 </div>
                 <div style={{ fontSize: 12, color: colors.textMuted }}>
                   {skill.lastRunAt ? (

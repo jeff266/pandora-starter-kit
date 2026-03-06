@@ -103,6 +103,9 @@ export interface SkillDefinition {
 
   /** True for skills created via the Skill Builder (not built-in) */
   isCustom?: boolean;
+
+  /** True for utility skills hidden from the user-facing Skills library and agent picker */
+  isUtility?: boolean;
 }
 
 // ============================================================================
