@@ -136,15 +136,18 @@ export default function AgentBuilder() {
   const [lastRunStatus, setLastRunStatus] = useState<string | null>(null);
   const [latestGeneration, setLatestGeneration] = useState<any>(null);
   const [pendingCount, setPendingCount] = useState(0);
+  const [allSkills, setAllSkills] = useState<Array<{ id: string; name: string }>>([]);
+  const [skillsLoading, setSkillsLoading] = useState(true);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
       api.get('/governance/summary').then(s => setPendingCount(s?.pending_approval ?? 0)).catch(() => {});
-      const [templatesRes, agentsRes, filtersRes] = await Promise.all([
+      const [templatesRes, agentsRes, filtersRes, skillsRes] = await Promise.all([
         api.get('/agent-templates'),
         api.get('/agents-v2'),
         api.get('/filters').catch(() => ({ filters: [] })),
+        api.get('/skills/dashboard').catch(() => ({ skills: [] })),
       ]);
       setTemplates(templatesRes.templates || []);
       setAgents(agentsRes || []);
@@ -155,10 +158,12 @@ export default function AgentBuilder() {
         entity_types: f.entity_types || [],
         confirmed: f.confirmed ?? false,
       })));
+      setAllSkills((skillsRes.skills || []).map((s: any) => ({ id: s.id, name: s.name })));
     } catch (err) {
       console.error('Failed to load agent data:', err);
     } finally {
       setLoading(false);
+      setSkillsLoading(false);
     }
   }, []);
 
@@ -750,12 +755,14 @@ export default function AgentBuilder() {
         <div>
           <SectionLabel>Skills to run ({skills.length})</SectionLabel>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {ALL_SKILLS.map(s => (
-              <button key={s} onClick={() => setSkills(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s])} style={{
+            {skillsLoading ? (
+              <span style={{ fontSize: 12, color: colors.textMuted }}>Loading skills…</span>
+            ) : allSkills.map(s => (
+              <button key={s.id} onClick={() => setSkills(prev => prev.includes(s.id) ? prev.filter(x => x !== s.id) : [...prev, s.id])} style={{
                 ...chipBtn,
-                ...(skills.includes(s) ? chipBtnActive : {}),
+                ...(skills.includes(s.id) ? chipBtnActive : {}),
               }}>
-                {skills.includes(s) ? '✓ ' : ''}{s}
+                {skills.includes(s.id) ? '✓ ' : ''}{s.name}
               </button>
             ))}
           </div>
@@ -982,12 +989,6 @@ export default function AgentBuilder() {
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return <div style={{ font: `500 12px ${fonts.sans}`, color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>{children}</div>;
 }
-
-const ALL_SKILLS = [
-  'pipeline-hygiene', 'single-thread-alert', 'pipeline-coverage', 'deal-risk-review',
-  'forecast-rollup', 'monte-carlo-forecast', 'rep-scorecard', 'conversation-intelligence',
-  'icp-discovery', 'data-quality-audit', 'stage-velocity-benchmarks',
-];
 
 const card: React.CSSProperties = {
   background: colors.surface,
