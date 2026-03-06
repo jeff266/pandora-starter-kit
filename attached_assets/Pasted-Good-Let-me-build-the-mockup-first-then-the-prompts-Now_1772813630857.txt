@@ -1,0 +1,341 @@
+Good. Let me build the mockup first, then the prompts.Now the build prompts. Two parts — Claude Code handles the backend, Replit handles the UI.
+
+---
+
+## Claude Code Prompt — Skill Builder Backend
+
+```
+Before starting, read:
+1. server/skills/index.ts — how skills are registered (registry.register() calls)
+2. server/skills/library/ — any one skill definition as a reference (forecast-rollup is the clearest)
+3. server/skills/tool-definitions.ts — the toolRegistry Map and how computeFns are registered
+4. server/skills/runtime.ts — specifically executeComputeStep() around line 533 where computeFn is resolved via getToolDefinition()
+5. server/db/migrations/ — find the latest migration number
+
+---
+
+## Task 1: Database Migration
+
+Create migration XXX_custom_skills.sql (next sequential number).
+
+```sql
+CREATE TABLE custom_skills (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  
+  -- Identity
+  skill_id TEXT NOT NULL,           -- e.g. 'custom-renewal-risk' (slug, generated from name)
+  name TEXT NOT NULL,
+  description TEXT NOT NULL,        -- the "question it answers"
+  category TEXT NOT NULL DEFAULT 'Custom',
+  version TEXT NOT NULL DEFAULT '1.0.0',
+  
+  -- Data layer
+  query_source TEXT NOT NULL,       -- 'saved_query' | 'inline_sql'
+  saved_query_id UUID REFERENCES saved_queries(id),   -- if query_source = 'saved_query'
+  inline_sql TEXT,                  -- if query_source = 'inline_sql'
+  
+  -- Intelligence config
+  classify_enabled BOOLEAN NOT NULL DEFAULT true,
+  classify_bad TEXT,                -- plain English description of "bad"
+  classify_good TEXT,               -- plain English description of "good"
+  synthesize_enabled BOOLEAN NOT NULL DEFAULT true,
+  synthesize_tone TEXT DEFAULT 'Flag risks',   -- 'Flag risks'|'Highlight opportunities'|'Weekly summary'|'Custom'
+  synthesize_custom_prompt TEXT,    -- if tone = 'Custom'
+  
+  -- Output / schedule
+  output_slack BOOLEAN NOT NULL DEFAULT true,
+  output_report BOOLEAN NOT NULL DEFAULT false,
+  schedule_cron TEXT,               -- null = on-demand only
+  
+  -- Runtime state
+  status TEXT NOT NULL DEFAULT 'active',   -- 'active' | 'disabled'
+  last_run_at TIMESTAMPTZ,
+  run_count INTEGER NOT NULL DEFAULT 0,
+  
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  
+  UNIQUE(workspace_id, skill_id)
+);
+
+CREATE INDEX idx_custom_skills_workspace ON custom_skills(workspace_id, status);
+```
+
+---
+
+## Task 2: Dynamic Compute Step Resolution
+
+This is the key architectural change. In server/skills/runtime.ts, find executeComputeStep() — the function that resolves computeFn by calling getToolDefinition() against the hardcoded toolRegistry.
+
+Add a fallback path: if the computeFn name is not found in the hardcoded registry, check if it matches a saved query name in the DB.
+
+```typescript
+// In executeComputeStep(), after the existing registry lookup fails:
+
+if (!toolDef) {
+  // Fallback: check saved_queries table by name
+  const savedQuery = await db.query(
+    `SELECT sql, name FROM saved_queries 
+     WHERE workspace_id = $1 AND name = $2 AND status = 'active'
+     LIMIT 1`,
+    [context.workspaceId, computeFnName]
+  );
+  
+  if (savedQuery.rows.length > 0) {
+    // Execute saved query with workspace_id as $1
+    const result = await db.query(savedQuery.rows[0].sql, [context.workspaceId]);
+    return { rows: result.rows, count: result.rowCount };
+  }
+  
+  throw new Error(`Tool not found: ${computeFnName}`);
+}
+```
+
+Important: saved queries executed this way are always parameterized with workspace_id = $1 only. No additional params in v1. If the query uses other params, it fails gracefully with a clear error.
+
+---
+
+## Task 3: Skill Definition Generator
+
+Create server/skills/custom-skill-builder.ts.
+
+This file takes a custom_skills row and returns a valid SkillDefinition object — the same interface that server/skills/library/*.ts files produce.
+
+```typescript
+export function buildCustomSkillDefinition(row: CustomSkillRow): SkillDefinition {
+  // 1. Determine computeFn name:
+  //    - if query_source = 'saved_query': use the saved query's name (resolves via dynamic fallback)
+  //    - if query_source = 'inline_sql': use row.skill_id as the computeFn name,
+  //      and register the inline SQL into a temp saved_queries entry on first run
+
+  // 2. Build steps array based on toggles:
+  //    - Always include: Step 1 compute (computeFn → outputKey: 'raw_data')
+  //    - If classify_enabled: Step 2 deepseek (generate prompt from classify_bad + classify_good)
+  //    - If synthesize_enabled: Step 3 claude (generate prompt from synthesize_tone or custom_prompt)
+
+  // 3. Generate DeepSeek prompt from plain English:
+  //    Template:
+  //    `You are a sales operations analyst reviewing the following data.
+  //     For each item, classify as 'risk' or 'healthy'.
+  //     A 'risk' item: ${classify_bad}
+  //     A 'healthy' item: ${classify_good}
+  //     Items: {{{json raw_data.rows}}}
+  //     Respond with ONLY JSON: { "classifications": [{ "id": "...", "status": "risk|healthy", "reason": "..." }] }`
+
+  // 4. Generate Claude prompt from tone:
+  //    Map tone → instruction prefix, then append the question as the synthesis goal
+  //    'Flag risks' → "You are a revenue analyst. Surface risks and required actions. Be specific — use names and numbers."
+  //    'Highlight opportunities' → "You are a revenue analyst. Surface opportunities the team should act on this week."
+  //    'Weekly summary' → "You are a revenue analyst writing the weekly summary. Be concise and scannable."
+  //    'Custom' → use synthesize_custom_prompt directly
+  //    Always append: "\n\nQuestion this skill answers: ${description}\n\n{{voiceBlock}}"
+
+  // 5. Return SkillDefinition with:
+  //    - id: row.skill_id
+  //    - name: row.name
+  //    - description: row.description
+  //    - category: row.category (lowercase)
+  //    - schedule: { cron: row.schedule_cron, trigger: 'on_demand' }
+  //    - outputFormat: 'markdown'
+  //    - isCustom: true  ← add this flag to SkillDefinition type if not present
+}
+```
+
+---
+
+## Task 4: Registry Hot-Loading
+
+In server/skills/index.ts, after the existing registry.register() calls:
+
+```typescript
+// Load custom skills from DB at startup
+export async function loadCustomSkills(workspaceId?: string): Promise<void> {
+  const rows = await db.query(
+    `SELECT * FROM custom_skills WHERE status = 'active'
+     ${workspaceId ? 'AND workspace_id = $1' : ''}`,
+    workspaceId ? [workspaceId] : []
+  );
+  
+  for (const row of rows.rows) {
+    const skillDef = buildCustomSkillDefinition(row);
+    registry.register(skillDef);
+  }
+}
+
+// Call at server startup (add to wherever the skill registry is initialized)
+await loadCustomSkills();
+```
+
+Also export a function for hot-loading a single skill after creation (so the UI doesn't require a restart):
+
+```typescript
+export async function registerCustomSkill(skillId: string, workspaceId: string): Promise<void> {
+  const row = await db.query(
+    `SELECT * FROM custom_skills WHERE skill_id = $1 AND workspace_id = $2`,
+    [skillId, workspaceId]
+  );
+  if (row.rows.length > 0) {
+    registry.register(buildCustomSkillDefinition(row.rows[0]));
+  }
+}
+```
+
+---
+
+## Task 5: API Routes
+
+Add to the existing skills routes file (wherever GET /api/workspaces/:id/skills lives):
+
+```
+POST   /api/workspaces/:id/skills/custom
+       Body: CustomSkillCreatePayload
+       → validate, generate skill_id slug from name, insert into custom_skills,
+         call registerCustomSkill(), return created row
+
+GET    /api/workspaces/:id/skills/custom
+       → return all custom_skills for workspace
+
+PUT    /api/workspaces/:id/skills/custom/:skillId
+       → update, re-register in registry
+
+DELETE /api/workspaces/:id/skills/custom/:skillId
+       → set status = 'disabled', unregister from registry
+
+POST   /api/workspaces/:id/skills/custom/:skillId/run
+       → trigger immediate run via skill runtime (same path as built-in on-demand runs)
+```
+
+---
+
+## Task 6: Cron Wiring
+
+In the skill scheduler (wherever cron jobs for built-in skills are registered), add:
+
+On scheduler startup, load all custom_skills where schedule_cron IS NOT NULL and register their cron jobs dynamically — same pattern as built-in skills. When a custom skill is created or updated with a schedule, register/replace its cron job without restart.
+
+---
+
+## Validation
+
+Test against Frontera workspace:
+1. Create a custom skill using the "Stalled deals" saved query
+2. Verify it appears in GET /api/workspaces/:id/skills alongside built-in skills with isCustom: true
+3. Run it on demand — verify compute step resolves via the dynamic fallback, not the hardcoded registry
+4. Verify Slack output is delivered if output_slack = true
+5. Verify the skill ID appears in the Agent Builder's skill picker (no Agent Builder changes needed — it reads from the same registry)
+```
+
+---
+
+## Replit Prompt — Skill Builder UI
+
+```
+Read REPLIT_CONTEXT.md before starting.
+
+Build the Skill Builder UI — a 4-step wizard that lets users create custom skills 
+without writing code. Custom skills appear in the Skills library and are available 
+to all Agents via the Agent Builder.
+
+---
+
+## Route
+
+Add route: /workspaces/:workspaceId/skills/new
+
+Add a "New Skill" button to the Skills library page (top-right, same pattern as 
+other primary actions in the app). Clicking it navigates to this route.
+
+---
+
+## 4-Step Wizard
+
+### Step 1: Define
+- Skill name (text input, required)
+- Question it answers (textarea, required) — this is the description
+- Category selector: Pipeline / Forecasting / Reporting / Intelligence / Custom (pill buttons)
+- Output toggles: Slack summary, Full report (markdown)
+- Schedule selector: On demand / Every Monday 8am / Every Friday 4pm / Monthly 1st
+  (show as human labels, not cron strings — map to cron on submit)
+
+### Step 2: Data
+Two sub-tabs: "Saved queries" and "Write SQL"
+
+Saved queries tab:
+- Load from GET /api/workspaces/:id/saved-queries
+- Show each as a selectable card: name + "returns: col1, col2, col3" (inferred from query)
+- Selected state: teal border + "Selected" badge
+
+Write SQL tab:
+- SQL textarea with monospace font
+- Helper text: "Always include workspace_id = $1 for data isolation"
+- On blur, show a preview of column names (parse SELECT clause)
+
+Below both tabs, once a query is selected/written:
+- Show a "Data preview" panel: list of column chips + token budget estimate
+  ("~1,200 tokens · Row limit: 500 · Workspace isolation: enforced")
+
+### Step 3: Intelligence
+Two collapsible panels:
+
+Classify with AI (DeepSeek — teal accent):
+- Toggle to enable/disable
+- When enabled: two inputs
+  - "What does bad look like?" (plain English)
+  - "What does good look like?" (plain English)
+- Subtitle: "DeepSeek labels each row before Claude synthesizes — keeps costs low"
+
+Synthesize with Claude (coral accent):
+- Toggle to enable/disable  
+- When enabled: tone selector (pill buttons)
+  - Flag risks / Highlight opportunities / Weekly summary / Custom
+  - If Custom: show textarea for custom instruction
+- Subtitle: "Generates a narrative report with findings and recommended actions"
+
+Below both panels: cost estimate bar
+- Est. tokens / run · Est. cost / run · Monthly cost (based on schedule)
+- Recalculate dynamically as toggles change
+
+### Step 4: Review
+- Summary table of all selections
+- Confirmation callout:
+  "This skill will appear in the Skills library with a Custom badge.
+   All Agents can be configured to call it. You can edit or delete it at any time."
+- "Create Skill" primary button
+
+---
+
+## On Submit (Create Skill button)
+
+POST /api/workspaces/:id/skills/custom with the full payload.
+
+On success:
+- Show a brief success toast: "Skill created — it's now available in the Skills library and Agent Builder"
+- Navigate to /workspaces/:workspaceId/skills with the new skill highlighted (scroll to it, flash the row)
+
+On error: inline error message below the Create button.
+
+---
+
+## Skills Library: Custom Badge
+
+On the Skills library page, for any skill where isCustom = true:
+- Show a "Custom" pill badge in muted teal next to the skill name
+- Show an edit (pencil) icon that navigates to the edit view of the Skill Builder
+- Show a delete option in the skill's action menu (with confirmation modal)
+
+---
+
+## Design
+- Dark theme, match existing Pandora design system exactly
+- Step progress indicator at top (same style as Agent Builder if one exists)
+- Continue button disabled until required fields for each step are filled
+- "Back" button on all steps except Step 1
+
+---
+
+## What NOT to build
+- Do NOT modify the Agent Builder — it already reads from the skill registry
+- Do NOT build skill versioning or import/export
+- Do NOT allow custom skills to have multiple compute steps (v1 is one query → classify → synthesize only)
+```
