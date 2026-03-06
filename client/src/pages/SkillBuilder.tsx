@@ -429,13 +429,12 @@ export default function SkillBuilder({ editMode }: Props) {
               ) : (
                 <div>
                   <p style={{ fontSize: 12, color: textMuted, margin: '0 0 10px' }}>
-                    Write a SQL query against your workspace data. Always include{' '}
-                    <code style={{ color: teal, fontSize: 11 }}>workspace_id = $1</code> for data isolation.
+                    Write a SQL query against your workspace data. Your data is automatically scoped to your workspace.
                   </p>
                   <textarea
                     value={sql}
                     onChange={e => setSql(e.target.value)}
-                    placeholder={'SELECT d.id, d.name, d.owner_email, d.amount, d.close_date\nFROM deals d\nWHERE workspace_id = $1\n  AND stage NOT IN (\'closed_won\',\'closed_lost\')\n  AND close_date < NOW()'}
+                    placeholder={'SELECT d.id, d.name, d.owner_email, d.amount, d.close_date\nFROM deals d\nWHERE stage NOT IN (\'closed_won\',\'closed_lost\')\n  AND close_date < NOW()'}
                     rows={8}
                     style={{ ...inputStyle, fontFamily: 'monospace', fontSize: 12, lineHeight: 1.7, resize: 'vertical' }}
                   />

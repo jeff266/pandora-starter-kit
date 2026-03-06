@@ -544,8 +544,21 @@ export class SkillRuntime {
           [context.workspaceId, step.computeFn]
         );
         if (sq.rows.length > 0) {
-          const r = await query(sq.rows[0].sql_text, [context.workspaceId]);
-          return { rows: r.rows, count: r.rowCount, source: 'saved_query' };
+          const client = await pool.connect();
+          try {
+            await client.query('BEGIN');
+            await client.query(`SET LOCAL app.current_workspace_id = '${context.workspaceId}'`);
+            await client.query('SET LOCAL statement_timeout = 10000');
+            await client.query('SET LOCAL ROLE pandora_rls_user');
+            const r = await client.query(sq.rows[0].sql_text);
+            await client.query('COMMIT');
+            return { rows: r.rows, count: r.rowCount, source: 'saved_query' };
+          } catch (e) {
+            await client.query('ROLLBACK');
+            throw e;
+          } finally {
+            client.release();
+          }
         }
       } catch (_) {}
 
@@ -556,8 +569,21 @@ export class SkillRuntime {
           [context.workspaceId, step.computeFn]
         );
         if (cs.rows.length > 0 && cs.rows[0].inline_sql) {
-          const r = await query(cs.rows[0].inline_sql, [context.workspaceId]);
-          return { rows: r.rows, count: r.rowCount, source: 'inline_sql' };
+          const client = await pool.connect();
+          try {
+            await client.query('BEGIN');
+            await client.query(`SET LOCAL app.current_workspace_id = '${context.workspaceId}'`);
+            await client.query('SET LOCAL statement_timeout = 10000');
+            await client.query('SET LOCAL ROLE pandora_rls_user');
+            const r = await client.query(cs.rows[0].inline_sql);
+            await client.query('COMMIT');
+            return { rows: r.rows, count: r.rowCount, source: 'inline_sql' };
+          } catch (e) {
+            await client.query('ROLLBACK');
+            throw e;
+          } finally {
+            client.release();
+          }
         }
       } catch (_) {}
 
