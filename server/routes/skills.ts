@@ -394,6 +394,12 @@ router.patch('/:workspaceId/skills/:skillId/schedule', async (req, res) => {
       return res.status(404).json({ error: `Skill not found: ${skillId}` });
     }
 
+    const existing = await query(
+      `SELECT cron, enabled FROM skill_schedules WHERE workspace_id = $1 AND skill_id = $2`,
+      [workspaceId, skillId]
+    );
+    const previousSnapshot = existing.rows[0] ?? null;
+
     await query(
       `INSERT INTO skill_schedules (workspace_id, skill_id, cron, enabled, updated_at)
        VALUES ($1, $2, $3, $4, NOW())
@@ -402,6 +408,23 @@ router.patch('/:workspaceId/skills/:skillId/schedule', async (req, res) => {
          enabled = EXCLUDED.enabled,
          updated_at = NOW()`,
       [workspaceId, skillId, cron ?? null, enabled ?? true]
+    );
+
+    await query(
+      `INSERT INTO skill_governance (
+        workspace_id, source_type, change_type, change_description,
+        change_payload, supersedes_snapshot, status, deployed_at, deployed_by
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8)`,
+      [
+        workspaceId,
+        'manual',
+        'skill_schedule',
+        'Schedule updated via UI',
+        JSON.stringify({ skill_id: skillId, cron: cron ?? null, enabled: enabled ?? true }),
+        previousSnapshot ? JSON.stringify(previousSnapshot) : null,
+        'deployed',
+        (req as any).user?.user_id ?? 'admin',
+      ]
     );
 
     return res.json({ ok: true });
@@ -438,6 +461,46 @@ router.get('/:workspaceId/skills/:skillId/runs', async (req, res) => {
     })));
   } catch (err) {
     console.error('[skills] Error listing skill runs:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.get('/:workspaceId/skills/:skillId/history', async (req, res) => {
+  try {
+    const { workspaceId, skillId } = req.params;
+
+    const result = await query(
+      `SELECT
+         id,
+         change_description,
+         change_payload,
+         supersedes_snapshot,
+         deployed_at,
+         deployed_by,
+         status
+       FROM skill_governance
+       WHERE
+         workspace_id = $1
+         AND change_type = 'skill_schedule'
+         AND change_payload->>'skill_id' = $2
+       ORDER BY deployed_at DESC
+       LIMIT 50`,
+      [workspaceId, skillId]
+    );
+
+    return res.json({
+      history: result.rows.map(row => ({
+        id: row.id,
+        change_description: row.change_description,
+        change_payload: row.change_payload,
+        supersedes_snapshot: row.supersedes_snapshot,
+        deployed_at: row.deployed_at,
+        deployed_by: row.deployed_by,
+        status: row.status,
+      })),
+    });
+  } catch (err) {
+    console.error('[skills] Error fetching skill history:', err);
     return res.status(500).json({ error: 'Internal server error' });
   }
 });

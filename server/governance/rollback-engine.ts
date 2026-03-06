@@ -26,6 +26,17 @@ export async function applyChange(
     case 'named_filter':
       await applyNamedFilter(workspaceId, record.change_payload);
       break;
+    case 'skill_schedule': {
+      const { skill_id, cron, enabled } = record.change_payload;
+      await query(
+        `INSERT INTO skill_schedules (workspace_id, skill_id, cron, enabled, updated_at)
+         VALUES ($1, $2, $3, $4, NOW())
+         ON CONFLICT (workspace_id, skill_id)
+         DO UPDATE SET cron = EXCLUDED.cron, enabled = EXCLUDED.enabled, updated_at = NOW()`,
+        [workspaceId, skill_id, cron, enabled]
+      );
+      break;
+    }
     default:
       throw new Error(`Unknown change_type: ${record.change_type}`);
   }
@@ -161,6 +172,25 @@ export async function rollbackChange(
       case 'named_filter':
         await removeNamedFilter(workspaceId, record.change_payload.filter_slug, record.supersedes_snapshot);
         break;
+      case 'skill_schedule': {
+        const { skill_id } = record.change_payload;
+        const snapshot = record.supersedes_snapshot;
+        if (snapshot === null) {
+          await query(
+            `DELETE FROM skill_schedules WHERE workspace_id = $1 AND skill_id = $2`,
+            [workspaceId, skill_id]
+          );
+        } else {
+          await query(
+            `INSERT INTO skill_schedules (workspace_id, skill_id, cron, enabled, updated_at)
+             VALUES ($1, $2, $3, $4, NOW())
+             ON CONFLICT (workspace_id, skill_id)
+             DO UPDATE SET cron = EXCLUDED.cron, enabled = EXCLUDED.enabled, updated_at = NOW()`,
+            [workspaceId, skill_id, snapshot.cron, snapshot.enabled]
+          );
+        }
+        break;
+      }
     }
 
     // Update governance record

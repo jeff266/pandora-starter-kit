@@ -45,6 +45,41 @@ interface SkillRun {
   createdAt: string;
 }
 
+interface SkillConfigHistory {
+  id: string;
+  change_description: string;
+  change_payload: { skill_id: string; cron: string | null; enabled: boolean };
+  supersedes_snapshot: { cron: string | null; enabled: boolean } | null;
+  deployed_at: string;
+  deployed_by: string;
+  status: 'deployed' | 'rolled_back';
+}
+
+const cronLabel = (cron: string | null): string => {
+  if (!cron) return 'Not set';
+  if (cron === '0 8 * * 1') return 'Weekly (Mon 8am)';
+  if (cron === '0 8 * * *') return 'Daily (8am)';
+  if (cron === '0 8 1 * *') return 'Monthly (1st, 8am)';
+  return cron;
+};
+
+const describeChange = (
+  payload: { cron: string | null; enabled: boolean },
+  previous: { cron: string | null; enabled: boolean } | null
+): string[] => {
+  if (!previous) {
+    return [`Schedule created: ${cronLabel(payload.cron)}, ${payload.enabled ? 'enabled' : 'disabled'}`];
+  }
+  const lines: string[] = [];
+  if (previous.enabled !== payload.enabled) {
+    lines.push(`Schedule: ${previous.enabled ? 'enabled' : 'disabled'} → ${payload.enabled ? 'enabled' : 'disabled'}`);
+  }
+  if (previous.cron !== payload.cron) {
+    lines.push(`Cadence: ${cronLabel(previous.cron)} → ${cronLabel(payload.cron)}`);
+  }
+  return lines;
+};
+
 const STATUS_DOT: Record<string, string> = {
   healthy: colors.green,
   warning: colors.yellow,
@@ -118,6 +153,8 @@ export default function SkillsPage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [runHistory, setRunHistory] = useState<SkillRun[]>([]);
   const [loadingRuns, setLoadingRuns] = useState(false);
+  const [configHistory, setConfigHistory] = useState<SkillConfigHistory[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
   const [runningSkills, setRunningSkills] = useState<Set<string>>(new Set());
   const [queuedSkills, setQueuedSkills] = useState<string[]>([]);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -179,16 +216,30 @@ export default function SkillsPage() {
     }
   };
 
+  const fetchConfigHistory = async (skillId: string) => {
+    setLoadingHistory(true);
+    try {
+      const data = await api.get(`/skills/${skillId}/history`);
+      setConfigHistory(data?.history || []);
+    } catch {
+      setConfigHistory([]);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
   const openDrawer = (skill: Skill) => {
     setSelectedSkill(skill);
     setDrawerOpen(true);
     fetchRunHistory(skill.id);
+    fetchConfigHistory(skill.id);
   };
 
   const closeDrawer = () => {
     setDrawerOpen(false);
     setSelectedSkill(null);
     setRunHistory([]);
+    setConfigHistory([]);
   };
 
   const runSkill = async (skillId: string, skillName: string, e?: React.MouseEvent) => {
@@ -227,6 +278,17 @@ export default function SkillsPage() {
         }
         return rest;
       });
+    }
+  };
+
+  const handleRevert = async (governanceId: string, skillId: string) => {
+    try {
+      await api.post(`/governance/${governanceId}/rollback`, { reason: 'Reverted via Skills UI' });
+      fetchConfigHistory(skillId);
+      loadDashboard();
+      showToast('Schedule reverted successfully', 'success');
+    } catch {
+      showToast('Failed to revert — please try again', 'error');
     }
   };
 
@@ -639,6 +701,76 @@ export default function SkillsPage() {
                         </span>
                       </div>
                     ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Configuration History */}
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 600, color: colors.textSecondary, marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Configuration History
+                </div>
+                {loadingHistory ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {[1, 2].map(i => (
+                      <div key={i} style={{ height: 52, background: colors.surface, borderRadius: 6, opacity: 0.6 }} />
+                    ))}
+                  </div>
+                ) : configHistory.length === 0 ? (
+                  <div style={{ fontSize: 12, color: colors.textMuted, padding: '16px 0' }}>
+                    No configuration changes recorded yet.
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {configHistory.map(entry => {
+                      const lines = describeChange(entry.change_payload, entry.supersedes_snapshot);
+                      const isRolledBack = entry.status === 'rolled_back';
+                      return (
+                        <div key={entry.id} style={{
+                          background: colors.surface,
+                          border: `1px solid ${isRolledBack ? colors.border : colors.border}`,
+                          borderRadius: 8, padding: '10px 12px',
+                          display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10,
+                          opacity: isRolledBack ? 0.65 : 1,
+                        }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            {lines.map((line, i) => (
+                              <div key={i} style={{ fontSize: 12, color: colors.text, lineHeight: 1.5 }}>
+                                {line}
+                              </div>
+                            ))}
+                            <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 4, display: 'flex', gap: 8, alignItems: 'center' }}>
+                              <span title={entry.deployed_at}>
+                                {formatTimeAgo(entry.deployed_at)}
+                              </span>
+                              <span style={{ color: colors.border }}>·</span>
+                              <span>{entry.deployed_by}</span>
+                              {isRolledBack && (
+                                <>
+                                  <span style={{ color: colors.border }}>·</span>
+                                  <span style={{ color: colors.textDim, fontStyle: 'italic' }}>reverted</span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                          <button
+                            disabled={isRolledBack}
+                            onClick={() => handleRevert(entry.id, selectedSkill!.id)}
+                            style={{
+                              fontSize: 11, fontWeight: 600, padding: '4px 10px',
+                              borderRadius: 6, flexShrink: 0,
+                              border: `1px solid ${isRolledBack ? colors.border : colors.accent}`,
+                              background: 'transparent',
+                              color: isRolledBack ? colors.textDim : colors.accent,
+                              cursor: isRolledBack ? 'default' : 'pointer',
+                              opacity: isRolledBack ? 0.5 : 1,
+                            }}
+                          >
+                            Revert
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
