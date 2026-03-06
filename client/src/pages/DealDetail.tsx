@@ -313,6 +313,7 @@ export default function DealDetail() {
   const [coachingNextStep, setCoachingNextStep] = useState<string | null>(null);
   const [meddicCoverage, setMeddicCoverage] = useState<{ covered_fields: string[]; field_signal_counts?: Record<string, number> } | null>(null);
   const { actions: inlineActions, executeAction, dismissAction } = useInlineActions(dealId);
+  const [showSignals, setShowSignals] = useState<boolean | null>(null);
 
   useEffect(() => {
     if (!pipelineEditing) return;
@@ -1180,35 +1181,84 @@ export default function DealDetail() {
       </div>
 
       {/* High Priority Signals */}
-      {inlineActions.length > 0 && (
+      {inlineActions.length > 0 && showSignals !== false && (
         <div style={{
           background: colors.surface,
           border: `1px solid ${colors.border}`,
           borderRadius: 10,
           padding: '14px 20px',
         }}>
-          <div style={{
-            fontSize: 11,
-            fontWeight: 600,
-            textTransform: 'uppercase',
-            letterSpacing: '0.07em',
-            color: colors.textMuted,
-            marginBottom: 12,
-            fontFamily: fonts.sans,
-          }}>
-            High Priority Signals
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {inlineActions.map((action) => (
-              <StageRecCard
-                key={action.id}
-                action={action}
-                onExecute={(overrideStage) => executeAction(action.id, overrideStage)}
-                onDismiss={() => dismissAction(action.id)}
-                compact={false}
-              />
-            ))}
-          </div>
+          {showSignals === null ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{
+                width: 28, height: 28, borderRadius: 6, flexShrink: 0,
+                background: colors.accentSoft, border: `1px solid ${colors.accentGlow}`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14,
+              }}>
+                ✦
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: colors.text, marginBottom: 3, fontFamily: fonts.sans }}>
+                  I found {inlineActions.length} high priority signal{inlineActions.length !== 1 ? 's' : ''} for this deal
+                </div>
+                <div style={{ fontSize: 11, color: colors.textMuted, fontFamily: fonts.sans }}>
+                  {inlineActions.filter(a => a.severity === 'critical').length > 0 && (
+                    <span style={{ color: colors.red, fontWeight: 600 }}>{inlineActions.filter(a => a.severity === 'critical').length} critical</span>
+                  )}
+                  {inlineActions.filter(a => a.severity === 'critical').length > 0 && inlineActions.filter(a => a.severity === 'warning').length > 0 && ' • '}
+                  {inlineActions.filter(a => a.severity === 'warning').length > 0 && (
+                    <span style={{ color: colors.orange, fontWeight: 600 }}>{inlineActions.filter(a => a.severity === 'warning').length} warning</span>
+                  )}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                <button
+                  onClick={() => setShowSignals(true)}
+                  style={{
+                    padding: '6px 12px', fontSize: 11, fontWeight: 600, border: 'none',
+                    borderRadius: 6, cursor: 'pointer', background: colors.accent, color: '#fff',
+                    fontFamily: fonts.sans, boxShadow: `0 0 12px ${colors.accentGlow}`,
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.opacity = '0.9')}
+                  onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
+                >
+                  Yes, show signals
+                </button>
+                <button
+                  onClick={() => setShowSignals(false)}
+                  style={{
+                    padding: '6px 12px', fontSize: 11, fontWeight: 500,
+                    border: `1px solid ${colors.border}`, borderRadius: 6, cursor: 'pointer',
+                    background: 'transparent', color: colors.textSecondary, fontFamily: fonts.sans,
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.color = colors.text)}
+                  onMouseLeave={e => (e.currentTarget.style.color = colors.textSecondary)}
+                >
+                  No thanks
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div style={{
+                fontSize: 11, fontWeight: 600, textTransform: 'uppercase',
+                letterSpacing: '0.07em', color: colors.textMuted, marginBottom: 12, fontFamily: fonts.sans,
+              }}>
+                High Priority Signals
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {inlineActions.map((action) => (
+                  <StageRecCard
+                    key={action.id}
+                    action={action}
+                    onExecute={(overrideStage) => executeAction(action.id, overrideStage)}
+                    onDismiss={() => dismissAction(action.id)}
+                    compact={false}
+                  />
+                ))}
+              </div>
+            </>
+          )}
         </div>
       )}
 

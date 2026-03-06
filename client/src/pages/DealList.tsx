@@ -50,6 +50,7 @@ interface DealRow {
   days_since_last_call?: number | null;
   divergence_flag?: boolean;
   action_count?: number;
+  critical_action_count?: number;
 }
 
 type SortField = 'name' | 'amount' | 'stage' | 'owner' | 'close_date' | 'health' | 'days_in_stage' | 'last_call' | 'signals';
@@ -121,12 +122,14 @@ export default function DealList() {
         api.get('/actions/summary-by-deal').catch(() => ({ data: { deals: [] } })),
       ]);
 
-      // Build action count map
+      // Build action count maps from flat object keyed by deal_id
       const actionCounts = new Map<string, number>();
-      if (actionSummary?.data?.deals) {
-        for (const dealSummary of actionSummary.data.deals) {
-          actionCounts.set(dealSummary.deal_id, dealSummary.open_count);
-        }
+      const criticalCounts = new Map<string, number>();
+      const summaryData = actionSummary?.data || {};
+      for (const [dealId, s] of Object.entries(summaryData) as [string, any][]) {
+        const total = (s.critical || 0) + (s.warning || 0) + (s.info || 0);
+        if (total > 0) actionCounts.set(dealId, total);
+        if (s.critical > 0) criticalCounts.set(dealId, s.critical);
       }
 
       const riskDeals: DealRow[] = (riskData?.deals || []).map((d: any) => ({
@@ -153,6 +156,7 @@ export default function DealList() {
         days_since_last_call: d.days_since_last_call ?? null,
         divergence_flag: d.divergence_flag ?? false,
         action_count: actionCounts.get(d.deal_id) || 0,
+        critical_action_count: criticalCounts.get(d.deal_id) || 0,
       }));
 
       const riskDealIds = new Set(riskDeals.map(d => d.id));
@@ -184,6 +188,7 @@ export default function DealList() {
             mechanical_grade: null,
             active_source: undefined,
             action_count: actionCounts.get(d.id) || 0,
+            critical_action_count: criticalCounts.get(d.id) || 0,
           };
         });
 
@@ -524,7 +529,7 @@ export default function DealList() {
                       <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                         {deal.signal_counts.act > 0 && <span style={{ width: 6, height: 6, borderRadius: '50%', background: severityColor('act'), display: 'inline-block' }} />}
                         {deal.signal_counts.watch > 0 && <span style={{ width: 6, height: 6, borderRadius: '50%', background: severityColor('watch'), display: 'inline-block' }} />}
-                        {deal.action_count && deal.action_count > 0 && <span style={{ width: 6, height: 6, borderRadius: '50%', background: colors.accent, display: 'inline-block' }} title={`${deal.action_count} pending action${deal.action_count > 1 ? 's' : ''}`} />}
+                        {deal.action_count && deal.action_count > 0 && <span style={{ width: 6, height: 6, borderRadius: '50%', background: deal.critical_action_count ? colors.red : colors.orange, display: 'inline-block' }} title={`${deal.action_count} pending action${deal.action_count > 1 ? 's' : ''}`} />}
                       </span>
                     )}
                   </div>
@@ -668,17 +673,18 @@ export default function DealList() {
                     <span
                       style={{
                         fontSize: 9,
-                        fontWeight: 600,
+                        fontWeight: 700,
                         padding: '2px 6px',
                         borderRadius: 4,
-                        background: colors.accentSoft,
-                        color: colors.accent,
+                        background: deal.critical_action_count ? `${colors.red}22` : `${colors.orange}22`,
+                        color: deal.critical_action_count ? colors.red : colors.orange,
                         fontFamily: fonts.sans,
                         cursor: 'pointer',
+                        letterSpacing: '0.04em',
                       }}
                       title={`${deal.action_count} pending action${deal.action_count > 1 ? 's' : ''}`}
                     >
-                      {deal.action_count} ACTION{deal.action_count > 1 ? 'S' : ''}
+                      {deal.critical_action_count ? '⚠ ' : ''}{deal.action_count} ACTION{deal.action_count > 1 ? 'S' : ''}
                     </span>
                   )}
                 </div>

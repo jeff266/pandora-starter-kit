@@ -1259,44 +1259,40 @@ export async function runPandoraAgent(
     // Extract deal IDs from cited records
     const citedRecords = extractCitedRecords(toolTrace);
     const dealIds = citedRecords
-      .filter(r => r.entity_type === 'deal')
+      .filter(r => r.type === 'deal')
       .map(r => r.id)
       .filter((id, index, arr) => arr.indexOf(id) === index) // dedupe
-      .slice(0, 1); // Only include actions for the primary deal
+      .slice(0, 5); // Check up to 5 cited deals
 
     if (dealIds.length > 0) {
       const { query: dbQuery } = await import('../db.js');
-      const dealId = dealIds[0];
 
-      // Fetch open actions for this deal
+      // Fetch open actions for all cited deals in one query
       const actionsResult = await dbQuery(`
         SELECT
-          id, action_type, severity, title, summary,
-          execution_payload, impact_label, urgency_label,
-          created_at, target_entity_id
-        FROM actions
-        WHERE workspace_id = $1
-          AND target_entity_id = $2
-          AND execution_status = 'open'
-          AND severity IN ('critical', 'warning')
-        ORDER BY
-          CASE severity
-            WHEN 'critical' THEN 1
-            WHEN 'warning' THEN 2
-            ELSE 3
-          END,
-          created_at DESC
-        LIMIT 2
-      `, [workspaceId, dealId]);
+          a.id, a.action_type, a.severity, a.title, a.summary,
+          a.execution_payload, a.impact_label, a.urgency_label,
+          a.created_at, a.target_entity_id,
+          d.name as deal_name,
+          ROW_NUMBER() OVER (
+            PARTITION BY a.target_entity_id
+            ORDER BY
+              CASE a.severity WHEN 'critical' THEN 1 WHEN 'warning' THEN 2 ELSE 3 END,
+              a.created_at DESC
+          ) as rn
+        FROM actions a
+        LEFT JOIN deals d ON d.id = a.target_entity_id
+        WHERE a.workspace_id = $1
+          AND a.target_entity_id = ANY($2::uuid[])
+          AND a.execution_status = 'open'
+          AND a.severity IN ('critical', 'warning')
+      `, [workspaceId, dealIds]);
 
-      if (actionsResult.rows.length > 0) {
-        const { query: dealsQuery } = await import('../db.js');
-        const dealResult = await dealsQuery(`
-          SELECT name FROM deals WHERE id = $1 LIMIT 1
-        `, [dealId]);
-        const dealName = dealResult.rows[0]?.name;
+      // Keep up to 2 actions per deal
+      const rows = actionsResult.rows.filter((row: any) => row.rn <= 2);
 
-        inlineActions = actionsResult.rows.map(row => ({
+      if (rows.length > 0) {
+        inlineActions = rows.map((row: any) => ({
           id: row.id,
           action_type: row.action_type,
           severity: row.severity,
@@ -1309,10 +1305,10 @@ export async function runPandoraAgent(
           impact_label: row.impact_label,
           urgency_label: row.urgency_label,
           created_at: row.created_at,
-          deal_name: dealName,
+          deal_name: row.deal_name,
         }));
 
-        console.log(`[PandoraAgent] Injected ${inlineActions.length} inline action(s) for deal ${dealId}`);
+        console.log(`[PandoraAgent] Injected ${inlineActions.length} inline action(s) for ${dealIds.length} deal(s)`);
       }
     }
   } catch (err) {
