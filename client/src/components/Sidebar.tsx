@@ -361,6 +361,47 @@ export default function Sidebar({ badges, showAllClients, collapsed = false, onT
           </div>
           );
         })}
+
+        {/* Admin section — only for workspace admins */}
+        {currentWorkspace?.role === 'admin' && (
+          <div style={{ marginBottom: 4 }}>
+            {!collapsed && (
+              <div style={{ padding: '10px 16px 4px' }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: colors.textSecondary, letterSpacing: '0.08em' }}>ADMIN</span>
+              </div>
+            )}
+            {collapsed && <div style={{ height: 1, background: colors.border, margin: '6px 10px' }} />}
+            {[
+              { label: 'Token Usage', path: '/admin/token-usage', icon: '◈' },
+              { label: 'Billing Meter', path: '/admin/billing', icon: '◎' },
+              { label: 'Scopes', path: '/admin/scopes', icon: '◫' },
+            ].map(item => {
+              const active = isActive(item.path);
+              return (
+                <div
+                  key={item.path}
+                  onClick={() => mobileNav(item.path)}
+                  title={collapsed ? item.label : undefined}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: collapsed ? 0 : 8,
+                    padding: collapsed ? '7px 0' : '7px 14px', marginLeft: collapsed ? 0 : 2,
+                    justifyContent: collapsed ? 'center' : 'flex-start',
+                    cursor: 'pointer', fontSize: 13,
+                    color: active ? colors.accent : colors.textSecondary,
+                    background: active ? colors.accentSoft : 'transparent',
+                    borderLeft: collapsed ? 'none' : (active ? `2px solid ${colors.accent}` : '2px solid transparent'),
+                    transition: 'background 0.1s',
+                  }}
+                  onMouseEnter={e => { if (!active) e.currentTarget.style.background = colors.surfaceHover; }}
+                  onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent'; }}
+                >
+                  <span style={{ fontSize: 14, width: 18, textAlign: 'center', opacity: 0.8 }}>{item.icon}</span>
+                  {!collapsed && <span style={{ flex: 1, fontWeight: active ? 600 : 400 }}>{item.label}</span>}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </nav>
 
       <div style={{ borderTop: `1px solid ${colors.border}`, padding: collapsed ? '10px 0' : '10px 14px' }}>

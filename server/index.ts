@@ -269,8 +269,6 @@ app.use("/api/users/me/notifications", requireUserSession, userNotificationsRout
 
 app.use("/api/consultant", consultantRouter);
 
-app.use('/api/admin', requireAdmin, billingAdminRouter);
-
 app.post('/api/admin/migrate-credentials', requireAdmin, async (_req, res) => {
   try {
     const { migrateCredentials } = await import('./lib/migrate-credentials.js');
@@ -374,6 +372,7 @@ workspaceApiRouter.use(webhookEndpointsRouter);
 workspaceApiRouter.use(scoringStateRouter);
 workspaceApiRouter.use(agentBuilderRouter);
 workspaceApiRouter.use(adminScopesRouter);
+workspaceApiRouter.use(billingAdminRouter);
 workspaceApiRouter.use(targetsRouter);
 workspaceApiRouter.use(reportsRouter);
 workspaceApiRouter.use(sqlWorkspaceRouter);

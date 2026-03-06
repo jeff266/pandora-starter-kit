@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { colors, fonts } from '../../styles/theme';
 import { api } from '../../lib/api';
+import { useWorkspace } from '../../context/WorkspaceContext';
 
 interface BillingRow {
   workspace_id: string;
@@ -77,6 +78,7 @@ interface InvoiceModal {
 }
 
 export default function BillingMeterPage() {
+  const { currentWorkspace } = useWorkspace();
   const [period, setPeriod] = useState(currentPeriod());
   const [data, setData] = useState<BillingResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -172,7 +174,9 @@ export default function BillingMeterPage() {
   };
 
   const doExport = () => {
-    window.open(`/api/admin/billing/export?period=${period}`, '_blank');
+    const wsId = currentWorkspace?.id;
+    if (!wsId) return;
+    window.open(`/api/workspaces/${wsId}/admin/billing/export?period=${period}`, '_blank');
   };
 
   const { summary, rows } = data ?? { summary: null, rows: [] };
