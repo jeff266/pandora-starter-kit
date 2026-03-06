@@ -1,0 +1,109 @@
+Read REPLIT_CONTEXT.md before starting.
+
+Two priority items before any new feature work, then one UX surface task.
+
+---
+
+## Priority 1: Audit context.stepOutputs → context.stepResults (Systemic Bug)
+
+Last sprint found that persistAccuracyScores and persistVelocityBenchmarks were 
+both reading from context.stepOutputs — which doesn't exist. The correct property 
+is context.stepResults. These were fixed, but the pattern may exist elsewhere.
+
+Search the entire codebase for context.stepOutputs:
+
+  grep -r "context\.stepOutputs" server/
+
+For every occurrence found:
+  1. Identify which skill and which step it's in
+  2. Confirm whether context.stepResults is the correct replacement
+     (check how adjacent steps in the same skill reference context)
+  3. Replace context.stepOutputs with context.stepResults
+  4. Note the file and step name in your completion summary
+
+Then run a broader check for any other likely mismatches — search for 
+context.outputs, context.results, context.stepData as variants that may 
+also be wrong:
+
+  grep -r "context\.\(outputs\|results\|stepData\)" server/skills/
+
+Report every file with a mismatch. Fix all of them.
+
+After fixing: re-run forecast-accuracy-tracking and stage-velocity-benchmarks 
+one more time to confirm the originally fixed steps still write correctly after 
+the broader audit changes.
+
+This is a correctness audit. Do not move to Priority 2 until it's complete.
+
+---
+
+## Priority 2: Surface Frontera RFM Data Gap via Data Quality Audit
+
+The RFM narrative ran correctly on Frontera but produced group-level guidance 
+only because deals have no linked activity signals (no calls or meetings 
+associated with deals). The skill code handled this gracefully and said so —
+"This run used recency + momentum only." That's correct behavior.
+
+But the workspace owner doesn't know their activity data is missing. 
+Surface it.
+
+In the Data Quality Audit skill output for Frontera, add a check for 
+activity-to-deal linkage rate:
+
+  In the existing data quality compute function, add:
+  
+  activityDealLinkage: {
+    totalActivities: number,        -- COUNT(*) from activities table
+    activitiesLinkedToDeals: number, -- COUNT(*) WHERE deal_id IS NOT NULL
+    linkageRate: number,            -- percentage
+    flag: boolean                   -- true if linkageRate < 50%
+  }
+
+If flag is true, add a finding to the Data Quality Audit output:
+  severity: 'high'
+  finding: 'X% of activities are not linked to deals. Skills that rely on 
+    deal-level engagement signals (RFM Scoring, Deal Risk Review, Single 
+    Thread Alert) will produce reduced-quality output until activities are 
+    associated with deals.'
+  recommended_action: 'In HubSpot, ensure call and meeting records are 
+    logged against deal records, not just contact records.'
+
+This turns a silent quality degradation into a visible, actionable finding.
+
+---
+
+## Priority 3: Renderer Consistency Audit
+
+The bonus fix last sprint updated the skill run renderer to surface 
+output_text and result.report fields. Confirm this fix is consistent 
+across all output shapes in the runs history page.
+
+Check the renderer handles all four cases without falling through to raw JSON:
+
+  Case 1: result.narrative exists → render as markdown ✓ (existing)
+  Case 2: result.report exists → render as markdown ✓ (fixed last sprint)
+  Case 3: output_text exists → render as markdown ✓ (fixed last sprint)  
+  Case 4: status is 'skipped_insufficient_data' or output contains 
+    status: 'calibration_required' or status: 'building_baseline' or 
+    status: 'no_data' → render as amber "Insufficient Data" panel ✓ (fixed)
+
+Add one missing case that likely isn't handled yet:
+
+  Case 5: result is a plain object with no recognized text field
+    → render a collapsible "Raw output" panel (dark background, monospace) 
+      instead of nothing. Label it clearly: "Raw output — this skill may 
+      need a synthesis step."
+
+This prevents any future skill (including user-created custom skills that 
+have synthesis disabled) from producing a blank runs page.
+
+Test Cases 4 and 5 explicitly:
+  - Run forecast-model against a thin workspace → confirm amber panel renders
+  - Run a custom skill with synthesize disabled → confirm raw output panel renders
+
+---
+
+## What NOT to change
+- Do not modify any skill logic
+- Do not start Sprint 3 skill work until Priority 1 audit is complete
+- Do not change the Agent Builder
