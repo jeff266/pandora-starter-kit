@@ -23,6 +23,7 @@ import {
 import CompactAlerts from '../components/command-center/CompactAlerts';
 import AnnotatedPipelineChart from '../components/command-center/AnnotatedPipelineChart';
 import ConnectorStatusStrip from '../components/command-center/ConnectorStatusStrip';
+import AgentConversationFeed, { type ToolCallEvent } from '../components/assistant/AgentConversationFeed';
 
 interface FindingAssumption {
   label: string;
@@ -209,6 +210,8 @@ export default function CommandCenter() {
   const [metricBreakdown, setMetricBreakdown] = useState<string | null>(null);
   const [activeMetric, setActiveMetric] = useState<string | null>(null);
   const [greetingData, setGreetingData] = useState<any>(null);
+  const [latestFeed, setLatestFeed] = useState<{ operators: any[]; events: ToolCallEvent[] } | null>(null);
+  const [feedCollapsed, setFeedCollapsed] = useState(true);
 
   useEffect(() => {
     const tickInterval = setInterval(() => setTick(t => t + 1), 30000);
@@ -358,6 +361,9 @@ export default function CommandCenter() {
   useEffect(() => {
     if (!wsId) return;
     api.get(`/briefing/greeting?localHour=${new Date().getHours()}`).then(setGreetingData).catch(() => {});
+    api.get('/briefing/latest-feed').then((data: any) => {
+      if (data?.operators?.length > 0) setLatestFeed(data);
+    }).catch(() => {});
   }, [wsId]);
 
   const stageData: PipelineStage[] = pipeline?.by_stage || [];
@@ -819,6 +825,50 @@ export default function CommandCenter() {
           />
         </div>
       </SectionErrorBoundary>
+
+      {/* How we got here — operator reasoning replay */}
+      {latestFeed && latestFeed.operators.length > 0 && (
+        <SectionErrorBoundary fallbackMessage="Failed to load operator feed.">
+          <div style={{
+            background: colors.surface,
+            border: `1px solid ${colors.border}`,
+            borderRadius: 10,
+            overflow: 'hidden',
+          }}>
+            <div
+              onClick={() => setFeedCollapsed(c => !c)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                padding: '10px 16px',
+                cursor: 'pointer',
+                borderBottom: feedCollapsed ? 'none' : `1px solid ${colors.border}`,
+                userSelect: 'none',
+              }}
+            >
+              <span style={{ display: 'flex', gap: 3 }}>
+                {latestFeed.operators.slice(0, 4).map((op: any) => (
+                  <span key={op.agent_id} style={{ fontSize: 13 }}>{op.icon}</span>
+                ))}
+              </span>
+              <span style={{ fontSize: 12, fontWeight: 600, color: colors.text, flex: 1 }}>How we got here</span>
+              <span style={{ fontSize: 11, color: colors.textMuted }}>
+                {latestFeed.operators.length} analyst{latestFeed.operators.length !== 1 ? 's' : ''} ran
+              </span>
+              <span style={{ fontSize: 11, color: colors.textMuted, marginLeft: 4 }}>{feedCollapsed ? '↓' : '↑'}</span>
+            </div>
+            {!feedCollapsed && (
+              <div style={{ padding: 16 }}>
+                <AgentConversationFeed
+                  operators={latestFeed.operators}
+                  toolCalls={latestFeed.events}
+                  phase="complete"
+                  onOperatorClick={undefined}
+                />
+              </div>
+            )}
+          </div>
+        </SectionErrorBoundary>
+      )}
 
       {/* Pipeline by Stage — full width */}
       <SectionErrorBoundary fallbackMessage="Failed to load pipeline chart.">

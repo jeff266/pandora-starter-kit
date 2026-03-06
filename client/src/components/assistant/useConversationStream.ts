@@ -4,6 +4,7 @@ import type { OperatorProgress } from './AgentChip';
 import type { EvidenceCardData } from './EvidenceCard';
 import type { RecommendedAction } from './ActionCard';
 import type { DeliverableOption } from './DeliverablePicker';
+import type { ToolCallEvent } from './AgentConversationFeed';
 
 export interface ConversationMessage {
   id: string;
@@ -17,6 +18,7 @@ export interface ConversationState {
   phase: 'idle' | 'recruiting' | 'findings' | 'synthesis' | 'complete';
   messages: ConversationMessage[];
   activeOperators: OperatorProgress[];
+  toolCalls: ToolCallEvent[];
   synthesisText: string;
   synthesisComplete: boolean;
   evidenceCards: EvidenceCardData[];
@@ -41,6 +43,7 @@ const initial: ConversationState = {
   phase: 'idle',
   messages: [],
   activeOperators: [],
+  toolCalls: [],
   synthesisText: '',
   synthesisComplete: false,
   evidenceCards: [],
@@ -65,6 +68,8 @@ function reducer(state: ConversationState, action: Action): ConversationState {
       phase: 'recruiting',
       synthesisText: '',
       synthesisComplete: false,
+      activeOperators: [],
+      toolCalls: [],
       evidenceCards: [],
       actions: [],
       deliverableOptions: [],
@@ -76,6 +81,17 @@ function reducer(state: ConversationState, action: Action): ConversationState {
   if (action.type === 'STREAM_EVENT') {
     const ev = action.event;
     switch (ev.type) {
+      case 'tool_call': {
+        return {
+          ...state,
+          toolCalls: [...state.toolCalls, {
+            agent_id: ev.agent_id,
+            tool_name: ev.tool_name,
+            label: ev.label,
+            ts: ev.ts ?? Date.now(),
+          }],
+        };
+      }
       case 'recruiting': {
         const existing = state.activeOperators.find(o => o.agent_id === ev.agent_id);
         if (existing) return state;

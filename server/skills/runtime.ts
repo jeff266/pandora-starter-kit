@@ -96,7 +96,8 @@ export class SkillRuntime {
     skill: SkillDefinition,
     workspaceId: string,
     params?: any,
-    userId?: string
+    userId?: string,
+    onStep?: (stepId: string, stepName: string) => void
   ): Promise<SkillResult> {
     const runId = randomUUID();
     const startTime = Date.now();
@@ -248,6 +249,9 @@ export class SkillRuntime {
 
         try {
           console.log(`[Skill Runtime] Executing step: ${step.id} (${step.tier})`);
+
+          // Fire onStep callback so callers can stream progress to the frontend
+          try { onStep?.(step.id, step.name || step.id); } catch {}
 
           const result = await this.executeStep(step, context);
           context.stepResults[step.outputKey] = result;

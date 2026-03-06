@@ -965,7 +965,8 @@ async function classifyQuestion(workspaceId: string, question: string): Promise<
 export async function runPandoraAgent(
   workspaceId: string,
   message: string,
-  conversationHistory: Array<{ role: 'user' | 'assistant'; content: any }>
+  conversationHistory: Array<{ role: 'user' | 'assistant'; content: any }>,
+  onToolCall?: (toolName: string, label: string) => void
 ): Promise<PandoraResponse> {
   const startTime = Date.now();
   const toolTrace: PandoraToolCall[] = [];
@@ -1088,6 +1089,9 @@ export async function runPandoraAgent(
     for (const toolCall of response.toolCalls) {
       let result: any;
       let isError = false;
+
+      // Notify caller about this tool call (for streaming to frontend)
+      try { onToolCall?.(toolCall.name, toolCall.name); } catch {}
 
       try {
         result = await executeDataTool(workspaceId, toolCall.name, toolCall.input);

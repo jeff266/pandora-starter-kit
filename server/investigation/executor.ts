@@ -119,6 +119,7 @@ export async function executeInvestigation(
   plan: InvestigationPlan,
   callbacks: {
     onStepStart?: (step: InvestigationStep) => void;
+    onSkillStep?: (step: InvestigationStep, stepId: string, stepName: string) => void;
     onStepComplete?: (step: InvestigationStep, findings: string[]) => void;
     onFollowUpDecided?: (fromStep: number, newStep: InvestigationStep) => void;
     onSynthesisStart?: () => void;
@@ -171,7 +172,9 @@ export async function executeInvestigation(
         } else {
           const skillDef = registry.get(step.skill_id);
           if (skillDef) {
-            const result = await skillRuntime.executeSkill(skillDef, plan.workspace_id, {});
+            const result = await skillRuntime.executeSkill(skillDef, plan.workspace_id, {}, undefined,
+              callbacks.onSkillStep ? (sId, sName) => callbacks.onSkillStep!(step, sId, sName) : undefined
+            );
             skillResult = result;
             step.used_cache = false;
           } else {
@@ -182,7 +185,9 @@ export async function executeInvestigation(
       } else {
         const skillDef = registry.get(step.skill_id);
         if (skillDef) {
-          const result = await skillRuntime.executeSkill(skillDef, plan.workspace_id, {});
+          const result = await skillRuntime.executeSkill(skillDef, plan.workspace_id, {}, undefined,
+            callbacks.onSkillStep ? (sId, sName) => callbacks.onSkillStep!(step, sId, sName) : undefined
+          );
           skillResult = result;
           step.used_cache = false;
         } else {

@@ -5,12 +5,12 @@ import { useNavigate } from 'react-router-dom';
 import { colors } from '../../styles/theme';
 import { useConversationStream } from './useConversationStream';
 import { getWorkspaceId, getAuthToken } from '../../lib/api';
-import AgentChip from './AgentChip';
 import EvidenceCard from './EvidenceCard';
 import ActionCard from './ActionCard';
 import DeliverablePicker from './DeliverablePicker';
 import StickyInput from './StickyInput';
 import MessageFeedback from './MessageFeedback';
+import AgentConversationFeed from './AgentConversationFeed';
 
 interface ConversationViewProps {
   initialMessage?: string;
@@ -190,22 +190,16 @@ export default function ConversationView({ initialMessage, onBack }: Conversatio
         ))}
 
         {state.activeOperators.length > 0 && (
-          <div ref={latestAnswerRef} style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
-              Consulting Operators
-            </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {state.activeOperators.map(op => {
-                const route = AGENT_ROUTES[op.agent_id];
-                return (
-                  <AgentChip
-                    key={op.agent_id}
-                    operator={op}
-                    onClick={route ? () => navigate(route) : undefined}
-                  />
-                );
-              })}
-            </div>
+          <div ref={latestAnswerRef}>
+            <AgentConversationFeed
+              operators={state.activeOperators}
+              toolCalls={state.toolCalls}
+              phase={state.phase}
+              onOperatorClick={(agentId) => {
+                const route = AGENT_ROUTES[agentId];
+                if (route) navigate(route);
+              }}
+            />
           </div>
         )}
 

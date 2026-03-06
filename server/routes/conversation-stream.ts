@@ -291,7 +291,9 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
           const registry = getSkillRegistry();
           const skillDef = registry.get(primarySkill);
           if (skillDef) {
-            const result = await getSkillRuntime().executeSkill(skillDef, workspaceId, {});
+            const result = await getSkillRuntime().executeSkill(skillDef, workspaceId, {}, undefined, (stepId, stepName) => {
+              sse(res, { type: 'tool_call', agent_id: primarySkill, tool_name: stepId, label: stepName, ts: Date.now() });
+            });
             skillRun = {
               id: result.runId,
               skill_id: primarySkill,
@@ -351,7 +353,10 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
           (history as Array<{ role: string; content: string }>).map(m => ({
             role: m.role as 'user' | 'assistant',
             content: m.content,
-          }))
+          })),
+          (toolName, _label) => {
+            sse(res, { type: 'tool_call', agent_id: primarySkill, tool_name: toolName, label: toolName, ts: Date.now() });
+          }
         );
         assistantResponse = pandoraT1.answer;
         const tier1NoRunId = randomUUID();
@@ -412,11 +417,10 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
 
       if (usedFallback) {
         // Fallback: route to the tool-calling agent so live data is available
+        const fallbackOp = FALLBACK_OPERATORS[0];
         for (const op of FALLBACK_OPERATORS) {
           sse(res, { type: 'recruiting', agent_id: op.id, agent_name: op.name, icon: op.icon, color: op.color, task: op.task });
           sse(res, { type: 'agent_thinking', agent_id: op.id });
-          sse(res, { type: 'agent_found', agent_id: op.id, finding_preview: 'Pulling live data' });
-          sse(res, { type: 'agent_done', agent_id: op.id, finding: { agent_id: op.id, agent_name: op.name, summary: 'Analysis complete', severity: 'info' } });
         }
 
         sse(res, { type: 'synthesis_start' });
@@ -426,8 +430,16 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
           message,
           (history as Array<{ role: string; content: string }>)
             .filter(m => m.role && m.content)
-            .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }))
+            .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+          (toolName, _label) => {
+            const fbAgentId = fallbackOp?.id ?? 'ask-pandora';
+            sse(res, { type: 'tool_call', agent_id: fbAgentId, tool_name: toolName, label: toolName, ts: Date.now() });
+          }
         );
+
+        for (const op of FALLBACK_OPERATORS) {
+          sse(res, { type: 'agent_done', agent_id: op.id, finding: { agent_id: op.id, agent_name: op.name, summary: 'Analysis complete', severity: 'info' } });
+        }
         assistantResponse = pandoraFallback.answer;
         const fallbackResponseId = randomUUID();
         sse(res, { type: 'synthesis_chunk', text: pandoraFallback.answer });
@@ -474,6 +486,9 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
         const result = await executeInvestigation(plan!, {
           onStepStart: (step: InvestigationStep) => {
             sse(res, { type: 'agent_thinking', agent_id: step.skill_id });
+          },
+          onSkillStep: (step: InvestigationStep, stepId: string, stepName: string) => {
+            sse(res, { type: 'tool_call', agent_id: step.skill_id, tool_name: stepId, label: stepName, ts: Date.now() });
           },
           onStepComplete: (step: InvestigationStep, findings: string[]) => {
             const preview = findings[0] ?? `Analysis complete for ${step.operator_name ?? step.skill_id}`;

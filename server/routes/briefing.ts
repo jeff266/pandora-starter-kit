@@ -119,6 +119,92 @@ router.get('/:workspaceId/briefing/brief', async (req: Request, res: Response): 
   }
 });
 
+router.get('/:workspaceId/briefing/latest-feed', requireWorkspaceAccess, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const workspaceId = req.params.workspaceId as string;
+
+    const OPERATOR_META: Record<string, { name: string; icon: string; color: string }> = {
+      'forecast-rollup':           { name: 'Forecast Analyst',  icon: '🎯', color: '#7C6AE8' },
+      'deal-risk-review':          { name: 'Deal Analyst',       icon: '🔍', color: '#FB923C' },
+      'pipeline-coverage':         { name: 'Pipeline Analyst',   icon: '📊', color: '#22D3EE' },
+      'pipeline-hygiene':          { name: 'Pipeline Inspector', icon: '🔬', color: '#22D3EE' },
+      'rep-scorecard':             { name: 'Coaching Analyst',   icon: '🏋️', color: '#34D399' },
+      'weekly-recap':              { name: 'Recap Analyst',      icon: '📋', color: '#A78BFA' },
+      'data-quality-audit':        { name: 'Data Quality',       icon: '🧹', color: '#F59E0B' },
+      'pipeline-waterfall':        { name: 'Waterfall Analyst',  icon: '💧', color: '#38BDF8' },
+      'stage-velocity-benchmarks': { name: 'Velocity Analyst',   icon: '⚡', color: '#F472B6' },
+      'bowtie-analysis':           { name: 'Bowtie Analyst',     icon: '🎀', color: '#FB923C' },
+      'forecast-model':            { name: 'Forecast Model',     icon: '📈', color: '#818CF8' },
+      'lead-scoring':              { name: 'Lead Scorer',        icon: '⭐', color: '#FBBF24' },
+    };
+
+    const runsResult = await query<{
+      skill_id: string;
+      status: string;
+      output_text: string | null;
+      steps: any;
+      started_at: string;
+      completed_at: string | null;
+      duration_ms: number | null;
+    }>(
+      `SELECT skill_id, status, output_text, steps, started_at, completed_at, duration_ms
+       FROM skill_runs
+       WHERE workspace_id = $1 AND status = 'completed'
+       ORDER BY completed_at DESC
+       LIMIT 5`,
+      [workspaceId]
+    );
+
+    if (runsResult.rows.length === 0) {
+      res.json({ operators: [], events: [] });
+      return;
+    }
+
+    const operators: Array<{ agent_id: string; agent_name: string; icon: string; color: string; phase: string; finding_preview?: string }> = [];
+    const events: Array<{ agent_id: string; tool_name: string; label: string; ts: number }> = [];
+
+    const seen = new Set<string>();
+    let baseTs = Date.now() - 60000;
+
+    for (const row of runsResult.rows) {
+      const meta = OPERATOR_META[row.skill_id] || { name: row.skill_id, icon: '⚙️', color: '#6B7280' };
+      if (!seen.has(row.skill_id)) {
+        seen.add(row.skill_id);
+
+        const preview = row.output_text
+          ? row.output_text.replace(/^#+\s*/m, '').replace(/\n.*/s, '').substring(0, 80)
+          : undefined;
+
+        operators.push({
+          agent_id: row.skill_id,
+          agent_name: meta.name,
+          icon: meta.icon,
+          color: meta.color,
+          phase: 'done',
+          finding_preview: preview,
+        });
+
+        if (Array.isArray(row.steps)) {
+          for (const step of row.steps) {
+            const stepName = (step.name || step.id || 'Processing').replace(/_/g, ' ');
+            events.push({ agent_id: row.skill_id, tool_name: step.id || 'step', label: stepName, ts: baseTs });
+            baseTs += 800;
+          }
+        } else {
+          events.push({ agent_id: row.skill_id, tool_name: 'analyze', label: 'Analyzing data', ts: baseTs });
+          baseTs += 800;
+        }
+      }
+    }
+
+    res.json({ operators, events });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[briefing] latest-feed error:', msg);
+    res.status(500).json({ error: msg });
+  }
+});
+
 router.get('/:workspaceId/briefing/operators', async (req: Request, res: Response): Promise<void> => {
   try {
     const workspaceId = req.params.workspaceId as string;
