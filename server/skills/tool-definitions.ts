@@ -2117,25 +2117,35 @@ Required weekly pipeline gen: ${weeklyGenStr}`;
 
         const activitiesResult = await query(
           `SELECT deal_id, activity_type, COUNT(*)::int as cnt,
-                  MAX(timestamp) as last_date
+                  MAX(timestamp) FILTER (WHERE timestamp <= NOW()) as last_completed_date,
+                  MIN(timestamp) FILTER (WHERE timestamp > NOW()) as next_scheduled_date
            FROM activities
            WHERE workspace_id = $1 AND deal_id = ANY($2)
            GROUP BY deal_id, activity_type
-           ORDER BY deal_id, last_date DESC`,
+           ORDER BY deal_id, last_completed_date DESC NULLS LAST`,
           [context.workspaceId, dealIds]
         );
 
-        const actByDeal = new Map<string, { types: string; lastActivity: string }>();
-        const actMap = new Map<string, { types: string[]; lastDate: string }>();
+        const actByDeal = new Map<string, { types: string; lastCompleted: string | null; nextScheduled: string | null }>();
+        const actMap = new Map<string, { types: string[]; lastCompleted: string | null; nextScheduled: string | null }>();
         for (const row of activitiesResult.rows) {
           const key = row.deal_id;
-          if (!actMap.has(key)) actMap.set(key, { types: [], lastDate: row.last_date });
+          if (!actMap.has(key)) actMap.set(key, { types: [], lastCompleted: null, nextScheduled: null });
           const entry = actMap.get(key)!;
           entry.types.push(`${row.activity_type}:${row.cnt}`);
-          if (new Date(row.last_date) > new Date(entry.lastDate)) entry.lastDate = row.last_date;
+          if (row.last_completed_date) {
+            if (!entry.lastCompleted || new Date(row.last_completed_date) > new Date(entry.lastCompleted)) {
+              entry.lastCompleted = row.last_completed_date;
+            }
+          }
+          if (row.next_scheduled_date) {
+            if (!entry.nextScheduled || new Date(row.next_scheduled_date) < new Date(entry.nextScheduled)) {
+              entry.nextScheduled = row.next_scheduled_date;
+            }
+          }
         }
         for (const [did, data] of actMap) {
-          actByDeal.set(did, { types: data.types.join(', '), lastActivity: data.lastDate });
+          actByDeal.set(did, { types: data.types.join(', '), lastCompleted: data.lastCompleted, nextScheduled: data.nextScheduled });
         }
 
         // Fetch recent activity notes with body content (3 most recent per deal)
@@ -2192,15 +2202,31 @@ Required weekly pipeline gen: ${weeklyGenStr}`;
           const act = actByDeal.get(d.id);
           const contacts = contactsByDeal.get(d.id) || [];
           const notes = notesByDeal.get(d.id) || [];
-          const daysSinceActivity = act?.lastActivity
-            ? Math.floor((Date.now() - new Date(act.lastActivity).getTime()) / 86400000)
+          const daysSinceActivity = act?.lastCompleted
+            ? Math.floor((Date.now() - new Date(act.lastCompleted).getTime()) / 86400000)
+            : null;
+          const daysUntilScheduled = act?.nextScheduled
+            ? Math.floor((new Date(act.nextScheduled).getTime() - Date.now()) / 86400000)
             : null;
           const daysSinceUpdate = d.updated_at
             ? Math.floor((Date.now() - new Date(d.updated_at).getTime()) / 86400000)
             : null;
 
+          let activityLine: string;
+          if (!act) {
+            activityLine = `No activities | Updated: ${daysSinceUpdate !== null ? daysSinceUpdate + 'd ago' : 'N/A'}`;
+          } else if (daysSinceActivity !== null && daysUntilScheduled !== null) {
+            activityLine = `${act.types} | Last: ${daysSinceActivity}d ago | Next scheduled: ${daysUntilScheduled}d out`;
+          } else if (daysSinceActivity !== null) {
+            activityLine = `${act.types} | Last: ${daysSinceActivity}d ago`;
+          } else if (daysUntilScheduled !== null) {
+            activityLine = `${act.types} | No completed activities | Next scheduled: ${daysUntilScheduled}d out`;
+          } else {
+            activityLine = `${act.types} | Updated: ${daysSinceUpdate !== null ? daysSinceUpdate + 'd ago' : 'N/A'}`;
+          }
+
           let profile = `DEAL: ${d.name} | $${(d.amount || 0).toLocaleString()} | Stage: ${d.stage_normalized || d.stage} | Close: ${d.close_date || 'N/A'} | Owner: ${d.owner_name || 'N/A'}
-  Activity: ${act ? `${act.types} | Last: ${daysSinceActivity}d ago` : `No activities | Updated: ${daysSinceUpdate !== null ? daysSinceUpdate + 'd ago' : 'N/A'}`}
+  Activity: ${activityLine}
   Contacts (${contacts.length}): ${contacts.length > 0 ? contacts.slice(0, 5).join('; ') : 'None'}${contacts.length > 5 ? ` +${contacts.length - 5} more` : ''}
   Single-threaded: ${contacts.length <= 1 ? 'YES' : 'No'}`;
 

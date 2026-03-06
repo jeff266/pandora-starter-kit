@@ -183,7 +183,7 @@ export interface StaleDealItem {
 export function pickStaleDealFields(deal: any): StaleDealItem {
   const lastActivity = deal.last_activity_date ? new Date(deal.last_activity_date) : null;
   const daysStale = lastActivity
-    ? Math.floor((Date.now() - lastActivity.getTime()) / (1000 * 60 * 60 * 24))
+    ? Math.max(0, Math.floor((Date.now() - lastActivity.getTime()) / (1000 * 60 * 60 * 24)))
     : 999;
 
   return {
