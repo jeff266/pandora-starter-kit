@@ -179,10 +179,10 @@ export default function SkillBuilder({ editMode }: Props) {
   }, [editMode, skillId]);
 
   const canAdvance: Record<number, boolean> = {
-    1: skillName.length >= 3 && question.length >= 5,
-    2: !sqlMode ? selectedQueryId !== null : sql.length > 10,
+    0: skillName.length >= 3 && question.length >= 5,
+    1: !sqlMode ? selectedQueryId !== null : sql.length > 10,
+    2: true,
     3: true,
-    4: true,
   };
 
   const inferColumns = (sqlText: string): string[] => {
