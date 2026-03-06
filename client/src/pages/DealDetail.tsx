@@ -11,6 +11,8 @@ import { useDemoMode } from '../contexts/DemoModeContext';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { buildDealCrmUrl, buildConversationUrl, useCrmInfo } from '../lib/deeplinks';
 import { useWorkspace } from '../context/WorkspaceContext';
+import { useInlineActions } from '../hooks/useInlineActions';
+import StageRecCard from '../components/actions/StageRecCard';
 
 const SEVERITY_LABELS: Record<string, string> = {
   act: 'Critical', watch: 'Warning', notable: 'Notable', info: 'Info',
@@ -310,6 +312,7 @@ export default function DealDetail() {
   const [dealComposite, setDealComposite] = useState<{ label: string; color: string } | null>(null);
   const [coachingNextStep, setCoachingNextStep] = useState<string | null>(null);
   const [meddicCoverage, setMeddicCoverage] = useState<{ covered_fields: string[]; field_signal_counts?: Record<string, number> } | null>(null);
+  const { actions: inlineActions, executeAction, dismissAction } = useInlineActions(dealId);
 
   useEffect(() => {
     if (!pipelineEditing) return;
@@ -1175,6 +1178,39 @@ export default function DealDetail() {
           ))
         )}
       </div>
+
+      {/* High Priority Signals */}
+      {inlineActions.length > 0 && (
+        <div style={{
+          background: colors.surface,
+          border: `1px solid ${colors.border}`,
+          borderRadius: 10,
+          padding: '14px 20px',
+        }}>
+          <div style={{
+            fontSize: 11,
+            fontWeight: 600,
+            textTransform: 'uppercase',
+            letterSpacing: '0.07em',
+            color: colors.textMuted,
+            marginBottom: 12,
+            fontFamily: fonts.sans,
+          }}>
+            High Priority Signals
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {inlineActions.map((action) => (
+              <StageRecCard
+                key={action.id}
+                action={action}
+                onExecute={(overrideStage) => executeAction(action.id, overrideStage)}
+                onDismiss={() => dismissAction(action.id)}
+                compact={false}
+              />
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Stakeholder Coverage Rings */}
       {contactsList.length > 0 && (
