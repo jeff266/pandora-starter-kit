@@ -27,6 +27,7 @@ export const dealRiskReviewSkill: SkillDefinition = {
     'queryConversations',
     'truncateConversations',
     'summarizeForClaude',
+    'enrichDealsWithRfm',
   ],
 
   requiredContext: ['business_model', 'goals_and_targets', 'definitions'],
@@ -131,10 +132,20 @@ Return valid JSON array of signals.`,
     },
 
     {
+      id: 'enrich-with-rfm-scores',
+      name: 'Enrich with RFM Scores',
+      tier: 'compute',
+      dependsOn: ['batch-deal-context'],
+      computeFn: 'enrichDealsWithRfm',
+      computeArgs: {},
+      outputKey: 'rfm_enrichment',
+    },
+
+    {
       id: 'assess-risk',
       name: 'Assess Deal Risk',
       tier: 'claude',
-      dependsOn: ['batch-deal-context'],
+      dependsOn: ['enrich-with-rfm-scores'],
       maxTokens: 2500,
       claudePrompt: `Review these deals for risk. All data is pre-fetched below — do NOT request additional tools.
 
@@ -165,13 +176,14 @@ NOTE: Conversation data not available. Call signals skipped.
 {{/if}}
 
 For each deal, assess:
-1. Activity recency vs sales cycle expectations{{#if deal_context.dataAvailability.activityNote}} (use updated_at as proxy){{/if}}
-2. Stakeholder coverage: single-threaded deals are high risk{{#if deal_context.dataAvailability.contactNote}} (SKIP - no contact data){{/if}}
-3. Velocity: stage progression vs expected pace
+1. RFM Behavioral Health: Consider RFM grade (A=best, F=worst) and days dark. Grade D/F or >30 days dark indicates disengagement risk
+2. Activity recency vs sales cycle expectations{{#if deal_context.dataAvailability.activityNote}} (use updated_at as proxy){{/if}}
+3. Stakeholder coverage: single-threaded deals are high risk{{#if deal_context.dataAvailability.contactNote}} (SKIP - no contact data){{/if}}
+4. Velocity: stage progression vs expected pace
 {{#if dataFreshness.hasConversations}}
-4. Call signals: factor matched signals into assessment
+5. Call signals: factor matched signals into assessment
 {{/if}}
-5. Data quality: missing critical fields
+6. Data quality: missing critical fields
 
 Produce a risk assessment for each deal:
 {

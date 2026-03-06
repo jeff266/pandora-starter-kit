@@ -9,6 +9,7 @@ export const pipelineGenForecastSkill: SkillDefinition = {
   tier: 'mixed',
 
   requiredTools: [
+    'checkPipelineGenHistory',
     'resolveTimeWindows',
     'pgfGatherCreationHistory',
     'pgfGatherInqtrCloseRates',
@@ -26,9 +27,19 @@ export const pipelineGenForecastSkill: SkillDefinition = {
 
   steps: [
     {
+      id: 'check-pipeline-gen-history',
+      name: 'Check Pipeline Gen History',
+      tier: 'compute',
+      computeFn: 'checkPipelineGenHistory',
+      computeArgs: {},
+      outputKey: 'history_check',
+    },
+
+    {
       id: 'resolve-time-windows',
       name: 'Resolve Time Windows',
       tier: 'compute',
+      dependsOn: ['check-pipeline-gen-history'],
       computeFn: 'resolveTimeWindows',
       computeArgs: {
         analysisWindow: 'trailing_90d',
@@ -128,6 +139,15 @@ Return ONLY the JSON array.`,
         'calculate-output-budget',
       ],
       claudePrompt: `You are a Revenue Operations analyst delivering the pipeline generation forecast for {{business_model.company_name}}.
+
+{{#if history_check.historyTier}}
+📊 PIPELINE GEN HISTORY: {{history_check.historyTier}} ({{history_check.weeklyCount}} deals created in last 90d)
+{{history_check.message}}
+
+{{#equals history_check.historyTier "insufficient"}}
+⚠️ IMPORTANT: Insufficient pipeline generation history. Skip velocity modeling and provide qualitative summary instead.
+{{/equals}}
+{{/if}}
 
 CREATION HISTORY:
 {{{json creation_history}}}

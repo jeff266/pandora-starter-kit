@@ -9,6 +9,7 @@ export const forecastModelSkill: SkillDefinition = {
   tier: 'mixed',
 
   requiredTools: [
+    'checkForecastCalibration',
     'resolveTimeWindows',
     'fmScoreOpenDeals',
     'fmApplyRepHaircuts',
@@ -27,9 +28,19 @@ export const forecastModelSkill: SkillDefinition = {
 
   steps: [
     {
+      id: 'check-forecast-calibration',
+      name: 'Check Forecast Calibration',
+      tier: 'compute',
+      computeFn: 'checkForecastCalibration',
+      computeArgs: {},
+      outputKey: 'calibration_check',
+    },
+
+    {
       id: 'resolve-time-windows',
       name: 'Resolve Time Windows',
       tier: 'compute',
+      dependsOn: ['check-forecast-calibration'],
       computeFn: 'resolveTimeWindows',
       computeArgs: {
         analysisWindow: 'current_quarter',
@@ -140,6 +151,17 @@ Return ONLY the JSON array.`,
         'calculate-output-budget',
       ],
       claudePrompt: `You are the VP of Revenue Operations presenting the quarterly forecast to the CRO and CFO for {{business_model.company_name}}.
+
+{{#if calibration_check.calibrationTier}}
+📊 DATA CALIBRATION: {{calibration_check.calibrationTier}} ({{calibration_check.closedDeals}} closed deals, {{calibration_check.wonDeals}} won in last 180d)
+{{calibration_check.message}}
+
+{{#if calibration_check.calibrationTier}}
+{{#equals calibration_check.calibrationTier "insufficient"}}
+⚠️ IMPORTANT: Due to insufficient historical closed deal data, skip probabilistic modeling and haircuts. Provide a simpler forecast roll-up instead (sum by forecast_category). Recommend waiting until more closed deal history accumulates before using this probabilistic model.
+{{/equals}}
+{{/if}}
+{{/if}}
 
 FORECAST MODEL OUTPUT:
 {{{json forecast_model}}}

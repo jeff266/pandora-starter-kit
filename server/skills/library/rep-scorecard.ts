@@ -17,6 +17,7 @@ export const repScorecardSkill: SkillDefinition = {
 
   requiredTools: [
     'checkDataAvailability',
+    'loadVelocityBenchmarks',
     'repScorecardCompute',
     'prepareRepScorecardSummary',
   ],
@@ -49,12 +50,23 @@ export const repScorecardSkill: SkillDefinition = {
       outputKey: 'data_availability',
     },
 
+    // Step 2b: Load velocity benchmarks
+    {
+      id: 'load-velocity-benchmarks',
+      name: 'Load Velocity Benchmarks',
+      tier: 'compute',
+      dependsOn: ['check-data-availability'],
+      computeFn: 'loadVelocityBenchmarks',
+      computeArgs: {},
+      outputKey: 'velocity_benchmarks',
+    },
+
     // Step 3: Compute full scorecard
     {
       id: 'compute-scorecard',
       name: 'Compute Rep Scorecard',
       tier: 'compute',
-      dependsOn: ['resolve-time-windows', 'check-data-availability'],
+      dependsOn: ['resolve-time-windows', 'check-data-availability', 'load-velocity-benchmarks'],
       computeFn: 'repScorecardCompute',
       computeArgs: {},
       outputKey: 'scorecard',
@@ -155,6 +167,13 @@ Note: {{dataFreshness.staleCaveat}}
 
 DATA AVAILABILITY:
 {{{json data_availability}}}
+
+{{#if velocity_benchmarks}}
+VELOCITY BENCHMARKS (workspace avg):
+{{{json velocity_benchmarks}}}
+
+Use these benchmarks when assessing deal velocity. Flag deals >p75 as "stuck".
+{{/if}}
 
 TEAM SUMMARY:
 Total reps: {{scorecard.reps.length}}

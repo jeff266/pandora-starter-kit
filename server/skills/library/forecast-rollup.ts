@@ -12,6 +12,7 @@ export const forecastRollupSkill: SkillDefinition = {
     'checkQuotaConfig',
     'resolveTimeWindows',
     'forecastRollup',
+    'enrichForecastWithAccuracy',
     'gatherPreviousForecast',
     'forecastWoWDelta',
     'gatherDealConcentrationRisk',
@@ -64,6 +65,16 @@ export const forecastRollupSkill: SkillDefinition = {
     },
 
     {
+      id: 'enrich-with-accuracy-scores',
+      name: 'Enrich with Rep Accuracy Scores',
+      tier: 'compute',
+      dependsOn: ['gather-forecast-data'],
+      computeFn: 'enrichForecastWithAccuracy',
+      computeArgs: {},
+      outputKey: 'accuracy_enrichment',
+    },
+
+    {
       id: 'gather-previous-forecast',
       name: 'Retrieve Previous Forecast Run',
       tier: 'compute',
@@ -107,8 +118,17 @@ export const forecastRollupSkill: SkillDefinition = {
       id: 'classify-forecast-risks',
       name: 'Classify Forecast Behavioral Risks',
       tier: 'deepseek',
-      dependsOn: ['gather-forecast-data', 'gather-previous-forecast', 'gather-wow-delta', 'gather-deal-concentration-risk'],
+      dependsOn: ['gather-forecast-data', 'enrich-with-accuracy-scores', 'gather-previous-forecast', 'gather-wow-delta', 'gather-deal-concentration-risk'],
       deepseekPrompt: `You are a sales forecast auditor analyzing rep behavior patterns for {{business_model.company_name}}.
+
+{{#if accuracy_enrichment}}
+REP ACCURACY HISTORY:
+{{{json accuracy_enrichment}}}
+
+Consider historical accuracy when classifying risks:
+- Reps with <70% commit accuracy in 2+ quarters = higher risk classification
+- Reps with >85% commit accuracy = lower risk classification
+{{/if}}
 
 CURRENT FORECAST DATA:
 {{{json forecast_data}}}

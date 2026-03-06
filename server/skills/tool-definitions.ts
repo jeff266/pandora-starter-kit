@@ -2114,6 +2114,7 @@ Required weekly pipeline gen: ${weeklyGenStr}`;
       if (skillId === 'deal-risk-review') {
         const openDeals = (context.stepResults as any).open_deals;
         const callSignals = (context.stepResults as any).call_signals;
+        const rfmEnrichment = (context.stepResults as any).rfm_enrichment;
 
         if (!openDeals?.deals || openDeals.deals.length === 0) {
           return { dealProfiles: 'No open deals found.', signalsSummary: 'N/A' };
@@ -2121,6 +2122,14 @@ Required weekly pipeline gen: ${weeklyGenStr}`;
 
         const deals = openDeals.deals.slice(0, 20);
         const dealIds = deals.map((d: any) => d.id);
+
+        // Build RFM lookup map
+        const rfmByDeal = new Map();
+        if (rfmEnrichment?.enrichedDeals) {
+          for (const enrichedDeal of rfmEnrichment.enrichedDeals) {
+            rfmByDeal.set(enrichedDeal.id, enrichedDeal.rfm);
+          }
+        }
 
         const activitiesResult = await query(
           `SELECT deal_id, activity_type, COUNT(*)::int as cnt,
@@ -2232,7 +2241,13 @@ Required weekly pipeline gen: ${weeklyGenStr}`;
             activityLine = `${act.types} | Updated: ${daysSinceUpdate !== null ? daysSinceUpdate + 'd ago' : 'N/A'}`;
           }
 
+          const rfm = rfmByDeal.get(d.id);
+          const rfmLine = rfm && rfm.rfm_grade
+            ? `RFM Health: ${rfm.rfm_grade} (${rfm.rfm_label}) | ${rfm.rfm_recency_days !== null ? `Days dark: ${rfm.rfm_recency_days}` : 'N/A'} | Frequency: ${rfm.rfm_frequency_count || 'N/A'}`
+            : 'RFM Health: Not scored';
+
           let profile = `DEAL: ${d.name} | $${(d.amount || 0).toLocaleString()} | Stage: ${d.stage_normalized || d.stage} | Close: ${d.close_date || 'N/A'} | Owner: ${d.owner_name || 'N/A'}
+  ${rfmLine}
   Activity: ${activityLine}
   Contacts (${contacts.length}): ${contacts.length > 0 ? contacts.slice(0, 5).join('; ') : 'None'}${contacts.length > 5 ? ` +${contacts.length - 5} more` : ''}
   Single-threaded: ${contacts.length <= 1 ? 'YES' : 'No'}`;
@@ -2804,6 +2819,110 @@ const getCWDByRepTool: ToolDefinition = {
 // Forecast Roll-up Tools
 // ============================================================================
 
+const checkForecastCalibration: ToolDefinition = {
+  name: 'checkForecastCalibration',
+  description: 'Check if workspace has sufficient historical closed deal data for reliable probabilistic forecasting. Returns calibration tier (full/partial/insufficient) based on 180-day closed deal history.',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('checkForecastCalibration', async () => {
+      const result = await query(
+        `SELECT
+          COUNT(DISTINCT id) as closed_deals_count,
+          COUNT(DISTINCT id) FILTER (WHERE stage_normalized = 'closed_won') as won_count
+         FROM deals
+         WHERE workspace_id = $1
+           AND stage_normalized IN ('closed_won', 'closed_lost')
+           AND close_date >= NOW() - INTERVAL '180 days'`,
+        [context.workspaceId]
+      );
+
+      const closedDeals = parseInt(result.rows[0]?.closed_deals_count || '0', 10);
+      const wonDeals = parseInt(result.rows[0]?.won_count || '0', 10);
+
+      let calibrationTier: 'full' | 'partial' | 'insufficient';
+      let message: string;
+
+      if (closedDeals >= 30 && wonDeals >= 10) {
+        calibrationTier = 'full';
+        message = 'Sufficient historical data for full probabilistic modeling.';
+      } else if (closedDeals >= 10 && wonDeals >= 3) {
+        calibrationTier = 'partial';
+        message = 'Limited historical data. Forecasts may have reduced precision. Recommend monitoring as more deals close.';
+      } else {
+        calibrationTier = 'insufficient';
+        message = 'Insufficient historical closed deal data for probabilistic modeling. Consider using simpler roll-up methods until more history accumulates (need 10+ closed deals, 3+ wins in last 180 days).';
+      }
+
+      console.log(`[Forecast Calibration] Tier: ${calibrationTier} (${closedDeals} closed, ${wonDeals} won in last 180d)`);
+
+      return {
+        calibrationTier,
+        closedDeals,
+        wonDeals,
+        message,
+      };
+    }, params);
+  },
+};
+
+const checkPipelineGenHistory: ToolDefinition = {
+  name: 'checkPipelineGenHistory',
+  description: 'Check if workspace has sufficient pipeline creation history for reliable velocity modeling. Returns history tier (full/partial/insufficient) based on 90-day deal creation history.',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('checkPipelineGenHistory', async () => {
+      const result = await query(
+        `SELECT
+          COUNT(DISTINCT id) as weekly_count,
+          MIN(created_at) as earliest_deal,
+          MAX(created_at) as latest_deal
+         FROM deals
+         WHERE workspace_id = $1
+           AND created_at >= NOW() - INTERVAL '90 days'`,
+        [context.workspaceId]
+      );
+
+      const weeklyCount = parseInt(result.rows[0]?.weekly_count || '0', 10);
+      const earliestDeal = result.rows[0]?.earliest_deal || null;
+      const latestDeal = result.rows[0]?.latest_deal || null;
+
+      let historyTier: 'full' | 'partial' | 'insufficient';
+      let message: string;
+
+      if (weeklyCount >= 40) {
+        historyTier = 'full';
+        message = 'Sufficient pipeline creation history for full velocity modeling (4+ deals/week).';
+      } else if (weeklyCount >= 15) {
+        historyTier = 'partial';
+        message = 'Limited pipeline creation history. Velocity projections may have reduced precision.';
+      } else {
+        historyTier = 'insufficient';
+        message = 'Insufficient pipeline creation history for velocity modeling. Need 15+ deals created in last 90 days. Consider qualitative summary instead.';
+      }
+
+      console.log(`[Pipeline Gen History] Tier: ${historyTier} (${weeklyCount} deals created in last 90d)`);
+
+      return {
+        historyTier,
+        weeklyCount,
+        earliestDeal: earliestDeal ? new Date(earliestDeal).toISOString() : null,
+        latestDeal: latestDeal ? new Date(latestDeal).toISOString() : null,
+        message,
+      };
+    }, params);
+  },
+};
+
 const forecastRollup: ToolDefinition = {
   name: 'forecastRollup',
   description: 'Aggregate deals by forecast_category into team totals, bear/base/bull scenarios, and per-rep breakdown. Only includes forecasted pipelines.',
@@ -3260,6 +3379,48 @@ const forecastRollup: ToolDefinition = {
             total: categories.closed.amount,
           },
         ],
+      };
+    }, params);
+  },
+};
+
+const enrichForecastWithAccuracy: ToolDefinition = {
+  name: 'enrichForecastWithAccuracy',
+  description: 'Enrich forecast data with rep historical accuracy scores from forecast_accuracy table. Returns accuracy metrics by rep email for risk classification.',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('enrichForecastWithAccuracy', async () => {
+      const result = await query(
+        `SELECT
+          owner_email,
+          avg_commit_accuracy,
+          avg_forecast_accuracy,
+          total_quarters_tracked
+         FROM forecast_accuracy
+         WHERE workspace_id = $1`,
+        [context.workspaceId]
+      );
+
+      const byRep: Record<string, { commitAccuracy: number; forecastAccuracy: number; quartersTracked: number }> = {};
+
+      for (const row of result.rows) {
+        byRep[row.owner_email] = {
+          commitAccuracy: parseFloat(row.avg_commit_accuracy || '0'),
+          forecastAccuracy: parseFloat(row.avg_forecast_accuracy || '0'),
+          quartersTracked: parseInt(row.total_quarters_tracked || '0', 10),
+        };
+      }
+
+      console.log(`[Accuracy Enrichment] Loaded accuracy data for ${Object.keys(byRep).length} reps`);
+
+      return {
+        byRep,
+        repCount: Object.keys(byRep).length,
       };
     }, params);
   },
@@ -4197,6 +4358,50 @@ const checkDataAvailabilityTool: ToolDefinition = {
   },
 };
 
+const loadVelocityBenchmarks: ToolDefinition = {
+  name: 'loadVelocityBenchmarks',
+  description: 'Load workspace-level stage velocity benchmarks (avg_days, p50, p75) from stage_velocity_benchmarks table. Used for assessing deal progression speed.',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('loadVelocityBenchmarks', async () => {
+      const result = await query(
+        `SELECT
+          stage_normalized,
+          avg_days,
+          p50_days,
+          p75_days,
+          deal_count
+         FROM stage_velocity_benchmarks
+         WHERE workspace_id = $1`,
+        [context.workspaceId]
+      );
+
+      const byStage: Record<string, { avgDays: number; p50: number; p75: number; count: number }> = {};
+
+      for (const row of result.rows) {
+        byStage[row.stage_normalized] = {
+          avgDays: parseFloat(row.avg_days || '0'),
+          p50: parseFloat(row.p50_days || '0'),
+          p75: parseFloat(row.p75_days || '0'),
+          count: parseInt(row.deal_count || '0', 10),
+        };
+      }
+
+      console.log(`[Velocity Benchmarks] Loaded benchmarks for ${Object.keys(byStage).length} stages`);
+
+      return {
+        byStage,
+        stageCount: Object.keys(byStage).length,
+      };
+    }, params);
+  },
+};
+
 const repScorecardComputeTool: ToolDefinition = {
   name: 'repScorecardCompute',
   description: 'Compute composite scorecard for all reps with adaptive weighting',
@@ -4363,22 +4568,47 @@ const generateCustomFieldReportTool: ToolDefinition = {
   },
   execute: async (params, context) => {
     return safeExecute('generateCustomFieldReport', async () => {
-      const discoveryResult = (context.stepResults as any).discovery_result as CustomFieldDiscoveryResult;
+      const discoveryResult = (context.stepResults as any).discovered_fields as CustomFieldDiscoveryResult;
+      const classifications = (context.stepResults as any).field_classifications || [];
 
       if (!discoveryResult) {
-        throw new Error('discovery_result not found in context. Run discoverCustomFields first.');
+        throw new Error('discovered_fields not found in context. Run discoverCustomFields first.');
       }
 
-      const report = generateDiscoveryReport(discoveryResult);
+      // Merge classifications into topFields
+      const classificationMap = new Map();
+      for (const c of classifications) {
+        classificationMap.set(c.field_name, c);
+      }
 
-      console.log(`[Custom Field Discovery] Generated report (${report.length} chars)`);
+      const enrichedTopFields = discoveryResult.topFields.map((field: any) => {
+        const classification = classificationMap.get(field.field_key);
+        return {
+          ...field,
+          ...(classification ? {
+            category: classification.category,
+            classification_confidence: classification.confidence,
+            classification_reasoning: classification.reasoning,
+          } : {}),
+        };
+      });
+
+      const enrichedResult = {
+        ...discoveryResult,
+        topFields: enrichedTopFields,
+      };
+
+      const report = generateDiscoveryReport(enrichedResult);
+
+      console.log(`[Custom Field Discovery] Generated report (${report.length} chars, ${classifications.length} classifications)`);
 
       return {
         report,
-        topFields: discoveryResult.topFields,
+        topFields: enrichedTopFields,
         discoveredFields: discoveryResult.discoveredFields,
         entityBreakdown: discoveryResult.entityBreakdown,
         metadata: discoveryResult.metadata,
+        classifications: classifications.length,
       };
     }, params);
   },
@@ -4433,6 +4663,74 @@ const computeRFMScoresTool: ToolDefinition = {
         rfm_scored: rfm.scored,
         rfm_mode: rfm.mode,
         tte_computed: true,
+      };
+    }, params);
+  },
+};
+
+const enrichDealsWithRfm: ToolDefinition = {
+  name: 'enrichDealsWithRfm',
+  description: 'Enrich deal data with RFM behavioral health scores (rfm_grade, rfm_score, days_since_last_engagement). Pulls RFM fields from deals table.',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('enrichDealsWithRfm', async () => {
+      const openDeals = (context.stepResults as any).open_deals;
+
+      if (!openDeals?.deals || openDeals.deals.length === 0) {
+        return { enrichedDeals: [], count: 0 };
+      }
+
+      const dealIds = openDeals.deals.map((d: any) => d.id);
+
+      // Query RFM fields for these deals
+      const rfmResult = await query(
+        `SELECT id, rfm_grade, rfm_label, rfm_recency_days, rfm_frequency_count,
+                rfm_segment, rfm_score, rfm_mode
+         FROM deals
+         WHERE workspace_id = $1 AND id = ANY($2)`,
+        [context.workspaceId, dealIds]
+      );
+
+      const rfmByDeal = new Map();
+      for (const row of rfmResult.rows) {
+        rfmByDeal.set(row.id, {
+          rfm_grade: row.rfm_grade,
+          rfm_label: row.rfm_label,
+          rfm_recency_days: row.rfm_recency_days,
+          rfm_frequency_count: row.rfm_frequency_count,
+          rfm_segment: row.rfm_segment,
+          rfm_score: row.rfm_score,
+          rfm_mode: row.rfm_mode,
+        });
+      }
+
+      // Enrich deals with RFM data
+      const enrichedDeals = openDeals.deals.map((deal: any) => {
+        const rfm = rfmByDeal.get(deal.id);
+        return {
+          ...deal,
+          rfm: rfm || {
+            rfm_grade: null,
+            rfm_label: 'No RFM data',
+            rfm_recency_days: null,
+            rfm_frequency_count: null,
+            rfm_segment: null,
+            rfm_score: null,
+            rfm_mode: null,
+          },
+        };
+      });
+
+      console.log(`[RFM Enrichment] Enriched ${enrichedDeals.length} deals with RFM scores`);
+
+      return {
+        enrichedDeals,
+        count: enrichedDeals.length,
       };
     }, params);
   },
@@ -8289,7 +8587,10 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['checkWorkspaceHasConversations', checkWorkspaceHasConversations],
   ['auditConversationDealCoverage', auditConversationDealCoverage],
   ['getCWDByRep', getCWDByRepTool],
+  ['checkForecastCalibration', checkForecastCalibration],
+  ['checkPipelineGenHistory', checkPipelineGenHistory],
   ['forecastRollup', forecastRollup],
+  ['enrichForecastWithAccuracy', enrichForecastWithAccuracy],
   ['forecastWoWDelta', forecastWoWDelta],
   ['prepareForecastSummary', prepareForecastSummary],
   ['gatherPreviousForecast', gatherPreviousForecast],
@@ -8302,12 +8603,14 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['velocityBenchmarks', velocityBenchmarksTool],
   ['prepareWaterfallSummary', prepareWaterfallSummaryTool],
   ['checkDataAvailability', checkDataAvailabilityTool],
+  ['loadVelocityBenchmarks', loadVelocityBenchmarks],
   ['repScorecardCompute', repScorecardComputeTool],
   ['prepareRepScorecardSummary', prepareRepScorecardSummaryTool],
   ['discoverCustomFields', discoverCustomFieldsTool],
   ['generateCustomFieldReport', generateCustomFieldReportTool],
   ['scoreLeads', scoreLeadsTool],
   ['computeRFMScores', computeRFMScoresTool],
+  ['enrichDealsWithRfm', enrichDealsWithRfm],
   ['resolveContactRoles', resolveContactRolesTool],
   ['generateContactRoleReport', generateContactRoleReportTool],
   ['discoverICP', discoverICPTool],

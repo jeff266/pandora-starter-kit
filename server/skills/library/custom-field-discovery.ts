@@ -19,9 +19,9 @@ export const customFieldDiscoverySkill: SkillDefinition = {
   description: 'Automatically discovers which CRM custom fields are meaningful for ICP analysis',
   version: '1.0.0',
   category: 'enrichment',
-  tier: 'compute',
+  tier: 'mixed',
 
-  requiredTools: ['discoverCustomFields'],
+  requiredTools: ['discoverCustomFields', 'generateCustomFieldReport'],
   requiredContext: [],
 
   steps: [
@@ -31,16 +31,71 @@ export const customFieldDiscoverySkill: SkillDefinition = {
       tier: 'compute',
       computeFn: 'discoverCustomFields',
       computeArgs: {
-        enableClassification: false, // DeepSeek classification disabled for now
+        enableClassification: true, // DeepSeek classification enabled with 30 field cap
       },
-      outputKey: 'discovery_result',
+      outputKey: 'discovered_fields',
+    },
+
+    {
+      id: 'classify-field-types',
+      name: 'Classify Field Business Types (DeepSeek)',
+      tier: 'deepseek',
+      dependsOn: ['discover-fields'],
+      deepseekPrompt: `You are a sales operations analyst classifying CRM custom fields.
+
+{{#if discovered_fields.total}}
+{{#if discovered_fields.total > 30}}
+⚠️ Too many fields ({{discovered_fields.total}}). Only classifying top 30 by usage frequency.
+{{/if}}
+
+CUSTOM FIELDS:
+{{{json discovered_fields.topFields}}}
+
+Classify each field's business purpose. Return JSON array:
+[
+  {
+    "field_name": "...",
+    "object_type": "deal" | "contact" | "account",
+    "category": "qualification" | "commercial_terms" | "stakeholder_role" | "technical_requirement" | "risk_indicator" | "stage_tracking" | "account_info" | "unknown",
+    "confidence": 0.0 to 1.0,
+    "reasoning": "one sentence why this classification makes sense"
+  }
+]
+
+Definitions:
+- qualification: fields that indicate deal quality or fit (pain severity, BANT, use case)
+- commercial_terms: pricing, contract terms, billing details
+- stakeholder_role: decision-maker titles, champion info, buying committee roles
+- technical_requirement: integration needs, security requirements, product SKUs
+- risk_indicator: competitor presence, renewal risk, churn signals
+- stage_tracking: deal milestones, next steps, close plan
+- account_info: company metadata (industry, size, region)
+- unknown: unclear or generic fields
+{{else}}
+No custom fields discovered. Return empty array: []
+{{/if}}`,
+      deepseekSchema: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            field_name: { type: 'string' },
+            object_type: { type: 'string' },
+            category: { type: 'string' },
+            confidence: { type: 'number' },
+            reasoning: { type: 'string' },
+          },
+          required: ['field_name', 'object_type', 'category', 'confidence', 'reasoning'],
+        },
+      },
+      outputKey: 'field_classifications',
     },
 
     {
       id: 'generate-report',
       name: 'Generate Discovery Report',
       tier: 'compute',
-      dependsOn: ['discover-fields'],
+      dependsOn: ['discover-fields', 'classify-field-types'],
       computeFn: 'generateCustomFieldReport',
       computeArgs: {},
       outputKey: 'report',
