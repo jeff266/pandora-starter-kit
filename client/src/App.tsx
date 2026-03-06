@@ -23,6 +23,7 @@ import AccountList from './pages/AccountList';
 import ConversationsPage from './pages/ConversationsPage';
 import ConversationDetail from './pages/ConversationDetail';
 import SkillsPage from './pages/SkillsPage';
+import SkillBuilder from './pages/SkillBuilder';
 import SkillRunsPage from './pages/SkillRunsPage';
 import ConnectorsPage from './pages/ConnectorsPage';
 import EnrichmentConnectorsPage from './pages/EnrichmentConnectorsPage';
@@ -291,6 +292,8 @@ export default function App() {
             <Route path="/conversations" element={<ConversationsPage />} />
             <Route path="/targets" element={<Targets />} />
             <Route path="/skills" element={<SkillsPage />} />
+            <Route path="/skills/new" element={<SkillBuilder />} />
+            <Route path="/skills/custom/:skillId/edit" element={<SkillBuilder editMode />} />
             <Route path="/governance" element={<GovernancePage />} />
             <Route path="/skills/:skillId/runs" element={<SkillRunsPage />} />
             <Route path="/investigation/history" element={<InvestigationHistoryPage />} />

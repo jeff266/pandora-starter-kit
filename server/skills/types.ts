@@ -24,7 +24,8 @@ export type SkillCategory =
   | 'intelligence'
   | 'scoring'
   | 'config'
-  | 'data_enrichment';
+  | 'data_enrichment'
+  | 'custom';
 
 export type SkillOutputFormat = 'slack' | 'markdown' | 'json' | 'structured';
 
@@ -99,6 +100,9 @@ export interface SkillDefinition {
 
   /** Keywords or phrases this skill can answer (used for routing) */
   answers_questions?: string[];
+
+  /** True for skills created via the Skill Builder (not built-in) */
+  isCustom?: boolean;
 }
 
 // ============================================================================

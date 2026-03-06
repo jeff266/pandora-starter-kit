@@ -256,6 +256,7 @@ router.get('/:workspaceId/skills/dashboard', async (req, res) => {
         name: s.name,
         category: s.category,
         description: s.description,
+        isCustom: (s as any).isCustom ?? false,
         schedule: {
           ...baseSchedule,
           cron: override?.cron ?? baseSchedule.cron ?? null,

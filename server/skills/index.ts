@@ -5,6 +5,10 @@
  */
 
 import { getSkillRegistry as _getSkillRegistry } from './registry.js';
+import { query } from '../db.js';
+import { buildCustomSkillDefinition } from './custom-skill-builder.js';
+export { buildCustomSkillDefinition } from './custom-skill-builder.js';
+export type { CustomSkillRow } from './custom-skill-builder.js';
 import { registerAllEvidenceBuilders } from './evidence-builders/index.js';
 import { registerAllActionGenerators } from './action-generators/index.js';
 import { pipelineHygieneSkill } from './library/pipeline-hygiene.js';
@@ -187,4 +191,53 @@ export function registerBuiltInSkills(): void {
   registerAllActionGenerators();
 
   console.log('[Skills] Registered all built-in skills, evidence builders, and action generators');
+}
+
+/**
+ * Load all active custom skills from DB into the registry.
+ * Safe to call at startup and after workspace-level changes.
+ */
+export async function loadCustomSkills(workspaceId?: string): Promise<void> {
+  const registry = _getSkillRegistry();
+  try {
+    const whereClause = workspaceId ? 'AND workspace_id = $1' : '';
+    const params = workspaceId ? [workspaceId] : [];
+    const rows = await query(
+      `SELECT * FROM custom_skills WHERE status = 'active' ${whereClause} ORDER BY created_at ASC`,
+      params
+    );
+    for (const row of rows.rows) {
+      const skillDef = buildCustomSkillDefinition(row);
+      if (registry.has(skillDef.id)) registry.unregister(skillDef.id);
+      registry.register(skillDef);
+    }
+    if (rows.rows.length > 0) {
+      console.log(`[CustomSkills] Loaded ${rows.rows.length} custom skill(s) into registry`);
+    }
+  } catch (err: any) {
+    console.error('[CustomSkills] Failed to load custom skills:', err.message);
+  }
+}
+
+/**
+ * Hot-load a single custom skill into the registry without restart.
+ */
+export async function registerCustomSkill(skillId: string, workspaceId: string): Promise<void> {
+  const registry = _getSkillRegistry();
+  const result = await query(
+    `SELECT * FROM custom_skills WHERE skill_id = $1 AND workspace_id = $2 AND status = 'active'`,
+    [skillId, workspaceId]
+  );
+  if (result.rows.length > 0) {
+    const skillDef = buildCustomSkillDefinition(result.rows[0]);
+    if (registry.has(skillDef.id)) registry.unregister(skillDef.id);
+    registry.register(skillDef);
+  }
+}
+
+/**
+ * Remove a custom skill from the registry.
+ */
+export function unregisterCustomSkill(skillId: string): void {
+  _getSkillRegistry().unregister(skillId);
 }

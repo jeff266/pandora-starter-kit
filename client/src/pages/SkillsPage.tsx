@@ -24,6 +24,7 @@ interface Skill {
   lastRunStatus: string | null;
   status: 'healthy' | 'warning' | 'stale';
   stats: SkillStats;
+  isCustom?: boolean;
 }
 
 interface DashboardSummary {
@@ -343,7 +344,7 @@ export default function SkillsPage() {
       )}
 
       {/* Metrics Row */}
-      <div style={{ display: 'flex', gap: 12 }}>
+      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
         <MetricCard
           label="Active Skills"
           value={summary ? summary.activeSkills.toString() : skills.filter(s => s.status === 'healthy').length.toString()}
@@ -365,6 +366,17 @@ export default function SkillsPage() {
           value={usedFallback ? '—' : `${avgSuccessRate}%`}
           color={avgSuccessRate >= 90 ? colors.green : avgSuccessRate >= 70 ? colors.yellow : colors.red}
         />
+        <button
+          onClick={() => navigate('/skills/new')}
+          style={{
+            alignSelf: 'flex-start',
+            marginTop: 4,
+            fontSize: 12, fontWeight: 600, padding: '8px 14px',
+            borderRadius: 8, background: '#2DD4BF22',
+            color: '#2DD4BF', border: '1px solid #2DD4BF44',
+            cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0,
+          }}
+        >+ New Skill</button>
       </div>
 
       {/* Category Filter Pills */}
@@ -443,11 +455,25 @@ export default function SkillsPage() {
                   <StatusDot status={skill.status} />
                 </div>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                     <span style={{ fontSize: 13, fontWeight: 600, color: colors.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {skill.name || skill.id}
                     </span>
                     <CategoryBadge category={skill.category} />
+                    {skill.isCustom && (
+                      <span style={{
+                        fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 4,
+                        background: '#2DD4BF22', color: '#2DD4BF', border: '1px solid #2DD4BF44',
+                        letterSpacing: '0.06em', textTransform: 'uppercase',
+                      }}>Custom</span>
+                    )}
+                    {skill.isCustom && (
+                      <button
+                        onClick={e => { e.stopPropagation(); navigate(`/skills/custom/${skill.id}/edit`); }}
+                        title="Edit skill"
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: colors.textMuted, padding: '0 2px', fontSize: 12, lineHeight: 1 }}
+                      >✏</button>
+                    )}
                   </div>
                   {skill.description && (
                     <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 2, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
@@ -474,7 +500,27 @@ export default function SkillsPage() {
                 <div style={{ fontSize: 12, fontFamily: fonts.mono, color: (skill.stats?.findingsCount || 0) > 0 ? colors.orange : colors.textDim }}>
                   {skill.stats?.findingsCount ?? 0}
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+                  {skill.isCustom && (
+                    <button
+                      onClick={e => {
+                        e.stopPropagation();
+                        if (window.confirm(`Delete "${skill.name}"? This cannot be undone.`)) {
+                          api.delete(`/skills/custom/${skill.id}`)
+                            .then(() => { showToast('Skill deleted', 'success'); loadDashboard(); })
+                            .catch(() => showToast('Failed to delete skill', 'error'));
+                        }
+                      }}
+                      title="Delete skill"
+                      style={{
+                        fontSize: 11, fontWeight: 600, padding: '4px 8px',
+                        borderRadius: 6, background: 'transparent',
+                        color: colors.textMuted,
+                        border: `1px solid ${colors.border}`,
+                        cursor: 'pointer',
+                      }}
+                    >Delete</button>
+                  )}
                   <button
                     onClick={e => runSkill(skill.id, skill.name, e)}
                     disabled={isRunning || isQueued}
@@ -520,7 +566,7 @@ export default function SkillsPage() {
           <div style={{
             position: 'fixed', top: 0, right: 0, bottom: 0,
             width: 480, zIndex: 50,
-            background: colors.background,
+            background: colors.bg,
             borderLeft: `1px solid ${colors.border}`,
             display: 'flex', flexDirection: 'column',
             overflow: 'hidden',

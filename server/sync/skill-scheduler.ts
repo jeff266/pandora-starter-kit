@@ -26,6 +26,63 @@ interface ScheduledSkill {
 
 const scheduledSkills: ScheduledSkill[] = [];
 
+const customSkillCrons = new Map<string, cron.ScheduledTask>();
+
+export interface CustomSkillCronRow {
+  skill_id: string;
+  workspace_id: string;
+  schedule_cron: string;
+  name: string;
+}
+
+export function registerCustomSkillCron(row: CustomSkillCronRow): void {
+  if (!row.schedule_cron) return;
+  unregisterCustomSkillCron(row.skill_id);
+
+  const task = cron.schedule(
+    row.schedule_cron,
+    async () => {
+      console.log(`[Custom Skill Scheduler] Cron triggered for "${row.name}" (${row.skill_id})`);
+      try {
+        const { runScheduledSkills } = await import('./skill-scheduler.js');
+        await runScheduledSkills(row.workspace_id, [row.skill_id], 'scheduled');
+      } catch (err: any) {
+        console.error(`[Custom Skill Scheduler] Error running ${row.skill_id}:`, err.message);
+      }
+    },
+    { timezone: 'UTC' }
+  );
+
+  customSkillCrons.set(row.skill_id, task);
+  console.log(`[Custom Skill Scheduler] Registered "${row.name}" on cron ${row.schedule_cron}`);
+}
+
+export function unregisterCustomSkillCron(skillId: string): void {
+  const existing = customSkillCrons.get(skillId);
+  if (existing) {
+    existing.stop();
+    customSkillCrons.delete(skillId);
+  }
+}
+
+async function loadAndScheduleCustomSkills(): Promise<void> {
+  try {
+    const rows = await query(
+      `SELECT skill_id, workspace_id, schedule_cron, name
+       FROM custom_skills
+       WHERE status = 'active' AND schedule_cron IS NOT NULL`
+    );
+    for (const row of rows.rows) {
+      registerCustomSkillCron(row);
+    }
+    if (rows.rows.length > 0) {
+      console.log(`[Custom Skill Scheduler] Scheduled ${rows.rows.length} custom skill cron(s)`);
+    }
+  } catch (err: any) {
+    console.error('[Custom Skill Scheduler] Failed to load custom skill crons:', err.message);
+  }
+}
+
 /**
  * Check if skill has run recently (last 6 hours) to prevent duplicate executions
  */
@@ -728,6 +785,9 @@ export function startSkillScheduler(): void {
   console.log(`[Skill Scheduler] Server timezone: ${timezone}`);
   console.log(`[Skill Scheduler] Cron expressions use UTC timezone`);
   console.log(`[Skill Scheduler] ${scheduledSkills.length} cron schedule(s) registered (${agentCronCount} agent(s))`);
+
+  // Load and schedule custom skills from DB
+  loadAndScheduleCustomSkills();
 }
 
 // ── Account enrichment & scoring cron jobs ────────────────────────────────

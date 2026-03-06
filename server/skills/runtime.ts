@@ -537,6 +537,30 @@ export class SkillRuntime {
 
     const tool = getToolDefinition(step.computeFn);
     if (!tool) {
+      // Dynamic fallback 1: workspace_saved_queries by name
+      try {
+        const sq = await query(
+          `SELECT sql_text FROM workspace_saved_queries WHERE workspace_id = $1 AND name = $2 LIMIT 1`,
+          [context.workspaceId, step.computeFn]
+        );
+        if (sq.rows.length > 0) {
+          const r = await query(sq.rows[0].sql_text, [context.workspaceId]);
+          return { rows: r.rows, count: r.rowCount, source: 'saved_query' };
+        }
+      } catch (_) {}
+
+      // Dynamic fallback 2: inline_sql stored on custom_skills row
+      try {
+        const cs = await query(
+          `SELECT inline_sql FROM custom_skills WHERE workspace_id = $1 AND skill_id = $2 AND query_source = 'inline_sql' LIMIT 1`,
+          [context.workspaceId, step.computeFn]
+        );
+        if (cs.rows.length > 0 && cs.rows[0].inline_sql) {
+          const r = await query(cs.rows[0].inline_sql, [context.workspaceId]);
+          return { rows: r.rows, count: r.rowCount, source: 'inline_sql' };
+        }
+      } catch (_) {}
+
       throw new Error(`Tool not found: ${step.computeFn}`);
     }
 

@@ -19,6 +19,7 @@ import syncRouter from "./routes/sync.js";
 import dataRouter from "./routes/data.js";
 import slackSettingsRouter from "./routes/slack-settings.js";
 import skillsRouter from "./routes/skills.js";
+import customSkillsRouter from "./routes/custom-skills.js";
 import webhooksRouter from "./routes/webhooks.js";
 import llmConfigRouter from "./routes/llm-config.js";
 import billingAdminRouter from "./routes/billing-admin.js";
@@ -76,7 +77,7 @@ import { gongAdapter } from "./connectors/gong/adapter.js";
 import { firefliesAdapter } from "./connectors/fireflies/adapter.js";
 import { startScheduler } from "./sync/scheduler.js";
 import { startSkillScheduler, stopSkillScheduler } from "./sync/skill-scheduler.js";
-import { registerBuiltInSkills } from "./skills/index.js";
+import { registerBuiltInSkills, loadCustomSkills } from "./skills/index.js";
 import { getSkillRegistry } from "./skills/registry.js";
 import { startJobQueue } from "./jobs/queue.js";
 import { agentsGlobalRouter, agentsWorkspaceRouter } from './routes/agents.js';
@@ -312,6 +313,7 @@ workspaceApiRouter.use(competitiveIntelligenceRouter);
 workspaceApiRouter.use(dataRouter);
 workspaceApiRouter.use(slackSettingsRouter);
 workspaceApiRouter.use(skillsRouter);
+workspaceApiRouter.use(customSkillsRouter);
 workspaceApiRouter.use(llmConfigRouter);
 workspaceApiRouter.use(salesforceSyncRouter);
 workspaceApiRouter.use(webhookConfigRouter);
@@ -438,6 +440,15 @@ function registerSkills(): void {
   );
 }
 
+async function registerAllSkillsWithCustom(): Promise<void> {
+  registerSkills();
+  try {
+    await loadCustomSkills();
+  } catch (err: any) {
+    console.error('[server] Failed to load custom skills at startup:', err.message);
+  }
+}
+
 async function initWorkflowEngine(): Promise<ActivePiecesClient | undefined> {
   const apBaseUrl = process.env.AP_BASE_URL;
   const apApiKey = process.env.AP_API_KEY;
@@ -541,7 +552,7 @@ async function initializeAfterStart(t0: number, tDb: number): Promise<void> {
 
   await Promise.all([
     Promise.resolve(registerAdapters()),
-    Promise.resolve(registerSkills()),
+    registerAllSkillsWithCustom(),
     Promise.resolve(registerBuiltInAgents()),
     initWorkflowEngine().then(apClient => {
       startWorkflowMonitor(apClient);
