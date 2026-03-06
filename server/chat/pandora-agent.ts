@@ -921,6 +921,27 @@ export interface PandoraResponse {
   tokens_used: number;
   tool_call_count: number;
   latency_ms: number;
+  inline_actions?: InlineAction[];
+}
+
+interface InlineAction {
+  id: string;
+  action_type: string;
+  severity: 'critical' | 'warning' | 'info';
+  title: string;
+  summary: string;
+  confidence: number;
+  from_value: string | null;
+  to_value: string | null;
+  evidence: Array<{
+    label: string;
+    value: string;
+    signal_type: string;
+  }>;
+  impact_label: string | null;
+  urgency_label: string | null;
+  created_at: string;
+  deal_name?: string;
 }
 
 // ─── Follow-up question parser ────────────────────────────────────────────────
@@ -1231,6 +1252,74 @@ export async function runPandoraAgent(
     }
   }
 
+  // Inject inline actions for deal-specific queries
+  let inlineActions: InlineAction[] | undefined = undefined;
+
+  try {
+    // Extract deal IDs from cited records
+    const citedRecords = extractCitedRecords(toolTrace);
+    const dealIds = citedRecords
+      .filter(r => r.entity_type === 'deal')
+      .map(r => r.id)
+      .filter((id, index, arr) => arr.indexOf(id) === index) // dedupe
+      .slice(0, 1); // Only include actions for the primary deal
+
+    if (dealIds.length > 0) {
+      const { query: dbQuery } = await import('../db.js');
+      const dealId = dealIds[0];
+
+      // Fetch open actions for this deal
+      const actionsResult = await dbQuery(`
+        SELECT
+          id, action_type, severity, title, summary,
+          execution_payload, impact_label, urgency_label,
+          created_at, target_entity_id
+        FROM actions
+        WHERE workspace_id = $1
+          AND target_entity_id = $2
+          AND execution_status = 'open'
+          AND severity IN ('critical', 'warning')
+        ORDER BY
+          CASE severity
+            WHEN 'critical' THEN 1
+            WHEN 'warning' THEN 2
+            ELSE 3
+          END,
+          created_at DESC
+        LIMIT 2
+      `, [workspaceId, dealId]);
+
+      if (actionsResult.rows.length > 0) {
+        const { query: dealsQuery } = await import('../db.js');
+        const dealResult = await dealsQuery(`
+          SELECT name FROM deals WHERE id = $1 LIMIT 1
+        `, [dealId]);
+        const dealName = dealResult.rows[0]?.name;
+
+        inlineActions = actionsResult.rows.map(row => ({
+          id: row.id,
+          action_type: row.action_type,
+          severity: row.severity,
+          title: row.title,
+          summary: row.summary || '',
+          confidence: row.execution_payload?.confidence ?? 70,
+          from_value: row.execution_payload?.from_value ?? null,
+          to_value: row.execution_payload?.to_value ?? null,
+          evidence: row.execution_payload?.evidence ?? [],
+          impact_label: row.impact_label,
+          urgency_label: row.urgency_label,
+          created_at: row.created_at,
+          deal_name: dealName,
+        }));
+
+        console.log(`[PandoraAgent] Injected ${inlineActions.length} inline action(s) for deal ${dealId}`);
+      }
+    }
+  } catch (err) {
+    console.error('[PandoraAgent] Failed to fetch inline actions:', err);
+    // Swallow error - don't fail the whole response
+  }
+
   return {
     answer: parsedFinal.answer,
     follow_up_questions: parsedFinal.followups,
@@ -1241,6 +1330,7 @@ export async function runPandoraAgent(
     tokens_used: totalTokens,
     tool_call_count: toolTrace.length,
     latency_ms: Date.now() - startTime,
+    inline_actions: inlineActions,
   };
 }
 

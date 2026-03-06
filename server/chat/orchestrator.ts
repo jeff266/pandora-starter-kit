@@ -72,6 +72,7 @@ export interface ConversationTurnResult {
     docxFilename: string;
     xlsxFilename: string;
   };
+  inline_actions?: any[];
 }
 
 const CONVERSATION_SIGNALS = [
@@ -594,6 +595,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
           tool_call_count: pandoraResult.tool_call_count,
           latency_ms: pandoraResult.latency_ms,
         } : {}),
+        ...(pandoraResult.inline_actions ? { inline_actions: pandoraResult.inline_actions } : {}),
       } as any;
     } catch (err) {
       console.error('[orchestrator] Pandora Agent failed:', err);
