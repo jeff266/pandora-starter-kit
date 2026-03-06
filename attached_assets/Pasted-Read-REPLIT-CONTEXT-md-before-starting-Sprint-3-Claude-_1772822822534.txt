@@ -1,0 +1,171 @@
+Read REPLIT_CONTEXT.md before starting.
+
+Sprint 3 Claude Code tasks are complete. Validate each in order before 
+any new work proceeds.
+
+---
+
+## T001 Validation — RFM Signal in Deal Risk Review
+
+First, confirm the data source:
+  SELECT column_name FROM information_schema.columns 
+  WHERE table_name = 'deals' 
+  AND column_name LIKE '%rfm%'
+
+  AND separately:
+  SELECT column_name FROM information_schema.columns 
+  WHERE table_name = 'lead_scores'
+  AND column_name LIKE '%rfm%'
+
+If rfm fields exist on the deals table: confirm they are populated for 
+Frontera workspace (SELECT COUNT(*) FROM deals WHERE workspace_id = [id] 
+AND rfm_grade IS NOT NULL). If count is 0, the enrich step will silently 
+return nulls for every deal and the RFM wiring provides no value.
+
+If rfm fields only exist on lead_scores: the enrichDealsWithRfm function 
+is querying the wrong table. Fix it to JOIN deals to lead_scores on 
+entity_id = deal_id WHERE entity_type = 'deal'.
+
+After confirming the data source is correct and populated, run 
+deal-risk-review on Frontera. Check the skill_run step outputs:
+  - enrich-with-rfm-scores step should return non-null rfm_grade for 
+    at least some deals
+  - classify-deal-risk DeepSeek input should include rfm_grade per deal
+  - Claude synthesis should reference at least one RFM grade explicitly
+
+If rfm_grade is null for all deals: the data isn't there yet — note it 
+but don't block. The wiring is correct; the scoring engine needs to run 
+first to populate lead_scores.
+
+---
+
+## T002 Validation — Forecast Model Calibration Gate
+
+Run checkForecastCalibration against both Imubit and Frontera:
+  POST /api/workspaces/[imubit_id]/skills/forecast-model/run
+  POST /api/workspaces/[frontera_id]/skills/forecast-model/run
+
+For each, check the skill_run step output for calibration_tier value.
+
+Expected:
+  Imubit (Salesforce, mature data): should hit 'full' or 'partial'
+  Frontera (HubSpot, mid-market): confirm which tier
+
+If either workspace hits 'insufficient' unexpectedly: the thresholds 
+(30+ closed deals, 10+ won) may be too aggressive for mid-market. 
+
+Check actual counts:
+  SELECT 
+    COUNT(*) as total_closed,
+    COUNT(*) FILTER (WHERE is_closed_won = true) as closed_won
+  FROM deals 
+  WHERE workspace_id = $1
+    AND closed_at > NOW() - INTERVAL '180 days'
+
+If a workspace with meaningful data hits 'insufficient', lower the 
+full tier threshold to match the original spec: 10+ closed-won deals, 
+6+ months. Update checkForecastCalibration accordingly.
+
+---
+
+## T003 Validation — Pipeline Gen Forecast History Gate
+
+Same pattern. Run against Frontera and Imubit.
+
+Check actual pipeline creation history:
+  SELECT COUNT(DISTINCT DATE_TRUNC('month', created_at)) as months_with_deals,
+         COUNT(*) as total_deals
+  FROM deals
+  WHERE workspace_id = $1
+    AND created_at > NOW() - INTERVAL '90 days'
+
+If a workspace with 6+ months of data hits 'insufficient' (threshold: 
+40+ deals / 90 days), the window is too short. Original spec used 
+monthly cohorts over 6 months — reconsider whether 90 days is the 
+right lookback. If fewer than 3 months of data are found, 
+'insufficient' is correct. If 6+ months exist but the 90-day window 
+misses them, extend to 180 days.
+
+---
+
+## T004 Validation — Forecast Rollup Accuracy Wiring
+
+Run forecast-rollup on Imubit (has 35 accuracy rows from T005 last sprint).
+
+Confirm in the skill_run step outputs:
+  - enrich-with-accuracy-scores step returns data for at least some reps
+  - classify-forecast-risks DeepSeek input includes historical_accuracy 
+    per rep
+  - Claude synthesis cites at least one rep's historical accuracy by name
+
+If the accuracy table has data but the step returns empty: check that 
+enrichForecastWithAccuracy is querying the correct quarter value. The 
+quarter field in forecast_accuracy may be stored as '2026-Q1' or 
+similar — confirm the format matches what the query expects.
+
+---
+
+## T005 Validation — Rep Scorecard Velocity Benchmarks
+
+Run rep-scorecard on Imubit (has 4 velocity_benchmarks rows).
+
+Confirm:
+  - load-velocity-benchmarks step returns rows (not { available: false })
+  - compute-scorecard step output includes velocity_vs_benchmark per rep 
+    per stage
+  - Claude synthesis references at least one stage benchmark comparison 
+    by name ("X days vs. benchmark of Y days")
+
+If velocity_vs_benchmark is missing from compute output: the step 
+dependency wiring may be off. Check that compute-scorecard has 
+load-velocity-benchmarks in its dependsOn array.
+
+---
+
+## T006 Validation — Custom Field Discovery DeepSeek
+
+Run custom-field-discovery on-demand against any workspace with custom 
+CRM fields.
+
+Confirm:
+  - classify-field-types DeepSeek step fires (check token usage > 0 
+    in skill_run)
+  - Classifications appear in the skill output (fields categorized as 
+    qualification, commercial_terms, etc.)
+  - The utility and recommended_action fields appear per field 
+    in the synthesis
+
+If the step fires but classifications are missing from the synthesis: 
+check that generateCustomFieldReport merges the classifications array 
+correctly. The merge key should be field_name or field_id — confirm 
+the DeepSeek output keys match what the merge expects.
+
+---
+
+## Threshold Correction (if needed after T002/T003 checks)
+
+If the validation confirms thresholds are too aggressive, apply these 
+corrections to match original spec:
+
+Forecast Model (checkForecastCalibration):
+  full:        closedWonCount >= 10 AND monthsWithData >= 6
+  partial:     closedWonCount >= 5  AND monthsWithData >= 3
+  insufficient: anything below partial
+
+Pipeline Gen Forecast (checkPipelineGenHistory):
+  sufficient:   monthsWithDeals >= 6  (use 180-day lookback, not 90)
+  partial:      monthsWithDeals >= 3
+  insufficient: monthsWithDeals < 3
+
+---
+
+## Completion Summary Format
+
+For each T001–T006, report:
+  - Validated: yes / no
+  - Data source confirmed: (for T001)
+  - Calibration/history tier on Imubit and Frontera: (for T002/T003)
+  - Threshold correction applied: yes / no
+  - Any regressions found: yes / no + details
+
+Do not begin any new feature work until all six are validated.
