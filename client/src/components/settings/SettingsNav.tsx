@@ -15,23 +15,24 @@ interface SettingsNavProps {
 }
 
 const userTabs: NavItem[] = [
-  { key: 'profile', label: 'Profile', icon: 'connections' },
-  { key: 'security', label: 'Security', icon: 'filter' },
+  { key: 'profile', label: 'Profile', icon: 'hub' },
+  { key: 'security', label: 'Security', icon: 'check-flow' },
   { key: 'preferences', label: 'Preferences', icon: 'filter' },
-  { key: 'workspaces', label: 'Workspaces', icon: '▦' },
+  { key: 'workspaces', label: 'Workspaces', icon: 'building' },
 ];
 
 const adminTabs: NavItem[] = [
   { key: 'setup', label: 'Setup Guide', icon: '✦' },
   { key: 'members', label: 'Members', icon: 'connections' },
-  { key: 'sales-roster', label: 'Sales Roster', icon: 'connections' },
-  { key: 'roles', label: 'Roles', icon: 'building' },
-  { key: 'notifications', label: 'Notifications', icon: 'target' },
-  { key: 'features', label: 'Features', icon: 'flow' },
+  { key: 'sales-roster', label: 'Sales Roster', icon: 'network' },
+  { key: 'roles', label: 'Roles', icon: 'target' },
+  { key: 'notifications', label: 'Notifications', icon: 'wifi' },
+  { key: 'features', label: 'Features', icon: 'lightbulb' },
   { key: 'crm-sync', label: 'CRM Sync', icon: 'refresh' },
-  { key: 'webhooks', label: 'Webhooks', icon: 'flow' },
+  { key: 'webhooks', label: 'Webhooks', icon: 'transfer' },
   { key: 'billing', label: 'Billing', icon: 'chart-growth' },
-  { key: 'token-usage', label: 'Token Usage', icon: 'chart-growth' },
+  { key: 'token-usage', label: 'Token Usage', icon: 'trending' },
+  { key: 'ai-keys', label: 'AI Keys', icon: 'brain' },
 ];
 
 export default function SettingsNav({ activeTab, onTabChange, isAdmin = false }: SettingsNavProps) {

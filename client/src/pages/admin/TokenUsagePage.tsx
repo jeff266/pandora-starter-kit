@@ -52,6 +52,31 @@ const FEATURE_LABELS: Record<string, string> = {
   lead_scoring: 'Lead Scoring',
   intent_classify: 'Intent Classifier',
   compress: 'Result Compression',
+  synthesize: 'Synthesize',
+  pipeline_gen_forecast: 'Pipeline Gen Forecast',
+  pipeline_waterfall: 'Pipeline Waterfall',
+  monte_carlo_forecast: 'Monte Carlo Forecast',
+  pipeline_contribution_forecast: 'Pipeline Contribution',
+  stage_velocity_benchmarks: 'Stage Velocity',
+  contact_role_resolution: 'Contact Role Resolution',
+  icp_taxonomy_builder: 'ICP Taxonomy Builder',
+  competitive_intelligence: 'Competitive Intelligence',
+  forecast_accuracy_tracking: 'Forecast Accuracy',
+  forecast_model: 'Forecast Model',
+  deal_scoring_model: 'Deal Scoring Model',
+  deal_rfm_scoring: 'RFM Scoring',
+  stage_mismatch_detector: 'Stage Mismatch',
+  bowtie_analysis: 'Bowtie Analysis',
+  pipeline_coverage: 'Pipeline Coverage',
+  pipeline_goals: 'Pipeline Goals',
+  custom_field_discovery: 'Custom Field Discovery',
+  workspace_config_audit: 'Config Audit',
+  data_quality_audit: 'Data Quality Audit',
+  weekly_recap: 'Weekly Recap',
+  project_recap: 'Project Recap',
+  strategy_insights: 'Strategy Insights',
+  pipeline_state: 'Pipeline State',
+  single_thread_alert: 'Single Thread Alert',
 };
 
 const SEGMENT_MAP: Record<string, 'command' | 'assistant'> = {
@@ -603,10 +628,12 @@ export default function TokenUsagePage() {
             Pandora infrastructure.
           </span>
         </div>
+        <div style={{ overflowX: 'auto' }}>
+        <div style={{ minWidth: 640 }}>
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: '2fr 70px 90px 90px 90px 90px 56px',
+            gridTemplateColumns: 'minmax(160px, 2fr) 70px 100px 100px 90px 100px 60px',
             padding: '9px 18px',
             borderBottom: `1px solid ${colors.border}`,
             fontSize: 9,
@@ -615,13 +642,13 @@ export default function TokenUsagePage() {
             textTransform: 'uppercase',
           }}
         >
-          <span>Feature</span>
-          <span style={{ textAlign: 'right' }}>Calls</span>
-          <span style={{ textAlign: 'right' }}>Pandora Tokens</span>
-          <span style={{ textAlign: 'right' }}>Pandora Cost</span>
-          <span style={{ textAlign: 'right' }}>Cost / Call</span>
-          <span style={{ textAlign: 'right' }}>BYOK Tokens</span>
-          <span style={{ textAlign: 'right' }}>Bar</span>
+          <span style={{ whiteSpace: 'nowrap' }}>Feature</span>
+          <span style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>Calls</span>
+          <span style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>Pandora Tokens</span>
+          <span style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>Pandora Cost</span>
+          <span style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>Cost / Call</span>
+          <span style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>BYOK Tokens</span>
+          <span style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>Bar</span>
         </div>
 
         {(['command', 'assistant'] as SegKey[]).map((seg) => {
@@ -642,7 +669,7 @@ export default function TokenUsagePage() {
                 onClick={() => toggleSegment(seg)}
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: '2fr 70px 90px 90px 90px 90px 56px',
+                  gridTemplateColumns: 'minmax(160px, 2fr) 70px 100px 100px 90px 100px 60px',
                   padding: '10px 18px',
                   borderBottom: `1px solid ${colors.border}`,
                   borderLeft: `3px solid ${meta.color}`,
@@ -696,7 +723,7 @@ export default function TokenUsagePage() {
                       onClick={() => setSelectedFeature(isSelected ? null : row.feature)}
                       style={{
                         display: 'grid',
-                        gridTemplateColumns: '2fr 70px 90px 90px 90px 90px 56px',
+                        gridTemplateColumns: 'minmax(160px, 2fr) 70px 100px 100px 90px 100px 60px',
                         padding: '11px 18px 11px 30px',
                         borderBottom: `1px solid ${colors.border}`,
                         cursor: 'pointer',
@@ -705,8 +732,8 @@ export default function TokenUsagePage() {
                       }}
                     >
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={{ fontSize: 12, color: colors.text }}>
-                          {FEATURE_LABELS[row.feature] || row.feature}
+                        <span style={{ fontSize: 12, color: colors.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {FEATURE_LABELS[row.feature] || row.feature.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
                         </span>
                         {byokTotal > 0 && (
                           <span style={{ fontSize: 8, color: colors.green, background: colors.greenSoft, padding: '1px 5px', borderRadius: 2, letterSpacing: '0.1em' }}>
@@ -771,7 +798,7 @@ export default function TokenUsagePage() {
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: '2fr 70px 90px 90px 90px 90px 56px',
+            gridTemplateColumns: 'minmax(160px, 2fr) 70px 100px 100px 90px 100px 60px',
             padding: '11px 18px',
             borderTop: `2px solid ${colors.border}`,
             background: colors.bg,
@@ -793,6 +820,8 @@ export default function TokenUsagePage() {
             {totals.byok_input > 0 ? fmt(totals.byok_input + totals.byok_output) : '—'}
           </span>
           <span />
+        </div>
+        </div>
         </div>
       </div>
 
