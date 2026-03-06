@@ -14,6 +14,26 @@ export interface ConversationMessage {
   response_id?: string;
 }
 
+export interface InlineAction {
+  id: string;
+  action_type: string;
+  severity: 'critical' | 'warning' | 'info';
+  title: string;
+  summary: string;
+  confidence: number;
+  from_value: string | null;
+  to_value: string | null;
+  evidence: Array<{
+    label: string;
+    value: string;
+    signal_type: string;
+  }>;
+  impact_label: string | null;
+  urgency_label: string | null;
+  created_at: string;
+  deal_name?: string;
+}
+
 export interface ConversationState {
   phase: 'idle' | 'recruiting' | 'findings' | 'synthesis' | 'complete';
   messages: ConversationMessage[];
@@ -23,6 +43,7 @@ export interface ConversationState {
   synthesisComplete: boolean;
   evidenceCards: EvidenceCardData[];
   actions: RecommendedAction[];
+  inlineActions: InlineAction[];
   deliverableOptions: DeliverableOption[];
   error: string | null;
   restored: boolean;
@@ -32,6 +53,7 @@ type Action =
   | { type: 'USER_MESSAGE'; text: string }
   | { type: 'STREAM_EVENT'; event: any }
   | { type: 'DISMISS_ACTION'; id: string }
+  | { type: 'DISMISS_INLINE_ACTION'; id: string }
   | { type: 'INIT_MESSAGES'; messages: ConversationMessage[] }
   | { type: 'RESET' };
 
@@ -48,6 +70,7 @@ const initial: ConversationState = {
   synthesisComplete: false,
   evidenceCards: [],
   actions: [],
+  inlineActions: [],
   deliverableOptions: [],
   error: null,
   restored: false,
@@ -62,6 +85,9 @@ function reducer(state: ConversationState, action: Action): ConversationState {
   if (action.type === 'DISMISS_ACTION') {
     return { ...state, actions: state.actions.filter(a => a.id !== action.id) };
   }
+  if (action.type === 'DISMISS_INLINE_ACTION') {
+    return { ...state, inlineActions: state.inlineActions.filter(a => a.id !== action.id) };
+  }
   if (action.type === 'USER_MESSAGE') {
     return {
       ...state,
@@ -72,6 +98,7 @@ function reducer(state: ConversationState, action: Action): ConversationState {
       toolCalls: [],
       evidenceCards: [],
       actions: [],
+      inlineActions: [],
       deliverableOptions: [],
       error: null,
       restored: false,
@@ -147,6 +174,9 @@ function reducer(state: ConversationState, action: Action): ConversationState {
       }
       case 'actions': {
         return { ...state, actions: ev.items ?? [] };
+      }
+      case 'inline_actions': {
+        return { ...state, inlineActions: ev.items ?? [] };
       }
       case 'deliverable_options': {
         return { ...state, deliverableOptions: ev.options ?? [] };
@@ -286,5 +316,9 @@ export function useConversationStream() {
     dispatch({ type: 'DISMISS_ACTION', id });
   }, []);
 
-  return { state, sendMessage, reset, dismissAction, threadId, loadHistory, startNewThread };
+  const dismissInlineAction = useCallback((id: string) => {
+    dispatch({ type: 'DISMISS_INLINE_ACTION', id });
+  }, []);
+
+  return { state, sendMessage, reset, dismissAction, dismissInlineAction, threadId, loadHistory, startNewThread };
 }

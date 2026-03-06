@@ -362,6 +362,12 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
         const tier1NoRunId = randomUUID();
         sse(res, { type: 'synthesis_chunk', text: pandoraT1.answer });
         sse(res, { type: 'synthesis_done', full_text: pandoraT1.answer, response_id: tier1NoRunId });
+
+        // Emit inline actions if present
+        if (pandoraT1.inline_actions && pandoraT1.inline_actions.length > 0) {
+          sse(res, { type: 'inline_actions', items: pandoraT1.inline_actions });
+        }
+
         if (pandoraT1.evidence.cited_records.length > 0) {
           const t1DealRecs = pandoraT1.evidence.cited_records.filter((r: any) => r.type === 'deal');
           if (t1DealRecs.length > 0) {
@@ -444,6 +450,12 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
         const fallbackResponseId = randomUUID();
         sse(res, { type: 'synthesis_chunk', text: pandoraFallback.answer });
         sse(res, { type: 'synthesis_done', full_text: pandoraFallback.answer, response_id: fallbackResponseId });
+
+        // Emit inline actions if present
+        if (pandoraFallback.inline_actions && pandoraFallback.inline_actions.length > 0) {
+          sse(res, { type: 'inline_actions', items: pandoraFallback.inline_actions });
+        }
+
         if (pandoraFallback.evidence.cited_records.length > 0) {
           const fbDealRecs = pandoraFallback.evidence.cited_records.filter((r: any) => r.type === 'deal');
           if (fbDealRecs.length > 0) {
