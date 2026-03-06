@@ -351,14 +351,16 @@ function FilterPreviewPanel({
   anon: ReturnType<typeof useDemoMode>['anon'];
 }) {
   const [expandedDealId, setExpandedDealId] = useState<string | null>(null);
-  const previewScopes = scopes.filter(s => s.scope_id !== 'default');
+  const nonDefaultScopes = scopes.filter(s => s.scope_id !== 'default');
+  const defaultScope = scopes.find(s => s.scope_id === 'default');
+  const previewScopes = defaultScope ? [...nonDefaultScopes, defaultScope] : nonDefaultScopes;
 
   if (previewScopes.length === 0) {
     return (
       <div style={panelStyle}>
         <div style={panelTitleStyle}>Filter Preview</div>
         <div style={{ color: colors.textMuted, fontSize: 13, fontFamily: fonts.sans }}>
-          No non-default scopes to preview.
+          No scopes to preview.
         </div>
       </div>
     );
@@ -374,26 +376,36 @@ function FilterPreviewPanel({
 
       {/* Scope selector buttons */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-        {previewScopes.map(s => (
-          <button
-            key={s.scope_id}
-            onClick={() => onSelectScope(s.scope_id)}
-            style={{
-              padding: '6px 14px',
-              borderRadius: 6,
-              fontSize: 12,
-              fontWeight: 600,
-              fontFamily: fonts.sans,
-              cursor: 'pointer',
-              border: `1px solid ${selectedScopeId === s.scope_id ? colors.accent : colors.border}`,
-              background: selectedScopeId === s.scope_id ? colors.accentSoft : colors.surfaceRaised,
-              color: selectedScopeId === s.scope_id ? colors.accent : colors.textSecondary,
-              transition: 'all 0.15s',
-            }}
-          >
-            {anon.pipeline(s.name)}
-          </button>
-        ))}
+        {previewScopes.map(s => {
+          const isDefault = s.scope_id === 'default';
+          const isSelected = selectedScopeId === s.scope_id;
+          return (
+            <button
+              key={s.scope_id}
+              onClick={() => onSelectScope(s.scope_id)}
+              style={{
+                padding: '6px 14px',
+                borderRadius: 6,
+                fontSize: 12,
+                fontWeight: 600,
+                fontFamily: fonts.sans,
+                cursor: 'pointer',
+                border: isSelected
+                  ? `1px solid ${isDefault ? colors.textMuted : colors.accent}`
+                  : `1px ${isDefault ? 'dashed' : 'solid'} ${colors.border}`,
+                background: isSelected
+                  ? (isDefault ? colors.surfaceHover : colors.accentSoft)
+                  : colors.surfaceRaised,
+                color: isSelected
+                  ? (isDefault ? colors.textSecondary : colors.accent)
+                  : colors.textMuted,
+                transition: 'all 0.15s',
+              }}
+            >
+              {isDefault ? 'Default (catch-all)' : anon.pipeline(s.name)}
+            </button>
+          );
+        })}
       </div>
 
       {loadingPreview ? (

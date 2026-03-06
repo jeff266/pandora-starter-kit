@@ -1080,6 +1080,23 @@ LIMIT 100`);
   // Modification tracking
   const isModified = sql !== originalSQL && originalSQL !== '';
 
+  const downloadCsv = () => {
+    if (!results.length) return;
+    const cols = Object.keys(results[0]);
+    const escape = (v: any) => {
+      const s = v === null || v === undefined ? '' : String(v);
+      return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const lines = [cols.join(','), ...results.map(row => cols.map(c => escape(row[c])).join(','))];
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `query-results-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   // Read route state on mount
   useEffect(() => {
     const state = location.state as any;
@@ -1510,7 +1527,24 @@ LIMIT 100`);
           {/* Results area */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
             {runtimeError && <RuntimeError error={runtimeError} />}
-            {results.length > 0 && !runtimeError && <ResultsTable results={results} />}
+            {results.length > 0 && !runtimeError && (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 12px', borderBottom: `1px solid ${colors.border}`, flexShrink: 0 }}>
+                  <span style={{ fontSize: 11, color: colors.textSecondary, fontFamily: fonts.body }}>
+                    {results.length.toLocaleString()} row{results.length !== 1 ? 's' : ''}
+                  </span>
+                  <button
+                    onClick={downloadCsv}
+                    style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px', border: `1px solid ${colors.border}`, borderRadius: 5, background: colors.surfaceRaised, color: colors.textSecondary, fontSize: 11, fontFamily: fonts.body, cursor: 'pointer', fontWeight: 500 }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = colors.accent; e.currentTarget.style.color = colors.accent; }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = colors.border; e.currentTarget.style.color = colors.textSecondary; }}
+                  >
+                    ↓ Download CSV
+                  </button>
+                </div>
+                <ResultsTable results={results} />
+              </>
+            )}
             {results.length === 0 && !runtimeError && !executing && (
               <div
                 style={{
