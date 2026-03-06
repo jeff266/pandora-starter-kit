@@ -88,7 +88,8 @@ router.post('/:workspaceId/sql/execute', async (req: Request, res: Response) => 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query('SET LOCAL app.current_workspace_id = $1', [workspaceId]);
+    // Note: SET LOCAL doesn't support parameterized queries, but workspaceId is already validated as UUID
+    await client.query(`SET LOCAL app.current_workspace_id = '${workspaceId}'`);
     await client.query(`SET LOCAL statement_timeout = ${QUERY_TIMEOUT_MS}`);
     await client.query(`SET LOCAL ROLE pandora_rls_user`);
 
