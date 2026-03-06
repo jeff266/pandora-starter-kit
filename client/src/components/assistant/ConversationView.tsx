@@ -6,8 +6,8 @@ import { colors, fonts } from '../../styles/theme';
 import { useConversationStream } from './useConversationStream';
 import { getWorkspaceId, getAuthToken, api } from '../../lib/api';
 import EvidenceCard from './EvidenceCard';
-import ActionCard from './ActionCard';
 import InlineActionsPrompt from './InlineActionsPrompt';
+import ActionsPrompt from './ActionsPrompt';
 import DeliverablePicker from './DeliverablePicker';
 import StickyInput from './StickyInput';
 import MessageFeedback from './MessageFeedback';
@@ -247,14 +247,7 @@ export default function ConversationView({ initialMessage, onBack }: Conversatio
         )}
 
         {state.actions.length > 0 && (
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
-              Recommended Actions
-            </div>
-            {state.actions.map(action => (
-              <ActionCard key={action.id} action={action} onDismiss={dismissAction} />
-            ))}
-          </div>
+          <ActionsPrompt actions={state.actions} onDismiss={dismissAction} />
         )}
 
         {state.inlineActions.length > 0 && (
