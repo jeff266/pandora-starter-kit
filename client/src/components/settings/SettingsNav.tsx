@@ -31,6 +31,7 @@ const adminTabs: NavItem[] = [
   { key: 'crm-sync', label: 'CRM Sync', icon: 'refresh' },
   { key: 'webhooks', label: 'Webhooks', icon: 'flow' },
   { key: 'billing', label: 'Billing', icon: 'chart-growth' },
+  { key: 'token-usage', label: 'Token Usage', icon: 'chart-growth' },
 ];
 
 export default function SettingsNav({ activeTab, onTabChange, isAdmin = false }: SettingsNavProps) {
