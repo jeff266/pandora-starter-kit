@@ -443,4 +443,60 @@ router.get('/:id/survival-curve', requireWorkspaceAccess, async (req, res) => {
   }
 });
 
+// GET /:workspaceId/usage — workspace usage stats for billing tab
+router.get('/:workspaceId/usage', requireWorkspaceAccess, async (req, res) => {
+  const { workspaceId } = req.params;
+  try {
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+
+    const [skillRunsResult, memberResult, docsResult, tokenResult] = await Promise.all([
+      query<{ count: string }>(
+        `SELECT COUNT(*) AS count FROM skill_runs
+         WHERE workspace_id = $1 AND created_at >= $2`,
+        [workspaceId, monthStart]
+      ),
+      query<{ count: string }>(
+        `SELECT COUNT(*) AS count FROM user_workspaces WHERE workspace_id = $1`,
+        [workspaceId]
+      ),
+      query<{ docs: string; generated: string }>(
+        `SELECT
+           (SELECT COUNT(*) FROM documents WHERE workspace_id = $1)::text AS docs,
+           (SELECT COUNT(*) FROM generated_documents WHERE workspace_id = $1)::text AS generated`,
+        [workspaceId]
+      ),
+      query<{ input_tokens: string; output_tokens: string; cost: string }>(
+        `SELECT
+           COALESCE(SUM(input_tokens), 0)::text AS input_tokens,
+           COALESCE(SUM(output_tokens), 0)::text AS output_tokens,
+           COALESCE(SUM(estimated_cost_usd), 0)::text AS cost
+         FROM token_usage
+         WHERE workspace_id = $1 AND created_at >= $2`,
+        [workspaceId, monthStart]
+      ),
+    ]);
+
+    const docs = parseInt(docsResult.rows[0]?.docs ?? '0');
+    const generated = parseInt(docsResult.rows[0]?.generated ?? '0');
+    const totalDocs = docs + generated;
+
+    res.json({
+      skill_runs_this_month: parseInt(skillRunsResult.rows[0]?.count ?? '0'),
+      member_count: parseInt(memberResult.rows[0]?.count ?? '0'),
+      storage_docs: totalDocs,
+      storage_docs_breakdown: { synced: docs, generated },
+      token_usage_this_month: {
+        input_tokens: parseInt(tokenResult.rows[0]?.input_tokens ?? '0'),
+        output_tokens: parseInt(tokenResult.rows[0]?.output_tokens ?? '0'),
+        cost_usd: parseFloat(tokenResult.rows[0]?.cost ?? '0'),
+      },
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[workspaces] usage stats error:', msg);
+    res.status(500).json({ error: msg });
+  }
+});
+
 export default router;
