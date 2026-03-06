@@ -163,19 +163,99 @@ function truncateOutput(output: string, maxChars: number = 500): string {
   return output.substring(0, maxChars) + '...';
 }
 
+const DEPENDENT_SKILLS = [
+  'pipeline-hygiene',
+  'pipeline-coverage',
+  'pipeline-waterfall',
+  'data-quality-audit',
+  'deal-risk-review',
+  'forecast-rollup',
+  'rep-scorecard',
+  'conversation-intelligence',
+];
+
+async function checkInputFreshness(workspaceId: string): Promise<{
+  sufficientData: boolean;
+  limitedData: boolean;
+  skillsWithRecentRuns: string[];
+  skillsMissingRuns: string[];
+  warningMessage?: string;
+}> {
+  try {
+    const result = await query(`
+      SELECT DISTINCT ON (skill_id) skill_id, completed_at
+      FROM skill_runs
+      WHERE workspace_id = $1
+        AND skill_id = ANY($2)
+        AND status = 'completed'
+        AND started_at >= NOW() - INTERVAL '14 days'
+      ORDER BY skill_id, started_at DESC
+    `, [workspaceId, DEPENDENT_SKILLS]);
+
+    const ran = new Set(result.rows.map((r: any) => r.skill_id));
+    const skillsWithRecentRuns = DEPENDENT_SKILLS.filter(s => ran.has(s));
+    const skillsMissingRuns = DEPENDENT_SKILLS.filter(s => !ran.has(s));
+    const count = skillsWithRecentRuns.length;
+
+    if (count < 3) {
+      return {
+        sufficientData: false,
+        limitedData: false,
+        skillsWithRecentRuns,
+        skillsMissingRuns,
+        warningMessage: `Strategy & Insights needs at least 3 upstream skills to have run in the last 14 days. Only ${count} found: ${skillsWithRecentRuns.join(', ') || 'none'}. Run the following skills first: ${skillsMissingRuns.slice(0, 5).join(', ')}.`,
+      };
+    }
+
+    if (count < 5) {
+      return {
+        sufficientData: true,
+        limitedData: true,
+        skillsWithRecentRuns,
+        skillsMissingRuns,
+        warningMessage: `Running on partial data — ${count} of ${DEPENDENT_SKILLS.length} upstream skills have recent outputs. Missing: ${skillsMissingRuns.join(', ')}.`,
+      };
+    }
+
+    return { sufficientData: true, limitedData: false, skillsWithRecentRuns, skillsMissingRuns };
+  } catch (err: any) {
+    console.log('[StrategyInsights] Error checking input freshness:', err.message);
+    return { sufficientData: true, limitedData: false, skillsWithRecentRuns: [], skillsMissingRuns: [] };
+  }
+}
+
 export async function prepareStrategyInsights(workspaceId: string) {
   try {
     console.log('[StrategyInsights] Preparing strategy insights for workspace', workspaceId);
-    
+
+    const freshness = await checkInputFreshness(workspaceId);
+
+    if (!freshness.sufficientData) {
+      return {
+        recentOutputs: { skills: {}, agents: {}, skillCount: 0, agentCount: 0 },
+        crossWorkspace: { workspaces: [], icpProfiles: [], leadScoreDistribution: [] },
+        trends: { skillRunFrequency: [], stageMovement: [] },
+        dataAvailable: false,
+        limitedData: false,
+        warningMessage: freshness.warningMessage,
+        skillsWithRecentRuns: freshness.skillsWithRecentRuns,
+        skillsMissingRuns: freshness.skillsMissingRuns,
+      };
+    }
+
     const recentOutputs = await gatherRecentSkillOutputs(workspaceId);
     const crossWorkspace = await gatherCrossWorkspaceContext();
     const trends = await gatherTrendAnalysis(workspaceId);
-    
+
     return {
       recentOutputs,
       crossWorkspace,
       trends,
       dataAvailable: recentOutputs.skillCount > 0,
+      limitedData: freshness.limitedData,
+      warningMessage: freshness.warningMessage,
+      skillsWithRecentRuns: freshness.skillsWithRecentRuns,
+      skillsMissingRuns: freshness.skillsMissingRuns,
     };
   } catch (err: any) {
     console.log('[StrategyInsights] Error preparing insights:', err.message);
@@ -184,6 +264,10 @@ export async function prepareStrategyInsights(workspaceId: string) {
       crossWorkspace: { workspaces: [], icpProfiles: [], leadScoreDistribution: [] },
       trends: { skillRunFrequency: [], stageMovement: [] },
       dataAvailable: false,
+      limitedData: false,
+      warningMessage: 'Failed to load strategy insights data.',
+      skillsWithRecentRuns: [],
+      skillsMissingRuns: DEPENDENT_SKILLS,
     };
   }
 }

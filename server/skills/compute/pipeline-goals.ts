@@ -85,20 +85,50 @@ export async function loadTargetsAndActuals(workspaceId: string) {
     }
 
     if (monthly <= 0) {
-      // Last resort: trailing 3-month average of actual closed revenue
+      // Last resort: trailing 12-month average of actual closed revenue, split by rep
       // This is a run-rate estimate, not a real quota — treat as approximate
       const impliedResult = await query<any>(
-        `SELECT COALESCE(AVG(monthly_won), 0)::numeric as implied_monthly_target FROM (
-          SELECT DATE_TRUNC('month', close_date) as month, SUM(amount) as monthly_won
-          FROM deals WHERE workspace_id = $1 AND stage_normalized = 'closed_won'
-            AND close_date >= NOW() - INTERVAL '3 months'
-          GROUP BY 1
-        ) sub`,
+        `SELECT
+           COALESCE(SUM(monthly_won), 0)::numeric / GREATEST(COUNT(DISTINCT month), 1) as implied_monthly_target
+         FROM (
+           SELECT DATE_TRUNC('month', close_date) as month, SUM(amount) as monthly_won
+           FROM deals WHERE workspace_id = $1 AND stage_normalized = 'closed_won'
+             AND close_date >= NOW() - INTERVAL '12 months'
+           GROUP BY 1
+         ) sub`,
         [workspaceId]
       );
       monthly = Number(impliedResult.rows[0]?.implied_monthly_target || 0);
-      source = 'implied_trailing_3mo';
-      quotaWarning = 'No quota configured in targets table. Using trailing 3-month average as implied target.';
+      source = 'implied_trailing_12mo';
+      quotaWarning = 'Estimated from 12-month closed-won history — no quota configured. Set targets in workspace config for precise numbers.';
+    }
+
+    // Per-rep implied quota from 12-month closed-won history (always computed as supplemental data)
+    let perRepTargets: Array<{ rep: string; implied_monthly: number; deals_closed_12mo: number; status: string }> = [];
+    try {
+      const repResult = await query<any>(
+        `SELECT
+           COALESCE(owner_name, owner_email, 'Unknown') as rep,
+           COUNT(*)::int as deals_closed,
+           COALESCE(SUM(amount), 0)::numeric / 12 as implied_monthly
+         FROM deals
+         WHERE workspace_id = $1
+           AND stage_normalized = 'closed_won'
+           AND close_date >= NOW() - INTERVAL '12 months'
+           AND owner_name IS NOT NULL
+         GROUP BY 1
+         HAVING COUNT(*) >= 3
+         ORDER BY implied_monthly DESC`,
+        [workspaceId]
+      );
+      perRepTargets = repResult.rows.map((r: any) => ({
+        rep: r.rep,
+        implied_monthly: Number(r.implied_monthly),
+        deals_closed_12mo: parseInt(r.deals_closed, 10),
+        status: 'derived',
+      }));
+    } catch {
+      // per-rep derivation is supplemental, don't fail
     }
 
     const attainmentResult = await query<any>(
@@ -136,6 +166,8 @@ export async function loadTargetsAndActuals(workspaceId: string) {
       },
       timing: { daysRemaining, weeksRemaining },
       quotaWarning,
+      perRepTargets,
+      derivedFromHistory: source === 'implied_trailing_12mo',
     };
   } catch (error) {
     console.log('[PipelineGoals] Error loading targets and actuals:', error);

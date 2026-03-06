@@ -12,6 +12,7 @@ export const stageVelocityBenchmarksSkill: SkillDefinition = {
     'resolveTimeWindows',
     'svbComputeBenchmarks',
     'svbFlagSlowDeals',
+    'persistVelocityBenchmarks',
     'calculateOutputBudget',
   ],
 
@@ -45,6 +46,16 @@ export const stageVelocityBenchmarksSkill: SkillDefinition = {
       computeFn: 'svbComputeBenchmarks',
       computeArgs: { lookback_months: 12 },
       outputKey: 'benchmarks',
+    },
+
+    {
+      id: 'persist-benchmarks',
+      name: 'Persist Benchmarks to Cache',
+      tier: 'compute',
+      dependsOn: ['compute-benchmarks'],
+      computeFn: 'persistVelocityBenchmarks',
+      computeArgs: {},
+      outputKey: 'persist_result',
     },
 
     {

@@ -6366,35 +6366,66 @@ const dsmGatherScoringContext: ToolDefinition = {
   parameters: { type: 'object', properties: {}, required: [] },
   execute: async (params, context) => {
     return safeExecute('dsmGatherScoringContext', async () => {
-      // Stage benchmarks: median and p75 days per stage from closed-won deals
-      const benchmarkResult = await query<any>(
-        `SELECT stage_normalized,
-                PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY days_in_stage) as median_days,
-                PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY days_in_stage) as p75_days,
-                PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY days_in_stage) as p90_days,
-                COUNT(*)::int as sample_size
-         FROM deals
+      // Check velocity_benchmarks cache (Stage Velocity Benchmarks skill writes here)
+      const cacheResult = await query<any>(
+        `SELECT stage_normalized, median_days, p75_days, p90_days, mean_days, sample_size, computed_at
+         FROM velocity_benchmarks
          WHERE workspace_id = $1
-           AND stage_normalized = 'closed_won'
-           AND days_in_stage > 0
-           AND created_at >= NOW() - INTERVAL '12 months'
-         GROUP BY stage_normalized`,
+           AND computed_at >= NOW() - INTERVAL '7 days'`,
         [context.workspaceId]
       ).catch(() => ({ rows: [] as any[] }));
 
-      // Also get per-stage benchmarks from all deals (not just CW)
-      const stageResult = await query<any>(
-        `SELECT stage_normalized,
-                PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY days_in_stage) as median_days,
-                PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY days_in_stage) as p75_days,
-                COUNT(*)::int as sample_size
-         FROM deals
-         WHERE workspace_id = $1
-           AND days_in_stage > 0
-           AND created_at >= NOW() - INTERVAL '12 months'
-         GROUP BY stage_normalized`,
-        [context.workspaceId]
-      ).catch(() => ({ rows: [] as any[] }));
+      let stageBenchmarks: Record<string, { median_days: number; p75_days: number; p90_days: number }> = {};
+      let benchmarkSource: 'cached' | 'computed' = 'computed';
+
+      if (cacheResult.rows.length > 0) {
+        benchmarkSource = 'cached';
+        for (const row of cacheResult.rows) {
+          stageBenchmarks[row.stage_normalized] = {
+            median_days: parseFloat(row.median_days || '30'),
+            p75_days: parseFloat(row.p75_days || '45'),
+            p90_days: parseFloat(row.p90_days || '60'),
+          };
+        }
+      } else {
+        // Fall back to computing from deals table
+        await query<any>(
+          `SELECT stage_normalized,
+                  PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY days_in_stage) as median_days,
+                  PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY days_in_stage) as p75_days,
+                  PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY days_in_stage) as p90_days,
+                  COUNT(*)::int as sample_size
+           FROM deals
+           WHERE workspace_id = $1
+             AND stage_normalized = 'closed_won'
+             AND days_in_stage > 0
+             AND created_at >= NOW() - INTERVAL '12 months'
+           GROUP BY stage_normalized`,
+          [context.workspaceId]
+        ).catch(() => ({ rows: [] as any[] }));
+
+        // Per-stage benchmarks from all deals (not just CW)
+        const stageResult = await query<any>(
+          `SELECT stage_normalized,
+                  PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY days_in_stage) as median_days,
+                  PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY days_in_stage) as p75_days,
+                  COUNT(*)::int as sample_size
+           FROM deals
+           WHERE workspace_id = $1
+             AND days_in_stage > 0
+             AND created_at >= NOW() - INTERVAL '12 months'
+           GROUP BY stage_normalized`,
+          [context.workspaceId]
+        ).catch(() => ({ rows: [] as any[] }));
+
+        for (const row of stageResult.rows) {
+          stageBenchmarks[row.stage_normalized] = {
+            median_days: parseFloat(row.median_days || '30'),
+            p75_days: parseFloat(row.p75_days || '45'),
+            p90_days: parseFloat(row.p90_days || '60'),
+          };
+        }
+      }
 
       // Rep win rates from closed deals (last 12 months)
       const repResult = await query<any>(
@@ -6412,15 +6443,6 @@ const dsmGatherScoringContext: ToolDefinition = {
         [context.workspaceId]
       ).catch(() => ({ rows: [] as any[] }));
 
-      const stageBenchmarks: Record<string, { median_days: number; p75_days: number; p90_days: number }> = {};
-      for (const row of stageResult.rows) {
-        stageBenchmarks[row.stage_normalized] = {
-          median_days: parseFloat(row.median_days || '30'),
-          p75_days: parseFloat(row.p75_days || '45'),
-          p90_days: parseFloat(row.p90_days || '60'),
-        };
-      }
-
       const repWinRates: Record<string, number> = {};
       let totalWins = 0;
       let totalDecisions = 0;
@@ -6437,6 +6459,7 @@ const dsmGatherScoringContext: ToolDefinition = {
         rep_win_rates: repWinRates,
         workspace_win_rate: workspaceWinRate,
         total_reps_analyzed: repResult.rows.length,
+        benchmark_source: benchmarkSource,
       };
     }, params);
   },
@@ -7944,6 +7967,266 @@ const enrichMismatchedDealsTool: ToolDefinition = {
 };
 
 // ============================================================================
+// RFM Narrative — gather scored deals for Claude synthesis
+// ============================================================================
+
+const gatherScoredDealNarratives: ToolDefinition = {
+  name: 'gatherScoredDealNarratives',
+  description: 'Reads RFM-scored deals from the database after computeRFMScores has run. Returns top 10 (grade A/B) and bottom 10 (grade D/F) open deals with all score fields for narrative synthesis.',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (params, context) => {
+    return safeExecute('gatherScoredDealNarratives', async () => {
+      const result = await query(`
+        SELECT
+          name as deal_name,
+          COALESCE(account_name, '') as account_name,
+          rfm_grade,
+          rfm_label,
+          rfm_recency_days,
+          rfm_recency_stage,
+          rfm_recency_stage_threshold,
+          rfm_frequency_count,
+          rfm_threading_factor,
+          ROUND(COALESCE(tte_conditional_prob, 0)::numeric * 100, 1) as tte_pct,
+          COALESCE(amount, 0)::numeric as amount,
+          COALESCE(owner_name, owner_email, 'Unassigned') as owner_name,
+          stage,
+          rfm_scored_at
+        FROM deals
+        WHERE workspace_id = $1
+          AND stage_normalized NOT IN ('closed_won', 'closed_lost')
+          AND rfm_scored_at IS NOT NULL
+          AND rfm_grade IS NOT NULL
+        ORDER BY
+          CASE rfm_grade WHEN 'A' THEN 1 WHEN 'B' THEN 2 WHEN 'C' THEN 3 WHEN 'D' THEN 4 ELSE 5 END,
+          amount DESC
+      `, [context.workspaceId]);
+
+      const all = result.rows;
+      const atRisk = all.filter((d: any) => ['D', 'F'].includes(d.rfm_grade)).slice(0, 10);
+      const healthy = all.filter((d: any) => ['A', 'B'].includes(d.rfm_grade)).slice(0, 10);
+      const totalScored = all.length;
+      const gradeDistribution = ['A', 'B', 'C', 'D', 'F'].reduce((acc: any, g) => {
+        acc[g] = all.filter((d: any) => d.rfm_grade === g).length;
+        return acc;
+      }, {});
+
+      return { atRisk, healthy, totalScored, gradeDistribution };
+    }, params);
+  },
+};
+
+// ============================================================================
+// Conversation Intelligence Data Gate
+// ============================================================================
+
+const checkConvIntelData: ToolDefinition = {
+  name: 'checkConvIntelData',
+  description: 'Pre-flight check for Conversation Intelligence: counts calls with summaries in the last 14 days. Returns hasSufficientData=false if below threshold of 5.',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (params, context) => {
+    return safeExecute('checkConvIntelData', async () => {
+      const threshold = 5;
+      const result = await query(`
+        SELECT
+          COUNT(*)::int as call_count,
+          COUNT(summary) FILTER (WHERE summary IS NOT NULL AND summary != '')::int as summarized_count
+        FROM conversations
+        WHERE workspace_id = $1
+          AND started_at >= NOW() - INTERVAL '14 days'
+          AND (is_internal = false OR is_internal IS NULL)
+      `, [context.workspaceId]);
+
+      const row = result.rows[0] || {};
+      const callCount = parseInt(row.call_count || '0', 10);
+      const summarizedCount = parseInt(row.summarized_count || '0', 10);
+      const hasSufficientData = summarizedCount >= threshold;
+
+      return {
+        hasSufficientData,
+        callCount,
+        summarizedCount,
+        threshold,
+        warningMessage: hasSufficientData
+          ? undefined
+          : `Only ${summarizedCount} of ${callCount} recent calls have summaries (need ${threshold}). More call data is required to generate conversation themes.`,
+      };
+    }, params);
+  },
+};
+
+// ============================================================================
+// Competitive Intelligence Data Gate
+// ============================================================================
+
+const checkCompIntelData: ToolDefinition = {
+  name: 'checkCompIntelData',
+  description: 'Pre-flight check for Competitive Intelligence: counts competitor mentions across conversation_signals, conversations, and deal_insights in the last 30 days. Returns hasSufficientData=false if below threshold of 10.',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (params, context) => {
+    return safeExecute('checkCompIntelData', async () => {
+      const threshold = 10;
+
+      const signalResult = await query(`
+        SELECT COUNT(*)::int as mention_count
+        FROM conversation_signals cs
+        JOIN conversations c ON c.id = cs.conversation_id
+        WHERE c.workspace_id = $1
+          AND cs.signal_type = 'competitor'
+          AND cs.created_at >= NOW() - INTERVAL '30 days'
+      `, [context.workspaceId]).catch(() => ({ rows: [{ mention_count: 0 }] }));
+
+      const legacyResult = await query(`
+        SELECT COUNT(*)::int as mention_count
+        FROM conversations
+        WHERE workspace_id = $1
+          AND started_at >= NOW() - INTERVAL '30 days'
+          AND competitor_mentions IS NOT NULL
+          AND competitor_mentions != '[]'
+      `, [context.workspaceId]).catch(() => ({ rows: [{ mention_count: 0 }] }));
+
+      const insightResult = await query(`
+        SELECT COUNT(*)::int as mention_count
+        FROM deal_insights di
+        JOIN deals d ON d.id = di.deal_id
+        WHERE d.workspace_id = $1
+          AND di.insight_type = 'competitive'
+          AND di.created_at >= NOW() - INTERVAL '30 days'
+      `, [context.workspaceId]).catch(() => ({ rows: [{ mention_count: 0 }] }));
+
+      const mentionCount =
+        parseInt(signalResult.rows[0]?.mention_count || '0', 10) +
+        parseInt(legacyResult.rows[0]?.mention_count || '0', 10) +
+        parseInt(insightResult.rows[0]?.mention_count || '0', 10);
+
+      const hasSufficientData = mentionCount >= threshold;
+
+      return {
+        hasSufficientData,
+        mentionCount,
+        threshold,
+        warningMessage: hasSufficientData
+          ? undefined
+          : `Only ${mentionCount} competitive mentions found in the last 30 days (need ${threshold}). Competitive analysis requires more win/loss data, call mentions, or deal notes referencing competitors.`,
+      };
+    }, params);
+  },
+};
+
+// ============================================================================
+// Forecast Accuracy Persistence
+// ============================================================================
+
+const persistAccuracyScores: ToolDefinition = {
+  name: 'persistAccuracyScores',
+  description: 'Writes per-rep forecast accuracy scores to the forecast_accuracy table, enabling trend lines in Rep Scorecard and data-driven confidence warnings in Forecast Rollup. Upserts by (workspace_id, rep_name, quarter).',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (params, context) => {
+    return safeExecute('persistAccuracyScores', async () => {
+      const repAccuracy = (context as any).stepOutputs?.rep_accuracy;
+      if (!repAccuracy?.reps?.length) {
+        return { persisted: 0, skipped: true, reason: 'No rep accuracy data available' };
+      }
+
+      const now = new Date();
+      const quarter = `${now.getFullYear()}-Q${Math.ceil((now.getMonth() + 1) / 3)}`;
+      const skillRunId = (context as any).skillRunId ?? null;
+
+      let persisted = 0;
+      for (const rep of repAccuracy.reps) {
+        try {
+          await query(`
+            INSERT INTO forecast_accuracy
+              (workspace_id, rep_name, quarter, win_rate, commit_hit_rate, haircut_factor,
+               pattern, deals_analyzed, computed_at, skill_run_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9)
+            ON CONFLICT (workspace_id, rep_name, quarter)
+            DO UPDATE SET
+              win_rate = EXCLUDED.win_rate,
+              commit_hit_rate = EXCLUDED.commit_hit_rate,
+              haircut_factor = EXCLUDED.haircut_factor,
+              pattern = EXCLUDED.pattern,
+              deals_analyzed = EXCLUDED.deals_analyzed,
+              computed_at = NOW(),
+              skill_run_id = EXCLUDED.skill_run_id
+          `, [
+            context.workspaceId,
+            rep.rep_name,
+            quarter,
+            rep.win_rate ?? null,
+            rep.commit_hit_rate ?? null,
+            rep.haircut_factor ?? null,
+            rep.pattern ?? null,
+            rep.quarters_analyzed ?? null,
+            skillRunId,
+          ]);
+          persisted++;
+        } catch (err: any) {
+          console.log(`[persistAccuracyScores] Failed for rep ${rep.rep_name}:`, err.message);
+        }
+      }
+
+      return { persisted, quarter };
+    }, params);
+  },
+};
+
+// ============================================================================
+// Velocity Benchmarks Persistence
+// ============================================================================
+
+const persistVelocityBenchmarks: ToolDefinition = {
+  name: 'persistVelocityBenchmarks',
+  description: 'Writes stage velocity benchmarks computed by svbComputeBenchmarks to the velocity_benchmarks table. The Deal Scoring Model reads from this cache instead of recomputing, and applies a velocity risk multiplier to slow deals.',
+  tier: 'compute',
+  parameters: { type: 'object', properties: {}, required: [] },
+  execute: async (params, context) => {
+    return safeExecute('persistVelocityBenchmarks', async () => {
+      const benchmarks = (context as any).stepOutputs?.benchmarks;
+      if (!benchmarks?.length) {
+        return { persisted: 0, skipped: true, reason: 'No benchmark data available' };
+      }
+
+      let persisted = 0;
+      for (const b of benchmarks) {
+        try {
+          await query(`
+            INSERT INTO velocity_benchmarks
+              (workspace_id, stage_normalized, median_days, p75_days, p90_days, mean_days, sample_size, computed_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+            ON CONFLICT (workspace_id, stage_normalized)
+            DO UPDATE SET
+              median_days = EXCLUDED.median_days,
+              p75_days = EXCLUDED.p75_days,
+              p90_days = EXCLUDED.p90_days,
+              mean_days = EXCLUDED.mean_days,
+              sample_size = EXCLUDED.sample_size,
+              computed_at = NOW()
+          `, [
+            context.workspaceId,
+            b.stage_normalized,
+            b.median_days ?? null,
+            b.p75_days ?? null,
+            b.p90_days ?? null,
+            b.mean_days ?? null,
+            b.sample_size ?? null,
+          ]);
+          persisted++;
+        } catch (err: any) {
+          console.log(`[persistVelocityBenchmarks] Failed for stage ${b.stage_normalized}:`, err.message);
+        }
+      }
+
+      return { persisted };
+    }, params);
+  },
+};
+
+// ============================================================================
 
 export const toolRegistry = new Map<string, ToolDefinition>([
   ['queryDeals', queryDeals],
@@ -8075,6 +8358,11 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['survivalCurveQuery', survivalCurveQuery],
   ['stageMismatchAnalysis', stageMismatchAnalysisTool],
   ['enrichMismatchedDeals', enrichMismatchedDealsTool],
+  ['gatherScoredDealNarratives', gatherScoredDealNarratives],
+  ['checkConvIntelData', checkConvIntelData],
+  ['checkCompIntelData', checkCompIntelData],
+  ['persistAccuracyScores', persistAccuracyScores],
+  ['persistVelocityBenchmarks', persistVelocityBenchmarks],
 ]);
 
 // ============================================================================

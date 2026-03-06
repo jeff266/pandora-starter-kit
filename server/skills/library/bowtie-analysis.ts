@@ -160,6 +160,11 @@ Keep it under 600 words. This is for the Monday ops review.
     sections: ['funnel_headline', 'bottleneck_fix', 'volume_vs_conversion', 'activity_prescription', 'metric_to_watch'],
   } as any,
 
+  schedule: {
+    cron: '0 9 1 * *',
+    trigger: 'on_demand',
+  },
+
   estimatedDuration: '300 seconds',
 
   answers_questions: ['bowtie', 'funnel', 'full funnel', 'conversion', 'retention', 'expansion', 'top of funnel'],

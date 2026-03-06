@@ -75,6 +75,10 @@ Respond with ONLY a JSON object:
 ⚠️ {{goals_data.targets.quotaWarning}}
 {{/if}}
 
+{{#if goals_data.targets.derivedFromHistory}}
+> **Estimated quota** — derived from trailing 12-month closed-won history. Per-rep targets below are also estimated. Update workspace targets for precise numbers.
+{{/if}}
+
 {{#if dataFreshness.isStale}}
 ⚠️ DATA FRESHNESS: {{dataFreshness.staleCaveat}}
 {{/if}}
@@ -118,6 +122,13 @@ Biggest lever: {{gap_classifications.biggest_lever}}
 {{#each goals_data.repBreakdown}}
 - **{{this.rep}}**: {{this.openDeals}} open deals (\${{this.pipelineValue}}), won {{this.wonThisMonth}} (\${{this.wonValue}}), {{this.meetings}} meetings / {{this.calls}} calls this month
 {{/each}}
+
+{{#if goals_data.targets.perRepTargets.length}}
+# Per-Rep Implied Monthly Targets (from 12-month history)
+{{#each goals_data.targets.perRepTargets}}
+- **{{this.rep}}**: ~\${{this.implied_monthly}}/mo implied ({{this.deals_closed_12mo}} deals closed last 12 months)
+{{/each}}
+{{/if}}
 
 Write an activity goals briefing covering:
 1. Headline: are we on track or not? (one sentence with the dollar gap)

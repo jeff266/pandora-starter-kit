@@ -12,6 +12,7 @@ export const forecastAccuracyTrackingSkill: SkillDefinition = {
     'resolveTimeWindows',
     'fatGatherRepAccuracy',
     'fatGatherHistoricalRollups',
+    'persistAccuracyScores',
     'calculateOutputBudget',
   ],
 
@@ -90,6 +91,16 @@ Grade criteria:
 Skip reps with pattern "accurate" and sufficient data — they don't need classification.
 Return ONLY the JSON array.`,
       outputKey: 'rep_classifications',
+    },
+
+    {
+      id: 'persist-accuracy-scores',
+      name: 'Persist Rep Accuracy Scores',
+      tier: 'compute',
+      dependsOn: ['gather-rep-accuracy', 'classify-volatile-reps'],
+      computeFn: 'persistAccuracyScores',
+      computeArgs: {},
+      outputKey: 'persist_result',
     },
 
     {

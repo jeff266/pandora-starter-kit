@@ -25,9 +25,19 @@ export const competitiveIntelligenceSkill: SkillDefinition = {
 
   steps: [
     {
+      id: 'check-data-availability',
+      name: 'Check Competitive Data Sufficiency',
+      tier: 'compute',
+      computeFn: 'checkCompIntelData',
+      computeArgs: {},
+      outputKey: 'data_check',
+    },
+
+    {
       id: 'resolve-time-windows',
       name: 'Resolve Time Windows',
       tier: 'compute',
+      dependsOn: ['check-data-availability'],
       computeFn: 'resolveTimeWindows',
       computeArgs: {
         analysisWindow: 'trailing_90d',
@@ -61,8 +71,13 @@ export const competitiveIntelligenceSkill: SkillDefinition = {
       id: 'analyze-competitive-patterns',
       name: 'Analyze Competitive Patterns',
       tier: 'deepseek',
-      dependsOn: ['gather-competitor-mentions', 'compute-competitive-win-rates'],
+      dependsOn: ['check-data-availability', 'gather-competitor-mentions', 'compute-competitive-win-rates'],
       deepseekPrompt: `You are a competitive intelligence analyst. Classify competitive patterns from win/loss data.
+
+{{#unless data_check.hasSufficientData}}
+INSUFFICIENT DATA: {{data_check.warningMessage}}
+Return an empty JSON array: []
+{{else}}
 
 COMPETITOR MENTIONS:
 {{{json competitor_mentions}}}
@@ -89,7 +104,8 @@ Definitions:
 - declining_threat: mentions decreasing over the analysis period
 - segment_specific: only appears in certain deal sizes, industries, or stages
 
-Return ONLY the JSON array.`,
+Return ONLY the JSON array.
+{{/unless}}`,
       outputKey: 'competitive_patterns',
     },
 
@@ -108,6 +124,7 @@ Return ONLY the JSON array.`,
       name: 'Synthesize Competitive Intelligence Report',
       tier: 'claude',
       dependsOn: [
+        'check-data-availability',
         'resolve-time-windows',
         'gather-competitor-mentions',
         'compute-competitive-win-rates',
@@ -115,6 +132,15 @@ Return ONLY the JSON array.`,
         'calculate-output-budget',
       ],
       claudePrompt: `You are a Revenue Intelligence analyst delivering the competitive landscape brief for {{business_model.company_name}}.
+
+{{#unless data_check.hasSufficientData}}
+**Competitive Intelligence could not run** — {{data_check.warningMessage}}
+
+Competitive mentions found in the last 30 days: {{data_check.mentionCount}}.
+Minimum required: {{data_check.threshold}} mentions.
+
+This report will generate once more competitor names appear in call summaries, deal notes, or win/loss records. No action needed.
+{{else}}
 
 COMPETITOR MENTIONS:
 {{{json competitor_mentions}}}
@@ -158,7 +184,8 @@ After the report, emit an <actions> block:
   "impact_amount": 0,
   "urgency_label": "this_week" | "next_week"
 }]
-<actions>[]</actions>`,
+<actions>[]</actions>
+{{/unless}}`,
       outputKey: 'narrative',
     },
   ],

@@ -4,7 +4,7 @@ export const strategyInsightsSkill: SkillDefinition = {
   id: 'strategy-insights',
   name: 'Strategy & Insights',
   description: 'Cross-skill pattern analysis: reads outputs from all other skills and agents to identify strategic patterns, contradictions, and leading indicators.',
-  version: '1.0.0',
+  version: '1.1.0',
   category: 'intelligence',
   tier: 'mixed',
 
@@ -14,7 +14,7 @@ export const strategyInsightsSkill: SkillDefinition = {
   steps: [
     {
       id: 'gather-insights-data',
-      name: 'Gather Skill Outputs & Cross-Workspace Data',
+      name: 'Gather Skill Outputs & Check Input Freshness',
       tier: 'compute',
       computeFn: 'prepareStrategyInsights',
       computeArgs: {},
@@ -28,6 +28,29 @@ export const strategyInsightsSkill: SkillDefinition = {
       dependsOn: ['gather-insights-data'],
       claudePrompt: `You are a strategic advisor to a RevOps consultant who manages multiple client engagements. You have access to every analysis that has been run across all clients. Your job is to identify patterns, contradictions, and strategic implications that no single report can see.
 
+{{#unless insights_data.dataAvailable}}
+⚠️ INSUFFICIENT DATA — DO NOT SYNTHESIZE
+
+{{insights_data.warningMessage}}
+
+Skills with recent outputs: {{#if insights_data.skillsWithRecentRuns.length}}{{#each insights_data.skillsWithRecentRuns}}{{this}}{{#unless @last}}, {{/unless}}{{/each}}{{else}}none{{/if}}
+
+Please output the following message verbatim and nothing else:
+
+**Strategy & Insights could not run** — not enough upstream skill data is available (need at least 3 skills with outputs from the last 14 days).
+
+To generate this report, run these skills first:
+{{#each insights_data.skillsMissingRuns}}
+- {{this}}
+{{/each}}
+
+Once those have completed, re-run Strategy & Insights.
+{{else}}
+{{#if insights_data.limitedData}}
+⚠️ LIMITED DATA CAVEAT: {{insights_data.warningMessage}}
+This synthesis is based on partial data. Treat recommendations as directional, not definitive.
+
+{{/if}}
 You think in terms of:
 - Cross-client patterns: is the same issue showing up everywhere?
 - Leading indicators: what's about to become a problem?
@@ -82,11 +105,17 @@ One thing the team should deprioritize based on the data.
 
 Keep it under 500 words. This is the "so what?" layer.
 
-{{voiceBlock}}`,
+{{voiceBlock}}
+{{/unless}}`,
       maxTokens: 2500,
       outputKey: 'report',
     },
   ],
+
+  schedule: {
+    cron: '30 8 * * 1',
+    trigger: 'on_demand',
+  },
 
   outputFormat: {
     type: 'narrative',

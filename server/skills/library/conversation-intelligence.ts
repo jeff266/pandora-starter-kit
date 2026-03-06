@@ -25,9 +25,19 @@ export const conversationIntelligenceSkill: SkillDefinition = {
 
   steps: [
     {
+      id: 'check-data-availability',
+      name: 'Check Call Data Sufficiency',
+      tier: 'compute',
+      computeFn: 'checkConvIntelData',
+      computeArgs: {},
+      outputKey: 'data_check',
+    },
+
+    {
       id: 'resolve-time-windows',
       name: 'Resolve Time Windows',
       tier: 'compute',
+      dependsOn: ['check-data-availability'],
       computeFn: 'resolveTimeWindows',
       computeArgs: {
         analysisWindow: 'trailing_7d',
@@ -51,8 +61,13 @@ export const conversationIntelligenceSkill: SkillDefinition = {
       id: 'extract-themes',
       name: 'Extract Themes from Call Summaries',
       tier: 'deepseek',
-      dependsOn: ['gather-conversations'],
+      dependsOn: ['check-data-availability', 'gather-conversations'],
       deepseekPrompt: `You are a conversation analyst. Extract structured signals from sales call summaries.
+
+{{#unless data_check.hasSufficientData}}
+INSUFFICIENT DATA: {{data_check.warningMessage}}
+Return an empty JSON array: []
+{{else}}
 
 RECENT CONVERSATIONS (last 7 days):
 {{{json conversations}}}
@@ -82,7 +97,8 @@ Guidelines:
 - Only include non-empty arrays. If nothing was found for a field, use [].
 - Skip conversations with no summary.
 
-Return ONLY the JSON array.`,
+Return ONLY the JSON array.
+{{/unless}}`,
       outputKey: 'theme_extractions',
     },
 
@@ -111,6 +127,7 @@ Return ONLY the JSON array.`,
       name: 'Synthesize Conversation Intelligence Report',
       tier: 'claude',
       dependsOn: [
+        'check-data-availability',
         'resolve-time-windows',
         'gather-conversations',
         'extract-themes',
@@ -118,6 +135,15 @@ Return ONLY the JSON array.`,
         'calculate-output-budget',
       ],
       claudePrompt: `You are a Revenue Intelligence analyst delivering the weekly conversation brief for {{business_model.company_name}}.
+
+{{#unless data_check.hasSufficientData}}
+**Conversation Intelligence could not run this week** — {{data_check.warningMessage}}
+
+Calls found in the last 14 days: {{data_check.callCount}} total, {{data_check.summarizedCount}} with summaries available.
+Minimum required: {{data_check.threshold}} calls with summaries.
+
+The report will generate automatically once more calls are recorded and summarized. No action is needed.
+{{else}}
 
 CONVERSATION SUMMARY (this week):
 {{{json conversations.summary}}}
@@ -159,7 +185,8 @@ After the report, emit an <actions> block with a JSON array:
   "impact_amount": 0,
   "urgency_label": "overdue" | "this_week" | "next_week"
 }]
-<actions>[]</actions>`,
+<actions>[]</actions>
+{{/unless}}`,
       outputKey: 'narrative',
     },
   ],
