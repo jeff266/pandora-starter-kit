@@ -1,0 +1,35 @@
+Skill authoring in Pandora is more structured than most people realize — it's not "write a prompt and attach it to a schedule." There's a strict architectural pattern every skill must follow.
+
+**The three-phase rule**
+
+Every skill is Compute → Classify → Synthesize. No exceptions.
+
+- **Compute (free):** SQL aggregations only. No LLM touches this. The output is structured summaries — counts, buckets, top-N lists, period comparisons. Raw rows never leave this phase.
+- **Classify (DeepSeek, cheap):** Takes the top ≤30 items from Compute and categorizes each one. Root cause, confidence, signals, suggested action. DeepSeek does the per-item grunt work.
+- **Synthesize (Claude, expensive):** Receives the summaries + classifications, answers one specific strategic question. Hard rule: Claude's input must be under 4K tokens. If it isn't, you haven't aggregated enough in Compute.
+
+The whole skill should cost under ~$0.15 to run. The bad version of Pipeline Hygiene — before this pattern was enforced — was sending 291 raw deal records to Claude and cost $3 per run.
+
+**What a skill author actually defines**
+
+The skill definition checklist forces you to answer eight questions before writing a line of code:
+1. What raw data do I need?
+2. What aggregations reduce it to summaries?
+3. What's the top-N for per-item classification (≤30)?
+4. What categories should DeepSeek classify into?
+5. What single strategic question does Claude answer?
+6. What follow-up tools does Claude get? (max 2–3, capped at 5 tool calls)
+7. What's the output format? (Slack, markdown, JSON)
+8. Is Claude's input actually under 4K tokens?
+
+**Where skill authoring gets interesting for Pandora specifically**
+
+The `workspace_config` layer means skills aren't hardcoded. A skill reads stale thresholds, pipeline scope, win rate definitions, and team filters from the config rather than embedding them. So the same Pipeline Hygiene skill behaves differently for Imubit (Salesforce, 14-day stale) vs Frontera (HubSpot, custom threshold), without any code changes.
+
+The `applicable_skills` field on saved queries was meant to close the loop between the SQL Tools page and the skill library — letting a workspace-specific query plug in as a custom data step inside an existing skill's Compute phase. That wiring doesn't exist yet, which is why it came up in the saved query conversation.
+
+**What's hard about skill authoring today**
+
+It's entirely code-level. There's no UI for defining or editing skill steps, adjusting prompts, previewing what data a Compute step produces, or seeing token budgets before you run. Anyone who wants to create or modify a skill has to touch the skill definition files directly.
+
+That's the gap the `applicable_skills` connection would start to address — letting an operator attach a saved query to an existing skill without opening code. A proper skill authoring UI (step editor, prompt preview, token cost meter, test run against real data) would be the fuller version of that, but it's firmly in the backlog.
