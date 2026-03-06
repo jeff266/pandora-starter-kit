@@ -668,10 +668,10 @@ export default function CommandCenter() {
       {/* Combined greeting + controls row */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         {/* Left: greeting */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 120, flex: 1, overflow: 'hidden' }}>
           {greetingData ? (
             <>
-              <span style={{ fontSize: 13, fontWeight: 600, color: colors.text, whiteSpace: 'nowrap' }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: colors.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {greetingData.headline}
               </span>
               <span style={{ color: colors.border, flexShrink: 0 }}>·</span>
