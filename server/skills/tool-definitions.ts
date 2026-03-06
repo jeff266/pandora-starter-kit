@@ -2872,7 +2872,7 @@ const checkForecastCalibration: ToolDefinition = {
 
 const checkPipelineGenHistory: ToolDefinition = {
   name: 'checkPipelineGenHistory',
-  description: 'Check if workspace has sufficient pipeline creation history for reliable velocity modeling. Returns history tier (full/partial/insufficient) based on 90-day deal creation history.',
+  description: 'Check if workspace has sufficient pipeline creation history for reliable velocity modeling. Returns history tier (full/partial/insufficient) based on 180-day deal creation history using monthly cohort count.',
   tier: 'compute',
   parameters: {
     type: 'object',
@@ -2883,38 +2883,39 @@ const checkPipelineGenHistory: ToolDefinition = {
     return safeExecute('checkPipelineGenHistory', async () => {
       const result = await query(
         `SELECT
-          COUNT(DISTINCT id) as weekly_count,
+          COUNT(DISTINCT DATE_TRUNC('month', created_at)) as months_with_deals,
+          COUNT(*) as total_deals,
           MIN(created_at) as earliest_deal,
           MAX(created_at) as latest_deal
          FROM deals
          WHERE workspace_id = $1
-           AND created_at >= NOW() - INTERVAL '90 days'`,
+           AND created_at >= NOW() - INTERVAL '180 days'`,
         [context.workspaceId]
       );
 
-      const weeklyCount = parseInt(result.rows[0]?.weekly_count || '0', 10);
+      const monthsWithDeals = parseInt(result.rows[0]?.months_with_deals || '0', 10);
       const earliestDeal = result.rows[0]?.earliest_deal || null;
       const latestDeal = result.rows[0]?.latest_deal || null;
 
       let historyTier: 'full' | 'partial' | 'insufficient';
       let message: string;
 
-      if (weeklyCount >= 40) {
+      if (monthsWithDeals >= 6) {
         historyTier = 'full';
-        message = 'Sufficient pipeline creation history for full velocity modeling (4+ deals/week).';
-      } else if (weeklyCount >= 15) {
+        message = 'Sufficient pipeline creation history for full velocity modeling (6+ months of data).';
+      } else if (monthsWithDeals >= 3) {
         historyTier = 'partial';
-        message = 'Limited pipeline creation history. Velocity projections may have reduced precision.';
+        message = 'Limited pipeline creation history. Velocity projections may have reduced precision (fewer than 6 months of data).';
       } else {
         historyTier = 'insufficient';
-        message = 'Insufficient pipeline creation history for velocity modeling. Need 15+ deals created in last 90 days. Consider qualitative summary instead.';
+        message = 'Insufficient pipeline creation history for velocity modeling. Need at least 3 months of deal creation data in the last 6 months. Consider qualitative summary instead.';
       }
 
-      console.log(`[Pipeline Gen History] Tier: ${historyTier} (${weeklyCount} deals created in last 90d)`);
+      console.log(`[Pipeline Gen History] Tier: ${historyTier} (${monthsWithDeals} months with deals in last 180d)`);
 
       return {
         historyTier,
-        weeklyCount,
+        monthsWithDeals,
         earliestDeal: earliestDeal ? new Date(earliestDeal).toISOString() : null,
         latestDeal: latestDeal ? new Date(latestDeal).toISOString() : null,
         message,
@@ -3397,26 +3398,31 @@ const enrichForecastWithAccuracy: ToolDefinition = {
     return safeExecute('enrichForecastWithAccuracy', async () => {
       const result = await query(
         `SELECT
-          owner_email,
-          avg_commit_accuracy,
-          avg_forecast_accuracy,
-          total_quarters_tracked
+          rep_name,
+          AVG(win_rate) as avg_win_rate,
+          AVG(commit_hit_rate) as avg_commit_hit_rate,
+          AVG(haircut_factor) as avg_haircut_factor,
+          COUNT(DISTINCT quarter) as quarters_tracked,
+          MAX(pattern) as dominant_pattern
          FROM forecast_accuracy
-         WHERE workspace_id = $1`,
+         WHERE workspace_id = $1
+         GROUP BY rep_name`,
         [context.workspaceId]
       );
 
-      const byRep: Record<string, { commitAccuracy: number; forecastAccuracy: number; quartersTracked: number }> = {};
+      const byRep: Record<string, { commitAccuracy: number; forecastAccuracy: number; quartersTracked: number; haircut: number; pattern: string | null }> = {};
 
       for (const row of result.rows) {
-        byRep[row.owner_email] = {
-          commitAccuracy: parseFloat(row.avg_commit_accuracy || '0'),
-          forecastAccuracy: parseFloat(row.avg_forecast_accuracy || '0'),
-          quartersTracked: parseInt(row.total_quarters_tracked || '0', 10),
+        byRep[row.rep_name] = {
+          commitAccuracy: parseFloat(row.avg_commit_hit_rate || '0'),
+          forecastAccuracy: parseFloat(row.avg_win_rate || '0'),
+          quartersTracked: parseInt(row.quarters_tracked || '0', 10),
+          haircut: parseFloat(row.avg_haircut_factor || '0'),
+          pattern: row.dominant_pattern || null,
         };
       }
 
-      console.log(`[Accuracy Enrichment] Loaded accuracy data for ${Object.keys(byRep).length} reps`);
+      console.log(`[Accuracy Enrichment] Loaded accuracy data for ${Object.keys(byRep).length} reps (keyed by rep_name)`);
 
       return {
         byRep,
@@ -4360,7 +4366,7 @@ const checkDataAvailabilityTool: ToolDefinition = {
 
 const loadVelocityBenchmarks: ToolDefinition = {
   name: 'loadVelocityBenchmarks',
-  description: 'Load workspace-level stage velocity benchmarks (avg_days, p50, p75) from stage_velocity_benchmarks table. Used for assessing deal progression speed.',
+  description: 'Load workspace-level stage velocity benchmarks (mean_days, median_days, p75_days) from velocity_benchmarks table. Used for assessing deal progression speed.',
   tier: 'compute',
   parameters: {
     type: 'object',
@@ -4372,23 +4378,25 @@ const loadVelocityBenchmarks: ToolDefinition = {
       const result = await query(
         `SELECT
           stage_normalized,
-          avg_days,
-          p50_days,
+          mean_days,
+          median_days,
           p75_days,
-          deal_count
-         FROM stage_velocity_benchmarks
+          p90_days,
+          sample_size
+         FROM velocity_benchmarks
          WHERE workspace_id = $1`,
         [context.workspaceId]
       );
 
-      const byStage: Record<string, { avgDays: number; p50: number; p75: number; count: number }> = {};
+      const byStage: Record<string, { avgDays: number; p50: number; p75: number; p90: number; count: number }> = {};
 
       for (const row of result.rows) {
         byStage[row.stage_normalized] = {
-          avgDays: parseFloat(row.avg_days || '0'),
-          p50: parseFloat(row.p50_days || '0'),
+          avgDays: parseFloat(row.mean_days || '0'),
+          p50: parseFloat(row.median_days || '0'),
           p75: parseFloat(row.p75_days || '0'),
-          count: parseInt(row.deal_count || '0', 10),
+          p90: parseFloat(row.p90_days || '0'),
+          count: parseInt(row.sample_size || '0', 10),
         };
       }
 
@@ -4569,20 +4577,30 @@ const generateCustomFieldReportTool: ToolDefinition = {
   execute: async (params, context) => {
     return safeExecute('generateCustomFieldReport', async () => {
       const discoveryResult = (context.stepResults as any).discovered_fields as CustomFieldDiscoveryResult;
-      const classifications = (context.stepResults as any).field_classifications || [];
+      // DeepSeek sometimes wraps the result in an object (e.g. { custom_fields: [...] }) instead of returning a bare array
+      const rawClassifications = (context.stepResults as any).field_classifications || [];
+      const classifications: any[] = Array.isArray(rawClassifications)
+        ? rawClassifications
+        : (Array.isArray(rawClassifications.custom_fields) ? rawClassifications.custom_fields
+          : Array.isArray(rawClassifications.classifications) ? rawClassifications.classifications
+          : Array.isArray(rawClassifications.fields) ? rawClassifications.fields
+          : (Object.values(rawClassifications as object).find(v => Array.isArray(v)) as any[]) || []);
 
       if (!discoveryResult) {
         throw new Error('discovered_fields not found in context. Run discoverCustomFields first.');
       }
 
       // Merge classifications into topFields
+      // classificationMap is keyed on c.fieldKey (verbatim from input) so it matches field.fieldKey exactly
       const classificationMap = new Map();
       for (const c of classifications) {
-        classificationMap.set(c.field_name, c);
+        if (c.fieldKey) classificationMap.set(c.fieldKey, c);
+        // Fallback: also key by field_name in case older DeepSeek output used that
+        if (c.field_name) classificationMap.set(c.field_name, c);
       }
 
       const enrichedTopFields = discoveryResult.topFields.map((field: any) => {
-        const classification = classificationMap.get(field.field_key);
+        const classification = classificationMap.get(field.fieldKey);
         return {
           ...field,
           ...(classification ? {

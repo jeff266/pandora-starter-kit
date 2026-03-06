@@ -141,7 +141,7 @@ Return ONLY the JSON array.`,
       claudePrompt: `You are a Revenue Operations analyst delivering the pipeline generation forecast for {{business_model.company_name}}.
 
 {{#if history_check.historyTier}}
-📊 PIPELINE GEN HISTORY: {{history_check.historyTier}} ({{history_check.weeklyCount}} deals created in last 90d)
+📊 PIPELINE GEN HISTORY: {{history_check.historyTier}} ({{history_check.monthsWithDeals}} months of pipeline creation history in 6-month window)
 {{history_check.message}}
 
 {{#equals history_check.historyTier "insufficient"}}

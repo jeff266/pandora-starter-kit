@@ -1507,7 +1507,7 @@ export default function DealDetail() {
                 <div key={i} style={{ display: 'flex', gap: 12, paddingBottom: 12, position: 'relative', borderLeft: i < stageHistory.length - 1 ? `2px solid ${colors.border}` : `2px solid ${colors.accent}`, paddingLeft: 16 }}>
                   <div style={{ position: 'absolute', left: -5, top: 0, width: 8, height: 8, borderRadius: '50%', background: i === stageHistory.length - 1 ? colors.accent : colors.border }} />
                   <div>
-                    <span style={{ fontSize: 13, fontWeight: 500, color: colors.text }}>{s.stage_label || s.stage?.replace(/_/g, ' ') || 'Unknown'}</span>
+                    <span style={{ fontSize: 13, fontWeight: 500, color: colors.text }}>{s.stage_label || s.stage_normalized?.replace(/_/g, ' ') || s.stage?.replace(/_/g, ' ') || 'Unknown'}</span>
                     <div style={{ fontSize: 11, color: colors.textMuted }}>{s.entered_at ? formatDate(s.entered_at) : ''}{s.days_in_stage ? ` · ${Math.round(s.days_in_stage)}d` : ''}</div>
                   </div>
                 </div>

@@ -43,26 +43,14 @@ export const customFieldDiscoverySkill: SkillDefinition = {
       dependsOn: ['discover-fields'],
       deepseekPrompt: `You are a sales operations analyst classifying CRM custom fields.
 
-{{#if discovered_fields.total}}
-{{#if discovered_fields.total > 30}}
-⚠️ Too many fields ({{discovered_fields.total}}). Only classifying top 30 by usage frequency.
-{{/if}}
+{{#if discovered_fields.topFields}}
+CUSTOM FIELDS (classifying top {{discovered_fields.topFields.length}} by ICP relevance score):
 
-CUSTOM FIELDS:
-{{{json discovered_fields.topFields}}}
+{{#each discovered_fields.topFields}}
+[{{@index}}] fieldKey="{{this.fieldKey}}" | entity={{this.entityType}} | fillRate={{this.fillRate}} | cardinality={{this.cardinality}} | winRateSpread={{this.winRateSpread}} | icpScore={{this.icpRelevanceScore}}
+{{/each}}
 
-Classify each field's business purpose. Return JSON array:
-[
-  {
-    "field_name": "...",
-    "object_type": "deal" | "contact" | "account",
-    "category": "qualification" | "commercial_terms" | "stakeholder_role" | "technical_requirement" | "risk_indicator" | "stage_tracking" | "account_info" | "unknown",
-    "confidence": 0.0 to 1.0,
-    "reasoning": "one sentence why this classification makes sense"
-  }
-]
-
-Definitions:
+Category definitions:
 - qualification: fields that indicate deal quality or fit (pain severity, BANT, use case)
 - commercial_terms: pricing, contract terms, billing details
 - stakeholder_role: decision-maker titles, champion info, buying committee roles
@@ -71,6 +59,11 @@ Definitions:
 - stage_tracking: deal milestones, next steps, close plan
 - account_info: company metadata (industry, size, region)
 - unknown: unclear or generic fields
+
+Classify each field above. Return a JSON array with exactly {{discovered_fields.topFields.length}} entries, one per field in the same order listed.
+For each entry, the "fieldKey" must be copied EXACTLY as shown in the list (e.g. fieldKey="Type" → output "fieldKey": "Type", fieldKey="Number_of_Tasks__c" → output "fieldKey": "Number_of_Tasks__c").
+
+Example: [{ "fieldKey": "LeadSource", "field_name": "Lead Source", "object_type": "deal", "category": "qualification", "confidence": 0.8, "reasoning": "Tracks where deals originate." }]
 {{else}}
 No custom fields discovered. Return empty array: []
 {{/if}}`,
@@ -79,13 +72,14 @@ No custom fields discovered. Return empty array: []
         items: {
           type: 'object',
           properties: {
+            fieldKey: { type: 'string', description: 'Verbatim copy of the fieldKey from the input object' },
             field_name: { type: 'string' },
             object_type: { type: 'string' },
             category: { type: 'string' },
             confidence: { type: 'number' },
             reasoning: { type: 'string' },
           },
-          required: ['field_name', 'object_type', 'category', 'confidence', 'reasoning'],
+          required: ['fieldKey', 'field_name', 'object_type', 'category', 'confidence', 'reasoning'],
         },
       },
       outputKey: 'field_classifications',
