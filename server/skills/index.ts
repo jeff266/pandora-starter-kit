@@ -35,6 +35,7 @@ import { dealScoringModelSkill } from './library/deal-scoring-model.js';
 import { dealRfmScoringSkill } from './library/deal-rfm-scoring.js';
 import { monteCarloForecastSkill } from './library/monte-carlo-forecast.js';
 import { pipelineContributionForecastSkill } from './library/pipeline-contribution-forecast.js';
+import { stageMismatchDetectorSkill } from './library/stage-mismatch-detector.js';
 
 // Types
 export type {
@@ -116,6 +117,7 @@ export { forecastAccuracyTrackingSkill } from './library/forecast-accuracy-track
 export { dealScoringModelSkill } from './library/deal-scoring-model.js';
 export { monteCarloForecastSkill } from './library/monte-carlo-forecast.js';
 export { pipelineContributionForecastSkill } from './library/pipeline-contribution-forecast.js';
+export { stageMismatchDetectorSkill } from './library/stage-mismatch-detector.js';
 
 // Formatters
 export {
@@ -175,6 +177,7 @@ export function registerBuiltInSkills(): void {
   registry.register(dealRfmScoringSkill);
   registry.register(monteCarloForecastSkill);
   registry.register(pipelineContributionForecastSkill);
+  registry.register(stageMismatchDetectorSkill);
 
   // Register evidence builders for "Show the Work" evidence assembly
   registerAllEvidenceBuilders();
