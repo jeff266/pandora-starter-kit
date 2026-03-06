@@ -25,6 +25,8 @@ import { queryDealOutcomes } from './query-deal-outcomes.js';
  * Safe arithmetic calculator using JavaScript eval with strict sanitization.
  * Only allows numbers, basic operators, parentheses, and whitespace.
  */
+const ALLOWED_MATH_FUNCTIONS = ['round', 'floor', 'ceil', 'abs', 'min', 'max', 'sqrt', 'pow'];
+
 function calculateMath(params: { expression: string; description?: string }): {
   result: number;
   expression: string;
@@ -33,33 +35,49 @@ function calculateMath(params: { expression: string; description?: string }): {
 } {
   const { expression, description } = params;
 
-  // Sanitize: only allow numbers, operators, parentheses, decimals, whitespace
-  const sanitized = expression.replace(/[^0-9+\-*/(). ]/g, '');
+  // Strip all whitespace for validation
+  const compact = expression.replace(/\s/g, '');
 
-  // Validation: check if sanitization removed anything (indicating invalid chars)
-  const normalized = expression.replace(/\s/g, ''); // Remove whitespace from original
-  const sanitizedNormalized = sanitized.replace(/\s/g, ''); // Remove whitespace from sanitized
+  // Allow: digits, decimal points, basic operators (+, -, *, /), parentheses,
+  // commas (for min/max multi-arg), and lowercase letters (for whitelisted functions only)
+  const allowedPattern = /^[0-9+\-*\/().,a-z]+$/;
+  if (!compact || !allowedPattern.test(compact)) {
+    throw new Error('Invalid expression. Only numbers, operators (+, -, *, /), parentheses, and math functions (round, floor, ceil, abs, min, max, sqrt, pow) are allowed.');
+  }
 
-  if (!sanitized || normalized !== sanitizedNormalized) {
-    throw new Error('Invalid expression. Only numbers and operators (+, -, *, /, parentheses) are allowed.');
+  // Validate that any identifier in the expression is a whitelisted function name
+  const identifiers = compact.match(/[a-z]+/g) || [];
+  for (const id of identifiers) {
+    if (!ALLOWED_MATH_FUNCTIONS.includes(id)) {
+      throw new Error(`Function "${id}" is not allowed. Permitted functions: ${ALLOWED_MATH_FUNCTIONS.join(', ')}.`);
+    }
   }
 
   try {
-    // eslint-disable-next-line no-eval
-    const result = eval(sanitized);
+    // Build a safe function with only whitelisted math functions in scope
+    // eslint-disable-next-line no-new-func
+    const fn = new Function(
+      'round', 'floor', 'ceil', 'abs', 'min', 'max', 'sqrt', 'pow',
+      `"use strict"; return (${expression});`
+    );
+    const result = fn(
+      Math.round, Math.floor, Math.ceil, Math.abs,
+      Math.min, Math.max, Math.sqrt, Math.pow
+    );
 
     if (typeof result !== 'number' || !isFinite(result)) {
       throw new Error('Calculation did not produce a valid number');
     }
 
-    // Format large numbers with commas for readability
+    // Format large numbers with commas for readability; integers stay as integers
+    const isInteger = Number.isInteger(result);
     const formattedResult = result >= 1000 || result <= -1000
-      ? result.toLocaleString('en-US', { maximumFractionDigits: 2 })
-      : result.toFixed(2);
+      ? result.toLocaleString('en-US', { maximumFractionDigits: isInteger ? 0 : 2 })
+      : isInteger ? result.toString() : result.toFixed(2);
 
     return {
       result,
-      expression: expression,
+      expression,
       description,
       formatted_result: formattedResult,
     };

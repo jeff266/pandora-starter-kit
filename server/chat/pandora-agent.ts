@@ -31,7 +31,7 @@ const PANDORA_TOOLS: ToolDef[] = [
   {
     name: 'query_deals',
     description:
-      'Query deal/opportunity records with flexible filters. Returns individual deal records with name, amount, stage, close_date, owner, account, days_in_stage, probability, forecast_category. Always returns total_count and total_amount across all matches. Use this when you need to see specific deals, break down pipeline numbers, or analyze deal-level data.',
+      'Query deal/opportunity records with flexible filters. Returns individual deal records with name, amount, stage, close_date, owner, account, days_in_stage, probability, forecast_category. ALWAYS returns total_count and total_amount in the response — these are computed by the database and are exact. When the user asks for total pipeline, sum of deals, or deal count, use total_amount and total_count from the response directly without calling calculate to re-sum the individual amounts.',
     parameters: {
       type: 'object',
       properties: {
@@ -736,14 +736,14 @@ const PANDORA_TOOLS: ToolDef[] = [
   {
     name: 'calculate',
     description:
-      '⚠️ MANDATORY for ALL arithmetic. Large language models are TERRIBLE at math and WILL get it wrong. You MUST use this tool for ANY arithmetic operation: addition, subtraction, multiplication, division, percentages, averages. Even simple operations like "10 + 20" or "2 * 3". If you try to do math manually, you will make errors. Use this for: summing deal amounts, computing percentages to quota, calculating averages, finding totals, any arithmetic whatsoever.',
+      '⚠️ MANDATORY for ALL arithmetic. Large language models are TERRIBLE at math and WILL get it wrong. You MUST use this tool for ANY arithmetic operation: addition, subtraction, multiplication, division, percentages, averages, attainment, MRR/ARR conversion, pipeline coverage. Even simple operations like "10 + 20" or "2 * 3". Supports math functions: round(), floor(), ceil(), abs(), min(), max(), sqrt(), pow(). Exception: when query_deals returns total_amount, that DB value is already exact — use it directly without re-summing.',
     parameters: {
       type: 'object',
       properties: {
         expression: {
           type: 'string',
           description:
-            'JavaScript math expression to evaluate. Examples: "8100 + 5400 + 4860", "300000 + 150000 + 96000", "(59580 / 350000) * 100", "(240000 + 300000) / 2"',
+            'JavaScript math expression to evaluate. Basic: "8100 + 5400 + 4860", "(59580 / 350000) * 100", "(240000 + 300000) / 2". With functions: "round((59580 / 350000) * 100)" for attainment %, "round(350000 / 12)" for MRR from ARR, "round((1200000 / 400000) * 10) / 10" for pipeline coverage to 1 decimal.',
         },
         description: {
           type: 'string',
@@ -773,9 +773,14 @@ You have tools that query the company's live data. When someone asks a question,
 
    Examples of when to use calculate:
    - Adding deal amounts: calculate({ expression: "8100 + 5400 + 4860", description: "Total for Sara" })
-   - Computing percentage: calculate({ expression: "(59580 / 350000) * 100", description: "Percent to quota" })
+   - Attainment: calculate({ expression: "round((59580 / 350000) * 100)", description: "Percent to quota" })
    - Finding average: calculate({ expression: "(240000 + 300000 + 96000) / 3", description: "Average deal size" })
+   - MRR/ARR: calculate({ expression: "round(350000 / 12)", description: "Monthly from ARR" })
+   - Subtraction (delta): calculate({ expression: "350000 - 295000", description: "Pipeline change vs prior week" })
+   - Division (coverage ratio): calculate({ expression: "round((1200000 / 400000) * 10) / 10", description: "Pipeline coverage ratio" })
    - ANY arithmetic operation whatsoever
+
+   EXCEPTION: When query_deals returns total_amount, that is a database-computed sum — do NOT re-sum individual deal amounts through calculate. Use total_amount directly.
 
    This is NON-NEGOTIABLE. You cannot do math correctly without the calculator tool.
 
@@ -981,6 +986,9 @@ function requiresCalculator(message: string): boolean {
   // Percentage calculations
   const hasPercentCalc = /\d+%|\bpercent\b/i.test(message);
 
+  // RevOps metric keywords — these imply division/multiplication even without explicit numbers
+  const revOpsMetrics = /\b(attainment|quota|arr|mrr|growth rate|win rate|conversion rate|coverage ratio|coverage|churn|retention|ramp rate|average deal|median deal|weighted pipeline|forecast accuracy|shrink rate|deal velocity|burn rate|net revenue retention|nrr|gross revenue retention|grr|average selling price|asp|cac|ltv|payback period)\b/i;
+
   // Common patterns that need math
   const mathPatterns = [
     /how much|how many/i,
@@ -993,6 +1001,7 @@ function requiresCalculator(message: string): boolean {
   if (hasNumbers && hasOperators) return true;  // Explicit arithmetic
   if (mathKeywords.test(lower) && hasNumbers) return true;  // Math keywords + numbers
   if (hasPercentCalc && mathPatterns.some(p => p.test(lower))) return true;  // Percentage questions
+  if (revOpsMetrics.test(lower)) return true;  // RevOps metric implies division or multiplication
 
   return false;
 }
