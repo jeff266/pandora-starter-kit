@@ -786,6 +786,13 @@ export function startSkillScheduler(): void {
   console.log(`[Skill Scheduler] Cron expressions use UTC timezone`);
   console.log(`[Skill Scheduler] ${scheduledSkills.length} cron schedule(s) registered (${agentCronCount} agent(s))`);
 
+  // Summary: skills registered vs scheduled vs on-demand
+  const skillRegistrySummary = getSkillRegistry();
+  const allRegisteredSkills = skillRegistrySummary.getAll();
+  const scheduledSkillCount = allRegisteredSkills.filter(s => s.schedule?.cron).length;
+  const onDemandSkillCount = allRegisteredSkills.length - scheduledSkillCount;
+  console.log(`[Skill Scheduler] ${allRegisteredSkills.length} skills registered (${scheduledSkillCount} scheduled, ${onDemandSkillCount} on-demand only)`);
+
   // Load and schedule custom skills from DB
   loadAndScheduleCustomSkills();
 }

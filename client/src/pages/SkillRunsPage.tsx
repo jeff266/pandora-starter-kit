@@ -134,13 +134,40 @@ export default function SkillRunsPage() {
 }
 
 function RunOutput({ run }: { run: any }) {
-  const narrative = run.result?.narrative || run.result?.output || run.result?.synthesize?.narrative;
+  const narrative =
+    run.output_text ||
+    run.result?.report ||
+    run.result?.narrative ||
+    run.result?.output ||
+    run.result?.synthesize?.narrative ||
+    run.result?.synthesis?.narrative;
+
+  const isInsufficient =
+    typeof narrative === 'string' &&
+    (narrative.includes('INSUFFICIENT DATA') || narrative.includes('could not run'));
+
   const error = run.error || run.result?.error;
 
   if (error) {
     return (
       <div style={{ fontSize: 12, color: colors.red, fontFamily: fonts.mono, whiteSpace: 'pre-wrap' }}>
         {typeof error === 'string' ? error : JSON.stringify(error, null, 2)}
+      </div>
+    );
+  }
+
+  if (isInsufficient) {
+    return (
+      <div style={{
+        background: `${colors.yellow}11`, border: `1px solid ${colors.yellow}33`,
+        borderRadius: 8, padding: '12px 16px',
+      }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: colors.yellow, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          Insufficient Data
+        </div>
+        <div style={{ fontSize: 12, color: colors.textSecondary, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+          {narrative}
+        </div>
       </div>
     );
   }

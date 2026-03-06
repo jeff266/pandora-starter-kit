@@ -1,0 +1,104 @@
+Clean sweep — all 7 tasks confirmed. The follow-up prompt should focus on validation against real client data and surfacing the new outputs in the UI where they're not yet visible.
+
+---
+
+## Replit Follow-Up Prompt
+
+```
+Read REPLIT_CONTEXT.md before starting.
+
+All 7 sprint tasks completed on the backend. This prompt is validation + UI surfacing 
+only — no new skill logic. Work through each section in order.
+
+---
+
+## Section 1: Validate T001 — RFM Narrative (Frontera workspace)
+
+Run deal-rfm-scoring on-demand against the Frontera workspace.
+
+Check:
+1. The skill completes without error and produces a markdown output
+2. The synthesize-rfm-report Claude step fires (check skill_runs for token usage > 0 on that step)
+3. The output contains per-deal prescriptions — not just a summary paragraph
+4. If the Frontera workspace has fewer than 5 RFM-scored deals, log a warning but don't 
+   block — the data gate for RFM is lower than ConvIntel
+
+Surface in UI: On the deal-rfm-scoring skill detail page (or wherever skill outputs 
+render), confirm the narrative output renders as markdown, not raw JSON. If it's 
+currently showing raw JSON, fix the renderer to detect the new output format.
+
+---
+
+## Section 2: Validate T004 — Data Sufficiency Gates (Frontera + GrowthBook)
+
+Test both gates against workspaces with thin call data:
+
+For conversation-intelligence:
+- Manually check: SELECT COUNT(*) FROM conversations WHERE workspace_id = [id] 
+  AND summary IS NOT NULL AND created_at > NOW() - INTERVAL '14 days'
+- If below threshold (5), run the skill and confirm it exits at the gate step with a 
+  structured warning — NOT a thin LLM output
+- The gate output should be a clear user-facing message, not a server log. 
+  Verify it surfaces in the skill run result and in the UI as a "Insufficient data" 
+  state rather than an empty or broken report
+
+For competitive-intelligence:
+- Same pattern, threshold 10 competitor signal mentions in last 30 days
+- Confirm the gate message tells users specifically what's missing: 
+  "Not enough competitor mentions found in recent calls (found X, need 10). 
+   Connect more call recordings or ensure competitor names appear in call summaries."
+
+---
+
+## Section 3: Validate T005 + T006 — Cross-Skill Data Flow
+
+T005 (forecast accuracy persistence):
+- Run forecast-accuracy-tracking, then query:
+  SELECT * FROM forecast_accuracy WHERE workspace_id = [imubit_id] ORDER BY created_at DESC LIMIT 10
+- Confirm rows exist with rep_name, accuracy_pct, quarter populated
+- Confirm upsert works: run it twice, verify row count doesn't double
+
+T006 (velocity → deal scoring cache):
+- Run stage-velocity-benchmarks, then query:
+  SELECT * FROM velocity_benchmarks WHERE workspace_id = [id]
+- Confirm rows exist per stage_normalized
+- Then run deal-scoring-model and check the skill_run log for "benchmark_source: 'cached'" 
+  in the step output — this confirms the cache hit path is working
+- If benchmark_source is missing from the log, add it to the step output explicitly so 
+  it's observable
+
+---
+
+## Section 4: UI — Skills Library "Custom" Badge Prep
+
+This is forward-looking setup for the Skill Builder feature coming next sprint.
+
+On the Skills library page, add support for an isCustom flag on skill cards:
+- If skill.isCustom === true: show a small "Custom" pill badge in muted teal next to 
+  the skill name (same style as the category badge but teal)
+- If skill.isCustom === false or undefined: no badge (no change to existing cards)
+
+This is a pure UI prop — no backend call needed yet. Just wire the conditional render 
+so it's ready when the Skill Builder ships custom skills with isCustom: true in the 
+registry.
+
+---
+
+## Section 5: Schedule Confirmation Log
+
+In the server startup logs, the scheduler currently logs each cron registration. 
+Add one additional log line after all skills are registered:
+
+  [Skill Scheduler] X skills registered (Y scheduled, Z on-demand only)
+
+This makes it easy to spot registration count regressions across deploys. Pull the 
+counts from the registry at startup — scheduled = skills with a cron defined, 
+on-demand = skills without.
+
+---
+
+## What NOT to change
+- Do not modify any skill logic — validation only
+- Do not touch the Agent Builder
+- Do not begin Skill Builder UI — that's the next prompt
+```

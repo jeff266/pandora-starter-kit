@@ -8127,7 +8127,7 @@ const persistAccuracyScores: ToolDefinition = {
   parameters: { type: 'object', properties: {}, required: [] },
   execute: async (params, context) => {
     return safeExecute('persistAccuracyScores', async () => {
-      const repAccuracy = (context as any).stepOutputs?.rep_accuracy;
+      const repAccuracy = (context as any).stepResults?.rep_accuracy;
       if (!repAccuracy?.reps?.length) {
         return { persisted: 0, skipped: true, reason: 'No rep accuracy data available' };
       }
@@ -8186,7 +8186,7 @@ const persistVelocityBenchmarks: ToolDefinition = {
   parameters: { type: 'object', properties: {}, required: [] },
   execute: async (params, context) => {
     return safeExecute('persistVelocityBenchmarks', async () => {
-      const benchmarks = (context as any).stepOutputs?.benchmarks;
+      const benchmarks = (context as any).stepResults?.benchmarks;
       if (!benchmarks?.length) {
         return { persisted: 0, skipped: true, reason: 'No benchmark data available' };
       }
