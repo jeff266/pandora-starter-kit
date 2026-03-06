@@ -49,6 +49,7 @@ interface DealRow {
   active_source: 'skill' | 'health' | undefined;
   days_since_last_call?: number | null;
   divergence_flag?: boolean;
+  action_count?: number;
 }
 
 type SortField = 'name' | 'amount' | 'stage' | 'owner' | 'close_date' | 'health' | 'days_in_stage' | 'last_call' | 'signals';
@@ -114,10 +115,19 @@ export default function DealList() {
   const fetchDeals = useCallback(async () => {
     setLoading(true);
     try {
-      const [riskData, dealsData] = await Promise.all([
+      const [riskData, dealsData, actionSummary] = await Promise.all([
         api.get('/pipeline/risk-summary').catch(() => null),
         api.get('/deals?limit=1000'),
+        api.get('/actions/summary-by-deal').catch(() => ({ data: { deals: [] } })),
       ]);
+
+      // Build action count map
+      const actionCounts = new Map<string, number>();
+      if (actionSummary?.data?.deals) {
+        for (const dealSummary of actionSummary.data.deals) {
+          actionCounts.set(dealSummary.deal_id, dealSummary.open_count);
+        }
+      }
 
       const riskDeals: DealRow[] = (riskData?.deals || []).map((d: any) => ({
         id: d.deal_id,
@@ -142,6 +152,7 @@ export default function DealList() {
         active_source: d.active_source ?? undefined,
         days_since_last_call: d.days_since_last_call ?? null,
         divergence_flag: d.divergence_flag ?? false,
+        action_count: actionCounts.get(d.deal_id) || 0,
       }));
 
       const riskDealIds = new Set(riskDeals.map(d => d.id));
@@ -172,6 +183,7 @@ export default function DealList() {
             mechanical_score: null,
             mechanical_grade: null,
             active_source: undefined,
+            action_count: actionCounts.get(d.id) || 0,
           };
         });
 
@@ -508,10 +520,11 @@ export default function DealList() {
                     <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 4, background: colors.accentSoft, color: colors.accent, textTransform: 'capitalize' }}>{deal.stage?.replace(/_/g, ' ') || '—'}</span>
                     <span>{anon.person(shortName(deal.owner)) || '—'}</span>
                     <span style={{ color: pastDue ? colors.red : colors.textMuted }}>{deal.close_date ? formatDate(deal.close_date) : ''}</span>
-                    {totalFindings > 0 && (
+                    {(totalFindings > 0 || (deal.action_count && deal.action_count > 0)) && (
                       <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                         {deal.signal_counts.act > 0 && <span style={{ width: 6, height: 6, borderRadius: '50%', background: severityColor('act'), display: 'inline-block' }} />}
                         {deal.signal_counts.watch > 0 && <span style={{ width: 6, height: 6, borderRadius: '50%', background: severityColor('watch'), display: 'inline-block' }} />}
+                        {deal.action_count && deal.action_count > 0 && <span style={{ width: 6, height: 6, borderRadius: '50%', background: colors.accent, display: 'inline-block' }} title={`${deal.action_count} pending action${deal.action_count > 1 ? 's' : ''}`} />}
                       </span>
                     )}
                   </div>
@@ -622,7 +635,7 @@ export default function DealList() {
                       return (
                         <span style={{
                           fontSize: 9, fontWeight: 600, padding: '2px 6px', borderRadius: 4,
-                          background: '#fef2f2', color: severityColor('act'),
+                          background: '#fef2f2', color: severityColor('act'), fontFamily: fonts.sans,
                         }}>
                           ACT
                         </span>
@@ -632,7 +645,7 @@ export default function DealList() {
                       return (
                         <span style={{
                           fontSize: 9, fontWeight: 600, padding: '2px 6px', borderRadius: 4,
-                          background: '#fefce8', color: severityColor('watch'),
+                          background: '#fefce8', color: severityColor('watch'), fontFamily: fonts.sans,
                         }}>
                           WATCH
                         </span>
@@ -642,7 +655,7 @@ export default function DealList() {
                       return (
                         <span style={{
                           fontSize: 9, fontWeight: 600, padding: '2px 6px', borderRadius: 4,
-                          background: colors.surfaceRaised, color: colors.textMuted,
+                          background: colors.surfaceRaised, color: colors.textMuted, fontFamily: fonts.sans,
                         }}>
                           NOTABLE
                         </span>
@@ -651,6 +664,23 @@ export default function DealList() {
 
                     return null;
                   })()}
+                  {deal.action_count && deal.action_count > 0 && (
+                    <span
+                      style={{
+                        fontSize: 9,
+                        fontWeight: 600,
+                        padding: '2px 6px',
+                        borderRadius: 4,
+                        background: colors.accentSoft,
+                        color: colors.accent,
+                        fontFamily: fonts.sans,
+                        cursor: 'pointer',
+                      }}
+                      title={`${deal.action_count} pending action${deal.action_count > 1 ? 's' : ''}`}
+                    >
+                      {deal.action_count} ACTION{deal.action_count > 1 ? 'S' : ''}
+                    </span>
+                  )}
                 </div>
               </div>
             );
