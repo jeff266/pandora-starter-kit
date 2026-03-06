@@ -85,7 +85,13 @@ export async function createInvestigationPlan(
   ]);
 
   const registry = getSkillRegistry();
-  const skills = registry.listAll();
+  const allSkills = registry.listAll();
+
+  // Suppress built-ins that are overridden by a custom skill
+  const overriddenSlugs = new Set(
+    allSkills.filter(s => s.replacesSkillId).map(s => s.replacesSkillId!)
+  );
+  const skills = allSkills.filter(s => !overriddenSlugs.has(s.id));
 
   const goalsFiltered = goals.filter(Boolean);
   const recentFindings = recentFindingsResult.rows;
@@ -94,7 +100,11 @@ export async function createInvestigationPlan(
 "${question}"
 
 AVAILABLE SKILLS:
-${skills.map((s) => `- ${s.id}: ${s.name} (${s.category})`).join('\n')}
+${skills.map((s) => {
+  const base = `- ${s.id}: ${s.name} (${s.category})`;
+  const desc = s.description?.trim();
+  return desc ? `${base} — answers: "${desc}"` : base;
+}).join('\n')}
 
 ACTIVE GOALS:
 ${goalsFiltered.length > 0

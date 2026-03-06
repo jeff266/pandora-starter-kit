@@ -137,6 +137,8 @@ export default function SkillBuilder({ editMode }: Props) {
   const [synthesizeTone, setSynthesizeTone] = useState('Flag risks');
   const [customPrompt, setCustomPrompt] = useState('');
 
+  const [replacesSkillId, setReplacesSkillId] = useState('');
+
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
@@ -172,6 +174,7 @@ export default function SkillBuilder({ editMode }: Props) {
             setSynthesizeEnabled(row.synthesize_enabled);
             setSynthesizeTone(row.synthesize_tone || 'Flag risks');
             setCustomPrompt(row.synthesize_custom_prompt || '');
+            setReplacesSkillId(row.replaces_skill_id || '');
           }
         })
         .catch(() => {});
@@ -218,6 +221,7 @@ export default function SkillBuilder({ editMode }: Props) {
         output_slack: outputSlack,
         output_report: outputReport,
         schedule_cron: schedule || null,
+        replaces_skill_id: replacesSkillId || null,
       };
 
       if (editMode && skillId) {
@@ -354,6 +358,28 @@ export default function SkillBuilder({ editMode }: Props) {
                 </select>
               </Field>
             </div>
+
+            <Field label="Override a built-in skill (optional)" hint="Ask Pandora will always use this skill instead of the selected built-in">
+              <select
+                value={replacesSkillId}
+                onChange={e => setReplacesSkillId(e.target.value)}
+                style={{ ...inputStyle, cursor: 'pointer' }}
+              >
+                <option value="">None — compete on description match</option>
+                <option value="pipeline-hygiene">Pipeline Hygiene</option>
+                <option value="single-thread-alert">Single Thread Alert</option>
+                <option value="data-quality-audit">Data Quality Audit</option>
+                <option value="pipeline-coverage">Pipeline Coverage by Rep</option>
+                <option value="forecast-rollup">Forecast Roll-up</option>
+                <option value="stage-velocity-benchmarks">Stage Velocity Benchmarks</option>
+                <option value="icp-discovery">ICP Discovery</option>
+                <option value="lead-scoring">Lead Scoring</option>
+                <option value="conversation-intelligence">Conversation Intelligence</option>
+                <option value="competitive-intelligence">Competitive Intelligence</option>
+                <option value="rep-scorecard">Rep Scorecard</option>
+                <option value="deal-risk-review">Deal Risk Review</option>
+              </select>
+            </Field>
           </div>
         )}
 
@@ -580,6 +606,7 @@ export default function SkillBuilder({ editMode }: Props) {
                 ['Synthesize with Claude', synthesizeEnabled ? `Yes — ${synthesizeTone}` : 'Disabled'],
                 ['Slack output', outputSlack ? 'Enabled' : 'Disabled'],
                 ['Schedule', scheduleOptions.find(o => o.value === schedule)?.label || 'On demand only'],
+                ...(replacesSkillId ? [['Overrides built-in', replacesSkillId]] : []),
               ].map(([k, v], i, arr) => (
                 <div
                   key={k}

@@ -106,6 +106,9 @@ export interface SkillDefinition {
 
   /** True for utility skills hidden from the user-facing Skills library and agent picker */
   isUtility?: boolean;
+
+  /** Slug of the built-in skill this custom skill replaces in the planner */
+  replacesSkillId?: string;
 }
 
 // ============================================================================

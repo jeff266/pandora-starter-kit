@@ -66,6 +66,7 @@ router.post('/:workspaceId/skills/custom', async (req, res) => {
       output_slack = true,
       output_report = false,
       schedule_cron,
+      replaces_skill_id,
     } = req.body;
 
     if (!name || !description || !query_source) {
@@ -97,15 +98,15 @@ router.post('/:workspaceId/skills/custom', async (req, res) => {
          saved_query_id, saved_query_name, inline_sql,
          classify_enabled, classify_bad, classify_good,
          synthesize_enabled, synthesize_tone, synthesize_custom_prompt,
-         output_slack, output_report, schedule_cron)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+         output_slack, output_report, schedule_cron, replaces_skill_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
        RETURNING *`,
       [
         workspaceId, skillId, name, description, category, query_source,
         saved_query_id ?? null, saved_query_name ?? null, inline_sql ?? null,
         classify_enabled, classify_bad ?? null, classify_good ?? null,
         synthesize_enabled, synthesize_tone, synthesize_custom_prompt ?? null,
-        output_slack, output_report, schedule_cron ?? null,
+        output_slack, output_report, schedule_cron ?? null, replaces_skill_id ?? null,
       ]
     );
 
@@ -148,6 +149,7 @@ router.put('/:workspaceId/skills/custom/:skillId', async (req, res) => {
       output_slack,
       output_report,
       schedule_cron,
+      replaces_skill_id,
     } = req.body;
 
     const result = await query(
@@ -168,6 +170,7 @@ router.put('/:workspaceId/skills/custom/:skillId', async (req, res) => {
         output_slack = COALESCE($16, output_slack),
         output_report = COALESCE($17, output_report),
         schedule_cron = $18,
+        replaces_skill_id = $19,
         updated_at = now()
        WHERE workspace_id = $1 AND skill_id = $2 AND status = 'active'
        RETURNING *`,
@@ -178,7 +181,7 @@ router.put('/:workspaceId/skills/custom/:skillId', async (req, res) => {
         classify_enabled ?? null, classify_bad ?? null, classify_good ?? null,
         synthesize_enabled ?? null, synthesize_tone ?? null, synthesize_custom_prompt ?? null,
         output_slack ?? null, output_report ?? null,
-        schedule_cron ?? null,
+        schedule_cron ?? null, replaces_skill_id ?? null,
       ]
     );
 

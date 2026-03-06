@@ -30,6 +30,7 @@ export interface CustomSkillRow {
   output_slack: boolean;
   output_report: boolean;
   schedule_cron?: string | null;
+  replaces_skill_id?: string | null;
   status: string;
   last_run_at?: string | null;
   run_count: number;
@@ -131,5 +132,6 @@ ${classifyDepends.length > 0 ? '\nClassifications: {{{json classifications}}}' :
     outputFormat: 'markdown',
     estimatedDuration: '60s',
     isCustom: true,
+    ...(row.replaces_skill_id ? { replacesSkillId: row.replaces_skill_id } : {}),
   };
 }

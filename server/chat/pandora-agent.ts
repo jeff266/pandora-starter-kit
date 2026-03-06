@@ -14,6 +14,7 @@ import { callLLM, type ToolDef, type LLMCallOptions } from '../utils/llm-router.
 import { executeDataTool } from './data-tools.js';
 import type { ConversationMessage } from './conversation-state.js';
 import { buildWorkspaceContextBlock } from '../context/workspace-memory.js';
+import { getSkillRegistry } from '../skills/registry.js';
 
 const _chatDir = dirname(fileURLToPath(import.meta.url));
 const PRODUCT_KNOWLEDGE = (() => {
@@ -113,25 +114,9 @@ const PANDORA_TOOLS: ToolDef[] = [
       required: [],
     },
   },
-  {
-    name: 'get_skill_evidence',
-    description:
-      'Retrieve the most recent output from a Pandora AI skill. Skills run on schedules and produce findings (claims with severity) plus evaluated records (the data they analyzed). ALWAYS check skill evidence before querying raw data for pipeline health, risk, forecasting, or rep performance — skills have richer analysis with risk flags and cross-record patterns. Available skills: pipeline-hygiene (stale deals, missing data, close date issues), single-thread-alert (deals with only 1 contact engaged), data-quality-audit (CRM data completeness), pipeline-coverage-by-rep (rep-level pipeline vs quota), weekly-forecast-rollup (forecast by category with changes), pipeline-waterfall (pipeline movement: created, advanced, slipped, lost), rep-scorecard (rep performance metrics), stage-velocity-benchmarks (deals exceeding time-in-stage thresholds, stalled/grinding/stuck patterns), conversation-intelligence (weekly call themes: top objections, competitive mentions, buying signals, coaching opportunities).',
-    parameters: {
-      type: 'object',
-      properties: {
-        skill_id: {
-          type: 'string',
-          enum: ['pipeline-hygiene', 'single-thread-alert', 'data-quality-audit', 'pipeline-coverage-by-rep', 'weekly-forecast-rollup', 'pipeline-waterfall', 'rep-scorecard', 'stage-velocity-benchmarks', 'conversation-intelligence', 'forecast-model', 'pipeline-gen-forecast', 'competitive-intelligence', 'contact-role-resolution'],
-          description: 'The skill to pull evidence from',
-        },
-        max_age_hours: { type: 'number', description: 'Only return if run within this many hours (default 24)' },
-        filter_severity: { type: 'string', enum: ['critical', 'warning', 'info'], description: 'Only return findings of this severity' },
-        filter_entity_id: { type: 'string', description: 'Only return findings about this specific deal/account/rep' },
-      },
-      required: ['skill_id'],
-    },
-  },
+  // get_skill_evidence is built dynamically at request time (see buildGetSkillEvidenceTool)
+  // Placeholder replaced in runPandoraAgent below
+  null as unknown as ToolDef,
   {
     name: 'compute_metric',
     description:
@@ -1058,6 +1043,45 @@ async function classifyQuestion(workspaceId: string, question: string): Promise<
   return { question_type: 'analytical', tools_likely_needed: [], estimated_complexity: 'medium', token_budget: 4096 };
 }
 
+// ─── Dynamic get_skill_evidence tool builder ──────────────────────────────────
+
+function buildGetSkillEvidenceTool(): ToolDef {
+  const registry = getSkillRegistry();
+  const allSkills = registry.listAll();
+
+  // Suppress built-ins overridden by a custom skill (mirrors planner logic)
+  const overriddenSlugs = new Set(
+    allSkills.filter(s => s.replacesSkillId).map(s => s.replacesSkillId!)
+  );
+  const skills = allSkills.filter(s => !overriddenSlugs.has(s.id));
+
+  const skillLines = skills.map(s => {
+    const answers = s.description?.trim() ? ` — answers: "${s.description}"` : '';
+    return `  • ${s.id}${answers}`;
+  }).join('\n');
+
+  const skillIds = skills.map(s => s.id);
+
+  return {
+    name: 'get_skill_evidence',
+    description: `Retrieve the most recent output from a Pandora AI skill. Skills run on schedules and produce findings (claims with severity) plus evaluated records (the data they analyzed). ALWAYS check skill evidence before querying raw data for pipeline health, risk, forecasting, or rep performance — skills have richer analysis with risk flags and cross-record patterns.\n\nAvailable skills for this workspace:\n${skillLines}`,
+    parameters: {
+      type: 'object',
+      properties: {
+        skill_id: {
+          type: 'string',
+          enum: skillIds,
+          description: 'The skill to pull evidence from',
+        },
+        max_age_hours: { type: 'number', description: 'Only return if run within this many hours (default 24)' },
+        filter_severity: { type: 'string', enum: ['critical', 'warning', 'info'], description: 'Only return findings of this severity' },
+        filter_entity_id: { type: 'string', description: 'Only return findings about this specific deal/account/rep' },
+      },
+      required: ['skill_id'],
+    },
+  };
+}
+
 // ─── Main agent loop ──────────────────────────────────────────────────────────
 
 export async function runPandoraAgent(
@@ -1099,19 +1123,24 @@ export async function runPandoraAgent(
     { role: 'user', content: message + toolHint },
   ];
 
+  // Build the dynamic tools list — replace the null placeholder with the live get_skill_evidence tool
+  const dynamicTools: ToolDef[] = PANDORA_TOOLS.map(t =>
+    (t as any) === null ? buildGetSkillEvidenceTool() : t
+  );
+
   for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
     // Guard: if we've reached max iterations, break and synthesize
     if (i >= MAX_TOOL_ITERATIONS) {
       console.log(`[PandoraAgent] Hit MAX_TOOL_ITERATIONS (${MAX_TOOL_ITERATIONS}), forcing synthesis`);
       break;
     }
-    console.log(`[PandoraAgent] iter=${i} calling LLM with ${PANDORA_TOOLS.length} tools, history=${messages.length} msgs, maxTokens=${dynamicMaxTokens}`);
-    console.log(`[PandoraAgent] tools:`, PANDORA_TOOLS.map(t => t.name).join(', '));
+    console.log(`[PandoraAgent] iter=${i} calling LLM with ${dynamicTools.length} tools, history=${messages.length} msgs, maxTokens=${dynamicMaxTokens}`);
+    console.log(`[PandoraAgent] tools:`, dynamicTools.map(t => t.name).join(', '));
 
     const response = await callLLM(workspaceId, 'reason', {
       systemPrompt: effectiveSystemPrompt,
       messages,
-      tools: PANDORA_TOOLS,
+      tools: dynamicTools,
       maxTokens: dynamicMaxTokens,
       temperature: 0.2,
       _tracking: {
