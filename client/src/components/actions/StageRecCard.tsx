@@ -79,10 +79,10 @@ export default function StageRecCard({
         gap: 10,
       }}>
         <Icon name="check" size={14} color={colors.green} />
-        <span style={{ fontSize: compact ? 12 : 13, color: colors.green, fontWeight: 500 }}>
+        <span style={{ fontSize: compact ? 12 : 13, color: colors.green, fontWeight: 500, fontFamily: fonts.sans }}>
           Stage updated to <strong>{customStage || action.to_value}</strong> in {action.deal_name ? 'CRM' : 'HubSpot'}
         </span>
-        <span style={{ fontSize: 11, color: colors.textMuted, marginLeft: 'auto' }}>just now</span>
+        <span style={{ fontSize: 11, color: colors.textMuted, marginLeft: 'auto', fontFamily: fonts.sans }}>just now</span>
       </div>
     );
   }
@@ -102,7 +102,7 @@ export default function StageRecCard({
         opacity: 0.5,
       }}>
         <Icon name="info" size={13} color={colors.textMuted} />
-        <span style={{ fontSize: 12, color: colors.textMuted }}>Recommendation dismissed</span>
+        <span style={{ fontSize: 12, color: colors.textMuted, fontFamily: fonts.sans }}>Recommendation dismissed</span>
       </div>
     );
   }
@@ -167,7 +167,7 @@ export default function StageRecCard({
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: compact ? 12 : 13, fontWeight: 600, color: colors.text }}>
+            <span style={{ fontSize: compact ? 12 : 13, fontWeight: 600, color: colors.text, fontFamily: fonts.sans }}>
               {action.title}
             </span>
             {action.confidence > 0 && (
@@ -186,10 +186,10 @@ export default function StageRecCard({
               gap: 6,
               flexWrap: 'wrap',
             }}>
-              <span style={{ color: colors.textMuted }}>Current:</span>
+              <span style={{ color: colors.textMuted, fontFamily: fonts.sans }}>Current:</span>
               <StagePill label={action.from_value} variant="from" compact={compact} />
               <Icon name="arrow" size={12} color={colors.textMuted} />
-              <span style={{ color: colors.textMuted }}>Recommended:</span>
+              <span style={{ color: colors.textMuted, fontFamily: fonts.sans }}>Recommended:</span>
 
               {editing ? (
                 <input
@@ -250,6 +250,7 @@ export default function StageRecCard({
           color: colors.textSecondary,
           lineHeight: 1.65,
           margin: 0,
+          fontFamily: fonts.sans,
         }}>
           {action.summary}
         </p>
@@ -411,6 +412,7 @@ function StagePill({ label, variant, compact }: { label: string; variant: 'from'
       border: `1px solid ${s.border}`,
       borderRadius: 4,
       padding: compact ? '1px 6px' : '2px 8px',
+      fontFamily: fonts.sans,
     }}>
       {label}
     </span>
@@ -430,10 +432,10 @@ function EvidenceRow({ evidence, compact }: { evidence: Evidence; compact?: bool
         <Icon name={EVIDENCE_ICONS[evidence.signal_type] || 'filter'} size={compact ? 12 : 13} color={colors.textMuted} />
       </div>
       <div style={{ flex: 1 }}>
-        <div style={{ fontSize: compact ? 10 : 11, color: colors.textMuted, marginBottom: 2 }}>
+        <div style={{ fontSize: compact ? 10 : 11, color: colors.textMuted, marginBottom: 2, fontFamily: fonts.sans }}>
           {evidence.label}
         </div>
-        <div style={{ fontSize: compact ? 11 : 12, color: colors.textSecondary, lineHeight: 1.5 }}>
+        <div style={{ fontSize: compact ? 11 : 12, color: colors.textSecondary, lineHeight: 1.5, fontFamily: fonts.sans }}>
           {evidence.value}
         </div>
       </div>

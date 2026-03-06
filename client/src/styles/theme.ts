@@ -16,18 +16,23 @@ export const colors = {
   accent: 'var(--color-accent)',
   accentHover: 'var(--color-accentHover)',
   accentSoft: 'var(--color-accentSoft)',
+  accentGlow: 'var(--color-accent)',
   green: 'var(--color-green)',
   greenSoft: 'var(--color-greenSoft)',
+  greenBorder: 'var(--color-green)',
   yellow: 'var(--color-yellow)',
   yellowSoft: 'var(--color-yellowSoft)',
+  yellowBorder: 'var(--color-yellow)',
   red: 'var(--color-red)',
   redSoft: 'var(--color-redSoft)',
+  redBorder: 'var(--color-red)',
   coral: 'var(--color-coral)',
   coralSoft: 'var(--color-coralSoft)',
   purple: 'var(--color-purple)',
   purpleSoft: 'var(--color-purpleSoft)',
   orange: 'var(--color-orange)',
   orangeSoft: 'var(--color-orangeSoft)',
+  orangeBorder: 'var(--color-orange)',
 } as const;
 
 export const fonts = {
