@@ -1,0 +1,82 @@
+Good. Let me pull the relevant spec files before drafting anything.Good. Here's the sprint plan based on everything I know about the architecture, your client constraints, and Replit's assessment.
+
+---
+
+## Pandora Skills Sprint — Fix the Floor, Then Push Higher
+
+### Context framing
+
+You have **3 Functional skills** with specific, fixable constraints and **full build bandwidth**. Imubit and Frontera are the test beds. The goal is to leave this sprint with all 3 Functional skills at Production-Ready, plus opportunistic lifts on the highest-ROI Solid skills.
+
+---
+
+### Phase 1 — Fix the 3 Functional Skills
+*These are Claude Code tasks. Each has a clear, bounded fix.*
+
+**1. Deal RFM Scoring → Add Narrative Layer**
+This is the highest-leverage fix in the sprint. The compute engine is already Flagship-quality (stage-relative recency, threading multiplier, TTE survival model). It's missing one thing: a Claude synthesis step.
+
+- Add a Step N: `synthesize-rfm-report (CLAUDE)` after the existing compute
+- Input: top/bottom 10 scored deals with score breakdowns — not raw arrays
+- Output: Slack + markdown narrative with deal-level actions ("Acme Corp hasn't had engagement in 34 days and is in late-stage — multi-thread or risk losing it")
+- Register output channels: `['slack', 'markdown']`
+- This goes from raw JSON to a user-facing skill overnight
+
+**2. Strategy & Insights → Schedule + Input Guard**
+Currently dies silently when no other skills have run. Two fixes:
+
+- Add weekly schedule: `0 8 * * 1` (Monday 8am, after Pipeline Hygiene and Pipeline Coverage have run)
+- Add a Step 1: `check-input-freshness (COMPUTE)` — query `skill_runs` for the 8 dependent skills, check `completed_at`. If fewer than 3 have run in the last 14 days, output a warning and skip synthesis rather than producing thin output
+- Add a minimum viable fallback: if only 1–2 skills have recent runs, synthesize just from those with a clear "limited data" caveat
+- This skill's value proposition (cross-functional synthesis) requires its inputs to exist — enforce that contract in code, not hope
+
+**3. Pipeline Goals → Quota Auto-Derivation**
+Currently warns and falls back to generic output when no quota configured. Most workspaces don't set quota. Fix the coverage problem:
+
+- In `check-quota-config`, add a derivation path: if no quota in `goals_and_targets`, compute trailing 12-month average closed-won per rep from the deals table
+- Flag the output clearly: "Estimated quota derived from historical performance — update your workspace config for precise targets"
+- For Imubit specifically: Salesforce likely has quota fields in the Opportunity object — add a Salesforce quota field probe to the sync layer that auto-populates if found
+- This converts "warns most of the time" to "useful most of the time"
+
+---
+
+### Phase 2 — Solid → Production-Ready Lifts
+*With full push bandwidth, do all four of these. Each is a half-day Claude Code task.*
+
+**4. Forecast Accuracy Tracking → Persist Accuracy Scores**
+Currently computes rep accuracy but doesn't write it back. Add a `persist-accuracy-scores (COMPUTE)` step that writes to a `forecast_accuracy` table (or rep metadata). Enables trend lines in the Rep Scorecard and makes the Forecast Rollup's confidence warnings data-driven rather than heuristic.
+
+**5. Stage Velocity Benchmarks → Feed Deal Scoring**
+Currently runs but its output sits isolated. Wire it: after each Stage Velocity run, update a `velocity_benchmarks` cache that the Deal Scoring Model reads. Deals moving slower than benchmark get a risk multiplier. One JOIN changes this from a standalone report to a real-time scoring signal.
+
+**6. Competitive Intelligence + Conversation Intelligence → Data Sufficiency Gates**
+Both degrade badly on low-data workspaces but don't tell users why. Add the same pattern Rep Scorecard uses: a `check-data-availability (COMPUTE)` Step 1 that counts call summaries with competitor mentions (for CI) or total summarized calls (for ConvIntel). If below threshold (suggest: 10 calls for CI, 5 for ConvIntel), emit a structured warning and skip the LLM steps. No more thin outputs reaching users — they get a clear "not enough call data yet" instead.
+
+**7. Bowtie Analysis → Add Schedule**
+This is a fully working skill sitting on-demand only. Add `0 9 1 * *` (monthly, 1st). No code changes to logic — pure scheduler registration. Frontera would immediately benefit given their HubSpot + Gong stack generating full funnel data.
+
+---
+
+### Build Order (sequenced for safety)
+
+| Order | Task | Workspace to test | Risk |
+|---|---|---|---|
+| 1 | Deal RFM narrative step | Frontera (Gong data = richer RFM signals) | Low — additive only |
+| 2 | Strategy & Insights guard + schedule | Both | Low — guard prevents regression |
+| 3 | Pipeline Goals quota derivation | Imubit (Salesforce likely has quota data) | Medium — new derivation logic |
+| 4 | Data sufficiency gates (CI + ConvIntel) | Frontera | Low — defensive only |
+| 5 | Forecast Accuracy persistence | Imubit | Medium — new table write |
+| 6 | Stage Velocity → Deal Scoring wire | Both | Medium — cross-skill dependency |
+| 7 | Bowtie schedule | Frontera | Low — scheduler only |
+
+---
+
+### What this doesn't include
+
+Skipping marketplace/community layer, Agent Builder UI testing, and calendar integration — those are separate workstreams. This sprint is purely skills quality.
+
+---
+
+### One open question before I write the Claude Code prompts
+
+For **Pipeline Goals / quota derivation**: when Pandora auto-derives quota from historical closed-won, should it derive a **team target** only, or attempt **per-rep targets** by splitting closed-won by owner? Per-rep is more useful but noisier for small teams. Want your call on that before the prompt goes to Claude Code.
