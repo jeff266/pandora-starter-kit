@@ -733,6 +733,26 @@ const PANDORA_TOOLS: ToolDef[] = [
       required: [],
     },
   },
+  {
+    name: 'calculate',
+    description:
+      '⚠️ MANDATORY for ALL arithmetic. Large language models are TERRIBLE at math and WILL get it wrong. You MUST use this tool for ANY arithmetic operation: addition, subtraction, multiplication, division, percentages, averages. Even simple operations like "10 + 20" or "2 * 3". If you try to do math manually, you will make errors. Use this for: summing deal amounts, computing percentages to quota, calculating averages, finding totals, any arithmetic whatsoever.',
+    parameters: {
+      type: 'object',
+      properties: {
+        expression: {
+          type: 'string',
+          description:
+            'JavaScript math expression to evaluate. Examples: "8100 + 5400 + 4860", "300000 + 150000 + 96000", "(59580 / 350000) * 100", "(240000 + 300000) / 2"',
+        },
+        description: {
+          type: 'string',
+          description: 'What you are calculating (e.g., "Total pipeline for Sara Bollman", "Percentage to quota", "Average deal size")',
+        },
+      },
+      required: ['expression'],
+    },
+  },
 ];
 
 // ─── System prompt ────────────────────────────────────────────────────────────
@@ -749,33 +769,43 @@ You have tools that query the company's live data. When someone asks a question,
 
 2. NEVER SAY "I WOULD NEED." If a tool exists that could get the data, call it. You have tools covering deals, accounts, conversations, contacts, leads, activity timelines, skill evidence, metric calculations, ICP scoring, multithreading analysis, sentiment analysis, rep conversions, source conversion, process blockers, and buyer signals. Use them.
 
-3. SHOW YOUR WORK. When citing totals or metrics, list the underlying records. "19 deals totaling $303K" is better than "$303K." Name the top deals.
+3. NEVER DO ARITHMETIC MANUALLY. For ANY math operation (addition, subtraction, multiplication, division, percentages, averages), you MUST call the calculate tool. Even simple operations like "2 + 2" or "100 - 50" MUST use calculate. If you do math without calling calculate, you WILL get it wrong.
 
-4. CHECK SKILL EVIDENCE FIRST. Before querying raw data for pipeline health, risk, forecasting, or rep performance questions, check get_skill_evidence. Skills have already analyzed the data with richer context than a raw query provides.
+   Examples of when to use calculate:
+   - Adding deal amounts: calculate({ expression: "8100 + 5400 + 4860", description: "Total for Sara" })
+   - Computing percentage: calculate({ expression: "(59580 / 350000) * 100", description: "Percent to quota" })
+   - Finding average: calculate({ expression: "(240000 + 300000 + 96000) / 3", description: "Average deal size" })
+   - ANY arithmetic operation whatsoever
+
+   This is NON-NEGOTIABLE. You cannot do math correctly without the calculator tool.
+
+4. SHOW YOUR WORK. When citing totals or metrics, list the underlying records. "19 deals totaling $303K" is better than "$303K." Name the top deals.
+
+5. CHECK SKILL EVIDENCE FIRST. Before querying raw data for pipeline health, risk, forecasting, or rep performance questions, check get_skill_evidence. Skills have already analyzed the data with richer context than a raw query provides.
    Available skills: pipeline-hygiene, single-thread-alert, data-quality-audit, pipeline-coverage-by-rep, weekly-forecast-rollup, pipeline-waterfall, rep-scorecard, stage-velocity-benchmarks, conversation-intelligence, forecast-model, pipeline-gen-forecast, competitive-intelligence, contact-role-resolution.
 
-5. CROSS-REFERENCE. When a question spans entities (deals + calls, reps + accounts), query both sides. Don't answer with half the picture.
+6. CROSS-REFERENCE. When a question spans entities (deals + calls, reps + accounts), query both sides. Don't answer with half the picture.
 
-6. BE DIRECT. Lead with the answer. Put context and caveats after the main point, not before.
+7. BE DIRECT. Lead with the answer. Put context and caveats after the main point, not before.
 
-7. WHEN LISTING DEALS: always include name, amount, stage, close date, and owner.
+8. WHEN LISTING DEALS: always include name, amount, stage, close date, and owner.
    WHEN LISTING CONVERSATIONS: always include title, date, account, rep, and duration.
    WHEN CITING METRICS: always include the formula and record count.
 
-8. PRIOR TOOL RESULTS IN CONTEXT ARE FROM PREVIOUS QUESTIONS — NOT YOUR CURRENT DATA. Each new question starts fresh. All 17 tools are always available. Never say "I don't have access to X in the data provided" or "the data shows only Y" — that refers to a past question. Call a tool.
+9. PRIOR TOOL RESULTS IN CONTEXT ARE FROM PREVIOUS QUESTIONS — NOT YOUR CURRENT DATA. Each new question starts fresh. All tools are always available. Never say "I don't have access to X in the data provided" or "the data shows only Y" — that refers to a past question. Call a tool.
 
-9. FORECASTS AND QUARTERLY NUMBERS: For any question about Q1/Q2/Q3/Q4 forecast, quarterly pipeline, quarterly revenue, or forecast categories (commit/best case):
+10. FORECASTS AND QUARTERLY NUMBERS: For any question about Q1/Q2/Q3/Q4 forecast, quarterly pipeline, quarterly revenue, or forecast categories (commit/best case):
    - ALWAYS call get_skill_evidence with skill_id="weekly-forecast-rollup" first.
    - THEN call query_deals with close_date_from and close_date_to set to the quarter's date range.
    - Q1 = Jan 1 – Mar 31. Q2 = Apr 1 – Jun 30. Q3 = Jul 1 – Sep 30. Q4 = Oct 1 – Dec 31.
    - Use the current year unless the user specifies otherwise.
    - Never say "I don't have Q1 data" — you have deal close dates and the forecast rollup skill.
 
-10. VELOCITY QUESTIONS: Check get_skill_evidence('stage-velocity-benchmarks') first. If stale or unavailable, call compute_stage_benchmarks directly. Always compare a specific deal's time-in-stage to the benchmark — never say a deal is "slow" without the data to prove it.
+11. VELOCITY QUESTIONS: Check get_skill_evidence('stage-velocity-benchmarks') first. If stale or unavailable, call compute_stage_benchmarks directly. Always compare a specific deal's time-in-stage to the benchmark — never say a deal is "slow" without the data to prove it.
 
-11. DEAL INVESTIGATION: When investigating why a deal is at risk, call MULTIPLE tools: query_field_history (stage regressions), query_stage_history (full stage log), query_conversations (recent call activity), query_contacts (stakeholder coverage). Build the full picture before diagnosing.
+12. DEAL INVESTIGATION: When investigating why a deal is at risk, call MULTIPLE tools: query_field_history (stage regressions), query_stage_history (full stage log), query_conversations (recent call activity), query_contacts (stakeholder coverage). Build the full picture before diagnosing.
 
-12. SCHEMA-FIRST REASONING: Before querying deals, companies, or contacts for questions that involve:
+13. SCHEMA-FIRST REASONING: Before querying deals, companies, or contacts for questions that involve:
     - Custom fields (loss reasons, close notes, lifecycle stage, custom scores, lead sources, etc.)
     - Fields you are uncertain exist in this specific workspace
     - Any question where the answer depends on a field you haven't verified
@@ -795,7 +825,7 @@ You have tools that query the company's live data. When someone asks a question,
     - Call query_schema(object_type='deals', filter='populated') to find loss reason fields
     - Then query with proper field understanding
 
-12. FORECAST QUESTIONS REQUIRE PROBABILITY WEIGHTING: For any forecast question, call compute_close_probability to score deals, then reference get_skill_evidence('forecast-model') for the full probability-weighted forecast with rep haircuts and in-quarter creation projections. Never present unweighted pipeline totals as a "forecast." Raw pipeline ≠ forecast.
+14. FORECAST QUESTIONS REQUIRE PROBABILITY WEIGHTING: For any forecast question, call compute_close_probability to score deals, then reference get_skill_evidence('forecast-model') for the full probability-weighted forecast with rep haircuts and in-quarter creation projections. Never present unweighted pipeline totals as a "forecast." Raw pipeline ≠ forecast.
 
 13. COMPETITIVE QUESTIONS: Check get_skill_evidence('competitive-intelligence') first. For specific competitor deep-dives, also use search_transcripts and compute_competitive_rates to find recent mentions and win/loss patterns.
 
@@ -908,6 +938,44 @@ function parseFollowUpQuestions(content: string): { answer: string; followups: s
   return { answer, followups };
 }
 
+// ─── Math Detection Utility ───────────────────────────────────────────────────
+
+/**
+ * Deterministic detection of when arithmetic is needed.
+ * Returns true if the question explicitly requires calculations.
+ */
+function requiresCalculator(message: string): boolean {
+  const lower = message.toLowerCase();
+
+  // Explicit math keywords
+  const mathKeywords = /\b(add|sum|total|calculate|compute|percent|percentage|average|mean|multiply|divide|subtract|difference)\b/i;
+
+  // Numbers with operators
+  const hasNumbers = /\d+/.test(message);
+  const hasOperators = /[+\-×x*÷/]/.test(message);
+
+  // Lists of dollar amounts (e.g., "$100, $200, $300")
+  const hasDollarList = /\$[\d,]+.*\$[\d,]+/i.test(message);
+
+  // Percentage calculations
+  const hasPercentCalc = /\d+%|\bpercent\b/i.test(message);
+
+  // Common patterns that need math
+  const mathPatterns = [
+    /how much|how many/i,
+    /\d+ (deals?|accounts?|contacts?)/i,
+    /quota|pipeline|forecast/i,
+  ];
+
+  // Detection logic
+  if (hasDollarList) return true;  // Multiple dollar amounts = likely summation
+  if (hasNumbers && hasOperators) return true;  // Explicit arithmetic
+  if (mathKeywords.test(lower) && hasNumbers) return true;  // Math keywords + numbers
+  if (hasPercentCalc && mathPatterns.some(p => p.test(lower))) return true;  // Percentage questions
+
+  return false;
+}
+
 // ─── Pre-flight question classifier ───────────────────────────────────────────
 
 interface QuestionClassification {
@@ -981,9 +1049,17 @@ export async function runPandoraAgent(
   console.log(`[PandoraAgent] classification:`, JSON.stringify(classification));
   const dynamicMaxTokens = classification.token_budget;
 
-  const toolHint = classification.tools_likely_needed.length > 0
-    ? `\n\n[Routing hint: This question likely needs these tools first: ${classification.tools_likely_needed.join(', ')}. Start by calling them.]`
-    : '';
+  // Detect if arithmetic is needed
+  const needsCalculator = requiresCalculator(message);
+  console.log(`[PandoraAgent] math detection: needsCalculator=${needsCalculator}`);
+
+  // Build routing hints
+  let toolHint = '';
+  if (needsCalculator) {
+    toolHint = `\n\n[CRITICAL: This question requires arithmetic calculations. You MUST call the calculate tool for ALL math operations. Do NOT attempt to do arithmetic manually - you will get it wrong. Call calculate first.]`;
+  } else if (classification.tools_likely_needed.length > 0) {
+    toolHint = `\n\n[Routing hint: This question likely needs these tools first: ${classification.tools_likely_needed.join(', ')}. Start by calling them.]`;
+  }
 
   const messages: LLMCallOptions['messages'] = [
     ...conversationHistory.map(m => ({
@@ -1140,6 +1216,20 @@ export async function runPandoraAgent(
   totalTokens += (finalResponse.usage?.input || 0) + (finalResponse.usage?.output || 0);
 
   const parsedFinal = parseFollowUpQuestions(finalResponse.content);
+
+  // Track calculator usage for math questions
+  if (needsCalculator) {
+    const usedCalculator = toolTrace.some(t => t.tool === 'calculate');
+    if (!usedCalculator) {
+      console.warn(
+        `[PandoraAgent] ⚠️ CALCULATOR BYPASSED: Math was detected but calculate tool was not called.`,
+        `Question: "${message.substring(0, 100)}..."`,
+        `Tools called: ${toolTrace.map(t => t.tool).join(', ')}`
+      );
+    } else {
+      console.log(`[PandoraAgent] ✅ Calculator used correctly for math question`);
+    }
+  }
 
   return {
     answer: parsedFinal.answer,

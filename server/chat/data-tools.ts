@@ -19,6 +19,55 @@ import { scoreIcpFit, scoreMultithreading, scoreConversationSentiment } from './
 import { computeRepConversions, computeSourceConversion, detectProcessBlockers, detectBuyerSignals, checkStakeholderStatus, enrichMarketSignals } from './analysis-tools.js';
 import { queryDealOutcomes } from './query-deal-outcomes.js';
 
+// ─── Calculator Tool ─────────────────────────────────────────────────────────
+
+/**
+ * Safe arithmetic calculator using JavaScript eval with strict sanitization.
+ * Only allows numbers, basic operators, parentheses, and whitespace.
+ */
+function calculateMath(params: { expression: string; description?: string }): {
+  result: number;
+  expression: string;
+  description?: string;
+  formatted_result?: string;
+} {
+  const { expression, description } = params;
+
+  // Sanitize: only allow numbers, operators, parentheses, decimals, whitespace
+  const sanitized = expression.replace(/[^0-9+\-*/(). ]/g, '');
+
+  // Validation: check if sanitization removed anything (indicating invalid chars)
+  const normalized = expression.replace(/\s/g, ''); // Remove whitespace from original
+  const sanitizedNormalized = sanitized.replace(/\s/g, ''); // Remove whitespace from sanitized
+
+  if (!sanitized || normalized !== sanitizedNormalized) {
+    throw new Error('Invalid expression. Only numbers and operators (+, -, *, /, parentheses) are allowed.');
+  }
+
+  try {
+    // eslint-disable-next-line no-eval
+    const result = eval(sanitized);
+
+    if (typeof result !== 'number' || !isFinite(result)) {
+      throw new Error('Calculation did not produce a valid number');
+    }
+
+    // Format large numbers with commas for readability
+    const formattedResult = result >= 1000 || result <= -1000
+      ? result.toLocaleString('en-US', { maximumFractionDigits: 2 })
+      : result.toFixed(2);
+
+    return {
+      result,
+      expression: expression,
+      description,
+      formatted_result: formattedResult,
+    };
+  } catch (error: any) {
+    throw new Error(`Calculation error: ${error.message}. Expression: ${expression}`);
+  }
+}
+
 // ─── Tool result types ───────────────────────────────────────────────────────
 
 export interface DealRecord {
@@ -314,6 +363,8 @@ export async function executeDataTool(
         result = await enrichMarketSignals(workspaceId, params); break;
       case 'query_deal_outcomes':
         result = await queryDealOutcomes(workspaceId, params); break;
+      case 'calculate':
+        result = calculateMath(params as { expression: string; description?: string }); break;
       default:
         throw new Error(`Unknown tool: ${toolName}`);
     }
