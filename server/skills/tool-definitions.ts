@@ -1946,8 +1946,15 @@ const summarizeForClaude: ToolDefinition = {
         const contactsSummary = summarizeEntity('Contacts', metrics.byEntity.contacts);
         const accountsSummary = summarizeEntity('Accounts', metrics.byEntity.accounts);
 
+        let entitySummaries = `${dealsSummary}\n${contactsSummary}\n${accountsSummary}`;
+
+        const linkage = metrics.activityDealLinkage;
+        if (linkage?.flag) {
+          entitySummaries += `\nActivity linkage: ${linkage.linkageRate}% of ${linkage.totalActivities} activities are logged directly against deal records (below 50% threshold — RFM Scoring, Deal Risk Review, and Single Thread Alert will produce reduced-quality output)`;
+        }
+
         return {
-          entitySummaries: `${dealsSummary}\n${contactsSummary}\n${accountsSummary}`,
+          entitySummaries,
         };
       }
 

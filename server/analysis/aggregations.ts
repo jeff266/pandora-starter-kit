@@ -813,6 +813,12 @@ export interface DataQualityAudit {
   };
   worstOffenders: WorstOffender[];
   ownerBreakdown: OwnerQualityBreakdown[];
+  activityDealLinkage: {
+    totalActivities: number;
+    activitiesLinkedToDeals: number;
+    linkageRate: number;
+    flag: boolean;
+  };
 }
 
 export async function dataQualityAudit(workspaceId: string, scopeId?: string): Promise<DataQualityAudit> {
@@ -1192,6 +1198,25 @@ export async function dataQualityAudit(workspaceId: string, scopeId?: string): P
     criticalIssues: parseInt(row.critical_issues, 10) || 0,
   }));
 
+  // ===== ACTIVITY DEAL LINKAGE =====
+  const activityLinkageResult = await query(`
+    SELECT
+      COUNT(*) as total_activities,
+      COUNT(deal_id) as linked_activities
+    FROM activities
+    WHERE workspace_id = $1
+  `, [workspaceId]);
+
+  const totalActivities = parseInt(activityLinkageResult.rows[0]?.total_activities || '0', 10);
+  const activitiesLinkedToDeals = parseInt(activityLinkageResult.rows[0]?.linked_activities || '0', 10);
+  const linkageRate = totalActivities > 0 ? Math.round((activitiesLinkedToDeals / totalActivities) * 100) : 100;
+  const activityDealLinkage = {
+    totalActivities,
+    activitiesLinkedToDeals,
+    linkageRate,
+    flag: totalActivities > 0 && linkageRate < 50,
+  };
+
   // ===== OVERALL METRICS =====
   const totalRecords = dealsTotal + contactsTotal + accountsTotal;
 
@@ -1266,6 +1291,7 @@ export async function dataQualityAudit(workspaceId: string, scopeId?: string): P
     },
     worstOffenders,
     ownerBreakdown,
+    activityDealLinkage,
   };
 }
 

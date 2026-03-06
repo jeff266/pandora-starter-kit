@@ -269,6 +269,10 @@ Total records audited: {{quality_metrics.overall.totalRecords}}
 BY ENTITY:
 {{quality_summary.entitySummaries}}
 
+{{#if quality_metrics.activityDealLinkage.flag}}
+ACTIVITY LINKAGE WARNING: {{quality_metrics.activityDealLinkage.linkageRate}}% of {{quality_metrics.activityDealLinkage.totalActivities}} activities are logged directly against deal records (need ≥50%). Skills affected: RFM Scoring, Deal Risk Review, Single Thread Alert.
+{{/if}}
+
 TREND (vs last audit):
 {{{json quality_trend}}}
 
@@ -292,7 +296,7 @@ REPORT PARAMETERS:
 
 STRUCTURE YOUR REPORT:
 1. Health grade (A-F based on critical field completeness: A=95%+, B=85-94%, C=75-84%, D=60-74%, F=<60%) and one-line summary.
-2. Top data gaps: the 3 fields or patterns that most affect downstream analysis. Include record counts and dollar exposure.
+2. Top data gaps: the 3 fields or patterns that most affect downstream analysis. Include record counts and dollar exposure.{{#if quality_metrics.activityDealLinkage.flag}} Include activity-to-deal linkage as a high-severity finding: {{quality_metrics.activityDealLinkage.linkageRate}}% of activities are logged directly against deal records. Recommended action: In HubSpot, ensure call and meeting records are logged directly against deal records, not just contact records.{{/if}}
 3. Per-rep patterns: which reps have the worst data quality and what their pattern is (from classifications). Brief — table format preferred.
 4. Trend: is quality improving or declining? Which fields changed most?
 5. One recommended action for this week — the single highest-impact fix.

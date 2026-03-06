@@ -142,9 +142,12 @@ function RunOutput({ run }: { run: any }) {
     run.result?.synthesize?.narrative ||
     run.result?.synthesis?.narrative;
 
+  const insufficientStatuses = new Set(['calibration_required', 'building_baseline', 'no_data', 'skipped_insufficient_data']);
   const isInsufficient =
-    typeof narrative === 'string' &&
-    (narrative.includes('INSUFFICIENT DATA') || narrative.includes('could not run'));
+    run.status === 'skipped_insufficient_data' ||
+    (run.result?.status && insufficientStatuses.has(run.result.status)) ||
+    (typeof narrative === 'string' &&
+      (narrative.includes('INSUFFICIENT DATA') || narrative.includes('could not run')));
 
   const error = run.error || run.result?.error;
 
@@ -157,6 +160,7 @@ function RunOutput({ run }: { run: any }) {
   }
 
   if (isInsufficient) {
+    const insufficientMessage = narrative || 'This skill did not produce output due to insufficient data.';
     return (
       <div style={{
         background: `${colors.yellow}11`, border: `1px solid ${colors.yellow}33`,
@@ -166,7 +170,7 @@ function RunOutput({ run }: { run: any }) {
           Insufficient Data
         </div>
         <div style={{ fontSize: 12, color: colors.textSecondary, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
-          {narrative}
+          {insufficientMessage}
         </div>
       </div>
     );
@@ -181,10 +185,32 @@ function RunOutput({ run }: { run: any }) {
   }
 
   if (run.result) {
+    const raw = JSON.stringify(run.result, null, 2);
+    const truncated = raw.slice(0, 2000);
+    const wasTruncated = raw.length > 2000;
     return (
-      <pre style={{ fontSize: 11, color: colors.textSecondary, fontFamily: fonts.mono, whiteSpace: 'pre-wrap', maxHeight: 300, overflow: 'auto' }}>
-        {JSON.stringify(run.result, null, 2).slice(0, 3000)}
-      </pre>
+      <details>
+        <summary style={{
+          fontSize: 12, color: colors.textMuted, cursor: 'pointer',
+          userSelect: 'none', marginBottom: 8, listStyle: 'none',
+        }}>
+          <span style={{ borderBottom: `1px dashed ${colors.border}` }}>
+            Raw output — this skill may need a synthesis step
+          </span>
+        </summary>
+        <pre style={{
+          fontSize: 11, color: colors.textSecondary, fontFamily: fonts.mono,
+          background: colors.surfaceRaised, borderRadius: 6, padding: '10px 12px',
+          whiteSpace: 'pre-wrap', maxHeight: 300, overflow: 'auto', marginTop: 8,
+        }}>
+          {truncated}
+        </pre>
+        {wasTruncated && (
+          <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 6 }}>
+            Showing first 2,000 characters — run with synthesis enabled for a full report
+          </div>
+        )}
+      </details>
     );
   }
 
