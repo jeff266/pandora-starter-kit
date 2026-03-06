@@ -29,7 +29,7 @@
  */
 
 import { query } from '../db.js';
-import { redistributeWeights, getDegradationState, type DataAvailability } from '../scoring/weight-redistribution.js';
+import { redistributeWeightsLegacy as redistributeWeights, getDegradationState, type DataAvailability } from '../scoring/weight-redistribution.js';
 
 export interface DealRow {
   id: string;
