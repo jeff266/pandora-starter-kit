@@ -27,6 +27,35 @@ Pandora is a multi-tenant, agent-based Go-To-Market (GTM) intelligence platform 
 - Applied at: `server/analysis/scoped-analysis.ts` (deal + account context builders) and `server/agents/runtime.ts` (synthesis template variable substitution).
 - Rule: any new code path that reads CRM field values into an AI prompt string must call `sanitizeForPrompt()` on the value.
 
+## Model Management System
+
+### LLM Router (`server/utils/llm-router.ts`)
+- **Model catalog** `MODEL_CONTEXT_WINDOWS`: maps all known model IDs to their max context window size. Covers Claude Sonnet/Opus 4 (200K), Gemini 2.5 Pro + GPT-4.1 (1M), Flash (1M), DeepSeek R1/V3/V3.1 (128K), Perplexity Sonar variants (127K).
+- **Context guardrail**: workspace-aware — looks up routed model's actual window, only overrides when input genuinely exceeds it. On overflow picks highest-capacity available model (prefers gemini-2.5-pro → claude → gpt-4.1 by window). Logs clearly: model requested, input size, override reason.
+- **Google (Gemini)**: OpenAI-compatible via `https://generativelanguage.googleapis.com/v1beta/openai/`. Env var `GOOGLE_API_KEY`, also respects workspace BYOK key.
+- **Perplexity**: OpenAI-compatible via `https://api.perplexity.ai`. Env var `PERPLEXITY_API_KEY`, also respects workspace BYOK key.
+- **`keySource`**: `'pandora'` (platform key) or `'byok'` (workspace-provided key) — threaded through `TrackingContext` → `TokenRecord` → `token_usage.key_source` column.
+
+### AI Keys Settings (`client/src/components/settings/AIKeysTab.tsx`)
+- Provider key cards for Anthropic, OpenAI, Google (Gemini), Fireworks, Perplexity — each with toggle, masked input, Show/Hide, Save button, docs link.
+- **Model Routing section**: two capability groups — "Reasoning & Generation" (Claude/Gemini 2.5 Pro/GPT-4.1/DeepSeek R1) and "Extraction & Classification" (DeepSeek V3/GPT-4o-mini/Gemini Flash/Perplexity Sonar). Each model card shows: context window badge, cost tier ($/$$/$$$$), strengths blurb, warning if provider key not connected. Single "Save Routing" button POSTs `{ routing: { reason, generate, extract, classify } }` to `/llm/config`.
+
+## Customer Billing Metering
+
+### Database
+- `token_usage.key_source VARCHAR(10) DEFAULT 'pandora'` — added by migration `131_billing_meter.sql`.
+- `billing_meter` table: per-workspace monthly aggregates with pandora/byok token splits, markup multiplier, customer charge, invoice workflow (pending → invoiced → paid/waived). Unique constraint on `(workspace_id, billing_period)`.
+
+### Backend
+- **`server/billing/meter.ts`**: `rollupBillingPeriod`, `rollupCurrentMonth`, `rollupAllWorkspaces`, `getAllWorkspaceMeter`. Upsert computes `customer_charge_usd = pandora_cost_usd * markup_multiplier`. Only updates rows with `invoice_status = 'pending'`.
+- **`server/routes/billing-admin.ts`**: mounted at `app.use('/api/admin', requireAdmin, billingAdminRouter)`. Endpoints: `GET /billing`, `POST /billing/rollup`, `POST /billing/:id/invoice`, `POST /billing/:id/paid`, `POST /billing/:id/waive`, `POST /billing/:id/markup`, `GET /billing/export` (CSV).
+
+### Admin UI (`client/src/pages/admin/BillingMeterPage.tsx`)
+- Route: `/admin/billing`.
+- Period picker (last 12 months), summary bar (8 KPI cards), workspace table with inline markup editing.
+- Per-row action buttons: Invoice (opens modal for reference + notes), Mark Paid, Waive — contextual by status.
+- Export CSV hits `/api/admin/billing/export?period=YYYY-MM`.
+
 ## User Preferences
 - Raw SQL with parameterized queries — no ORM
 - Minimal dependencies — only install what's needed

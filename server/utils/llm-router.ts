@@ -10,6 +10,36 @@ import {
 import { logTrainingPair } from '../training/index.js';
 import { TOKEN_THRESHOLDS } from '../chat/token-estimator.js';
 
+// Context window limits per model (in tokens)
+export const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
+  // Anthropic
+  'claude-sonnet-4-20250514': 200_000,
+  'claude-opus-4-20250514': 200_000,
+  'claude-sonnet-4-5': 200_000,
+  'claude-haiku-4-5-20251001': 200_000,
+  // Google Gemini
+  'gemini-2.5-pro': 1_048_576,
+  'gemini-2.5-pro-preview-05-06': 1_048_576,
+  'gemini-2.0-flash': 1_048_576,
+  'gemini-2.0-flash-lite': 1_048_576,
+  // OpenAI
+  'gpt-4.1': 1_048_576,
+  'gpt-4o': 128_000,
+  'gpt-4o-mini': 128_000,
+  'o3': 200_000,
+  'o4-mini': 200_000,
+  // Fireworks / DeepSeek
+  'deepseek-v3-0324': 131_072,
+  'deepseek-v3p1': 131_072,
+  'deepseek-chat': 131_072,
+  'deepseek-r1': 131_072,
+  // Perplexity
+  'sonar': 127_072,
+  'sonar-pro': 127_072,
+  'sonar-reasoning': 127_072,
+  'sonar-reasoning-pro': 127_072,
+};
+
 export type LLMCapability = 'extract' | 'reason' | 'generate' | 'classify' | 'intent_classify' | 'compress';
 
 export interface ToolDef {
@@ -193,6 +223,16 @@ function getApiKey(config: LLMConfig, provider: string): { apiKey: string; baseU
     case 'openai':
       return {
         apiKey: process.env.OPENAI_API_KEY || '',
+      };
+    case 'google':
+      return {
+        apiKey: process.env.GOOGLE_API_KEY || '',
+        baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+      };
+    case 'perplexity':
+      return {
+        apiKey: process.env.PERPLEXITY_API_KEY || '',
+        baseURL: 'https://api.perplexity.ai',
       };
     default:
       throw new Error(`Unknown provider '${provider}' — no platform key configured`);
@@ -531,12 +571,18 @@ async function callProviderByName(
       return await callAnthropic(modelName, options, apiKey, baseURL);
     case 'fireworks':
     case 'openai':
+    case 'google':
+    case 'perplexity':
       return await callOpenAICompatible(
         modelName,
         options,
         apiKey,
         baseURL || (providerName === 'fireworks'
           ? 'https://api.fireworks.ai/inference/v1'
+          : providerName === 'google'
+          ? 'https://generativelanguage.googleapis.com/v1beta/openai/'
+          : providerName === 'perplexity'
+          ? 'https://api.perplexity.ai'
           : 'https://api.openai.com/v1'),
         providerName
       );
@@ -565,11 +611,50 @@ export async function callLLM(
   const promptChars = payloadSummary.totalChars;
   const inputTokenEstimate = Math.ceil(promptChars / 4);
 
-  // Size guardrail: force Claude for large contexts
-  if (inputTokenEstimate > TOKEN_THRESHOLDS.LARGE_CONTEXT) {
-    console.warn(`[LLMRouter] Input ${inputTokenEstimate} tokens exceeds threshold, forcing Claude`);
-    provider = 'anthropic';
-    model = 'claude-sonnet-4-20250514';
+  // Context window guardrail: check if the configured model can handle this input
+  const modelWindow = MODEL_CONTEXT_WINDOWS[model] ?? 128_000;
+  const safeLimit = Math.floor(modelWindow * 0.85); // leave 15% headroom for output
+  if (inputTokenEstimate > safeLimit) {
+    // Find the highest-capacity model available to this workspace
+    const providerKeys = config.providers;
+    let overrideProvider = provider;
+    let overrideModel = model;
+    let bestWindow = modelWindow;
+
+    const candidates: Array<{ provider: string; model: string; window: number }> = [
+      { provider: 'google', model: 'gemini-2.5-pro', window: 1_048_576 },
+      { provider: 'openai', model: 'gpt-4.1', window: 1_048_576 },
+      { provider: 'anthropic', model: 'claude-sonnet-4-20250514', window: 200_000 },
+    ];
+
+    for (const candidate of candidates) {
+      if (candidate.window <= bestWindow) continue;
+      const hasKey = (candidate.provider === 'anthropic' &&
+        (process.env.ANTHROPIC_API_KEY || process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY)) ||
+        (providerKeys[candidate.provider]?.enabled && !!providerKeys[candidate.provider]?.apiKey) ||
+        (candidate.provider === 'openai' && !!process.env.OPENAI_API_KEY) ||
+        (candidate.provider === 'google' && !!process.env.GOOGLE_API_KEY);
+      if (hasKey) {
+        overrideProvider = candidate.provider;
+        overrideModel = candidate.model;
+        bestWindow = candidate.window;
+        break;
+      }
+    }
+
+    if (overrideModel !== model) {
+      console.warn(
+        `[LLMRouter] Context guardrail: ${inputTokenEstimate} tokens exceeds ${model} limit (${safeLimit} safe / ${modelWindow} max). ` +
+        `Overriding ${provider}/${model} → ${overrideProvider}/${overrideModel} (window: ${bestWindow})`
+      );
+      provider = overrideProvider;
+      model = overrideModel;
+    } else {
+      console.warn(
+        `[LLMRouter] Context guardrail: ${inputTokenEstimate} tokens near/over ${model} limit (${safeLimit} safe). ` +
+        `No higher-capacity model available — proceeding with ${provider}/${model}`
+      );
+    }
   }
 
   console.log(`[LLM Router] ${capability} → ${provider}/${model}${fallbackProvider ? ` (fallback: ${fallbackProvider}/${fallbackModel})` : ''}`);
@@ -580,6 +665,11 @@ export async function callLLM(
   let response: LLMResponse;
   let usedProvider = provider;
   let usedModel = model;
+
+  // Determine if this call uses a workspace (BYOK) key or the platform key
+  const workspaceProviderCfg = config.providers[provider];
+  const isUsingByok = !!(workspaceProviderCfg?.enabled && workspaceProviderCfg?.apiKey);
+  const keySource: 'byok' | 'pandora' = isUsingByok ? 'byok' : 'pandora';
 
   try {
     response = await callProviderByName(provider, model, options, config);
@@ -620,6 +710,7 @@ export async function callLLM(
     latencyMs,
     recommendations,
     questionText: tracking?.questionText,
+    keySource: tracking?.keySource || keySource,
   }).catch(err => console.warn('[Token Tracker] Fire-and-forget failed:', err.message));
 
   // Fire-and-forget training pair capture
@@ -662,11 +753,15 @@ export async function getLLMConfig(workspaceId: string): Promise<{
     providers[name] = { connected: p.enabled && !!p.apiKey };
   }
 
-  const platformProviders = ['anthropic', 'fireworks'];
+  const platformProviders = ['anthropic', 'fireworks', 'openai', 'google', 'perplexity'];
   for (const name of platformProviders) {
     if (!providers[name]) {
-      const { apiKey } = getApiKey(config, name);
-      providers[name] = { connected: !!apiKey };
+      try {
+        const { apiKey } = getApiKey(config, name);
+        providers[name] = { connected: !!apiKey };
+      } catch {
+        providers[name] = { connected: false };
+      }
     }
   }
 

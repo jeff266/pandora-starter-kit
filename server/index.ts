@@ -21,6 +21,7 @@ import slackSettingsRouter from "./routes/slack-settings.js";
 import skillsRouter from "./routes/skills.js";
 import webhooksRouter from "./routes/webhooks.js";
 import llmConfigRouter from "./routes/llm-config.js";
+import billingAdminRouter from "./routes/billing-admin.js";
 import salesforceAuthRouter from "./routes/salesforce-auth.js";
 import salesforceSyncRouter from "./routes/salesforce-sync.js";
 import hubspotAuthRouter from "./routes/hubspot-auth.js";
@@ -267,6 +268,8 @@ app.use("/api/auth", userAuthRouter);
 app.use("/api/users/me/notifications", requireUserSession, userNotificationsRouter);
 
 app.use("/api/consultant", consultantRouter);
+
+app.use('/api/admin', requireAdmin, billingAdminRouter);
 
 app.post('/api/admin/migrate-credentials', requireAdmin, async (_req, res) => {
   try {

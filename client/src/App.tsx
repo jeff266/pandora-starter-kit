@@ -42,6 +42,7 @@ import CompetitiveIntelligencePage from './pages/intelligence/CompetitiveIntelli
 import ProspectsPage from './pages/ProspectsPage';
 import AdminScopesPage from './pages/AdminScopesPage';
 import TokenUsagePage from './pages/admin/TokenUsagePage';
+import BillingMeterPage from './pages/admin/BillingMeterPage';
 import Targets from './pages/Targets';
 import ReportViewer from './pages/ReportViewer';
 import ReportsPage from './pages/ReportsPage';
@@ -87,6 +88,7 @@ const pageTitles: Record<string, string> = {
   '/prospects': 'Prospects',
   '/admin/scopes': 'Workspace Scopes',
   '/admin/token-usage': 'Token Usage',
+  '/admin/billing': 'Billing Meter',
   '/forecast': 'Forecast',
 };
 
@@ -317,6 +319,7 @@ export default function App() {
             <Route path="/prospects" element={<ProspectsPage />} />
             <Route path="/admin/scopes" element={<AdminScopesPage />} />
             <Route path="/admin/token-usage" element={<TokenUsagePage />} />
+            <Route path="/admin/billing" element={<BillingMeterPage />} />
             <Route path="/reports" element={<ReportsPage />} />
             <Route path="/reports/new" element={<ReportBuilder />} />
             <Route path="/reports/:reportId/edit" element={<ReportBuilder />} />
