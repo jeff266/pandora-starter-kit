@@ -7,7 +7,7 @@ import { useConversationStream } from './useConversationStream';
 import { getWorkspaceId, getAuthToken, api } from '../../lib/api';
 import EvidenceCard from './EvidenceCard';
 import ActionCard from './ActionCard';
-import StageRecCard from '../actions/StageRecCard';
+import InlineActionsPrompt from './InlineActionsPrompt';
 import DeliverablePicker from './DeliverablePicker';
 import StickyInput from './StickyInput';
 import MessageFeedback from './MessageFeedback';
@@ -258,32 +258,23 @@ export default function ConversationView({ initialMessage, onBack }: Conversatio
         )}
 
         {state.inlineActions.length > 0 && (
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8, fontFamily: fonts.sans }}>
-              Stage Recommendations
-            </div>
-            {state.inlineActions.map(action => (
-              <StageRecCard
-                key={action.id}
-                action={{ ...action, execution_status: 'open' }}
-                onExecute={async (overrideStage) => {
-                  const workspaceId = getWorkspaceId();
-                  if (!workspaceId) return;
-                  await api.post(`/workspaces/${workspaceId}/actions/${action.id}/execute-inline`, {
-                    override_value: overrideStage
-                  });
-                  dismissInlineAction(action.id);
-                }}
-                onDismiss={async () => {
-                  const workspaceId = getWorkspaceId();
-                  if (!workspaceId) return;
-                  await api.post(`/workspaces/${workspaceId}/actions/${action.id}/dismiss`);
-                  dismissInlineAction(action.id);
-                }}
-                compact={true}
-              />
-            ))}
-          </div>
+          <InlineActionsPrompt
+            actions={state.inlineActions}
+            onExecute={async (actionId, overrideStage) => {
+              const workspaceId = getWorkspaceId();
+              if (!workspaceId) return;
+              await api.post(`/workspaces/${workspaceId}/actions/${actionId}/execute-inline`, {
+                override_value: overrideStage
+              });
+              dismissInlineAction(actionId);
+            }}
+            onDismiss={async (actionId) => {
+              const workspaceId = getWorkspaceId();
+              if (!workspaceId) return;
+              await api.post(`/workspaces/${workspaceId}/actions/${actionId}/dismiss`);
+              dismissInlineAction(actionId);
+            }}
+          />
         )}
 
         {state.deliverableOptions.length > 0 && state.phase === 'complete' && (
