@@ -344,6 +344,9 @@ export class SkillRuntime {
       }
 
       try {
+        let totalActionsCreated = 0;
+
+        // Extract actions from <actions> block in Claude output
         if (finalOutput) {
           const extractedActions = parseActionsFromOutput(finalOutput);
           if (extractedActions.length > 0) {
@@ -351,12 +354,36 @@ export class SkillRuntime {
               pool, workspaceId, skill.id, runId, null, extractedActions
             );
             console.log(`[Actions] Extracted ${insertedCount} actions from ${skill.id} run ${runId}`);
-            if (insertedCount > 0) {
-              import('../webhooks/action-events.js')
-                .then(m => m.emitActionCreatedEvents(workspaceId, skill.id, runId))
-                .catch(() => {});
+            totalActionsCreated += insertedCount;
+          }
+        }
+
+        // Run registered action generator if one exists for this skill
+        try {
+          const { getActionGenerator } = await import('./action-generators/index.js');
+          const actionGenerator = getActionGenerator(skill.id);
+          if (actionGenerator) {
+            const generatedCount = await actionGenerator(
+              pool,
+              workspaceId,
+              runId,
+              stepResults,
+              contextData
+            );
+            if (generatedCount > 0) {
+              console.log(`[Actions] Generated ${generatedCount} actions programmatically from ${skill.id} run ${runId}`);
+              totalActionsCreated += generatedCount;
             }
           }
+        } catch (err) {
+          console.error(`[Actions] Action generator failed for ${skill.id}:`, err instanceof Error ? err.message : err);
+        }
+
+        // Emit webhook events if any actions were created
+        if (totalActionsCreated > 0) {
+          import('../webhooks/action-events.js')
+            .then(m => m.emitActionCreatedEvents(workspaceId, skill.id, runId))
+            .catch(() => {});
         }
       } catch (err) {
         console.error(`[Actions] Extraction failed for ${skill.id}:`, err instanceof Error ? err.message : err);

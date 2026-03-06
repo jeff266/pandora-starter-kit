@@ -26,6 +26,7 @@ import { buildContactRoleResolutionEvidence } from './contact-role-resolution.js
 import { buildCustomFieldDiscoveryEvidence } from './custom-field-discovery.js';
 import { buildProjectRecapEvidence } from './project-recap.js';
 import { buildStrategyInsightsEvidence } from './strategy-insights.js';
+import { buildStageMismatchEvidence } from './stage-mismatch-detector.js';
 
 export function registerAllEvidenceBuilders(): void {
   registerEvidenceBuilder('pipeline-hygiene', buildPipelineHygieneEvidence);
@@ -46,4 +47,5 @@ export function registerAllEvidenceBuilders(): void {
   registerEvidenceBuilder('custom-field-discovery', buildCustomFieldDiscoveryEvidence);
   registerEvidenceBuilder('project-recap', buildProjectRecapEvidence);
   registerEvidenceBuilder('strategy-insights', buildStrategyInsightsEvidence);
+  registerEvidenceBuilder('stage-mismatch-detector', buildStageMismatchEvidence);
 }

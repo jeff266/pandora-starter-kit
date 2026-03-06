@@ -1667,3 +1667,278 @@ export async function repPipelineQuality(
     };
   });
 }
+
+// ─── Stage Mismatch Analysis ───────────────────────────────────────────────
+
+export interface StageMismatchDeal {
+  id: string;
+  name: string;
+  amount: number;
+  stage: string;
+  stage_normalized: string;
+  inferred_phase: string | null;
+  inferred_phase_confidence: number | null;
+  owner: string;
+  close_date: string | null;
+  stage_age_days: number;
+  last_activity_date: string | null;
+  conversation_count: number;
+  contact_count: number;
+  account_name: string | null;
+  source: string;
+  source_id: string;
+}
+
+export interface StageMismatchAnalysis {
+  deals: StageMismatchDeal[];
+  summary: {
+    totalOpenDeals: number;
+    mismatchCount: number;
+    avgPhaseGap: number;
+    avgStageAge: number;
+    crmSource: string;
+    totalMismatchValue: number;
+  };
+}
+
+/**
+ * Analyze deals for stage mismatches by comparing inferred_phase vs stage_normalized.
+ * Returns deals where conversation signals suggest progression beyond current stage.
+ */
+export async function stageMismatchAnalysis(
+  workspaceId: string,
+  scopeId?: string
+): Promise<StageMismatchAnalysis> {
+  // Build scope filter
+  const scopeClause = scopeId && scopeId !== 'default' ? 'AND d.scope_id = $2' : '';
+  const queryParams: unknown[] = [workspaceId];
+  if (scopeId && scopeId !== 'default') queryParams.push(scopeId);
+
+  const result = await query(
+    `
+    WITH deal_data AS (
+      SELECT
+        d.id,
+        d.name,
+        d.amount,
+        d.stage,
+        d.stage_normalized,
+        d.inferred_phase,
+        d.inferred_phase_confidence,
+        d.owner,
+        d.close_date,
+        COALESCE(d.days_in_stage, 0) as stage_age_days,
+        d.last_activity_date,
+        d.account_name,
+        d.source,
+        d.source_id,
+        -- Count conversations
+        (SELECT COUNT(*) FROM conversations c WHERE c.deal_id = d.id) as conversation_count,
+        -- Count contacts
+        (SELECT COUNT(DISTINCT contact_id) FROM deal_contacts dc WHERE dc.deal_id = d.id) as contact_count
+      FROM deals d
+      WHERE d.workspace_id = $1
+        AND d.is_open = true
+        ${scopeClause}
+    ),
+    mismatch_deals AS (
+      SELECT *
+      FROM deal_data
+      WHERE inferred_phase IS NOT NULL
+        AND stage_normalized IS NOT NULL
+        AND inferred_phase != stage_normalized
+        AND inferred_phase_confidence >= 0.6
+    )
+    SELECT
+      md.*,
+      (SELECT COUNT(*) FROM deal_data) as total_open_deals,
+      (SELECT COUNT(*) FROM mismatch_deals) as mismatch_count,
+      (SELECT COALESCE(AVG(stage_age_days), 0) FROM mismatch_deals) as avg_stage_age,
+      (SELECT COALESCE(SUM(amount), 0) FROM mismatch_deals) as total_mismatch_value,
+      (SELECT source FROM deal_data LIMIT 1) as crm_source
+    FROM mismatch_deals md
+    ORDER BY
+      CASE
+        WHEN md.inferred_phase = 'negotiation' AND md.stage_normalized IN ('demo', 'discovery') THEN 1
+        WHEN md.inferred_phase = 'proposal' AND md.stage_normalized = 'demo' THEN 2
+        ELSE 3
+      END,
+      md.amount DESC NULLS LAST
+    LIMIT 100
+    `,
+    queryParams
+  );
+
+  const deals: StageMismatchDeal[] = result.rows.map((row: any) => ({
+    id: row.id,
+    name: row.name,
+    amount: row.amount || 0,
+    stage: row.stage,
+    stage_normalized: row.stage_normalized,
+    inferred_phase: row.inferred_phase,
+    inferred_phase_confidence: row.inferred_phase_confidence,
+    owner: row.owner,
+    close_date: row.close_date,
+    stage_age_days: parseInt(row.stage_age_days, 10) || 0,
+    last_activity_date: row.last_activity_date,
+    conversation_count: parseInt(row.conversation_count, 10) || 0,
+    contact_count: parseInt(row.contact_count, 10) || 0,
+    account_name: row.account_name,
+    source: row.source || 'unknown',
+    source_id: row.source_id || '',
+  }));
+
+  // Calculate phase gap (approximate - based on stage progression order)
+  const stageOrder: Record<string, number> = {
+    discovery: 1,
+    demo: 2,
+    proposal: 3,
+    negotiation: 4,
+    'closed-won': 5,
+  };
+
+  const avgPhaseGap =
+    deals.length > 0
+      ? deals.reduce((sum, d) => {
+          const currentOrder = stageOrder[d.stage_normalized] || 2;
+          const inferredOrder = stageOrder[d.inferred_phase || ''] || 2;
+          return sum + Math.max(0, inferredOrder - currentOrder);
+        }, 0) / deals.length
+      : 0;
+
+  const summary = {
+    totalOpenDeals: result.rows[0]?.total_open_deals
+      ? parseInt(result.rows[0].total_open_deals, 10)
+      : 0,
+    mismatchCount: deals.length,
+    avgPhaseGap: Math.round(avgPhaseGap * 10) / 10,
+    avgStageAge: result.rows[0]?.avg_stage_age
+      ? Math.round(parseFloat(result.rows[0].avg_stage_age))
+      : 0,
+    crmSource: result.rows[0]?.crm_source || 'unknown',
+    totalMismatchValue: result.rows[0]?.total_mismatch_value
+      ? Math.round(parseFloat(result.rows[0].total_mismatch_value))
+      : 0,
+  };
+
+  return { deals, summary };
+}
+
+export interface EnrichedMismatchDeal extends StageMismatchDeal {
+  recent_conversations: Array<{
+    id: string;
+    title: string;
+    date: string;
+    excerpt: string;
+  }>;
+  recent_contacts_added: number;
+  keywords_detected: string[];
+  stakeholder_expansion: boolean;
+}
+
+/**
+ * Enrich mismatched deals with conversation excerpts and stakeholder context.
+ */
+export async function enrichMismatchedDeals(
+  workspaceId: string,
+  deals: StageMismatchDeal[]
+): Promise<EnrichedMismatchDeal[]> {
+  if (deals.length === 0) return [];
+
+  const dealIds = deals.map((d) => d.id);
+
+  // Fetch recent conversations for these deals
+  const conversationsResult = await query(
+    `
+    WITH ranked_conversations AS (
+      SELECT
+        c.id,
+        c.deal_id,
+        c.title,
+        c.date,
+        COALESCE(
+          LEFT(c.summary, 200),
+          LEFT(c.transcript, 200),
+          'No transcript available'
+        ) as excerpt,
+        ROW_NUMBER() OVER (PARTITION BY c.deal_id ORDER BY c.date DESC) as rn
+      FROM conversations c
+      WHERE c.workspace_id = $1
+        AND c.deal_id = ANY($2)
+        AND c.date >= NOW() - INTERVAL '30 days'
+    )
+    SELECT *
+    FROM ranked_conversations
+    WHERE rn <= 3
+    ORDER BY deal_id, date DESC
+    `,
+    [workspaceId, dealIds]
+  );
+
+  // Group conversations by deal_id
+  const convsByDeal: Record<string, any[]> = {};
+  conversationsResult.rows.forEach((row: any) => {
+    if (!convsByDeal[row.deal_id]) convsByDeal[row.deal_id] = [];
+    convsByDeal[row.deal_id].push({
+      id: row.id,
+      title: row.title,
+      date: row.date,
+      excerpt: row.excerpt,
+    });
+  });
+
+  // Fetch recent contact additions (contacts added in last 30 days)
+  const contactsResult = await query(
+    `
+    SELECT
+      dc.deal_id,
+      COUNT(*) as recent_count
+    FROM deal_contacts dc
+    WHERE dc.workspace_id = $1
+      AND dc.deal_id = ANY($2)
+      AND dc.created_at >= NOW() - INTERVAL '30 days'
+    GROUP BY dc.deal_id
+    `,
+    [workspaceId, dealIds]
+  );
+
+  const recentContactsByDeal: Record<string, number> = {};
+  contactsResult.rows.forEach((row: any) => {
+    recentContactsByDeal[row.deal_id] = parseInt(row.recent_count, 10) || 0;
+  });
+
+  // Enrich each deal
+  return deals.map((deal) => {
+    const conversations = convsByDeal[deal.id] || [];
+    const recentContactsAdded = recentContactsByDeal[deal.id] || 0;
+
+    // Detect keywords in conversation excerpts
+    const allText = conversations.map((c) => c.excerpt.toLowerCase()).join(' ');
+    const keywords: string[] = [];
+    const keywordPatterns = [
+      { pattern: /\b(contract|agreement|terms)\b/, keyword: 'contract discussion' },
+      { pattern: /\b(pricing|price|quote|proposal)\b/, keyword: 'pricing' },
+      { pattern: /\b(timeline|when.*start|go-live)\b/, keyword: 'timeline commitment' },
+      { pattern: /\b(legal|compliance|security)\b/, keyword: 'legal review' },
+      { pattern: /\b(implementation|onboarding|kick.*off)\b/, keyword: 'implementation planning' },
+      { pattern: /\b(cfо|finance|budget|procurement)\b/, keyword: 'financial buyer engaged' },
+    ];
+
+    keywordPatterns.forEach(({ pattern, keyword }) => {
+      if (pattern.test(allText) && !keywords.includes(keyword)) {
+        keywords.push(keyword);
+      }
+    });
+
+    // Stakeholder expansion = contacts added recently OR contact count > 2
+    const stakeholder_expansion = recentContactsAdded > 0 || deal.contact_count > 2;
+
+    return {
+      ...deal,
+      recent_conversations: conversations,
+      recent_contacts_added: recentContactsAdded,
+      keywords_detected: keywords,
+      stakeholder_expansion,
+    };
+  });
+}

@@ -6,6 +6,7 @@
 
 import { getSkillRegistry as _getSkillRegistry } from './registry.js';
 import { registerAllEvidenceBuilders } from './evidence-builders/index.js';
+import { registerAllActionGenerators } from './action-generators/index.js';
 import { pipelineHygieneSkill } from './library/pipeline-hygiene.js';
 import { dealRiskReviewSkill } from './library/deal-risk-review.js';
 import { weeklyRecapSkill } from './library/weekly-recap.js';
@@ -182,5 +183,8 @@ export function registerBuiltInSkills(): void {
   // Register evidence builders for "Show the Work" evidence assembly
   registerAllEvidenceBuilders();
 
-  console.log('[Skills] Registered all built-in skills and evidence builders');
+  // Register action generators for programmatic action creation
+  registerAllActionGenerators();
+
+  console.log('[Skills] Registered all built-in skills, evidence builders, and action generators');
 }

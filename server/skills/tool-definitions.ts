@@ -7878,6 +7878,45 @@ const survivalCurveQuery: ToolDefinition = {
   },
 };
 
+const stageMismatchAnalysisTool: ToolDefinition = {
+  name: 'stageMismatchAnalysis',
+  description: 'Analyze deals where conversation signals indicate progression beyond current CRM stage.',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('stageMismatchAnalysis', async () => {
+      const { stageMismatchAnalysis } = await import('../analysis/aggregations.js');
+      return stageMismatchAnalysis(context.workspaceId, context.scopeId);
+    }, params);
+  },
+};
+
+const enrichMismatchedDealsTool: ToolDefinition = {
+  name: 'enrichMismatchedDeals',
+  description: 'Enrich deals with stage mismatch with recent conversations, keywords, and stakeholder data.',
+  tier: 'compute',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  execute: async (params, context) => {
+    return safeExecute('enrichMismatchedDeals', async () => {
+      const { enrichMismatchedDeals, stageMismatchAnalysis } = await import('../analysis/aggregations.js');
+
+      // First get the mismatched deals
+      const analysis = await stageMismatchAnalysis(context.workspaceId, context.scopeId);
+
+      // Then enrich them
+      return enrichMismatchedDeals(context.workspaceId, analysis.deals);
+    }, params);
+  },
+};
+
 // ============================================================================
 
 export const toolRegistry = new Map<string, ToolDefinition>([
@@ -8008,6 +8047,8 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ['pcfProjectCreation', pcfProjectCreation],
   ['pcfAuditOpenPipeline', pcfAuditOpenPipeline],
   ['survivalCurveQuery', survivalCurveQuery],
+  ['stageMismatchAnalysis', stageMismatchAnalysisTool],
+  ['enrichMismatchedDeals', enrichMismatchedDealsTool],
 ]);
 
 // ============================================================================
