@@ -6,7 +6,14 @@ import {
   X, 
   ArrowRight,
   ChevronRight,
-  Move
+  Move,
+  AlertTriangle,
+  Check,
+  Send,
+  Mail,
+  Slack,
+  Download,
+  Database
 } from 'lucide-react';
 import { 
   AccumulatedDocument, 
@@ -24,6 +31,11 @@ export default function DocumentPill({ workspaceId, threadId }: DocumentPillProp
   const [doc, setDoc] = useState<AccumulatedDocument | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
+  const [synthesis, setSynthesis] = useState<any>(null);
+  const [showReview, setShowReview] = useState(false);
+  const [confirmedFlags, setConfirmedFlags] = useState<Record<string, boolean>>({});
+  const [showDistribution, setShowDistribution] = useState(false);
+  const [distributing, setDistributing] = useState(false);
 
   useEffect(() => {
     const fetchDoc = async () => {
@@ -61,20 +73,59 @@ export default function DocumentPill({ workspaceId, threadId }: DocumentPillProp
 
   const handleRender = async () => {
     try {
-      // T012: Trigger synthesis
-      const synthesis = await api.post(`/sessions/${threadId}/document/synthesize`, {
-        metrics: {} // Future: Pass actual workspace metrics from context
+      const res = await api.post(`/sessions/${threadId}/document/synthesize`, {
+        metrics: {} 
       });
-      
-      console.log('Synthesis complete:', synthesis);
-      // In a real app, we'd pass this to the PDF/PPTX renderer.
-      // For now, show the throughline as confirmation.
-      window.alert(`Rendered with throughline: ${synthesis.documentThroughline}\n\nCheck console for full synthesis payload.`);
+      setSynthesis(res);
+      if (res.lowConfidenceFlags && res.lowConfidenceFlags.length > 0) {
+        setShowReview(true);
+      } else {
+        setShowDistribution(true);
+      }
     } catch (err) {
-      console.error('Failed to synthesize/render:', err);
-      window.alert('Synthesis failed. Proceeding with raw rendering.');
+      console.error('Failed to synthesize:', err);
+      setShowDistribution(true);
     }
   };
+
+  const handleConfirmFlag = (flagId: string) => {
+    setConfirmedFlags(prev => ({ ...prev, [flagId]: true }));
+  };
+
+  const handleRemoveFlag = async (contributionId: string, flagId: string) => {
+    try {
+      const res = await api.post(`/sessions/${threadId}/document/contribution/${contributionId}/remove`);
+      setDoc(res);
+      setConfirmedFlags(prev => ({ ...prev, [flagId]: true }));
+    } catch (err) {
+      console.error('Failed to remove contribution:', err);
+    }
+  };
+
+  const handleDistribute = async (channel: string) => {
+    setDistributing(true);
+    try {
+      const result = await api.post(`/sessions/${threadId}/document/distribute`, {
+        channel,
+        recipient: channel === 'email' ? 'jeff@revopsimpact.us' : undefined,
+        subject: synthesis?.documentThroughline || 'Pandora Analysis',
+        body: synthesis?.executiveSummary || 'New document generated.'
+      });
+      if (result.success) {
+        window.alert(`Successfully distributed via ${channel}`);
+        setShowDistribution(false);
+      } else {
+        window.alert(`Failed to distribute: ${result.error}`);
+      }
+    } catch (err) {
+      console.error('Distribution failed:', err);
+      window.alert('Distribution failed.');
+    } finally {
+      setDistributing(false);
+    }
+  };
+
+  const allConfirmed = synthesis?.lowConfidenceFlags?.every((f: any) => confirmedFlags[f.contributionId]);
 
   return (
     <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 w-full max-w-lg px-4">
@@ -105,6 +156,115 @@ export default function DocumentPill({ workspaceId, threadId }: DocumentPillProp
             {expanded ? <ChevronDown size={18} className="text-slate-400" /> : <ChevronUp size={18} className="text-slate-400" />}
           </div>
         </div>
+
+        {/* Review Panel */}
+        {showReview && (
+          <div className="p-4 bg-slate-950 border-t border-slate-800">
+            <div className="flex items-center gap-2 mb-4">
+              <AlertTriangle className="text-amber-500" size={18} />
+              <h3 className="text-sm font-bold text-slate-100">Review Required</h3>
+            </div>
+            <div className="space-y-3 mb-6 max-h-48 overflow-y-auto pr-2">
+              {synthesis?.lowConfidenceFlags?.map((flag: any) => (
+                <div key={flag.contributionId} className="bg-slate-900 rounded-lg p-3 border border-slate-800">
+                  <div className="text-[11px] text-slate-400 mb-1">
+                    {doc.sections.flatMap(s => s.content).find(c => c.id === flag.contributionId)?.title || 'Unknown Item'}
+                  </div>
+                  <div className="text-xs text-slate-200 mb-3">{flag.reason}</div>
+                  {!confirmedFlags[flag.contributionId] ? (
+                    <div className="flex gap-2">
+                      <button 
+                        onClick={() => handleConfirmFlag(flag.contributionId)}
+                        className="bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white text-[10px] px-2 py-1 rounded transition-all flex items-center gap-1"
+                      >
+                        <Check size={10} /> Confirm
+                      </button>
+                      <button 
+                        onClick={() => handleRemoveFlag(flag.contributionId, flag.contributionId)}
+                        className="bg-rose-600/20 hover:bg-rose-600 text-rose-400 hover:text-white text-[10px] px-2 py-1 rounded transition-all flex items-center gap-1"
+                      >
+                        <X size={10} /> Remove
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="text-[10px] text-emerald-500 font-bold flex items-center gap-1">
+                      <Check size={10} /> Handled
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-between items-center">
+              <button onClick={() => setShowReview(false)} className="text-xs text-slate-500 hover:text-slate-300">Cancel</button>
+              <button 
+                disabled={!allConfirmed}
+                onClick={() => { setShowReview(false); setShowDistribution(true); }}
+                className="bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-500 text-white text-xs font-bold px-4 py-2 rounded-lg transition-all"
+              >
+                Continue to distribution →
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Distribution Panel */}
+        {showDistribution && (
+          <div className="p-4 bg-slate-950 border-t border-slate-800">
+            <div className="flex items-center gap-2 mb-4">
+              <Send className="text-blue-400" size={18} />
+              <h3 className="text-sm font-bold text-slate-100">Distribute Document</h3>
+            </div>
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              <button 
+                onClick={() => handleDistribute('slack')}
+                disabled={distributing}
+                className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 p-3 rounded-xl transition-all"
+              >
+                <Slack className="text-pink-500" size={20} />
+                <div className="text-left">
+                  <div className="text-[11px] font-bold text-slate-200">Slack</div>
+                  <div className="text-[10px] text-slate-500">Post summary</div>
+                </div>
+              </button>
+              <button 
+                onClick={() => handleDistribute('email')}
+                disabled={distributing}
+                className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 p-3 rounded-xl transition-all"
+              >
+                <Mail className="text-blue-400" size={20} />
+                <div className="text-left">
+                  <div className="text-[11px] font-bold text-slate-200">Email</div>
+                  <div className="text-[10px] text-slate-500">Send PDF</div>
+                </div>
+              </button>
+              <button 
+                onClick={() => handleDistribute('drive')}
+                disabled={distributing}
+                className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 p-3 rounded-xl transition-all"
+              >
+                <Database className="text-emerald-500" size={20} />
+                <div className="text-left">
+                  <div className="text-[11px] font-bold text-slate-200">Google Drive</div>
+                  <div className="text-[10px] text-slate-500">Save to cloud</div>
+                </div>
+              </button>
+              <button 
+                onClick={() => handleDistribute('download')}
+                disabled={distributing}
+                className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 p-3 rounded-xl transition-all"
+              >
+                <Download className="text-slate-400" size={20} />
+                <div className="text-left">
+                  <div className="text-[11px] font-bold text-slate-200">Download</div>
+                  <div className="text-[10px] text-slate-500">PPTX/DOCX/PDF</div>
+                </div>
+              </button>
+            </div>
+            <div className="flex justify-end">
+              <button onClick={() => setShowDistribution(false)} className="text-xs text-slate-500 hover:text-slate-300">Close</button>
+            </div>
+          </div>
+        )}
 
         {/* Expanded Content */}
         {expanded && (

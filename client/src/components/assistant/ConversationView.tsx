@@ -9,6 +9,7 @@ import EvidenceCard from './EvidenceCard';
 import InlineActionsPrompt from './InlineActionsPrompt';
 import ActionsPrompt from './ActionsPrompt';
 import ActionCard from './ActionCard';
+import StrategicCard from './StrategicCard';
 import DeliverablePicker from './DeliverablePicker';
 import StickyInput from './StickyInput';
 import MessageFeedback from './MessageFeedback';
@@ -291,6 +292,10 @@ export default function ConversationView({ initialMessage, onBack, onThreadId }:
               {!state.synthesisComplete && <span style={{ color: colors.accent }}>▋</span>}
             </div>
           </div>
+        )}
+
+        {state.strategicAnalysis && (
+          <StrategicCard data={state.strategicAnalysis} />
         )}
 
         {state.evidenceCards.length > 0 && (

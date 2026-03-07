@@ -10,8 +10,8 @@ import { query } from '../db.js';
 export interface WorkspaceMemory {
   id: string;
   workspace_id: string;
-  memory_type: 'recurring_finding' | 'strategic_priority' | 'entity_context' | 'data_gap';
-  entity_type?: 'deal' | 'account' | 'rep' | 'contact';
+  memory_type: 'recurring_finding' | 'strategic_priority' | 'entity_context' | 'data_gap' | 'forecast_accuracy';
+  entity_type?: 'deal' | 'account' | 'rep' | 'contact' | 'workspace';
   entity_id?: string;
   entity_name?: string;
   period_start?: Date;
@@ -215,4 +215,129 @@ export function getCurrentPeriodStart(): Date {
 export function getCurrentPeriodEnd(): Date {
   const start = getCurrentPeriodStart();
   return new Date(start.getTime() + 6 * 24 * 60 * 60 * 1000);
+}
+
+export interface ForecastAccuracyMemory {
+  period_label: string;
+  overall_accuracy: number;
+  rep_accuracies: {
+    rep_name: string;
+    rep_email: string;
+    accuracy: number;
+    closed_won: number;
+    committed: number;
+  }[];
+  most_reliable_rep?: string;
+  least_reliable_rep?: string;
+}
+
+/**
+ * Writes quarterly or partial YTD forecast accuracy to workspace memory.
+ */
+export async function writeQuarterlyForecastAccuracy(workspaceId: string, periodLabel: string) {
+  // 1. Get closed won deals for the period
+  // We approximate the period from the label or use current quarter
+  const now = new Date();
+  const qStart = new Date(now.getFullYear(), (Math.floor(now.getMonth() / 3)) * 3, 1);
+  const qEnd = new Date(now.getFullYear(), (Math.floor(now.getMonth() / 3) + 1) * 3, 0);
+
+  const [closedRes, forecastRes] = await Promise.all([
+    query<{ owner: string; total: string }>(
+      `SELECT owner, SUM(amount) as total 
+       FROM deals 
+       WHERE workspace_id = $1 
+       AND stage_normalized = 'closed_won' 
+       AND close_date >= $2 AND close_date <= $3
+       GROUP BY owner`,
+      [workspaceId, qStart.toISOString(), qEnd.toISOString()]
+    ),
+    query<{ result: any }>(
+      `SELECT result FROM skill_runs 
+       WHERE workspace_id = $1 
+       AND skill_id = 'forecast-rollup' 
+       AND status = 'completed' 
+       ORDER BY started_at DESC LIMIT 1`,
+      [workspaceId]
+    )
+  ]);
+
+  const fResult = forecastRes.rows[0]?.result || {};
+  const repCommits = fResult.rep_breakdown || {}; // Assuming forecast-rollup returns this
+
+  const repAccuracies = closedRes.rows.map(r => {
+    const committed = repCommits[r.owner]?.commit || 0;
+    const closed = parseFloat(r.total || '0');
+    const accuracy = committed > 0 ? (closed / committed) * 100 : 0;
+    return {
+      rep_name: r.owner,
+      rep_email: r.owner,
+      accuracy: Math.round(accuracy),
+      closed_won: closed,
+      committed: committed
+    };
+  }).filter(r => r.committed > 0);
+
+  if (repAccuracies.length === 0) return;
+
+  const totalCommitted = repAccuracies.reduce((sum, r) => sum + r.committed, 0);
+  const totalClosed = repAccuracies.reduce((sum, r) => sum + r.closed_won, 0);
+  const overallAccuracy = totalCommitted > 0 ? (totalClosed / totalCommitted) * 100 : 0;
+
+  const sorted = [...repAccuracies].sort((a, b) => Math.abs(100 - a.accuracy) - Math.abs(100 - b.accuracy));
+  const mostReliable = sorted[0]?.rep_name;
+  const leastReliable = sorted[sorted.length - 1]?.rep_name;
+
+  const content: ForecastAccuracyMemory = {
+    period_label: periodLabel,
+    overall_accuracy: Math.round(overallAccuracy),
+    rep_accuracies: repAccuracies,
+    most_reliable_rep: mostReliable,
+    least_reliable_rep: leastReliable
+  };
+
+  await query(
+    `INSERT INTO workspace_memory (
+      workspace_id, memory_type, entity_type, period_label, content, summary
+    )
+    VALUES ($1, 'forecast_accuracy', 'workspace', $2, $3, $4)
+    ON CONFLICT (workspace_id, memory_type, entity_type, entity_id, period_label)
+    DO UPDATE SET content = $3, summary = $4, updated_at = NOW()`,
+    [
+      workspaceId, periodLabel, content,
+      `Forecast accuracy for ${periodLabel}: ${Math.round(overallAccuracy)}%`
+    ]
+  );
+}
+
+/**
+ * Returns formatted accuracy context for LLM/Brief.
+ */
+export async function getForecastAccuracyContext(workspaceId: string): Promise<string> {
+  const res = await query<WorkspaceMemory>(
+    `SELECT * FROM workspace_memory 
+     WHERE workspace_id = $1 AND memory_type = 'forecast_accuracy' 
+     ORDER BY created_at DESC LIMIT 3`
+  );
+
+  if (res.rows.length === 0) return '';
+
+  return buildAccuracyContextString(res.rows);
+}
+
+export function buildAccuracyContextString(rows: WorkspaceMemory[]): string {
+  let block = `<forecast_accuracy_history>\n`;
+  const avgAcc = rows.reduce((sum, r) => sum + (r.content.overall_accuracy || 0), 0) / rows.length;
+  
+  block += `Over the last ${rows.length} periods, commit accuracy averaged ${Math.round(avgAcc)}%.\n`;
+  
+  for (const row of rows) {
+    const c = row.content as ForecastAccuracyMemory;
+    block += `- ${row.period_label}: ${c.overall_accuracy}% accuracy. `;
+    if (c.most_reliable_rep) block += `Most reliable: ${c.most_reliable_rep}. `;
+    if (c.least_reliable_rep) block += `Least reliable: ${c.least_reliable_rep}.`;
+    block += `\n`;
+  }
+  
+  block += `</forecast_accuracy_history>`;
+  return block;
 }

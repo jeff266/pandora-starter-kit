@@ -20,6 +20,7 @@ interface TheNumberCardProps {
   reps?: any;
   expandedRow?: ExpandedRow;
   onExpandedRowChange?: (row: ExpandedRow) => void;
+  forecastAccuracyNote?: string;
 }
 
 type ExpandedRow = 'pipeline' | 'attainment' | 'gap' | null;
@@ -49,7 +50,7 @@ function MathRow({ label, value, highlight }: { label: string; value: string; hi
   );
 }
 
-export default function TheNumberCard({ theNumber: n, briefType, deltaMode, reps, expandedRow: controlledExpanded, onExpandedRowChange }: TheNumberCardProps) {
+export default function TheNumberCard({ theNumber: n, briefType, deltaMode, reps, expandedRow: controlledExpanded, onExpandedRowChange, forecastAccuracyNote }: TheNumberCardProps) {
   const [internalExpanded, setInternalExpanded] = useState<ExpandedRow>(null);
   const expanded = controlledExpanded !== undefined ? controlledExpanded : internalExpanded;
 
@@ -208,6 +209,11 @@ export default function TheNumberCard({ theNumber: n, briefType, deltaMode, reps
       <ClickableRow label="Deals" value={String(n.deal_count)} onClick={() => toggle('pipeline')} expanded={expanded === 'pipeline'} />
       {expanded === 'pipeline' && <PipelineMath />}
       {n.days_remaining != null && <Row label="Days left in quarter" value={String(n.days_remaining)} />}
+      {forecastAccuracyNote && (
+        <div style={{ marginTop: 8, fontSize: 11, color: '#6B7280', fontStyle: 'italic', borderTop: '1px solid #1F2937', paddingTop: 8 }}>
+          {forecastAccuracyNote}
+        </div>
+      )}
     </div>
   );
 }

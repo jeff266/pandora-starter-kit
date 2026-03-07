@@ -12,6 +12,9 @@ export interface RecommendedAction {
   judgment_reason?: string;
   approval_prompt?: string;
   escalation_reason?: string;
+  slack_draft?: string;
+  slack_draft_id?: string;
+  recipient_name?: string;
 }
 
 interface ActionCardProps {
@@ -28,7 +31,7 @@ const TYPE_ICON: Record<string, string> = {
 
 export default function ActionCard({ action, onDismiss }: ActionCardProps) {
   const [editing, setEditing] = useState(false);
-  const [editValue, setEditValue] = useState(action.preview || action.detail);
+  const [editValue, setEditValue] = useState(action.slack_draft || action.preview || action.detail);
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
 
@@ -36,7 +39,11 @@ export default function ActionCard({ action, onDismiss }: ActionCardProps) {
     setLoading(true);
     try {
       const workspaceId = getWorkspaceId();
-      if (action.id && workspaceId) {
+      if (action.type === 'slack' && action.slack_draft_id && workspaceId) {
+        await api.post(`/workspaces/${workspaceId}/actions/slack-drafts/${action.slack_draft_id}/send`, {
+          editedMessage: editValue !== action.slack_draft ? editValue : undefined
+        });
+      } else if (action.id && workspaceId) {
         // Use inline execute route if it's a real action with ID
         await api.post(`/workspaces/${workspaceId}/actions/${action.id}/execute-inline`, {
           user_id: 'user', // In a real app, this would be from auth context
@@ -50,6 +57,20 @@ export default function ActionCard({ action, onDismiss }: ActionCardProps) {
     } catch {
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDismiss = async () => {
+    try {
+      const workspaceId = getWorkspaceId();
+      if (action.type === 'slack' && action.slack_draft_id && workspaceId) {
+        await api.post(`/workspaces/${workspaceId}/actions/slack-drafts/${action.slack_draft_id}/dismiss`, {
+          reason: 'User dismissed from UI'
+        });
+      }
+      onDismiss(action.id);
+    } catch {
+      onDismiss(action.id);
     }
   };
 
@@ -102,11 +123,13 @@ export default function ActionCard({ action, onDismiss }: ActionCardProps) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
         <span style={{ fontSize: 18 }}>{TYPE_ICON[action.type]}</span>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: colors.text }}>{action.title}</div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: colors.text }}>
+            {action.type === 'slack' && action.recipient_name ? `📨 Draft Slack DM → ${action.recipient_name}` : action.title}
+          </div>
           <div style={{ fontSize: 11, color: colors.textMuted }}>{action.detail}</div>
         </div>
       </div>
-      {editing && (
+      {(editing || action.type === 'slack') && (
         <textarea
           value={editValue}
           onChange={e => setEditValue(e.target.value)}
@@ -127,26 +150,28 @@ export default function ActionCard({ action, onDismiss }: ActionCardProps) {
             borderRadius: 6, cursor: 'pointer', background: colors.accent, color: '#0b1014',
           }}
         >
-          {loading ? 'Sending...' : 'Approve & Send'}
+          {loading ? 'Sending...' : (action.type === 'slack' ? 'Send' : 'Approve & Send')}
         </button>
+        {action.type !== 'slack' && (
+          <button
+            onClick={() => setEditing(e => !e)}
+            style={{
+              padding: '5px 12px', fontSize: 11, fontWeight: 500,
+              border: `1px solid ${colors.border}`, borderRadius: 6, cursor: 'pointer',
+              background: 'transparent', color: colors.textSecondary,
+            }}
+          >
+            {editing ? 'Hide' : 'Edit first'}
+          </button>
+        )}
         <button
-          onClick={() => setEditing(e => !e)}
-          style={{
-            padding: '5px 12px', fontSize: 11, fontWeight: 500,
-            border: `1px solid ${colors.border}`, borderRadius: 6, cursor: 'pointer',
-            background: 'transparent', color: colors.textSecondary,
-          }}
-        >
-          {editing ? 'Hide' : 'Edit first'}
-        </button>
-        <button
-          onClick={() => onDismiss(action.id)}
+          onClick={handleDismiss}
           style={{
             padding: '5px 10px', fontSize: 11, border: 'none',
             borderRadius: 6, cursor: 'pointer', background: 'transparent', color: colors.textMuted,
           }}
         >
-          Skip
+          {action.type === 'slack' ? 'Dismiss' : 'Skip'}
         </button>
       </div>
     </div>

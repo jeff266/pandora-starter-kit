@@ -8,6 +8,7 @@ import { computeFields } from '../computed-fields/engine.js';
 import { refreshComputedFields } from '../tools/computed-fields-refresh.js';
 import { resolveConversationParticipants } from '../conversations/resolve-participants.js';
 import { discoverWinPatterns } from '../coaching/win-pattern-discovery.js';
+import { sendSlackDraft, dismissSlackDraft } from '../actions/slack-draft.js';
 
 const router = Router();
 
@@ -260,6 +261,32 @@ router.post('/:workspaceId/actions/discover-win-patterns', async (req: Request<W
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.error('[Actions] Win pattern discovery error:', message);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.post('/:workspaceId/actions/slack-drafts/:draftId/send', async (req: Request<WorkspaceParams & { draftId: string }>, res: Response) => {
+  try {
+    const { workspaceId, draftId } = req.params;
+    const { editedMessage } = req.body;
+    await sendSlackDraft(workspaceId, draftId, editedMessage);
+    res.json({ success: true, message: 'Slack draft sent' });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[Actions] Send slack draft error:', message);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.post('/:workspaceId/actions/slack-drafts/:draftId/dismiss', async (req: Request<WorkspaceParams & { draftId: string }>, res: Response) => {
+  try {
+    const { workspaceId, draftId } = req.params;
+    const { reason } = req.body;
+    await dismissSlackDraft(workspaceId, draftId, reason);
+    res.json({ success: true, message: 'Slack draft dismissed' });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[Actions] Dismiss slack draft error:', message);
     res.status(500).json({ error: message });
   }
 });

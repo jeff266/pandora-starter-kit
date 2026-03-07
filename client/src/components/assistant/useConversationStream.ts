@@ -48,6 +48,7 @@ export interface ConversationState {
   actions: RecommendedAction[];
   judgedActions: any[];
   inlineActions: InlineAction[];
+  strategicAnalysis: any | null;
   deliverableOptions: DeliverableOption[];
   chartSpecs: ChartSpec[];
   error: string | null;
@@ -80,6 +81,7 @@ const initial: ConversationState = {
   actions: [],
   judgedActions: [],
   inlineActions: [],
+  strategicAnalysis: null,
   deliverableOptions: [],
   chartSpecs: [],
   error: null,
@@ -115,6 +117,7 @@ function reducer(state: ConversationState, action: Action): ConversationState {
       crossSignalFindings: [],
       actions: [],
       inlineActions: [],
+      strategicAnalysis: null,
       deliverableOptions: [],
       chartSpecs: [],
       error: null,
@@ -200,6 +203,9 @@ function reducer(state: ConversationState, action: Action): ConversationState {
       }
       case 'inline_actions': {
         return { ...state, inlineActions: ev.items ?? [] };
+      }
+      case 'strategic_reasoning': {
+        return { ...state, strategicAnalysis: ev.data };
       }
       case 'deliverable_options': {
         return { ...state, deliverableOptions: ev.options ?? [] };

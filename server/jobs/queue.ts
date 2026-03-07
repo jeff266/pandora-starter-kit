@@ -472,11 +472,16 @@ export class JobQueue {
           [workspaceId]
         );
         const closedWonCount = parseInt(recentClosedWon.rows[0]?.cnt || '0');
+        
+        const { evaluateRecommendationOutcomes } = await import('../documents/recommendation-tracker.js');
+        const materialChanges = closedWonCount > 0
+          ? [{ type: 'deal_closed_won' as const, dealId: '', dealName: `${closedWonCount} deal(s)`, before: {}, after: {} }]
+          : [];
+        
+        await evaluateRecommendationOutcomes(workspaceId, materialChanges);
+
         if (closedWonCount > 0 || recordsStored > 0) {
           const { triggerBriefReassembly } = await import('../briefing/brief-reassembly-trigger.js');
-          const materialChanges = closedWonCount > 0
-            ? [{ type: 'deal_closed_won' as const, dealId: '', dealName: `${closedWonCount} deal(s)`, before: {}, after: {} }]
-            : [];
           const reason = closedWonCount > 0 ? `hubspot_sync:${closedWonCount}_closed_won` : 'hubspot_sync:records_updated';
           triggerBriefReassembly(workspaceId, reason, materialChanges);
         }

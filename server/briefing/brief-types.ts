@@ -137,6 +137,7 @@ export interface WeeklyBriefRow {
   ai_blurbs: AiBlurbs;
   editorial_focus: EditorialFocus;
   section_refreshed_at: Record<string, string>;
+  forecast_accuracy_note?: string;
   status: 'assembling' | 'ready' | 'sent' | 'edited' | 'failed';
   error_message?: string;
   sent_to: any[];
@@ -146,6 +147,8 @@ export interface WeeklyBriefRow {
   assembly_duration_ms: number;
   ai_tokens_used: number;
   skill_runs_used: string[];
+  comparison_block?: string;
+  comparison_data?: any;
   generated_at: string;
   created_at: string;
   updated_at: string;

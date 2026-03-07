@@ -1,5 +1,6 @@
 import { query } from '../db.js';
-import { writeMemoryFromBriefAssembly } from '../memory/workspace-memory.js';
+import { writeMemoryFromBriefAssembly, getForecastAccuracyContext, writeQuarterlyForecastAccuracy, getCurrentPeriodLabel } from '../memory/workspace-memory.js';
+import { getOutcomeSummaryForBrief } from '../documents/recommendation-tracker.js';
 import {
   getMonday, endOfWeek, subDays, quarterStart, quarterEnd, getQuarter,
   daysRemainingInQuarter, getWonLostStages,
@@ -9,6 +10,7 @@ import { determineBriefType, determineEditorialFocus } from './editorial-engine.
 import { generateBriefNarratives } from './brief-narratives.js';
 import { annotateBriefNarrative } from './brief-annotator.js';
 import { computeTemporalContext } from '../context/opening-brief.js';
+import { buildComparison, formatComparisonBlock } from '../documents/comparator.js';
 import type { BriefType, TheNumber, WhatChanged, Segments, Reps, DealsToWatch, AssembledBrief } from './brief-types.js';
 
 // ─── Entry point ─────────────────────────────────────────────────────────────
@@ -363,9 +365,15 @@ async function assembleMondaySetup(workspaceId: string, now: Date, briefType: Br
     computeTemporalContext(workspaceId).catch(() => null),
   ]);
   const editorialFocus = determineEditorialFocus(briefType, theNumber, whatChanged as any, reps, deals, theNumber.days_remaining);
+  const forecastAccuracyNote = await getForecastAccuracyContext(workspaceId).catch(() => undefined);
   const rawBlurbs = await generateBriefNarratives(workspaceId, briefType, theNumber, whatChanged, reps.items, deals.items, editorialFocus, temporal?.weekOfQuarter, temporal?.quarterPhase as any, temporal?.pctQuarterComplete);
   const aiBlurbs = await annotateBriefNarrative(workspaceId, rawBlurbs, { theNumber, whatChanged, reps: reps.items, deals: deals.items });
-  return saveBrief(workspaceId, briefType, now, { theNumber, whatChanged, segments, reps, deals, aiBlurbs, editorialFocus, startTime });
+  
+  // Trigger partial accuracy write
+  const periodLabel = getCurrentPeriodLabel();
+  await writeQuarterlyForecastAccuracy(workspaceId, periodLabel).catch(err => console.error('Failed to write forecast accuracy:', err));
+
+  return saveBrief(workspaceId, briefType, now, { theNumber, whatChanged, segments, reps, deals, aiBlurbs, editorialFocus, startTime, forecastAccuracyNote });
 }
 
 async function assemblePulse(workspaceId: string, now: Date, briefType: BriefType, startTime: number): Promise<AssembledBrief> {
@@ -404,9 +412,15 @@ async function assemblePulse(workspaceId: string, now: Date, briefType: BriefTyp
 
   const temporal = await computeTemporalContext(workspaceId).catch(() => null);
   const editorialFocus = determineEditorialFocus(briefType, theNumber, whatChanged as any, reps, deals, theNumber.days_remaining);
+  const forecastAccuracyNote = await getForecastAccuracyContext(workspaceId).catch(() => undefined);
   const rawBlurbs = await generateBriefNarratives(workspaceId, briefType, theNumber, whatChanged, reps.items, deals.items, editorialFocus, temporal?.weekOfQuarter, temporal?.quarterPhase as any, temporal?.pctQuarterComplete);
   const aiBlurbs = await annotateBriefNarrative(workspaceId, rawBlurbs, { theNumber, whatChanged, reps: reps.items, deals: deals.items });
-  return saveBrief(workspaceId, briefType, now, { theNumber, whatChanged, segments, reps, deals, aiBlurbs, editorialFocus, startTime });
+  
+  // Trigger partial accuracy write
+  const periodLabel = getCurrentPeriodLabel();
+  await writeQuarterlyForecastAccuracy(workspaceId, periodLabel).catch(err => console.error('Failed to write forecast accuracy:', err));
+
+  return saveBrief(workspaceId, briefType, now, { theNumber, whatChanged, segments, reps, deals, aiBlurbs, editorialFocus, startTime, forecastAccuracyNote });
 }
 
 async function assembleFridayRecap(workspaceId: string, now: Date, briefType: BriefType, startTime: number): Promise<AssembledBrief> {
@@ -428,9 +442,15 @@ async function assembleFridayRecap(workspaceId: string, now: Date, briefType: Br
 
   const temporal = await computeTemporalContext(workspaceId).catch(() => null);
   const editorialFocus = determineEditorialFocus(briefType, theNumber, whatChanged as any, reps, deals, theNumber.days_remaining);
+  const forecastAccuracyNote = await getForecastAccuracyContext(workspaceId).catch(() => undefined);
   const rawBlurbs = await generateBriefNarratives(workspaceId, briefType, theNumber, whatChanged, reps.items, deals.items, editorialFocus, temporal?.weekOfQuarter, temporal?.quarterPhase as any, temporal?.pctQuarterComplete);
   const aiBlurbs = await annotateBriefNarrative(workspaceId, rawBlurbs, { theNumber, whatChanged, reps: reps.items, deals: deals.items });
-  return saveBrief(workspaceId, briefType, now, { theNumber, whatChanged, segments, reps, deals, aiBlurbs, editorialFocus, startTime });
+  
+  // Trigger partial accuracy write
+  const periodLabel = getCurrentPeriodLabel();
+  await writeQuarterlyForecastAccuracy(workspaceId, periodLabel).catch(err => console.error('Failed to write forecast accuracy:', err));
+
+  return saveBrief(workspaceId, briefType, now, { theNumber, whatChanged, segments, reps, deals, aiBlurbs, editorialFocus, startTime, forecastAccuracyNote });
 }
 
 async function assembleQuarterClose(workspaceId: string, now: Date, briefType: BriefType, startTime: number): Promise<AssembledBrief> {
@@ -460,14 +480,22 @@ async function assembleQuarterClose(workspaceId: string, now: Date, briefType: B
   const temporal = await computeTemporalContext(workspaceId).catch(() => null);
   const editorialFocus = determineEditorialFocus(briefType, theNumber, whatChanged, reps, deals, theNumber.days_remaining);
   const rawBlurbs = await generateBriefNarratives(workspaceId, briefType, theNumber, whatChanged, reps.items, deals.items, editorialFocus, temporal?.weekOfQuarter, temporal?.quarterPhase as any, temporal?.pctQuarterComplete);
+  
+  // Closed-Loop Recommendations
+  const outcomes = await getOutcomeSummaryForBrief(workspaceId, subDays(now, 7));
+  if (outcomes.length > 0) {
+    const outcomeBlock = "\n\n### Recommendation Outcomes\n" + outcomes.join('\n');
+    rawBlurbs.executive_summary += outcomeBlock;
+  }
+
   const aiBlurbs = await annotateBriefNarrative(workspaceId, rawBlurbs, { theNumber, whatChanged, reps: reps.items, deals: deals.items });
   return saveBrief(workspaceId, briefType, now, { theNumber, whatChanged, segments, reps, deals, aiBlurbs, editorialFocus, startTime });
 }
 
 // ─── Save & parse ─────────────────────────────────────────────────────────────
 
-async function saveBrief(workspaceId: string, briefType: BriefType, now: Date, data: { theNumber: any; whatChanged: any; segments: any; reps: any; deals: any; aiBlurbs: any; editorialFocus: any; startTime: number }): Promise<AssembledBrief> {
-  const { theNumber, whatChanged, segments, reps, deals, aiBlurbs, editorialFocus, startTime } = data;
+async function saveBrief(workspaceId: string, briefType: BriefType, now: Date, data: { theNumber: any; whatChanged: any; segments: any; reps: any; deals: any; aiBlurbs: any; editorialFocus: any; startTime: number; forecastAccuracyNote?: string }): Promise<AssembledBrief> {
+  const { theNumber, whatChanged, segments, reps, deals, aiBlurbs, editorialFocus, startTime, forecastAccuracyNote } = data;
   const todayStr = now.toISOString().split('T')[0];
   const monday = getMonday(now);
   const sunday = endOfWeek(monday);
@@ -476,16 +504,30 @@ async function saveBrief(workspaceId: string, briefType: BriefType, now: Date, d
   const daysInQ = Math.ceil((qEnd.getTime() - qStart.getTime()) / (1000 * 60 * 60 * 24));
   const sectionRefreshedAt: Record<string, string> = { the_number: now.toISOString(), what_changed: now.toISOString(), segments: now.toISOString(), reps: now.toISOString(), deals_to_watch: now.toISOString() };
 
+  // Prior Document Comparison
+  let comparisonBlock: string | undefined;
+  let comparisonData: any | undefined;
+  try {
+    const comparison = await buildComparison(workspaceId, ''); // currentBriefId is empty during initial insert
+    if (comparison) {
+      comparisonData = comparison;
+      comparisonBlock = formatComparisonBlock(comparison, []);
+    }
+  } catch (err) {
+    console.error(`[brief-assembler] Comparison failed for ${workspaceId}:`, err);
+  }
+
   const result = await query<any>(
-    `INSERT INTO weekly_briefs (workspace_id, brief_type, generated_date, period_start, period_end, days_in_quarter, days_remaining, the_number, what_changed, segments, reps, deals_to_watch, ai_blurbs, editorial_focus, section_refreshed_at, status, assembly_duration_ms)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'ready',$16)
+    `INSERT INTO weekly_briefs (workspace_id, brief_type, generated_date, period_start, period_end, days_in_quarter, days_remaining, the_number, what_changed, segments, reps, deals_to_watch, ai_blurbs, editorial_focus, section_refreshed_at, status, assembly_duration_ms, comparison_block, comparison_data, forecast_accuracy_note)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'ready',$16,$17,$18,$19)
      ON CONFLICT (workspace_id, generated_date) DO UPDATE SET
        brief_type=$2, period_start=$4, period_end=$5, days_in_quarter=$6, days_remaining=$7,
        the_number=$8, what_changed=$9, segments=$10, reps=$11, deals_to_watch=$12,
        ai_blurbs=$13, editorial_focus=$14, section_refreshed_at=$15,
-       status='ready', assembly_duration_ms=$16, updated_at=NOW()
+       status='ready', assembly_duration_ms=$16, updated_at=NOW(),
+       comparison_block=$17, comparison_data=$18, forecast_accuracy_note=$19
      RETURNING *`,
-    [workspaceId, briefType, todayStr, monday.toISOString().split('T')[0], sunday.toISOString().split('T')[0], daysInQ, theNumber.days_remaining, JSON.stringify(theNumber), JSON.stringify(whatChanged), JSON.stringify(segments), JSON.stringify(reps), JSON.stringify(deals), JSON.stringify(aiBlurbs), JSON.stringify(editorialFocus), JSON.stringify(sectionRefreshedAt), Date.now() - startTime]
+    [workspaceId, briefType, todayStr, monday.toISOString().split('T')[0], sunday.toISOString().split('T')[0], daysInQ, theNumber.days_remaining, JSON.stringify(theNumber), JSON.stringify(whatChanged), JSON.stringify(segments), JSON.stringify(reps), JSON.stringify(deals), JSON.stringify(aiBlurbs), JSON.stringify(editorialFocus), JSON.stringify(sectionRefreshedAt), Date.now() - startTime, comparisonBlock, JSON.stringify(comparisonData), forecastAccuracyNote]
   );
 
   console.log(`[brief-assembler] ${briefType} brief ready for workspace ${workspaceId} in ${Date.now() - startTime}ms`);

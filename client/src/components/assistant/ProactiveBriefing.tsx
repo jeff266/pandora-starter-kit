@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { colors, fonts } from '../../styles/theme';
 import InvestigationResults from './InvestigationResults';
+import ComparisonBlock from './ComparisonBlock';
 import { type GreetingPhase } from './Greeting';
 
 const CURSOR_STYLE: React.CSSProperties = {
@@ -378,6 +379,11 @@ export default function ProactiveBriefing({
                 </span>
               )}
             </div>
+          )}
+          
+          {/* Prior Document Comparison */}
+          {brief?.comparison_data && (
+            <ComparisonBlock comparison={brief.comparison_data} />
           )}
 
           {/* Live change signal (compact — replaces delta_alert collapsible) */}

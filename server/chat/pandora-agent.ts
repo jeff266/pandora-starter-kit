@@ -17,7 +17,7 @@ import { callLLM, type ToolDef, type LLMCallOptions } from '../utils/llm-router.
 import { executeDataTool } from './data-tools.js';
 import type { ConversationMessage } from './conversation-state.js';
 import { buildWorkspaceContextBlock } from '../context/workspace-memory.js';
-import { buildMemoryContextBlock } from '../memory/workspace-memory.js';
+import { buildMemoryContextBlock, getForecastAccuracyContext } from '../memory/workspace-memory.js';
 import { getSkillRegistry } from '../skills/registry.js';
 import { validateChartSpec } from '../renderers/types.js';
 import type { ChartSpec } from '../renderers/types.js';
@@ -31,9 +31,12 @@ import {
   createSessionContext,
   addSessionRecommendation
 } from '../agents/session-context.js';
+import { persistRecommendation } from '../documents/recommendation-tracker.js';
 import { addContribution, createAccumulatedDocument } from '../documents/accumulator.js';
 import { DocumentContribution } from '../documents/types.js';
 import { runCrossSignalAnalysis } from '../skills/cross-signal-analyzer.js';
+import { classifyStrategicQuestion, runStrategicReasoning } from '../skills/strategic-reasoner.js';
+import { getRelevantMemories } from '../memory/workspace-memory.js';
 
 const _chatDir = dirname(fileURLToPath(import.meta.url));
 const PRODUCT_KNOWLEDGE = (() => {
@@ -1173,7 +1176,16 @@ export async function runPandoraAgent(
   const activeScope = currentSessionContext.activeScope;
 
   const contextBlock = await buildWorkspaceContextBlock(workspaceId).catch(() => '');
-  const memoryBlock = await buildMemoryContextBlock(workspaceId).catch(() => '');
+  let memoryBlock = await buildMemoryContextBlock(workspaceId).catch(() => '');
+
+  // Inject forecast accuracy memory if relevant
+  const forecastKeywords = ['forecast', 'commit', 'attainment', 'best case', 'weighted', 'accuracy'];
+  if (forecastKeywords.some(kw => message.toLowerCase().includes(kw))) {
+    const accuracyContext = await getForecastAccuracyContext(workspaceId);
+    if (accuracyContext) {
+      memoryBlock += `\n${accuracyContext}\n`;
+    }
+  }
 
   let scopeContextBlock = '';
   if (activeScope && activeScope.type !== 'workspace') {
@@ -1244,6 +1256,62 @@ DO NOT calculate numeric values yourself — use only values returned by tools.`
   // Detect if arithmetic is needed
   const needsCalculator = requiresCalculator(message);
   console.log(`[PandoraAgent] math detection: needsCalculator=${needsCalculator}`);
+
+  // ── Strategic Reasoning Layer ──────────────────────────────────────────
+  if (classifyStrategicQuestion(message)) {
+    console.log(`[PandoraAgent] Strategic question detected. Running strategic reasoning...`);
+    const memories = await getRelevantMemories(workspaceId);
+    const strategicResult = await runStrategicReasoning(workspaceId, message, currentSessionContext, memories);
+    
+    // Emit strategic reasoning event to frontend
+    if (sse) {
+      sse({ type: 'strategic_reasoning', data: strategicResult });
+    }
+
+    // Accumulate strategic results into the document
+    if (strategicResult.hypothesis && strategicResult.recommendation) {
+      addContribution(currentSessionContext.accumulatedDocument!, {
+        id: randomUUID(),
+        type: 'recommendation',
+        title: 'Strategic Recommendation',
+        body: `**Hypothesis:** ${strategicResult.hypothesis}\n\n**Recommendation:** ${strategicResult.recommendation}`,
+        source_skill_id: 'strategic-reasoner',
+        timestamp: new Date().toISOString()
+      });
+    }
+    if (strategicResult.contradictingEvidence.length > 0) {
+      addContribution(currentSessionContext.accumulatedDocument!, {
+        id: randomUUID(),
+        type: 'finding',
+        title: 'Strategic Risks (Contradicting Evidence)',
+        body: strategicResult.contradictingEvidence.map(e => `${e.label}: ${e.value}`).join('\n'),
+        source_skill_id: 'strategic-reasoner',
+        severity: 'warning',
+        timestamp: new Date().toISOString()
+      });
+    }
+    addContribution(currentSessionContext.accumulatedDocument!, {
+      id: randomUUID(),
+      type: 'finding',
+      title: 'Strategic Analysis Appendix',
+      body: JSON.stringify(strategicResult, null, 2),
+      source_skill_id: 'strategic-reasoner',
+      timestamp: new Date().toISOString()
+    });
+
+    return {
+      answer: strategicResult.recommendation,
+      follow_up_questions: [],
+      evidence: {
+        tool_calls: [],
+        cited_records: []
+      },
+      tokens_used: 0,
+      tool_call_count: 0,
+      latency_ms: Date.now() - startTime,
+      synthesis: strategicResult.recommendation
+    } as any;
+  }
 
   // Build routing hints
   let toolHint = '';
@@ -1368,20 +1436,41 @@ DO NOT calculate numeric values yourself — use only values returned by tools.`
         );
 
         // Judgment & SSE emission
-        const judgedActions = extractedActions.map(a => {
-          const judgment = judgeAction({
+        const judgedActions = await Promise.all(extractedActions.map(async a => {
+          const judgment = await judgeAction({
+            workspace_id: workspaceId,
             action_type: a.action_type,
             severity: a.severity as any,
             target: a.target_deal_name || a.target_account_name,
+            recommendation: a.summary,
+            recipient_name: a.execution_payload?.recipient_name,
+            deal_context: a.context,
           });
+
+          let slackDraftId: string | undefined;
+          if (judgment.slackDraft && a.action_type === 'slack_dm') {
+            const { createSlackDraft } = await import('../actions/slack-draft.js');
+            const draft = await createSlackDraft(workspaceId, {
+              source_skill_id: a.source_skill,
+              recipient_slack_id: a.execution_payload?.recipient_slack_id,
+              recipient_name: a.execution_payload?.recipient_name,
+              draft_message: judgment.slackDraft,
+              context: a.context,
+            });
+            slackDraftId = draft.id;
+          }
+
           return {
             ...a,
             judgment_mode: judgment.mode,
             judgment_reason: judgment.reason,
             approval_prompt: judgment.approvalPrompt,
             escalation_reason: judgment.escalationReason,
+            slack_draft: judgment.slackDraft,
+            slack_draft_id: slackDraftId,
+            recipient_name: a.execution_payload?.recipient_name,
           };
-        });
+        }));
 
         sse?.({ type: 'actions_judged', items: judgedActions });
       }
@@ -1431,6 +1520,24 @@ DO NOT calculate numeric values yourself — use only values returned by tools.`
           ...currentSessionContext.activeScope,
           ...newScope
         };
+      }
+
+      // Persist session recommendations
+      if (currentSessionContext.sessionRecommendations?.length > 0) {
+        const { persistRecommendation } = await import('../documents/recommendation-tracker.js');
+        for (const rec of currentSessionContext.sessionRecommendations) {
+          if (typeof rec === 'object' && rec.action) {
+            await persistRecommendation(workspaceId, null, {
+              workspace_id: workspaceId,
+              deal_id: rec.deal_id,
+              deal_name: rec.deal_name,
+              action: rec.action,
+              category: rec.category,
+              urgency: rec.urgency,
+              status: 'pending'
+            }).catch(err => console.error('[pandora-agent] Failed to persist recommendation:', err));
+          }
+        }
       }
 
       return {

@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import { getConversationState, updateContext } from '../chat/conversation-state.js';
 import { getOrCreateSessionContext } from '../agents/session-context.js';
-import { overrideSection } from '../documents/accumulator.js';
+import { overrideSection, removeContribution } from '../documents/accumulator.js';
 import { synthesizeDocument } from '../documents/synthesizer.js';
+import { distributeDocument } from '../documents/distributor.js';
 
 const router = Router();
 
@@ -72,6 +73,57 @@ router.post('/:workspaceId/sessions/:threadId/document/synthesize', async (req, 
     res.json(synthesis);
   } catch (err: any) {
     console.error('[Sessions Route] Synthesis error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST remove contribution
+router.post('/:workspaceId/sessions/:threadId/document/contribution/:contributionId/remove', async (req, res) => {
+  const { workspaceId, threadId, contributionId } = req.params;
+
+  try {
+    const state = await getConversationState(workspaceId, 'command_center', threadId);
+    if (!state) return res.status(404).json({ error: 'Session not found' });
+
+    const sessionContext = getOrCreateSessionContext(state.context);
+    if (!sessionContext.accumulatedDocument) {
+      return res.status(400).json({ error: 'No document in session' });
+    }
+
+    removeContribution(sessionContext.accumulatedDocument, contributionId);
+
+    // Save back to state.context
+    await updateContext(workspaceId, 'command_center', threadId, { sessionContext });
+
+    res.json(sessionContext.accumulatedDocument);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST distribute document
+router.post('/:workspaceId/sessions/:threadId/document/distribute', async (req: any, res) => {
+  const { workspaceId, threadId } = req.params;
+  const { channel, recipient, subject, body, filename, filepath } = req.body;
+
+  try {
+    const state = await getConversationState(workspaceId, 'command_center', threadId);
+    if (!state) return res.status(404).json({ error: 'Session not found' });
+
+    const sessionContext = getOrCreateSessionContext(state.context);
+    if (!sessionContext.accumulatedDocument) {
+      return res.status(400).json({ error: 'No document in session' });
+    }
+
+    const result = await distributeDocument(
+      workspaceId,
+      sessionContext.accumulatedDocument,
+      channel,
+      { recipient, subject, body, filename, filepath }
+    );
+
+    res.json(result);
+  } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });

@@ -14,21 +14,27 @@ export interface ActionJudgment {
   reason: string;
   approvalPrompt?: string;
   escalationReason?: string;
+  slackDraft?: string;
 }
 
 export interface ActionInput {
+  action_id?: string;
+  workspace_id?: string;
   action_type: string;
   severity: 'critical' | 'warning' | 'info';
   target?: string;
   record_count?: number;
   field?: string;
   duration_days?: number;
+  recommendation?: string;
+  deal_context?: any;
+  recipient_name?: string;
 }
 
 /**
  * Judge an action based on type, severity, and context
  */
-export function judgeAction(action: ActionInput): ActionJudgment {
+export async function judgeAction(action: ActionInput): Promise<ActionJudgment> {
   const { action_type, severity } = action;
 
   // 1. Escalation Rules (High Risk/Strategic)
@@ -55,21 +61,34 @@ export function judgeAction(action: ActionInput): ActionJudgment {
     'notify_manager',
     'ops_process_fix',
     'ops_system_config',
+    'slack_dm',
   ].includes(action_type);
 
   if (requiresApproval || severity === 'critical') {
-    return {
+    const judgment: ActionJudgment = {
       mode: 'approval',
       reason: severity === 'critical' ? 'Critical severity requires verification' : 'CRM write-back or notification requires approval',
       approvalPrompt: `Confirm ${action_type.replace(/_/g, ' ')}?`,
     };
+
+    if (action_type === 'slack_dm' && action.workspace_id && action.recipient_name && action.recommendation) {
+      const { generateSlackDraft } = await import('./slack-draft.js');
+      judgment.slackDraft = await generateSlackDraft(
+        action.workspace_id,
+        action.recipient_name,
+        action.recommendation,
+        action.deal_context
+      );
+    }
+
+    return judgment;
   }
 
   // 3. Autonomous Rules (Low Risk / Data Cleanup)
   // Simple data cleanup or info-level tasks
   if (
     action_type === 'ops_data_cleanup' ||
-    (action_type === 'clean_data' && severity !== 'critical') ||
+    (action_type === 'clean_data' && (severity as string) !== 'critical') ||
     severity === 'info'
   ) {
     return {

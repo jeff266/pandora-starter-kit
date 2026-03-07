@@ -65,11 +65,15 @@ export async function executeAction(
 
   // 2. Judge the action if not bypassed
   if (!request.bypassJudgment && actor === 'system') {
-    const judgment = judgeAction({
+    const judgment = await judgeAction({
+      workspace_id: workspaceId,
       action_type: action.action_type,
       severity: action.severity,
       target: action.target_entity_name,
       record_count: action.execution_payload?.record_count,
+      recommendation: action.summary,
+      deal_context: action.context,
+      recipient_name: action.execution_payload?.recipient_name,
     });
 
     if (judgment.mode !== 'autonomous') {

@@ -392,5 +392,47 @@ Added to `server/routes/data.ts`:
 - **`client/src/components/assistant/ActionCard.tsx`**: Extended with 3 modes — autonomous notification chip, approval card (Approve/Edit/Skip), escalation card with "Show me the scenarios →"
 - **`client/src/components/assistant/ConversationView.tsx`**: Renders "Recommended Actions" section in chat feed
 
-### Remaining V2 Tasks (T013, T015, T017, T018, T020, T021)
-Not yet implemented: T013 (document distribution — Slack/Email/Drive), T015 (strategic reasoning layer), T017 (Slack draft queue), T018 (closed-loop recommendation tracking), T020 (prior document comparison), T021 (forecast accuracy memory)
+## Pandora V2 Continuation Layer (March 2026 — T013, T015, T017, T018, T020, T021)
+
+### T013: Document Distribution + Human-in-the-Loop Review
+- **`migrations/135_document_distributions.sql`** (new, applied): `document_distributions` table (workspace_id, document_id, channel, recipient, distributed_at, status, error)
+- **`server/documents/distributor.ts`** (new): `distributeDocument()` routing to Slack (summary block + download link), Email (Resend, PDF attachment, executive summary body), Google Drive (save + shareable link); writes to document_distributions after each distribution
+- **`server/routes/sessions.ts`**: Added `/remove` (remove contribution) and `/distribute` (trigger distribution) endpoints
+- **`client/src/components/assistant/DocumentPill.tsx`**: Review gate — when `lowConfidenceFlags.length > 0`, shows modal with ⚠ items, [Confirm]/[Remove] per item, "Continue to render →" activates only when all resolved; Distribution panel: Slack / Email / Drive / Download buttons after review passes
+
+### T015: Strategic Reasoning Layer
+- **`server/skills/strategic-reasoner.ts`** (new): `classifyStrategicQuestion()` detects "why do we keep...", "should we...", "root cause", etc.; `runStrategicReasoning()` — Claude structured prompt (HYPOTHESIS / SUPPORTING EVIDENCE / CONTRADICTING EVIDENCE / RECOMMENDATION / TRADEOFFS / WATCH FOR); opens with recurrence context when workspace_memory occurrence_count ≥ 3
+- **`server/chat/pandora-agent.ts`**: Pre-tool-loop strategic question check; if detected, runs strategic reasoner and bypasses normal tool loop; emits `strategic_reasoning` SSE event; integrates output into accumulatedDocument
+- **`client/src/components/assistant/StrategicCard.tsx`** (new): 🧠 header, labeled sections (Hypothesis, Supporting Evidence, What doesn't fit, Recommendation, What you give up, Watch for, Confidence)
+- **`client/src/components/assistant/useConversationStream.ts`**: Handles `strategic_reasoning` event
+- **`client/src/components/assistant/ConversationView.tsx`**: Renders StrategicCard in feed
+
+### T017: Slack Draft Queue
+- **`migrations/136_slack_drafts.sql`** (new, applied): `slack_drafts` table (workspace_id, source_action_id, recipient_slack_id, recipient_name, draft_message, edited_message, context, status, approved_by, sent_at, dismissed_at)
+- **`server/actions/slack-draft.ts`** (new): `generateSlackDraft()` — Claude call with rep-voice prompt, 2-4 sentences, collegial, no mention of Pandora; `createSlackDraft()`, `sendSlackDraft()`, `dismissSlackDraft()`
+- **`server/actions/judgment.ts`**: slack_dm action type triggers `generateSlackDraft`; draft attached to ActionJudgment result
+- **`client/src/components/assistant/ActionCard.tsx`**: slack_dm renders "📨 Draft Slack DM → {name}" with inline draft text; [Send as-is] [Edit & Send] [Dismiss]; Edit & Send opens inline textarea
+- `server/routes/actions.ts`: Added `POST /slack-drafts/:draftId/send` and `/dismiss` endpoints
+
+### T018: Closed-Loop Recommendation Tracking
+- **`migrations/137_recommendations.sql`** (new, applied): `recommendations` table (workspace_id, session_id, deal_id, deal_name, action, category, urgency, status, outcome, was_actioned, recommendation_correct, resolved_at)
+- **`server/documents/recommendation-tracker.ts`** (new): `persistRecommendation()`, `updateRecommendationStatus()`, `evaluateRecommendationOutcomes()` (called post-sync for material changes), `resolveRecommendation()` (updates DB + writes to workspace_memory), `writeRecommendationOutcomeMemory()`, `getOutcomeSummaryForBrief()`
+- **`server/jobs/queue.ts`**: Calls `evaluateRecommendationOutcomes()` after HubSpot sync with material changes
+- **`server/chat/pandora-agent.ts`**: Persists recommendations extracted from agent response via `persistRecommendation()`
+- **`server/briefing/brief-assembler.ts`**: Injects outcome summaries ("✓ Behavioral Framework closed...") into executive summary section
+
+### T020: Prior Document Comparison
+- **`server/documents/comparator.ts`** (new): `buildComparison()` queries prior weekly_brief, matches findings by (category, entity_id), classifies resolved/persisted/new, compares metrics (attainment, coverage, days_remaining); `formatComparisonBlock()` with icon legend (✓ ↑ → ↓ ⚡); consecutive weeks from workspace_memory occurrence_count
+- **`server/briefing/brief-assembler.ts`**: Calls `buildComparison()` post-assembly; stores `comparison_block` (HTML) and `comparison_data` (JSON) in weekly_briefs table
+- **`server/briefing/brief-types.ts`**: Added `comparison_block` and `comparison_data` fields
+- **`client/src/components/assistant/ComparisonBlock.tsx`** (new): "Since last week" section with color-coded rows (green ✓, teal ↑, amber →, coral ↓/⚡), metric delta badges
+- **`client/src/components/assistant/ProactiveBriefing.tsx`**: Renders ComparisonBlock between narrative and metrics strip when comparison data is available
+
+### T021: Forecast Accuracy Memory
+- **`server/memory/workspace-memory.ts`**: Added `ForecastAccuracyMemory` interface; `writeQuarterlyForecastAccuracy()` computes per-rep accuracy from closed deals vs forecast calls, writes to workspace_memory with memory_type='forecast_accuracy'; `getForecastAccuracyContext()` + `buildAccuracyContextString()` for last 3 periods
+- **`server/chat/pandora-agent.ts`**: Injects `<forecast_accuracy_history>` context block when message contains forecast/commit/attainment keywords
+- **`server/briefing/brief-assembler.ts`**: Calls `writeQuarterlyForecastAccuracy()` on assembly; fetches accuracy context and stores as `forecast_accuracy_note` in weekly_briefs
+- **`client/src/components/assistant/TheNumberCard.tsx`**: Shows `forecast_accuracy_note` as muted italic text below metrics strip when present
+
+### All V2 Tasks Complete
+T010–T021 are all built and running. Migration tracker updated with 134–137. No regressions on T001–T009.
