@@ -1,0 +1,33 @@
+The fix works for Frontera. The concern is whether it generalizes.
+
+The `ILIKE '%Core Sales%'` pattern is hardcoded logic — it works because Frontera's pipeline is literally named "Core Sales Pipeline." For a different client, the pipeline might be "Enterprise New Business," "SMB Inbound," "Renewal," or whatever their CRM admin named it three years ago. The partial match heuristic will work when the user's language happens to match the CRM string, and fail silently when it doesn't.
+
+Three specific failure modes across different clients:
+
+**Naming mismatches.** A client says "enterprise pipeline" but their HubSpot pipeline is named "New Business — ENT." The ILIKE match fails. No filter is applied. All deals return. The agent gives the wrong answer confidently — same bug, different client.
+
+**Multiple pipelines with overlapping names.** A client has "Core Sales," "Core Sales — SMB," and "Core Sales — Enterprise." The `ILIKE '%Core Sales%'` matches all three. The user asking about one gets all three. This is actually worse than no filter.
+
+**The parameter description fix is load-bearing.** The stronger tool description in `pandora-agent.ts` nudges Claude to pass `pipeline_name` more reliably — but it's still prompt guidance, not a contract. If Claude decides the user's question doesn't clearly name a pipeline, it won't pass the parameter, the filter is skipped, and the query is unscoped. This is unpredictable across different user communication styles.
+
+**What makes it properly dynamic:**
+
+The workspace config system already has the infrastructure for this. When a workspace connects its CRM, the connector discovers the pipeline schema — names, IDs, stage mappings. That data lives in `connector_configs.metadata` or the `stage_configs` table. The `queryDeals` function should resolve pipeline names through that config, not through string matching:
+
+```typescript
+// Instead of:
+WHERE d.pipeline ILIKE '%Core Sales%'
+
+// Should be:
+const pipelineId = await resolvePipelineName(workspaceId, pipeline_name);
+// resolvePipelineName does fuzzy match against known pipelines for THIS workspace
+// Returns the canonical CRM pipeline ID or null
+WHERE d.pipeline_id = $resolvedPipelineId
+  -- or falls back to ILIKE only against known pipeline names for this workspace
+```
+
+The `resolvePipelineName` function is the critical piece. It takes the user's natural language ("Core Sales," "enterprise," "renewals") and maps it to the exact pipeline name stored in that workspace's CRM. The mapping is workspace-specific — what "Core Sales" means for Frontera has nothing to do with what it means for Imubit or GrowthBook.
+
+This also gives Claude better tool guidance — instead of a generic description, the tool can be dynamically described with the actual pipeline names for the current workspace: "Available pipelines: Core Sales Pipeline, Fellowship Pipeline. Pass one of these exact names when filtering." That removes the ambiguity entirely rather than relying on Claude to infer correctly.
+
+The Workspace Config system you already have is the right home for this. The fix Replit shipped closes the immediate bug. The proper solution is wiring `queryDeals` pipeline resolution through the workspace's known pipeline config rather than open-ended string matching.
