@@ -1605,7 +1605,8 @@ The system will transform raw_annotation into a voice-styled annotation automati
         continue;
       }
 
-      const parsed = parseFollowUpQuestions(response.content);
+      const { cleanedText: cleanedContent, specs: parsedChartSpecs } = parseChartSpecs(response.content);
+      const parsed = parseFollowUpQuestions(cleanedContent);
       const voiceResult = applyPostTransforms(parsed.answer, currentSessionContext.voiceProfile);
       parsed.answer = voiceResult.text;
 
@@ -1752,7 +1753,7 @@ The system will transform raw_annotation into a voice-styled annotation automati
         tokens_used: totalTokens,
         tool_call_count: toolTrace.length,
         latency_ms: Date.now() - startTime,
-        chart_specs: charts.length > 0 ? charts : undefined,
+        chart_specs: parsedChartSpecs.length > 0 ? parsedChartSpecs : (charts.length > 0 ? charts : undefined),
         sessionContext: currentSessionContext,
       };
     }
@@ -2178,7 +2179,7 @@ function extractFindings(content: string): any[] {
 
 function extractCharts(content: string, profile?: VoiceProfile): ChartSpec[] {
   const charts: ChartSpec[] = [];
-  const chartRegex = /```chart_spec\n([\s\S]*?)\n```/g;
+  const chartRegex = /```chart_spec[^\n]*\n([\s\S]*?)```/g;
   let match;
   while ((match = chartRegex.exec(content)) !== null) {
     try {
