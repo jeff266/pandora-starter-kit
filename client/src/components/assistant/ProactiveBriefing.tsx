@@ -126,6 +126,8 @@ interface ProactiveBriefingProps {
   brief?: any;
   briefMetadata?: BriefMetadata;
   onRefreshBrief?: () => void;
+  workspaceId?: string;
+  onBriefRefreshed?: (brief: any) => void;
 }
 
 function formatCurrency(val: number): string {
@@ -187,10 +189,15 @@ export default function ProactiveBriefing({
   brief,
   briefMetadata,
   onRefreshBrief,
+  workspaceId,
+  onBriefRefreshed,
 }: ProactiveBriefingProps) {
   const navigate = useNavigate();
   const [resultsModal, setResultsModal] = useState<{ skillId: string; runId: string } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
+  const [nextRefreshAt, setNextRefreshAt] = useState<Date | null>(null);
+  const [isByok, setIsByok] = useState(false);
   const briefing = greeting.proactive_briefing;
   const isStreaming = phase && !['pills', 'browsing'].includes(phase);
   const severityColor = getSeverityColor(greeting.severity);
@@ -201,10 +208,36 @@ export default function ProactiveBriefing({
   const hasLiveDelta = deltas && (deltas.new_critical_count > 0 || (deltas.total_at_risk ?? 0) > 0);
 
   const handleRefresh = async () => {
-    if (!onRefreshBrief || refreshing) return;
+    if (refreshing) return;
     setRefreshing(true);
+    setRefreshMessage(null);
     try {
-      await onRefreshBrief();
+      if (workspaceId) {
+        const result = await fetch(`/api/workspaces/${workspaceId}/brief/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ force: false }),
+        }).then(r => r.json());
+
+        setIsByok(result.is_byok || false);
+
+        if (result.skipped && result.skip_reason) {
+          setRefreshMessage(result.skip_reason);
+          if (result.next_refresh_allowed_at) {
+            setNextRefreshAt(new Date(result.next_refresh_allowed_at));
+          }
+        } else if (result.brief) {
+          setRefreshMessage(null);
+          setNextRefreshAt(null);
+          if (onBriefRefreshed) onBriefRefreshed(result.brief);
+          if (onRefreshBrief) onRefreshBrief();
+        }
+      } else if (onRefreshBrief) {
+        await onRefreshBrief();
+      }
+    } catch {
+      setRefreshMessage('Refresh failed. Please try again.');
     } finally {
       setRefreshing(false);
     }
@@ -283,10 +316,53 @@ export default function ProactiveBriefing({
                     opacity: refreshing ? 0.6 : 1,
                   }}
                 >
-                  {refreshing ? 'refreshing...' : 'refreshing ↻'}
+                  {refreshing ? 'refreshing...' : 'refresh ↻'}
                 </button>
               </span>
             </>
+          )}
+          {!briefMetadata.is_potentially_stale && workspaceId && (
+            <>
+              <span style={{ color: colors.textDim }}>·</span>
+              <button
+                onClick={handleRefresh}
+                disabled={refreshing}
+                style={{
+                  background: 'none', border: 'none', cursor: refreshing ? 'default' : 'pointer',
+                  color: colors.textMuted, fontSize: 11, padding: 0, fontFamily: fonts.sans,
+                  opacity: refreshing ? 0.6 : 1,
+                }}
+              >
+                {refreshing ? 'refreshing...' : '↻'}
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ── Rate limit message ── */}
+      {refreshMessage && !isByok && (
+        <div style={{
+          fontSize: 11,
+          color: colors.textMuted,
+          marginBottom: 8,
+          fontFamily: fonts.sans,
+          lineHeight: 1.5,
+        }}>
+          {refreshMessage}
+          {nextRefreshAt && (
+            <span>
+              {' '}Next refresh available at {nextRefreshAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}{' '}·{' '}
+              <button
+                onClick={() => navigate('/settings/llm-config')}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  color: colors.accent, fontSize: 11, padding: 0, fontFamily: fonts.sans,
+                }}
+              >
+                Add your API key for unlimited refreshes →
+              </button>
+            </span>
           )}
         </div>
       )}

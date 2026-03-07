@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../db.js';
-import { assembleBrief, getLatestBrief } from '../briefing/brief-assembler.js';
+import { assembleBrief, getLatestBrief, assembleLiveBrief } from '../briefing/brief-assembler.js';
 import { formatBriefForSlack } from '../briefing/brief-formatter.js';
 import { getSlackAppClient } from '../connectors/slack/slack-app-client.js';
 import type { BriefType } from '../briefing/brief-types.js';
@@ -51,6 +51,39 @@ router.post('/:workspaceId/brief/assemble', async (req: Request, res: Response):
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('[briefs] POST /brief/assemble failed:', msg);
+    res.status(500).json({ error: msg });
+  }
+});
+
+// POST /:workspaceId/brief/refresh — live query refresh with fingerprint + rate limiting
+router.post('/:workspaceId/brief/refresh', async (req: Request, res: Response): Promise<void> => {
+  const workspaceId = req.params.workspaceId as string;
+  try {
+    const result = await assembleLiveBrief(workspaceId, 'user_request');
+
+    const responsePayload: Record<string, any> = {
+      brief: result.brief,
+      refreshed: !result.skipped,
+      synthesis_ran: result.synthesis_ran,
+      skipped: result.skipped,
+      tokens_used: result.tokens_used,
+      is_byok: result.is_byok || false,
+    };
+
+    if (result.skip_reason) {
+      responsePayload.skip_reason = result.skip_reason;
+    }
+    if (result.next_refresh_allowed_at) {
+      responsePayload.next_refresh_allowed_at = result.next_refresh_allowed_at;
+    }
+    if (result.data_freshness) {
+      responsePayload.data_freshness = result.data_freshness;
+    }
+
+    res.json(responsePayload);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[briefs] POST /brief/refresh failed:', msg);
     res.status(500).json({ error: msg });
   }
 });

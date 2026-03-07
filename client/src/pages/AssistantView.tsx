@@ -433,6 +433,8 @@ export default function AssistantView() {
             brief={brief}
             briefMetadata={briefMetadata ?? undefined}
             onRefreshBrief={fetchBrief}
+            workspaceId={wsId}
+            onBriefRefreshed={fetchBrief}
             onEscalate={() => {
               alert('Escalation feature coming soon');
             }}

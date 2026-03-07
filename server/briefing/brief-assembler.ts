@@ -12,6 +12,11 @@ import { annotateBriefNarrative } from './brief-annotator.js';
 import { computeTemporalContext } from '../context/opening-brief.js';
 import { buildComparison, formatComparisonBlock } from '../documents/comparator.js';
 import type { BriefType, TheNumber, WhatChanged, Segments, Reps, DealsToWatch, AssembledBrief } from './brief-types.js';
+import { assembleLiveBriefData } from './live-query-assembler.js';
+import type { LiveBriefData } from './live-query-assembler.js';
+import { computeBriefFingerprint, getLastBriefFingerprint } from './fingerprint.js';
+import { checkRefreshRateLimit } from './rate-limiter.js';
+import { callLLM } from '../utils/llm-router.js';
 
 // ─── Entry point ─────────────────────────────────────────────────────────────
 
@@ -594,4 +599,419 @@ async function postBriefToSlack(
     );
     console.log(`[brief-assembler] Brief posted to Slack channel ${ref.channel} ts=${ref.ts}`);
   }
+}
+
+// ─── Live Query Architecture (T004 + T005) ────────────────────────────────────
+
+export interface LiveBriefNarrative {
+  week_summary: string;
+  pulse_summary: string;
+  key_action: string;
+  rep_observations: string;
+  risk_narrative: string;
+}
+
+export async function assembleLiveBrief(
+  workspaceId: string,
+  triggeredBy: 'cron' | 'material_sync_change' | 'user_request'
+): Promise<{
+  brief: AssembledBrief | null;
+  skipped: boolean;
+  skip_reason?: string;
+  synthesis_ran: boolean;
+  tokens_used: number;
+  is_byok?: boolean;
+  next_refresh_allowed_at?: string;
+  data_freshness?: { queried_at: string; last_crm_sync_at: string | null; sync_lag_minutes: number | null };
+}> {
+  const startTime = Date.now();
+
+  // Step 1: Check rate limit for user-initiated requests
+  if (triggeredBy === 'user_request') {
+    const rateLimit = await checkRefreshRateLimit(workspaceId);
+    if (!rateLimit.allowed) {
+      await logRefreshAttempt(workspaceId, {
+        triggered_by: triggeredBy,
+        data_changed: false,
+        synthesis_ran: false,
+        rate_limited: true,
+        tokens_used: 0,
+        duration_ms: Date.now() - startTime,
+      });
+      return {
+        brief: await getLatestBrief(workspaceId),
+        skipped: true,
+        skip_reason: rateLimit.reason,
+        synthesis_ran: false,
+        tokens_used: 0,
+        is_byok: false,
+        next_refresh_allowed_at: rateLimit.next_allowed_at,
+      };
+    }
+  }
+
+  // Step 2: Compute fingerprint
+  const { fingerprint, inputs } = await computeBriefFingerprint(workspaceId);
+  const lastFingerprint = await getLastBriefFingerprint(workspaceId);
+  const dataChanged = fingerprint !== lastFingerprint;
+
+  // Step 3: Serve cached brief if nothing changed
+  if (!dataChanged && lastFingerprint !== null) {
+    await logRefreshAttempt(workspaceId, {
+      triggered_by: triggeredBy,
+      fingerprint_before: lastFingerprint,
+      fingerprint_after: fingerprint,
+      data_changed: false,
+      synthesis_ran: false,
+      rate_limited: false,
+      tokens_used: 0,
+      duration_ms: Date.now() - startTime,
+    });
+    return {
+      brief: await getLatestBrief(workspaceId),
+      skipped: true,
+      skip_reason: 'No data changes since last brief',
+      synthesis_ran: false,
+      tokens_used: 0,
+    };
+  }
+
+  // Step 4: Run live query pass
+  const liveData = await assembleLiveBriefData(workspaceId);
+
+  // Step 5: Compute delta vs prior brief
+  const priorBrief = await getLatestBrief(workspaceId);
+  if (priorBrief?.the_number) {
+    liveData.delta = computeDelta(liveData, priorBrief);
+  }
+
+  // Step 6: Synthesize narrative with prompt caching
+  const { narrative, tokensUsed } = await synthesizeBriefNarrative(workspaceId, liveData);
+
+  // Step 7: Store new brief
+  const newBrief = await storeLiveBrief(workspaceId, {
+    liveData,
+    narrative,
+    fingerprint,
+    fingerprintInputs: inputs,
+    assembledAt: new Date().toISOString(),
+    dataSource: 'live_query',
+  });
+
+  await logRefreshAttempt(workspaceId, {
+    triggered_by: triggeredBy,
+    fingerprint_before: lastFingerprint,
+    fingerprint_after: fingerprint,
+    data_changed: true,
+    synthesis_ran: true,
+    rate_limited: false,
+    tokens_used: tokensUsed,
+    duration_ms: Date.now() - startTime,
+  });
+
+  console.log(`[brief-assembler] Live brief assembled for ${workspaceId} in ${Date.now() - startTime}ms, tokens=${tokensUsed}`);
+
+  return {
+    brief: newBrief,
+    skipped: false,
+    synthesis_ran: true,
+    tokens_used: tokensUsed,
+    data_freshness: liveData.data_freshness,
+  };
+}
+
+async function synthesizeBriefNarrative(
+  workspaceId: string,
+  liveData: LiveBriefData
+): Promise<{ narrative: LiveBriefNarrative; tokensUsed: number }> {
+  const workspaceContext = await getWorkspaceContext(workspaceId);
+
+  // T005: Prompt caching — the LLM router automatically applies cache_control: ephemeral
+  // to the systemPrompt for Anthropic. The static system prompt + workspace context
+  // is the ideal cache target (~800-1200 tokens, above the 1024 minimum).
+  const systemPrompt = `${buildBriefSystemPrompt()}
+
+<workspace_context>
+${workspaceContext}
+</workspace_context>`;
+
+  const dynamicContent = buildDynamicBriefContent(liveData);
+
+  const response = await callLLM(workspaceId, 'reason', {
+    systemPrompt,
+    messages: [
+      {
+        role: 'user' as const,
+        content: dynamicContent,
+      },
+    ],
+    maxTokens: 1200,
+    temperature: 0.4,
+    _tracking: {
+      workspaceId,
+      skillId: 'brief-synthesis',
+      phase: 'synthesize',
+      stepName: 'narrative',
+    },
+  });
+
+  const cacheRead = (response.usage as any)?.cache_read_input_tokens || 0;
+  const tokensUsed = ((response.usage as any)?.input_tokens || 0)
+    + ((response.usage as any)?.output_tokens || 0)
+    - cacheRead;
+
+  const narrative = parseBriefNarrative(response.content);
+  return { narrative, tokensUsed };
+}
+
+function buildBriefSystemPrompt(): string {
+  return `You are the VP RevOps analyst embedded in this team. You have already looked at the data before anyone got in. You have a point of view and you're prepared to defend it.
+
+VOICE RULES:
+- Use "we" and "I" — you own the number with the team
+- Make calls. "The commit number doesn't reflect what I'm seeing" not "there may be risk"
+- Name people and deals. Generic findings are useless.
+- State the one thing that matters most this week as your focus — not a suggestion, a directive
+- Never present a relative number without the absolute base
+- Never state causation — state correlation and invite investigation
+- Hedged language for low-confidence observations: "early signal", "worth watching"
+- Direct language for high-confidence findings: "We have a problem here"
+
+OUTPUT FORMAT (JSON):
+{
+  "week_summary": "2-3 sentence narrative of current state in the teammate voice",
+  "pulse_summary": "1 sentence — the single most important thing right now",
+  "key_action": "The one concrete action for this week — specific, named, time-bound",
+  "rep_observations": "1-2 sentences about rep-level patterns worth noting",
+  "risk_narrative": "1-2 sentences on the biggest risk to the quarter, if any"
+}`;
+}
+
+function buildDynamicBriefContent(liveData: LiveBriefData): string {
+  const n = liveData.the_number;
+  const deals = liveData.deals_to_watch.slice(0, 8);
+  const reps = liveData.rep_summary;
+
+  const deltaSection = liveData.delta ? `
+CHANGES SINCE LAST BRIEF:
+- Pipeline movement: ${liveData.delta.pipeline_change >= 0 ? '+' : ''}${formatK(liveData.delta.pipeline_change)}
+${liveData.delta.new_closed_won.length > 0 ? `- New closed won: ${liveData.delta.new_closed_won.map(d => `${d.name} (${formatK(d.amount)})`).join(', ')}` : ''}
+${liveData.delta.newly_at_risk.length > 0 ? `- Newly at risk: ${liveData.delta.newly_at_risk.map(d => `${d.name} (${d.reason})`).join(', ')}` : ''}` : '';
+
+  return `<current_data queried_at="${liveData.data_freshness.queried_at}">
+ATTAINMENT: ${n.attainment_pct}% ($${formatM(n.closed_won_amount)} closed of $${formatM(n.quota_amount)} quota)
+GAP: $${formatM(n.gap_amount)} remaining | ${n.days_remaining} days left | ${n.pipeline_label}
+COVERAGE: ${n.coverage_ratio}x ($${formatM(n.open_pipeline_amount)} open pipeline, ${n.open_pipeline_count} deals)
+
+TOP OPEN DEALS:
+${deals.map(d =>
+  `- ${d.name}: $${formatK(d.amount)} | ${d.stage} | ${d.owner_name} | closes ${d.close_date} | ${d.contact_count} contacts | ${d.days_since_activity != null ? `${d.days_since_activity}d since activity` : 'activity recent'}${d.risk_flags.length > 0 ? ` | FLAGS: ${d.risk_flags[0]}` : ''}`
+).join('\n')}
+
+REPS:
+${reps.map(r =>
+  `- ${r.owner_name}: $${formatM(r.pipeline_amount)} pipeline | $${formatM(r.closed_won_amount)} closed | ${r.coverage_ratio}x coverage | ${r.deal_count} deals`
+).join('\n')}
+${deltaSection}
+</current_data>
+
+Write the brief narrative in the specified JSON format.`;
+}
+
+async function getWorkspaceContext(workspaceId: string): Promise<string> {
+  const [workspaceResult, quotaResult, repResult] = await Promise.all([
+    query<{ name: string }>(
+      `SELECT name FROM workspaces WHERE id = $1`,
+      [workspaceId]
+    ),
+    query<{ period_start: string; period_end: string; amount: string; pipeline_name: string | null }>(
+      `SELECT period_start::text, period_end::text, amount::text, pipeline_name
+       FROM targets
+       WHERE workspace_id = $1 AND is_active = true
+         AND period_start <= CURRENT_DATE AND period_end >= CURRENT_DATE
+       ORDER BY period_start DESC LIMIT 1`,
+      [workspaceId]
+    ),
+    query<{ owner_name: string }>(
+      `SELECT DISTINCT owner_name FROM deals
+       WHERE workspace_id = $1 AND owner_name IS NOT NULL
+       ORDER BY owner_name LIMIT 20`,
+      [workspaceId]
+    ),
+  ]);
+
+  const companyName = workspaceResult.rows[0]?.name || 'this company';
+  const quota = quotaResult.rows[0];
+  const repNames = repResult.rows.map(r => r.owner_name).join(', ');
+
+  return [
+    `Company: ${companyName}`,
+    quota ? `Quarter: ${quota.period_start} to ${quota.period_end}` : '',
+    quota ? `Quota: $${formatM(Number(quota.amount))}` : '',
+    quota?.pipeline_name ? `Primary pipeline: ${quota.pipeline_name}` : '',
+    repNames ? `Reps: ${repNames}` : '',
+  ].filter(Boolean).join('\n');
+}
+
+function parseBriefNarrative(content: string): LiveBriefNarrative {
+  try {
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      return {
+        week_summary: parsed.week_summary || '',
+        pulse_summary: parsed.pulse_summary || '',
+        key_action: parsed.key_action || '',
+        rep_observations: parsed.rep_observations || '',
+        risk_narrative: parsed.risk_narrative || '',
+      };
+    }
+  } catch {
+    // fall through
+  }
+  return {
+    week_summary: content.slice(0, 500),
+    pulse_summary: '',
+    key_action: '',
+    rep_observations: '',
+    risk_narrative: '',
+  };
+}
+
+function computeDelta(current: LiveBriefData, prior: any): LiveBriefData['delta'] {
+  const priorPipeline = prior.the_number?.open_pipeline_amount || 0;
+  const currentPipeline = current.the_number.open_pipeline_amount;
+
+  const priorDealIds = new Set((prior.deals_to_watch || []).map((d: any) => d.id));
+
+  const newClosedWon = current.deals_to_watch
+    .filter(d => !priorDealIds.has(d.id) && d.stage === 'closed_won')
+    .map(d => ({ name: d.name, amount: d.amount }));
+
+  const newlyAtRisk = current.deals_to_watch
+    .filter(d => d.days_since_activity != null && d.days_since_activity >= 14)
+    .filter(d => {
+      const priorDeal = (prior.deals_to_watch || []).find((p: any) => p.id === d.id);
+      return !priorDeal || (priorDeal.days_since_activity || 0) < 14;
+    })
+    .map(d => ({ name: d.name, reason: `No activity in ${d.days_since_activity} days` }));
+
+  return {
+    pipeline_change: currentPipeline - priorPipeline,
+    new_closed_won: newClosedWon,
+    newly_at_risk: newlyAtRisk,
+  };
+}
+
+async function storeLiveBrief(
+  workspaceId: string,
+  opts: {
+    liveData: LiveBriefData;
+    narrative: LiveBriefNarrative;
+    fingerprint: string;
+    fingerprintInputs: any;
+    assembledAt: string;
+    dataSource: string;
+  }
+): Promise<AssembledBrief> {
+  const { liveData, narrative, fingerprint, fingerprintInputs, assembledAt, dataSource } = opts;
+  const todayStr = new Date().toISOString().split('T')[0];
+
+  const aiBlurbs = {
+    week_summary: narrative.week_summary,
+    pulse_summary: narrative.pulse_summary,
+    key_action: narrative.key_action,
+    rep_observations: narrative.rep_observations,
+    risk_narrative: narrative.risk_narrative,
+  };
+
+  const theNumber = liveData.the_number;
+  const dealsToWatch = { deals: liveData.deals_to_watch };
+
+  const result = await query<any>(
+    `INSERT INTO weekly_briefs (
+       workspace_id, brief_type, generated_date, status,
+       the_number, deals_to_watch, ai_blurbs,
+       what_changed, segments, reps,
+       fingerprint, fingerprint_inputs, data_source, live_query_at, assembled_at,
+       assembly_duration_ms
+     ) VALUES ($1, $2, $3, 'ready', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 0)
+     ON CONFLICT (workspace_id, generated_date) DO UPDATE SET
+       status = 'ready',
+       the_number = EXCLUDED.the_number,
+       deals_to_watch = EXCLUDED.deals_to_watch,
+       ai_blurbs = EXCLUDED.ai_blurbs,
+       fingerprint = EXCLUDED.fingerprint,
+       fingerprint_inputs = EXCLUDED.fingerprint_inputs,
+       data_source = EXCLUDED.data_source,
+       live_query_at = EXCLUDED.live_query_at,
+       assembled_at = EXCLUDED.assembled_at,
+       updated_at = NOW()
+     RETURNING *`,
+    [
+      workspaceId,
+      'pulse',
+      todayStr,
+      JSON.stringify(theNumber),
+      JSON.stringify(dealsToWatch),
+      JSON.stringify(aiBlurbs),
+      JSON.stringify({}),
+      JSON.stringify({}),
+      JSON.stringify({ reps: liveData.rep_summary }),
+      fingerprint,
+      JSON.stringify(fingerprintInputs),
+      dataSource,
+      liveData.data_freshness.queried_at,
+      assembledAt,
+    ]
+  );
+
+  return parseBriefRow(result.rows[0]);
+}
+
+async function logRefreshAttempt(
+  workspaceId: string,
+  opts: {
+    triggered_by: string;
+    fingerprint_before?: string | null;
+    fingerprint_after?: string;
+    data_changed: boolean;
+    synthesis_ran: boolean;
+    rate_limited: boolean;
+    tokens_used: number;
+    duration_ms: number;
+  }
+): Promise<void> {
+  try {
+    await query(
+      `INSERT INTO brief_refresh_log
+         (workspace_id, triggered_by, fingerprint_before, fingerprint_after,
+          data_changed, synthesis_ran, tokens_used, rate_limited, duration_ms)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [
+        workspaceId,
+        opts.triggered_by,
+        opts.fingerprint_before || null,
+        opts.fingerprint_after || null,
+        opts.data_changed,
+        opts.synthesis_ran,
+        opts.tokens_used,
+        opts.rate_limited,
+        opts.duration_ms,
+      ]
+    );
+  } catch (err) {
+    console.error('[brief-assembler] Failed to log refresh attempt:', err);
+  }
+}
+
+function formatM(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${Math.round(n / 1_000)}K`;
+  return String(Math.round(n));
+}
+
+function formatK(n: number): string {
+  if (Math.abs(n) >= 1_000) return `${Math.round(n / 1_000)}K`;
+  return String(Math.round(n));
 }

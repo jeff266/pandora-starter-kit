@@ -600,3 +600,34 @@ T010–T021 are all built and running. Migration tracker updated with 134–137.
 - **`server/routes/fine-tuning.ts`** (new): `GET /readiness` (pair counts vs 500/200 thresholds); `POST /assemble-dataset`; `POST /submit-job`; `GET /jobs` + `GET /jobs/:id`; `POST /jobs/:id/evaluate` (calls model evaluator); `POST /jobs/:id/deploy` (updates llm_configs routing); `POST /jobs/:id/rollback`; `GET /stats` (fallback rates + cost savings from llm_call_log)
 - **`client/src/pages/admin/FineTuning.tsx`** (new): Training Readiness section with progress bars (500/200 targets); Training Jobs table with status/improvement/fallback rate/deploy+rollback actions; Router Status (4 capability rows with current model, fallback rate, avg confidence); Cost Impact (Claude calls avoided, estimated savings at $3/1M tokens)
 - **`client/src/App.tsx`**: Route `/admin/fine-tuning` registered
+
+---
+
+## Assistant Live Query Architecture (March 2026 — T001–T007)
+
+### Architecture
+Before: `CRM sync → skill_runs snapshots → brief-assembler reads snapshots → weekly_briefs → UI`  
+After: `User request → fingerprint check → if changed: live query pass + synthesis → cache + serve; if unchanged: serve cached brief (0 tokens)`
+
+**Cost controls:** change detection (fingerprint), rate limiting (1/hr standard, unlimited BYOK), Anthropic prompt caching on system prompt + workspace context.
+
+### T001: Brief Data Fingerprint
+- **`migrations/143_brief_live_query.sql`**: ALTER `weekly_briefs` — adds `fingerprint VARCHAR(64)`, `fingerprint_inputs JSONB`, `data_source VARCHAR(20) DEFAULT 'skill_snapshot'`, `live_query_at TIMESTAMPTZ`, `assembled_at TIMESTAMPTZ`. Creates `brief_refresh_log` table (id, workspace_id, triggered_by, fingerprint_before/after, data_changed, synthesis_ran, tokens_used, rate_limited, duration_ms, created_at) with index on (workspace_id, created_at DESC).
+- **`server/briefing/fingerprint.ts`** (new): `computeBriefFingerprint(workspaceId)` — queries `deals` + `targets` tables (closed won QTD, open pipeline, top 10 deals, rep pipeline); stable JSON serialization → SHA-256 → 16-char hex fingerprint. `getLastBriefFingerprint(workspaceId)` — reads latest brief's fingerprint. Helper: `getDefaultQuarterStart/End(now)` for workspaces without configured targets.
+
+### T002: Rate Limiter
+- **`server/briefing/rate-limiter.ts`** (new): `checkRefreshRateLimit(workspaceId)` — checks BYOK via `llm_configs.providers` (any provider with `api_key.length > 10` → unlimited); reads `workspaces.plan_type` (COALESCE to 'design_partner'); queries `brief_refresh_log` for recent synthesis runs. `PLAN_RATE_LIMITS`: design_partner/starter = 1/hr 60min cooldown, growth = 4/hr 15min, consultant = 8/hr 10min. Returns `{ allowed, reason?, next_allowed_at?, is_byok }`.
+
+### T003: Live Query Assembler
+- **`server/briefing/live-query-assembler.ts`** (new): `assembleLiveBriefData(workspaceId)` — loads quota/dates from `targets` via `getCurrentQuota()`; resolves default pipeline via `resolveDefaultPipeline(workspaceId, 'attainment', 'admin', '')`; parallel queries for closed won QTD, open pipeline (with optional scope_id filter), top 15 deals (with contact_count + days_since_activity), rep summary, last CRM sync from `sync_log`. `loadRiskFlagsFromSkillRuns` overlays risk flags from skill_runs claims (best-effort, fails silently). Returns `LiveBriefData` with `the_number`, `deals_to_watch`, `rep_summary`, `delta: null` (populated in T004), `data_freshness`.
+
+### T004 + T005: Synthesis Layer with Prompt Caching
+- **`server/briefing/brief-assembler.ts`** (extended): New exports: `assembleLiveBrief(workspaceId, triggeredBy)` — full orchestrator: rate limit check → fingerprint → skip if unchanged → live query → delta computation → synthesis → store → log. `LiveBriefNarrative` interface. Private helpers: `synthesizeBriefNarrative` (calls `callLLM` with `systemPrompt` = buildBriefSystemPrompt + workspaceContext — LLM router auto-applies `cache_control: ephemeral` for Anthropic), `buildBriefSystemPrompt` (VP RevOps voice), `buildDynamicBriefContent` (structured metrics string), `getWorkspaceContext` (company name + quota + rep names), `parseBriefNarrative` (JSON extraction), `computeDelta` (pipeline change, new closed won, newly at risk), `storeLiveBrief` (INSERT/UPDATE weekly_briefs with fingerprint + data_source='live_query'), `logRefreshAttempt`, `formatM`/`formatK` helpers.
+
+### T006: Refresh Endpoint + Frontend
+- **`server/routes/briefs.ts`**: Added `POST /:workspaceId/brief/refresh` — calls `assembleLiveBrief(workspaceId, 'user_request')`, returns `{ brief, refreshed, synthesis_ran, skipped, skip_reason?, tokens_used, is_byok, next_refresh_allowed_at?, data_freshness? }`. Rate-limited responses return HTTP 200 with `skipped: true`.
+- **`client/src/components/assistant/ProactiveBriefing.tsx`**: Added `workspaceId?` and `onBriefRefreshed?` props. `handleRefresh` now calls API directly when `workspaceId` present. Added `refreshMessage`, `nextRefreshAt`, `isByok` state. Rate limit message shown below refresh button: "Next refresh available at [time] · Add your API key for unlimited refreshes →" (links to `/settings/llm-config`). Standalone `↻` button shows for non-stale briefs when `workspaceId` is set.
+- **`client/src/pages/AssistantView.tsx`**: Passes `workspaceId={wsId}` and `onBriefRefreshed={fetchBrief}` to ProactiveBriefing.
+
+### T007: Plan Schema
+- **`migrations/144_workspace_plans.sql`**: ALTER `workspaces` — adds `plan_type VARCHAR(20) DEFAULT 'design_partner'`, `plan_started_at TIMESTAMPTZ DEFAULT NOW()`, `plan_features JSONB DEFAULT '{}'`. Seeds all existing workspaces as 'design_partner'. Rate limiter reads this column (COALESCE-safe). Future plan values: 'design_partner', 'starter', 'growth', 'consultant'.
