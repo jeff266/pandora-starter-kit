@@ -15,6 +15,7 @@ import { getAgentRegistry } from '../agents/registry.js';
 import { getAgentRuntime } from '../agents/runtime.js';
 import { runDealScoreSnapshots } from '../scoring/deal-score-snapshot.js';
 import { getActiveScopes, DEFAULT_SCOPE, type ActiveScope } from '../config/scope-loader.js';
+import { registerCustomSkill } from '../skills/index.js';
 import { SCHEDULED_INVESTIGATIONS } from '../briefing/scheduled-investigations.js';
 import { getJobQueue } from '../jobs/queue.js';
 
@@ -182,6 +183,28 @@ async function executeSkill(
         result.completedAt,
       ]
     );
+
+    // For custom skills: track successful runs so the override guard can activate.
+    // Only increment run_count on 'completed' — a failed scheduled run must not
+    // suppress the built-in skill the custom skill is set to override.
+    if (skill.isCustom) {
+      try {
+        if (result.status === 'completed') {
+          await query(
+            `UPDATE custom_skills SET last_run_at = now(), run_count = run_count + 1 WHERE skill_id = $1 AND workspace_id = $2`,
+            [skill.id, workspaceId]
+          );
+          await registerCustomSkill(skill.id, workspaceId).catch(() => {});
+        } else {
+          await query(
+            `UPDATE custom_skills SET last_run_at = now() WHERE skill_id = $1 AND workspace_id = $2`,
+            [skill.id, workspaceId]
+          );
+        }
+      } catch (updateErr) {
+        console.warn(`[Skill Scheduler] Failed to update run_count for ${skill.id}:`, updateErr);
+      }
+    }
 
     const duration = Date.now() - startTime;
     console.log(`[Skill Scheduler] ✓ ${skill.id} completed for workspace ${workspaceId} in ${duration}ms`);

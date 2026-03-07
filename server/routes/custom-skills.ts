@@ -275,13 +275,24 @@ router.post('/:workspaceId/skills/custom/:skillId/run', async (req, res) => {
         ]
       );
 
-      await query(
-        `UPDATE custom_skills SET last_run_at = now(), run_count = run_count + 1 WHERE skill_id = $1 AND workspace_id = $2`,
-        [skillId, workspaceId]
-      );
-      // Refresh the registry entry so runCount is up-to-date immediately —
-      // the override guard activates on the very first successful run without needing a restart
-      await registerCustomSkill(skillId, workspaceId).catch(() => {});
+      if (result.status === 'completed') {
+        await query(
+          `UPDATE custom_skills SET last_run_at = now(), run_count = run_count + 1 WHERE skill_id = $1 AND workspace_id = $2`,
+          [skillId, workspaceId]
+        );
+        // Refresh the registry entry so runCount is up-to-date immediately —
+        // the override guard activates on the very first SUCCESSFUL run without needing a restart.
+        // Intentionally not called for 'failed' or 'partial' — a broken replacement must not
+        // suppress the built-in it overrides.
+        await registerCustomSkill(skillId, workspaceId).catch(() => {});
+      } else {
+        // Still record last_run_at so the UI shows when it was last attempted,
+        // but do NOT increment run_count or refresh the registry.
+        await query(
+          `UPDATE custom_skills SET last_run_at = now() WHERE skill_id = $1 AND workspace_id = $2`,
+          [skillId, workspaceId]
+        );
+      }
     } catch (logErr) {
       console.error('[custom-skills] Failed to log skill run:', logErr);
     }
