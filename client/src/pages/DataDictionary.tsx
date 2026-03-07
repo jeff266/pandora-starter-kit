@@ -75,7 +75,7 @@ export default function DataDictionary() {
       if (search) params.append('search', search);
       if (activeFilter !== 'all') params.append('source', activeFilter);
       
-      const data = await api.get(`/workspace/${currentWorkspace.id}/dictionary?${params.toString()}`);
+      const data = await api.get(`/dictionary?${params.toString()}`);
       setEntries(data);
     } catch (err) {
       console.error('Failed to fetch dictionary:', err);
@@ -92,7 +92,7 @@ export default function DataDictionary() {
     e.preventDefault();
     if (!currentWorkspace) return;
     try {
-      await api.post(`/workspace/${currentWorkspace.id}/dictionary`, newTerm);
+      await api.post(`/dictionary`, newTerm);
       setIsAddModalOpen(false);
       setNewTerm({ term: '', definition: '', technical_definition: '', sql_definition: '', segmentable_by: [] });
       fetchEntries();
@@ -104,7 +104,7 @@ export default function DataDictionary() {
   const handleUpdateDefinition = async (id: string) => {
     if (!currentWorkspace) return;
     try {
-      await api.put(`/workspace/${currentWorkspace.id}/dictionary/${id}`, {
+      await api.put(`/dictionary/${id}`, {
         definition: editValue
       });
       setEditingId(null);
@@ -117,7 +117,7 @@ export default function DataDictionary() {
   const handleDeleteEntry = async (id: string) => {
     if (!currentWorkspace || !window.confirm('Are you sure you want to delete this term?')) return;
     try {
-      await api.delete(`/workspace/${currentWorkspace.id}/dictionary/${id}`);
+      await api.delete(`/dictionary/${id}`);
       fetchEntries();
     } catch (err) {
       console.error('Failed to delete term:', err);
