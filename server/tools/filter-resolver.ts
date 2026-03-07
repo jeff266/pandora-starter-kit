@@ -8,6 +8,7 @@ import type {
   FilterResolutionMetadata,
   FilterValue,
   RelativeDateValue,
+  WorkspaceDimension,
 } from '../types/workspace-config.js';
 
 export class FilterNotFoundError extends Error {
@@ -97,6 +98,63 @@ export class FilterResolver {
     }
 
     return { sql: combinedSQL, params: combinedParams, filter_metadata: metadata };
+  }
+
+  async getWorkspaceDimensions(workspaceId: string): Promise<WorkspaceDimension[]> {
+    const config = await configLoader.getConfig(workspaceId);
+    const dimensions: WorkspaceDimension[] = [];
+
+    // 1. Built-in Pipeline dimension
+    if (config.pipelines && config.pipelines.length > 0) {
+      dimensions.push({
+        id: 'pipeline',
+        label: 'Pipeline',
+        options: config.pipelines.map(p => ({
+          label: p.name,
+          value: p.id,
+        })),
+      });
+    }
+
+    // 2. User-defined dimensions (Named Filters with is_dimension=true)
+    const filters = config.named_filters || [];
+    const dimensionFilters = filters.filter(f => f.is_dimension);
+
+    // Group by dimension_group
+    const groups: Record<string, { label: string; order: number; options: any[] }> = {};
+
+    for (const filter of dimensionFilters) {
+      const groupKey = filter.dimension_group || filter.id;
+      const groupLabel = filter.dimension_group_label || filter.label;
+      const order = filter.dimension_order ?? 99;
+
+      if (!groups[groupKey]) {
+        groups[groupKey] = {
+          label: groupLabel,
+          order,
+          options: [],
+        };
+      }
+
+      groups[groupKey].options.push({
+        label: filter.label,
+        value: filter.id,
+        filter_id: filter.id,
+      });
+    }
+
+    // Sort groups and add to dimensions
+    const sortedGroups = Object.entries(groups).sort((a, b) => a[1].order - b[1].order);
+
+    for (const [id, group] of sortedGroups) {
+      dimensions.push({
+        id,
+        label: group.label,
+        options: group.options,
+      });
+    }
+
+    return dimensions;
   }
 
   private compileToSQL(

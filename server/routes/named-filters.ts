@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import { query } from '../db.js';
 import { configLoader, WorkspaceConfigLoader } from '../config/workspace-config-loader.js';
+import { seedDictionary } from '../dictionary/dictionary-seeder.js';
 import { filterResolver, FilterNotFoundError } from '../tools/filter-resolver.js';
 import type { NamedFilter } from '../types/workspace-config.js';
 
@@ -41,14 +42,31 @@ router.get('/:workspaceId/filters', async (req: Request<WorkspaceParams>, res: R
     const config = await configLoader.getConfig(workspaceId);
     let filters = config.named_filters || [];
 
+    const isDimension = req.query.is_dimension === 'true';
+
     if (objectFilter) {
       filters = filters.filter(f => f.object === objectFilter);
+    }
+
+    if (isDimension) {
+      filters = filters.filter(f => f.is_dimension);
     }
 
     res.json({ success: true, filters });
   } catch (error) {
     console.error('[NamedFilters] Error fetching filters:', error);
     res.status(500).json({ error: 'Failed to fetch filters' });
+  }
+});
+
+router.get('/:workspaceId/filters/dimensions', async (req: Request<WorkspaceParams>, res: Response) => {
+  try {
+    const { workspaceId } = req.params;
+    const dimensions = await filterResolver.getWorkspaceDimensions(workspaceId);
+    res.json({ success: true, dimensions });
+  } catch (error) {
+    console.error('[NamedFilters] Error fetching dimensions:', error);
+    res.status(500).json({ error: 'Failed to fetch dimensions' });
   }
 });
 
@@ -265,7 +283,7 @@ router.get('/:workspaceId/filters/:filterId', async (req: Request<FilterParams>,
 router.post('/:workspaceId/filters', async (req: Request<WorkspaceParams>, res: Response) => {
   try {
     const { workspaceId } = req.params;
-    const { id, label, description, object, conditions } = req.body;
+    const { id, label, description, object, conditions, is_dimension, dimension_group, dimension_group_label, dimension_order } = req.body;
 
     if (!id || !label || !object || !conditions) {
       res.status(400).json({ error: 'id, label, object, and conditions are required' });
@@ -304,10 +322,15 @@ router.post('/:workspaceId/filters', async (req: Request<WorkspaceParams>, res: 
       created_at: now,
       updated_at: now,
       created_by: (req as any).user?.email || 'api',
+      is_dimension: is_dimension || undefined,
+      dimension_group: dimension_group || undefined,
+      dimension_group_label: dimension_group_label || undefined,
+      dimension_order: dimension_order !== undefined ? Number(dimension_order) : undefined,
     };
 
     filters.push(newFilter);
     await saveWorkspaceFilters(workspaceId, filters);
+    seedDictionary(workspaceId).catch(err => console.error('[NamedFilters] Failed to seed dictionary after update:', err));
 
     res.status(201).json({ success: true, filter: newFilter });
   } catch (error) {
@@ -319,7 +342,7 @@ router.post('/:workspaceId/filters', async (req: Request<WorkspaceParams>, res: 
 router.put('/:workspaceId/filters/:filterId', async (req: Request<FilterParams>, res: Response) => {
   try {
     const { workspaceId, filterId } = req.params;
-    const { label, description, conditions, object } = req.body;
+    const { label, description, conditions, object, is_dimension, dimension_group, dimension_group_label, dimension_order } = req.body;
 
     const config = await configLoader.getConfig(workspaceId);
     const filters = [...(config.named_filters || [])];
@@ -336,12 +359,17 @@ router.put('/:workspaceId/filters/:filterId', async (req: Request<FilterParams>,
       ...(description !== undefined && { description }),
       ...(conditions !== undefined && { conditions }),
       ...(object !== undefined && { object }),
+      ...(is_dimension !== undefined && { is_dimension }),
+      ...(dimension_group !== undefined && { dimension_group }),
+      ...(dimension_group_label !== undefined && { dimension_group_label }),
+      ...(dimension_order !== undefined && { dimension_order: Number(dimension_order) }),
       source: 'user_defined',
       updated_at: new Date().toISOString(),
     };
 
     filters[idx] = updated;
     await saveWorkspaceFilters(workspaceId, filters);
+    seedDictionary(workspaceId).catch(err => console.error('[NamedFilters] Failed to seed dictionary after update:', err));
 
     res.json({ success: true, filter: updated });
   } catch (error) {
@@ -377,6 +405,7 @@ router.delete('/:workspaceId/filters/:filterId', async (req: Request<FilterParam
 
     filters.splice(idx, 1);
     await saveWorkspaceFilters(workspaceId, filters);
+    seedDictionary(workspaceId).catch(err => console.error('[NamedFilters] Failed to seed dictionary after update:', err));
 
     res.json({ success: true, deleted: filterId });
   } catch (error) {
@@ -405,6 +434,7 @@ router.post('/:workspaceId/filters/:filterId/confirm', async (req: Request<Filte
     };
 
     await saveWorkspaceFilters(workspaceId, filters);
+    seedDictionary(workspaceId).catch(err => console.error('[NamedFilters] Failed to seed dictionary after update:', err));
 
     res.json({ success: true, filter: filters[idx] });
   } catch (error) {

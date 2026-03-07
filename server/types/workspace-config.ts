@@ -71,6 +71,22 @@ export interface NamedFilter {
   created_by?: string;
   last_used_at?: string;
   usage_count?: number;
+  is_dimension?: boolean;
+  dimension_group?: string;         // e.g. "region", "deal_type", "segment"
+  dimension_group_label?: string;   // e.g. "Region", "Deal Type"
+  dimension_order?: number;
+}
+
+export interface WorkspaceDimensionOption {
+  label: string;
+  value: string;
+  filter_id?: string;
+}
+
+export interface WorkspaceDimension {
+  id: string;
+  label: string;
+  options: WorkspaceDimensionOption[];
 }
 
 export interface FilterResolutionMetadata {

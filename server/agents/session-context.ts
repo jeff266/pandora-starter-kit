@@ -25,6 +25,8 @@ export interface SessionContext {
   workspaceId?: string;
   userId?: string;
   userRole?: 'admin' | 'manager' | 'rep' | 'analyst' | 'viewer' | 'member';
+  ambiguitySelections?: Record<string, string>;
+  pipeline_name?: string;
 }
 
 export function createSessionContext(initialScope?: Partial<SessionContext['activeScope']>, workspaceId?: string): SessionContext {

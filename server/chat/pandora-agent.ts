@@ -999,12 +999,33 @@ function parseFollowUpQuestions(content: string): { answer: string; followups: s
  */
 function detectVisualizationHint(message: string): string | null {
   const m = message.toLowerCase();
+  
+  // Waterfall / Scenario
   if (/waterfall|what\s+changed|pipeline\s+movement|moved\s+this\s+week/.test(m)) return 'waterfall';
+  if (/what\s+if\s+we\s+close|what\s+if\s+we\s+won|if\s+we\s+close|scenario|closing\s+scenario|what\s+happens\s+if/.test(m)) return 'waterfall';
+  
+  // Bar Chart
   if (/pipeline\s+by\s+stage|deals\s+by\s+stage|stage\s+breakdown/.test(m)) return 'bar';
+  if (/pipeline\s+looking\s+like|pipeline\s+overview|pipeline\s+health|pipeline\s+status|pipeline\s+picture/.test(m)) return 'bar';
+  if (/win\s+rate|conversion\s+rate|stage\s+conversion|win\s+rates\s+by|convert\s+by/.test(m)) return 'bar';
+  if (/won\s+this\s+quarter|won\s+this\s+year|closed\s+won\s+by|wins\s+by\s+month|revenue\s+by\s+month/.test(m)) return 'bar';
+  if (/chart\s+this|can\s+you\s+chart|visualize|show.*chart|graph\s+this|plot\s+this/.test(m)) return 'bar';
+  
+  // Horizontal Bar
   if (/rep\s+coverage|rep\s+comparison|by\s+rep|per\s+rep|who\s+has\s+the\s+most|who\s+has\s+the\s+least|rep\s+performance/.test(m)) return 'horizontal_bar';
+  if (/reps\s+tracking|tracking\s+against\s+quota|rep\s+attainment|how\s+are\s+reps|reps\s+performing/.test(m)) return 'horizontal_bar';
+  if (/pipeline\s+coverage|coverage\s+ratio|coverage\s+for|coverage\s+against/.test(m)) return 'horizontal_bar';
+  if (/average\s+deal\s+size|deal\s+size\s+by|deal\s+sizes/.test(m)) return 'horizontal_bar';
+  
+  // Line / Time series
   if (/trend\s+over\s+time|pacing|how\s+are\s+we\s+tracking|week\s+by\s+week|attainment\s+pace/.test(m)) return 'line';
+  
+  // Stacked Bar
   if (/forecast\s+breakdown|commit\s+vs|by\s+category|commit\s+and\s+best\s+case/.test(m)) return 'stacked_bar';
+  
+  // Donut
   if (/distribution|what\s+percent|win.?loss\s+split|icp\s+grade|breakdown\s+of/.test(m)) return 'donut';
+  
   return null;
 }
 
@@ -1221,6 +1242,30 @@ export async function runPandoraAgent(
 
   const contextBlock = await buildWorkspaceContextBlock(workspaceId).catch(() => '');
   let memoryBlock = await buildMemoryContextBlock(workspaceId).catch(() => '');
+
+  // ── Ambiguity Marker Stripping ──────────────────────────────────────────────
+  // Extract and strip [Dimension: dimension=value] markers from the message
+  let processedMessage = message;
+  const dimensionMatches = message.match(/\[Dimension:\s*([^=]+)=([^\]]+)\]/gi);
+  if (dimensionMatches) {
+    for (const match of dimensionMatches) {
+      processedMessage = processedMessage.replace(match, '').trim();
+      const parts = match.match(/\[Dimension:\s*([^=]+)=([^\]]+)\]/i);
+      if (parts && parts[1] && parts[2]) {
+        const dimId = parts[1].trim();
+        const dimValue = parts[2].trim();
+        if (!currentSessionContext.ambiguitySelections) {
+          currentSessionContext.ambiguitySelections = {};
+        }
+        currentSessionContext.ambiguitySelections[dimId] = dimValue;
+        
+        // If it's a pipeline selection, also update pipeline_name in sessionContext for tools
+        if (dimId === 'pipeline') {
+          currentSessionContext.pipeline_name = dimValue;
+        }
+      }
+    }
+  }
 
   // Inject forecast accuracy memory if relevant
   const forecastKeywords = ['forecast', 'commit', 'attainment', 'best case', 'weighted', 'accuracy'];

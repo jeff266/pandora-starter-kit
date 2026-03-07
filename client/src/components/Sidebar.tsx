@@ -63,6 +63,7 @@ const sections: NavSection[] = [
     items: [
       { label: 'Connectors', path: '/connectors', icon: '\u229E' },
       { label: 'Enrichment', path: '/enrichment', icon: '\u2B22' },
+      { label: 'Dictionary', path: '/dictionary', icon: '\uD83D\uDCD6' },
     ],
   },
   {

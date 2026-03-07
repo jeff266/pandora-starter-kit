@@ -631,3 +631,36 @@ After: `User request → fingerprint check → if changed: live query pass + syn
 
 ### T007: Plan Schema
 - **`migrations/144_workspace_plans.sql`**: ALTER `workspaces` — adds `plan_type VARCHAR(20) DEFAULT 'design_partner'`, `plan_started_at TIMESTAMPTZ DEFAULT NOW()`, `plan_features JSONB DEFAULT '{}'`. Seeds all existing workspaces as 'design_partner'. Rate limiter reads this column (COALESCE-safe). Future plan values: 'design_partner', 'starter', 'growth', 'consultant'.
+
+---
+
+## Chart Intelligence, Clarifying Questions, Dimension Builder & Data Dictionary
+
+### Chart Trigger Expansion
+- **`server/chat/pandora-agent.ts`** — `detectVisualizationHint` extended with 8 new keyword groups: pipeline overview phrases → `bar`; win rate / conversion rate phrases → `bar`; rep tracking / coverage ratio / average deal size → `horizontal_bar`; scenario / what-if phrases → `waterfall`; generic chart command phrases (`visualize`, `graph this`, etc.) → `bar` fallback.
+
+### NamedFilter Dimension Metadata (T002)
+- **`server/types/workspace-config.ts`**: `NamedFilter` interface extended with `is_dimension?`, `dimension_group?`, `dimension_group_label?`, `dimension_order?`. New types `WorkspaceDimension` and `WorkspaceDimensionOption`.
+- **`server/tools/filter-resolver.ts`**: New `getWorkspaceDimensions(workspaceId)` helper — groups `is_dimension=true` named filters by `dimension_group`, always prepends built-in "Pipeline" dimension from `analysis_scopes`.
+- **`server/routes/named-filters.ts`**: `GET /:workspaceId/filters/dimensions` endpoint returns grouped dimension view; filter list endpoint supports `?is_dimension=true` query param.
+
+### Ambiguity Detection + Clarifying Question SSE (T003)
+- **`server/chat/ambiguity-detector.ts`**: `detectQueryAmbiguity(message, workspaceId)` — detects pipeline ambiguity (pipeline/deals/revenue mention + 2+ scopes) and dimension ambiguity (dimension keyword + 2+ options); appends "All" option; skips for follow-up messages containing `[Dimension:` markers.
+- **`server/routes/conversation-stream.ts`**: Before brief assembly, runs `detectQueryAmbiguity` on first messages (`!thread_id`); if result, emits `sse({ type: 'clarifying_question', ...result })` and returns early — no LLM invoked.
+- **`server/chat/pandora-agent.ts`**: Parses and strips `[Dimension: key=value]` markers from incoming messages; stores selections in session context; auto-sets `pipeline_name` when pipeline is selected.
+
+### Client Clarifying Question Card (T004)
+- **`client/src/hooks/useConversationStream.ts`**: New `'clarifying'` phase; `clarifyingQuestion` state field.
+- **`client/src/components/assistant/ClarifyingQuestionCard.tsx`**: Pill-button card matching dark brief aesthetic. Clicking a pill appends `[Dimension: key=value]` to last user message and re-sends via `sendMessage`.
+- **`client/src/components/assistant/ConversationView.tsx`**: Renders `ClarifyingQuestionCard` when `phase === 'clarifying'`; dims last user message while pending.
+
+### Dimension Tool Builder (T005)
+- **`client/src/pages/settings/DimensionBuilder.tsx`** (or `client/src/pages/DimensionBuilder.tsx`): Lists dimension groups + options with usage stats from `filter_usage_log`. "Add Dimension Group" flow; each option uses filter condition builder. Saves with `is_dimension=true` + group metadata.
+- Wired to Settings nav under "Dimensions" tab; route `/settings/dimensions`.
+
+### Data Dictionary (T006)
+- **`migrations/145_data_dictionary.sql`**: `data_dictionary` table — `id`, `workspace_id`, `term`, `definition`, `technical_definition`, `source` (user/filter/scope/metric/stage/system), `source_id`, `created_by`, `created_at`, `updated_at`, `last_referenced_at`, `is_active`. Unique on `(workspace_id, term)`.
+- **`server/dictionary/dictionary-seeder.ts`**: `seedDictionary(workspaceId)` — seeds pipelines (from `analysis_scopes`), stages (from `stage_mappings`), 10+ stock RevOps metrics (Coverage Ratio, Win Rate, Attainment, etc. with definitions + formulas), named filters with descriptions. Hooked into named filter create/update routes.
+- **`server/routes/data-dictionary.ts`**: `GET /:workspaceId/dictionary` (paginated + search + source filter), `POST`, `PUT /:id`, `DELETE /:id` (soft), `GET /:workspaceId/dictionary/context` (compact term→definition map, top 50 by reference count for AI injection). Mounted via `workspaceApiRouter`.
+- **AI injection**: `conversation-stream.ts` fetches `/dictionary/context` and injects as `WORKSPACE TERMINOLOGY:` block in system prompt — Pandora uses workspace's own definitions for "qualified", "coverage ratio", etc.
+- **`client/src/pages/DataDictionary.tsx`**: Searchable/filterable table; source badge pills (system=gray, user=accent, filter=purple, metric=blue, stage=teal, pipeline=orange); inline definition editing; "Add Term" modal. Registered at `/dictionary` route; "Dictionary" added to sidebar under DATA section.

@@ -31,6 +31,7 @@ const adminTabs: NavItem[] = [
   { key: 'crm-sync', label: 'CRM Sync', icon: 'refresh' },
   { key: 'webhooks', label: 'Webhooks', icon: 'transfer' },
   { key: 'billing', label: 'Billing', icon: 'chart-growth' },
+  { key: 'dimensions', label: 'Dimensions', icon: 'filter' },
   { key: 'token-usage', label: 'Token Usage', icon: 'trending' },
   { key: 'ai-keys', label: 'AI Keys', icon: 'brain' },
 ];

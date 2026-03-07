@@ -32,6 +32,7 @@ import InsightsPage from './pages/InsightsPage';
 import Actions from './pages/Actions';
 import Playbooks from './pages/Playbooks';
 import SettingsPage from './pages/SettingsPage';
+import DimensionBuilder from './pages/DimensionBuilder';
 import OnboardingFlow from './pages/OnboardingFlow';
 import ConnectorHealth from './pages/ConnectorHealth';
 import ToolsPage from './pages/ToolsPage';
@@ -55,6 +56,7 @@ import AgentBuilder from './pages/AgentBuilder';
 import GovernancePage from './pages/GovernancePage';
 import FiltersPage from './pages/FiltersPage';
 import SQLWorkspace from './pages/SQLWorkspace';
+import DataDictionary from './pages/DataDictionary';
 import ForecastPage from './pages/ForecastPage';
 import InvestigationHistoryPage from './pages/InvestigationHistoryPage';
 import { colors, fonts } from './styles/theme';
@@ -82,6 +84,7 @@ const pageTitles: Record<string, string> = {
   '/connectors/health': 'Connector Health',
   '/enrichment': 'Enrichment Connectors',
   '/filters': 'Named Filters',
+  '/dictionary': 'Data Dictionary',
   '/sql-workspace': 'SQL Workspace',
   '/members': 'Members',
   '/marketplace': 'Marketplace',
@@ -316,11 +319,13 @@ export default function App() {
             <Route path="/actions" element={<Actions />} />
             <Route path="/connectors/health" element={<ConnectorHealth />} />
             <Route path="/filters" element={<FiltersPage />} />
+            <Route path="/dictionary" element={<DataDictionary />} />
             <Route path="/sql-workspace" element={<SQLWorkspace />} />
             <Route path="/forecast" element={<ForecastPage />} />
             <Route path="/marketplace" element={<MarketplacePage />} />
             <Route path="/onboarding" element={<OnboardingFlow />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/settings/dimensions" element={<DimensionBuilder />} />
             <Route path="/settings/:tab" element={<SettingsPage />} />
             <Route path="/icp-profile" element={<IcpProfilePage />} />
             <Route path="/stage-velocity" element={<BenchmarksGrid />} />

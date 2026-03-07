@@ -36,7 +36,7 @@ export interface InlineAction {
 }
 
 export interface ConversationState {
-  phase: 'idle' | 'recruiting' | 'findings' | 'synthesis' | 'complete';
+  phase: 'idle' | 'recruiting' | 'findings' | 'synthesis' | 'complete' | 'clarifying';
   messages: ConversationMessage[];
   threadId: string | null;
   activeOperators: OperatorProgress[];
@@ -53,6 +53,7 @@ export interface ConversationState {
   chartSpecs: ChartSpec[];
   error: string | null;
   restored: boolean;
+  clarifyingQuestion: { question: string; dimension: string; options: { label: string; value: string }[] } | null;
 }
 
 type Action =
@@ -86,6 +87,7 @@ const initial: ConversationState = {
   chartSpecs: [],
   error: null,
   restored: false,
+  clarifyingQuestion: null,
 };
 
 function reducer(state: ConversationState, action: Action): ConversationState {
@@ -212,6 +214,17 @@ function reducer(state: ConversationState, action: Action): ConversationState {
       }
       case 'chart_specs': {
         return { ...state, chartSpecs: ev.specs ?? [] };
+      }
+      case 'clarifying_question': {
+        return {
+          ...state,
+          phase: 'clarifying',
+          clarifyingQuestion: {
+            question: ev.question,
+            dimension: ev.dimension,
+            options: ev.options
+          }
+        };
       }
       case 'error': {
         return { ...state, error: ev.message, phase: 'complete' };

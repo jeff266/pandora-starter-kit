@@ -14,8 +14,10 @@ import { getSkillRegistry } from '../skills/registry.js';
 import { createConversationState, getConversationState, appendMessage, updateContext } from '../chat/conversation-state.js';
 import { buildWorkspaceContextBlock } from '../context/workspace-memory.js';
 import { getOrAssembleBrief, renderBriefContext, BRIEF_SYSTEM_PROMPT } from '../context/opening-brief.js';
+import { detectQueryAmbiguity } from '../chat/ambiguity-detector.js';
 import { runPandoraAgent } from '../chat/pandora-agent.js';
 import { getOrCreateSessionContext } from '../agents/session-context.js';
+import axios from 'axios';
 import type { InvestigationStep } from '../goals/types.js';
 
 const router = Router();
@@ -97,6 +99,22 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
 
   const userId = (req as any).user?.user_id as string | undefined;
 
+  // ── Opening brief (new conversations only) ──────────────────────────────────
+  // A new conversation has no thread_id in the request. We assemble a role-scoped
+  // brief (cached 5 min) and prepend it to the user message so Claude synthesizes
+  // the brief AND answers any question in a single pass.
+  const isNewConversation = !thread_id;
+
+  // ── Ambiguity Detection ─────────────────────────────────────────────────────
+  if (isNewConversation) {
+    const ambiguity = await detectQueryAmbiguity(message, workspaceId).catch(() => null);
+    if (ambiguity) {
+      sse(res, { type: 'clarifying_question', ...ambiguity });
+      res.end();
+      return;
+    }
+  }
+
   // Populate user identity into session context for pipeline defaulting
   if (sessionContext && userId) {
     sessionContext.userId = userId;
@@ -120,11 +138,30 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
 
   const contextBlock = await buildWorkspaceContextBlock(workspaceId, userId).catch(() => '');
 
-  // ── Opening brief (new conversations only) ──────────────────────────────────
-  // A new conversation has no thread_id in the request. We assemble a role-scoped
-  // brief (cached 5 min) and prepend it to the user message so Claude synthesizes
-  // the brief AND answers any question in a single pass.
-  const isNewConversation = !thread_id;
+  // ── Workspace Terminology ──────────────────────────────────────────────────
+  let dictionaryContextBlock = '';
+  try {
+    const dictionaryResult = await query(
+      `SELECT term, definition
+       FROM data_dictionary
+       WHERE workspace_id = $1 AND is_active = TRUE
+       ORDER BY (
+         SELECT COUNT(*) FROM filter_usage_log ful 
+         WHERE ful.workspace_id = data_dictionary.workspace_id 
+           AND ful.filter_id = data_dictionary.source_id 
+           AND data_dictionary.source = 'filter'
+       ) DESC
+       LIMIT 50`,
+      [workspaceId]
+    );
+    if (dictionaryResult.rows.length > 0) {
+      dictionaryContextBlock = '\nWORKSPACE TERMINOLOGY:\n' + 
+        dictionaryResult.rows.map(r => `${r.term}: ${r.definition}`).join('\n');
+    }
+  } catch (dictErr) {
+    console.warn('[conversation-stream] Dictionary context fetch failed (non-fatal):', dictErr);
+  }
+
   let briefContextBlock = '';
   let effectiveMessage = message;
 
@@ -140,8 +177,8 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
 
   // Combined system context: workspace memory + optional brief instructions
   const fullContextBlock = briefContextBlock
-    ? `${BRIEF_SYSTEM_PROMPT}\n\n${contextBlock}`
-    : contextBlock;
+    ? `${BRIEF_SYSTEM_PROMPT}\n\n${contextBlock}${dictionaryContextBlock}`
+    : `${contextBlock}${dictionaryContextBlock}`;
 
   try {
     // ── Opening brief delivery (new conversation + brief assembled) ─────────
@@ -155,6 +192,7 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
       const systemForBrief = [
         BRIEF_SYSTEM_PROMPT,
         contextBlock,
+        dictionaryContextBlock,
       ].filter(Boolean).join('\n\n');
       const stream = anthropic.messages.stream({
         model: 'claude-sonnet-4-5',

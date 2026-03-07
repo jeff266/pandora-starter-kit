@@ -10,6 +10,7 @@ import InlineActionsPrompt from './InlineActionsPrompt';
 import ActionsPrompt from './ActionsPrompt';
 import ActionCard from './ActionCard';
 import StrategicCard from './StrategicCard';
+import ClarifyingQuestionCard from './ClarifyingQuestionCard';
 import DeliverablePicker from './DeliverablePicker';
 import StickyInput from './StickyInput';
 import MessageFeedback from './MessageFeedback';
@@ -108,7 +109,17 @@ export default function ConversationView({ initialMessage, onBack, onThreadId }:
     startNewThread();
   };
 
-  const inProgress = state.phase !== 'idle' && state.phase !== 'complete';
+  const handleClarifyingSelection = (option: { label: string; value: string }) => {
+    if (!state.clarifyingQuestion) return;
+    const lastUserMsg = state.messages.filter(m => m.role === 'user').pop();
+    if (!lastUserMsg) return;
+
+    // Append the dimension marker to the original message and re-send
+    const dimensionTag = `[Dimension: ${state.clarifyingQuestion.dimension}=${option.label}]`;
+    handleSendWithTracking(`${lastUserMsg.content} ${dimensionTag}`);
+  };
+
+  const inProgress = state.phase !== 'idle' && state.phase !== 'complete' && state.phase !== 'clarifying';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -160,6 +171,7 @@ export default function ConversationView({ initialMessage, onBack, onThreadId }:
               flexDirection: 'column',
               alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start',
               marginBottom: 12,
+              opacity: state.phase === 'clarifying' && msg === state.messages[state.messages.length - 1] ? 0.6 : 1,
             }}
           >
             <div style={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start', width: '100%' }}>
@@ -369,6 +381,15 @@ export default function ConversationView({ initialMessage, onBack, onThreadId }:
           <div style={{ padding: '10px 14px', background: '#ff8c8220', border: `1px solid #ff8c82`, borderRadius: 8, fontSize: 12, color: '#ff8c82', marginBottom: 12 }}>
             {state.error}
           </div>
+        )}
+
+        {state.phase === 'clarifying' && state.clarifyingQuestion && (
+          <ClarifyingQuestionCard
+            question={state.clarifyingQuestion.question}
+            dimension={state.clarifyingQuestion.dimension}
+            options={state.clarifyingQuestion.options}
+            onSelect={handleClarifyingSelection}
+          />
         )}
 
         <div ref={bottomRef} />

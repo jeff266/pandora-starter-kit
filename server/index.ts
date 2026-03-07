@@ -138,6 +138,7 @@ import conversationStreamRouter from './routes/conversation-stream.js';
 import motionsRouter from './routes/motions.js';
 import goalsRouter from './routes/goals.js';
 import voiceCalibrationRouter from './routes/voice-calibration.js';
+import dataDictionaryRouter from './routes/data-dictionary.js';
 import workspaceVoiceRouter from './routes/workspace-voice.js';
 import goalSnapshotsRouter from './routes/goal-snapshots.js';
 
@@ -403,6 +404,7 @@ workspaceApiRouter.use(conversationStreamRouter);
 workspaceApiRouter.use(motionsRouter);
 workspaceApiRouter.use(goalsRouter);
 workspaceApiRouter.use(goalSnapshotsRouter);
+workspaceApiRouter.use(dataDictionaryRouter);
 workspaceApiRouter.use(voiceCalibrationRouter);
 workspaceApiRouter.use(workspaceVoiceRouter);
 workspaceApiRouter.use(governanceRouter);
