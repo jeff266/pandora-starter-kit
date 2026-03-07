@@ -17,6 +17,7 @@ import { detectStageChanges, recordStageChanges, updateDealStageCache } from './
 import { getStageMapping } from '../../config/index.js';
 import { inferAnalysisScopes, applyInferredScopes } from '../../config/scope-inference.js';
 import { stampAllDealsForWorkspace, stampDealScopes } from '../../config/scope-stamper.js';
+import { autoConfigurePipelineDefaults } from '../../chat/pipeline-resolver.js';
 
 async function buildStageMaps(client: HubSpotClient, workspaceId: string): Promise<DealTransformOptions> {
   const stageMap = new Map<string, string>();
@@ -805,7 +806,8 @@ export async function initialSync(
         .then(async (inferred) => {
           await applyInferredScopes(workspaceId, inferred);
           await stampAllDealsForWorkspace(workspaceId);
-          console.log(`[HubSpot Sync] Scope inference + stamping complete for workspace=${workspaceId}`);
+          await autoConfigurePipelineDefaults(workspaceId);
+          console.log(`[HubSpot Sync] Scope inference + stamping + pipeline defaults complete for workspace=${workspaceId}`);
         })
         .catch(err => {
           console.error(`[HubSpot Sync] Scope inference failed for workspace=${workspaceId}:`, err instanceof Error ? err.message : err);

@@ -17,6 +17,7 @@ import { query } from '../db.js';
 import { inferAnalysisScopes, applyInferredScopes } from '../config/scope-inference.js';
 import { stampAllDealsForWorkspace, setDealScopeOverride } from '../config/scope-stamper.js';
 import { getScopeWhereClause, type ActiveScope } from '../config/scope-loader.js';
+import { getPipelineDefaults, upsertPipelineDefaults, getWorkspacePipelineNames } from '../chat/pipeline-resolver.js';
 
 const router = Router();
 
@@ -378,6 +379,63 @@ router.delete('/:workspaceId/admin/scopes/deals/:dealId/override', requirePermis
   } catch (err) {
     console.error('[Admin Scopes] Clear override error:', err);
     res.status(500).json({ error: 'Clear override failed', details: (err as Error).message });
+  }
+});
+
+// ============================================================================
+// GET /:workspaceId/admin/pipeline-defaults
+// ============================================================================
+
+router.get('/:workspaceId/admin/pipeline-defaults', requirePermission('config.view'), async (req: Request, res: Response): Promise<void> => {
+  const workspaceId = req.params.workspaceId as string;
+  try {
+    const [defaults, availablePipelines] = await Promise.all([
+      getPipelineDefaults(workspaceId),
+      getWorkspacePipelineNames(workspaceId),
+    ]);
+    res.json({
+      defaults: defaults ?? null,
+      needs_configuration: defaults?.needs_configuration ?? (availablePipelines.length > 1 && !defaults?.primary_scope_id),
+      available_pipelines: availablePipelines,
+    });
+  } catch (err) {
+    console.error('[Admin Scopes] Pipeline defaults GET error:', err);
+    res.status(500).json({ error: 'Failed to load pipeline defaults', details: (err as Error).message });
+  }
+});
+
+// ============================================================================
+// PUT /:workspaceId/admin/pipeline-defaults
+// ============================================================================
+
+router.put('/:workspaceId/admin/pipeline-defaults', requirePermission('config.edit'), async (req: Request, res: Response): Promise<void> => {
+  const workspaceId = req.params.workspaceId as string;
+  const { quota_bearing_scope_ids, primary_scope_id, intent_defaults } = req.body;
+
+  if (!Array.isArray(quota_bearing_scope_ids)) {
+    res.status(400).json({ error: 'quota_bearing_scope_ids must be an array' });
+    return;
+  }
+
+  try {
+    const existing = await getPipelineDefaults(workspaceId);
+    const updated = {
+      quota_bearing_scope_ids: quota_bearing_scope_ids ?? existing?.quota_bearing_scope_ids ?? [],
+      primary_scope_id: primary_scope_id ?? existing?.primary_scope_id ?? null,
+      intent_defaults: intent_defaults ?? existing?.intent_defaults ?? {
+        attainment: 'quota_bearing',
+        coverage: 'quota_bearing',
+        activity: 'all',
+        rep_scoped: 'owner_only',
+        unspecified: 'primary',
+      },
+      needs_configuration: false,
+    };
+    await upsertPipelineDefaults(workspaceId, updated);
+    res.json({ ok: true, defaults: updated });
+  } catch (err) {
+    console.error('[Admin Scopes] Pipeline defaults PUT error:', err);
+    res.status(500).json({ error: 'Failed to save pipeline defaults', details: (err as Error).message });
   }
 });
 

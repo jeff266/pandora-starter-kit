@@ -32,6 +32,7 @@ import { query } from '../../db.js';
 import { updateCredentialFields } from '../../lib/credential-store.js';
 import { inferAnalysisScopes, applyInferredScopes } from '../../config/scope-inference.js';
 import { stampAllDealsForWorkspace, stampDealScopes } from '../../config/scope-stamper.js';
+import { autoConfigurePipelineDefaults } from '../../chat/pipeline-resolver.js';
 
 // ============================================================================
 // Salesforce Adapter Implementation
@@ -422,7 +423,8 @@ export class SalesforceAdapter implements CRMAdapter {
         .then(async (inferred) => {
           await applyInferredScopes(workspaceId, inferred);
           await stampAllDealsForWorkspace(workspaceId);
-          logger.info('[Salesforce Adapter] Scope inference + stamping complete', { workspaceId });
+          await autoConfigurePipelineDefaults(workspaceId);
+          logger.info('[Salesforce Adapter] Scope inference + stamping + pipeline defaults complete', { workspaceId });
         })
         .catch(err => {
           logger.warn('[Salesforce Adapter] Scope inference failed', { workspaceId, error: err instanceof Error ? err.message : err });

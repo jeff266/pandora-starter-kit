@@ -544,6 +544,34 @@ T010–T021 are all built and running. Migration tracker updated with 134–137.
 
 ---
 
+## Pipeline Resolution System (March 2026)
+
+### Architecture
+- **`server/chat/pipeline-resolver.ts`** (new): workspace-aware pipeline name resolution + intent classification + default pipeline logic
+  - `resolvePipelineName(workspaceId, userInput)` — resolves natural language to `analysis_scopes` row via 3-tier normalized match (exact → input-in-name → name-in-input); prefers `confirmed=true` scopes; returns `ResolvedPipeline | null`
+  - `getWorkspacePipelineNames(workspaceId)` — returns confirmed non-default scope names for tool description injection
+  - `getPipelineDefaults / upsertPipelineDefaults` — reads/writes `pipeline_defaults` from `context_layer.definitions->'workspace_config'->'pipeline_defaults'` JSONB
+  - `autoConfigurePipelineDefaults(workspaceId)` — called after CRM sync: single-pipeline workspaces auto-configure; multi-pipeline workspaces get `needs_configuration=true`
+  - `classifyQuestionIntent(message)` — classifies into: `attainment | coverage | rep_scoped | deal_lookup | activity | unspecified`
+  - `resolveDefaultPipeline(workspaceId, intent, userRole, userId)` — returns `PipelineResolution` (scope_ids, owner_only, mode, assumption_label, assumption_made)
+
+### Query Fixes
+- **`server/chat/data-tools.ts`**: `queryDeals` and `computeMetric` use `resolvePipelineName` instead of open ILIKE. When `pipeline_name` is set: exact `scope_id` match for confirmed scopes, `filter_field/filter_values` for inferred scopes, ILIKE fallback for unconfigured workspaces. When not set: `resolveDefaultPipeline` applies intent-based default scope (rep → owner-only, activity → all, attainment → quota-bearing, etc.). Results include `pipeline_assumption` field when a default was applied.
+- **`_original_question`, `_requesting_user_id`, `_requesting_user_role`**: metadata params injected into every tool call from `runPandoraAgent`; prefixed with `_` so Claude never sees/passes them
+
+### Tool Description
+- **`server/chat/pandora-agent.ts`**: `buildQueryDealsTool(pipelineNames)` returns dynamic `query_deals` tool definition listing actual confirmed pipeline names from the workspace. Injected per-request alongside `buildGetSkillEvidenceTool`. System prompt instructs Claude to append "Showing [pipeline]." disclosure when `pipeline_assumption` field is present.
+
+### User Context
+- **`server/agents/session-context.ts`**: `SessionContext` extended with `userId?: string` and `userRole?: 'admin'|'manager'|'rep'|...'`
+- **`server/routes/conversation-stream.ts`**: Populates `sessionContext.userId` from `req.user.user_id`; looks up `system_type` from `workspace_members JOIN workspace_roles` and stores as `sessionContext.userRole`
+
+### Onboarding Auto-Config
+- **`server/connectors/hubspot/sync.ts`** and **`server/connectors/salesforce/adapter.ts`**: Call `autoConfigurePipelineDefaults(workspaceId)` after scope inference+stamping completes
+- **`server/routes/admin-scopes.ts`**: Added `GET /:id/admin/pipeline-defaults` and `PUT /:id/admin/pipeline-defaults` endpoints for workspace settings UI
+
+---
+
 ## Fine-Tuning Pipeline + LLM Router Integration (March 2026 — FT1–FT6)
 
 ### FT1: Training Pair Schema + Quality Labeling

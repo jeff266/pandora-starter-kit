@@ -96,6 +96,28 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
   res.setHeader('X-Accel-Buffering', 'no');
 
   const userId = (req as any).user?.user_id as string | undefined;
+
+  // Populate user identity into session context for pipeline defaulting
+  if (sessionContext && userId) {
+    sessionContext.userId = userId;
+    // Look up workspace role (system_type: admin | manager | rep | analyst | viewer | member)
+    try {
+      const roleResult = await query<{ system_type: string }>(
+        `SELECT wr.system_type
+         FROM workspace_members wm
+         JOIN workspace_roles wr ON wr.id = wm.role_id
+         WHERE wm.user_id = $1 AND wm.workspace_id = $2
+         LIMIT 1`,
+        [userId, workspaceId]
+      );
+      if (roleResult.rows[0]?.system_type) {
+        sessionContext.userRole = roleResult.rows[0].system_type as any;
+      }
+    } catch (_roleErr) {
+      // Non-fatal — role lookup failure should not block the conversation
+    }
+  }
+
   const contextBlock = await buildWorkspaceContextBlock(workspaceId, userId).catch(() => '');
 
   // ── Opening brief (new conversations only) ──────────────────────────────────

@@ -45,6 +45,7 @@ import { DocumentContribution } from '../documents/types.js';
 import { runCrossSignalAnalysis } from '../skills/cross-signal-analyzer.js';
 import { classifyStrategicQuestion, runStrategicReasoning } from '../skills/strategic-reasoner.js';
 import { getRelevantMemories } from '../memory/workspace-memory.js';
+import { getWorkspacePipelineNames } from './pipeline-resolver.js';
 
 const _chatDir = dirname(fileURLToPath(import.meta.url));
 const PRODUCT_KNOWLEDGE = (() => {
@@ -888,6 +889,14 @@ For pipeline, forecast, and performance questions — three parts:
 For deal questions: current state (stage, age, amount, owner) then the risk or concern, then what to do about it.
 For rep questions: who is on pace and why, then who is behind and by how much, then specific coaching moves.
 
+## Pipeline Scope Disclosure
+
+When a tool result includes a pipeline_assumption field, append exactly one plain sentence at the end of your response: "Showing [assumption]." No bullet, no heading, no parentheses. Example: "Showing Core Sales Pipeline (quota-bearing)." or "Showing all pipelines."
+
+If the user explicitly named a pipeline in their question (you passed pipeline_name to the tool), omit the disclosure — no sentence needed.
+
+If the workspace has multiple pipelines and the assumption was genuinely ambiguous (intent was unspecified), append an invitation after the disclosure: "Want me to scope this to [specific pipeline] instead, or show both separately?"
+
 ## Language
 
 - Write short declarative sentences. Use periods. No em dashes.
@@ -1121,6 +1130,31 @@ async function classifyQuestion(workspaceId: string, question: string): Promise<
 }
 
 // ─── Dynamic get_skill_evidence tool builder ──────────────────────────────────
+
+function buildQueryDealsTool(
+  pipelineNames: Array<{ scope_id: string; name: string }>
+): ToolDef {
+  const nameList = pipelineNames.map(p => p.name);
+  const pipelineDescription =
+    nameList.length > 0
+      ? `Filter by pipeline. Available pipelines for this workspace: ${nameList.join(', ')}. Pass the exact name or a partial match (e.g. "Core Sales" matches "Core Sales Pipeline"). Only pass this when the user explicitly names a pipeline — omit it otherwise and the system will apply the appropriate workspace default.`
+      : `Filter by pipeline name if the user explicitly mentions one. Omit if no pipeline is specified.`;
+
+  const staticTool = PANDORA_TOOLS.find(t => t && t.name === 'query_deals')!;
+  return {
+    ...staticTool,
+    parameters: {
+      ...staticTool.parameters,
+      properties: {
+        ...(staticTool.parameters as any).properties,
+        pipeline_name: {
+          type: 'string',
+          description: pipelineDescription,
+        },
+      },
+    },
+  };
+}
 
 function buildGetSkillEvidenceTool(): ToolDef {
   const registry = getSkillRegistry();
@@ -1369,10 +1403,15 @@ DO NOT calculate numeric values yourself — use only values returned by tools.`
     { role: 'user', content: message + toolHint },
   ];
 
-  // Build the dynamic tools list — replace the null placeholder with the live get_skill_evidence tool
-  const dynamicTools: ToolDef[] = PANDORA_TOOLS.map(t =>
-    (t as any) === null ? buildGetSkillEvidenceTool() : t
-  );
+  // Build the dynamic tools list:
+  // - replace null placeholder with live get_skill_evidence tool
+  // - replace query_deals with workspace-aware version listing actual pipeline names
+  const pipelineNames = await getWorkspacePipelineNames(workspaceId).catch(() => [] as Array<{ scope_id: string; name: string }>);
+  const dynamicTools: ToolDef[] = PANDORA_TOOLS.map(t => {
+    if ((t as any) === null) return buildGetSkillEvidenceTool();
+    if (t.name === 'query_deals') return buildQueryDealsTool(pipelineNames);
+    return t;
+  });
 
   for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
     // Guard: if we've reached max iterations, break and synthesize
@@ -1612,6 +1651,12 @@ DO NOT calculate numeric values yourself — use only values returned by tools.`
       try { onToolCall?.(toolCall.name, toolCall.name); } catch {}
 
       try {
+        const enrichedInput = {
+          ...toolCall.input,
+          _original_question: message,
+          _requesting_user_id: currentSessionContext.userId,
+          _requesting_user_role: currentSessionContext.userRole,
+        };
         if (toolCall.name === 'compute_metric') {
           const cacheKey = JSON.stringify(toolCall.input);
           const cached = getCachedComputation(currentSessionContext, cacheKey);
@@ -1619,11 +1664,11 @@ DO NOT calculate numeric values yourself — use only values returned by tools.`
             console.log(`[PandoraAgent] Cache hit for compute_metric: ${cacheKey}`);
             result = cached;
           } else {
-            result = await executeDataTool(workspaceId, toolCall.name, toolCall.input);
+            result = await executeDataTool(workspaceId, toolCall.name, enrichedInput);
             cacheComputation(currentSessionContext, cacheKey, result);
           }
         } else {
-          result = await executeDataTool(workspaceId, toolCall.name, toolCall.input);
+          result = await executeDataTool(workspaceId, toolCall.name, enrichedInput);
         }
         toolTrace.push({
           tool: toolCall.name,

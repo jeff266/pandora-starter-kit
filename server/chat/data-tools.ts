@@ -6,6 +6,8 @@
  */
 
 import { query } from '../db.js';
+import { resolvePipelineName, resolveDefaultPipeline, classifyQuestionIntent } from './pipeline-resolver.js';
+import type { PipelineResolution } from './pipeline-resolver.js';
 import { getToolFilters } from '../config/tool-filter-injector.js';
 import { callLLM } from '../utils/llm-router.js';
 import { querySchema, type ObjectType, type FilterMode } from '../tools/schema-query.js';
@@ -488,8 +490,44 @@ async function queryDeals(workspaceId: string, params: Record<string, any>): Pro
   }
 
   if (params.pipeline_name) {
-    conditions.push(`d.pipeline ILIKE ${addParam(`%${params.pipeline_name}%`)}`);
-    descParts.push(`pipeline~"${params.pipeline_name}"`);
+    const resolved = await resolvePipelineName(workspaceId, params.pipeline_name);
+    if (resolved) {
+      if (resolved.confirmed) {
+        conditions.push(`d.scope_id = ${addParam(resolved.scope_id)}`);
+      } else {
+        const escaped = resolved.filter_values
+          .map(v => `'${String(v).replace(/'/g, "''")}'`)
+          .join(',');
+        conditions.push(`d.${resolved.filter_field} = ANY(ARRAY[${escaped}])`);
+      }
+      descParts.push(`pipeline="${resolved.name}"`);
+    } else {
+      conditions.push(`d.pipeline ILIKE ${addParam(`%${params.pipeline_name}%`)}`);
+      descParts.push(`pipeline~"${params.pipeline_name}"`);
+    }
+  } else if (!params._skip_default_pipeline) {
+    const intent = classifyQuestionIntent(params._original_question || '');
+    const resolution = await resolveDefaultPipeline(
+      workspaceId,
+      intent,
+      (params._requesting_user_role || 'admin') as any,
+      params._requesting_user_id || ''
+    );
+    if (resolution.owner_only && params._requesting_user_id) {
+      const ownerRow = await query<{ owner_email: string }>(
+        `SELECT LOWER(email) AS owner_email FROM users WHERE id = $1 LIMIT 1`,
+        [params._requesting_user_id]
+      ).catch(() => ({ rows: [] as { owner_email: string }[] }));
+      if (ownerRow.rows[0]) {
+        conditions.push(`LOWER(d.owner) = ${addParam(ownerRow.rows[0].owner_email)}`);
+        descParts.push(`owner=${ownerRow.rows[0].owner_email}`);
+      }
+    } else if (resolution.scope_ids && resolution.scope_ids.length > 0) {
+      const placeholders = resolution.scope_ids.map(id => addParam(id));
+      conditions.push(`d.scope_id = ANY(ARRAY[${placeholders.join(',')}])`);
+      descParts.push(`pipeline="${resolution.assumption_label}"`);
+    }
+    params._pipeline_resolution = resolution;
   }
 
   if (params.has_findings === true) {
@@ -547,12 +585,19 @@ async function queryDeals(workspaceId: string, params: Record<string, any>): Pro
     ? `Deals matching: ${descParts.join(', ')}`
     : 'All deals';
 
-  return {
+  const result: any = {
     deals: rows.rows,
     total_count: totalCount,
     total_amount: totalAmount,
     query_description: `${description} — ${totalCount} records, ${formatCurrency(totalAmount)} total`,
   };
+
+  const resolution: PipelineResolution | undefined = params._pipeline_resolution;
+  if (resolution?.assumption_made) {
+    result.pipeline_assumption = resolution.assumption_label;
+  }
+
+  return result;
 }
 
 // ─── Tool 2: query_accounts ──────────────────────────────────────────────────
@@ -978,8 +1023,19 @@ async function computeTotalPipeline(workspaceId: string, params: Record<string, 
     conditions.push(`LOWER(owner) = $${values.length}`);
   }
   if (params.pipeline_name) {
-    values.push(`%${params.pipeline_name}%`);
-    conditions.push(`pipeline ILIKE $${values.length}`);
+    const resolved = await resolvePipelineName(workspaceId, params.pipeline_name);
+    if (resolved && resolved.confirmed) {
+      values.push(resolved.scope_id);
+      conditions.push(`scope_id = $${values.length}`);
+    } else if (resolved && resolved.filter_values.length > 0) {
+      const escaped = resolved.filter_values
+        .map(v => `'${String(v).replace(/'/g, "''")}'`)
+        .join(',');
+      conditions.push(`${resolved.filter_field} = ANY(ARRAY[${escaped}])`);
+    } else {
+      values.push(`%${params.pipeline_name}%`);
+      conditions.push(`pipeline ILIKE $${values.length}`);
+    }
   }
   if (params.stage) {
     values.push(`%${params.stage}%`);

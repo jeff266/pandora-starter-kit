@@ -23,6 +23,8 @@ export interface SessionContext {
   accumulatedDocument?: AccumulatedDocument; 
   voiceProfile: VoiceProfile;
   workspaceId?: string;
+  userId?: string;
+  userRole?: 'admin' | 'manager' | 'rep' | 'analyst' | 'viewer' | 'member';
 }
 
 export function createSessionContext(initialScope?: Partial<SessionContext['activeScope']>, workspaceId?: string): SessionContext {
