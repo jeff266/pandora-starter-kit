@@ -46,6 +46,7 @@ import { runCrossSignalAnalysis } from '../skills/cross-signal-analyzer.js';
 import { classifyStrategicQuestion, runStrategicReasoning } from '../skills/strategic-reasoner.js';
 import { getRelevantMemories } from '../memory/workspace-memory.js';
 import { getWorkspacePipelineNames } from './pipeline-resolver.js';
+import { resolveTemporalContext, formatTemporalContextBlock } from './temporal-resolver.js';
 
 const _chatDir = dirname(fileURLToPath(import.meta.url));
 const PRODUCT_KNOWLEDGE = (() => {
@@ -1297,6 +1298,13 @@ Continue using this scope unless the user explicitly changes it.`;
   let effectiveSystemPrompt = contextBlock
     ? `${PANDORA_SYSTEM_PROMPT}\n\n${contextBlock}\n\n${memoryBlock}${scopeContextBlock}`
     : `${PANDORA_SYSTEM_PROMPT}\n\n${memoryBlock}${scopeContextBlock}`;
+
+  // ── Temporal context injection — resolve time-period references to exact dates ──
+  const temporalCtx = resolveTemporalContext(message);
+  if (temporalCtx) {
+    effectiveSystemPrompt += `\n\n${formatTemporalContextBlock(temporalCtx)}`;
+    console.log(`[PandoraAgent] Temporal context injected: ${temporalCtx.label} (${temporalCtx.start} → ${temporalCtx.end})`);
+  }
 
   // ── Live deal lookup — inject before LLM sees anything ────────────────────
   const [dealMentions] = await Promise.all([

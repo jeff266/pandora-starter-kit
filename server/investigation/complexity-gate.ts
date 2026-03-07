@@ -1,4 +1,5 @@
 import { SkillRegistry } from '../skills/registry.js';
+import { hasFuturePeriod } from '../chat/temporal-resolver.js';
 
 export type QuestionComplexity = 'data_query' | 'lookup' | 'focused' | 'investigation';
 
@@ -18,6 +19,17 @@ export async function classifyComplexity(
   },
 ): Promise<ComplexityResult> {
   const lower = message.toLowerCase().trim();
+
+  // ─── Future-period guard — always investigate, never return stale cache ────
+  if (hasFuturePeriod(lower)) {
+    return {
+      tier: 'investigation',
+      primary_skill: inferPrimarySkill(lower),
+      max_skills: 3,
+      allow_fresh_runs: true,
+      reasoning: 'Future-period question requires fresh data — bypassing cache',
+    };
+  }
 
   // ─── TIER 0: Direct data queries — SQL, no AI synthesis ────────────────────
   // Questions answerable with a single aggregation or filter query against deals.
@@ -198,7 +210,33 @@ export async function classifyComplexity(
   };
 }
 
+const KEYWORD_SKILL_MAP: Record<string, string> = {
+  'pipeline coverage': 'pipeline-coverage',
+  'coverage ratio': 'pipeline-coverage',
+  'coverage': 'pipeline-coverage',
+  'waterfall': 'pipeline-waterfall',
+  'hygiene': 'pipeline-hygiene',
+  'stalled': 'pipeline-hygiene',
+  'stuck': 'pipeline-hygiene',
+  'at risk': 'deal-risk-review',
+  'risk': 'deal-risk-review',
+  'bowtie': 'bowtie-analysis',
+  'rep scorecard': 'rep-scorecard',
+  'scorecard': 'rep-scorecard',
+  'win rate': 'forecast-rollup',
+  'close rate': 'forecast-rollup',
+  'forecast': 'forecast-rollup',
+  'monte carlo': 'monte-carlo-forecast',
+  'single thread': 'single-thread-alert',
+  'icp': 'icp-discovery',
+};
+
 export function inferPrimarySkill(lower: string): string {
+  // Priority keyword map — checked before phrase-scoring loop
+  for (const [keyword, skillId] of Object.entries(KEYWORD_SKILL_MAP)) {
+    if (lower.includes(keyword)) return skillId;
+  }
+
   const registry = SkillRegistry.getInstance();
   const skills = registry.getAll();
   

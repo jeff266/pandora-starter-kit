@@ -158,6 +158,11 @@ const DATA_QUERY_PATTERNS = [
   /\b(which deals|what deals|which accounts|what accounts)\b/i,
   /\b(last (week|month|quarter|year)|this (week|month|quarter))\b/i,
   /\b(show|pull|get|find|search|look up)\b.*(deal|account|contact|opportunity)/i,
+  // Temporal + metric combinations — always require CRM data, never advisory
+  /\b(next quarter|next q\b|next fiscal|upcoming quarter)\b.*\b(pipeline|coverage|forecast|attainment|quota|deals?)\b/i,
+  /\b(pipeline|coverage|forecast|attainment|quota|deals?)\b.*\b(next quarter|next q\b|next fiscal|upcoming quarter)\b/i,
+  /\bq[1-4]\b.*\b(pipeline|coverage|forecast|attainment|quota|deals?)\b/i,
+  /\b(pipeline|coverage|forecast|attainment|quota|deals?)\b.*\bq[1-4]\b/i,
 ];
 
 const ADVISORY_STATELESS_PATTERNS = [
@@ -261,10 +266,12 @@ async function classifyWithLLM(
     };
   } catch (err: any) {
     console.warn('[IntentClassifier] Classification failed, falling through:', err?.message || err);
+    // Default to data_query rather than ambiguous — ambiguous causes uncertain routing.
+    // Most questions that time out or fail classification are data queries.
     return {
-      category: 'ambiguous',
-      confidence: 0,
-      reasoning: 'Classification failed or timed out',
+      category: 'data_query',
+      confidence: 0.5,
+      reasoning: 'Classification timed out — defaulting to data_query',
       fast_path: false,
       tokens_used: 0,
     };

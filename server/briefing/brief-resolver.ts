@@ -14,6 +14,9 @@ export interface BriefResolverResult {
 export async function resolveFromBrief(workspaceId: string, message: string): Promise<BriefResolverResult | null> {
   const lower = message.toLowerCase().trim();
 
+  // Hard pass: future-period questions always need fresh computation, never cached brief
+  if (/\bnext quarter\b|\bnext q\b|\bnext fiscal\b|\bupcoming quarter\b|\bfollowing quarter\b|\bnext period\b|\bnext year\b|\bq3\b|\bq4\b|\bq[1-4]\s+20\d\d\b/.test(lower)) return null;
+
   // Hard pass: causal, predictive, or open-ended questions always need investigation
   if (/\bwhy\b|\bbecause\b|\bgoing to\b|\bwill we\b|\bshould we\b|\bwhat if\b|\bcompare\b|\bvs\b|\bversus\b|\bwhere will\b|\bwill (she|he|they)\b|\bend (the|this) quarter\b|\bon track (to|for)\b|\bby (end of|quarter end)\b|\bproject(ed)?\b|\bclosed.?won\b|\bhow (many|much) did\b|\bdid.*close\b|\bwin rate\b|\brev(enue)? from\b|\brep.*history\b|\bwon\b|\bwin\b|\bwon.*(pipeline|quarter|year|month|fiscal)\b|\bhow much.*win\b/.test(lower)) return null;
   if (lower.split(' ').length > 20) return null;
@@ -96,7 +99,7 @@ export async function resolveFromBrief(workspaceId: string, message: string): Pr
   }
 
   // ── 8. The number / forecast / attainment ───────────────────────────────────
-  if (/forecast|the number|attainment|quota|are we on track|coverage|gap to quota|are we going/.test(lower)) {
+  if (/forecast|the number|attainment|quota|are we on track|pipeline coverage|gap to quota|are we going/.test(lower)) {
     return { section: 'the_number', display_hint: 'section', answer: formatTheNumber(brief), tokens_used: 0 };
   }
 
