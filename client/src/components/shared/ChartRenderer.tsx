@@ -11,6 +11,12 @@ interface ChartRendererProps {
   compact?: boolean;
 }
 
+function sortData(data: ChartSpec['data'], sort?: ChartSpec['sort']): ChartSpec['data'] {
+  if (sort === 'value_desc') return [...data].sort((a, b) => b.value - a.value);
+  if (sort === 'value_asc') return [...data].sort((a, b) => a.value - b.value);
+  return data;
+}
+
 function formatCurrency(val: number): string {
   if (Math.abs(val) >= 1_000_000) return `$${(val / 1_000_000).toFixed(1)}M`;
   if (Math.abs(val) >= 1_000) return `$${Math.round(val / 1_000)}K`;
@@ -305,21 +311,22 @@ function DonutChartRenderer({ spec, height }: { spec: ChartSpec; height: number 
 export default function ChartRenderer({ spec, compact = false }: ChartRendererProps) {
   const fullHeight = 220;
   const height = compact ? Math.round(fullHeight * 0.7) : fullHeight;
+  const sortedSpec = { ...spec, data: sortData(spec.data, spec.sort) };
 
   const renderChart = () => {
     switch (spec.chartType) {
       case 'bar':
-        return <BarChartRenderer spec={spec} height={height} compact={compact} />;
+        return <BarChartRenderer spec={sortedSpec} height={height} compact={compact} />;
       case 'horizontal_bar':
-        return <HorizontalBarChartRenderer spec={spec} height={Math.max(height, spec.data.length * 32 + 20)} />;
+        return <HorizontalBarChartRenderer spec={sortedSpec} height={Math.max(height, sortedSpec.data.length * 32 + 20)} />;
       case 'line':
-        return <LineChartRenderer spec={spec} height={height} />;
+        return <LineChartRenderer spec={sortedSpec} height={height} />;
       case 'stacked_bar':
-        return <StackedBarChartRenderer spec={spec} height={height} />;
+        return <StackedBarChartRenderer spec={sortedSpec} height={height} />;
       case 'waterfall':
-        return <WaterfallChartRenderer spec={spec} height={height} />;
+        return <WaterfallChartRenderer spec={sortedSpec} height={height} />;
       case 'donut':
-        return <DonutChartRenderer spec={spec} height={height} />;
+        return <DonutChartRenderer spec={sortedSpec} height={height} />;
       default:
         return null;
     }

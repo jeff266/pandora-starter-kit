@@ -21,6 +21,7 @@ export interface ChartSpec {
   subtitle?: string;
   annotation?: string;
   referenceValue?: number;
+  sort?: 'natural' | 'value_desc' | 'value_asc';
   data: ChartDataPoint[];
   xAxis?: { label: string };
   yAxis?: { label: string; format: 'currency' | 'number' | 'percent' };

@@ -1417,6 +1417,7 @@ Required fields:
 - chartType: one of: bar, horizontal_bar, line, stacked_bar, waterfall, donut
 - title: descriptive chart title
 - data: array of {label: string, value: number}
+- sort: "natural" for stage breakdowns and time series (preserves order from tool results — funnel order, chronological); "value_desc" for rep/account rankings and leaderboards
 - raw_annotation: one "so what" sentence
 - source.calculation_id: reference the tool call that produced values
 - source.run_at: ISO timestamp
