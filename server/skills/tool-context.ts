@@ -6,11 +6,11 @@ import { getSkillRegistry } from './registry.js';
  */
 export function getToolDefinitionsContext(): string {
   const registry = getSkillRegistry();
-  const skills = Array.from(registry.values());
+  const skills = registry.getAll();
 
   const toolDescriptions = skills
-    .filter((s) => s.description)
-    .map((s) => `- ${s.id}: ${s.description}`)
+    .filter((s: any) => s.description)
+    .map((s: any) => `- ${s.id}: ${s.description}`)
     .join('\n');
 
   return `

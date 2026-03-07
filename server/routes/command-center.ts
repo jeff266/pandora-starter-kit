@@ -9,8 +9,9 @@ const router = Router();
  * Returns Server-Sent Events showing tool calls in real-time as the brief assembles
  */
 router.post('/:workspaceId/assistant/brief/stream', async (req: Request, res: Response) => {
-  const { workspaceId } = req.params;
-  const { force, brief_type } = req.body;
+  const workspaceId = req.params.workspaceId as string;
+  const force = req.body.force;
+  const brief_type = Array.isArray(req.body.brief_type) ? req.body.brief_type[0] : req.body.brief_type as string | undefined;
 
   // Set up SSE headers
   res.setHeader('Content-Type', 'text/event-stream');

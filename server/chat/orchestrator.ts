@@ -458,6 +458,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
           let toolCalls: any[] = [];
           let evidence: any = { tool_calls: [], cited_records: [] };
           let latencyMs = 0;
+          let pandoraResult: any = null;
 
           if (intentClassification.is_followup_doc) {
             // Follow-up doc request: reuse the last assistant message instead of re-mining
@@ -486,7 +487,7 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
               agentMessage = `[Context: viewing ${scopeType} id=${entityId}] ${message}`;
             }
 
-            const pandoraResult = await runPandoraAgent(workspaceId, agentMessage, history);
+            pandoraResult = await runPandoraAgent(workspaceId, agentMessage, history);
             chatResponse = pandoraResult.answer;
             toolResults = pandoraResult.evidence.tool_calls.map((tc: any) => ({
               tool: tc.tool,
