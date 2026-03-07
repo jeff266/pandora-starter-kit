@@ -487,6 +487,11 @@ async function queryDeals(workspaceId: string, params: Record<string, any>): Pro
     descParts.push(`forecast=${params.forecast_category}`);
   }
 
+  if (params.pipeline_name) {
+    conditions.push(`d.pipeline ILIKE ${addParam(`%${params.pipeline_name}%`)}`);
+    descParts.push(`pipeline~"${params.pipeline_name}"`);
+  }
+
   if (params.has_findings === true) {
     conditions.push(`EXISTS (SELECT 1 FROM findings f WHERE f.deal_id = d.id AND f.resolved_at IS NULL)`);
   }

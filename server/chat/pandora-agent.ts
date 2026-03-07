@@ -79,7 +79,7 @@ const PANDORA_TOOLS: ToolDef[] = [
         created_after: { type: 'string', description: 'ISO date — deals created after' },
         created_before: { type: 'string', description: 'ISO date — deals created before' },
         forecast_category: { type: 'string', description: 'Filter: commit, best_case, pipeline, omitted' },
-        pipeline_name: { type: 'string', description: 'Filter by named pipeline (e.g., "Sales Pipeline", "Partnership Pipeline")' },
+        pipeline_name: { type: 'string', description: 'Filter by pipeline name — partial match on the pipeline column. Pass the name the user specifies (e.g. "Core Sales" to match deals in the Core Sales pipeline, "Fellowship" for the Fellowship pipeline). Always set this when the user mentions a specific pipeline.' },
         has_findings: { type: 'boolean', description: 'Only deals with active AI skill findings' },
         limit: { type: 'number', description: 'Max records to return (default 50, max 200)' },
         order_by: { type: 'string', description: 'Sort by: amount, close_date, created_date, days_in_stage' },
