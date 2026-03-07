@@ -266,8 +266,8 @@ export function validateChartSpec(spec: any, context: CalculationContext): spec 
     }
   }
   if (!spec.source?.calculation_id) {
-    console.warn('[ChartEmitter] Invalid chart spec: missing source.calculation_id');
-    return false;
+    console.warn('[ChartEmitter] Chart spec missing source.calculation_id — using fallback');
+    spec.source = { ...spec.source, calculation_id: 'unknown' };
   }
   return true;
 }

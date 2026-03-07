@@ -1048,8 +1048,9 @@ function detectVisualizationHint(message: string): string | null {
  */
 function parseChartSpecs(rawText: string): { cleanedText: string; specs: ChartSpec[] } {
   const specs: ChartSpec[] = [];
-  // More robust regex: handles trailing whitespace and Windows line endings
-  const chartBlockRegex = /```chart_spec[ \t]*\r?\n([\s\S]*?)\r?\n[ \t]*```/g;
+  // Permissive regex: does NOT require a newline before the closing fence,
+  // which handles Claude's dense JSON output where the closing ``` follows immediately
+  const chartBlockRegex = /```chart_spec[^\n]*\n([\s\S]*?)```/g;
 
   // Step 1: Collect all raw blocks
   const blocks: Array<{ content: string; fullMatch: string }> = [];
@@ -1061,6 +1062,8 @@ function parseChartSpecs(rawText: string): { cleanedText: string; specs: ChartSp
       fullMatch: match[0],
     });
   }
+
+  console.log(`[ChartParser] Found ${blocks.length} chart_spec block(s), stripping from text`);
 
   // Step 2: Strip ALL blocks from text unconditionally (before validation)
   let cleanedText = rawText;
