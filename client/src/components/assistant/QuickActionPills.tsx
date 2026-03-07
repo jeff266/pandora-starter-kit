@@ -32,7 +32,11 @@ function getActionPills(): string[] {
 export default function QuickActionPills({ onSend, onSection, openSections, hasBrief, phase, hasBriefing }: QuickActionPillsProps) {
   const visible = ['pills', 'browsing'].includes(phase);
   if (!visible) return null;
-  if (hasBriefing) return null;
+
+  const showSectionPills = hasBrief;
+  const showActionPills = !hasBriefing;
+
+  if (!showSectionPills && !showActionPills) return null;
 
   const actionPills = getActionPills();
 
@@ -67,8 +71,8 @@ export default function QuickActionPills({ onSend, onSection, openSections, hasB
 
   return (
     <div style={{ animation: 'pandora-fade-up 300ms ease-out forwards', marginBottom: 24 }}>
-      {hasBrief && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+      {showSectionPills && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: showActionPills ? 10 : 0 }}>
           {SECTION_PILLS.map(({ key, label }) => (
             <button
               key={key}
@@ -81,29 +85,31 @@ export default function QuickActionPills({ onSend, onSection, openSections, hasB
         </div>
       )}
 
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, animation: 'pandora-fade-up 300ms 80ms ease-out both' }}>
-        {actionPills.map(p => (
-          <button
-            key={p}
-            onClick={() => onSend(p)}
-            style={actionPillStyle}
-            onMouseEnter={e => {
-              const el = e.currentTarget as HTMLButtonElement;
-              el.style.background = colors.accentSoft ?? 'rgba(100,136,234,0.12)';
-              el.style.color = colors.accent;
-              el.style.borderColor = colors.accent;
-            }}
-            onMouseLeave={e => {
-              const el = e.currentTarget as HTMLButtonElement;
-              el.style.background = colors.surface;
-              el.style.color = colors.textSecondary;
-              el.style.borderColor = colors.border;
-            }}
-          >
-            {p}
-          </button>
-        ))}
-      </div>
+      {showActionPills && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, animation: 'pandora-fade-up 300ms 80ms ease-out both' }}>
+          {actionPills.map(p => (
+            <button
+              key={p}
+              onClick={() => onSend(p)}
+              style={actionPillStyle}
+              onMouseEnter={e => {
+                const el = e.currentTarget as HTMLButtonElement;
+                el.style.background = colors.accentSoft ?? 'rgba(100,136,234,0.12)';
+                el.style.color = colors.accent;
+                el.style.borderColor = colors.accent;
+              }}
+              onMouseLeave={e => {
+                const el = e.currentTarget as HTMLButtonElement;
+                el.style.background = colors.surface;
+                el.style.color = colors.textSecondary;
+                el.style.borderColor = colors.border;
+              }}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

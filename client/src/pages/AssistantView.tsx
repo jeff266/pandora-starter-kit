@@ -194,7 +194,20 @@ export default function AssistantView() {
     if (!wsId) return;
     try {
       const res = await api.get('/brief');
-      setBrief(res?.available ? res.brief : null);
+      const loaded = res?.available ? res.brief : null;
+      setBrief(loaded);
+      // Auto-open editorial-recommended sections if user hasn't made a choice yet
+      if (loaded?.editorial_focus?.open_sections?.length > 0) {
+        setOpenSections(prev => {
+          if (prev.length > 0) return prev; // don't override user choices
+          const sectionMap: Record<string, string> = { deals_to_watch: 'deals' };
+          const mapped = (loaded.editorial_focus.open_sections as string[]).map(
+            (s: string) => sectionMap[s] ?? s
+          );
+          return mapped;
+        });
+        setPhase(p => (['pills', 'browsing'].includes(p) ? 'browsing' : p));
+      }
     } catch {
       setBrief(null);
     } finally {
@@ -408,6 +421,7 @@ export default function AssistantView() {
             onInvestigatePath={handleInvestigateSkill}
             investigationStatus={investigationJobs}
             onQuestionClick={handleSend}
+            brief={brief}
             onEscalate={() => {
               alert('Escalation feature coming soon');
             }}
