@@ -20,8 +20,6 @@ const STRATEGIC_PATTERNS = [
   /\bshould\s+we\b/i,
   /\bwhat\s+should\s+we\s+change\b/i,
   /\bwhat's\s+the\s+root\s+cause\s+of\b/i,
-  /\bnext\s+quarter\b/i,
-  /\bis\s+our\s+.*\s+right\b/i,
   /\bstrategic\b/i,
   /\broot\s+cause\b/i,
   /\blong-term\b/i

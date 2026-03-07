@@ -1332,18 +1332,25 @@ DO NOT calculate numeric values yourself — use only values returned by tools.`
       timestamp: new Date().toISOString()
     });
 
-    return {
-      answer: strategicResult.recommendation,
-      follow_up_questions: [],
-      evidence: {
-        tool_calls: [],
-        cited_records: []
-      },
-      tokens_used: 0,
-      tool_call_count: 0,
-      latency_ms: Date.now() - startTime,
-      synthesis: strategicResult.recommendation
-    } as any;
+    const strategicAnswer = strategicResult.recommendation?.trim()
+      || [strategicResult.hypothesis, ...(strategicResult.tradeoffs || [])].filter(Boolean).join('\n\n').trim();
+
+    if (strategicAnswer) {
+      return {
+        answer: strategicAnswer,
+        follow_up_questions: [],
+        evidence: {
+          tool_calls: [],
+          cited_records: []
+        },
+        tokens_used: 0,
+        tool_call_count: 0,
+        latency_ms: Date.now() - startTime,
+        synthesis: strategicAnswer
+      } as any;
+    }
+    // Strategic reasoning returned no usable content — fall through to normal tool-loop below.
+    console.warn('[PandoraAgent] Strategic reasoning returned empty recommendation, falling through to agent.');
   }
 
   // Build routing hints
