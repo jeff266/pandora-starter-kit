@@ -279,6 +279,9 @@ router.post('/:workspaceId/skills/custom/:skillId/run', async (req, res) => {
         `UPDATE custom_skills SET last_run_at = now(), run_count = run_count + 1 WHERE skill_id = $1 AND workspace_id = $2`,
         [skillId, workspaceId]
       );
+      // Refresh the registry entry so runCount is up-to-date immediately —
+      // the override guard activates on the very first successful run without needing a restart
+      await registerCustomSkill(skillId, workspaceId).catch(() => {});
     } catch (logErr) {
       console.error('[custom-skills] Failed to log skill run:', logErr);
     }

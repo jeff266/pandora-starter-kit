@@ -109,6 +109,9 @@ export interface SkillDefinition {
 
   /** Slug of the built-in skill this custom skill replaces in the planner */
   replacesSkillId?: string;
+
+  /** Number of successful runs — populated for custom skills only; used to guard override suppression */
+  runCount?: number;
 }
 
 // ============================================================================

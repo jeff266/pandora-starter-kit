@@ -87,9 +87,13 @@ export async function createInvestigationPlan(
   const registry = getSkillRegistry();
   const allSkills = registry.listAll();
 
-  // Suppress built-ins that are overridden by a custom skill
+  // Suppress built-ins that are overridden by a custom skill.
+  // Guard: only suppress if the custom skill has at least one successful run —
+  // avoids silently dropping a built-in when the replacement has never executed.
   const overriddenSlugs = new Set(
-    allSkills.filter(s => s.replacesSkillId).map(s => s.replacesSkillId!)
+    allSkills
+      .filter(s => s.replacesSkillId && (s.runCount ?? 0) > 0)
+      .map(s => s.replacesSkillId!)
   );
   const skills = allSkills.filter(s => !overriddenSlugs.has(s.id));
 

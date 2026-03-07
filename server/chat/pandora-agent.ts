@@ -1049,9 +1049,12 @@ function buildGetSkillEvidenceTool(): ToolDef {
   const registry = getSkillRegistry();
   const allSkills = registry.listAll();
 
-  // Suppress built-ins overridden by a custom skill (mirrors planner logic)
+  // Suppress built-ins overridden by a custom skill (mirrors planner logic).
+  // Guard: only suppress if the custom skill has at least one successful run.
   const overriddenSlugs = new Set(
-    allSkills.filter(s => s.replacesSkillId).map(s => s.replacesSkillId!)
+    allSkills
+      .filter(s => s.replacesSkillId && (s.runCount ?? 0) > 0)
+      .map(s => s.replacesSkillId!)
   );
   const skills = allSkills.filter(s => !overriddenSlugs.has(s.id));
 
