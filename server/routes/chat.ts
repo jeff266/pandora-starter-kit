@@ -98,6 +98,7 @@ router.post('/:workspaceId/chat', async (req: Request, res: Response): Promise<v
               tokens_used: result.tokens_used,
               tool_call_count: result.tool_call_count,
               latency_ms: result.latency_ms,
+              ...(result.chart_specs?.length ? { chart_specs: result.chart_specs } : {}),
             }
           );
         })
@@ -115,6 +116,7 @@ router.post('/:workspaceId/chat', async (req: Request, res: Response): Promise<v
             tokens_used: result.tokens_used,
             tool_call_count: result.tool_call_count,
             latency_ms: result.latency_ms,
+            ...(result.chart_specs?.length ? { chart_specs: result.chart_specs } : {}),
           })
         )
         .catch((err) => {
@@ -137,6 +139,7 @@ router.post('/:workspaceId/chat', async (req: Request, res: Response): Promise<v
       ...(result.tool_call_count != null ? { tool_call_count: result.tool_call_count } : {}),
       ...(result.latency_ms != null ? { latency_ms: result.latency_ms } : {}),
       ...(result.inline_actions ? { inline_actions: result.inline_actions } : {}),
+      ...(result.chart_specs?.length ? { chart_specs: result.chart_specs } : {}),
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

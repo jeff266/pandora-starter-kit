@@ -227,18 +227,22 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
     }
   };
 
+  const stripChartBlocks = (text: string) =>
+    text.replace(/```chart_spec[^\n]*\n[\s\S]*?```/g, '').trim();
+
   const loadSession = async (id: string) => {
     try {
       const data = await api.get(`/chat/sessions/${id}`);
       setMessages(data.messages.map((msg: any) => ({
         role: msg.role,
-        content: msg.content,
+        content: stripChartBlocks(msg.content),
         timestamp: msg.created_at,
         responseId: msg.metadata?.response_id,
         feedbackEnabled: msg.metadata?.feedback_enabled,
         evidence: msg.metadata?.evidence,
         tool_call_count: msg.metadata?.tool_call_count,
         latency_ms: msg.metadata?.latency_ms,
+        chart_specs: msg.metadata?.chart_specs,
       })));
       setSessionId(id);
       setIsHistoryView(false);
