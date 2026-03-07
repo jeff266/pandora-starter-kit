@@ -21,9 +21,17 @@ export interface ExtractedAction {
   impact_amount?: number;
   urgency_label?: string;
   urgency_days_stale?: number;
+  source_skill?: string;
+  context?: string;
   execution_payload?: {
     crm_updates?: Array<{ field: string; proposed_value: any }>;
     note_text?: string;
+    recipient_slack_id?: string;
+    recipient_name?: string;
+    slack_user_id?: string;
+    owner_email?: string;
+    record_count?: number;
+    [key: string]: any;
   };
 }
 

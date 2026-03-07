@@ -29,7 +29,7 @@ const BLOCKED_KEYWORDS = [
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 router.post('/:workspaceId/sql/execute', async (req: Request, res: Response) => {
-  const { workspaceId } = req.params;
+  const { workspaceId } = req.params as Record<string, string>;
   const { sql } = req.body;
 
   if (!UUID_RE.test(workspaceId)) {
@@ -171,7 +171,7 @@ router.post('/:workspaceId/sql/execute', async (req: Request, res: Response) => 
  * Get all saved queries for a workspace
  */
 router.get('/:workspaceId/sql/saved', async (req: Request, res: Response) => {
-  const { workspaceId } = req.params;
+  const { workspaceId } = req.params as Record<string, string>;
 
   try {
     const result = await query(
@@ -200,7 +200,7 @@ router.get('/:workspaceId/sql/saved', async (req: Request, res: Response) => {
  * Create a new saved query
  */
 router.post('/:workspaceId/sql/saved', async (req: Request, res: Response) => {
-  const { workspaceId } = req.params;
+  const { workspaceId } = req.params as Record<string, string>;
   const { name, sql_text, source_type, source_id, source_name, description } = req.body;
 
   if (!name || typeof name !== 'string') {
@@ -251,7 +251,7 @@ router.post('/:workspaceId/sql/saved', async (req: Request, res: Response) => {
  * Update an existing saved query
  */
 router.put('/:workspaceId/sql/saved/:queryId', async (req: Request, res: Response) => {
-  const { workspaceId, queryId } = req.params;
+  const { workspaceId, queryId } = req.params as Record<string, string>;
   const { name, sql_text, description } = req.body;
 
   // Build SET clause dynamically
@@ -318,7 +318,7 @@ router.put('/:workspaceId/sql/saved/:queryId', async (req: Request, res: Respons
  * Delete a saved query
  */
 router.delete('/:workspaceId/sql/saved/:queryId', async (req: Request, res: Response) => {
-  const { workspaceId, queryId } = req.params;
+  const { workspaceId, queryId } = req.params as Record<string, string>;
 
   try {
     const result = await query(
@@ -351,7 +351,7 @@ router.delete('/:workspaceId/sql/saved/:queryId', async (req: Request, res: Resp
  * Execute a saved query and update its run metadata
  */
 router.post('/:workspaceId/sql/saved/:queryId/run', async (req: Request, res: Response) => {
-  const { workspaceId, queryId } = req.params;
+  const { workspaceId, queryId } = req.params as Record<string, string>;
 
   if (!UUID_RE.test(workspaceId)) {
     return res.status(400).json({ error: 'Invalid workspace ID format' });

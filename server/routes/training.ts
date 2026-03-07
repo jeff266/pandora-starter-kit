@@ -11,7 +11,7 @@ const router = express.Router();
  * Admin only: Export training pairs for a workspace in JSONL format
  */
 router.get('/:workspaceId/training-pairs/export', requireAdmin, async (req, res) => {
-  const { workspaceId } = req.params;
+  const { workspaceId } = req.params as Record<string, string>;
   const { quality, min_edit_distance, format } = req.query;
 
   try {
@@ -98,7 +98,7 @@ router.get('/admin/training-pairs/export-all', requireAdmin, async (req, res) =>
  * Aggregates document quality metrics
  */
 router.get('/:workspaceId/document-quality', requireWorkspaceAccess, attachWorkspaceContext, async (req, res) => {
-  const { workspaceId } = req.params;
+  const { workspaceId } = req.params as Record<string, string>;
 
   try {
     const profile = await configLoader.getDocumentProfile(workspaceId);

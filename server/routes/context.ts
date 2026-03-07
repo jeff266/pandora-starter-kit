@@ -47,10 +47,10 @@ async function validateWorkspace(workspaceId: string, res: Response): Promise<bo
   return true;
 }
 
-router.get('/:workspaceId/context', async (req: Request<WorkspaceParams>, res: Response) => {
+router.get('/:workspaceId/context', async (req: Request, res: Response) => {
   try {
-    if (!(await validateWorkspace(req.params.workspaceId, res))) return;
-    const context = await getContext(req.params.workspaceId);
+    if (!(await validateWorkspace((req.params.workspaceId as string), res))) return;
+    const context = await getContext((req.params.workspaceId as string));
     res.json({ success: true, context });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
@@ -59,10 +59,10 @@ router.get('/:workspaceId/context', async (req: Request<WorkspaceParams>, res: R
   }
 });
 
-router.get('/:workspaceId/context/version', async (req: Request<WorkspaceParams>, res: Response) => {
+router.get('/:workspaceId/context/version', async (req: Request, res: Response) => {
   try {
-    if (!(await validateWorkspace(req.params.workspaceId, res))) return;
-    const version = await getContextVersion(req.params.workspaceId);
+    if (!(await validateWorkspace((req.params.workspaceId as string), res))) return;
+    const version = await getContextVersion((req.params.workspaceId as string));
     res.json({ success: true, version });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
@@ -73,7 +73,7 @@ router.get('/:workspaceId/context/version', async (req: Request<WorkspaceParams>
 
 router.get('/:workspaceId/context/:section', async (req: Request<SectionParams>, res: Response) => {
   try {
-    if (!(await validateWorkspace(req.params.workspaceId, res))) return;
+    if (!(await validateWorkspace((req.params.workspaceId as string), res))) return;
 
     const { section } = req.params;
     const getter = SECTION_GETTERS[section];
@@ -86,7 +86,7 @@ router.get('/:workspaceId/context/:section', async (req: Request<SectionParams>,
       return;
     }
 
-    const data = await getter(req.params.workspaceId);
+    const data = await getter((req.params.workspaceId as string));
     res.json({ success: true, section, data });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
@@ -97,7 +97,7 @@ router.get('/:workspaceId/context/:section', async (req: Request<SectionParams>,
 
 router.put('/:workspaceId/context/:section', async (req: Request<SectionParams>, res: Response) => {
   try {
-    if (!(await validateWorkspace(req.params.workspaceId, res))) return;
+    if (!(await validateWorkspace((req.params.workspaceId as string), res))) return;
 
     const { section } = req.params;
 
@@ -120,7 +120,7 @@ router.put('/:workspaceId/context/:section', async (req: Request<SectionParams>,
       return;
     }
 
-    const updated = await updateContext(req.params.workspaceId, dbSection, data, updated_by);
+    const updated = await updateContext((req.params.workspaceId as string), dbSection, data, updated_by);
     res.json({ success: true, version: updated.version, context: updated });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
@@ -129,9 +129,9 @@ router.put('/:workspaceId/context/:section', async (req: Request<SectionParams>,
   }
 });
 
-router.post('/:workspaceId/context/onboard', requirePermission('config.edit'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/context/onboard', requirePermission('config.edit'), async (req: Request, res: Response) => {
   try {
-    if (!(await validateWorkspace(req.params.workspaceId, res))) return;
+    if (!(await validateWorkspace((req.params.workspaceId as string), res))) return;
 
     const body = req.body as Partial<OnboardingAnswers>;
 
@@ -176,7 +176,7 @@ router.post('/:workspaceId/context/onboard', requirePermission('config.edit'), a
       target_market: body.target_market,
     };
 
-    const context = await onboardWorkspace(req.params.workspaceId, answers);
+    const context = await onboardWorkspace((req.params.workspaceId as string), answers);
     res.json({ success: true, message: 'Workspace onboarded successfully', context });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
@@ -189,15 +189,15 @@ router.post('/:workspaceId/context/onboard', requirePermission('config.edit'), a
 // Forecast Thresholds API
 // ============================================================================
 
-router.get('/:workspaceId/forecast-thresholds', async (req: Request<WorkspaceParams>, res: Response) => {
+router.get('/:workspaceId/forecast-thresholds', async (req: Request, res: Response) => {
   try {
-    if (!(await validateWorkspace(req.params.workspaceId, res))) return;
+    if (!(await validateWorkspace((req.params.workspaceId as string), res))) return;
 
     const result = await query<{ commit_threshold: number; best_case_threshold: number }>(
       `SELECT commit_threshold, best_case_threshold
        FROM forecast_thresholds
        WHERE workspace_id = $1`,
-      [req.params.workspaceId]
+      [(req.params.workspaceId as string)]
     );
 
     if (result.rows.length === 0) {
@@ -213,9 +213,9 @@ router.get('/:workspaceId/forecast-thresholds', async (req: Request<WorkspacePar
   }
 });
 
-router.put('/:workspaceId/forecast-thresholds', async (req: Request<WorkspaceParams>, res: Response) => {
+router.put('/:workspaceId/forecast-thresholds', async (req: Request, res: Response) => {
   try {
-    if (!(await validateWorkspace(req.params.workspaceId, res))) return;
+    if (!(await validateWorkspace((req.params.workspaceId as string), res))) return;
 
     const { commit_threshold, best_case_threshold } = req.body;
 
@@ -241,7 +241,7 @@ router.put('/:workspaceId/forecast-thresholds', async (req: Request<WorkspacePar
          commit_threshold = $2,
          best_case_threshold = $3,
          updated_at = NOW()`,
-      [req.params.workspaceId, commit_threshold, best_case_threshold]
+      [(req.params.workspaceId as string), commit_threshold, best_case_threshold]
     );
 
     res.json({
@@ -260,9 +260,9 @@ router.put('/:workspaceId/forecast-thresholds', async (req: Request<WorkspacePar
 // Quota Periods API
 // ============================================================================
 
-router.get('/:workspaceId/quotas/periods', async (req: Request<WorkspaceParams>, res: Response) => {
+router.get('/:workspaceId/quotas/periods', async (req: Request, res: Response) => {
   try {
-    if (!(await validateWorkspace(req.params.workspaceId, res))) return;
+    if (!(await validateWorkspace((req.params.workspaceId as string), res))) return;
 
     const result = await query<{
       id: string;
@@ -277,7 +277,7 @@ router.get('/:workspaceId/quotas/periods', async (req: Request<WorkspaceParams>,
        FROM quota_periods
        WHERE workspace_id = $1
        ORDER BY start_date DESC`,
-      [req.params.workspaceId]
+      [(req.params.workspaceId as string)]
     );
 
     res.json(result.rows);
@@ -288,9 +288,9 @@ router.get('/:workspaceId/quotas/periods', async (req: Request<WorkspaceParams>,
   }
 });
 
-router.post('/:workspaceId/quotas/periods', requirePermission('config.edit'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/quotas/periods', requirePermission('config.edit'), async (req: Request, res: Response) => {
   try {
-    if (!(await validateWorkspace(req.params.workspaceId, res))) return;
+    if (!(await validateWorkspace((req.params.workspaceId as string), res))) return;
 
     const { name, period_type, start_date, end_date, team_quota } = req.body;
 
@@ -309,7 +309,7 @@ router.post('/:workspaceId/quotas/periods', requirePermission('config.edit'), as
       `INSERT INTO quota_periods (workspace_id, name, period_type, start_date, end_date, team_quota)
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING id`,
-      [req.params.workspaceId, name, period_type, start_date, end_date, team_quota]
+      [(req.params.workspaceId as string), name, period_type, start_date, end_date, team_quota]
     );
 
     res.status(201).json({ id: result.rows[0].id, name, period_type, start_date, end_date, team_quota });
@@ -320,9 +320,9 @@ router.post('/:workspaceId/quotas/periods', requirePermission('config.edit'), as
   }
 });
 
-router.put('/:workspaceId/quotas/periods/:periodId', requirePermission('config.edit'), async (req: Request<WorkspaceParams & { periodId: string }>, res: Response) => {
+router.put('/:workspaceId/quotas/periods/:periodId', requirePermission('config.edit'), async (req: Request<any>, res: Response) => {
   try {
-    if (!(await validateWorkspace(req.params.workspaceId, res))) return;
+    if (!(await validateWorkspace((req.params.workspaceId as string), res))) return;
 
     const { name, period_type, start_date, end_date, team_quota } = req.body;
 
@@ -335,7 +335,7 @@ router.put('/:workspaceId/quotas/periods/:periodId', requirePermission('config.e
            team_quota = COALESCE($5, team_quota),
            updated_at = NOW()
        WHERE id = $6 AND workspace_id = $7`,
-      [name, period_type, start_date, end_date, team_quota, req.params.periodId, req.params.workspaceId]
+      [name, period_type, start_date, end_date, team_quota, (req.params.periodId as string), (req.params.workspaceId as string)]
     );
 
     res.json({ success: true });
@@ -346,13 +346,13 @@ router.put('/:workspaceId/quotas/periods/:periodId', requirePermission('config.e
   }
 });
 
-router.delete('/:workspaceId/quotas/periods/:periodId', requirePermission('config.edit'), async (req: Request<WorkspaceParams & { periodId: string }>, res: Response) => {
+router.delete('/:workspaceId/quotas/periods/:periodId', requirePermission('config.edit'), async (req: Request<any>, res: Response) => {
   try {
-    if (!(await validateWorkspace(req.params.workspaceId, res))) return;
+    if (!(await validateWorkspace((req.params.workspaceId as string), res))) return;
 
     await query(
       `DELETE FROM quota_periods WHERE id = $1 AND workspace_id = $2`,
-      [req.params.periodId, req.params.workspaceId]
+      [(req.params.periodId as string), (req.params.workspaceId as string)]
     );
 
     res.json({ success: true });
@@ -367,9 +367,9 @@ router.delete('/:workspaceId/quotas/periods/:periodId', requirePermission('confi
 // Rep Quotas API
 // ============================================================================
 
-router.get('/:workspaceId/quotas/periods/:periodId/reps', async (req: Request<WorkspaceParams & { periodId: string }>, res: Response) => {
+router.get('/:workspaceId/quotas/periods/:periodId/reps', async (req: Request<any>, res: Response) => {
   try {
-    if (!(await validateWorkspace(req.params.workspaceId, res))) return;
+    if (!(await validateWorkspace((req.params.workspaceId as string), res))) return;
 
     const result = await query<{
       id: string;
@@ -381,7 +381,7 @@ router.get('/:workspaceId/quotas/periods/:periodId/reps', async (req: Request<Wo
        JOIN quota_periods qp ON qp.id = rq.period_id
        WHERE rq.period_id = $1 AND qp.workspace_id = $2
        ORDER BY rq.rep_name`,
-      [req.params.periodId, req.params.workspaceId]
+      [(req.params.periodId as string), (req.params.workspaceId as string)]
     );
 
     res.json(result.rows);
@@ -392,9 +392,9 @@ router.get('/:workspaceId/quotas/periods/:periodId/reps', async (req: Request<Wo
   }
 });
 
-router.put('/:workspaceId/quotas/periods/:periodId/reps/:repName', async (req: Request<WorkspaceParams & { periodId: string; repName: string }>, res: Response) => {
+router.put('/:workspaceId/quotas/periods/:periodId/reps/:repName', async (req: Request<any>, res: Response) => {
   try {
-    if (!(await validateWorkspace(req.params.workspaceId, res))) return;
+    if (!(await validateWorkspace((req.params.workspaceId as string), res))) return;
 
     const { quota_amount } = req.body;
 
@@ -408,10 +408,10 @@ router.put('/:workspaceId/quotas/periods/:periodId/reps/:repName', async (req: R
        VALUES ($1, $2, $3)
        ON CONFLICT (period_id, rep_name)
        DO UPDATE SET quota_amount = $3, updated_at = NOW()`,
-      [req.params.periodId, req.params.repName, quota_amount]
+      [(req.params.periodId as string), (req.params.repName as string), quota_amount]
     );
 
-    res.json({ success: true, rep_name: req.params.repName, quota_amount });
+    res.json({ success: true, rep_name: (req.params.repName as string), quota_amount });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.error('[Context] Update rep quota error:', message);
@@ -419,14 +419,14 @@ router.put('/:workspaceId/quotas/periods/:periodId/reps/:repName', async (req: R
   }
 });
 
-router.delete('/:workspaceId/quotas/periods/:periodId/reps/:repName', async (req: Request<WorkspaceParams & { periodId: string; repName: string }>, res: Response) => {
+router.delete('/:workspaceId/quotas/periods/:periodId/reps/:repName', async (req: Request<any>, res: Response) => {
   try {
-    if (!(await validateWorkspace(req.params.workspaceId, res))) return;
+    if (!(await validateWorkspace((req.params.workspaceId as string), res))) return;
 
     await query(
       `DELETE FROM rep_quotas
        WHERE period_id = $1 AND rep_name = $2`,
-      [req.params.periodId, req.params.repName]
+      [(req.params.periodId as string), (req.params.repName as string)]
     );
 
     res.json({ success: true });
@@ -437,10 +437,10 @@ router.delete('/:workspaceId/quotas/periods/:periodId/reps/:repName', async (req
   }
 });
 
-router.post('/:workspaceId/bowtie/discover', async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/bowtie/discover', async (req: Request, res: Response) => {
   try {
-    if (!(await validateWorkspace(req.params.workspaceId, res))) return;
-    const result = await discoverBowtieStages(req.params.workspaceId);
+    if (!(await validateWorkspace((req.params.workspaceId as string), res))) return;
+    const result = await discoverBowtieStages((req.params.workspaceId as string));
     res.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
@@ -449,13 +449,13 @@ router.post('/:workspaceId/bowtie/discover', async (req: Request<WorkspaceParams
   }
 });
 
-router.put('/:workspaceId/bowtie', async (req: Request<WorkspaceParams>, res: Response) => {
+router.put('/:workspaceId/bowtie', async (req: Request, res: Response) => {
   try {
-    if (!(await validateWorkspace(req.params.workspaceId, res))) return;
+    if (!(await validateWorkspace((req.params.workspaceId as string), res))) return;
     const bowtieData = req.body;
     bowtieData.status = 'confirmed';
-    const definitions = await getDefinitions(req.params.workspaceId) as Record<string, unknown>;
-    await updateContext(req.params.workspaceId, 'definitions', {
+    const definitions = await getDefinitions((req.params.workspaceId as string)) as Record<string, unknown>;
+    await updateContext((req.params.workspaceId as string), 'definitions', {
       ...definitions,
       bowtie_discovery: bowtieData,
     }, 'user:manual');
@@ -467,10 +467,10 @@ router.put('/:workspaceId/bowtie', async (req: Request<WorkspaceParams>, res: Re
   }
 });
 
-router.get('/:workspaceId/bowtie', async (req: Request<WorkspaceParams>, res: Response) => {
+router.get('/:workspaceId/bowtie', async (req: Request, res: Response) => {
   try {
-    if (!(await validateWorkspace(req.params.workspaceId, res))) return;
-    const result = await getBowtieDiscovery(req.params.workspaceId);
+    if (!(await validateWorkspace((req.params.workspaceId as string), res))) return;
+    const result = await getBowtieDiscovery((req.params.workspaceId as string));
     if (!result) {
       res.json({ hasBowtieStages: false, message: 'Bowtie discovery has not been run yet. POST to /bowtie/discover to analyze.' });
       return;

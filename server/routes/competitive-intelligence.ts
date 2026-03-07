@@ -91,7 +91,7 @@ async function saveExclusions(workspaceId: string, exclusions: string[]): Promis
 
 router.get('/:workspaceId/intelligence/competitive/exclusions', async (req: Request, res: Response) => {
   try {
-    const exclusions = await loadExclusions(req.params.workspaceId);
+    const exclusions = await loadExclusions((req.params.workspaceId as string));
     return res.json({ exclusions });
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to load exclusions' });
@@ -103,10 +103,10 @@ router.post('/:workspaceId/intelligence/competitive/exclusions', async (req: Req
     const { name } = req.body ?? {};
     if (!name || typeof name !== 'string') return res.status(400).json({ error: 'name is required' });
     const key = name.toLowerCase().trim();
-    const exclusions = await loadExclusions(req.params.workspaceId);
+    const exclusions = await loadExclusions((req.params.workspaceId as string));
     if (!exclusions.includes(key)) {
       exclusions.push(key);
-      await saveExclusions(req.params.workspaceId, exclusions);
+      await saveExclusions((req.params.workspaceId as string), exclusions);
     }
     return res.json({ exclusions });
   } catch (err: any) {
@@ -116,10 +116,10 @@ router.post('/:workspaceId/intelligence/competitive/exclusions', async (req: Req
 
 router.delete('/:workspaceId/intelligence/competitive/exclusions/:name', async (req: Request, res: Response) => {
   try {
-    const key = decodeURIComponent(req.params.name).toLowerCase().trim();
-    const exclusions = await loadExclusions(req.params.workspaceId);
+    const key = decodeURIComponent(req.params.name as string).toLowerCase().trim();
+    const exclusions = await loadExclusions((req.params.workspaceId as string));
     const updated = exclusions.filter(e => e !== key);
-    await saveExclusions(req.params.workspaceId, updated);
+    await saveExclusions((req.params.workspaceId as string), updated);
     return res.json({ exclusions: updated });
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to remove exclusion' });
@@ -134,7 +134,7 @@ router.delete('/:workspaceId/intelligence/competitive/exclusions/:name', async (
  * Supplementary: skill_runs (last_run_at + patterns), workspace_settings (exclusions)
  */
 router.get('/:workspaceId/intelligence/competitive', async (req: Request, res: Response) => {
-  const workspaceId = req.params.workspaceId as string;
+  const workspaceId = (req.params.workspaceId as string) as string;
 
   try {
     const [

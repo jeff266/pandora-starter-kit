@@ -15,7 +15,7 @@ const router = Router();
 // ============================================================================
 
 router.get('/:workspaceId/targets', async (req: Request, res: Response): Promise<void> => {
-  const { workspaceId } = req.params;
+  const { workspaceId } = req.params as Record<string, string>;
   const { period_type, active_only } = req.query;
 
   try {
@@ -70,7 +70,7 @@ router.get('/:workspaceId/targets', async (req: Request, res: Response): Promise
 // ============================================================================
 
 router.post('/:workspaceId/targets', async (req: Request, res: Response): Promise<void> => {
-  const { workspaceId } = req.params;
+  const { workspaceId } = req.params as Record<string, string>;
   const { metric, period_type, period_start, period_end, period_label, amount, notes, set_by, pipeline_id, pipeline_name, target_type, assigned_to_user_id, assigned_to_email } = req.body as {
     metric: string;
     period_type: string;
@@ -175,7 +175,7 @@ router.post('/:workspaceId/targets', async (req: Request, res: Response): Promis
 // ============================================================================
 
 router.patch('/:workspaceId/targets/:targetId', async (req: Request, res: Response): Promise<void> => {
-  const { workspaceId, targetId } = req.params;
+  const { workspaceId, targetId } = req.params as Record<string, string>;
   const { amount, notes, set_by, period_start, period_end, period_label, target_type, assigned_to_user_id, assigned_to_email } = req.body as {
     amount?: number;
     notes?: string;
@@ -258,7 +258,7 @@ router.patch('/:workspaceId/targets/:targetId', async (req: Request, res: Respon
 // ============================================================================
 
 router.delete('/:workspaceId/targets/:targetId', async (req: Request, res: Response): Promise<void> => {
-  const { workspaceId, targetId } = req.params;
+  const { workspaceId, targetId } = req.params as Record<string, string>;
   try {
     const result = await query(
       `UPDATE targets SET is_active = false WHERE workspace_id = $1 AND id = $2 RETURNING id`,
@@ -282,7 +282,7 @@ router.delete('/:workspaceId/targets/:targetId', async (req: Request, res: Respo
 // ============================================================================
 
 router.get('/:workspaceId/targets/gap', async (req: Request, res: Response): Promise<void> => {
-  const workspaceId = req.params.workspaceId as string;
+  const workspaceId = (req.params.workspaceId as string) as string;
   const { period_start, period_end } = req.query;
 
   try {
@@ -311,7 +311,7 @@ router.get('/:workspaceId/targets/gap', async (req: Request, res: Response): Pro
 // ============================================================================
 
 router.get('/:workspaceId/quotas', async (req: Request, res: Response): Promise<void> => {
-  const { workspaceId } = req.params;
+  const { workspaceId } = req.params as Record<string, string>;
   const { period_start } = req.query;
 
   try {
@@ -343,7 +343,7 @@ router.get('/:workspaceId/quotas', async (req: Request, res: Response): Promise<
 // ============================================================================
 
 router.post('/:workspaceId/quotas/bulk', async (req: Request, res: Response): Promise<void> => {
-  const { workspaceId } = req.params;
+  const { workspaceId } = req.params as Record<string, string>;
   const { quotas, set_by } = req.body as {
     quotas: {
       rep_email: string;
@@ -423,7 +423,7 @@ router.post('/:workspaceId/quotas/bulk', async (req: Request, res: Response): Pr
 // ============================================================================
 
 router.patch('/:workspaceId/quotas/:quotaId', async (req: Request, res: Response): Promise<void> => {
-  const { workspaceId, quotaId } = req.params;
+  const { workspaceId, quotaId } = req.params as Record<string, string>;
   const { amount, set_by } = req.body as { amount: number; set_by?: string };
 
   if (amount == null) {
@@ -488,7 +488,7 @@ router.patch('/:workspaceId/quotas/:quotaId', async (req: Request, res: Response
 // ============================================================================
 
 router.get('/:workspaceId/targets/revenue-model', async (req: Request, res: Response): Promise<void> => {
-  const workspaceId = req.params.workspaceId as string;
+  const workspaceId = (req.params.workspaceId as string) as string;
 
   try {
     const configResult = await query(
@@ -523,7 +523,7 @@ router.get('/:workspaceId/targets/revenue-model', async (req: Request, res: Resp
 // ============================================================================
 
 router.patch('/:workspaceId/targets/revenue-model', async (req: Request, res: Response): Promise<void> => {
-  const { workspaceId } = req.params;
+  const { workspaceId } = req.params as Record<string, string>;
   const { metric } = req.body as { metric: string };
 
   if (!metric) {

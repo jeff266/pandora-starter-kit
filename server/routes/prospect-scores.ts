@@ -8,7 +8,7 @@ const router = Router();
 // Paginated, filtered, sorted list of scored prospects + aggregate stats.
 
 router.get('/:workspaceId/prospect-scores', async (req: Request, res: Response): Promise<void> => {
-  const workspaceId = req.params.workspaceId;
+  const workspaceId = (req.params.workspaceId as string);
   const {
     grade,
     action,
@@ -179,7 +179,7 @@ router.get('/:workspaceId/prospect-scores', async (req: Request, res: Response):
 // Triggers a fresh scoring run for the workspace.
 
 router.post('/:workspaceId/prospect-scores/run', async (req: Request, res: Response): Promise<void> => {
-  const workspaceId = req.params.workspaceId;
+  const workspaceId = (req.params.workspaceId as string);
   try {
     const result = await scoreLeads(workspaceId);
     res.json({

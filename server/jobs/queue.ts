@@ -204,6 +204,19 @@ export class JobQueue {
       return;
     }
 
+    // Reset any jobs stuck in 'running' for over 30 minutes on startup
+    // (handles ghost-running records left by crashed workers)
+    query(
+      `UPDATE jobs SET status = 'pending', run_after = NOW()
+       WHERE status = 'running' AND started_at < NOW() - INTERVAL '30 minutes'`
+    ).then(r => {
+      if (r.rowCount && r.rowCount > 0) {
+        console.log(`[JobQueue] Reset ${r.rowCount} stuck job(s) to pending on startup`);
+      }
+    }).catch(err => {
+      console.warn('[JobQueue] Failed to reset stuck jobs on startup:', err);
+    });
+
     console.log(`[JobQueue] Starting job queue (polling every ${this.pollIntervalMs}ms)`);
     this.pollingInterval = setInterval(() => {
       this.processNextJob().catch(err => {
@@ -439,10 +452,10 @@ export class JobQueue {
       if (conn.last_sync_at) {
         const since = new Date(conn.last_sync_at);
         console.log(`[HubSpot Job] Starting incremental sync for workspace ${workspaceId} since ${since.toISOString()}`);
-        result = await hubspotConnector.incrementalSync(connection, workspaceId, since);
+        result = await hubspotConnector.incrementalSync(connection as any, workspaceId, since);
       } else {
         console.log(`[HubSpot Job] Starting initial sync for workspace ${workspaceId}`);
-        result = await hubspotConnector.initialSync(connection, workspaceId);
+        result = await hubspotConnector.initialSync(connection as any, workspaceId);
       }
 
       const recordsStored = result.recordsStored ?? 0;

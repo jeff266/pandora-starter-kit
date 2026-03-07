@@ -7,6 +7,7 @@ import { assembleAccountDossier, type AccountDossier } from '../dossiers/account
 import { generatePipelineSnapshot, type PipelineSnapshot } from './pipeline-snapshot.js';
 import { searchTranscripts } from '../conversations/transcript-search.js';
 import { getActiveTarget, computeGap } from './gap-calculator.js';
+import { buildVoicePromptBlock } from '../config/voice-prompt-block.js';
 
 export interface AnalysisRequest {
   workspace_id: string;
@@ -910,13 +911,14 @@ export async function analyzeQuestion(
     };
   }
 
-  const voiceConfig = await configLoader.getVoiceConfig(workspaceId).catch(() => ({ promptBlock: '' }));
+  const voiceConfig = await configLoader.getVoiceConfig(workspaceId).catch(() => null);
+  const voiceBlock = voiceConfig ? buildVoicePromptBlock(voiceConfig) : '';
   const targetContext = await getTargetContext(workspaceId);
 
   const basePrompt = scope.type === 'conversations' ? CONVERSATIONS_SYSTEM_PROMPT : SYSTEM_PROMPT;
 
   const response = await callLLM(workspaceId, 'reason', {
-    systemPrompt: basePrompt + targetContext + (voiceConfig.promptBlock ? `\n\n${voiceConfig.promptBlock}` : ''),
+    systemPrompt: basePrompt + targetContext + (voiceBlock ? `\n\n${voiceBlock}` : ''),
     messages: [
       {
         role: 'user' as const,
@@ -972,11 +974,12 @@ export async function runScopedAnalysis(request: AnalysisRequest): Promise<Analy
     };
   }
 
-  const voiceConfig = await configLoader.getVoiceConfig(workspace_id).catch(() => ({ promptBlock: '' }));
+  const voiceConfig = await configLoader.getVoiceConfig(workspace_id).catch(() => null);
+  const voiceBlock = voiceConfig ? buildVoicePromptBlock(voiceConfig) : '';
   const targetContext = await getTargetContext(workspace_id);
 
   const basePrompt = scope.type === 'conversations' ? CONVERSATIONS_SYSTEM_PROMPT : SYSTEM_PROMPT;
-  const systemPrompt = basePrompt + targetContext + (voiceConfig.promptBlock ? `\n\n${voiceConfig.promptBlock}` : '');
+  const systemPrompt = basePrompt + targetContext + (voiceBlock ? `\n\n${voiceBlock}` : '');
 
   const messages: Array<{ role: 'user' | 'assistant' | 'tool'; content: any; toolCallId?: string }> = [
     {

@@ -78,9 +78,9 @@ router.get('/templates/:modelType', async (req: Request<TemplateParams>, res: Re
  * GET /api/workspaces/:workspaceId/funnel
  * Get the workspace's current funnel definition
  */
-router.get('/:workspaceId/funnel', async (req: Request<WorkspaceParams>, res: Response) => {
+router.get('/:workspaceId/funnel', async (req: Request, res: Response) => {
   try {
-    const { workspaceId } = req.params;
+    const { workspaceId } = req.params as Record<string, string>;
 
     // Validate workspace exists
     const wsCheck = await query('SELECT id FROM workspaces WHERE id = $1', [workspaceId]);
@@ -112,9 +112,9 @@ router.get('/:workspaceId/funnel', async (req: Request<WorkspaceParams>, res: Re
  * POST /api/workspaces/:workspaceId/funnel/discover
  * Run AI-assisted funnel discovery
  */
-router.post('/:workspaceId/funnel/discover', requirePermission('config.edit'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/funnel/discover', requirePermission('config.edit'), async (req: Request, res: Response) => {
   try {
-    const { workspaceId } = req.params;
+    const { workspaceId } = req.params as Record<string, string>;
 
     // Validate workspace exists
     const wsCheck = await query('SELECT id FROM workspaces WHERE id = $1', [workspaceId]);
@@ -141,9 +141,9 @@ router.post('/:workspaceId/funnel/discover', requirePermission('config.edit'), a
  * POST /api/workspaces/:workspaceId/funnel/from-template
  * Create a funnel from a template with optional customizations
  */
-router.post('/:workspaceId/funnel/from-template', requirePermission('config.edit'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/funnel/from-template', requirePermission('config.edit'), async (req: Request, res: Response) => {
   try {
-    const { workspaceId } = req.params;
+    const { workspaceId } = req.params as Record<string, string>;
     const { model_type, stage_overrides } = req.body as {
       model_type: string;
       stage_overrides?: Array<Partial<FunnelStage> & { id: string }>;
@@ -201,9 +201,9 @@ router.post('/:workspaceId/funnel/from-template', requirePermission('config.edit
  * PUT /api/workspaces/:workspaceId/funnel
  * Full update - replace the entire funnel definition
  */
-router.put('/:workspaceId/funnel', async (req: Request<WorkspaceParams>, res: Response) => {
+router.put('/:workspaceId/funnel', async (req: Request, res: Response) => {
   try {
-    const { workspaceId } = req.params;
+    const { workspaceId } = req.params as Record<string, string>;
     const funnelData = req.body as Partial<FunnelDefinition>;
 
     // Validate workspace exists
@@ -234,9 +234,9 @@ router.put('/:workspaceId/funnel', async (req: Request<WorkspaceParams>, res: Re
  * PATCH /api/workspaces/:workspaceId/funnel/stages
  * Partial update - add, remove, or modify individual stages
  */
-router.patch('/:workspaceId/funnel/stages', requirePermission('config.edit'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.patch('/:workspaceId/funnel/stages', requirePermission('config.edit'), async (req: Request, res: Response) => {
   try {
-    const { workspaceId } = req.params;
+    const { workspaceId } = req.params as Record<string, string>;
     const { add, remove, update } = req.body as {
       add?: Array<Partial<FunnelStage> & { after?: string }>;
       remove?: string[];
@@ -322,9 +322,9 @@ router.patch('/:workspaceId/funnel/stages', requirePermission('config.edit'), as
  * DELETE /api/workspaces/:workspaceId/funnel
  * Delete the funnel definition
  */
-router.delete('/:workspaceId/funnel', requirePermission('config.edit'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.delete('/:workspaceId/funnel', requirePermission('config.edit'), async (req: Request, res: Response) => {
   try {
-    const { workspaceId } = req.params;
+    const { workspaceId } = req.params as Record<string, string>;
 
     // Validate workspace exists
     const wsCheck = await query('SELECT id FROM workspaces WHERE id = $1', [workspaceId]);

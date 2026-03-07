@@ -15,7 +15,7 @@ const router = Router();
  */
 router.get('/:workspaceId/accounts/scores', async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const { workspaceId } = req.params as Record<string, string>;
     const gradeFilter = req.query.grade ? String(req.query.grade).split(',') : null;
     const limit = Math.min(parseInt(String(req.query.limit || '50')), 200);
     const offset = parseInt(String(req.query.offset || '0'));
@@ -64,7 +64,7 @@ router.get('/:workspaceId/accounts/scores', async (req, res) => {
  */
 router.get('/:workspaceId/accounts/:accountId/score', async (req, res) => {
   try {
-    const { workspaceId, accountId } = req.params;
+    const { workspaceId, accountId } = req.params as Record<string, string>;
 
     const result = await query(
       `SELECT a.id, a.name, a.domain, a.industry, a.owner,
@@ -98,7 +98,7 @@ router.get('/:workspaceId/accounts/:accountId/score', async (req, res) => {
  */
 router.get('/:workspaceId/accounts/:accountId/score/why', async (req, res) => {
   try {
-    const { workspaceId, accountId } = req.params;
+    const { workspaceId, accountId } = req.params as Record<string, string>;
 
     const exists = await query(
       `SELECT id FROM accounts WHERE workspace_id = $1 AND id = $2`,
@@ -120,7 +120,7 @@ router.get('/:workspaceId/accounts/:accountId/score/why', async (req, res) => {
  */
 router.post('/:workspaceId/accounts/:accountId/enrich', requirePermission('skills.run_manual'), async (req, res) => {
   try {
-    const { workspaceId, accountId } = req.params;
+    const { workspaceId, accountId } = req.params as Record<string, string>;
     const { forceApollo } = req.body || {};
 
     const enrichResult = await enrichAccount(workspaceId, accountId, { forceApollo: !!forceApollo });
@@ -143,7 +143,7 @@ router.post('/:workspaceId/accounts/:accountId/enrich', requirePermission('skill
  */
 router.post('/:workspaceId/accounts/enrich/batch', requirePermission('skills.run_manual'), async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const { workspaceId } = req.params as Record<string, string>;
     const { limit, forceRefresh, accountIds } = req.body || {};
 
     // Return immediately — run batch in background
@@ -164,7 +164,7 @@ router.post('/:workspaceId/accounts/enrich/batch', requirePermission('skills.run
  */
 router.get('/:workspaceId/accounts/enrich/status', async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const { workspaceId } = req.params as Record<string, string>;
 
     const [totals, byMethod, scoreDistrib, avgConf] = await Promise.all([
       query(

@@ -16,7 +16,7 @@ const router = Router();
 // Runs a tool function directly against the workspace — used by the playground UI.
 
 router.post('/:workspaceId/tools/:toolName/run', requirePermission('skills.run_manual'), async (req, res) => {
-  const { workspaceId, toolName } = req.params;
+  const { workspaceId, toolName } = req.params as Record<string, string>;
   const params: Record<string, any> = req.body || {};
 
   const start = Date.now();
@@ -40,7 +40,7 @@ router.post('/:workspaceId/tools/:toolName/run', requirePermission('skills.run_m
 // Returns per-tool usage stats for the last N days.
 
 router.get('/:workspaceId/tools/stats', async (req, res) => {
-  const { workspaceId } = req.params;
+  const { workspaceId } = req.params as Record<string, string>;
   const calledBy = req.query.called_by as string | undefined;
   const days = req.query.days ? parseInt(req.query.days as string, 10) : 7;
 

@@ -30,6 +30,7 @@ export interface PipelineDefaults {
   intent_defaults: {
     attainment: 'primary' | 'quota_bearing' | 'all';
     coverage: 'primary' | 'quota_bearing' | 'all';
+    deal_lookup: 'primary' | 'quota_bearing' | 'all';
     activity: 'all';
     rep_scoped: 'owner_only';
     unspecified: 'primary' | 'quota_bearing' | 'all';
@@ -251,6 +252,7 @@ export async function autoConfigurePipelineDefaults(
         intent_defaults: {
           attainment: 'primary',
           coverage: 'primary',
+          deal_lookup: 'primary',
           activity: 'all',
           rep_scoped: 'owner_only',
           unspecified: 'primary',
@@ -264,6 +266,7 @@ export async function autoConfigurePipelineDefaults(
         intent_defaults: {
           attainment: 'all',
           coverage: 'all',
+          deal_lookup: 'all',
           activity: 'all',
           rep_scoped: 'owner_only',
           unspecified: 'all',

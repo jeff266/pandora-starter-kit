@@ -18,7 +18,7 @@ async function validateWorkspace(workspaceId: string, res: any): Promise<boolean
 
 router.post('/:workspaceId/connectors/hubspot/backfill-stage-history', requirePermission('connectors.trigger_sync'), async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const { workspaceId } = req.params as Record<string, string>;
     if (!(await validateWorkspace(workspaceId, res))) return;
 
     // Check if HubSpot connection exists and is active
@@ -63,7 +63,7 @@ router.post('/:workspaceId/connectors/hubspot/backfill-stage-history', requirePe
 
 router.get('/:workspaceId/connectors/hubspot/backfill-stage-history/stats', async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const { workspaceId } = req.params as Record<string, string>;
     if (!(await validateWorkspace(workspaceId, res))) return;
 
     const stats = await getBackfillStats(workspaceId);
@@ -77,7 +77,7 @@ router.get('/:workspaceId/connectors/hubspot/backfill-stage-history/stats', asyn
 
 router.get('/:workspaceId/deals/:dealId/stage-history', async (req, res) => {
   try {
-    const { workspaceId, dealId } = req.params;
+    const { workspaceId, dealId } = req.params as Record<string, string>;
     if (!(await validateWorkspace(workspaceId, res))) return;
 
     const history = await getDealStageHistory(workspaceId, dealId);

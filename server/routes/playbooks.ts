@@ -93,9 +93,9 @@ function derivePlaybooks(): DerivedPlaybook[] {
   return playbooks;
 }
 
-router.get('/:workspaceId/playbooks', async (req: Request<WorkspaceParams>, res: Response) => {
+router.get('/:workspaceId/playbooks', async (req: Request, res: Response) => {
   try {
-    const { workspaceId } = req.params;
+    const { workspaceId } = req.params as Record<string, string>;
     const playbooks = derivePlaybooks();
 
     const enriched = await Promise.all(playbooks.map(async (playbook) => {
@@ -165,9 +165,9 @@ router.get('/:workspaceId/playbooks', async (req: Request<WorkspaceParams>, res:
   }
 });
 
-router.get('/:workspaceId/playbooks/:playbookId', async (req: Request<WorkspaceParams & { playbookId: string }>, res: Response) => {
+router.get('/:workspaceId/playbooks/:playbookId', async (req: Request<any>, res: Response) => {
   try {
-    const { workspaceId, playbookId } = req.params;
+    const { workspaceId, playbookId } = req.params as Record<string, string>;
     const playbooks = derivePlaybooks();
     const playbook = playbooks.find(p => p.id === playbookId);
 
@@ -262,9 +262,9 @@ router.get('/:workspaceId/playbooks/:playbookId', async (req: Request<WorkspaceP
   }
 });
 
-router.post('/:workspaceId/playbooks/:playbookId/run', requirePermission('skills.run_manual'), async (req: Request<WorkspaceParams & { playbookId: string }>, res: Response) => {
+router.post('/:workspaceId/playbooks/:playbookId/run', requirePermission('skills.run_manual'), async (req: Request<any>, res: Response) => {
   try {
-    const { workspaceId, playbookId } = req.params;
+    const { workspaceId, playbookId } = req.params as Record<string, string>;
     const playbooks = derivePlaybooks();
     const playbook = playbooks.find(p => p.id === playbookId);
 

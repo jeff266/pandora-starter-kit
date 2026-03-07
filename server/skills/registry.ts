@@ -59,6 +59,9 @@ export class SkillRegistry {
     name: string;
     category: string;
     tier: string;
+    description?: string;
+    replacesSkillId?: string;
+    runCount?: number;
     schedule?: { cron?: string; trigger?: string };
   }> {
     return Array.from(this.skills.values()).map(skill => ({
@@ -66,6 +69,9 @@ export class SkillRegistry {
       name: skill.name,
       category: skill.category,
       tier: skill.tier,
+      description: skill.description,
+      replacesSkillId: skill.replacesSkillId,
+      runCount: skill.runCount,
       schedule: skill.schedule as any,
     }));
   }

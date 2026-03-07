@@ -21,9 +21,9 @@ interface WorkspaceParams {
   workspaceId: string;
 }
 
-router.post('/:workspaceId/connectors/fireflies/connect', requirePermission('connectors.connect'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/connectors/fireflies/connect', requirePermission('connectors.connect'), async (req: Request, res: Response) => {
   try {
-    const workspaceId = req.params.workspaceId;
+    const workspaceId = (req.params.workspaceId as string);
     const { apiKey } = req.body as { apiKey?: string };
 
     if (!apiKey) {
@@ -56,9 +56,9 @@ router.post('/:workspaceId/connectors/fireflies/connect', requirePermission('con
   }
 });
 
-router.post('/:workspaceId/connectors/fireflies/sync', requirePermission('connectors.trigger_sync'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/connectors/fireflies/sync', requirePermission('connectors.trigger_sync'), async (req: Request, res: Response) => {
   try {
-    const workspaceId = req.params.workspaceId;
+    const workspaceId = (req.params.workspaceId as string);
     const { mode = 'initial', since, lookbackDays } = req.body as { mode?: string; since?: string; lookbackDays?: number };
 
     // Get connection metadata (not credentials)
@@ -143,9 +143,9 @@ router.post('/:workspaceId/connectors/fireflies/sync', requirePermission('connec
   }
 });
 
-router.get('/:workspaceId/connectors/fireflies/users', async (req: Request<WorkspaceParams>, res: Response) => {
+router.get('/:workspaceId/connectors/fireflies/users', async (req: Request, res: Response) => {
   try {
-    const workspaceId = req.params.workspaceId;
+    const workspaceId = (req.params.workspaceId as string);
 
     const dir = await getDirectory(workspaceId, 'fireflies');
 
@@ -198,9 +198,9 @@ router.get('/:workspaceId/connectors/fireflies/users', async (req: Request<Works
   }
 });
 
-router.post('/:workspaceId/connectors/fireflies/users/refresh', requirePermission('connectors.trigger_sync'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/connectors/fireflies/users/refresh', requirePermission('connectors.trigger_sync'), async (req: Request, res: Response) => {
   try {
-    const workspaceId = req.params.workspaceId;
+    const workspaceId = (req.params.workspaceId as string);
 
     // Get credentials from credential store
     const credentials = await getConnectorCredentials(workspaceId, 'fireflies');
@@ -234,9 +234,9 @@ router.post('/:workspaceId/connectors/fireflies/users/refresh', requirePermissio
   }
 });
 
-router.post('/:workspaceId/connectors/fireflies/users/track', requirePermission('connectors.connect'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.post('/:workspaceId/connectors/fireflies/users/track', requirePermission('connectors.connect'), async (req: Request, res: Response) => {
   try {
-    const workspaceId = req.params.workspaceId;
+    const workspaceId = (req.params.workspaceId as string);
     const { user_ids } = req.body as { user_ids?: string[] };
 
     if (!user_ids || !Array.isArray(user_ids) || user_ids.length === 0) {
@@ -253,9 +253,9 @@ router.post('/:workspaceId/connectors/fireflies/users/track', requirePermission(
   }
 });
 
-router.get('/:workspaceId/connectors/fireflies/users/track', async (req: Request<WorkspaceParams>, res: Response) => {
+router.get('/:workspaceId/connectors/fireflies/users/track', async (req: Request, res: Response) => {
   try {
-    const workspaceId = req.params.workspaceId;
+    const workspaceId = (req.params.workspaceId as string);
     const tracked = await getTrackedUsers(workspaceId, 'fireflies');
     res.json({ tracked_users: tracked, count: tracked.length });
   } catch (error) {
@@ -264,9 +264,9 @@ router.get('/:workspaceId/connectors/fireflies/users/track', async (req: Request
   }
 });
 
-router.delete('/:workspaceId/connectors/fireflies/users/track', requirePermission('connectors.connect'), async (req: Request<WorkspaceParams>, res: Response) => {
+router.delete('/:workspaceId/connectors/fireflies/users/track', requirePermission('connectors.connect'), async (req: Request, res: Response) => {
   try {
-    const workspaceId = req.params.workspaceId;
+    const workspaceId = (req.params.workspaceId as string);
     await clearTrackedUsers(workspaceId, 'fireflies');
     res.json({ success: true, message: 'All tracked users cleared' });
   } catch (error) {
@@ -275,9 +275,9 @@ router.delete('/:workspaceId/connectors/fireflies/users/track', requirePermissio
   }
 });
 
-router.post('/:workspaceId/connectors/fireflies/transcript/:sourceId', async (req: Request<WorkspaceParams & { sourceId: string }>, res: Response) => {
+router.post('/:workspaceId/connectors/fireflies/transcript/:sourceId', async (req: Request<any>, res: Response) => {
   try {
-    const { workspaceId, sourceId } = req.params;
+    const { workspaceId, sourceId } = req.params as Record<string, string>;
 
     // Check connection status
     const connResult = await query<{ status: string }>(
@@ -328,9 +328,9 @@ router.post('/:workspaceId/connectors/fireflies/transcript/:sourceId', async (re
   }
 });
 
-router.get('/:workspaceId/connectors/fireflies/health', async (req: Request<WorkspaceParams>, res: Response) => {
+router.get('/:workspaceId/connectors/fireflies/health', async (req: Request, res: Response) => {
   try {
-    const workspaceId = req.params.workspaceId;
+    const workspaceId = (req.params.workspaceId as string);
     const health = await firefliesConnector.health(workspaceId);
     res.json(health);
   } catch (error) {

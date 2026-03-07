@@ -15,7 +15,7 @@ const router = Router();
  * List all registered webhook endpoints for the workspace. Never returns secrets.
  */
 router.get('/:workspaceId/webhook-endpoints', async (req: Request, res: Response): Promise<void> => {
-  const { workspaceId } = req.params;
+  const { workspaceId } = req.params as Record<string, string>;
   try {
     const endpoints = await listWebhookEndpoints(workspaceId);
     res.json(endpoints);
@@ -30,7 +30,7 @@ router.get('/:workspaceId/webhook-endpoints', async (req: Request, res: Response
  * Register a new endpoint. Returns the signing secret exactly once.
  */
 router.post('/:workspaceId/webhook-endpoints', async (req: Request, res: Response): Promise<void> => {
-  const { workspaceId } = req.params;
+  const { workspaceId } = req.params as Record<string, string>;
   const { url, eventTypes } = req.body as { url?: string; eventTypes?: string[] };
 
   if (!url) {
@@ -63,7 +63,7 @@ router.post('/:workspaceId/webhook-endpoints', async (req: Request, res: Respons
  * Remove a registered endpoint.
  */
 router.delete('/:workspaceId/webhook-endpoints/:endpointId', async (req: Request, res: Response): Promise<void> => {
-  const { workspaceId, endpointId } = req.params;
+  const { workspaceId, endpointId } = req.params as Record<string, string>;
   try {
     const deleted = await deleteWebhookEndpoint(workspaceId, endpointId);
     if (!deleted) {
@@ -85,7 +85,7 @@ router.delete('/:workspaceId/webhook-endpoints/:endpointId', async (req: Request
  * Otherwise sends a single generic webhook.test ping.
  */
 router.post('/:workspaceId/webhook-endpoints/test-url', async (req: Request, res: Response): Promise<void> => {
-  const { workspaceId } = req.params;
+  const { workspaceId } = req.params as Record<string, string>;
   const { url, event_types } = req.body as { url?: string; event_types?: string[] };
 
   if (!url) {
@@ -111,7 +111,7 @@ router.post('/:workspaceId/webhook-endpoints/test-url', async (req: Request, res
  * Send a single test delivery to verify reachability and HMAC signing.
  */
 router.post('/:workspaceId/webhook-endpoints/:endpointId/test', async (req: Request, res: Response): Promise<void> => {
-  const { workspaceId, endpointId } = req.params;
+  const { workspaceId, endpointId } = req.params as Record<string, string>;
   const { event_type } = req.body as { event_type?: string };
   try {
     const result = await testWebhookEndpoint(workspaceId, endpointId, event_type);
@@ -131,7 +131,7 @@ router.post('/:workspaceId/webhook-endpoints/:endpointId/test', async (req: Requ
  * Fetch delivery history for an endpoint. Query param: ?limit (max 100, default 20).
  */
 router.get('/:workspaceId/webhook-endpoints/:endpointId/deliveries', async (req: Request, res: Response): Promise<void> => {
-  const { workspaceId, endpointId } = req.params;
+  const { workspaceId, endpointId } = req.params as Record<string, string>;
   const limit = Math.min(parseInt(String(req.query.limit ?? '20'), 10) || 20, 100);
   try {
     const deliveries = await getEndpointDeliveries(workspaceId, endpointId, limit);
