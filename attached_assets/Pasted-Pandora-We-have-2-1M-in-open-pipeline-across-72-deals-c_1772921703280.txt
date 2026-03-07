@@ -1,0 +1,39 @@
+Pandora
+We have $2.1M in open pipeline across 72 deals, concentrated heavily in Demo Conducted and Pilot stages.
+Stage Breakdown:
+• Demo Conducted: $1.0M (27 deals) — 50% of total pipeline. This is our largest stage by far. Top deals here: Action Behavior Centers - AB ($300K), Butterfly Effects Inc ($273K), Behavioral Framework ($105K), Autism Learning Partners ($86K), Intercare Therapy ($80K).
+• Pilot: $436K (23 deals) — 21% of pipeline. Second largest concentration. Includes Easterseals Northern California ($112K), Beacon Services of Connecticut ($108K), Catalight - DB ($96K).
+• Discovery/Qualification: $332K (5 deals) — 16% of pipeline. Dominated by ABS Kids - AB + RAB ($200K) and Hopebridge - AB ($126K).
+• Proposal Reviewed: $186K (7 deals) — 9% of pipeline. Includes Action Behavior Centers - DB ($150K).
+• Contract Sent: $31K (2 deals) — 1% of pipeline. Supportive Care ABA ($28K) and Comprehensive Learning Services ($2.7K).
+• Verbal Commitment: $27K (1 deal) — Beacon Services of Connecticut - DB.
+• Demo Scheduled: $22K (3 deals) — Small deals in early stage.
+• Discovery and Alignment: $7K (2 deals) — Minimal value.
+• Pilot (closed stage): $3K (2 deals) — Legacy or closed pilot deals still showing as open.
+Key Observations:
+We have a top-heavy funnel. Over 70% of our pipeline sits in Demo Conducted and Pilot stages. The early stages (Discovery, Demo Scheduled) are thin — only $361K combined across 10 deals. If Demo Conducted and Pilot deals don't convert, we'll have a gap.
+The three largest deals are all in Demo Conducted: Action Behavior Centers ($300K), Butterfly Effects ($273K), ABS Kids ($200K). Moving these forward is critical.
+```chart_spec
+{
+ "type": "chart",
+ "chartType": "horizontal_bar",
+ "title": "Open Pipeline by Stage",
+ "data": [
+ {"label": "Demo Conducted", "value": 1043635},
+ {"label": "Pilot ", "value": 435691},
+ {"label": "Discovery/Qualification", "value": 331940},
+ {"label": "Proposal Reviewed", "value": 186180},
+ {"label": "Contract Sent", "value": 30840},
+ {"label": "Verbal Commitment", "value": 27000},
+ {"label": "Demo Scheduled", "value": 21600},
+ {"label": "Discovery and Alignment", "value": 7200},
+ {"label": "Pilot", "value": 2820}
+ ],
+ "raw_annotation": "50% of pipeline is in Demo Conducted — need to advance these 27 deals or risk stalling.",
+ "source": {
+ "calculation_id": "compute_metric_segmented_total_pipeline_by_stage",
+ "run_at": "2026-03-07T00:00:00.000Z",
+ "record_count": 72
+ }
+}
+```
