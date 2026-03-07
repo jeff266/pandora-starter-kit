@@ -218,6 +218,19 @@ async function deliverToSlack(
   rendererInput: RendererInput,
   slackChannel?: string
 ): Promise<DeliveryResult> {
+  try {
+    const consolidatedResult = await query<{ use_consolidated_brief: boolean }>(
+      `SELECT use_consolidated_brief FROM slack_channel_config WHERE workspace_id=$1 AND use_consolidated_brief=true LIMIT 1`,
+      [workspaceId]
+    );
+    if (consolidatedResult.rows.length > 0) {
+      console.log(`[channels] Slack post suppressed for workspace ${workspaceId} — consolidated brief mode active`);
+      return { channel: 'slack', status: 'skipped', metadata: { error: 'consolidated_brief_mode' } };
+    }
+  } catch (err) {
+    console.warn('[channels] Error checking consolidated brief flag, proceeding with send:', err);
+  }
+
   const { getNotificationPreferences, getCategoryRule } = await import('../notifications/preferences.js');
   try {
     const prefs = await getNotificationPreferences(workspaceId);

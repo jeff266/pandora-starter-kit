@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { verifySlackSignature } from '../connectors/slack/signature.js';
 import { query } from '../db.js';
 import { getSlackAppClient } from '../connectors/slack/slack-app-client.js';
+import { handleDMMessage } from '../slack/dm-handler.js';
 import { classifyThreadReply } from '../chat/intent-classifier.js';
 import {
   handleDrillDown,
@@ -44,7 +45,9 @@ router.post('/', async (req, res) => {
 
   try {
     if (event.type === 'message' && !event.bot_id && event.subtype !== 'bot_message') {
-      if (event.thread_ts) {
+      if (event.channel_type === 'im') {
+        await handleDMMessage({ ...event, team_id: teamId });
+      } else if (event.thread_ts) {
         await handleThreadedReply(event, teamId);
       }
     } else if (event.type === 'app_mention' && !event.bot_id) {
@@ -70,6 +73,7 @@ interface ThreadAnchorRow {
   skill_run_id: string | null;
   agent_run_id: string | null;
   report_type: string | null;
+  brief_context?: Record<string, any> | null;
 }
 
 async function lookupThreadAnchor(channelId: string, messageTs: string): Promise<ThreadAnchorRow | null> {
@@ -81,6 +85,27 @@ async function lookupThreadAnchor(channelId: string, messageTs: string): Promise
     [channelId, messageTs]
   );
   if (result.rows.length > 0) return result.rows[0];
+
+  // Check if this thread matches a Pandora brief
+  const briefResult = await query<any>(
+    `SELECT workspace_id, the_number, deals_to_watch, id
+     FROM weekly_briefs
+     WHERE slack_message_ts = $1 AND slack_channel_id = $2
+     LIMIT 1`,
+    [messageTs, channelId]
+  );
+  if (briefResult.rows.length > 0) {
+    const row = briefResult.rows[0];
+    const theNumber = typeof row.the_number === 'string' ? JSON.parse(row.the_number) : (row.the_number || {});
+    const dealsToWatch = typeof row.deals_to_watch === 'string' ? JSON.parse(row.deals_to_watch) : (row.deals_to_watch || {});
+    return {
+      workspace_id: row.workspace_id,
+      skill_run_id: null,
+      agent_run_id: null,
+      report_type: 'brief',
+      brief_context: { the_number: theNumber, deals_to_watch: dealsToWatch, brief_id: row.id },
+    };
+  }
 
   const fallback = await query<any>(
     `SELECT sr.run_id as skill_run_id, sr.skill_id as report_type, sr.workspace_id
@@ -206,16 +231,19 @@ async function handleThreadedReply(event: any, teamId: string): Promise<void> {
   } else {
     const sessionId = event.thread_ts ?? event.ts;
     await logChatMessage({ workspaceId, sessionId, surface: 'slack', role: 'user', content: event.text || '', scope: { type: 'slack_thread', channelId: event.channel, threadTs: event.thread_ts ?? event.ts } });
+    const anchorPayload = anchor.brief_context
+      ? { report_type: 'brief', result: anchor.brief_context }
+      : anchor.agent_run_id
+      ? { agent_run_id: anchor.agent_run_id, report_type: anchor.report_type || undefined }
+      : undefined;
+
     const result = await handleConversationTurn({
       surface: 'slack_thread',
       workspaceId,
       threadId: event.thread_ts,
       channelId: event.channel,
       message: event.text || '',
-      anchor: anchor.agent_run_id ? {
-        agent_run_id: anchor.agent_run_id,
-        report_type: anchor.report_type || undefined,
-      } : undefined,
+      anchor: anchorPayload,
     });
     await logChatMessage({ workspaceId, sessionId, surface: 'slack', role: 'assistant', content: result.answer, scope: { type: 'slack_thread', channelId: event.channel, threadTs: event.thread_ts ?? event.ts } });
 

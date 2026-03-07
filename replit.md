@@ -498,6 +498,52 @@ T010–T021 are all built and running. Migration tracker updated with 134–137.
 - **`client/src/pages/admin/DocumentQuality.tsx`** (new): Overall quality score + trend; edit rate / rec actioning / distribution rate metrics; training pair count + progress bar; most-edited sections table; calibration status + "Run Calibration Now →" link; "Export Training Pairs →" JSONL download
 - **`client/src/App.tsx`**: Route `/admin/document-quality` registered
 
+## Slack Conversational Interface (March 2026 — S1–S7)
+
+### S1: Slack Bot Event Infrastructure
+- **`migrations/142_slack_conversational.sql`** (applied): Adds `slack_message_ts TEXT` and `slack_channel_id TEXT` to `weekly_briefs`; adds `use_consolidated_brief BOOLEAN DEFAULT FALSE` to `slack_channel_config`; index on `weekly_briefs(slack_message_ts, slack_channel_id)`
+- **`server/slack/types.ts`** (new): Shared TypeScript interfaces — `SlackSlashCommandPayload`, `SlackMessageEvent`, `SlackInteractionPayload`, `BlockKitRenderOptions`, `PandoraParentMessage`, `SlackSessionEntry`, `SlackBlock`
+- **`server/routes/slack-commands.ts`** (new): Express router for `/api/slack/commands` — verifies HMAC signature, sends immediate "thinking..." ephemeral ack, dispatches to `handleSlashCommand` via `setImmediate`
+- **`server/index.ts`**: Registered `slackCommandsRouter` at `/api/slack/commands` (alongside existing events and interactions routes)
+- **`server/routes/slack-events.ts`**: Added DM dispatch — checks `event.channel_type === 'im'` before thread check, dispatches to `handleDMMessage` from `dm-handler.ts`
+- Workspace resolution: `resolveWorkspaceFromTeam()` queries `slack_channel_config` then falls back to first workspace
+
+### S2: Slash Command Handler (`/pandora`)
+- **`server/slack/slash-command.ts`** (new): `handleSlashCommand(payload)` — routes to subcommands: `brief` → compact brief render, `status` → last brief/skill run timestamps, `help` → static command list, `run [skill]` → skill lookup via `registry.get()`, anything else → `handleAskCommand`
+- `handleAskCommand`: gets/creates conversation state keyed by `slash:{userId}:{timestamp}` (8h TTL in-memory), calls `handleConversationTurn({ surface: 'slack_dm', ... })`, renders via `renderToBlockKit`, posts ephemeral with "Share in channel" + "Open in Pandora" buttons
+- `handleBriefCommand`: fetches `getLatestBrief`, renders via `renderBriefToBlockKit({ compact: true })`
+- `handleStatusCommand`: queries last brief + skill run, formats status reply
+- Session persistence: in-memory `Map<string, SlashSession>` with 8-hour TTL; chains slash commands from same user within session window
+
+### S3: Brief Slack Renderer (Consolidation)
+- **`server/slack/brief-renderer.ts`** (new): `renderBriefToBlockKit(brief, options)` — produces: header block (date), narrative section (`ai_blurbs.pulse_summary || week_summary`), metrics context strip (attainment %, coverage ratio, gap, days remaining), since-last-week comparison block (resolved/persisted/new from `comparison_data`), focus block (`ai_blurbs.key_action`), top 3 findings (from `deals_to_watch.items`), staleness warning, timestamp footer, action buttons (Open in Pandora, Ask a question, All findings →)
+- **`server/briefing/brief-assembler.ts`**: Added `postBriefToSlack(workspaceId, briefId, brief)` — called fire-and-forget after successful assembly; gets default channel via `slackAppClient.getDefaultChannel()`, posts blocks, stores `slack_message_ts` and `slack_channel_id` back to `weekly_briefs`
+- Brief consolidation replaces per-skill posts: one brief per cadence instead of 4+ individual skill-run messages
+
+### S4: Thread Reply Routing with Brief Context
+- **`server/routes/slack-events.ts`**: Extended `lookupThreadAnchor()` to query `weekly_briefs WHERE slack_message_ts=$1 AND slack_channel_id=$2` — when a reply thread matches a brief, returns `brief_context: { the_number, deals_to_watch, brief_id }`
+- `handleThreadedReply`: when anchor has `brief_context`, passes it as `anchor: { report_type: 'brief', result: brief_context }` to `handleConversationTurn` — orchestrator receives pre-computed attainment and deal data without re-fetching
+
+### S5: DM Bot (Full Conversational Mode)
+- **`server/slack/dm-handler.ts`** (new): `handleDMMessage(event)` — guards against bot messages, resolves workspace, checks if first DM (queries `conversation_state` for existing records), sends onboarding message on first contact
+- Conversation state: `getConversationState(workspaceId, channelId, 'dm')` — uses `'dm'` as threadId so DM channel maintains one persistent conversation across messages
+- Posts "✦ thinking..." indicator, calls `handleConversationTurn({ surface: 'slack_dm', ... })`, deletes thinking message, posts rendered response
+- Document accumulator prompt: after 5+ assistant messages, offers "Render as WBR → Open in Pandora" button
+- **`server/connectors/slack/slack-app-client.ts`**: Added `deleteMessage(workspaceId, { channel, ts })` method using `chat.delete` API
+
+### S6: Block Kit Response Renderer
+- **`server/slack/block-kit-renderer.ts`** (new): `renderToBlockKit(result, options)` — converts `ConversationTurnResult.answer` (markdown string) into Slack Block Kit blocks
+- Splits text into sections by detecting headings (`##`), code fences (` ``` `), and prose; chunks prose at 2800 chars to avoid Slack's 3000-char block limit
+- Appends "Share in channel" actions block if `includeShareButton`; appends "Open in Pandora" context block if `includeDeepLink`
+- `extractPlainText(result)` — strips markdown for Slack notification fallback text (200 char limit)
+
+### S7: Noise Reduction (Skill Run Suppression)
+- **`server/agents/channels.ts`**: `deliverToSlack()` now checks `slack_channel_config.use_consolidated_brief` before rendering — if `true`, returns `{ status: 'skipped', metadata: { error: 'consolidated_brief_mode' } }` without posting
+- **`server/routes/slack-settings.ts`**: Added `POST /:id/settings/slack/consolidated-brief` (toggle `use_consolidated_brief` for all workspace channels) and `GET /:id/settings/slack/consolidated-brief` (read current value)
+- Feature flag: `use_consolidated_brief` defaults to `false` for all existing workspaces — no breaking change. Opt-in via admin settings API. New workspaces can be set to `true` at onboarding.
+
+---
+
 ## Fine-Tuning Pipeline + LLM Router Integration (March 2026 — FT1–FT6)
 
 ### FT1: Training Pair Schema + Quality Labeling

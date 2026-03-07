@@ -531,6 +531,11 @@ async function saveBrief(workspaceId: string, briefType: BriefType, now: Date, d
   );
 
   console.log(`[brief-assembler] ${briefType} brief ready for workspace ${workspaceId} in ${Date.now() - startTime}ms`);
+
+  // Post consolidated brief to Slack (fire-and-forget)
+  postBriefToSlack(workspaceId, result.rows[0].id, parseBriefRow(result.rows[0])).catch(err => {
+    console.error('[brief-assembler] Failed to post brief to Slack:', err.message);
+  });
   
   // Write to workspace memory
   if (deals?.items && deals.items.length > 0) {
@@ -562,4 +567,31 @@ export async function getLatestBrief(workspaceId: string): Promise<AssembledBrie
   const result = await query<any>(`SELECT * FROM weekly_briefs WHERE workspace_id = $1 AND status IN ('ready','sent','edited') ORDER BY generated_at DESC LIMIT 1`, [workspaceId]);
   if (result.rows.length === 0) return null;
   return parseBriefRow(result.rows[0]);
+}
+
+async function postBriefToSlack(
+  workspaceId: string,
+  briefId: string,
+  brief: AssembledBrief
+): Promise<void> {
+  const { getSlackAppClient } = await import('../connectors/slack/slack-app-client.js');
+  const { renderBriefToBlockKit } = await import('../slack/brief-renderer.js');
+
+  const slackClient = getSlackAppClient();
+  const briefChannel = await slackClient.getDefaultChannel(workspaceId);
+  if (!briefChannel) {
+    console.log('[brief-assembler] No Slack channel configured — skipping brief post');
+    return;
+  }
+
+  const blocks = renderBriefToBlockKit(brief, { includeFullFindingsButton: true });
+  const ref = await slackClient.postMessage(workspaceId, briefChannel, blocks as any);
+
+  if (ref.ts && ref.channel) {
+    await query(
+      `UPDATE weekly_briefs SET slack_message_ts=$1, slack_channel_id=$2 WHERE id=$3`,
+      [ref.ts, ref.channel, briefId]
+    );
+    console.log(`[brief-assembler] Brief posted to Slack channel ${ref.channel} ts=${ref.ts}`);
+  }
 }

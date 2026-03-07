@@ -124,6 +124,38 @@ export class SlackAppClient {
     }
   }
 
+  async deleteMessage(
+    workspaceId: string,
+    options: { channel: string; ts: string }
+  ): Promise<{ ok: boolean; error?: string }> {
+    const botToken = await this.getBotToken(workspaceId);
+    if (!botToken) {
+      return { ok: false, error: 'Bot token required for message deletion' };
+    }
+
+    try {
+      const response = await fetch('https://slack.com/api/chat.delete', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${botToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ channel: options.channel, ts: options.ts }),
+      });
+
+      const data = await response.json() as any;
+      if (!data.ok) {
+        console.error('[slack-app] Delete message error:', data.error);
+        return { ok: false, error: data.error };
+      }
+      return { ok: true };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[slack-app] Delete message exception:', msg);
+      return { ok: false, error: msg };
+    }
+  }
+
   async postEphemeral(
     workspaceId: string,
     options: {

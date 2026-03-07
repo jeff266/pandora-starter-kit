@@ -96,4 +96,49 @@ router.post('/:id/settings/slack/test-dm', async (req, res) => {
   }
 });
 
+router.post('/:id/settings/slack/consolidated-brief', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { use_consolidated_brief } = req.body;
+
+    if (typeof use_consolidated_brief !== 'boolean') {
+      return res.status(400).json({ error: 'use_consolidated_brief must be a boolean' });
+    }
+
+    const ws = await pool.query('SELECT id FROM workspaces WHERE id = $1', [id]);
+    if (ws.rows.length === 0) {
+      return res.status(404).json({ error: 'Workspace not found' });
+    }
+
+    await pool.query(
+      `UPDATE slack_channel_config
+       SET use_consolidated_brief = $1
+       WHERE workspace_id = $2`,
+      [use_consolidated_brief, id]
+    );
+
+    console.log(`[slack-settings] Workspace ${id} consolidated brief mode set to ${use_consolidated_brief}`);
+    return res.json({ ok: true, use_consolidated_brief });
+  } catch (err) {
+    console.error('[slack-settings] Error updating consolidated brief setting:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.get('/:id/settings/slack/consolidated-brief', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      `SELECT use_consolidated_brief FROM slack_channel_config WHERE workspace_id=$1 LIMIT 1`,
+      [id]
+    );
+
+    const enabled = result.rows.length > 0 ? result.rows[0].use_consolidated_brief : false;
+    return res.json({ use_consolidated_brief: enabled });
+  } catch (err) {
+    console.error('[slack-settings] Error reading consolidated brief setting:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 export default router;
