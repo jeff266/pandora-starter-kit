@@ -4,24 +4,38 @@ import { randomUUID } from 'crypto';
 
 const router = Router();
 
+const SAFE_COLUMNS = `
+  d.id, d.term, d.definition, d.technical_definition, d.sql_definition,
+  d.segmentable_by, d.source, d.source_id, d.created_by,
+  d.created_at, d.updated_at, d.last_referenced_at
+`;
+
+const REFERENCE_COUNT_SUBQUERY = `
+  (
+    SELECT COUNT(*) FROM filter_usage_log ful
+    WHERE ful.workspace_id = d.workspace_id
+      AND ful.filter_id = d.source_id
+      AND d.source = 'filter'
+  ) + (
+    SELECT COUNT(*) FROM tool_call_logs tcl
+    WHERE tcl.workspace_id = d.workspace_id
+      AND tcl.tool_name = d.technical_definition
+      AND d.source = 'system'
+  ) as reference_count
+`;
+
+function stripWorkspaceId(row: any) {
+  const { workspace_id, ...safe } = row;
+  return safe;
+}
+
 // GET /:workspaceId/dictionary — paginated list with search; joins reference counts
 router.get('/:workspaceId/dictionary', async (req: Request, res: Response) => {
   const { workspaceId } = req.params;
   const { search, source, limit = 50, offset = 0 } = req.query;
 
   let queryText = `
-    SELECT d.*, 
-           (
-             SELECT COUNT(*) FROM filter_usage_log ful 
-             WHERE ful.workspace_id = d.workspace_id 
-               AND ful.filter_id = d.source_id 
-               AND d.source = 'filter'
-           ) + (
-             SELECT COUNT(*) FROM tool_call_logs tcl
-             WHERE tcl.workspace_id = d.workspace_id
-               AND tcl.tool_name = d.technical_definition
-               AND d.source = 'system'
-           ) as reference_count
+    SELECT ${SAFE_COLUMNS}, ${REFERENCE_COUNT_SUBQUERY}
     FROM data_dictionary d
     WHERE d.workspace_id = $1 AND d.is_active = TRUE
   `;
@@ -67,10 +81,10 @@ router.post('/:workspaceId/dictionary', async (req: Request, res: Response) => {
          segmentable_by = EXCLUDED.segmentable_by,
          is_active = TRUE,
          updated_at = NOW()
-       RETURNING *`,
+       RETURNING id, term, definition, technical_definition, sql_definition, segmentable_by, source, source_id, created_by, created_at, updated_at`,
       [workspaceId, term, definition, technical_definition, sql_definition, segmentable_by || [], (req as any).user?.email || 'system']
     );
-    res.json(result.rows[0]);
+    res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error('[dictionary-router] POST failed:', err);
     res.status(500).json({ error: 'Failed to create dictionary entry' });
@@ -79,21 +93,21 @@ router.post('/:workspaceId/dictionary', async (req: Request, res: Response) => {
 
 // PUT /:workspaceId/dictionary/:id — edit term/definition
 router.put('/:workspaceId/dictionary/:id', async (req: Request, res: Response) => {
-  const { id } = req.params;
+  const { workspaceId, id } = req.params;
   const { term, definition, technical_definition, sql_definition, segmentable_by } = req.body;
 
   try {
     const result = await query(
       `UPDATE data_dictionary
-       SET term = COALESCE($2, term),
-           definition = COALESCE($3, definition),
-           technical_definition = COALESCE($4, technical_definition),
-           sql_definition = COALESCE($5, sql_definition),
-           segmentable_by = COALESCE($6, segmentable_by),
+       SET term = COALESCE($3, term),
+           definition = COALESCE($4, definition),
+           technical_definition = COALESCE($5, technical_definition),
+           sql_definition = COALESCE($6, sql_definition),
+           segmentable_by = COALESCE($7, segmentable_by),
            updated_at = NOW()
-       WHERE id = $1
-       RETURNING *`,
-      [id, term, definition, technical_definition, sql_definition, segmentable_by]
+       WHERE id = $1 AND workspace_id = $2
+       RETURNING id, term, definition, technical_definition, sql_definition, segmentable_by, source, source_id, created_by, created_at, updated_at`,
+      [id, workspaceId, term, definition, technical_definition, sql_definition, segmentable_by]
     );
     if (result.rowCount === 0) return res.status(404).json({ error: 'Entry not found' });
     res.json(result.rows[0]);
@@ -105,12 +119,12 @@ router.put('/:workspaceId/dictionary/:id', async (req: Request, res: Response) =
 
 // DELETE /:workspaceId/dictionary/:id — soft delete
 router.delete('/:workspaceId/dictionary/:id', async (req: Request, res: Response) => {
-  const { id } = req.params;
+  const { workspaceId, id } = req.params;
 
   try {
     const result = await query(
-      `UPDATE data_dictionary SET is_active = FALSE, updated_at = NOW() WHERE id = $1`,
-      [id]
+      `UPDATE data_dictionary SET is_active = FALSE, updated_at = NOW() WHERE id = $1 AND workspace_id = $2`,
+      [id, workspaceId]
     );
     if (result.rowCount === 0) return res.status(404).json({ error: 'Entry not found' });
     res.json({ success: true });
@@ -125,26 +139,25 @@ router.get('/:workspaceId/dictionary/context', async (req: Request, res: Respons
   const { workspaceId } = req.params;
 
   try {
-    // Get top 50 terms by reference count desc
     const result = await query(
       `SELECT term, definition
        FROM data_dictionary
        WHERE workspace_id = $1 AND is_active = TRUE
        ORDER BY (
-         SELECT COUNT(*) FROM filter_usage_log ful 
-         WHERE ful.workspace_id = data_dictionary.workspace_id 
-           AND ful.filter_id = data_dictionary.source_id 
+         SELECT COUNT(*) FROM filter_usage_log ful
+         WHERE ful.workspace_id = data_dictionary.workspace_id
+           AND ful.filter_id = data_dictionary.source_id
            AND data_dictionary.source = 'filter'
        ) DESC
        LIMIT 50`,
       [workspaceId]
     );
-    
+
     const context: Record<string, string> = {};
     result.rows.forEach(row => {
       context[row.term] = row.definition || '';
     });
-    
+
     res.json(context);
   } catch (err) {
     console.error('[dictionary-router] GET context failed:', err);
