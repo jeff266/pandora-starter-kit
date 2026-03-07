@@ -7,6 +7,8 @@
 import { query, getClient } from '../db.js';
 import { syncWorkspace } from '../sync/orchestrator.js';
 import { syncSalesforce } from '../connectors/salesforce/sync.js';
+import { hubspotConnector } from '../connectors/hubspot/index.js';
+import { getConnectorCredentials } from '../lib/credential-store.js';
 import pRetry from 'p-retry';
 import { notifyProgress, notifyCompleted, notifyFailed } from '../utils/webhook-notifier.js';
 
@@ -337,6 +339,11 @@ export class JobQueue {
       message: 'Initializing sync...',
     });
 
+    // HubSpot is not in the generic adapter registry — call its sync directly
+    if (connectorType === 'hubspot') {
+      return await this.handleHubSpotSyncJob(job);
+    }
+
     const results = await syncWorkspace(job.workspace_id, {
       connectors: connectorType ? [connectorType] : undefined,
       mode,
@@ -386,6 +393,94 @@ export class JobQueue {
       totalRecords,
       errors,
     };
+  }
+
+  private async handleHubSpotSyncJob(job: Job): Promise<any> {
+    const workspaceId = job.workspace_id;
+    const syncLogId = job.payload.syncLogId;
+
+    try {
+      // Fetch connection record
+      const connResult = await query<{
+        id: string;
+        status: string;
+        last_sync_at: Date | null;
+      }>(
+        `SELECT id, status, last_sync_at FROM connections
+         WHERE workspace_id = $1 AND connector_name = 'hubspot'`,
+        [workspaceId]
+      );
+
+      if (connResult.rows.length === 0) {
+        throw new Error('HubSpot connection not found for workspace');
+      }
+
+      const conn = connResult.rows[0];
+      if (conn.status === 'disconnected') {
+        throw new Error('HubSpot connection is disconnected');
+      }
+
+      // Get stored credentials
+      const credentials = await getConnectorCredentials(workspaceId, 'hubspot');
+      if (!credentials) {
+        throw new Error('HubSpot credentials not found in credential store');
+      }
+
+      const connection = {
+        id: conn.id,
+        workspaceId,
+        connectorName: 'hubspot' as const,
+        status: conn.status as 'active' | 'disconnected' | 'error',
+        credentials,
+      };
+
+      // Determine sync mode: incremental if we have a prior sync timestamp
+      let result;
+      if (conn.last_sync_at) {
+        const since = new Date(conn.last_sync_at);
+        console.log(`[HubSpot Job] Starting incremental sync for workspace ${workspaceId} since ${since.toISOString()}`);
+        result = await hubspotConnector.incrementalSync(connection, workspaceId, since);
+      } else {
+        console.log(`[HubSpot Job] Starting initial sync for workspace ${workspaceId}`);
+        result = await hubspotConnector.initialSync(connection, workspaceId);
+      }
+
+      const recordsStored = result.recordsStored ?? 0;
+      console.log(`[HubSpot Job] Sync complete — ${recordsStored} records stored`);
+
+      await this.updateProgress(job.id, { current: 100, total: 100, message: 'Sync completed' });
+
+      await query(
+        `UPDATE sync_log
+         SET status = 'completed', records_synced = $1, errors = '[]', completed_at = NOW()
+         WHERE id = $2`,
+        [recordsStored, syncLogId]
+      ).catch(() => {});
+
+      // Post-sync tasks (fire-and-forget)
+      prewarmSurvivalCache(workspaceId).catch(() => {});
+      import('../skills/compute/lead-scoring.js').then(({ scoreLeads }) =>
+        scoreLeads(workspaceId)
+      ).catch((err) =>
+        console.warn('[JobQueue] Post-HubSpot-sync scoring failed', { workspaceId, err })
+      );
+
+      return { recordsStored };
+    } catch (err: any) {
+      const errorMsg = err?.message ?? String(err);
+      console.error(`[HubSpot Job] Sync failed for workspace ${workspaceId}:`, errorMsg);
+
+      await this.updateProgress(job.id, { current: 100, total: 100, message: 'Sync failed' });
+
+      await query(
+        `UPDATE sync_log
+         SET status = 'failed', errors = $1, completed_at = NOW()
+         WHERE id = $2`,
+        [JSON.stringify([errorMsg]), syncLogId]
+      ).catch(() => {});
+
+      throw err;
+    }
   }
 
   private async handleSalesforceSyncJob(job: Job): Promise<any> {

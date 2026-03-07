@@ -689,20 +689,37 @@ export default function ConnectorsPage() {
           <h2 style={{ fontSize: 16, fontWeight: 600, color: colors.text, margin: 0 }}>
             Connected tools
           </h2>
-          <button
-            onClick={() => navigate('/marketplace')}
-            style={{
-              background: 'none',
-              border: `1px solid ${colors.border}`,
-              borderRadius: 8,
-              color: colors.textSecondary,
-              fontSize: 13,
-              padding: '6px 14px',
-              cursor: 'pointer',
-            }}
-          >
-            + Add connector
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button
+              onClick={() => navigate('/connectors/health')}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: colors.textSecondary,
+                fontSize: 12,
+                cursor: 'pointer',
+                padding: '6px 4px',
+                textDecoration: 'underline',
+                textUnderlineOffset: 3,
+              }}
+            >
+              View health details
+            </button>
+            <button
+              onClick={() => navigate('/marketplace')}
+              style={{
+                background: 'none',
+                border: `1px solid ${colors.border}`,
+                borderRadius: 8,
+                color: colors.textSecondary,
+                fontSize: 13,
+                padding: '6px 14px',
+                cursor: 'pointer',
+              }}
+            >
+              + Add connector
+            </button>
+          </div>
         </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }}>
         {connectors.map((connector) => {
