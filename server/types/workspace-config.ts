@@ -152,7 +152,7 @@ export interface WorkspaceConfig {
   updated_at: Date;
 
   /** Voice and tone settings for skill output */
-  voice: VoiceConfig;
+  voice: VoiceConfig & VoiceModifierConfig;
 
   /** Tool filter configuration for excluding deals from metrics */
   tool_filters?: ToolFiltersConfig;
@@ -169,6 +169,42 @@ export interface WorkspaceConfig {
 }
 
 // ===== VOICE CONFIG =====
+
+export interface VoiceModifierConfig {
+  persona: 'teammate' | 'advisor' | 'analyst';
+  ownership_pronoun: 'we' | 'you';
+  directness: 'direct' | 'diplomatic';
+  detail_level: 'executive' | 'manager' | 'analyst';
+  name_entities: boolean;
+  celebrate_wins: boolean;
+  surface_uncertainty: boolean;
+  temporal_awareness: 'quarter_phase' | 'week_day' | 'both' | 'none';
+  brief_overrides?: {
+    opening_style?: string;
+    focus_block_label?: string;
+    show_assembly_timestamp?: boolean;
+    since_last_week_label?: string;
+  };
+  chat_overrides?: {
+    response_max_sentences?: number;
+    always_show_evidence?: boolean;
+    strategic_reasoning_style?: string;
+  };
+  document_overrides?: {
+    executive_summary_length?: string;
+    include_uncertainty_appendix?: boolean;
+    throughline_position?: string;
+  };
+  anonymize_mode?: boolean;
+  custom_terms?: {
+    deal?: string;
+    rep?: string;
+    commit?: string;
+    pipeline?: string;
+    close_date?: string;
+    quota?: string;
+  };
+}
 
 export interface VoiceConfig {
   /**

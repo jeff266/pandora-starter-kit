@@ -78,13 +78,13 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
       const existing = await getConversationState(workspaceId, CHANNEL_ID, thread_id);
       if (existing) {
         history = existing.messages.map(m => ({ role: m.role, content: m.content }));
-        sessionContext = getOrCreateSessionContext(existing.context);
+        sessionContext = await getOrCreateSessionContext(existing.context, workspaceId);
       }
       // Refresh TTL regardless
       await createConversationState(workspaceId, CHANNEL_ID, thread_id, 'command_center');
     } else {
       await createConversationState(workspaceId, CHANNEL_ID, workingThreadId, 'command_center');
-      sessionContext = getOrCreateSessionContext();
+      sessionContext = await getOrCreateSessionContext(undefined, workspaceId);
     }
   } catch (stateErr) {
     console.error('[conversation-stream] state init error (non-fatal):', stateErr);

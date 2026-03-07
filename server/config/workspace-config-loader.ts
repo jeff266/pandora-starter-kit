@@ -12,9 +12,30 @@ import type {
   WinRateResult,
   QuotaPeriodResult,
   VoiceConfig,
+  VoiceModifierConfig,
   NamedFilter,
 } from '../types/workspace-config.js';
 import { buildVoicePromptBlock } from './voice-prompt-block.js';
+import type { VoiceProfile } from '../voice/types.js';
+import { DEFAULT_VOICE_PROFILE } from '../voice/types.js';
+
+/**
+ * Default voice configuration for new workspaces
+ */
+export const DEFAULT_VOICE_CONFIG: VoiceConfig & VoiceModifierConfig = {
+  // Legacy fields
+  detail_level: 'standard',
+  framing: 'balanced',
+  alert_threshold: 'watch_and_act',
+  // VoiceProfile fields
+  persona: 'teammate',
+  ownership_pronoun: 'we',
+  directness: 'direct',
+  name_entities: true,
+  celebrate_wins: true,
+  surface_uncertainty: true,
+  temporal_awareness: 'both',
+};
 
 /**
  * Workspace Configuration Loader
@@ -581,23 +602,59 @@ export class WorkspaceConfigLoader {
     ];
   }
 
-  async getVoiceConfig(workspaceId: string): Promise<{
-    detail_level: string;
-    framing: string;
-    alert_threshold: string;
-    promptBlock: string;
-  }> {
+  async getVoiceConfig(workspaceId: string): Promise<VoiceConfig & VoiceModifierConfig> {
     const config = await this.getConfig(workspaceId);
-    const voice: VoiceConfig = config.voice || {
-      detail_level: 'standard',
-      framing: 'balanced',
-      alert_threshold: 'watch_and_act',
+    return (config.voice || DEFAULT_VOICE_CONFIG) as VoiceConfig & VoiceModifierConfig;
+  }
+
+  /**
+   * Get voice profile for a workspace (maps modifier config to profile)
+   */
+  async getVoiceProfile(workspaceId: string): Promise<VoiceProfile> {
+    const voice = await this.getVoiceConfig(workspaceId);
+
+    const profile: VoiceProfile = {
+      persona: voice.persona || DEFAULT_VOICE_PROFILE.persona,
+      ownership_pronoun: voice.ownership_pronoun || DEFAULT_VOICE_PROFILE.ownership_pronoun,
+      directness: voice.directness || DEFAULT_VOICE_PROFILE.directness,
+      detail_level: (voice.detail_level as any) || DEFAULT_VOICE_PROFILE.detail_level,
+      name_entities: voice.name_entities !== undefined ? voice.name_entities : DEFAULT_VOICE_PROFILE.name_entities,
+      celebrate_wins: voice.celebrate_wins !== undefined ? voice.celebrate_wins : DEFAULT_VOICE_PROFILE.celebrate_wins,
+      surface_uncertainty: voice.surface_uncertainty !== undefined ? voice.surface_uncertainty : DEFAULT_VOICE_PROFILE.surface_uncertainty,
+      temporal_awareness: voice.temporal_awareness || DEFAULT_VOICE_PROFILE.temporal_awareness,
     };
 
-    return {
-      ...voice,
-      promptBlock: buildVoicePromptBlock(voice),
+    // Apply anonymize mode
+    if (voice.anonymize_mode) {
+      profile.name_entities = false;
+    }
+
+    return profile;
+  }
+
+  /**
+   * Update voice configuration for a workspace
+   */
+  async updateVoiceConfig(
+    workspaceId: string,
+    partial: Partial<VoiceModifierConfig & VoiceConfig>
+  ): Promise<VoiceConfig & VoiceModifierConfig> {
+    const currentConfig = await this.getConfig(workspaceId);
+    const updatedVoice = {
+      ...(currentConfig.voice || DEFAULT_VOICE_CONFIG),
+      ...partial,
     };
+
+    await query(
+      `UPDATE context_layer
+       SET definitions = jsonb_set(definitions, '{workspace_config,voice}', $2::jsonb, true),
+           updated_at = NOW()
+       WHERE workspace_id = $1`,
+      [workspaceId, JSON.stringify(updatedVoice)]
+    );
+
+    this.clearCache(workspaceId);
+    return updatedVoice as VoiceConfig & VoiceModifierConfig;
   }
 }
 

@@ -23,6 +23,12 @@ import { validateChartSpec } from '../renderers/types.js';
 import type { ChartSpec } from '../renderers/types.js';
 import { lookupLiveDeal, detectDealMentions, buildLiveDealFactsBlock, detectContradiction } from './deal-lookup.js';
 import { 
+  buildVoiceSystemPromptSection, 
+  applyPostTransforms, 
+  buildVoiceContext 
+} from '../voice/voice-renderer.js';
+import { 
+  VoiceProfile,
   SessionContext, 
   getOrCreateSessionContext, 
   cacheComputation, 
@@ -1234,6 +1240,11 @@ Do NOT re-assert the cached value. Re-query everything.`;
     console.log(`[PandoraAgent] Contradiction detected, injecting re-query instruction`);
   }
 
+  // ── Voice and Tone injection ──────────────────────────────────────────────
+  const voiceContext = buildVoiceContext(currentSessionContext, {}); // Metrics will be defaults for now
+  const voiceSection = buildVoiceSystemPromptSection(currentSessionContext.voiceProfile, voiceContext);
+  effectiveSystemPrompt += `\n\n## Voice and Tone\n${voiceSection}`;
+
   // ── Visualization hint — inject chart output instructions ─────────────────
   const vizHint = detectVisualizationHint(message);
   if (vizHint) {
@@ -1243,7 +1254,8 @@ After computing values with tools, emit a chart_spec JSON block using ONLY tool-
 Format: \`\`\`chart_spec
 {JSON}
 \`\`\`
-Required fields: type:"chart", chartType:"${vizHint}", title, data (array of {label:string, value:number}), source.calculation_id (reference the tool call that produced the values, e.g. "query_deals:stage_breakdown"), source.run_at (ISO timestamp), source.record_count.
+Required fields: type:"chart", chartType:"${vizHint}", title, data (array of {label:string, value:number}), raw_annotation (one sentence "so what"), source.calculation_id (reference the tool call that produced the values, e.g. "query_deals:stage_breakdown"), source.run_at (ISO timestamp), source.record_count.
+The system will automatically transform your \`raw_annotation\` into the final \`annotation\` using the workspace's voice profile.
 After the chart_spec block, write one annotation sentence — the "so what" in a teammate's voice.
 DO NOT calculate numeric values yourself — use only values returned by tools.`;
     console.log(`[PandoraAgent] Visualization hint: ${vizHint}`);
@@ -1406,6 +1418,8 @@ DO NOT calculate numeric values yourself — use only values returned by tools.`
       }
 
       const parsed = parseFollowUpQuestions(response.content);
+      const voiceResult = applyPostTransforms(parsed.answer, currentSessionContext.voiceProfile);
+      parsed.answer = voiceResult.text;
 
       // Extract findings and charts from response
       const findings = extractFindings(response.content);
@@ -1475,7 +1489,7 @@ DO NOT calculate numeric values yourself — use only values returned by tools.`
         sse?.({ type: 'actions_judged', items: judgedActions });
       }
 
-      const charts = extractCharts(response.content);
+      const charts = extractCharts(response.content, currentSessionContext.voiceProfile);
       charts.forEach(c => {
         currentSessionContext.sessionCharts.push(c);
         if (currentSessionContext.accumulatedDocument) {
@@ -1968,13 +1982,20 @@ function extractFindings(content: string): any[] {
   return findings;
 }
 
-function extractCharts(content: string): ChartSpec[] {
+function extractCharts(content: string, profile?: VoiceProfile): ChartSpec[] {
   const charts: ChartSpec[] = [];
   const chartRegex = /```chart_spec\n([\s\S]*?)\n```/g;
   let match;
   while ((match = chartRegex.exec(content)) !== null) {
     try {
       const spec = JSON.parse(match[1]);
+      
+      // V_ANNOTATION: Transform raw_annotation using voice profile if available
+      if (spec.raw_annotation && !spec.annotation && profile) {
+        const transformed = applyPostTransforms(spec.raw_annotation, profile);
+        spec.annotation = transformed.text;
+      }
+
       if (validateChartSpec(spec, { calculation_id: spec.source?.calculation_id })) {
         charts.push(spec);
       }

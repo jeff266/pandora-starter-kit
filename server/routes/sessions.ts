@@ -14,7 +14,7 @@ router.get('/:workspaceId/sessions/:threadId/document', async (req, res) => {
     const state = await getConversationState(workspaceId, 'command_center', threadId);
     if (!state) return res.status(404).json({ error: 'Session not found' });
 
-    const sessionContext = getOrCreateSessionContext(state.context);
+    const sessionContext = await getOrCreateSessionContext(state.context, workspaceId);
     res.json(sessionContext.accumulatedDocument || null);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -30,7 +30,7 @@ router.post('/:workspaceId/sessions/:threadId/document/contribution/:contributio
     const state = await getConversationState(workspaceId, 'command_center', threadId);
     if (!state) return res.status(404).json({ error: 'Session not found' });
 
-    const sessionContext = getOrCreateSessionContext(state.context);
+    const sessionContext = await getOrCreateSessionContext(state.context, workspaceId);
     if (!sessionContext.accumulatedDocument) {
       return res.status(400).json({ error: 'No document in session' });
     }
@@ -58,7 +58,7 @@ router.post('/:workspaceId/sessions/:threadId/document/synthesize', async (req, 
     const state = await getConversationState(workspaceId, 'command_center', threadId);
     if (!state) return res.status(404).json({ error: 'Session not found' });
 
-    const sessionContext = getOrCreateSessionContext(state.context);
+    const sessionContext = await getOrCreateSessionContext(state.context, workspaceId);
     if (!sessionContext.accumulatedDocument) {
       return res.status(400).json({ error: 'No document in session' });
     }
@@ -85,7 +85,7 @@ router.post('/:workspaceId/sessions/:threadId/document/contribution/:contributio
     const state = await getConversationState(workspaceId, 'command_center', threadId);
     if (!state) return res.status(404).json({ error: 'Session not found' });
 
-    const sessionContext = getOrCreateSessionContext(state.context);
+    const sessionContext = await getOrCreateSessionContext(state.context, workspaceId);
     if (!sessionContext.accumulatedDocument) {
       return res.status(400).json({ error: 'No document in session' });
     }
@@ -110,7 +110,7 @@ router.post('/:workspaceId/sessions/:threadId/document/distribute', async (req: 
     const state = await getConversationState(workspaceId, 'command_center', threadId);
     if (!state) return res.status(404).json({ error: 'Session not found' });
 
-    const sessionContext = getOrCreateSessionContext(state.context);
+    const sessionContext = await getOrCreateSessionContext(state.context, workspaceId);
     if (!sessionContext.accumulatedDocument) {
       return res.status(400).json({ error: 'No document in session' });
     }

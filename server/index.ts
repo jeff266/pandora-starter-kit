@@ -132,6 +132,8 @@ import viewPreferenceRouter from './routes/view-preference.js';
 import conversationStreamRouter from './routes/conversation-stream.js';
 import motionsRouter from './routes/motions.js';
 import goalsRouter from './routes/goals.js';
+import voiceCalibrationRouter from './routes/voice-calibration.js';
+import workspaceVoiceRouter from './routes/workspace-voice.js';
 import goalSnapshotsRouter from './routes/goal-snapshots.js';
 
 dotenv.config();
@@ -391,6 +393,8 @@ workspaceApiRouter.use(conversationStreamRouter);
 workspaceApiRouter.use(motionsRouter);
 workspaceApiRouter.use(goalsRouter);
 workspaceApiRouter.use(goalSnapshotsRouter);
+workspaceApiRouter.use(voiceCalibrationRouter);
+workspaceApiRouter.use(workspaceVoiceRouter);
 workspaceApiRouter.use(governanceRouter);
 app.use("/api/workspaces", workspaceApiRouter);
 

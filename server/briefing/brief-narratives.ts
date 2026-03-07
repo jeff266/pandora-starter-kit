@@ -2,6 +2,15 @@ import type { BriefType, EditorialFocus, AiBlurbs } from './brief-types.js';
 import { callLLM } from '../utils/llm-router.js';
 import { formatCompact } from './brief-utils.js';
 import { buildWorkspaceContextBlock } from '../context/workspace-memory.js';
+import { 
+  VoiceProfile, 
+  DEFAULT_VOICE_PROFILE 
+} from '../voice/types.js';
+import { 
+  buildVoiceSystemPromptSection, 
+  applyPostTransforms, 
+  buildVoiceContext 
+} from '../voice/voice-renderer.js';
 
 type QuarterPhase = 'early' | 'mid' | 'late' | 'final_week';
 
@@ -28,6 +37,16 @@ export async function generateBriefNarratives(
 ): Promise<AiBlurbs> {
   const contextBlock = await buildWorkspaceContextBlock(workspaceId).catch(() => '');
 
+  // V004 will load from DB, for now use default
+  const voiceProfile: VoiceProfile = DEFAULT_VOICE_PROFILE;
+  const voiceContext = buildVoiceContext({}, {
+    attainment_pct: theNumber.attainment_pct,
+    days_remaining: theNumber.days_remaining,
+    quarter_phase: quarterPhase,
+    surface: 'brief'
+  });
+  const voiceSection = buildVoiceSystemPromptSection(voiceProfile, voiceContext);
+
   const phase: QuarterPhase = quarterPhase ?? 'mid';
   const temporalFocus = getTemporalFocus(phase);
   const quarterPositionLine = weekOfQuarter != null
@@ -35,6 +54,9 @@ export async function generateBriefNarratives(
     : '';
 
   const systemPrompt = `You are Pandora, writing a ${briefType} revenue briefing for a sales leadership team.
+
+## Voice and Tone
+${voiceSection}
 
 TEMPORAL CONTEXT:
 ${temporalFocus}
@@ -116,7 +138,16 @@ ${requestedKeys}`;
     const raw = typeof response === 'string' ? response : (response as any)?.content || '';
     const cleaned = raw.replace(/```json\n?|\n?```/g, '').trim();
     try {
-      return JSON.parse(cleaned) as AiBlurbs;
+      const parsed = JSON.parse(cleaned) as AiBlurbs;
+      // Apply voice transforms to each blurb
+      for (const key of Object.keys(parsed)) {
+        const blurb = (parsed as any)[key];
+        if (typeof blurb === 'string') {
+          const transformed = applyPostTransforms(blurb, voiceProfile);
+          (parsed as any)[key] = transformed.text;
+        }
+      }
+      return parsed;
     } catch {
       console.error('[brief-narratives] Failed to parse LLM JSON:', cleaned.slice(0, 300));
       return {} as AiBlurbs;

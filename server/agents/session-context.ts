@@ -1,5 +1,10 @@
 import { ChartSpec } from '../renderers/types.js';
 import { AccumulatedDocument } from '../documents/types.js';
+import type { VoiceProfile } from '../voice/types.js';
+import { DEFAULT_VOICE_PROFILE } from '../voice/types.js';
+import { configLoader } from '../config/workspace-config-loader.js';
+
+export type { VoiceProfile };
 
 export interface SessionContext {
   activeScope: {
@@ -16,9 +21,11 @@ export interface SessionContext {
   sessionTables: any[];
   sessionRecommendations: any[];
   accumulatedDocument?: AccumulatedDocument; 
+  voiceProfile: VoiceProfile;
+  workspaceId?: string;
 }
 
-export function createSessionContext(initialScope?: Partial<SessionContext['activeScope']>): SessionContext {
+export function createSessionContext(initialScope?: Partial<SessionContext['activeScope']>, workspaceId?: string): SessionContext {
   return {
     activeScope: {
       type: 'workspace',
@@ -31,14 +38,24 @@ export function createSessionContext(initialScope?: Partial<SessionContext['acti
     sessionCharts: [],
     sessionTables: [],
     sessionRecommendations: [],
+    voiceProfile: DEFAULT_VOICE_PROFILE,
+    workspaceId,
   };
 }
 
-export function getOrCreateSessionContext(existingContext?: any): SessionContext {
+export async function getOrCreateSessionContext(existingContext?: any, workspaceId?: string): Promise<SessionContext> {
   if (existingContext?.sessionContext) {
     return existingContext.sessionContext;
   }
-  return createSessionContext();
+  const context = createSessionContext(undefined, workspaceId);
+  if (workspaceId) {
+    try {
+      context.voiceProfile = await configLoader.getVoiceProfile(workspaceId);
+    } catch (err) {
+      console.error(`[session-context] Failed to load voice profile for workspace ${workspaceId}:`, err);
+    }
+  }
+  return context;
 }
 
 export function updateSessionScope(context: SessionContext, newScope: Partial<SessionContext['activeScope']>) {

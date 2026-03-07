@@ -436,3 +436,32 @@ Added to `server/routes/data.ts`:
 
 ### All V2 Tasks Complete
 T010–T021 are all built and running. Migration tracker updated with 134–137. No regressions on T001–T009.
+
+## Voice Model System (March 2026 — V001–V006)
+
+### V001: Voice Renderer Module
+- **`server/voice/types.ts`** (new): `VoiceProfile` interface (persona, ownership_pronoun, directness, detail_level, name_entities, celebrate_wins, surface_uncertainty, temporal_awareness), `VoiceRenderInput`, `VoiceRenderContext`, `VoiceRenderOutput`, `WorkspaceVoiceOverrides`, `DEFAULT_VOICE_PROFILE` constant
+- **`server/voice/voice-renderer.ts`** (new): `buildVoiceSystemPromptSection(profile, context)` — generates persona/directness/detail/entity/temporal/uncertainty prompt blocks; `applyPostTransforms(text, profile)` — strips hedge phrases, replaces "the team"→"we" for teammate persona, returns `{text, transformationsApplied}`; `buildVoiceContext()` helper from session + workspace metrics
+
+### V002: Voice Injection into Orchestrator + Agent
+- **`server/agents/session-context.ts`**: Extended with `voiceProfile: VoiceProfile` (loaded at session init from workspace config, defaults to `DEFAULT_VOICE_PROFILE`); `getOrCreateSessionContext` now async; loads per-workspace voice profile via `configLoader.getVoiceProfile()`
+- **`server/chat/pandora-agent.ts`**: Builds `VoiceRenderContext` before each LLM call; appends `## Voice and Tone\n{voiceSection}` to system prompt; runs `applyPostTransforms` on raw LLM response before synthesis parsing
+- **`server/briefing/brief-narratives.ts`**: Voice prompt section injected into brief narrative generation system prompt; `applyPostTransforms` applied to each generated blurb
+
+### V003: Voice Calibration Endpoint
+- **`server/routes/voice-calibration.ts`** (new): `POST /api/workspaces/:id/voice/preview` — accepts `{voiceProfile, sampleContext}` with 4 sample scenarios (late_quarter_behind, on_track, over_target, mid_quarter_review); returns `{systemPromptSection, sampleOutputBefore, sampleOutputAfter, transformationsApplied}`
+
+### V004: Workspace Voice Config Schema + Storage
+- **`server/types/workspace-config.ts`**: Added `VoiceModifierConfig` with core voice fields + `brief_overrides`, `chat_overrides`, `document_overrides`, `anonymize_mode`, `custom_terms`; `WorkspaceConfig.voice` updated to combined type
+- **`migrations/138_voice_config_defaults.sql`** (applied): Sets default voice config (`persona='teammate'`, `directness='direct'`, etc.) on all existing `context_layer` workspace configs
+- **`server/config/workspace-config-loader.ts`**: Added `getVoiceConfig()`, `getVoiceProfile()` (maps config to profile, applies anonymize_mode), `updateVoiceConfig()` (partial merge + cache invalidation), `DEFAULT_VOICE_CONFIG` constant
+
+### V005: Admin Voice Settings UI
+- **`client/src/pages/admin/VoiceSettings.tsx`** (new): Full admin page — Core Voice (persona/ownership/directness/detail radio groups), Content Preferences (entity naming, wins, uncertainty, temporal dropdowns), Demo Mode (anonymize toggle), Custom Terminology (6 text inputs), Brief/Chat/Document overrides; Live preview panel calls preview endpoint on change (500ms debounce); Save/Reset buttons
+- **`client/src/App.tsx`**: Route `/admin/voice` + `VoiceSettings` page title registered
+
+### V006: Voice Config API Endpoints
+- **`server/routes/workspace-voice.ts`** (new): `GET /api/workspaces/:id/config/voice`, `PATCH /api/workspaces/:id/config/voice` (admin, partial merge, cache invalidation), `POST /api/workspaces/:id/voice/preview` (member, uses profile from body), `POST /api/workspaces/:id/voice/reset` (admin)
+
+### V_ANNOTATION: Voice-Aware Chart Annotations
+- **`server/chat/pandora-agent.ts`**: LLM now emits `raw_annotation` in chart_spec; `extractCharts()` accepts `voiceProfile` and runs `applyPostTransforms(raw_annotation, voiceProfile)` → final `annotation` before chart reaches frontend
