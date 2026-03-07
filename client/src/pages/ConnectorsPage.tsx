@@ -785,11 +785,14 @@ export default function ConnectorsPage() {
                       ))}
                     </select>
                   </div>
-                  {connector.next_sync_at && (
-                    <div style={{ fontSize: 10, color: colors.textMuted, marginTop: 4, marginLeft: 64 }}>
-                      Next: {formatTimeAgo(connector.next_sync_at)}
-                    </div>
-                  )}
+                  {connector.next_sync_at && (() => {
+                    const isOverdue = new Date(connector.next_sync_at).getTime() < Date.now();
+                    return (
+                      <div style={{ fontSize: 10, color: isOverdue ? colors.yellow : colors.textMuted, marginTop: 4, marginLeft: 64 }}>
+                        {isOverdue ? 'Overdue' : `Next: ${formatTimeAgo(connector.next_sync_at)}`}
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
 

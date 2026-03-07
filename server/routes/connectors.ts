@@ -468,20 +468,24 @@ router.get('/:workspaceId/connectors/status', async (req: Request<WorkspaceParam
       const lastSync = conn.last_sync_at ? new Date(conn.last_sync_at).getTime() : 0;
       const hoursSinceSync = lastSync ? (now - lastSync) / (1000 * 60 * 60) : Infinity;
 
+      const intervalMinutes: SyncIntervalMinutes = (VALID_SYNC_INTERVALS as readonly number[]).includes(conn.sync_interval_minutes)
+        ? conn.sync_interval_minutes as SyncIntervalMinutes
+        : 60;
+
+      // Stale threshold: 3 missed syncs (minimum 4h to avoid false-positives on slow first syncs)
+      const staleThresholdHours = Math.max(4, (intervalMinutes / 60) * 3);
+
       let health: 'green' | 'yellow' | 'red';
       if (conn.status === 'error' || conn.status === 'disconnected') {
         health = 'red';
       } else if (conn.status === 'degraded' || !lastSync) {
         health = 'yellow';
-      } else if (hoursSinceSync > 24 || (conn.error_message && conn.status !== 'error')) {
+      } else if (hoursSinceSync > staleThresholdHours || (conn.error_message && conn.status !== 'error')) {
         health = 'yellow';
       } else {
         health = 'green';
       }
 
-      const intervalMinutes: SyncIntervalMinutes = (VALID_SYNC_INTERVALS as readonly number[]).includes(conn.sync_interval_minutes)
-        ? conn.sync_interval_minutes as SyncIntervalMinutes
-        : 60;
       const nextSyncAt = conn.last_sync_at
         ? new Date(new Date(conn.last_sync_at).getTime() + intervalMinutes * 60 * 1000).toISOString()
         : null;
