@@ -165,6 +165,9 @@ const ADVISORY_STATELESS_PATTERNS = [
   /\b(difference between|compare|vs\.?|versus)\b.*(methodology|framework|model|approach)/i,
   /^(explain|define|what does .+ mean|how does .+ work)\b/i,
   /\b(best practice|industry standard|benchmark|typical|average company|most companies)\b/i,
+  /\b(how do you|how do we|how is|how are)\s+(define|calculate|measure|determine|compute|count)\b/i,
+  /\bwhat (counts?|qualifies?) as\b/i,
+  /\bwhat does .+ (mean|include|count as|represent|qualify as)\b/i,
 ];
 
 const ADVISORY_WITH_DATA_PATTERNS = [

@@ -248,8 +248,14 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
   // ── Goal-Aware Investigation Routing ─────────────────────────────────────────
   // When a question references goal-tracking keywords and structured goals exist,
   // route through the investigation engine for deeper, causal analysis.
+  // GUARD: Skip investigation routing for definitional/advisory questions — these
+  // contain goal-related nouns (e.g. "coverage") but don't need data.
+  const advisoryGuard = /^(how do you|how do we|how is|how are|what (is|are|does)|explain|define|what does|what counts|what qualifies)\b/i;
+  // GUARD: Skip investigation routing for explicit future-quarter scoping — the
+  // investigation engine only knows the current period; Pandora Agent handles temporal.
+  const futureQuarterGuard = /\b(next quarter|next month|q2|q3|q4|q[234])\b/i;
   const goalKeywords = /\b(number|target|goal|quota|hitting|miss|track|forecast|behind|ahead|gap|pace|run rate|attainment|coverage|on.?track)\b/i;
-  if (!answer && goalKeywords.test(message)) {
+  if (!answer && goalKeywords.test(message) && !advisoryGuard.test(message) && !futureQuarterGuard.test(message)) {
     try {
       const goals = await goalService.list(workspaceId, { is_active: true });
       if (goals.length > 0) {
@@ -310,10 +316,12 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
     }
   }
 
-  // ── Step 4.0: Intent Classification (in_app only) ────────────────────────────
+  // ── Step 4.0: Intent Classification (in_app + slack_dm) ─────────────────────
   // Pre-dispatch routing to catch advisory questions before expensive tool calls.
   // Falls through to Pandora Agent for data_query or ambiguous categories.
-  if (!answer && surface === 'in_app') {
+  // slack_dm gets the full classification + Pandora Agent path (same as in_app).
+  // slack_thread uses the lighter runScopedAnalysis path below.
+  if (!answer && (surface === 'in_app' || surface === 'slack_dm')) {
     try {
       const conversationHistory = buildConversationHistory(state.messages || [] as any);
       const intentClassification = await classifyIntent(message, conversationHistory, workspaceId);
@@ -566,10 +574,11 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
     }
   }
 
-  // ── Pandora Agent — exclusive path for all in_app questions ─────────────────
-  // Free-text questions on the Command Center surface go here and nowhere else.
-  // runScopedAnalysis is NOT a fallback for in_app — it's Slack-only (below).
-  if (!answer && surface === 'in_app') {
+  // ── Pandora Agent — full path for in_app and slack_dm ───────────────────────
+  // Free-text questions from the Command Center and Slack DMs go here.
+  // slack_thread uses the lighter runScopedAnalysis path below.
+  // runScopedAnalysis is NOT a fallback for in_app or slack_dm.
+  if (!answer && (surface === 'in_app' || surface === 'slack_dm')) {
     try {
       const history = buildConversationHistory(state.messages || [] as any);
 
@@ -650,8 +659,9 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
     }
   }
 
-  // ── Slack path — runScopedAnalysis for slack_thread / slack_dm ───────────────
-  // in_app questions never reach here; Pandora Agent handles them exclusively.
+  // ── Slack path — runScopedAnalysis for slack_thread only ────────────────────
+  // in_app and slack_dm questions never reach here; Pandora Agent handles them.
+  // slack_thread uses the lighter scoped-analysis path (no full tool loop).
   if (!answer && surface !== 'in_app') {
     try {
     if (isFollowUp) {
