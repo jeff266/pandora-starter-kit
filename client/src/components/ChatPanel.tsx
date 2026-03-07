@@ -3,6 +3,8 @@ import { useIsMobile } from '../hooks/useIsMobile';
 import { api, getAuthToken } from '../lib/api';
 import { useDemoMode } from '../contexts/DemoModeContext';
 import { Icon } from './icons';
+import ChartRenderer from './shared/ChartRenderer';
+import type { ChartSpec } from './shared/ChartRenderer';
 
 interface ToolCall {
   tool: string;
@@ -36,6 +38,7 @@ interface ChatMessage {
   evidence?: Evidence;
   tool_call_count?: number;
   latency_ms?: number;
+  chart_specs?: ChartSpec[];
 }
 
 interface ChatScope {
@@ -305,6 +308,7 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
         evidence: result.evidence,
         tool_call_count: result.tool_call_count,
         latency_ms: result.latency_ms,
+        chart_specs: result.chart_specs,
       };
       setMessages(prev => [...prev, assistantMsg]);
     } catch (err) {
@@ -493,6 +497,15 @@ export default function ChatPanel({ isOpen, onClose, scope }: ChatPanelProps) {
                   toolCallCount={msg.tool_call_count}
                   latencyMs={msg.latency_ms}
                 />
+              )}
+              {msg.role === 'assistant' && msg.chart_specs && msg.chart_specs.length > 0 && (
+                <div style={{ marginTop: 16 }}>
+                  {msg.chart_specs.map((spec, i) => (
+                    <div key={i} style={{ marginBottom: i < msg.chart_specs!.length - 1 ? 16 : 0 }}>
+                      <ChartRenderer spec={spec} compact={false} />
+                    </div>
+                  ))}
+                </div>
               )}
               {msg.role === 'assistant' && isLongResponse && !alreadyHasDoc && !loading && (
                 <div style={{ marginTop: 10, borderTop: '1px solid #1e293b', paddingTop: 10 }}>

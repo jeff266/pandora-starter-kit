@@ -17,17 +17,21 @@ import type { LiveBriefData } from './live-query-assembler.js';
 import { computeBriefFingerprint, getLastBriefFingerprint } from './fingerprint.js';
 import { checkRefreshRateLimit } from './rate-limiter.js';
 import { callLLM } from '../utils/llm-router.js';
+import { createBriefSSEEmitter, NULL_EMITTER, type BriefSSEEmitter } from './brief-sse-emitter.js';
+import { getDictionaryContext } from '../dictionary/dictionary-context.js';
+import { getToolDefinitionsContext } from '../skills/tool-context.js';
 
 // ─── Entry point ─────────────────────────────────────────────────────────────
 
 export async function assembleBrief(
   workspaceId: string,
-  options: { brief_type?: BriefType; force?: boolean } = {}
+  options: { brief_type?: BriefType; force?: boolean; emitter?: BriefSSEEmitter } = {}
 ): Promise<AssembledBrief> {
   const startTime = Date.now();
   const now = new Date();
   const briefType = options.brief_type ?? determineBriefType(now);
   const todayStr = now.toISOString().split('T')[0];
+  const { emitter = NULL_EMITTER } = options;
 
   if (!options.force) {
     const existing = await query<any>(
@@ -51,13 +55,13 @@ export async function assembleBrief(
   try {
     let result: AssembledBrief;
     if (briefType === 'monday_setup') {
-      result = await assembleMondaySetup(workspaceId, now, briefType, startTime);
+      result = await assembleMondaySetup(workspaceId, now, briefType, startTime, emitter);
     } else if (briefType === 'friday_recap') {
-      result = await assembleFridayRecap(workspaceId, now, briefType, startTime);
+      result = await assembleFridayRecap(workspaceId, now, briefType, startTime, emitter);
     } else if (briefType === 'quarter_close') {
-      result = await assembleQuarterClose(workspaceId, now, briefType, startTime);
+      result = await assembleQuarterClose(workspaceId, now, briefType, startTime, emitter);
     } else {
-      result = await assemblePulse(workspaceId, now, briefType, startTime);
+      result = await assemblePulse(workspaceId, now, briefType, startTime, emitter);
     }
     return result;
   } catch (err) {
@@ -357,10 +361,19 @@ async function getDealsToWatch(workspaceId: string, wonLostStages: string[], sin
 
 // ─── Sub-assemblers ───────────────────────────────────────────────────────────
 
-async function assembleMondaySetup(workspaceId: string, now: Date, briefType: BriefType, startTime: number): Promise<AssembledBrief> {
+async function assembleMondaySetup(workspaceId: string, now: Date, briefType: BriefType, startTime: number, emitter: BriefSSEEmitter): Promise<AssembledBrief> {
+  emitter.agentThinking('brief-assembler');
+
   const monday = getMonday(now);
   const priorMonday = subDays(monday, 7);
   const wonLostStages = await getWonLostStages(workspaceId);
+
+  emitter.toolCall('brief-assembler', 'getTheNumber', 'Computing attainment');
+  emitter.toolCall('brief-assembler', 'getWhatChanged', 'Analyzing pipeline changes');
+  emitter.toolCall('brief-assembler', 'getSegments', 'Segmenting pipeline');
+  emitter.toolCall('brief-assembler', 'getReps', 'Loading rep performance');
+  emitter.toolCall('brief-assembler', 'getDealsToWatch', 'Identifying key deals');
+
   const [theNumber, whatChanged, segments, reps, deals, temporal] = await Promise.all([
     getTheNumber(workspaceId, wonLostStages, now),
     getWhatChanged(workspaceId, wonLostStages, monday, priorMonday, monday),
@@ -369,24 +382,40 @@ async function assembleMondaySetup(workspaceId: string, now: Date, briefType: Br
     getDealsToWatch(workspaceId, wonLostStages, subDays(now, 7)),
     computeTemporalContext(workspaceId).catch(() => null),
   ]);
+
+  if (theNumber.chart_spec) emitter.chartSpec(theNumber.chart_spec);
+  if (whatChanged.chart_spec) emitter.chartSpec(whatChanged.chart_spec);
+  if (reps.chart_spec) emitter.chartSpec(reps.chart_spec);
+
   const editorialFocus = determineEditorialFocus(briefType, theNumber, whatChanged as any, reps, deals, theNumber.days_remaining);
   const forecastAccuracyNote = await getForecastAccuracyContext(workspaceId).catch(() => undefined);
+
+  emitter.toolCall('brief-assembler', 'generateNarrative', 'Synthesizing brief narrative');
   const rawBlurbs = await generateBriefNarratives(workspaceId, briefType, theNumber, whatChanged, reps.items, deals.items, editorialFocus, temporal?.weekOfQuarter, temporal?.quarterPhase as any, temporal?.pctQuarterComplete);
   const aiBlurbs = await annotateBriefNarrative(workspaceId, rawBlurbs, { theNumber, whatChanged, reps: reps.items, deals: deals.items });
-  
+
   // Trigger partial accuracy write
   const periodLabel = getCurrentPeriodLabel();
   await writeQuarterlyForecastAccuracy(workspaceId, periodLabel).catch(err => console.error('Failed to write forecast accuracy:', err));
 
+  emitter.agentDone('brief-assembler', 'Brief data assembled');
+
   return saveBrief(workspaceId, briefType, now, { theNumber, whatChanged, segments, reps, deals, aiBlurbs, editorialFocus, startTime, forecastAccuracyNote });
 }
 
-async function assemblePulse(workspaceId: string, now: Date, briefType: BriefType, startTime: number): Promise<AssembledBrief> {
+async function assemblePulse(workspaceId: string, now: Date, briefType: BriefType, startTime: number, emitter: BriefSSEEmitter): Promise<AssembledBrief> {
+  emitter.agentThinking('brief-assembler');
+
   const wonLostStages = await getWonLostStages(workspaceId);
   const mondayBriefRes = await query<any>(`SELECT generated_at::text, the_number FROM weekly_briefs WHERE workspace_id = $1 AND brief_type = 'monday_setup' AND status IN ('ready','sent','edited') ORDER BY generated_at DESC LIMIT 1`, [workspaceId]);
   const mondayBrief = mondayBriefRes.rows[0];
   const since = mondayBrief ? new Date(mondayBrief.generated_at) : getMonday(now);
   const sinceLabel = since.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+
+  emitter.toolCall('brief-assembler', 'getTheNumber', 'Computing attainment');
+  emitter.toolCall('brief-assembler', 'getWhatChanged', 'Analyzing pipeline changes');
+  emitter.toolCall('brief-assembler', 'getReps', 'Loading rep performance');
+  emitter.toolCall('brief-assembler', 'getDealsToWatch', 'Identifying key deals');
 
   const [theNumber, whatChanged, reps, deals] = await Promise.all([
     getTheNumber(workspaceId, wonLostStages, now),
@@ -394,6 +423,10 @@ async function assemblePulse(workspaceId: string, now: Date, briefType: BriefTyp
     getReps(workspaceId, wonLostStages),
     getDealsToWatch(workspaceId, wonLostStages, since),
   ]);
+
+  if (theNumber.chart_spec) emitter.chartSpec(theNumber.chart_spec);
+  if (whatChanged.chart_spec) emitter.chartSpec(whatChanged.chart_spec);
+  if (reps.chart_spec) emitter.chartSpec(reps.chart_spec);
 
   if (mondayBrief?.the_number) {
     const mondayNum = typeof mondayBrief.the_number === 'string' ? JSON.parse(mondayBrief.the_number) : mondayBrief.the_number;
@@ -418,20 +451,32 @@ async function assemblePulse(workspaceId: string, now: Date, briefType: BriefTyp
   const temporal = await computeTemporalContext(workspaceId).catch(() => null);
   const editorialFocus = determineEditorialFocus(briefType, theNumber, whatChanged as any, reps, deals, theNumber.days_remaining);
   const forecastAccuracyNote = await getForecastAccuracyContext(workspaceId).catch(() => undefined);
+
+  emitter.toolCall('brief-assembler', 'generateNarrative', 'Synthesizing brief narrative');
   const rawBlurbs = await generateBriefNarratives(workspaceId, briefType, theNumber, whatChanged, reps.items, deals.items, editorialFocus, temporal?.weekOfQuarter, temporal?.quarterPhase as any, temporal?.pctQuarterComplete);
   const aiBlurbs = await annotateBriefNarrative(workspaceId, rawBlurbs, { theNumber, whatChanged, reps: reps.items, deals: deals.items });
-  
+
   // Trigger partial accuracy write
   const periodLabel = getCurrentPeriodLabel();
   await writeQuarterlyForecastAccuracy(workspaceId, periodLabel).catch(err => console.error('Failed to write forecast accuracy:', err));
 
+  emitter.agentDone('brief-assembler', 'Brief data assembled');
+
   return saveBrief(workspaceId, briefType, now, { theNumber, whatChanged, segments, reps, deals, aiBlurbs, editorialFocus, startTime, forecastAccuracyNote });
 }
 
-async function assembleFridayRecap(workspaceId: string, now: Date, briefType: BriefType, startTime: number): Promise<AssembledBrief> {
+async function assembleFridayRecap(workspaceId: string, now: Date, briefType: BriefType, startTime: number, emitter: BriefSSEEmitter): Promise<AssembledBrief> {
+  emitter.agentThinking('brief-assembler');
+
   const monday = getMonday(now);
   const priorMonday = subDays(monday, 7);
   const wonLostStages = await getWonLostStages(workspaceId);
+
+  emitter.toolCall('brief-assembler', 'getTheNumber', 'Computing attainment');
+  emitter.toolCall('brief-assembler', 'getWhatChanged', 'Analyzing pipeline changes');
+  emitter.toolCall('brief-assembler', 'getSegments', 'Segmenting pipeline');
+  emitter.toolCall('brief-assembler', 'getReps', 'Loading rep performance');
+  emitter.toolCall('brief-assembler', 'getDealsToWatch', 'Identifying key deals');
 
   const [theNumber, whatChanged, segments, reps, deals] = await Promise.all([
     getTheNumber(workspaceId, wonLostStages, now),
@@ -441,6 +486,10 @@ async function assembleFridayRecap(workspaceId: string, now: Date, briefType: Br
     getDealsToWatch(workspaceId, wonLostStages, monday),
   ]);
 
+  if (theNumber.chart_spec) emitter.chartSpec(theNumber.chart_spec);
+  if (whatChanged.chart_spec) emitter.chartSpec(whatChanged.chart_spec);
+  if (reps.chart_spec) emitter.chartSpec(reps.chart_spec);
+
   reps.items.sort((a: any, b: any) => (b.closed || 0) - (a.closed || 0));
   const wonThisWeek = await query<any>(`SELECT id::text, name, amount, stage, COALESCE(owner,'') as owner FROM deals WHERE workspace_id = $1 AND stage_normalized = 'closed_won' AND close_date >= $2 ORDER BY amount DESC LIMIT 5`, [workspaceId, monday.toISOString().split('T')[0]]);
   (deals as any).won_this_week = wonThisWeek.rows.map((d: any) => ({ id: d.id, name: d.name, amount: parseFloat(d.amount||'0'), owner: d.owner }));
@@ -448,23 +497,36 @@ async function assembleFridayRecap(workspaceId: string, now: Date, briefType: Br
   const temporal = await computeTemporalContext(workspaceId).catch(() => null);
   const editorialFocus = determineEditorialFocus(briefType, theNumber, whatChanged as any, reps, deals, theNumber.days_remaining);
   const forecastAccuracyNote = await getForecastAccuracyContext(workspaceId).catch(() => undefined);
+
+  emitter.toolCall('brief-assembler', 'generateNarrative', 'Synthesizing brief narrative');
   const rawBlurbs = await generateBriefNarratives(workspaceId, briefType, theNumber, whatChanged, reps.items, deals.items, editorialFocus, temporal?.weekOfQuarter, temporal?.quarterPhase as any, temporal?.pctQuarterComplete);
   const aiBlurbs = await annotateBriefNarrative(workspaceId, rawBlurbs, { theNumber, whatChanged, reps: reps.items, deals: deals.items });
-  
+
   // Trigger partial accuracy write
   const periodLabel = getCurrentPeriodLabel();
   await writeQuarterlyForecastAccuracy(workspaceId, periodLabel).catch(err => console.error('Failed to write forecast accuracy:', err));
 
+  emitter.agentDone('brief-assembler', 'Brief data assembled');
+
   return saveBrief(workspaceId, briefType, now, { theNumber, whatChanged, segments, reps, deals, aiBlurbs, editorialFocus, startTime, forecastAccuracyNote });
 }
 
-async function assembleQuarterClose(workspaceId: string, now: Date, briefType: BriefType, startTime: number): Promise<AssembledBrief> {
+async function assembleQuarterClose(workspaceId: string, now: Date, briefType: BriefType, startTime: number, emitter: BriefSSEEmitter): Promise<AssembledBrief> {
+  emitter.agentThinking('brief-assembler');
+
   const wonLostStages = await getWonLostStages(workspaceId);
   const openFilter = buildOpenFilter(wonLostStages);
+
+  emitter.toolCall('brief-assembler', 'getTheNumber', 'Computing attainment');
+  emitter.toolCall('brief-assembler', 'getReps', 'Loading rep performance');
+
   const [theNumber, reps] = await Promise.all([
     getTheNumber(workspaceId, wonLostStages, now),
     getReps(workspaceId, wonLostStages),
   ]);
+
+  if (theNumber.chart_spec) emitter.chartSpec(theNumber.chart_spec);
+  if (reps.chart_spec) emitter.chartSpec(reps.chart_spec);
 
   reps.items.sort((a: any, b: any) => (b.gap || 0) - (a.gap || 0));
 
@@ -484,8 +546,10 @@ async function assembleQuarterClose(workspaceId: string, now: Date, briefType: B
   const segments: any = { omitted: true, reason: 'Not shown during quarter-close' };
   const temporal = await computeTemporalContext(workspaceId).catch(() => null);
   const editorialFocus = determineEditorialFocus(briefType, theNumber, whatChanged, reps, deals, theNumber.days_remaining);
+
+  emitter.toolCall('brief-assembler', 'generateNarrative', 'Synthesizing brief narrative');
   const rawBlurbs = await generateBriefNarratives(workspaceId, briefType, theNumber, whatChanged, reps.items, deals.items, editorialFocus, temporal?.weekOfQuarter, temporal?.quarterPhase as any, temporal?.pctQuarterComplete);
-  
+
   // Closed-Loop Recommendations
   const outcomes = await getOutcomeSummaryForBrief(workspaceId, subDays(now, 7));
   if (outcomes.length > 0) {
@@ -494,6 +558,9 @@ async function assembleQuarterClose(workspaceId: string, now: Date, briefType: B
   }
 
   const aiBlurbs = await annotateBriefNarrative(workspaceId, rawBlurbs, { theNumber, whatChanged, reps: reps.items, deals: deals.items });
+
+  emitter.agentDone('brief-assembler', 'Brief data assembled');
+
   return saveBrief(workspaceId, briefType, now, { theNumber, whatChanged, segments, reps, deals, aiBlurbs, editorialFocus, startTime });
 }
 
@@ -729,7 +796,8 @@ async function synthesizeBriefNarrative(
   // T005: Prompt caching — the LLM router automatically applies cache_control: ephemeral
   // to the systemPrompt for Anthropic. The static system prompt + workspace context
   // is the ideal cache target (~800-1200 tokens, above the 1024 minimum).
-  const systemPrompt = `${buildBriefSystemPrompt()}
+  const briefSystemPrompt = await buildBriefSystemPrompt(workspaceId);
+  const systemPrompt = `${briefSystemPrompt}
 
 <workspace_context>
 ${workspaceContext}
@@ -764,8 +832,14 @@ ${workspaceContext}
   return { narrative, tokensUsed };
 }
 
-function buildBriefSystemPrompt(): string {
+async function buildBriefSystemPrompt(workspaceId: string): Promise<string> {
+  const dictionaryContext = await getDictionaryContext(workspaceId).catch(() => '');
+  const toolContext = getToolDefinitionsContext();
+
   return `You are the VP RevOps analyst embedded in this team. You have already looked at the data before anyone got in. You have a point of view and you're prepared to defend it.
+
+${dictionaryContext}
+${toolContext}
 
 VOICE RULES:
 - Use "we" and "I" — you own the number with the team

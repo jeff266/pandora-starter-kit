@@ -21,6 +21,8 @@ import type { ConversationMessage } from './conversation-state.js';
 import { buildWorkspaceContextBlock } from '../context/workspace-memory.js';
 import { buildMemoryContextBlock, getForecastAccuracyContext } from '../memory/workspace-memory.js';
 import { getSkillRegistry } from '../skills/registry.js';
+import { getDictionaryContext } from '../dictionary/dictionary-context.js';
+import { getPandoraToolsContext } from '../skills/tool-context.js';
 import { validateChartSpec } from '../renderers/types.js';
 import type { ChartSpec } from '../renderers/types.js';
 import { lookupLiveDeal, detectDealMentions, buildLiveDealFactsBlock, detectContradiction } from './deal-lookup.js';
@@ -1019,6 +1021,8 @@ function detectVisualizationHint(message: string): string | null {
   if (/win\s+rate|conversion\s+rate|stage\s+conversion|win\s+rates\s+by|convert\s+by/.test(m)) return 'bar';
   if (/won\s+this\s+quarter|won\s+this\s+year|closed\s+won\s+by|wins\s+by\s+month|revenue\s+by\s+month/.test(m)) return 'bar';
   if (/chart\s+this|can\s+you\s+chart|visualize|show.*chart|graph\s+this|plot\s+this/.test(m)) return 'bar';
+  if (/\b(create|make|build|draw|generate)\s+(a\s+)?chart\b/i.test(m)) return 'bar';
+  if (/\bchart\s+of\b/i.test(m)) return 'bar';
   
   // Horizontal Bar
   if (/rep\s+coverage|rep\s+comparison|by\s+rep|per\s+rep|who\s+has\s+the\s+most|who\s+has\s+the\s+least|rep\s+performance/.test(m)) return 'horizontal_bar';
@@ -1044,13 +1048,31 @@ function detectVisualizationHint(message: string): string | null {
  */
 function parseChartSpecs(rawText: string): { cleanedText: string; specs: ChartSpec[] } {
   const specs: ChartSpec[] = [];
-  const chartBlockRegex = /```chart_spec\n([\s\S]*?)\n```/g;
-  let cleanedText = rawText;
+  // More robust regex: handles trailing whitespace and Windows line endings
+  const chartBlockRegex = /```chart_spec[ \t]*\r?\n([\s\S]*?)\r?\n[ \t]*```/g;
+
+  // Step 1: Collect all raw blocks
+  const blocks: Array<{ content: string; fullMatch: string }> = [];
   let match;
 
   while ((match = chartBlockRegex.exec(rawText)) !== null) {
+    blocks.push({
+      content: match[1],
+      fullMatch: match[0],
+    });
+  }
+
+  // Step 2: Strip ALL blocks from text unconditionally (before validation)
+  let cleanedText = rawText;
+  for (const block of blocks) {
+    cleanedText = cleanedText.replace(block.fullMatch, '');
+  }
+  cleanedText = cleanedText.trim();
+
+  // Step 3: Try to parse and validate each block
+  for (const block of blocks) {
     try {
-      const parsed = JSON.parse(match[1]);
+      const parsed = JSON.parse(block.content);
       const valid = validateChartSpec(parsed, { calculation_id: parsed.source?.calculation_id });
       if (valid) {
         specs.push(parsed as ChartSpec);
@@ -1060,10 +1082,6 @@ function parseChartSpecs(rawText: string): { cleanedText: string; specs: ChartSp
     } catch (e) {
       console.warn('[ChartEmitter] Chart spec parse error:', e instanceof Error ? e.message : e);
     }
-  }
-
-  if (specs.length > 0) {
-    cleanedText = rawText.replace(/```chart_spec\n[\s\S]*?\n```/g, '').trim();
   }
 
   return { cleanedText, specs };
@@ -1251,6 +1269,8 @@ export async function runPandoraAgent(
 
   const contextBlock = await buildWorkspaceContextBlock(workspaceId).catch(() => '');
   let memoryBlock = await buildMemoryContextBlock(workspaceId).catch(() => '');
+  const dictionaryContext = await getDictionaryContext(workspaceId).catch(() => '');
+  const toolContext = getPandoraToolsContext();
 
   // ── Ambiguity Marker Stripping ──────────────────────────────────────────────
   // Extract and strip [Dimension: dimension=value] markers from the message
@@ -1296,8 +1316,8 @@ Continue using this scope unless the user explicitly changes it.`;
   }
 
   let effectiveSystemPrompt = contextBlock
-    ? `${PANDORA_SYSTEM_PROMPT}\n\n${contextBlock}\n\n${memoryBlock}${scopeContextBlock}`
-    : `${PANDORA_SYSTEM_PROMPT}\n\n${memoryBlock}${scopeContextBlock}`;
+    ? `${PANDORA_SYSTEM_PROMPT}\n\n${contextBlock}\n\n${memoryBlock}${dictionaryContext}${toolContext}${scopeContextBlock}`
+    : `${PANDORA_SYSTEM_PROMPT}\n\n${memoryBlock}${dictionaryContext}${toolContext}${scopeContextBlock}`;
 
   // ── Temporal context injection — resolve time-period references to exact dates ──
   const temporalCtx = resolveTemporalContext(message);
@@ -1363,19 +1383,54 @@ Do NOT re-assert the cached value. Re-query everything.`;
   const voiceSection = buildVoiceSystemPromptSection(currentSessionContext.voiceProfile, voiceContext);
   effectiveSystemPrompt += `\n\n## Voice and Tone\n${voiceSection}`;
 
-  // ── Visualization hint — inject chart output instructions ─────────────────
+  // ── Chart Output — Proactive Visualization ────────────────────────────────
   const vizHint = detectVisualizationHint(message);
-  if (vizHint) {
-    effectiveSystemPrompt += `\n\n## Chart Output Instructions
-This question is best answered with a chart (type: ${vizHint}).
-After computing values with tools, emit a chart_spec JSON block using ONLY tool-computed values.
-Format: \`\`\`chart_spec
+
+  effectiveSystemPrompt += `\n\n## Chart Output — Proactive Visualization
+
+When you call tools and get back data that is naturally comparative or multi-value, ALWAYS emit a chart_spec JSON block alongside your prose answer. Do not wait to be asked.
+
+Emit a chart when you compute:
+- Pipeline broken down by stage, rep, segment, owner, or category (3+ values)
+- Rep attainment, quota comparison, or rep-level performance
+- Forecast categories (commit, best case, pipeline vs quota)
+- Coverage ratios across reps, segments, or periods
+- Attainment scenarios (current won + open pipeline vs quota)
+- Any comparison of 3 or more distinct numeric values
+
+Skip charts for:
+- Single-number answers
+- Yes/no or qualitative answers
+- Prose explanations with no computed quantities
+- Lists of deals or contacts (use table format instead)
+
+Format:
+\`\`\`chart_spec
 {JSON}
 \`\`\`
-Required fields: type:"chart", chartType:"${vizHint}", title, data (array of {label:string, value:number}), raw_annotation (one sentence "so what"), source.calculation_id (reference the tool call that produced the values, e.g. "query_deals:stage_breakdown"), source.run_at (ISO timestamp), source.record_count.
-The system will automatically transform your \`raw_annotation\` into the final \`annotation\` using the workspace's voice profile.
-After the chart_spec block, write one annotation sentence — the "so what" in a teammate's voice.
-DO NOT calculate numeric values yourself — use only values returned by tools.`;
+
+Required fields:
+- type: "chart"
+- chartType: one of: bar, horizontal_bar, line, stacked_bar, waterfall, donut
+- title: descriptive chart title
+- data: array of {label: string, value: number}
+- raw_annotation: one "so what" sentence
+- source.calculation_id: reference the tool call that produced values
+- source.run_at: ISO timestamp
+- source.record_count: number of records
+
+Choose chartType that best fits the data shape:
+- bar: for categories, stage breakdowns
+- horizontal_bar: for rep comparisons, named entities
+- line: for time series, trends
+- stacked_bar: for category breakdowns with subcategories
+- donut: for distributions, percentages
+- waterfall: for pipeline movement, changes
+
+DO NOT calculate numeric values yourself — use only values returned by tools.
+The system will transform raw_annotation into a voice-styled annotation automatically.${vizHint ? `\n\nPreferred chart type for this question: ${vizHint} — use this unless the data shape clearly calls for a different type.` : ''}`;
+
+  if (vizHint) {
     console.log(`[PandoraAgent] Visualization hint: ${vizHint}`);
   }
 

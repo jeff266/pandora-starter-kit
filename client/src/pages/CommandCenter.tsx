@@ -24,6 +24,7 @@ import CompactAlerts from '../components/command-center/CompactAlerts';
 import AnnotatedPipelineChart from '../components/command-center/AnnotatedPipelineChart';
 import ConnectorStatusStrip from '../components/command-center/ConnectorStatusStrip';
 import AgentConversationFeed, { type ToolCallEvent } from '../components/assistant/AgentConversationFeed';
+import { useBriefStream } from '../components/assistant/useBriefStream';
 
 interface FindingAssumption {
   label: string;
@@ -213,6 +214,9 @@ export default function CommandCenter() {
   const [latestFeed, setLatestFeed] = useState<{ operators: any[]; events: ToolCallEvent[] } | null>(null);
   const [feedCollapsed, setFeedCollapsed] = useState(true);
 
+  // Brief streaming for "Show Your Work" tool call visibility
+  const { state: briefStreamState, loadBrief } = useBriefStream();
+
   useEffect(() => {
     const tickInterval = setInterval(() => setTick(t => t + 1), 30000);
     return () => clearInterval(tickInterval);
@@ -365,6 +369,12 @@ export default function CommandCenter() {
       if (data?.operators?.length > 0) setLatestFeed(data);
     }).catch(() => {});
   }, [wsId]);
+
+  // Load brief with tool call streaming on page load
+  useEffect(() => {
+    if (!wsId) return;
+    loadBrief(false);
+  }, [wsId, loadBrief]);
 
   const stageData: PipelineStage[] = pipeline?.by_stage || [];
   const totalPipeline = Number(pipeline?.total_pipeline) || 0;
@@ -745,6 +755,15 @@ export default function CommandCenter() {
           <style>{`@keyframes ccSpin { to { transform: rotate(360deg); } }`}</style>
         </div>
       </div>
+
+      {/* Show Your Work - Tool Call Visibility */}
+      {briefStreamState.phase === 'complete' && briefStreamState.toolCalls.length > 0 && (
+        <AgentConversationFeed
+          operators={briefStreamState.operators}
+          toolCalls={briefStreamState.toolCalls}
+          phase={briefStreamState.phase}
+        />
+      )}
 
       <SectionErrorBoundary fallbackMessage="Failed to load metrics.">
         <CollapsibleSection
