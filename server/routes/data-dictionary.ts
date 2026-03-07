@@ -52,21 +52,23 @@ router.get('/:workspaceId/dictionary', async (req: Request, res: Response) => {
 // POST /:workspaceId/dictionary — create user term
 router.post('/:workspaceId/dictionary', async (req: Request, res: Response) => {
   const { workspaceId } = req.params;
-  const { term, definition, technical_definition } = req.body;
+  const { term, definition, technical_definition, sql_definition, segmentable_by } = req.body;
 
   if (!term) return res.status(400).json({ error: 'Term is required' });
 
   try {
     const result = await query(
-      `INSERT INTO data_dictionary (workspace_id, term, definition, technical_definition, source, created_by)
-       VALUES ($1, $2, $3, $4, 'user', $5)
+      `INSERT INTO data_dictionary (workspace_id, term, definition, technical_definition, sql_definition, segmentable_by, source, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, 'user', $7)
        ON CONFLICT (workspace_id, term) DO UPDATE SET
          definition = EXCLUDED.definition,
          technical_definition = EXCLUDED.technical_definition,
+         sql_definition = EXCLUDED.sql_definition,
+         segmentable_by = EXCLUDED.segmentable_by,
          is_active = TRUE,
          updated_at = NOW()
        RETURNING *`,
-      [workspaceId, term, definition, technical_definition, (req as any).user?.email || 'system']
+      [workspaceId, term, definition, technical_definition, sql_definition, segmentable_by || [], (req as any).user?.email || 'system']
     );
     res.json(result.rows[0]);
   } catch (err) {
@@ -78,7 +80,7 @@ router.post('/:workspaceId/dictionary', async (req: Request, res: Response) => {
 // PUT /:workspaceId/dictionary/:id — edit term/definition
 router.put('/:workspaceId/dictionary/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { term, definition, technical_definition } = req.body;
+  const { term, definition, technical_definition, sql_definition, segmentable_by } = req.body;
 
   try {
     const result = await query(
@@ -86,10 +88,12 @@ router.put('/:workspaceId/dictionary/:id', async (req: Request, res: Response) =
        SET term = COALESCE($2, term),
            definition = COALESCE($3, definition),
            technical_definition = COALESCE($4, technical_definition),
+           sql_definition = COALESCE($5, sql_definition),
+           segmentable_by = COALESCE($6, segmentable_by),
            updated_at = NOW()
        WHERE id = $1
        RETURNING *`,
-      [id, term, definition, technical_definition]
+      [id, term, definition, technical_definition, sql_definition, segmentable_by]
     );
     if (result.rowCount === 0) return res.status(404).json({ error: 'Entry not found' });
     res.json(result.rows[0]);

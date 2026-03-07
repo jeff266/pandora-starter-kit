@@ -9,6 +9,7 @@ import { query } from '../db.js';
 import { resolvePipelineName, resolveDefaultPipeline, classifyQuestionIntent } from './pipeline-resolver.js';
 import type { PipelineResolution } from './pipeline-resolver.js';
 import { getToolFilters } from '../config/tool-filter-injector.js';
+import { configLoader } from '../config/workspace-config-loader.js';
 import { callLLM } from '../utils/llm-router.js';
 import { querySchema, type ObjectType, type FilterMode } from '../tools/schema-query.js';
 import { queryConversationSignals, type SignalQueryFilters } from '../signals/query-conversation-signals.js';
@@ -262,6 +263,8 @@ export async function executeDataTool(
         result = await getSkillEvidence(workspaceId, params); break;
       case 'compute_metric':
         result = await computeMetric(workspaceId, params); break;
+      case 'compute_attainment':
+        result = await computeAttainment(workspaceId, params); break;
       case 'query_contacts':
         result = await queryContacts(workspaceId, params); break;
       case 'query_leads':
@@ -1000,9 +1003,113 @@ async function computeMetric(workspaceId: string, params: Record<string, any>): 
       return computePipelineCreated(workspaceId, params);
     case 'pipeline_closed':
       return computePipelineClosed(workspaceId, params);
+    case 'attainment':
+      return computeAttainment(workspaceId, params);
     default:
-      throw new Error(`Unknown metric: ${metric}. Available: total_pipeline, weighted_pipeline, win_rate, avg_deal_size, avg_sales_cycle, coverage_ratio, pipeline_created, pipeline_closed`);
+      throw new Error(`Unknown metric: ${metric}. Available: total_pipeline, weighted_pipeline, win_rate, avg_deal_size, avg_sales_cycle, coverage_ratio, pipeline_created, pipeline_closed, attainment`);
   }
+}
+
+async function computeAttainment(workspaceId: string, params: Record<string, any>): Promise<ComputeMetricResult> {
+  // 1. Load period and quota from targets table
+  let targetAmount = params.quota_amount;
+  let periodStart: Date | null = null;
+  let periodEnd: Date | null = null;
+  let periodLabel = '';
+
+  const targetResult = await query<{ target_amount: string; period_start: Date; period_end: Date; label: string }>(
+    `SELECT target_amount::text, period_start, period_end, label
+     FROM targets
+     WHERE workspace_id = $1 AND is_active = true
+     ORDER BY period_start DESC LIMIT 1`,
+    [workspaceId]
+  ).catch(() => ({ rows: [] as any[] }));
+
+  if (targetResult.rows[0]) {
+    if (!targetAmount) targetAmount = parseFloat(targetResult.rows[0].target_amount);
+    periodStart = targetResult.rows[0].period_start;
+    periodEnd = targetResult.rows[0].period_end;
+    periodLabel = targetResult.rows[0].label || '';
+  }
+
+  // Fallback to configLoader.getQuotaPeriod if no targets row or missing dates
+  if (!periodStart || !periodEnd) {
+    const period = await configLoader.getQuotaPeriod(workspaceId).catch(() => null);
+    if (period) {
+      periodStart = period.start;
+      periodEnd = period.end;
+    } else {
+      // Default to current quarter
+      const now = new Date();
+      const quarter = Math.floor(now.getUTCMonth() / 3);
+      periodStart = new Date(Date.UTC(now.getUTCFullYear(), quarter * 3, 1));
+      periodEnd = new Date(Date.UTC(now.getUTCFullYear(), (quarter + 1) * 3, 0));
+    }
+  }
+
+  const conditions = [
+    `workspace_id = $1`,
+    `stage_normalized = 'closed_won'`,
+    `close_date >= $2`,
+    `close_date <= $3`
+  ];
+  const values: any[] = [workspaceId, periodStart || new Date(), periodEnd || new Date()];
+
+  if (params.pipeline_name) {
+    const resolved = await resolvePipelineName(workspaceId, params.pipeline_name);
+    if (resolved && resolved.confirmed) {
+      values.push(resolved.scope_id);
+      conditions.push(`scope_id = $${values.length}`);
+    } else if (resolved && resolved.filter_values.length > 0) {
+      const escaped = resolved.filter_values
+        .map(v => `'${String(v).replace(/'/g, "''")}'`)
+        .join(',');
+      conditions.push(`${resolved.filter_field} = ANY(ARRAY[${escaped}])`);
+    } else {
+      values.push(`%${params.pipeline_name}%`);
+      conditions.push(`pipeline ILIKE $${values.length}`);
+    }
+  }
+
+  if (params.owner_email) {
+    values.push(params.owner_email.toLowerCase());
+    conditions.push(`LOWER(owner) = $${values.length}`);
+  }
+
+  const toolFilters = await getToolFilters(workspaceId, 'general', values.length + 1, 'deals').catch(() => ({ whereClause: '', params: [], paramOffset: values.length + 1, appliedRules: [] }));
+  if (toolFilters.whereClause) {
+    conditions.push(toolFilters.whereClause.replace(/^\s*AND\s+/, ''));
+    values.push(...toolFilters.params);
+  }
+
+  const result = await query<{ amount: string; id: string; name: string }>(
+    `SELECT amount::text, id, name FROM deals WHERE ${conditions.join(' AND ')}`,
+    values
+  );
+
+  const closedWon = result.rows.reduce((s, r) => s + parseFloat(r.amount || '0'), 0);
+  const quota = targetAmount || 0;
+  const pct = quota > 0 ? (closedWon / quota) * 100 : 0;
+  const formatted = `${pct.toFixed(1)}%`;
+  const periodStr = `${periodLabel ? `${periodLabel} ` : ''}(${periodStart.toISOString().split('T')[0]} to ${periodEnd.toISOString().split('T')[0]})`;
+
+  return {
+    metric: 'attainment',
+    value: pct,
+    formatted,
+    formula: `closed_won (${formatCurrency(closedWon)}) / quota (${formatCurrency(quota)}) × 100`,
+    inputs: { numerator: closedWon, denominator: quota, description: 'closed-won total / quota' },
+    underlying_records: result.rows.map(r => ({
+      id: r.id,
+      name: r.name,
+      amount: parseFloat(r.amount || '0'),
+      included_because: 'Closed won in period'
+    })),
+    exclusions: [],
+    record_count: result.rows.length,
+    period: periodStr,
+    query_description: `Attainment for ${periodStr}${params.pipeline_name ? ` in ${params.pipeline_name}` : ''}${params.owner_email ? ` for ${params.owner_email}` : ''}: ${formatted}`
+  };
 }
 
 function metricToContext(metric: string): 'win_rate' | 'pipeline_value' | 'general' {
@@ -1257,8 +1364,24 @@ async function computeAvgSalesCycle(workspaceId: string, params: Record<string, 
 }
 
 async function computeCoverageRatio(workspaceId: string, params: Record<string, any>): Promise<ComputeMetricResult> {
-  // Try to get quota from workspace config or use explicit param
+  // Try to get quota from targets table first, then workspace config, then explicit param
   let quota = params.quota_amount;
+  let periodEnd: Date | null = null;
+
+  if (!quota) {
+    const targetResult = await query<{ target_amount: string; period_end: Date }>(
+      `SELECT target_amount::text, period_end
+       FROM targets
+       WHERE workspace_id = $1 AND is_active = true
+       ORDER BY period_start DESC LIMIT 1`,
+      [workspaceId]
+    ).catch(() => ({ rows: [] as any[] }));
+
+    if (targetResult.rows[0]) {
+      quota = parseFloat(targetResult.rows[0].target_amount);
+      periodEnd = targetResult.rows[0].period_end;
+    }
+  }
 
   if (!quota) {
     try {
@@ -1274,6 +1397,33 @@ async function computeCoverageRatio(workspaceId: string, params: Record<string, 
 
   const covConditions = ['workspace_id = $1', "stage_normalized NOT IN ('closed_won', 'closed_lost')"];
   const covValues: any[] = [workspaceId];
+
+  if (params.pipeline_name) {
+    const resolved = await resolvePipelineName(workspaceId, params.pipeline_name);
+    if (resolved && resolved.confirmed) {
+      covValues.push(resolved.scope_id);
+      covConditions.push(`scope_id = $${covValues.length}`);
+    } else if (resolved && resolved.filter_values.length > 0) {
+      const escaped = resolved.filter_values
+        .map(v => `'${String(v).replace(/'/g, "''")}'`)
+        .join(',');
+      covConditions.push(`${resolved.filter_field} = ANY(ARRAY[${escaped}])`);
+    } else {
+      covValues.push(`%${params.pipeline_name}%`);
+      covConditions.push(`pipeline ILIKE $${covValues.length}`);
+    }
+  }
+
+  if (params.close_date_to) {
+    covValues.push(params.close_date_to);
+    covConditions.push(`close_date <= $${covValues.length}`);
+  }
+
+  if (params.close_date_from) {
+    covValues.push(params.close_date_from);
+    covConditions.push(`close_date >= $${covValues.length}`);
+  }
+
   const toolFilters = await getToolFilters(workspaceId, 'pipeline_value', covValues.length + 1, 'deals').catch(()=>({whereClause: '', params: [], paramOffset: covValues.length + 1, appliedRules: []}));
   if (toolFilters.whereClause) {
     covConditions.push(toolFilters.whereClause.replace(/^\s*AND\s+/, ''));

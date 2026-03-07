@@ -27,6 +27,8 @@ interface DictionaryEntry {
   term: string;
   definition: string;
   technical_definition: string;
+  sql_definition: string | null;
+  segmentable_by: string[];
   source: 'user' | 'system' | 'filter' | 'metric' | 'stage' | 'pipeline';
   source_id?: string;
   created_by: string;
@@ -55,10 +57,14 @@ export default function DataDictionary() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
 
+  const [expandedSqlId, setExpandedSqlId] = useState<string | null>(null);
+
   const [newTerm, setNewTerm] = useState({
     term: '',
     definition: '',
-    technical_definition: ''
+    technical_definition: '',
+    sql_definition: '',
+    segmentable_by: [] as string[]
   });
 
   const fetchEntries = useCallback(async () => {
@@ -88,7 +94,7 @@ export default function DataDictionary() {
     try {
       await api.post(`/workspace/${currentWorkspace.id}/dictionary`, newTerm);
       setIsAddModalOpen(false);
-      setNewTerm({ term: '', definition: '', technical_definition: '' });
+      setNewTerm({ term: '', definition: '', technical_definition: '', sql_definition: '', segmentable_by: [] });
       fetchEntries();
     } catch (err) {
       console.error('Failed to add term:', err);
@@ -253,6 +259,7 @@ export default function DataDictionary() {
               <th style={{ padding: '16px 20px', fontSize: 13, fontWeight: 600, color: colors.textSecondary }}>Term</th>
               <th style={{ padding: '16px 20px', fontSize: 13, fontWeight: 600, color: colors.textSecondary }}>Definition</th>
               <th style={{ padding: '16px 20px', fontSize: 13, fontWeight: 600, color: colors.textSecondary }}>Source</th>
+              <th style={{ padding: '16px 20px', fontSize: 13, fontWeight: 600, color: colors.textSecondary }}>Segments</th>
               <th style={{ padding: '16px 20px', fontSize: 13, fontWeight: 600, color: colors.textSecondary, width: 100 }}>Refs</th>
               <th style={{ padding: '16px 20px', fontSize: 13, fontWeight: 600, color: colors.textSecondary }}>Details</th>
               <th style={{ padding: '16px 20px', fontSize: 13, fontWeight: 600, color: colors.textSecondary, width: 50 }}></th>
@@ -277,8 +284,39 @@ export default function DataDictionary() {
                   <td style={{ padding: '16px 20px' }}>
                     <div style={{ fontWeight: 600, color: colors.text }}>{entry.term}</div>
                     {entry.technical_definition && (
-                      <div style={{ fontSize: 11, fontFamily: fonts.mono, color: colors.textMuted, marginTop: 4 }}>
+                      <div 
+                        onClick={() => entry.sql_definition && setExpandedSqlId(expandedSqlId === entry.id ? null : entry.id)}
+                        style={{ 
+                          fontSize: 11, 
+                          fontFamily: fonts.mono, 
+                          color: colors.textMuted, 
+                          marginTop: 4,
+                          cursor: entry.sql_definition ? 'pointer' : 'default',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 4
+                        }}
+                      >
                         {entry.technical_definition}
+                        {entry.sql_definition && (
+                          <Database size={10} style={{ color: expandedSqlId === entry.id ? colors.accent : colors.textMuted }} />
+                        )}
+                      </div>
+                    )}
+                    {expandedSqlId === entry.id && entry.sql_definition && (
+                      <div style={{
+                        marginTop: 8,
+                        padding: '8px 12px',
+                        backgroundColor: colors.bg,
+                        border: `1px solid ${colors.border}`,
+                        borderRadius: 6,
+                        fontSize: 11,
+                        fontFamily: fonts.mono,
+                        color: colors.textSecondary,
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-all'
+                      }}>
+                        {entry.sql_definition}
                       </div>
                     )}
                   </td>
@@ -335,6 +373,27 @@ export default function DataDictionary() {
                   </td>
                   <td style={{ padding: '16px 20px' }}>
                     {getSourceBadge(entry.source)}
+                  </td>
+                  <td style={{ padding: '16px 20px' }}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                      {entry.segmentable_by && entry.segmentable_by.length > 0 ? (
+                        entry.segmentable_by.map(seg => (
+                          <div key={seg} style={{
+                            padding: '2px 6px',
+                            backgroundColor: colors.surfaceRaised,
+                            borderRadius: 4,
+                            fontSize: 10,
+                            fontWeight: 600,
+                            color: colors.textMuted,
+                            border: `1px solid ${colors.border}`
+                          }}>
+                            {seg}
+                          </div>
+                        ))
+                      ) : (
+                        <span style={{ color: colors.textDim }}>—</span>
+                      )}
+                    </div>
                   </td>
                   <td style={{ padding: '16px 20px' }}>
                     <div style={{ 

@@ -48,6 +48,8 @@ export interface OpeningBriefData {
     pctAttained: number | null;
     gap: number | null;
     closedWonValue: number;
+    periodStart: string | null;
+    periodEnd: string | null;
   };
   pipeline: {
     totalValue: number;
@@ -534,6 +536,8 @@ export async function assembleOpeningBrief(
       pctAttained,
       gap,
       closedWonValue,
+      periodStart: periodStart?.toISOString() || null,
+      periodEnd: quarterEnd?.toISOString() || null,
     },
     pipeline: {
       totalValue: totalPipeline,
@@ -596,12 +600,25 @@ export function renderBriefContext(data: OpeningBriefData): string {
   const monthName = ['January','February','March','April','May','June',
     'July','August','September','October','November','December'][now.getUTCMonth()];
 
+  // Calculate next quarter dates
+  let nextQStartIso = '';
+  let nextQEndIso = '';
+  if (data.targets.periodEnd) {
+    const currentEnd = new Date(data.targets.periodEnd);
+    const nextStart = new Date(currentEnd.getTime() + 86400000);
+    const nextEnd = new Date(nextStart.getTime() + 91 * 86400000);
+    nextQStartIso = nextStart.toISOString().split('T')[0];
+    nextQEndIso = nextEnd.toISOString().split('T')[0];
+  }
+
   const lines: string[] = [
     `[OPENING BRIEF CONTEXT — synthesize this into a natural opening, then answer any question the user included]`,
     ``,
     `TODAY: ${t.dayOfWeek}, ${t.dayOfMonth} ${monthName} ${now.getUTCFullYear()}`,
     `POSITION: ${t.urgencyLabel}`,
     `QUARTER: ${t.fiscalQuarter} ${t.fiscalYear} — Week ${t.weekOfQuarter} of 13, ${Math.round(t.pctQuarterComplete * 100)}% complete, ${t.daysRemainingInQuarter} days remaining`,
+    `CURRENT QUARTER DATES: ${data.targets.periodStart?.split('T')[0] || 'N/A'} to ${data.targets.periodEnd?.split('T')[0] || 'N/A'}`,
+    `NEXT QUARTER DATES: ${nextQStartIso || 'N/A'} to ${nextQEndIso || 'N/A'}`,
     ``,
     `USER: ${data.user.name} (${data.user.pandoraRole})`,
     `SALES MOTION: ${data.workspace.salesMotion}`,

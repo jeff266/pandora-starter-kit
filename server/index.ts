@@ -562,6 +562,19 @@ async function initializeAfterStart(t0: number, tDb: number): Promise<void> {
   const tMigration = performance.now();
 
   try {
+    const { seedDictionary } = await import('./dictionary/dictionary-seeder.js');
+    const unseeded = await query<{ id: string }>(
+      `SELECT w.id FROM workspaces w WHERE NOT EXISTS (SELECT 1 FROM data_dictionary d WHERE d.workspace_id = w.id)`
+    );
+    for (const row of unseeded.rows) {
+      await seedDictionary(row.id).catch(err => console.warn('[Dictionary] Seed failed for workspace', row.id, err));
+    }
+    if (unseeded.rows.length > 0) console.log(`[Dictionary] Seeded ${unseeded.rows.length} workspace(s)`);
+  } catch (err) {
+    console.warn('[Dictionary] Startup seed failed (non-fatal):', err instanceof Error ? err.message : err);
+  }
+
+  try {
     const { runMigrationIfEnabled } = await import('./lib/migrate-credentials.js');
     await runMigrationIfEnabled();
   } catch (err) {

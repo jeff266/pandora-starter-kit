@@ -655,6 +655,9 @@ router.post('/workspaces/join', requireAuth, async (req: Request, res: Response)
 
     const ws = wsResult.rows[0];
 
+    const { seedDictionary } = await import('../dictionary/dictionary-seeder.js');
+    seedDictionary(ws.id).catch(err => console.warn('[Dictionary] Seed failed:', err));
+
     const existing = await query<{ user_id: string }>(`
       SELECT user_id FROM user_workspaces WHERE user_id = $1 AND workspace_id = $2
     `, [userId, ws.id]);
@@ -717,6 +720,9 @@ router.post('/workspaces/create', requireAuth, async (req: Request, res: Respons
     `, [name.trim(), slug, apiKey]);
 
     const ws = wsResult.rows[0];
+
+    const { seedDictionary } = await import('../dictionary/dictionary-seeder.js');
+    seedDictionary(ws.id).catch(err => console.warn('[Dictionary] Seed failed:', err));
 
     await query<Record<string, never>>(`
       INSERT INTO user_workspaces (user_id, workspace_id, role) VALUES ($1, $2, 'admin')

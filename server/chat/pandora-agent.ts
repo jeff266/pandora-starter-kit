@@ -157,16 +157,18 @@ const PANDORA_TOOLS: ToolDef[] = [
       properties: {
         metric: {
           type: 'string',
-          enum: ['total_pipeline', 'weighted_pipeline', 'win_rate', 'avg_deal_size', 'avg_sales_cycle', 'coverage_ratio', 'pipeline_created', 'pipeline_closed'],
-          description: 'The metric to calculate',
+          enum: ['total_pipeline', 'weighted_pipeline', 'win_rate', 'avg_deal_size', 'avg_sales_cycle', 'coverage_ratio', 'pipeline_created', 'pipeline_closed', 'attainment'],
+          description: 'The metric to calculate. Use "attainment" for closed-won vs quota progress.',
         },
         owner_email: { type: 'string', description: 'Scope to one rep' },
         date_from: { type: 'string', description: 'Start of period (ISO date)' },
         date_to: { type: 'string', description: 'End of period (ISO date)' },
         stage: { type: 'string', description: 'Scope to one stage' },
         pipeline_name: { type: 'string', description: 'Scope to one named pipeline' },
-        quota_amount: { type: 'number', description: 'Explicit quota for coverage_ratio (if not set, pulls from workspace config)' },
+        quota_amount: { type: 'number', description: 'Explicit quota for coverage_ratio or attainment (if not set, pulls from workspace config or targets table)' },
         lookback_days: { type: 'number', description: 'For win_rate — number of days to look back (default 90)' },
+        close_date_from: { type: 'string', description: 'ISO date — only include open deals closing on or after this date (for coverage_ratio)' },
+        close_date_to: { type: 'string', description: 'ISO date — only include open deals closing on or before this date (use for next quarter coverage)' },
       },
       required: ['metric'],
     },
@@ -816,6 +818,12 @@ You have tools that query the company's live data. When someone asks a question,
 9. PRIOR TOOL RESULTS IN CONTEXT ARE FROM PREVIOUS QUESTIONS — NOT YOUR CURRENT DATA. Each new question starts fresh. All tools are always available. Never say "I don't have access to X in the data provided" or "the data shows only Y" — that refers to a past question. Call a tool.
 
 9a. OPENING BRIEF CONTEXT IS AN ORIENTATION SNAPSHOT — NOT A PRECISE ANSWER. When the user asks about pipeline coverage, attainment percentage, pipeline total, deal count, or any specific metric, you MUST call compute_metric or query_deals for a live answer. Never answer metric questions using the numbers in the opening brief context block. The brief is a general starting point; specific metric questions always require a tool call.
+
+9b. TEMPORAL RESOLUTION — "NEXT" MEANS FUTURE PERIOD: When the user says "next quarter", "next month", "next period", or "next year":
+- Use the NEXT QUARTER DATES from the opening brief context to set close_date_from and close_date_to on coverage_ratio or query_deals
+- For "next quarter attainment", there is no data yet — answer that attainment is 0% (no closed won yet) and instead show the pipeline available
+- For "next quarter coverage", call compute_metric with metric=coverage_ratio, close_date_to=<next_quarter_end>, quota_amount=<next_quarter_quota if known>
+- Never guess dates — always derive them from the CURRENT/NEXT QUARTER DATES block in context
 
 10. FORECASTS AND QUARTERLY NUMBERS: For any question about Q1/Q2/Q3/Q4 forecast, quarterly pipeline, quarterly revenue, or forecast categories (commit/best case):
    - ALWAYS call get_skill_evidence with skill_id="weekly-forecast-rollup" first.
