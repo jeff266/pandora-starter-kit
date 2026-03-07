@@ -18,6 +18,8 @@ import type {
 import { buildVoicePromptBlock } from './voice-prompt-block.js';
 import type { VoiceProfile } from '../voice/types.js';
 import { DEFAULT_VOICE_PROFILE } from '../voice/types.js';
+import type { WorkspaceDocumentProfile, SectionPreferences } from '../types/document-profile.js';
+import { DEFAULT_DOCUMENT_PROFILE } from '../types/document-profile.js';
 
 /**
  * Default voice configuration for new workspaces
@@ -482,13 +484,12 @@ export class WorkspaceConfigLoader {
         scoring_model: 'auto',
       },
       voice: {
-        detail_level: 'standard',
-        framing: 'balanced',
-        alert_threshold: 'watch_and_act',
+        ...DEFAULT_VOICE_CONFIG,
       },
       named_filters: WorkspaceConfigLoader.getDefaultNamedFilters(),
       updated_at: new Date(),
       confirmed: false,
+      document_profile: DEFAULT_DOCUMENT_PROFILE,
     };
   }
 
@@ -655,6 +656,67 @@ export class WorkspaceConfigLoader {
 
     this.clearCache(workspaceId);
     return updatedVoice as VoiceConfig & VoiceModifierConfig;
+  }
+
+  // ===== DOCUMENT PROFILE =====
+
+  /**
+   * Get document profile for a workspace
+   */
+  async getDocumentProfile(workspaceId: string): Promise<WorkspaceDocumentProfile> {
+    const config = await this.getConfig(workspaceId);
+    return config.document_profile || DEFAULT_DOCUMENT_PROFILE;
+  }
+
+  /**
+   * Update document profile for a workspace (deep merge via jsonb_set)
+   */
+  async updateDocumentProfile(
+    workspaceId: string,
+    partial: Partial<WorkspaceDocumentProfile>
+  ): Promise<WorkspaceDocumentProfile> {
+    const currentProfile = await this.getDocumentProfile(workspaceId);
+    const updatedProfile = {
+      ...currentProfile,
+      ...partial,
+      // Handle nested merges if necessary, though document_profile structure is mostly top-level keys
+      calibration: {
+        ...currentProfile.calibration,
+        ...(partial.calibration || {}),
+      },
+      qualityScores: {
+        ...currentProfile.qualityScores,
+        ...(partial.qualityScores || {}),
+      },
+      distributionPatterns: {
+        ...currentProfile.distributionPatterns,
+        ...(partial.distributionPatterns || {}),
+      },
+    };
+
+    await query(
+      `UPDATE context_layer
+       SET definitions = jsonb_set(definitions, '{workspace_config,document_profile}', $2::jsonb, true),
+           updated_at = NOW()
+       WHERE workspace_id = $1`,
+      [workspaceId, JSON.stringify(updatedProfile)]
+    );
+
+    this.clearCache(workspaceId);
+    return updatedProfile;
+  }
+
+  /**
+   * Get preferences for a specific section
+   */
+  async getSectionPreferences(
+    workspaceId: string,
+    templateType: string,
+    sectionId: string
+  ): Promise<SectionPreferences | null> {
+    const profile = await this.getDocumentProfile(workspaceId);
+    const key = `${templateType}:${sectionId}`;
+    return profile.sectionPreferences[key] || null;
   }
 }
 

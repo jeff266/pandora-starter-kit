@@ -508,7 +508,7 @@ async function saveBrief(workspaceId: string, briefType: BriefType, now: Date, d
   let comparisonBlock: string | undefined;
   let comparisonData: any | undefined;
   try {
-    const comparison = await buildComparison(workspaceId, ''); // currentBriefId is empty during initial insert
+    const comparison = await buildComparison(workspaceId, null); // currentBriefId is null during initial insert
     if (comparison) {
       comparisonData = comparison;
       comparisonBlock = formatComparisonBlock(comparison, []);

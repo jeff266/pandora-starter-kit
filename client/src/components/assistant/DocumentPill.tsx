@@ -21,6 +21,7 @@ import {
   DocumentContribution 
 } from '../../types/document-types';
 import { api } from '../../lib/api';
+import CalibrationSession from '../documents/CalibrationSession';
 
 interface DocumentPillProps {
   workspaceId: string;
@@ -36,6 +37,25 @@ export default function DocumentPill({ workspaceId, threadId }: DocumentPillProp
   const [confirmedFlags, setConfirmedFlags] = useState<Record<string, boolean>>({});
   const [showDistribution, setShowDistribution] = useState(false);
   const [distributing, setDistributing] = useState(false);
+  const [editingSection, setEditingSection] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editedSectionsCount, setEditedSectionsCount] = useState(0);
+  const [showCalibrationNudge, setShowCalibrationNudge] = useState(false);
+  const [showCalibration, setShowCalibration] = useState(false);
+  const [calibrationStatus, setCalibrationStatus] = useState<any>(null);
+
+  useEffect(() => {
+    const fetchCalibrationStatus = async () => {
+      try {
+        const res = await api.get(`/workspaces/${workspaceId}/calibration/status`);
+        setCalibrationStatus(res);
+      } catch (err) {
+        console.error('Failed to fetch calibration status:', err);
+      }
+    };
+    fetchCalibrationStatus();
+  }, [workspaceId]);
 
   useEffect(() => {
     const fetchDoc = async () => {
@@ -125,11 +145,64 @@ export default function DocumentPill({ workspaceId, threadId }: DocumentPillProp
     }
   };
 
+  const handleEditSection = (sectionId: string, currentText: string) => {
+    setEditingSection(sectionId);
+    setEditValue(currentText);
+  };
+
+  const handleSaveEdit = async (sectionId: string, rawText: string) => {
+    if (savingEdit) return;
+    setSavingEdit(true);
+    try {
+      await api.post(`/documents/${doc.sessionId}/edit`, {
+        threadId,
+        sectionId,
+        rawText,
+        editedText: editValue
+      });
+      
+      // Update local state if we had synthesis
+      if (synthesis) {
+        setSynthesis({
+          ...synthesis,
+          [sectionId]: editValue
+        });
+      }
+      
+      setEditingSection(null);
+      setEditedSectionsCount(prev => {
+        const newCount = prev + 1;
+        if (newCount >= 2) {
+          setShowCalibrationNudge(true);
+        }
+        return newCount;
+      });
+      
+      // Temporary "Saved" feedback could be handled by a toast or state
+    } catch (err) {
+      console.error('Failed to save edit:', err);
+      window.alert('Failed to save edit.');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
   const allConfirmed = synthesis?.lowConfidenceFlags?.every((f: any) => confirmedFlags[f.contributionId]);
 
   return (
-    <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 w-full max-w-lg px-4">
-      <div className={`bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden transition-all duration-300 ${expanded ? 'max-h-[80vh]' : 'max-h-12'}`}>
+    <>
+      {showCalibration && (
+        <CalibrationSession 
+          workspaceId={workspaceId} 
+          onClose={() => setShowCalibration(false)} 
+          onComplete={() => {
+            setShowCalibration(false);
+            // Refresh status if needed
+          }}
+        />
+      )}
+      <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 w-full max-w-lg px-4">
+        <div className={`bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden transition-all duration-300 ${expanded ? 'max-h-[80vh]' : 'max-h-12'}`}>
         {/* Header/Pill */}
         <div 
           className="h-12 flex items-center justify-between px-4 cursor-pointer hover:bg-slate-800 transition-colors"
@@ -145,6 +218,14 @@ export default function DocumentPill({ workspaceId, threadId }: DocumentPillProp
             <span className="bg-slate-700 text-slate-300 text-[10px] px-1.5 py-0.5 rounded-full font-bold">
               {totalContributions}
             </span>
+            {calibrationStatus?.completedSessions === 0 && (
+              <button 
+                onClick={(e) => { e.stopPropagation(); setShowCalibration(true); }}
+                className="ml-2 text-[10px] text-blue-400 hover:text-blue-300 font-bold flex items-center gap-1"
+              >
+                <ArrowRight size={10} /> Calibrate
+              </button>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <button 
@@ -210,6 +291,35 @@ export default function DocumentPill({ workspaceId, threadId }: DocumentPillProp
         {/* Distribution Panel */}
         {showDistribution && (
           <div className="p-4 bg-slate-950 border-t border-slate-800">
+            {showCalibrationNudge && (
+              <div className="mb-4 bg-blue-600/10 border border-blue-600/20 rounded-lg p-3 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="bg-blue-600/20 p-1 rounded-full">
+                    <Check size={12} className="text-blue-400" />
+                  </div>
+                  <p className="text-[11px] text-slate-200">
+                    You've made several edits. Want to calibrate for better future output?
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => setShowCalibrationNudge(false)}
+                    className="text-[10px] text-slate-400 hover:text-slate-200"
+                  >
+                    Not now
+                  </button>
+                  <button 
+                    onClick={() => {
+                      setShowCalibration(true);
+                      setShowCalibrationNudge(false);
+                    }}
+                    className="bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold px-2 py-1 rounded transition-colors"
+                  >
+                    Calibrate →
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="flex items-center gap-2 mb-4">
               <Send className="text-blue-400" size={18} />
               <h3 className="text-sm font-bold text-slate-100">Distribute Document</h3>
@@ -269,6 +379,61 @@ export default function DocumentPill({ workspaceId, threadId }: DocumentPillProp
         {/* Expanded Content */}
         {expanded && (
           <div className="overflow-y-auto max-h-[calc(80vh-3rem)] p-4 space-y-3 bg-slate-900/50 backdrop-blur-sm">
+            {synthesis && (
+              <div className="mb-6 space-y-6">
+                {Object.entries(synthesis).map(([key, value]) => {
+                  if (typeof value !== 'string' || key === 'documentThroughline' || key === 'id') return null;
+                  
+                  const sectionTitle = key.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+                  const isEditing = editingSection === key;
+
+                  return (
+                    <div key={key} className="bg-slate-950/50 border border-slate-800 rounded-xl p-4 shadow-inner">
+                      <div className="flex items-center justify-between mb-3">
+                        <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">{sectionTitle}</h4>
+                        {!isEditing && (
+                          <button 
+                            onClick={() => handleEditSection(key, value)}
+                            className="text-[10px] text-blue-400 hover:text-blue-300 font-bold flex items-center gap-1 transition-colors"
+                          >
+                            Edit
+                          </button>
+                        )}
+                      </div>
+                      
+                      {isEditing ? (
+                        <div className="space-y-3">
+                          <textarea
+                            value={editValue}
+                            onChange={(e) => setEditValue(e.target.value)}
+                            className="w-full bg-slate-900 border border-blue-500/50 rounded-lg p-3 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 min-h-[150px] font-sans leading-relaxed"
+                          />
+                          <div className="flex justify-end gap-2">
+                            <button 
+                              onClick={() => setEditingSection(null)}
+                              className="text-xs text-slate-500 hover:text-slate-300 px-3 py-1.5"
+                            >
+                              Cancel
+                            </button>
+                            <button 
+                              onClick={() => handleSaveEdit(key, value)}
+                              disabled={savingEdit}
+                              className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-4 py-1.5 rounded-lg flex items-center gap-2 transition-all shadow-lg shadow-blue-600/20"
+                            >
+                              {savingEdit ? 'Saving...' : 'Save Changes'}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap">{value}</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 px-1">Source Contributions</div>
             {doc.sections.map((section: DocumentSection) => (
               <div key={section.id} className="border border-slate-800 rounded-lg overflow-hidden bg-slate-950/30">
                 <div 
@@ -325,5 +490,6 @@ export default function DocumentPill({ workspaceId, threadId }: DocumentPillProp
         )}
       </div>
     </div>
+    </>
   );
 }

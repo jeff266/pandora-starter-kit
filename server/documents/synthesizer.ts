@@ -1,5 +1,7 @@
 import { AccumulatedDocument, DocumentContribution, DocumentTemplateType } from './types.js';
 import { callLLM } from '../utils/llm-router.js';
+import { configLoader } from '../config/workspace-config-loader.js';
+import { buildProfileAwareSystemPrompt } from './profile-injector.js';
 
 export interface SynthesisInput {
   workspaceId: string;
@@ -27,6 +29,9 @@ export async function synthesizeDocument(input: SynthesisInput): Promise<Synthes
   const { workspaceId, document, workspaceMetrics } = input;
   const { templateType, sections } = document;
 
+  // Load document profile for the workspace
+  const profile = await configLoader.getDocumentProfile(workspaceId);
+
   // Prepare compact context (<3K tokens)
   const sectionSummaries = sections.map(section => {
     // Top 2 findings per section to stay under budget
@@ -42,7 +47,7 @@ export async function synthesizeDocument(input: SynthesisInput): Promise<Synthes
     .map(c => `- ${c.title}`)
     .join('\n');
 
-  const systemPrompt = `You are the Pandora Strategy Engine. Your job is to synthesize a narrative throughline for a ${templateType} document based on scattered findings and metrics.
+  const baseSystemPrompt = `You are the Pandora Strategy Engine. Your job is to synthesize a narrative throughline for a ${templateType} document based on scattered findings and metrics.
   
   Format your response as a JSON object with:
   - executiveSummary: 2-3 paragraphs of high-level narrative.
@@ -51,6 +56,8 @@ export async function synthesizeDocument(input: SynthesisInput): Promise<Synthes
   - lowConfidenceFlags: An array of { contributionId: string, reason: string } for items that seem contradictory or based on small sample sizes.
   
   Keep the tone professional, executive-ready, and data-driven.`;
+
+  const systemPrompt = buildProfileAwareSystemPrompt(profile, templateType, 'executive_summary', baseSystemPrompt);
 
   const userPrompt = `
   TEMPLATE TYPE: ${templateType}

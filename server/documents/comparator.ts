@@ -26,15 +26,23 @@ export interface DocumentComparison {
   findings: ComparisonItem[];
 }
 
-export async function buildComparison(workspaceId: string, currentBriefId: string): Promise<DocumentComparison | null> {
+export async function buildComparison(workspaceId: string, currentBriefId: string | null): Promise<DocumentComparison | null> {
   // 1. Find the most recent prior brief
-  const priorBriefRes = await query<any>(
-    `SELECT id, generated_date, the_number 
-     FROM weekly_briefs 
-     WHERE workspace_id = $1 AND id != $2 AND status IN ('ready', 'sent', 'edited')
-     ORDER BY generated_date DESC LIMIT 1`,
-    [workspaceId, currentBriefId]
-  );
+  const priorBriefRes = currentBriefId
+    ? await query<any>(
+        `SELECT id, generated_date, the_number 
+         FROM weekly_briefs 
+         WHERE workspace_id = $1 AND id != $2 AND status IN ('ready', 'sent', 'edited')
+         ORDER BY generated_date DESC LIMIT 1`,
+        [workspaceId, currentBriefId]
+      )
+    : await query<any>(
+        `SELECT id, generated_date, the_number 
+         FROM weekly_briefs 
+         WHERE workspace_id = $1 AND status IN ('ready', 'sent', 'edited')
+         ORDER BY generated_date DESC LIMIT 1`,
+        [workspaceId]
+      );
 
   if (priorBriefRes.rows.length === 0) return null;
   const priorBrief = priorBriefRes.rows[0];

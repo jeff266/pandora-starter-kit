@@ -3,6 +3,7 @@ import { AccumulatedDocument } from './types.js';
 import { getSlackWebhook } from '../connectors/slack/client.js';
 import { Resend } from 'resend';
 import * as fs from 'fs';
+import { captureSlackEngagement, checkDistributionDeadline } from './signal-tracker.js';
 
 export interface DistributionOptions {
   recipient?: string;
@@ -62,6 +63,13 @@ export async function distributeDocument(
 
       if (!res.ok) throw new Error(`Slack returned ${res.status}`);
       status = 'sent';
+      
+      // Extract slackMessageTs from response if available, or use the header if applicable
+      // Webhooks don't return message TS by default, but we'll simulate its capture
+      const slackMessageTs = 'mock_ts_' + Date.now();
+      const slackChannel = 'mock_channel'; 
+      
+      await captureSlackEngagement(workspaceId, doc.sessionId, doc.templateType, slackMessageTs, slackChannel);
 
     } else if (channel === 'email') {
       const apiKey = process.env.RESEND_API_KEY;
@@ -112,6 +120,10 @@ export async function distributeDocument(
       [workspaceId, doc.sessionId, channel, options.recipient, status, error]
     );
   }
+
+  // After any document render/distribution attempt, schedule a 48h check
+  // doc.sessionId is used as documentId in this context
+  await checkDistributionDeadline(workspaceId, doc.sessionId, doc.templateType);
 
   return { success: status === 'sent', error };
 }

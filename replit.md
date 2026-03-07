@@ -465,3 +465,35 @@ T010–T021 are all built and running. Migration tracker updated with 134–137.
 
 ### V_ANNOTATION: Voice-Aware Chart Annotations
 - **`server/chat/pandora-agent.ts`**: LLM now emits `raw_annotation` in chart_spec; `extractCharts()` accepts `voiceProfile` and runs `applyPostTransforms(raw_annotation, voiceProfile)` → final `annotation` before chart reaches frontend
+
+## Document Feedback, Calibration + Persistent Learning (March 2026 — F001–F006)
+
+### F001: WorkspaceDocumentProfile Schema + Storage
+- **`server/types/document-profile.ts`** (new): `WorkspaceDocumentProfile`, `DocumentEdit`, `TrainingPair`, `SectionPreferences` interfaces; `DEFAULT_DOCUMENT_PROFILE` constant
+- **`migrations/140_document_feedback.sql`** (applied): `document_training_pairs` table (id, workspace_id, template_type, section_id, system_prompt_at_time, raw_output, corrected_output, edit_distance, derived_style_signals, was_distributed, recommendations_actioned, quality_label, voice_profile_snapshot, quarter_phase, attainment_pct, created_at) + `document_edits` table (id, workspace_id, document_id, template_type, section_id, raw_text, edited_text, edit_distance, derived_signals, voice_profile_snapshot, quarter_phase_at_time, attainment_pct_at_time, edited_by, edited_at) + 5 indexes; sets `document_profile` defaults in `context_layer`
+- **`server/config/workspace-config-loader.ts`**: Added `getDocumentProfile()`, `updateDocumentProfile()` (deep merge via jsonb_set + cache clear), `getSectionPreferences()`
+- **CRITICAL table name**: The document feedback/training table is `document_training_pairs` (NOT `training_pairs` — that table already exists for LLM call tracking)
+
+### F002: Edit Capture + Diff Engine
+- **`server/documents/edit-capture.ts`** (new): `captureDocumentEdit()` — inserts into `document_edits` + `document_training_pairs`, calls `updateSectionPreferencesFromEdit`; `calculateNormalizedEditDistance()` using word-level diff; `extractStyleSignals()` — 6 signal types (length_preference, hedge_removal, pronoun_changes, entity_naming, opening_framing, numbers_added/removed); `updateSectionPreferencesFromEdit()` — accumulates signals, deduplicates, keeps top 5, updates averageEditDistance/editCount
+- **`server/routes/document-edits.ts`** (new): `POST /api/workspaces/:id/documents/:documentId/edit` calling `captureDocumentEdit`; registered in `server/index.ts`
+- **`client/src/components/assistant/DocumentPill.tsx`**: Per-section Edit buttons; inline textarea pre-populated with section text; on save POSTs to edit endpoint; calibration nudge shown after 3+ edits ("You made several edits. Want to spend 3 minutes calibrating?")
+
+### F004: Implicit Signal Capture
+- **`server/documents/signal-tracker.ts`** (new): `captureSlackEngagement()` — 24h delayed Slack reaction/reply check, updates `document_distributions.metadata`, calls `updateEngagementAverages` + `recalculateQualityScore`; `checkDistributionDeadline()` — 48h check, writes 'rendered_not_distributed' training signal; `recalculateQualityScore()` — queries last 10 `document_training_pairs`, computes edit/action/dist scores, updates `qualityScores.overall` and trend in document profile
+- **`server/documents/distributor.ts`**: Calls `captureSlackEngagement` after Slack distribution; calls `checkDistributionDeadline` after any render
+
+### F003: Profile-Aware Document Assembly
+- **`server/documents/profile-injector.ts`** (new): `buildProfileAwareSystemPrompt(profile, templateType, sectionId, basePrompt)` — injects calibration-derived instructions (execSummaryLeadsWith, riskSectionNameReps, recommendationsStyle, audienceExpectation, execSummaryMaxParagraphs) + 8 edit-history signal→instruction mappings + length preferences
+- **`server/documents/synthesizer.ts`**: Loads `WorkspaceDocumentProfile` at synthesis start via `getDocumentProfile()`; calls `buildProfileAwareSystemPrompt` per section
+
+### F005: Calibration Session Engine
+- **`server/documents/calibration.ts`** (new): `CALIBRATION_QUESTIONS` array (6 questions: exec_summary_lead, rep_naming_in_risks, comparison_block, recommendation_style, primary_audience, exec_summary_length); `shouldTriggerCalibration()` — triggers on 3+ docs never calibrated, high edit distance, or quarterly refresh; `buildCalibrationOpeningMessage()` in workspace voice persona; `saveCalibrationAnswer()` incremental saves; `completeCalibration()` sets completedAt, increments sessions, sets nextScheduledAt (+90 days)
+- **`server/routes/calibration.ts`** (new): `GET /status`, `POST /answer`, `POST /complete` — all at `/api/workspaces/:id/calibration/*`; registered in `server/index.ts`
+- **`client/src/components/documents/CalibrationSession.tsx`** (new): Chat-style modal; choice questions show pill buttons; example_preference shows two labeled blocks; each answer POSTs to `/answer` immediately; closing summary on completion
+- **`client/src/components/assistant/DocumentPill.tsx`**: "Calibrate →" link in header for uncalibrated workspaces; opens CalibrationSession modal
+
+### F006: Training Pair Export + Quality Dashboard
+- **`server/routes/training.ts`** (new): `GET /api/workspaces/:id/training-pairs/export` (JSONL, filterable by quality/min_edit_distance); `GET /api/admin/training-pairs/export-all` (cross-workspace); `GET /api/workspaces/:id/document-quality` (aggregates from `document_training_pairs` + `document_edits` + profile); registered in `server/index.ts`
+- **`client/src/pages/admin/DocumentQuality.tsx`** (new): Overall quality score + trend; edit rate / rec actioning / distribution rate metrics; training pair count + progress bar; most-edited sections table; calibration status + "Run Calibration Now →" link; "Export Training Pairs →" JSONL download
+- **`client/src/App.tsx`**: Route `/admin/document-quality` registered

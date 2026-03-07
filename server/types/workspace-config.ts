@@ -1,3 +1,5 @@
+import { WorkspaceDocumentProfile } from './document-profile.js';
+
 /**
  * Workspace Configuration Schema
  *
@@ -151,6 +153,9 @@ export interface WorkspaceConfig {
   /** Last update timestamp */
   updated_at: Date;
 
+  /** Document profile and feedback calibration */
+  document_profile?: WorkspaceDocumentProfile;
+
   /** Voice and tone settings for skill output */
   voice: VoiceConfig & VoiceModifierConfig;
 
@@ -174,7 +179,7 @@ export interface VoiceModifierConfig {
   persona: 'teammate' | 'advisor' | 'analyst';
   ownership_pronoun: 'we' | 'you';
   directness: 'direct' | 'diplomatic';
-  detail_level: 'executive' | 'manager' | 'analyst';
+  detail_level: 'concise' | 'standard' | 'detailed' | 'executive' | 'manager' | 'analyst';
   name_entities: boolean;
   celebrate_wins: boolean;
   surface_uncertainty: boolean;
@@ -213,7 +218,7 @@ export interface VoiceConfig {
    * - standard: 2-3 paragraphs, top 5 deals, stage breakdown if notable.
    * - detailed: 3-4 paragraphs, top 5 deals with full context, breakdowns, trend comparison.
    */
-  detail_level: 'concise' | 'standard' | 'detailed';
+  detail_level: 'concise' | 'standard' | 'detailed' | 'executive' | 'manager' | 'analyst';
 
   /**
    * Controls how bluntly findings are stated.
