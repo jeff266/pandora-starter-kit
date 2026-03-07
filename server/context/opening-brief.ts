@@ -1,6 +1,7 @@
 import { query } from '../db.js';
 import { configLoader } from '../config/workspace-config-loader.js';
 import { getPandoraRole, getHeadlineTarget, type PandolaRole } from './pandora-role.js';
+import { resolveDefaultPipeline } from '../chat/pipeline-resolver.js';
 
 // ===== TYPES =====
 
@@ -53,6 +54,7 @@ export interface OpeningBriefData {
     dealCount: number;
     weightedValue: number;
     coverageRatio: number | null;
+    pipelineLabel: string | null;
     closingThisWeek: { count: number; value: number; dealNames: string[] };
     closingThisMonth: { count: number; value: number };
     newThisWeek: { count: number; value: number };
@@ -314,6 +316,27 @@ export async function assembleOpeningBrief(
   // Use actual quota period start for attainment calculation, fall back to 90 days
   const periodStart = quotaPeriod?.start ?? new Date(Date.now() - 90 * 86400000);
 
+  // Resolve quota-bearing pipeline for scoping pipeline stats + coverage
+  const pipelineResolution = await resolveDefaultPipeline(workspaceId, 'attainment', pandoraRole ?? 'admin', '').catch(() => null);
+  const quarterEnd = quotaPeriod?.end ?? null;
+
+  // scope_id filter (applied to pipeline stats, closing week/month queries)
+  let scopeIdSQL = '';
+  const scopeIdParams: any[] = [];
+  if (pipelineResolution?.scope_ids?.length) {
+    scopeIdSQL = ` AND scope_id = ANY($${base.length + 1}::uuid[])`;
+    scopeIdParams.push(pipelineResolution.scope_ids);
+  }
+  const scopedBase = [...base, ...scopeIdParams];
+
+  // Full scope for pipelineStats: scope_id + quarter-end close_date bound
+  let pipelineStatsSQL = scopeIdSQL;
+  const pipelineStatsParams = [...scopedBase];
+  if (quarterEnd) {
+    pipelineStatsSQL += ` AND close_date <= $${pipelineStatsParams.length + 1}`;
+    pipelineStatsParams.push(quarterEnd);
+  }
+
   const [
     workspaceRow,
     userRow,
@@ -345,7 +368,7 @@ export async function assembleOpeningBrief(
     ),
     // Role-scoped headline target (period-current)
     getHeadlineTarget(workspaceId, userId),
-    // Open pipeline totals
+    // Open pipeline totals — scoped to quota-bearing pipeline + current quarter close_date
     query<{ deal_count: string; total_value: string; weighted_value: string }>(
       `SELECT COUNT(*) as deal_count,
               COALESCE(SUM(amount), 0)::numeric as total_value,
@@ -353,10 +376,10 @@ export async function assembleOpeningBrief(
        FROM deals
        WHERE workspace_id = $1
          AND stage_normalized NOT IN ('closed_won', 'closed_lost')
-         ${dealScope.sql}`,
-      base
+         ${dealScope.sql}${pipelineStatsSQL}`,
+      pipelineStatsParams
     ),
-    // Closing this week
+    // Closing this week — scoped to quota-bearing pipeline
     query<{ name: string; amount: string }>(
       `SELECT name, COALESCE(amount, 0)::numeric::text as amount
        FROM deals
@@ -364,12 +387,12 @@ export async function assembleOpeningBrief(
          AND stage_normalized NOT IN ('closed_won', 'closed_lost')
          AND close_date >= CURRENT_DATE
          AND close_date <= CURRENT_DATE + INTERVAL '7 days'
-         ${dealScope.sql}
+         ${dealScope.sql}${scopeIdSQL}
        ORDER BY amount DESC NULLS LAST
        LIMIT 5`,
-      base
+      scopedBase
     ),
-    // Closing this month
+    // Closing this month — scoped to quota-bearing pipeline
     query<{ count: string; value: string }>(
       `SELECT COUNT(*) as count, COALESCE(SUM(amount), 0)::numeric as value
        FROM deals
@@ -377,8 +400,8 @@ export async function assembleOpeningBrief(
          AND stage_normalized NOT IN ('closed_won', 'closed_lost')
          AND close_date >= CURRENT_DATE
          AND close_date < date_trunc('month', CURRENT_DATE) + INTERVAL '1 month'
-         ${dealScope.sql}`,
-      base
+         ${dealScope.sql}${scopeIdSQL}`,
+      scopedBase
     ),
     // New this week
     query<{ count: string; value: string }>(
@@ -517,6 +540,7 @@ export async function assembleOpeningBrief(
       dealCount: Number(pipe?.deal_count ?? 0),
       weightedValue: Number(pipe?.weighted_value ?? 0),
       coverageRatio,
+      pipelineLabel: pipelineResolution?.assumption_label ?? null,
       closingThisWeek: {
         count: cwRows.length,
         value: cwRows.reduce((s, r) => s + Number(r.amount), 0),
@@ -590,7 +614,8 @@ export function renderBriefContext(data: OpeningBriefData): string {
       lines.push(`ATTAINMENT: ${fmt(data.targets.closedWonValue)} closed (${data.targets.pctAttained}%) — ${fmt(data.targets.gap ?? 0)} gap remaining`);
     }
     if (data.pipeline.coverageRatio !== null) {
-      lines.push(`COVERAGE: ${data.pipeline.coverageRatio}x (pipeline ${fmt(data.pipeline.totalValue)} / gap ${fmt(data.targets.gap ?? 0)})`);
+      const pipelineScope = data.pipeline.pipelineLabel ? ` [${data.pipeline.pipelineLabel}]` : '';
+      lines.push(`COVERAGE: ${data.pipeline.coverageRatio}x (pipeline ${fmt(data.pipeline.totalValue)}${pipelineScope} / gap ${fmt(data.targets.gap ?? 0)})`);
     }
   } else {
     lines.push(``, `TARGET: Not configured`);
