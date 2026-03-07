@@ -312,3 +312,34 @@ Added to `server/routes/data.ts`:
 - Registered in `case` switch alongside `query_deals`, `query_contacts`
 - Added to `PANDORA_TOOLS` array and both system prompt tool lists
 - Differentiates HubSpot leads (use `query_contacts` with `lifecycle_stage="lead"`) vs Salesforce leads (use `query_leads`)
+
+## Pandora Assistant Intelligence Layer (March 2026)
+
+### Chart Infrastructure (T001–T005)
+- **`server/renderers/types.ts`**: Added `ChartType`, `ChartDataPoint`, `ChartSpec`, `ChartBlock` types + `validateChartSpec()` function
+- **`client/src/types/chart-types.ts`**: Mirror types for frontend consumption
+- **`client/src/components/shared/ChartRenderer.tsx`**: Full Recharts component supporting 6 chart types: bar, horizontal_bar, line, stacked_bar, waterfall, donut. Compact mode, annotation line, colorMap, referenceValue support.
+- **`server/chat/pandora-agent.ts`**: `detectVisualizationHint()`, `parseChartSpecs()` added; `PandoraResponse` extended with `chart_specs?: ChartSpec[]`; chart system prompt injection when viz hint detected
+- **`server/routes/conversation-stream.ts`**: Emits `chart_specs` SSE event before `synthesis_done` for all `runPandoraAgent` call sites
+- **`client/src/components/assistant/useConversationStream.ts`**: `chartSpecs: ChartSpec[]` in `ConversationState`; `chart_specs` SSE event handled; reset on new message
+- **`client/src/components/assistant/ConversationView.tsx`**: Chart block rendered above synthesis text when `chartSpecs.length > 0`
+- **`server/briefing/brief-assembler.ts`**: Generates `chart_spec` on `TheNumber` (attainment pacing line), `WhatChanged` (pipeline waterfall), `Reps` (rep coverage horizontal_bar)
+- **`server/briefing/brief-types.ts`**: `chart_spec?: any` added to `TheNumber`, `WhatChanged`, `Reps` interfaces
+- **`client/src/components/assistant/TheNumberCard.tsx`**: Renders `n.chart_spec` via ChartRenderer above table
+- **`client/src/components/assistant/WhatChangedCard.tsx`**: Renders `wc.chart_spec` via ChartRenderer above table
+- **`client/src/components/assistant/RepsCard.tsx`**: Renders `reps.chart_spec` via ChartRenderer above rep list
+
+### Live Deal Trust Layer (T006–T007)
+- **`server/chat/deal-lookup.ts`**: `lookupLiveDeal()`, `detectDealMentions()`, `buildLiveDealFactsBlock()`, `detectContradiction()` — forces live DB values over stale brief context
+- **`server/chat/pandora-agent.ts`**: Live deal injection + contradiction handling integrated into `runPandoraAgent`; deal mentions detected before tool loop; contradiction triggers mandatory re-query instruction
+
+### Event-Driven Brief Freshness (T008–T009)
+- **`server/briefing/brief-reassembly-trigger.ts`**: `triggerBriefReassembly(workspaceId, reason, materialChanges)` — non-blocking, fires `assembleBrief(force: true)` via `setImmediate`
+- **`server/jobs/queue.ts`**: `handleHubSpotSyncJob` now queries for recent Closed Won deals + triggers brief reassembly if records updated; fully non-blocking
+- **`server/routes/briefs.ts`**: `GET /:workspaceId/brief` now returns `metadata: { assembled_at, last_sync_at, is_potentially_stale, stale_reason }` by querying `connections` table
+- **`client/src/pages/AssistantView.tsx`**: Stores `briefMetadata` state; passes to `ProactiveBriefing` with `onRefreshBrief` callback
+- **`client/src/components/assistant/ProactiveBriefing.tsx`**: Assembly time line ("As of X:XX AM"), staleness banner (amber), clickable ↻ refresh button that calls `onRefreshBrief`
+
+### Immediate ACES ABA Fix
+- Frontera workspace brief force-reassembled on March 7, 2026 at 02:00 UTC
+- Corrected attainment: **112%** (was 20.7%), Won: **$392,100** (was $72,480, ACES ABA $315K now included)

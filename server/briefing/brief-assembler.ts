@@ -122,6 +122,27 @@ async function getTheNumber(workspaceId: string, wonLostStages: string[], now: D
     direction = wowPts > 1 ? 'up' : wowPts < -1 ? 'down' : 'flat';
   }
 
+  const runAt = new Date().toISOString();
+  const weeksInQuarter = 13;
+  const currentWeek = Math.max(1, weeksInQuarter - weeksRemaining);
+  const paceChartData: { label: string; value: number }[] = [];
+  const weeklyPaceTarget = target > 0 ? target / weeksInQuarter : 0;
+  for (let w = 1; w <= weeksInQuarter; w++) {
+    paceChartData.push({ label: `Wk ${w}`, value: Math.round(weeklyPaceTarget * w) });
+  }
+  const attainmentChartSpec = target > 0 ? {
+    type: 'chart' as const,
+    chartType: 'line' as const,
+    title: 'Attainment Pacing',
+    subtitle: `Current: ${Math.round(attainmentPct)}% at Wk ${currentWeek}`,
+    data: paceChartData,
+    referenceValue: target,
+    annotation: wonThisPeriod > 0
+      ? `At Wk ${currentWeek}: $${(wonThisPeriod / 1000).toFixed(0)}K closed of $${(target / 1000).toFixed(0)}K target`
+      : `$${(target / 1000).toFixed(0)}K target — no closed won recorded yet`,
+    source: { calculation_id: 'attainment_pacing', run_at: runAt, record_count: weeksInQuarter },
+  } : undefined;
+
   return {
     pipeline_total: pipelineTotal,
     deal_count: dealCount,
@@ -143,6 +164,7 @@ async function getTheNumber(workspaceId: string, wonLostStages: string[], now: D
     avg_deal_size: avgDealSize || undefined,
     weeks_remaining: weeksRemaining,
     required_deals_to_close: requiredDealsToCLose,
+    chart_spec: attainmentChartSpec,
   };
 }
 
@@ -172,17 +194,36 @@ async function getWhatChanged(workspaceId: string, wonLostStages: string[], sinc
   }
 
   const createdAmt = parseFloat(thisCreated.rows[0]?.total || '0');
+  const wonAmt = parseFloat(thisWon.rows[0]?.total || '0');
   const lostAmt = parseFloat(thisLost.rows[0]?.total || '0');
   const pushedAmt = parseFloat(pushed.rows[0]?.total || '0');
   const totalPipelineDelta = createdAmt - lostAmt - pushedAmt;
 
+  const waterfallRunAt = new Date().toISOString();
+  const waterfallChartSpec = (createdAmt > 0 || wonAmt > 0 || lostAmt > 0 || pushedAmt > 0) ? {
+    type: 'chart' as const,
+    chartType: 'waterfall' as const,
+    title: 'Pipeline Movement',
+    data: [
+      { label: 'Created', value: createdAmt },
+      { label: 'Won', value: wonAmt },
+      { label: 'Lost', value: -lostAmt },
+      { label: 'Pushed', value: -pushedAmt },
+    ].filter(d => d.value !== 0),
+    annotation: totalPipelineDelta >= 0
+      ? `Net +$${(totalPipelineDelta / 1000).toFixed(0)}K pipeline added this period`
+      : `Net -$${(Math.abs(totalPipelineDelta) / 1000).toFixed(0)}K pipeline this period`,
+    source: { calculation_id: 'pipeline_waterfall', run_at: waterfallRunAt, record_count: 4 },
+  } : undefined;
+
   return {
     created: { count: parseInt(thisCreated.rows[0]?.cnt || '0'), amount: createdAmt, prev_count: parseInt(priorCreated.rows[0]?.cnt || '0'), prev_amount: parseFloat(priorCreated.rows[0]?.total || '0') },
-    won: { count: parseInt(thisWon.rows[0]?.cnt || '0'), amount: parseFloat(thisWon.rows[0]?.total || '0'), prev_count: parseInt(priorWon.rows[0]?.cnt || '0'), prev_amount: parseFloat(priorWon.rows[0]?.total || '0') },
+    won: { count: parseInt(thisWon.rows[0]?.cnt || '0'), amount: wonAmt, prev_count: parseInt(priorWon.rows[0]?.cnt || '0'), prev_amount: parseFloat(priorWon.rows[0]?.total || '0') },
     lost: { count: parseInt(thisLost.rows[0]?.cnt || '0'), amount: lostAmt, prev_count: parseInt(priorLost.rows[0]?.cnt || '0'), prev_amount: parseFloat(priorLost.rows[0]?.total || '0') },
     pushed: { count: parseInt(pushed.rows[0]?.cnt || '0'), amount: pushedAmt },
     total_pipeline_delta: totalPipelineDelta,
     streak,
+    chart_spec: waterfallChartSpec,
   };
 }
 
@@ -250,22 +291,40 @@ async function getReps(workspaceId: string, wonLostStages: string[]): Promise<Re
     ? repRes.rows.filter((r: any) => allowedNames.has(r.name))
     : repRes.rows;
 
+  const repItems = filteredReps.map((r: any) => {
+    const closed = closedMap.get(r.email) || 0;
+    const quotaVal = quotaMap.get(r.email) || 0;
+    const flag = flagMap.get(r.email);
+    return {
+      email: r.email, name: r.name,
+      pipeline: parseFloat(r.pipeline), closed, deal_count: parseInt(r.cnt),
+      quota: quotaVal || undefined,
+      attainment_pct: quotaVal > 0 ? Math.round((closed / quotaVal) * 100) : undefined,
+      gap: quotaVal > 0 ? Math.max(0, quotaVal - closed) : undefined,
+      flag: flag?.message, flag_weeks: flag ? parseInt(flag.times_flagged) : undefined,
+      flag_severity: flag ? (parseInt(flag.escalation_level) >= 2 ? 'critical' : parseInt(flag.escalation_level) >= 1 ? 'warning' : 'ok') : 'ok',
+      escalation_level: flag ? parseInt(flag.escalation_level) : 0, findings_count: 0,
+    } as any;
+  });
+
+  const repsChartSpec = repItems.length > 0 ? {
+    type: 'chart' as const,
+    chartType: 'horizontal_bar' as const,
+    title: 'Rep Pipeline Coverage',
+    data: repItems.map((r: any) => ({
+      label: r.name || r.email || 'Unknown',
+      value: r.pipeline,
+      annotation: (r.quota && r.pipeline < r.quota * 3) ? 'Below 3x' : undefined,
+    })),
+    annotation: repItems.length > 1
+      ? `${repItems[0].name || repItems[0].email} leads with ${repItems[0].pipeline >= 1000 ? `$${(repItems[0].pipeline / 1000).toFixed(0)}K` : `$${repItems[0].pipeline.toFixed(0)}`} pipeline`
+      : undefined,
+    source: { calculation_id: 'rep_coverage_comparison', run_at: new Date().toISOString(), record_count: repItems.length },
+  } : undefined;
+
   return {
-    items: filteredReps.map((r: any) => {
-      const closed = closedMap.get(r.email) || 0;
-      const quotaVal = quotaMap.get(r.email) || 0;
-      const flag = flagMap.get(r.email);
-      return {
-        email: r.email, name: r.name,
-        pipeline: parseFloat(r.pipeline), closed, deal_count: parseInt(r.cnt),
-        quota: quotaVal || undefined,
-        attainment_pct: quotaVal > 0 ? Math.round((closed / quotaVal) * 100) : undefined,
-        gap: quotaVal > 0 ? Math.max(0, quotaVal - closed) : undefined,
-        flag: flag?.message, flag_weeks: flag ? parseInt(flag.times_flagged) : undefined,
-        flag_severity: flag ? (parseInt(flag.escalation_level) >= 2 ? 'critical' : parseInt(flag.escalation_level) >= 1 ? 'warning' : 'ok') : 'ok',
-        escalation_level: flag ? parseInt(flag.escalation_level) : 0, findings_count: 0,
-      } as any;
-    }),
+    items: repItems,
+    chart_spec: repsChartSpec,
   };
 }
 

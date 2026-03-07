@@ -15,6 +15,9 @@ import { executeDataTool } from './data-tools.js';
 import type { ConversationMessage } from './conversation-state.js';
 import { buildWorkspaceContextBlock } from '../context/workspace-memory.js';
 import { getSkillRegistry } from '../skills/registry.js';
+import { validateChartSpec } from '../renderers/types.js';
+import type { ChartSpec } from '../renderers/types.js';
+import { lookupLiveDeal, detectDealMentions, buildLiveDealFactsBlock, detectContradiction } from './deal-lookup.js';
 
 const _chatDir = dirname(fileURLToPath(import.meta.url));
 const PRODUCT_KNOWLEDGE = (() => {
@@ -912,6 +915,7 @@ export interface PandoraResponse {
   tool_call_count: number;
   latency_ms: number;
   inline_actions?: InlineAction[];
+  chart_specs?: ChartSpec[];
 }
 
 interface InlineAction {
@@ -950,6 +954,51 @@ function parseFollowUpQuestions(content: string): { answer: string; followups: s
 }
 
 // ─── Math Detection Utility ───────────────────────────────────────────────────
+
+/**
+ * Detect whether a question is better answered with a chart, and which type.
+ */
+function detectVisualizationHint(message: string): string | null {
+  const m = message.toLowerCase();
+  if (/waterfall|what\s+changed|pipeline\s+movement|moved\s+this\s+week/.test(m)) return 'waterfall';
+  if (/pipeline\s+by\s+stage|deals\s+by\s+stage|stage\s+breakdown/.test(m)) return 'bar';
+  if (/rep\s+coverage|rep\s+comparison|by\s+rep|per\s+rep|who\s+has\s+the\s+most|who\s+has\s+the\s+least|rep\s+performance/.test(m)) return 'horizontal_bar';
+  if (/trend\s+over\s+time|pacing|how\s+are\s+we\s+tracking|week\s+by\s+week|attainment\s+pace/.test(m)) return 'line';
+  if (/forecast\s+breakdown|commit\s+vs|by\s+category|commit\s+and\s+best\s+case/.test(m)) return 'stacked_bar';
+  if (/distribution|what\s+percent|win.?loss\s+split|icp\s+grade|breakdown\s+of/.test(m)) return 'donut';
+  return null;
+}
+
+/**
+ * Parse chart_spec JSON blocks from LLM response text.
+ * Returns cleaned text and valid chart specs.
+ */
+function parseChartSpecs(rawText: string): { cleanedText: string; specs: ChartSpec[] } {
+  const specs: ChartSpec[] = [];
+  const chartBlockRegex = /```chart_spec\n([\s\S]*?)\n```/g;
+  let cleanedText = rawText;
+  let match;
+
+  while ((match = chartBlockRegex.exec(rawText)) !== null) {
+    try {
+      const parsed = JSON.parse(match[1]);
+      const valid = validateChartSpec(parsed, { calculation_id: parsed.source?.calculation_id });
+      if (valid) {
+        specs.push(parsed as ChartSpec);
+      } else {
+        console.warn('[ChartEmitter] Chart spec failed validation, falling back to prose');
+      }
+    } catch (e) {
+      console.warn('[ChartEmitter] Chart spec parse error:', e instanceof Error ? e.message : e);
+    }
+  }
+
+  if (specs.length > 0) {
+    cleanedText = rawText.replace(/```chart_spec\n[\s\S]*?\n```/g, '').trim();
+  }
+
+  return { cleanedText, specs };
+}
 
 /**
  * Deterministic detection of when arithmetic is needed.
@@ -1098,9 +1147,57 @@ export async function runPandoraAgent(
   let totalTokens = 0;
 
   const contextBlock = await buildWorkspaceContextBlock(workspaceId).catch(() => '');
-  const effectiveSystemPrompt = contextBlock
+  let effectiveSystemPrompt = contextBlock
     ? `${PANDORA_SYSTEM_PROMPT}\n\n${contextBlock}`
     : PANDORA_SYSTEM_PROMPT;
+
+  // ── Live deal lookup — inject before LLM sees anything ────────────────────
+  const [dealMentions] = await Promise.all([
+    detectDealMentions(message, workspaceId).catch(() => [] as string[]),
+  ]);
+
+  if (dealMentions.length > 0) {
+    const liveFacts = await Promise.all(
+      dealMentions.map(name => lookupLiveDeal(workspaceId, name).catch(() => null))
+    );
+    const validFacts = liveFacts.filter(Boolean) as any[];
+    if (validFacts.length > 0) {
+      const factBlock = buildLiveDealFactsBlock(validFacts);
+      effectiveSystemPrompt = factBlock + '\n\n' + effectiveSystemPrompt;
+      console.log(`[PandoraAgent] Injected live deal facts for: ${dealMentions.join(', ')}`);
+    }
+  }
+
+  // ── Contradiction detection — re-query everything ─────────────────────────
+  const isContradiction = detectContradiction(message, conversationHistory);
+  if (isContradiction) {
+    effectiveSystemPrompt += `\n\n## Contradiction Handling — ACTIVE
+The user is pushing back on a value stated earlier.
+MANDATORY steps:
+1. Re-query any deal mentioned in this conversation using query_deals (do NOT use brief snapshot or prior context).
+2. Re-run compute_metric for any metric being challenged.
+3. In your response, explicitly acknowledge the discrepancy: "You're right to question that. Pulling live data now..."
+4. Explain WHY the earlier value was wrong (e.g., "the brief had the pre-sync amount").
+5. Give the correct value with the data source timestamp.
+6. Recalculate any derived metrics (e.g., attainment) using the corrected values.
+Do NOT re-assert the cached value. Re-query everything.`;
+    console.log(`[PandoraAgent] Contradiction detected, injecting re-query instruction`);
+  }
+
+  // ── Visualization hint — inject chart output instructions ─────────────────
+  const vizHint = detectVisualizationHint(message);
+  if (vizHint) {
+    effectiveSystemPrompt += `\n\n## Chart Output Instructions
+This question is best answered with a chart (type: ${vizHint}).
+After computing values with tools, emit a chart_spec JSON block using ONLY tool-computed values.
+Format: \`\`\`chart_spec
+{JSON}
+\`\`\`
+Required fields: type:"chart", chartType:"${vizHint}", title, data (array of {label:string, value:number}), source.calculation_id (reference the tool call that produced the values, e.g. "query_deals:stage_breakdown"), source.run_at (ISO timestamp), source.record_count.
+After the chart_spec block, write one annotation sentence — the "so what" in a teammate's voice.
+DO NOT calculate numeric values yourself — use only values returned by tools.`;
+    console.log(`[PandoraAgent] Visualization hint: ${vizHint}`);
+  }
 
   const classification = await classifyQuestion(workspaceId, message);
   console.log(`[PandoraAgent] classification:`, JSON.stringify(classification));
@@ -1277,7 +1374,8 @@ export async function runPandoraAgent(
 
   totalTokens += (finalResponse.usage?.input || 0) + (finalResponse.usage?.output || 0);
 
-  const parsedFinal = parseFollowUpQuestions(finalResponse.content);
+  const { cleanedText: cleanedFinalAnswer, specs: chartSpecs } = parseChartSpecs(finalResponse.content);
+  const parsedFinal = parseFollowUpQuestions(cleanedFinalAnswer);
 
   // Track calculator usage for math questions
   if (needsCalculator) {
@@ -1368,6 +1466,7 @@ export async function runPandoraAgent(
     tool_call_count: toolTrace.length,
     latency_ms: Date.now() - startTime,
     inline_actions: inlineActions,
+    chart_specs: chartSpecs.length > 0 ? chartSpecs : undefined,
   };
 }
 

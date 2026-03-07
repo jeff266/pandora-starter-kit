@@ -360,6 +360,9 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
         );
         assistantResponse = pandoraT1.answer;
         const tier1NoRunId = randomUUID();
+        if (pandoraT1.chart_specs && pandoraT1.chart_specs.length > 0) {
+          sse(res, { type: 'chart_specs', specs: pandoraT1.chart_specs });
+        }
         sse(res, { type: 'synthesis_chunk', text: pandoraT1.answer });
         sse(res, { type: 'synthesis_done', full_text: pandoraT1.answer, response_id: tier1NoRunId });
 
@@ -448,6 +451,9 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
         }
         assistantResponse = pandoraFallback.answer;
         const fallbackResponseId = randomUUID();
+        if (pandoraFallback.chart_specs && pandoraFallback.chart_specs.length > 0) {
+          sse(res, { type: 'chart_specs', specs: pandoraFallback.chart_specs });
+        }
         sse(res, { type: 'synthesis_chunk', text: pandoraFallback.answer });
         sse(res, { type: 'synthesis_done', full_text: pandoraFallback.answer, response_id: fallbackResponseId });
 

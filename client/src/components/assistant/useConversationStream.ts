@@ -5,6 +5,7 @@ import type { EvidenceCardData } from './EvidenceCard';
 import type { RecommendedAction } from './ActionCard';
 import type { DeliverableOption } from './DeliverablePicker';
 import type { ToolCallEvent } from './AgentConversationFeed';
+import type { ChartSpec } from '../../types/chart-types';
 
 export interface ConversationMessage {
   id: string;
@@ -45,6 +46,7 @@ export interface ConversationState {
   actions: RecommendedAction[];
   inlineActions: InlineAction[];
   deliverableOptions: DeliverableOption[];
+  chartSpecs: ChartSpec[];
   error: string | null;
   restored: boolean;
 }
@@ -72,6 +74,7 @@ const initial: ConversationState = {
   actions: [],
   inlineActions: [],
   deliverableOptions: [],
+  chartSpecs: [],
   error: null,
   restored: false,
 };
@@ -100,6 +103,7 @@ function reducer(state: ConversationState, action: Action): ConversationState {
       actions: [],
       inlineActions: [],
       deliverableOptions: [],
+      chartSpecs: [],
       error: null,
       restored: false,
       messages: [...state.messages, { id: makeId(), role: 'user', content: action.text, timestamp: Date.now() }],
@@ -180,6 +184,9 @@ function reducer(state: ConversationState, action: Action): ConversationState {
       }
       case 'deliverable_options': {
         return { ...state, deliverableOptions: ev.options ?? [] };
+      }
+      case 'chart_specs': {
+        return { ...state, chartSpecs: ev.specs ?? [] };
       }
       case 'error': {
         return { ...state, error: ev.message, phase: 'complete' };

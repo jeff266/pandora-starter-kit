@@ -1,4 +1,5 @@
 import React from 'react';
+import ChartRenderer from '../shared/ChartRenderer';
 
 function fmt(n: number): string {
   if (!n && n !== 0) return '—';
@@ -35,6 +36,11 @@ export default function WhatChangedCard({ whatChanged: wc, briefType }: WhatChan
 
   return (
     <div style={{ padding: '4px 0' }}>
+      {wc.chart_spec && (
+        <div style={{ marginBottom: 12 }}>
+          <ChartRenderer spec={wc.chart_spec} compact={false} />
+        </div>
+      )}
       {briefType === 'pulse' && (
         <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{sinceLabel}</div>
       )}

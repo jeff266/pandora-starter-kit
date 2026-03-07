@@ -465,6 +465,25 @@ export class JobQueue {
         console.warn('[JobQueue] Post-HubSpot-sync scoring failed', { workspaceId, err })
       );
 
+      // Check for material changes and trigger brief reassembly if needed
+      try {
+        const recentClosedWon = await query<{ cnt: string }>(
+          `SELECT COUNT(*)::text as cnt FROM deals WHERE workspace_id = $1 AND stage_normalized = 'closed_won' AND updated_at >= NOW() - INTERVAL '5 minutes'`,
+          [workspaceId]
+        );
+        const closedWonCount = parseInt(recentClosedWon.rows[0]?.cnt || '0');
+        if (closedWonCount > 0 || recordsStored > 0) {
+          const { triggerBriefReassembly } = await import('../briefing/brief-reassembly-trigger.js');
+          const materialChanges = closedWonCount > 0
+            ? [{ type: 'deal_closed_won' as const, dealId: '', dealName: `${closedWonCount} deal(s)`, before: {}, after: {} }]
+            : [];
+          const reason = closedWonCount > 0 ? `hubspot_sync:${closedWonCount}_closed_won` : 'hubspot_sync:records_updated';
+          triggerBriefReassembly(workspaceId, reason, materialChanges);
+        }
+      } catch (briefErr) {
+        console.warn(`[HubSpot Job] Brief reassembly check failed (non-fatal):`, briefErr instanceof Error ? briefErr.message : briefErr);
+      }
+
       return { recordsStored };
     } catch (err: any) {
       const errorMsg = err?.message ?? String(err);

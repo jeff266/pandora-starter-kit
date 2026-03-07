@@ -35,6 +35,7 @@ export interface TheNumber {
   avg_deal_size?: number;
   weeks_remaining?: number;
   required_deals_to_close?: number;
+  chart_spec?: any;
 }
 
 export interface WhatChanged {
@@ -45,6 +46,7 @@ export interface WhatChanged {
   streak?: string;
   nothing_moved?: boolean;
   since_date?: string;
+  chart_spec?: any;
 }
 
 export interface Segment {
@@ -78,6 +80,7 @@ export interface Reps {
   items: RepPerformance[];
   omitted?: boolean;
   reason?: string;
+  chart_spec?: any;
 }
 
 export interface DealToWatch {

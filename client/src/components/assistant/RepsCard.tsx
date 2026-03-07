@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import ChartRenderer from '../shared/ChartRenderer';
 
 function fmt(n?: number): string {
   if (n == null) return '—';
@@ -39,6 +40,11 @@ export default function RepsCard({ reps, highlightEmails = [], briefType, onAsk 
 
   return (
     <div style={{ padding: '4px 0' }}>
+      {reps.chart_spec && (
+        <div style={{ marginBottom: 12 }}>
+          <ChartRenderer spec={reps.chart_spec} compact={false} />
+        </div>
+      )}
       {sorted.map((rep) => {
         const isHighlighted = highlightEmails.includes(rep.email);
         const isExpanded = expanded[rep.email];

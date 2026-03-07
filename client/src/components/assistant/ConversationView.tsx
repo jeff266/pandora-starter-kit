@@ -12,6 +12,7 @@ import DeliverablePicker from './DeliverablePicker';
 import StickyInput from './StickyInput';
 import MessageFeedback from './MessageFeedback';
 import AgentConversationFeed from './AgentConversationFeed';
+import ChartRenderer from '../shared/ChartRenderer';
 
 interface ConversationViewProps {
   initialMessage?: string;
@@ -201,6 +202,22 @@ export default function ConversationView({ initialMessage, onBack }: Conversatio
                 if (route) navigate(route);
               }}
             />
+          </div>
+        )}
+
+        {state.chartSpecs.length > 0 && (state.phase === 'synthesis' || state.synthesisComplete) && (
+          <div style={{ display: 'flex', justifyContent: 'flex-start', width: '100%', marginBottom: 12 }}>
+            <div style={{
+              maxWidth: '75%', padding: '12px 14px', borderRadius: 10,
+              background: colors.surface, border: `1px solid ${colors.border}`,
+              width: '100%',
+            }}>
+              {state.chartSpecs.map((spec, i) => (
+                <div key={i} style={{ marginBottom: i < state.chartSpecs.length - 1 ? 20 : 0 }}>
+                  <ChartRenderer spec={spec} compact={true} />
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

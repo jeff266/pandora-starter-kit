@@ -91,6 +91,7 @@ export default function AssistantView() {
   // ── Data ─────────────────────────────────────────────────────────────────────
   const [greeting, setGreeting] = useState<GreetingPayload | null>(null);
   const [brief, setBrief] = useState<any>(null);
+  const [briefMetadata, setBriefMetadata] = useState<{ assembled_at: string; last_sync_at: string | null; is_potentially_stale: boolean; stale_reason?: string } | null>(null);
   const [briefLoading, setBriefLoading] = useState(true);
   const [operators, setOperators] = useState<any[] | null>(null);
   const [showSendDialog, setShowSendDialog] = useState(false);
@@ -196,6 +197,7 @@ export default function AssistantView() {
       const res = await api.get('/brief');
       const loaded = res?.available ? res.brief : null;
       setBrief(loaded);
+      setBriefMetadata(res?.metadata || null);
       // Auto-open editorial-recommended sections if user hasn't made a choice yet
       if (loaded?.editorial_focus?.open_sections?.length > 0) {
         setOpenSections(prev => {
@@ -422,6 +424,8 @@ export default function AssistantView() {
             investigationStatus={investigationJobs}
             onQuestionClick={handleSend}
             brief={brief}
+            briefMetadata={briefMetadata ?? undefined}
+            onRefreshBrief={fetchBrief}
             onEscalate={() => {
               alert('Escalation feature coming soon');
             }}

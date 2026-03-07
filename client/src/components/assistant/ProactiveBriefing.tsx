@@ -98,6 +98,13 @@ export interface GreetingData {
   proactive_briefing?: ProactiveBriefingData;
 }
 
+export interface BriefMetadata {
+  assembled_at: string;
+  last_sync_at: string | null;
+  is_potentially_stale: boolean;
+  stale_reason?: string;
+}
+
 interface ProactiveBriefingProps {
   greeting: GreetingData;
   phase?: GreetingPhase;
@@ -116,6 +123,8 @@ interface ProactiveBriefingProps {
     error?: string;
   }>;
   brief?: any;
+  briefMetadata?: BriefMetadata;
+  onRefreshBrief?: () => void;
 }
 
 function formatCurrency(val: number): string {
@@ -175,9 +184,12 @@ export default function ProactiveBriefing({
   onQuestionClick,
   investigationStatus,
   brief,
+  briefMetadata,
+  onRefreshBrief,
 }: ProactiveBriefingProps) {
   const navigate = useNavigate();
   const [resultsModal, setResultsModal] = useState<{ skillId: string; runId: string } | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const briefing = greeting.proactive_briefing;
   const isStreaming = phase && !['pills', 'browsing'].includes(phase);
   const severityColor = getSeverityColor(greeting.severity);
@@ -186,6 +198,35 @@ export default function ProactiveBriefing({
   const theNumber = brief?.the_number ?? null;
   const deltas = briefing?.deltas;
   const hasLiveDelta = deltas && (deltas.new_critical_count > 0 || (deltas.total_at_risk ?? 0) > 0);
+
+  const handleRefresh = async () => {
+    if (!onRefreshBrief || refreshing) return;
+    setRefreshing(true);
+    try {
+      await onRefreshBrief();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const formatAssembledAt = (isoStr: string) => {
+    try {
+      const d = new Date(isoStr);
+      return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+    } catch {
+      return '';
+    }
+  };
+
+  const syncAgoLabel = (() => {
+    if (!briefMetadata?.last_sync_at) return null;
+    const diffMs = Date.now() - new Date(briefMetadata.last_sync_at).getTime();
+    const mins = Math.floor(diffMs / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins} min ago`;
+    const hrs = Math.floor(mins / 60);
+    return `${hrs}h ago`;
+  })();
 
   return (
     <div
@@ -222,6 +263,48 @@ export default function ProactiveBriefing({
           </span>
         )}
       </div>
+
+      {/* ── Assembly time + staleness line ── */}
+      {briefMetadata?.assembled_at && (
+        <div style={{ fontSize: 11, color: colors.textMuted, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6, fontFamily: fonts.sans }}>
+          <span>As of {formatAssembledAt(briefMetadata.assembled_at)}</span>
+          {briefMetadata.is_potentially_stale && syncAgoLabel && (
+            <>
+              <span style={{ color: colors.textDim }}>·</span>
+              <span>
+                Sync ran {syncAgoLabel} —{' '}
+                <button
+                  onClick={handleRefresh}
+                  disabled={refreshing}
+                  style={{
+                    background: 'none', border: 'none', cursor: refreshing ? 'default' : 'pointer',
+                    color: colors.accent, fontSize: 11, padding: 0, fontFamily: fonts.sans,
+                    opacity: refreshing ? 0.6 : 1,
+                  }}
+                >
+                  {refreshing ? 'refreshing...' : 'refreshing ↻'}
+                </button>
+              </span>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ── Staleness banner ── */}
+      {briefMetadata?.is_potentially_stale && (
+        <div style={{
+          background: '#F59E0B20',
+          border: '1px solid #F59E0B60',
+          borderRadius: 6,
+          padding: '8px 12px',
+          fontSize: 12,
+          color: '#F59E0B',
+          marginBottom: 12,
+          fontFamily: fonts.sans,
+        }}>
+          ⚠ A sync ran after this brief was assembled. Some numbers may have changed. Refreshing...
+        </div>
+      )}
 
       {/* ── Greeting ── */}
       <div style={{ marginBottom: 16 }}>

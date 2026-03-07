@@ -13,10 +13,28 @@ router.get('/:workspaceId/brief', async (req: Request, res: Response): Promise<v
   try {
     const brief = await getLatestBrief(workspaceId);
     if (!brief) {
-      res.json({ available: false, brief: null });
+      res.json({ available: false, brief: null, metadata: null });
       return;
     }
-    res.json({ available: true, brief });
+
+    // Build staleness metadata
+    const connResult = await query<{ last_sync_at: string | null }>(
+      `SELECT last_sync_at::text FROM connections WHERE workspace_id = $1 AND connector_name = 'hubspot' ORDER BY last_sync_at DESC NULLS LAST LIMIT 1`,
+      [workspaceId]
+    ).catch(() => ({ rows: [] as { last_sync_at: string | null }[] }));
+
+    const assembledAt: string = (brief as any).generated_at || new Date().toISOString();
+    const lastSyncAt: string | null = connResult.rows[0]?.last_sync_at || null;
+    const isPotentiallyStale = !!(lastSyncAt && new Date(lastSyncAt) > new Date(assembledAt));
+
+    const metadata = {
+      assembled_at: assembledAt,
+      last_sync_at: lastSyncAt,
+      is_potentially_stale: isPotentiallyStale,
+      stale_reason: isPotentiallyStale ? 'A HubSpot sync ran after this brief was assembled' : undefined,
+    };
+
+    res.json({ available: true, brief, metadata });
   } catch (err) {
     console.error('[briefs] GET /brief failed:', err);
     res.status(500).json({ error: 'Failed to fetch brief' });

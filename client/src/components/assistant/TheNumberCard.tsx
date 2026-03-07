@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import ChartRenderer from '../shared/ChartRenderer';
 
 function fmt(n: number): string {
   if (!n && n !== 0) return '—';
@@ -180,6 +181,11 @@ export default function TheNumberCard({ theNumber: n, briefType, deltaMode, reps
   // monday_setup default
   return (
     <div style={{ padding: '4px 0' }}>
+      {n.chart_spec && (
+        <div style={{ marginBottom: 12 }}>
+          <ChartRenderer spec={n.chart_spec} compact={false} />
+        </div>
+      )}
       <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ fontSize: 22, fontWeight: 700, color: '#E5E7EB' }}>{fmt(n.pipeline_total)}</span>
         <span style={{ fontSize: 20, color: dirColor }}>{dir}</span>
