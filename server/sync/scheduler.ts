@@ -7,6 +7,7 @@ import { getActiveConsultantConnectors, updateConsultantConnector } from '../con
 import { syncConsultantFireflies } from '../connectors/consultant-fireflies-sync.js';
 import { hardDeleteExpiredAgents } from '../jobs/cleanup-agents.js';
 import { cleanupExpiredRefreshTokens } from '../auth/cleanup.js';
+import { recalculateAllWorkspacesQuality } from '../jobs/recalculate-training-quality.js';
 
 const INTERNAL_CONNECTORS = ['enrichment_config', 'csv_import'];
 
@@ -104,6 +105,14 @@ export class SyncScheduler {
       }
     }, { timezone: 'UTC' });
     this.tasks.push(webhookCleanupTask);
+
+    // Nightly training pair quality recalculation (daily at 2:00 AM UTC)
+    const qualityRecalcTask = cron.schedule('0 2 * * *', () => {
+      recalculateAllWorkspacesQuality().catch((err) => {
+        console.error('[Scheduler] Nightly quality recalculation failed:', err);
+      });
+    }, { timezone: 'UTC' });
+    this.tasks.push(qualityRecalcTask);
 
     const scheduleDescriptions = SYNC_SCHEDULES.map(s => s.label).join(', ');
     console.log(`[Scheduler] Sync schedules registered: ${scheduleDescriptions}, CRM (dynamic 15-min heartbeat), Consultant (every 6 hours), Agent cleanup (daily at 3 AM), Refresh token cleanup (daily at 3 AM), Webhook delivery cleanup (daily at 3 AM), Market signals (weekly on Monday at 6 AM)`);

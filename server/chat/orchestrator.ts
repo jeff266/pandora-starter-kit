@@ -1,4 +1,10 @@
+import { 
+  captureSuccessfulClassificationPair, 
+  captureStrategicRoutingMiss,
+  captureContradictionClassificationPair 
+} from '../llm/training-capture.js';
 import { query } from '../db.js';
+import { INTENT_CLASSIFIER_SYSTEM_PROMPT } from './intent-classifier.js';
 import { runScopedAnalysis } from '../analysis/scoped-analysis.js';
 import { tryHeuristic } from './heuristic-router.js';
 import { classifyDirectQuestion, classifyIntent, logIntentClassification } from './intent-classifier.js';
@@ -314,7 +320,45 @@ export async function handleConversationTurn(input: ConversationTurnInput): Prom
 
       console.log('[Intent]', JSON.stringify(intentClassification));
 
+      // FT2: Store classification for later success/failure tracking
+      (state.context as any).lastIntentClassification = {
+        ...intentClassification,
+        userMessage: message,
+        turnNumber: (state.messages || []).length
+      };
+      await updateContext(workspaceId, channelId, threadId, {
+        last_scope: { type: scopeType, entity_id: entityId, rep_email: repEmail },
+      });
+
       await logIntentClassification(workspaceId, message, intentClassification);
+
+      // FT2: Check for strategic routing miss
+      const isFollowUpAnalytical = (state.messages || []).length > 2; 
+      if (isFollowUpAnalytical) {
+        const lastTurn = state.messages[state.messages.length - 2];
+        const lastClass = (state.context as any).prevIntentClassification;
+        const missPatterns = ["that's not what i asked", "i meant", "why is this", "incorrect", "wrong"];
+        if (lastClass && lastClass.category === 'analytical' && missPatterns.some(p => message.toLowerCase().includes(p))) {
+           captureStrategicRoutingMiss(workspaceId, lastClass, INTENT_CLASSIFIER_SYSTEM_PROMPT).catch(console.error);
+        }
+      }
+
+      // FT2: Check for successful classification (2 turns ago)
+      const successTurn = (state.messages || []).length - 4;
+      if (successTurn >= 0) {
+        const successClass = (state.context as any).intentClassificationAtTurn?.[successTurn];
+        const contradictionInWindow = state.messages.slice(successTurn).some(m => m.role === 'user' && /that'?s?\s+(not|wrong|incorrect)/i.test(m.content));
+        if (successClass && !contradictionInWindow) {
+           captureSuccessfulClassificationPair(workspaceId, successClass, INTENT_CLASSIFIER_SYSTEM_PROMPT).catch(console.error);
+           // Clear it so we don't log it again
+           delete (state.context as any).intentClassificationAtTurn[successTurn];
+        }
+      }
+      
+      // Store classification history in context
+      if (!(state.context as any).intentClassificationAtTurn) (state.context as any).intentClassificationAtTurn = {};
+      (state.context as any).intentClassificationAtTurn[(state.messages || []).length] = (state.context as any).lastIntentClassification;
+      (state.context as any).prevIntentClassification = (state.context as any).lastIntentClassification;
 
       // Handle advisory_with_data_option: ask gating question
       if (

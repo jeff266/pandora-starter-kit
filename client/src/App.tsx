@@ -45,6 +45,7 @@ import AdminScopesPage from './pages/AdminScopesPage';
 import TokenUsagePage from './pages/admin/TokenUsagePage';
 import BillingMeterPage from './pages/admin/BillingMeterPage';
 import VoiceSettings from './pages/admin/VoiceSettings';
+import FineTuning from './pages/admin/FineTuning';
 import DocumentQuality from './pages/admin/DocumentQuality';
 import Targets from './pages/Targets';
 import ReportViewer from './pages/ReportViewer';
@@ -92,6 +93,7 @@ const pageTitles: Record<string, string> = {
   '/admin/scopes': 'Workspace Scopes',
   '/admin/token-usage': 'Token Usage',
   '/admin/billing': 'Billing Meter',
+  '/admin/fine-tuning': 'Fine-Tuning',
   '/admin/voice': 'Voice Settings',
   '/admin/document-quality': 'Document Quality',
   '/forecast': 'Forecast',
@@ -326,6 +328,7 @@ export default function App() {
             <Route path="/prospects" element={<ProspectsPage />} />
             <Route path="/admin/scopes" element={<AdminScopesPage />} />
             <Route path="/admin/token-usage" element={<TokenUsagePage />} />
+            <Route path="/admin/fine-tuning" element={<FineTuning />} />
             <Route path="/admin/billing" element={<BillingMeterPage />} />
             <Route path="/admin/voice" element={<VoiceSettings />} />
             <Route path="/admin/document-quality" element={<DocumentQuality />} />

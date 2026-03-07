@@ -80,19 +80,20 @@ export async function captureDocumentEdit(input: CaptureEditInput): Promise<Docu
   );
 
   // Create training pair
-  const qualityLabel = editDistance < 0.1 ? 'good' : (editDistance < 0.4 ? 'needs_improvement' : 'poor');
+  const qualityLabel = deriveQualityLabel(editDistance, false, 0);
   const trainingPairId = uuidv4();
   await query(
     `INSERT INTO document_training_pairs (
       id, workspace_id, template_type, section_id, system_prompt_at_time, 
       raw_output, corrected_output, edit_distance, derived_style_signals, 
-      quality_label, voice_profile_snapshot, quarter_phase, attainment_pct, created_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+      quality_label, voice_profile_snapshot, quarter_phase, attainment_pct, 
+      pair_type, created_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
     [
       trainingPairId, workspaceId, templateType, sectionId, systemPrompt,
       rawText, editedText, editDistance, signals,
       qualityLabel, JSON.stringify(voiceProfileSnapshot), 
-      quarterPhaseAtTime, attainmentPctAtTime, new Date().toISOString()
+      quarterPhaseAtTime, attainmentPctAtTime, 'document_synthesis', new Date().toISOString()
     ]
   );
 
@@ -100,6 +101,23 @@ export async function captureDocumentEdit(input: CaptureEditInput): Promise<Docu
   await updateSectionPreferencesFromEdit(workspaceId, templateType, sectionId, editDistance, signals);
 
   return edit;
+}
+
+/**
+ * Derives a quality label based on edit distance and engagement signals.
+ */
+export function deriveQualityLabel(
+  editDistance: number, 
+  wasDistributed: boolean, 
+  recommendationsActioned: number
+): 'good' | 'needs_improvement' | 'poor' {
+  if (editDistance < 0.1 && (wasDistributed || recommendationsActioned > 0)) {
+    return 'good';
+  }
+  if (editDistance < 0.4) {
+    return 'needs_improvement';
+  }
+  return 'poor';
 }
 
 /**

@@ -7,6 +7,8 @@
  * handlers. The model drives the loop; the loop runs until stop_reason: end_turn.
  */
 
+import { INTENT_CLASSIFIER_SYSTEM_PROMPT } from './intent-classifier.js';
+import { captureContradictionClassificationPair } from '../llm/training-capture.js';
 import { randomUUID } from 'crypto';
 import { judgeAction } from '../actions/judgment.js';
 import { parseActionsFromOutput, insertExtractedActions } from '../actions/index.js';
@@ -1227,6 +1229,25 @@ Continue using this scope unless the user explicitly changes it.`;
   // ── Contradiction detection — re-query everything ─────────────────────────
   const isContradiction = detectContradiction(message, conversationHistory);
   if (isContradiction) {
+    // FT2: Capture contradiction classification pair
+    // We need the original classification that led to the contradicted response.
+    // In this context, we don't easily have the *previous* turn's classification object,
+    // but the task spec says "pass it from orchestrator context or read from session".
+    // Since we are inside runPandoraAgent, we'll try to get it from the session if available.
+    if (currentSessionContext && (currentSessionContext as any).lastIntentClassification) {
+      const lastClass = (currentSessionContext as any).lastIntentClassification;
+      // We don't have the "corrected" version easily here without another LLM call, 
+      // but we can log the failure. The spec suggests:
+      // captureContradictionClassificationPair(workspaceId, originalClassification, correctedClassification, systemPromptUsed)
+      // For now, we'll log it with original classification.
+      captureContradictionClassificationPair(
+        workspaceId,
+        lastClass,
+        { ...lastClass, category: 'data_query' }, // Heuristic: contradictions usually mean we should have queried data
+        INTENT_CLASSIFIER_SYSTEM_PROMPT
+      ).catch(err => console.warn('[FT2] Failed to capture contradiction pair:', err));
+    }
+
     effectiveSystemPrompt += `\n\n## Contradiction Handling — ACTIVE
 The user is pushing back on a value stated earlier.
 MANDATORY steps:

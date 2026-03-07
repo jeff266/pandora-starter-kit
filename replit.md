@@ -497,3 +497,32 @@ T010–T021 are all built and running. Migration tracker updated with 134–137.
 - **`server/routes/training.ts`** (new): `GET /api/workspaces/:id/training-pairs/export` (JSONL, filterable by quality/min_edit_distance); `GET /api/admin/training-pairs/export-all` (cross-workspace); `GET /api/workspaces/:id/document-quality` (aggregates from `document_training_pairs` + `document_edits` + profile); registered in `server/index.ts`
 - **`client/src/pages/admin/DocumentQuality.tsx`** (new): Overall quality score + trend; edit rate / rec actioning / distribution rate metrics; training pair count + progress bar; most-edited sections table; calibration status + "Run Calibration Now →" link; "Export Training Pairs →" JSONL download
 - **`client/src/App.tsx`**: Route `/admin/document-quality` registered
+
+## Fine-Tuning Pipeline + LLM Router Integration (March 2026 — FT1–FT6)
+
+### FT1: Training Pair Schema + Quality Labeling
+- **`migrations/141_finetuning_pipeline.sql`** (applied): ALTERs `document_training_pairs` to allow NULL `template_type`/`section_id` (for classification pairs); adds `pair_type TEXT DEFAULT 'document_synthesis'` and `correction_signal TEXT`; creates `fine_tuning_jobs` table (id, model_purpose, pair_type, base_model, fireworks_job_id, fireworks_model_id, train/val counts, epochs, learning_rate, status, val_loss, baseline_val_loss, quality_improvement_pct, deployment_endpoint, confidence_gate_threshold=0.75, timestamps); creates `llm_call_log` table (capability, model_used, fell_back, confidence, tokens, duration_ms)
+- **`server/jobs/recalculate-training-quality.ts`** (new): `recalculateTrainingPairQuality(workspaceId)` + `recalculateAllWorkspacesQuality()` — UPDATE query derives quality_label from edit_distance + was_distributed + recommendations_actioned; registered nightly at 02:00 UTC
+- **`server/documents/edit-capture.ts`**: Added `deriveQualityLabel()`, sets quality_label at insert time, explicitly sets `pair_type = 'document_synthesis'`
+- **MIGRATION NOTE**: `npm run migrate` must be run manually — migrations are NOT auto-applied at startup
+
+### FT2: Classification Training Pair Capture
+- **`server/llm/training-capture.ts`** (new): `captureContradictionClassificationPair()` (pair_type='classification', quality_label='poor', correction_signal='contradiction_handler'); `captureSuccessfulClassificationPair()` (quality_label='good', edit_distance=0.0); `captureStrategicRoutingMiss()` (quality_label='poor', correction_signal='strategic_routing_miss'); all insert into `document_training_pairs` with NULL template_type/section_id
+- **`server/chat/pandora-agent.ts`**: After `detectContradiction` fires, calls `captureContradictionClassificationPair`
+- **`server/chat/orchestrator.ts`**: Tracks intent classification history per session; deferred success capture after 2 clean turns; strategic routing miss detection on analytical→pushback pattern
+
+### FT3: Dataset Assembler
+- **`server/llm/dataset-assembler.ts`** (new): `assembleDataset(options)` — queries `document_training_pairs`, filters by quality/edit_distance, deduplicates (200-char key, keep higher quality), converts to Fireworks messages format, shuffles, 90/10 train/val split; `FireworksFineTuneRecord` and `DatasetAssemblyOptions` interfaces; hard guard: 'poor' pairs always excluded; stats by quality/template/section returned
+
+### FT4: Fireworks Job Manager
+- **`server/llm/fireworks-trainer.ts`** (new): `submitFineTuningJob(purpose, dataset)` → upload JSONL → create DB record → submit to Fireworks API → poll every 5min; `uploadDatasetToFireworks()` → Fireworks datasets API; `pollFineTuningJob()` → status polling; `onJobCompleted()` → records val_loss, deploys model; `deployFineTunedModel()` → Fireworks deployment API; `getDeployedFineTunedModel(capability)` (exported — used by router) maps capability to model_purpose and returns latest deployed record
+- Capability→model_purpose mapping: `reason` → `document_synthesis`; `classify`/`intent_classify` → `classification`
+
+### FT5: Confidence-Gated Router Upgrade
+- **`server/utils/llm-router.ts`**: `resolveProvider()` is now async — after BYOK workspace override check, calls `getDeployedFineTunedModel(capability)` and returns a route with `confidenceGate` + `fallbackRoute`; `callLLM()` calls `callLLMWithLog()` which: calls fine-tuned model with logprobs=true, estimates confidence via avg(exp(logprob)), falls back to base model if confidence < gate threshold; every call logged to `llm_call_log`; BYOK overrides still take priority
+- **`server/llm/model-evaluator.ts`** (new): `evaluateFineTunedModel(jobId, valRecords)` — scores fine-tuned vs baseline on up to 50 val records; document_synthesis: ROUGE-L/LCS similarity; classification: exact match rate; requires ≥5% improvement for approval; updates `val_loss`/`baseline_val_loss`/`quality_improvement_pct` in `fine_tuning_jobs`
+
+### FT6: Fine-Tuning Admin Dashboard
+- **`server/routes/fine-tuning.ts`** (new): `GET /readiness` (pair counts vs 500/200 thresholds); `POST /assemble-dataset`; `POST /submit-job`; `GET /jobs` + `GET /jobs/:id`; `POST /jobs/:id/evaluate` (calls model evaluator); `POST /jobs/:id/deploy` (updates llm_configs routing); `POST /jobs/:id/rollback`; `GET /stats` (fallback rates + cost savings from llm_call_log)
+- **`client/src/pages/admin/FineTuning.tsx`** (new): Training Readiness section with progress bars (500/200 targets); Training Jobs table with status/improvement/fallback rate/deploy+rollback actions; Router Status (4 capability rows with current model, fallback rate, avg confidence); Cost Impact (Claude calls avoided, estimated savings at $3/1M tokens)
+- **`client/src/App.tsx`**: Route `/admin/fine-tuning` registered

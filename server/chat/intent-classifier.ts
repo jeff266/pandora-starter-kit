@@ -221,7 +221,7 @@ function generateGatingQuestion(message: string): string {
   return GATING_QUESTIONS['default'];
 }
 
-const INTENT_CLASSIFIER_SYSTEM_PROMPT = `You are classifying sales operations questions into categories.
+export const INTENT_CLASSIFIER_SYSTEM_PROMPT = `You are classifying sales operations questions into categories.
 
 Categories:
 - data_query: Requires pulling data from CRM or conversation tools to answer. Examples: "how many deals in pipeline?", "which deals are stalled?", "what's our win rate?"

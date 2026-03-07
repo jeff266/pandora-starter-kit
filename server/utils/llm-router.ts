@@ -9,6 +9,7 @@ import {
 } from '../lib/token-tracker.js';
 import { logTrainingPair } from '../training/index.js';
 import { TOKEN_THRESHOLDS } from '../chat/token-estimator.js';
+import { getDeployedFineTunedModel } from '../llm/fireworks-trainer.js';
 
 // Context window limits per model (in tokens)
 export const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
@@ -174,24 +175,57 @@ interface ResolvedRoute {
   model: string;
   fallbackProvider?: string;
   fallbackModel?: string;
+  confidenceGate?: number;
+  fallbackRoute?: ResolvedRoute;
 }
 
-function resolveProvider(config: LLMConfig, capability: LLMCapability): ResolvedRoute {
+async function resolveProvider(workspaceId: string, config: LLMConfig, capability: LLMCapability): Promise<ResolvedRoute> {
   const entry = config.routing[capability];
   if (!entry) {
     throw new Error(`No routing configured for capability '${capability}'`);
   }
 
+  let route: ResolvedRoute;
   if (typeof entry === 'string') {
-    return parseRoute(entry);
+    route = parseRoute(entry);
+  } else {
+    const primary = parseRoute(entry.primary);
+    if (entry.fallback) {
+      const fb = parseRoute(entry.fallback);
+      route = { ...primary, fallbackProvider: fb.provider, fallbackModel: fb.model };
+    } else {
+      route = primary;
+    }
   }
 
-  const primary = parseRoute(entry.primary);
-  if (entry.fallback) {
-    const fb = parseRoute(entry.fallback);
-    return { ...primary, fallbackProvider: fb.provider, fallbackModel: fb.model };
+  // Check for fine-tuned model injection
+  // Map capability to model_purpose: { reason: 'document_synthesis', classify: 'classification', intent_classify: 'classification' }
+  const fineTuneEligible: Record<string, string> = {
+    reason: 'document_synthesis',
+    classify: 'classification',
+    intent_classify: 'classification',
+  };
+
+  if (fineTuneEligible[capability]) {
+    // BYOK workspace routing override takes priority over fine-tuned model (existing behavior preserved)
+    const providerName = route.provider;
+    const workspaceProvider = config.providers[providerName];
+    const isUsingByok = !!(workspaceProvider?.enabled && workspaceProvider?.apiKey);
+
+    if (!isUsingByok) {
+      const fineTunedJob = await getDeployedFineTunedModel(capability);
+      if (fineTunedJob && fineTunedJob.deployment_endpoint) {
+        return {
+          provider: 'fireworks',
+          model: fineTunedJob.fireworks_model_id || fineTunedJob.deployment_endpoint,
+          confidenceGate: fineTunedJob.confidence_gate_threshold || 0.75,
+          fallbackRoute: route,
+        };
+      }
+    }
   }
-  return primary;
+
+  return route;
 }
 
 function isRetryableError(err: unknown): boolean {
@@ -591,91 +625,47 @@ async function callProviderByName(
   }
 }
 
-export async function callLLM(
+async function callLLMWithLog(
   workspaceId: string,
   capability: LLMCapability,
-  options: LLMCallOptions
+  options: LLMCallOptions,
+  resolved: ResolvedRoute,
+  config: LLMConfig,
+  payloadSummary: any,
+  promptChars: number,
+  keySource: 'byok' | 'pandora'
 ): Promise<LLMResponse> {
-  const config = await loadConfig(workspaceId);
-  let resolved = resolveProvider(config, capability);
-  let { provider, model, fallbackProvider, fallbackModel } = resolved;
-
-  const allMessages: Array<{ role: string; content: any }> = [];
-  if (options.systemPrompt) {
-    allMessages.push({ role: 'system', content: options.systemPrompt });
-  }
-  for (const m of options.messages) {
-    allMessages.push({ role: m.role, content: m.content });
-  }
-  const payloadSummary = analyzePayload(allMessages);
-  const promptChars = payloadSummary.totalChars;
-  const inputTokenEstimate = Math.ceil(promptChars / 4);
-
-  // Context window guardrail: check if the configured model can handle this input
-  const modelWindow = MODEL_CONTEXT_WINDOWS[model] ?? 128_000;
-  const safeLimit = Math.floor(modelWindow * 0.85); // leave 15% headroom for output
-  if (inputTokenEstimate > safeLimit) {
-    // Find the highest-capacity model available to this workspace
-    const providerKeys = config.providers;
-    let overrideProvider = provider;
-    let overrideModel = model;
-    let bestWindow = modelWindow;
-
-    const candidates: Array<{ provider: string; model: string; window: number }> = [
-      { provider: 'google', model: 'gemini-2.5-pro', window: 1_048_576 },
-      { provider: 'openai', model: 'gpt-4.1', window: 1_048_576 },
-      { provider: 'anthropic', model: 'claude-sonnet-4-20250514', window: 200_000 },
-    ];
-
-    for (const candidate of candidates) {
-      if (candidate.window <= bestWindow) continue;
-      const hasKey = (candidate.provider === 'anthropic' &&
-        (process.env.ANTHROPIC_API_KEY || process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY)) ||
-        (providerKeys[candidate.provider]?.enabled && !!providerKeys[candidate.provider]?.apiKey) ||
-        (candidate.provider === 'openai' && !!process.env.OPENAI_API_KEY) ||
-        (candidate.provider === 'google' && !!process.env.GOOGLE_API_KEY);
-      if (hasKey) {
-        overrideProvider = candidate.provider;
-        overrideModel = candidate.model;
-        bestWindow = candidate.window;
-        break;
-      }
-    }
-
-    if (overrideModel !== model) {
-      console.warn(
-        `[LLMRouter] Context guardrail: ${inputTokenEstimate} tokens exceeds ${model} limit (${safeLimit} safe / ${modelWindow} max). ` +
-        `Overriding ${provider}/${model} → ${overrideProvider}/${overrideModel} (window: ${bestWindow})`
-      );
-      provider = overrideProvider;
-      model = overrideModel;
-    } else {
-      console.warn(
-        `[LLMRouter] Context guardrail: ${inputTokenEstimate} tokens near/over ${model} limit (${safeLimit} safe). ` +
-        `No higher-capacity model available — proceeding with ${provider}/${model}`
-      );
-    }
-  }
-
-  console.log(`[LLM Router] ${capability} → ${provider}/${model}${fallbackProvider ? ` (fallback: ${fallbackProvider}/${fallbackModel})` : ''}`);
-
-
+  let { provider, model, fallbackProvider, fallbackModel, confidenceGate, fallbackRoute } = resolved;
   const startTime = Date.now();
-
   let response: LLMResponse;
   let usedProvider = provider;
   let usedModel = model;
-
-  // Determine if this call uses a workspace (BYOK) key or the platform key
-  const workspaceProviderCfg = config.providers[provider];
-  const isUsingByok = !!(workspaceProviderCfg?.enabled && workspaceProviderCfg?.apiKey);
-  const keySource: 'byok' | 'pandora' = isUsingByok ? 'byok' : 'pandora';
+  let confidence: number | undefined;
+  let fellBack = false;
 
   try {
-    response = await callProviderByName(provider, model, options, config);
+    if (confidenceGate && fallbackRoute) {
+      // Call fine-tuned model with logprobs: true in request
+      const fireworksOptions = { ...options, logprobs: true } as any;
+      response = await callProviderByName(provider, model, fireworksOptions, config);
+      
+      // Estimate confidence from logprobs
+      confidence = estimateConfidence((response as any).logprobs);
+
+      if (confidence < confidenceGate) {
+        console.warn(`[LLM Router] Confidence ${confidence.toFixed(2)} < ${confidenceGate}, falling back to ${fallbackRoute.provider}/${fallbackRoute.model}`);
+        fellBack = true;
+        usedProvider = fallbackRoute.provider;
+        usedModel = fallbackRoute.model;
+        response = await callProviderByName(usedProvider, usedModel, options, config);
+      }
+    } else {
+      response = await callProviderByName(provider, model, options, config);
+    }
   } catch (err) {
     if (fallbackProvider && fallbackModel && isRetryableError(err)) {
       console.warn(`[LLM Router] ${provider}/${model} failed, falling back to ${fallbackProvider}/${fallbackModel}`);
+      fellBack = true;
       usedProvider = fallbackProvider;
       usedModel = fallbackModel;
       response = await callProviderByName(fallbackProvider, fallbackModel, options, config);
@@ -686,6 +676,10 @@ export async function callLLM(
 
   const latencyMs = Date.now() - startTime;
   const totalTokens = response.usage.input + response.usage.output;
+
+  // Log to llm_call_log after every callLLM invocation
+  await logLLMCall(workspaceId, capability, usedModel, fellBack, confidence, response.usage.input, response.usage.output, latencyMs);
+
   await trackUsage(workspaceId, totalTokens);
 
   const tracking = options._tracking;
@@ -739,6 +733,120 @@ export async function callLLM(
   }
 
   return response;
+}
+
+function estimateConfidence(logprobs: any): number {
+  if (!logprobs || !Array.isArray(logprobs.content)) {
+    return 0.5;
+  }
+  
+  // Average of exp(logprob) across tokens
+  const probs = logprobs.content
+    .filter((lp: any) => lp.logprob !== undefined)
+    .map((lp: any) => Math.exp(lp.logprob));
+    
+  if (probs.length === 0) return 0.5;
+  
+  return probs.reduce((a: number, b: number) => a + b, 0) / probs.length;
+}
+
+async function logLLMCall(
+  workspaceId: string,
+  capability: string,
+  modelUsed: string,
+  fellBack: boolean,
+  confidence: number | undefined,
+  inputTokens: number,
+  outputTokens: number,
+  durationMs: number
+): Promise<void> {
+  try {
+    await query(
+      `INSERT INTO llm_call_log (workspace_id, capability, model_used, fell_back, confidence, input_tokens, output_tokens, duration_ms)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [workspaceId, capability, modelUsed, fellBack, confidence, inputTokens, outputTokens, durationMs]
+    );
+  } catch (err) {
+    console.error('[LLM Router] Failed to log LLM call:', err);
+  }
+}
+
+export async function callLLM(
+  workspaceId: string,
+  capability: LLMCapability,
+  options: LLMCallOptions
+): Promise<LLMResponse> {
+  const config = await loadConfig(workspaceId);
+  let resolved = await resolveProvider(workspaceId, config, capability);
+  let { provider, model, fallbackProvider, fallbackModel } = resolved;
+
+  const allMessages: Array<{ role: string; content: any }> = [];
+  if (options.systemPrompt) {
+    allMessages.push({ role: 'system', content: options.systemPrompt });
+  }
+  for (const m of options.messages) {
+    allMessages.push({ role: m.role, content: m.content });
+  }
+  const payloadSummary = analyzePayload(allMessages);
+  const promptChars = payloadSummary.totalChars;
+  const inputTokenEstimate = Math.ceil(promptChars / 4);
+
+  // Context window guardrail: check if the configured model can handle this input
+  const modelWindow = MODEL_CONTEXT_WINDOWS[model] ?? 128_000;
+  const safeLimit = Math.floor(modelWindow * 0.85); // leave 15% headroom for output
+  if (inputTokenEstimate > safeLimit) {
+    // Find the highest-capacity model available to this workspace
+    const providerKeys = config.providers;
+    let overrideProvider = provider;
+    let overrideModel = model;
+    let bestWindow = modelWindow;
+
+    const candidates: Array<{ provider: string; model: string; window: number }> = [
+      { provider: 'google', model: 'gemini-2.5-pro', window: 1_048_576 },
+      { provider: 'openai', model: 'gpt-4.1', window: 1_048_576 },
+      { provider: 'anthropic', model: 'claude-sonnet-4-20250514', window: 200_000 },
+    ];
+
+    for (const candidate of candidates) {
+      if (candidate.window <= bestWindow) continue;
+      const hasKey = (candidate.provider === 'anthropic' &&
+        (process.env.ANTHROPIC_API_KEY || process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY)) ||
+        (providerKeys[candidate.provider]?.enabled && !!providerKeys[candidate.provider]?.apiKey) ||
+        (candidate.provider === 'openai' && !!process.env.OPENAI_API_KEY) ||
+        (candidate.provider === 'google' && !!process.env.GOOGLE_API_KEY);
+      if (hasKey) {
+        overrideProvider = candidate.provider;
+        overrideModel = candidate.model;
+        bestWindow = candidate.window;
+        break;
+      }
+    }
+
+    if (overrideModel !== model) {
+      console.warn(
+        `[LLMRouter] Context guardrail: ${inputTokenEstimate} tokens exceeds ${model} limit (${safeLimit} safe / ${modelWindow} max). ` +
+        `Overriding ${provider}/${model} → ${overrideProvider}/${overrideModel} (window: ${bestWindow})`
+      );
+      resolved.provider = overrideProvider;
+      resolved.model = overrideModel;
+      provider = overrideProvider;
+      model = overrideModel;
+    } else {
+      console.warn(
+        `[LLMRouter] Context guardrail: ${inputTokenEstimate} tokens near/over ${model} limit (${safeLimit} safe). ` +
+        `No higher-capacity model available — proceeding with ${provider}/${model}`
+      );
+    }
+  }
+
+  console.log(`[LLM Router] ${capability} → ${provider}/${model}${fallbackProvider ? ` (fallback: ${fallbackProvider}/${fallbackModel})` : ''}`);
+
+  // Determine if this call uses a workspace (BYOK) key or the platform key
+  const workspaceProviderCfg = config.providers[provider];
+  const isUsingByok = !!(workspaceProviderCfg?.enabled && workspaceProviderCfg?.apiKey);
+  const keySource: 'byok' | 'pandora' = isUsingByok ? 'byok' : 'pandora';
+
+  return await callLLMWithLog(workspaceId, capability, options, resolved, config, payloadSummary, promptChars, keySource);
 }
 
 export async function getLLMConfig(workspaceId: string): Promise<{
