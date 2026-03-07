@@ -8,6 +8,7 @@ import { getWorkspaceId, getAuthToken, api } from '../../lib/api';
 import EvidenceCard from './EvidenceCard';
 import InlineActionsPrompt from './InlineActionsPrompt';
 import ActionsPrompt from './ActionsPrompt';
+import ActionCard from './ActionCard';
 import DeliverablePicker from './DeliverablePicker';
 import StickyInput from './StickyInput';
 import MessageFeedback from './MessageFeedback';
@@ -17,6 +18,7 @@ import ChartRenderer from '../shared/ChartRenderer';
 interface ConversationViewProps {
   initialMessage?: string;
   onBack: () => void;
+  onThreadId?: (threadId: string) => void;
 }
 
 const AGENT_ROUTES: Record<string, string> = {
@@ -29,8 +31,8 @@ const AGENT_ROUTES: Record<string, string> = {
   'bowtie-review': '/command-center',
 };
 
-export default function ConversationView({ initialMessage, onBack }: ConversationViewProps) {
-  const { state, sendMessage, dismissAction, dismissInlineAction, loadHistory, startNewThread } = useConversationStream();
+export default function ConversationView({ initialMessage, onBack, onThreadId }: ConversationViewProps) {
+  const { state, sendMessage, dismissAction, dismissJudgedAction, dismissInlineAction, loadHistory, startNewThread } = useConversationStream();
   const navigate = useNavigate();
   const bottomRef = useRef<HTMLDivElement>(null);
   const latestAnswerRef = useRef<HTMLDivElement>(null);
@@ -89,6 +91,12 @@ export default function ConversationView({ initialMessage, onBack }: Conversatio
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [state.messages, state.synthesisText, state.evidenceCards, state.actions, state.inlineActions, state.deliverableOptions, state.phase]);
+
+  useEffect(() => {
+    if (state.threadId && onThreadId) {
+      onThreadId(state.threadId);
+    }
+  }, [state.threadId, onThreadId]);
 
   const handleBack = () => {
     onBack();
@@ -191,6 +199,39 @@ export default function ConversationView({ initialMessage, onBack }: Conversatio
           </div>
         ))}
 
+        {state.crossSignalFindings.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 10, fontWeight: 600, color: colors.accent, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ fontSize: 12 }}>🔗</span> Connected Intelligence
+            </div>
+            {state.crossSignalFindings.map(f => (
+              <div key={f.id} style={{
+                background: colors.surface,
+                border: `1px solid ${colors.border}`,
+                borderLeft: `3px solid ${f.severity === 'critical' ? '#ff4d4d' : f.severity === 'warning' ? '#ff9800' : colors.accent}`,
+                borderRadius: 8,
+                padding: '12px 14px',
+                marginBottom: 10,
+                fontSize: 13
+              }}>
+                <div style={{ fontWeight: 600, marginBottom: 4, color: colors.text }}>{f.title}</div>
+                <div style={{ color: colors.textSecondary, marginBottom: 8, lineHeight: 1.5 }}>{f.summary}</div>
+                
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 12, paddingTop: 12, borderTop: `1px solid ${colors.border}` }}>
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: colors.textMuted, textTransform: 'uppercase', marginBottom: 4 }}>Root Cause</div>
+                    <div style={{ fontSize: 12, color: colors.textSecondary }}>{f.rootCause}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: colors.textMuted, textTransform: 'uppercase', marginBottom: 4 }}>Recommendation</div>
+                    <div style={{ fontSize: 12, color: colors.accent, fontWeight: 500 }}>{f.recommendation}</div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
         {state.activeOperators.length > 0 && (
           <div ref={latestAnswerRef}>
             <AgentConversationFeed
@@ -265,6 +306,30 @@ export default function ConversationView({ initialMessage, onBack }: Conversatio
 
         {state.actions.length > 0 && (
           <ActionsPrompt actions={state.actions} onDismiss={dismissAction} />
+        )}
+
+        {state.judgedActions.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 10, fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
+              Recommended Actions
+            </div>
+            {state.judgedActions.map((action, i) => (
+              <ActionCard 
+                key={i} 
+                action={{
+                  id: action.id,
+                  title: action.title,
+                  detail: action.summary,
+                  type: action.action_type.startsWith('ops_') ? 'generic' : 'crm',
+                  judgment_mode: action.judgment_mode,
+                  judgment_reason: action.judgment_reason,
+                  approval_prompt: action.approval_prompt,
+                  escalation_reason: action.escalation_reason
+                }} 
+                onDismiss={() => dismissJudgedAction(i)} 
+              />
+            ))}
+          </div>
         )}
 
         {state.inlineActions.length > 0 && (

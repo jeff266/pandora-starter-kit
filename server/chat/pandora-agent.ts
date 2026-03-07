@@ -7,6 +7,9 @@
  * handlers. The model drives the loop; the loop runs until stop_reason: end_turn.
  */
 
+import { randomUUID } from 'crypto';
+import { judgeAction } from '../actions/judgment.js';
+import { parseActionsFromOutput, insertExtractedActions } from '../actions/index.js';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { join, dirname } from 'path';
@@ -14,10 +17,23 @@ import { callLLM, type ToolDef, type LLMCallOptions } from '../utils/llm-router.
 import { executeDataTool } from './data-tools.js';
 import type { ConversationMessage } from './conversation-state.js';
 import { buildWorkspaceContextBlock } from '../context/workspace-memory.js';
+import { buildMemoryContextBlock } from '../memory/workspace-memory.js';
 import { getSkillRegistry } from '../skills/registry.js';
 import { validateChartSpec } from '../renderers/types.js';
 import type { ChartSpec } from '../renderers/types.js';
 import { lookupLiveDeal, detectDealMentions, buildLiveDealFactsBlock, detectContradiction } from './deal-lookup.js';
+import { 
+  SessionContext, 
+  getOrCreateSessionContext, 
+  cacheComputation, 
+  getCachedComputation,
+  addSessionFinding,
+  createSessionContext,
+  addSessionRecommendation
+} from '../agents/session-context.js';
+import { addContribution, createAccumulatedDocument } from '../documents/accumulator.js';
+import { DocumentContribution } from '../documents/types.js';
+import { runCrossSignalAnalysis } from '../skills/cross-signal-analyzer.js';
 
 const _chatDir = dirname(fileURLToPath(import.meta.url));
 const PRODUCT_KNOWLEDGE = (() => {
@@ -916,6 +932,7 @@ export interface PandoraResponse {
   latency_ms: number;
   inline_actions?: InlineAction[];
   chart_specs?: ChartSpec[];
+  sessionContext?: SessionContext;
 }
 
 interface InlineAction {
@@ -1140,16 +1157,37 @@ export async function runPandoraAgent(
   workspaceId: string,
   message: string,
   conversationHistory: Array<{ role: 'user' | 'assistant'; content: any }>,
-  onToolCall?: (toolName: string, label: string) => void
+  onToolCall?: (toolName: string, label: string) => void,
+  sessionContext?: SessionContext,
+  sse?: (event: any) => void
 ): Promise<PandoraResponse> {
   const startTime = Date.now();
   const toolTrace: PandoraToolCall[] = [];
   let totalTokens = 0;
+  const threadId = randomUUID(); // For consistent ID generation in this run
+
+  const currentSessionContext = sessionContext || createSessionContext();
+  if (!currentSessionContext.accumulatedDocument) {
+    currentSessionContext.accumulatedDocument = createAccumulatedDocument('session', workspaceId, 'WBR');
+  }
+  const activeScope = currentSessionContext.activeScope;
 
   const contextBlock = await buildWorkspaceContextBlock(workspaceId).catch(() => '');
+  const memoryBlock = await buildMemoryContextBlock(workspaceId).catch(() => '');
+
+  let scopeContextBlock = '';
+  if (activeScope && activeScope.type !== 'workspace') {
+    scopeContextBlock = `\n\n## Active Session Scope
+Type: ${activeScope.type}
+${activeScope.entityId ? `Entity ID: ${activeScope.entityId}` : ''}
+${activeScope.repEmail ? `Rep Email: ${activeScope.repEmail}` : ''}
+${activeScope.label ? `Label: ${activeScope.label}` : ''}
+Continue using this scope unless the user explicitly changes it.`;
+  }
+
   let effectiveSystemPrompt = contextBlock
-    ? `${PANDORA_SYSTEM_PROMPT}\n\n${contextBlock}`
-    : PANDORA_SYSTEM_PROMPT;
+    ? `${PANDORA_SYSTEM_PROMPT}\n\n${contextBlock}\n\n${memoryBlock}${scopeContextBlock}`
+    : `${PANDORA_SYSTEM_PROMPT}\n\n${memoryBlock}${scopeContextBlock}`;
 
   // ── Live deal lookup — inject before LLM sees anything ────────────────────
   const [dealMentions] = await Promise.all([
@@ -1301,6 +1339,100 @@ DO NOT calculate numeric values yourself — use only values returned by tools.`
 
       const parsed = parseFollowUpQuestions(response.content);
 
+      // Extract findings and charts from response
+      const findings = extractFindings(response.content);
+      findings.forEach(f => {
+        addSessionFinding(currentSessionContext, f);
+        if (currentSessionContext.accumulatedDocument) {
+          addContribution(currentSessionContext.accumulatedDocument, {
+            id: randomUUID(),
+            type: 'finding',
+            title: f.category || f.headline || 'Finding',
+            body: f.message || f.body || '',
+            severity: f.severity,
+            timestamp: new Date().toISOString()
+          });
+        }
+      });
+
+      const extractedActions = parseActionsFromOutput(response.content);
+      if (extractedActions.length > 0) {
+        const { query: db } = await import('../db.js');
+        await insertExtractedActions(
+          db as any,
+          workspaceId,
+          'pandora-agent',
+          'session-' + threadId,
+          null,
+          extractedActions
+        );
+
+        // Judgment & SSE emission
+        const judgedActions = extractedActions.map(a => {
+          const judgment = judgeAction({
+            action_type: a.action_type,
+            severity: a.severity as any,
+            target: a.target_deal_name || a.target_account_name,
+          });
+          return {
+            ...a,
+            judgment_mode: judgment.mode,
+            judgment_reason: judgment.reason,
+            approval_prompt: judgment.approvalPrompt,
+            escalation_reason: judgment.escalationReason,
+          };
+        });
+
+        sse?.({ type: 'actions_judged', items: judgedActions });
+      }
+
+      const charts = extractCharts(response.content);
+      charts.forEach(c => {
+        currentSessionContext.sessionCharts.push(c);
+        if (currentSessionContext.accumulatedDocument) {
+          addContribution(currentSessionContext.accumulatedDocument, {
+            id: randomUUID(),
+            type: 'chart',
+            title: c.title,
+            data: c,
+            timestamp: new Date().toISOString()
+          });
+        }
+      });
+
+      // T014: Cross-Signal Analysis Engine
+      // If we have findings from >= 2 categories, run analysis
+      const uniqueCategories = new Set(currentSessionContext.sessionFindings.map(f => f.category).filter(Boolean));
+      if (uniqueCategories.size >= 2) {
+        try {
+          const crossSignalFindings = runCrossSignalAnalysis({
+            workspaceId,
+            sessionId: currentSessionContext.activeScope.entityId || 'session',
+            findings: currentSessionContext.sessionFindings
+          });
+          crossSignalFindings.forEach(f => {
+            // Check for duplicates before adding
+            const exists = currentSessionContext.sessionFindings.some(sf => sf.category === 'cross_signal' && sf.patternId === f.patternId);
+            if (!exists) {
+              addSessionFinding(currentSessionContext, f);
+              console.log(`[PandoraAgent] Added cross-signal finding: ${f.title}`);
+            }
+          });
+        } catch (csError) {
+          console.error('[PandoraAgent] Cross-signal analysis failed:', csError);
+        }
+      }
+
+      // Extract scope change if any
+      const newScope = detectScopeChange(response.content);
+      if (newScope) {
+        console.log(`[PandoraAgent] Scope change detected:`, newScope);
+        currentSessionContext.activeScope = {
+          ...currentSessionContext.activeScope,
+          ...newScope
+        };
+      }
+
       return {
         answer: parsed.answer,
         follow_up_questions: parsed.followups,
@@ -1311,6 +1443,8 @@ DO NOT calculate numeric values yourself — use only values returned by tools.`
         tokens_used: totalTokens,
         tool_call_count: toolTrace.length,
         latency_ms: Date.now() - startTime,
+        chart_specs: charts.length > 0 ? charts : undefined,
+        sessionContext: currentSessionContext,
       };
     }
 
@@ -1329,7 +1463,19 @@ DO NOT calculate numeric values yourself — use only values returned by tools.`
       try { onToolCall?.(toolCall.name, toolCall.name); } catch {}
 
       try {
-        result = await executeDataTool(workspaceId, toolCall.name, toolCall.input);
+        if (toolCall.name === 'compute_metric') {
+          const cacheKey = JSON.stringify(toolCall.input);
+          const cached = getCachedComputation(currentSessionContext, cacheKey);
+          if (cached) {
+            console.log(`[PandoraAgent] Cache hit for compute_metric: ${cacheKey}`);
+            result = cached;
+          } else {
+            result = await executeDataTool(workspaceId, toolCall.name, toolCall.input);
+            cacheComputation(currentSessionContext, cacheKey, result);
+          }
+        } else {
+          result = await executeDataTool(workspaceId, toolCall.name, toolCall.input);
+        }
         toolTrace.push({
           tool: toolCall.name,
           params: toolCall.input,
@@ -1692,5 +1838,57 @@ export function buildConversationHistory(
   }
 
   return history;
+}
+
+function extractFindings(content: string): any[] {
+  const findings: any[] = [];
+  const findingRegex = /<finding\b([^>]*)>([\s\S]*?)<\/finding>/g;
+  let match;
+  while ((match = findingRegex.exec(content)) !== null) {
+    const attributes = match[1];
+    const body = match[2].trim();
+    const severityMatch = attributes.match(/severity=["']([^"']+)["']/);
+    const categoryMatch = attributes.match(/category=["']([^"']+)["']/);
+    findings.push({
+      id: `find_${Math.random().toString(36).slice(2)}`,
+      severity: severityMatch ? severityMatch[1] : 'info',
+      category: categoryMatch ? categoryMatch[1] : 'insight',
+      summary: body,
+      message: body,
+      created_at: new Date().toISOString()
+    });
+  }
+  return findings;
+}
+
+function extractCharts(content: string): ChartSpec[] {
+  const charts: ChartSpec[] = [];
+  const chartRegex = /```chart_spec\n([\s\S]*?)\n```/g;
+  let match;
+  while ((match = chartRegex.exec(content)) !== null) {
+    try {
+      const spec = JSON.parse(match[1]);
+      if (validateChartSpec(spec, { calculation_id: spec.source?.calculation_id })) {
+        charts.push(spec);
+      }
+    } catch (e) {
+      console.warn('[PandoraAgent] Failed to parse chart_spec:', e);
+    }
+  }
+  return charts;
+}
+
+function detectScopeChange(content: string): SessionContext['activeScope'] | null {
+  const scopeRegex = /<scope_change\s+type=["']([^"']+)["']\s*(?:entity_id=["']([^"']+)["'])?\s*(?:rep_email=["']([^"']+)["'])?\s*(?:label=["']([^"']+)["'])?\s*\/>/g;
+  const match = scopeRegex.exec(content);
+  if (match) {
+    return {
+      type: match[1] as any,
+      entityId: match[2],
+      repEmail: match[3],
+      label: match[4]
+    };
+  }
+  return null;
 }
 

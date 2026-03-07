@@ -11,10 +11,11 @@ import { executeDataQuery } from '../investigation/data-query-executor.js';
 import { goalService } from '../goals/goal-service.js';
 import { getSkillRuntime } from '../skills/runtime.js';
 import { getSkillRegistry } from '../skills/registry.js';
-import { createConversationState, getConversationState, appendMessage } from '../chat/conversation-state.js';
+import { createConversationState, getConversationState, appendMessage, updateContext } from '../chat/conversation-state.js';
 import { buildWorkspaceContextBlock } from '../context/workspace-memory.js';
 import { getOrAssembleBrief, renderBriefContext, BRIEF_SYSTEM_PROMPT } from '../context/opening-brief.js';
 import { runPandoraAgent } from '../chat/pandora-agent.js';
+import { getOrCreateSessionContext } from '../agents/session-context.js';
 import type { InvestigationStep } from '../goals/types.js';
 
 const router = Router();
@@ -70,17 +71,20 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
   // ── Resolve / create conversation thread ────────────────────────────────────
   const workingThreadId: string = thread_id || randomUUID();
   let history: { role: string; content: string }[] = [];
+  let sessionContext: any = null;
 
   try {
     if (thread_id) {
       const existing = await getConversationState(workspaceId, CHANNEL_ID, thread_id);
       if (existing) {
         history = existing.messages.map(m => ({ role: m.role, content: m.content }));
+        sessionContext = getOrCreateSessionContext(existing.context);
       }
       // Refresh TTL regardless
       await createConversationState(workspaceId, CHANNEL_ID, thread_id, 'command_center');
     } else {
       await createConversationState(workspaceId, CHANNEL_ID, workingThreadId, 'command_center');
+      sessionContext = getOrCreateSessionContext();
     }
   } catch (stateErr) {
     console.error('[conversation-stream] state init error (non-fatal):', stateErr);
@@ -356,15 +360,26 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
           })),
           (toolName, _label) => {
             sse(res, { type: 'tool_call', agent_id: primarySkill, tool_name: toolName, label: toolName, ts: Date.now() });
-          }
+          },
+          sessionContext,
+          (ev) => sse(res, ev)
         );
         assistantResponse = pandoraT1.answer;
-        const tier1NoRunId = randomUUID();
+        if (pandoraT1.sessionContext) {
+          await updateContext(workspaceId, CHANNEL_ID, workingThreadId, { sessionContext: pandoraT1.sessionContext }).catch(() => null);
+          
+          // Emit cross-signal findings if any
+          const crossSignalFindings = pandoraT1.sessionContext.sessionFindings.filter((f: any) => f.category === 'cross_signal');
+          if (crossSignalFindings.length > 0) {
+            sse(res, { type: 'cross_signal_findings', findings: crossSignalFindings });
+          }
+        }
+        const tier1ResponseId = randomUUID();
         if (pandoraT1.chart_specs && pandoraT1.chart_specs.length > 0) {
           sse(res, { type: 'chart_specs', specs: pandoraT1.chart_specs });
         }
         sse(res, { type: 'synthesis_chunk', text: pandoraT1.answer });
-        sse(res, { type: 'synthesis_done', full_text: pandoraT1.answer, response_id: tier1NoRunId });
+        sse(res, { type: 'synthesis_done', full_text: pandoraT1.answer, response_id: randomUUID() });
 
         // Emit inline actions if present
         if (pandoraT1.inline_actions && pandoraT1.inline_actions.length > 0) {
@@ -443,13 +458,24 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
           (toolName, _label) => {
             const fbAgentId = fallbackOp?.id ?? 'ask-pandora';
             sse(res, { type: 'tool_call', agent_id: fbAgentId, tool_name: toolName, label: toolName, ts: Date.now() });
-          }
+          },
+          sessionContext,
+          (ev) => sse(res, ev)
         );
 
         for (const op of FALLBACK_OPERATORS) {
-          sse(res, { type: 'agent_done', agent_id: op.id, finding: { agent_id: op.id, agent_name: op.name, summary: 'Analysis complete', severity: 'info' } });
+          sse(res, { agent_id: op.id, type: 'agent_done', finding: { agent_id: op.id, agent_name: op.name, summary: 'Analysis complete', severity: 'info' } });
         }
         assistantResponse = pandoraFallback.answer;
+        if (pandoraFallback.sessionContext) {
+          await updateContext(workspaceId, CHANNEL_ID, workingThreadId, { sessionContext: pandoraFallback.sessionContext }).catch(() => null);
+          
+          // Emit cross-signal findings if any
+          const crossSignalFindings = pandoraFallback.sessionContext.sessionFindings.filter((f: any) => f.category === 'cross_signal');
+          if (crossSignalFindings.length > 0) {
+            sse(res, { type: 'cross_signal_findings', findings: crossSignalFindings });
+          }
+        }
         const fallbackResponseId = randomUUID();
         if (pandoraFallback.chart_specs && pandoraFallback.chart_specs.length > 0) {
           sse(res, { type: 'chart_specs', specs: pandoraFallback.chart_specs });

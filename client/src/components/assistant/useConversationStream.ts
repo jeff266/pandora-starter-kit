@@ -38,12 +38,15 @@ export interface InlineAction {
 export interface ConversationState {
   phase: 'idle' | 'recruiting' | 'findings' | 'synthesis' | 'complete';
   messages: ConversationMessage[];
+  threadId: string | null;
   activeOperators: OperatorProgress[];
   toolCalls: ToolCallEvent[];
   synthesisText: string;
   synthesisComplete: boolean;
   evidenceCards: EvidenceCardData[];
+  crossSignalFindings: any[];
   actions: RecommendedAction[];
+  judgedActions: any[];
   inlineActions: InlineAction[];
   deliverableOptions: DeliverableOption[];
   chartSpecs: ChartSpec[];
@@ -55,6 +58,7 @@ type Action =
   | { type: 'USER_MESSAGE'; text: string }
   | { type: 'STREAM_EVENT'; event: any }
   | { type: 'DISMISS_ACTION'; id: string }
+  | { type: 'DISMISS_JUDGED_ACTION'; id: string }
   | { type: 'DISMISS_INLINE_ACTION'; id: string }
   | { type: 'INIT_MESSAGES'; messages: ConversationMessage[] }
   | { type: 'RESET' };
@@ -66,12 +70,15 @@ function makeId(): string {
 const initial: ConversationState = {
   phase: 'idle',
   messages: [],
+  threadId: null,
   activeOperators: [],
   toolCalls: [],
   synthesisText: '',
   synthesisComplete: false,
   evidenceCards: [],
+  crossSignalFindings: [],
   actions: [],
+  judgedActions: [],
   inlineActions: [],
   deliverableOptions: [],
   chartSpecs: [],
@@ -83,10 +90,15 @@ function reducer(state: ConversationState, action: Action): ConversationState {
   if (action.type === 'RESET') return { ...initial };
   if (action.type === 'INIT_MESSAGES') {
     if (action.messages.length === 0) return state;
-    return { ...state, messages: action.messages, restored: true };
+    const workspaceId = getWorkspaceId();
+    const savedThreadId = workspaceId ? localStorage.getItem(storageKey(workspaceId)) : null;
+    return { ...state, messages: action.messages, threadId: savedThreadId, restored: true };
   }
   if (action.type === 'DISMISS_ACTION') {
     return { ...state, actions: state.actions.filter(a => a.id !== action.id) };
+  }
+  if (action.type === 'DISMISS_JUDGED_ACTION') {
+    return { ...state, judgedActions: state.judgedActions.filter((_, i) => i !== (action as any).index) };
   }
   if (action.type === 'DISMISS_INLINE_ACTION') {
     return { ...state, inlineActions: state.inlineActions.filter(a => a.id !== action.id) };
@@ -100,6 +112,7 @@ function reducer(state: ConversationState, action: Action): ConversationState {
       activeOperators: [],
       toolCalls: [],
       evidenceCards: [],
+      crossSignalFindings: [],
       actions: [],
       inlineActions: [],
       deliverableOptions: [],
@@ -176,8 +189,14 @@ function reducer(state: ConversationState, action: Action): ConversationState {
       case 'evidence': {
         return { ...state, evidenceCards: ev.cards ?? [] };
       }
+      case 'cross_signal_findings': {
+        return { ...state, crossSignalFindings: ev.findings ?? [] };
+      }
       case 'actions': {
         return { ...state, actions: ev.items ?? [] };
+      }
+      case 'actions_judged': {
+        return { ...state, judgedActions: ev.items ?? [] };
       }
       case 'inline_actions': {
         return { ...state, inlineActions: ev.items ?? [] };
@@ -192,7 +211,7 @@ function reducer(state: ConversationState, action: Action): ConversationState {
         return { ...state, error: ev.message, phase: 'complete' };
       }
       case 'done': {
-        return { ...state, phase: 'complete' };
+        return { ...state, phase: 'complete', threadId: ev.thread_id ?? state.threadId };
       }
       default: return state;
     }
@@ -323,9 +342,13 @@ export function useConversationStream() {
     dispatch({ type: 'DISMISS_ACTION', id });
   }, []);
 
+  const dismissJudgedAction = useCallback((index: number) => {
+    dispatch({ type: 'DISMISS_JUDGED_ACTION', index } as any);
+  }, []);
+
   const dismissInlineAction = useCallback((id: string) => {
     dispatch({ type: 'DISMISS_INLINE_ACTION', id });
   }, []);
 
-  return { state, sendMessage, reset, dismissAction, dismissInlineAction, threadId, loadHistory, startNewThread };
+  return { state, sendMessage, reset, dismissAction, dismissJudgedAction, dismissInlineAction, threadId, loadHistory, startNewThread };
 }

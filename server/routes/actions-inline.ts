@@ -189,6 +189,7 @@ router.post(
         workspaceId,
         actor: user_id,
         dryRun: false,
+        bypassJudgment: true, // User-triggered execution bypasses automatic judgment
       });
 
       if (!result.success) {

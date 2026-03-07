@@ -1,4 +1,5 @@
 import { query } from '../db.js';
+import { writeMemoryFromBriefAssembly } from '../memory/workspace-memory.js';
 import {
   getMonday, endOfWeek, subDays, quarterStart, quarterEnd, getQuarter,
   daysRemainingInQuarter, getWonLostStages,
@@ -488,6 +489,25 @@ async function saveBrief(workspaceId: string, briefType: BriefType, now: Date, d
   );
 
   console.log(`[brief-assembler] ${briefType} brief ready for workspace ${workspaceId} in ${Date.now() - startTime}ms`);
+  
+  // Write to workspace memory
+  if (deals?.items && deals.items.length > 0) {
+    const findings = deals.items
+      .filter((d: any) => d.severity === 'critical' || d.severity === 'warning')
+      .map((d: any) => ({
+        entity_type: 'deal',
+        entity_id: d.id,
+        entity_name: d.name,
+        message: d.signal_text,
+        severity: d.severity === 'critical' ? 'act' : 'watch'
+      }));
+    if (findings.length > 0) {
+      writeMemoryFromBriefAssembly(workspaceId, result.rows[0].id, findings).catch(err => {
+        console.error('[brief-assembler] Failed to write memory:', err.message);
+      });
+    }
+  }
+
   return parseBriefRow(result.rows[0]);
 }
 

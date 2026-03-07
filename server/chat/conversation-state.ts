@@ -1,3 +1,4 @@
+import { SessionContext } from '../agents/session-context.js';
 import { query } from '../db.js';
 
 export interface ConversationMessage {
@@ -15,6 +16,7 @@ export interface ConversationContext {
     entity_id?: string;
     rep_email?: string;
   };
+  sessionContext?: SessionContext;
 }
 
 export interface ConversationState {

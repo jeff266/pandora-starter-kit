@@ -106,6 +106,7 @@ import { workspaceNotificationsRouter, userNotificationsRouter } from './routes/
 import notificationPreferencesRouter from './routes/notification-preferences.js';
 import skillRunRequestsRouter from './routes/skill-run-requests.js';
 import reportsRouter, { cleanupReportFiles } from './routes/reports.js';
+import sessionsRouter from './routes/sessions.js';
 import documentsRouter from './routes/documents.js';
 import dashboardPreferencesRouter from './routes/dashboard-preferences.js';
 import sqlWorkspaceRouter from './routes/sql-workspace.js';
@@ -384,6 +385,7 @@ workspaceApiRouter.use(investigationRouter);
 workspaceApiRouter.use(jobsRouter);
 workspaceApiRouter.use(briefsRouter);
 workspaceApiRouter.use(onboardingRouter);
+workspaceApiRouter.use(sessionsRouter);
 workspaceApiRouter.use(viewPreferenceRouter);
 workspaceApiRouter.use(conversationStreamRouter);
 workspaceApiRouter.use(motionsRouter);

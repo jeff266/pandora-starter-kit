@@ -343,3 +343,54 @@ Added to `server/routes/data.ts`:
 ### Immediate ACES ABA Fix
 - Frontera workspace brief force-reassembled on March 7, 2026 at 02:00 UTC
 - Corrected attainment: **112%** (was 20.7%), Won: **$392,100** (was $72,480, ACES ABA $315K now included)
+
+## Pandora V2 Intelligence Layer (March 2026 — T10–T16+T19)
+
+### T010: Session Context Object
+- **`server/agents/session-context.ts`** (new): Full `SessionContext` type with `activeScope`, `computedThisSession` cache (TTL-aware), `dealsLookedUp`, `conversationHistory`, `sessionFindings`, `sessionCharts`, `sessionTables`, `sessionRecommendations`, `accumulatedDocument`
+- Helper functions: `createSessionContext()`, `getOrCreateSessionContext()`, `updateSessionScope()`, `cacheComputation()`, `getCachedComputation()`, `addSessionFinding()`, `addSessionChart()`, `addSessionRecommendation()`
+- **`server/chat/conversation-state.ts`**: Extended `ConversationContext` to include `sessionContext` JSONB field
+- **`server/chat/pandora-agent.ts`**: Session context passed in/out; scope inheritance via LLM `<scope_change>` tags; `compute_metric` cache-before-query; finding/chart extraction into session context
+- **`server/routes/conversation-stream.ts`**: Session context loaded from conversation state at stream start, saved after agent response
+
+### T019: Cross-Session Workspace Memory
+- **`migrations/134_workspace_memory.sql`** (new, applied): `workspace_memory` table with memory_type, entity linkage, period scoping, occurrence_count, source tracking, resolution status + 4 performance indexes
+- **`server/memory/workspace-memory.ts`** (new): `writeMemoryFromSkillRun()`, `writeMemoryFromBriefAssembly()`, `getRelevantMemories()`, `resolveMemory()`, `buildMemoryContextBlock()` — formats memory as `<workspace_memory>` block injected into agent system prompt
+- **`server/findings/persistence-engine.ts`**: Calls `writeMemoryFromSkillRun` after every skill run
+- **`server/briefing/brief-assembler.ts`**: Calls `writeMemoryFromBriefAssembly` after brief assembly
+
+### T011: Document Accumulator
+- **`server/documents/types.ts`** (new): `DocumentTemplateType`, `DocumentSection`, `DocumentContribution`, `AccumulatedDocument`, `TEMPLATE_CONFIGS` for WBR/QBR/BOARD_DECK/FORECAST_MEMO/DEAL_REVIEW
+- **`client/src/types/document-types.ts`** (new): Client-side mirror of document types
+- **`server/documents/accumulator.ts`** (new): `createAccumulatedDocument()`, `autoSlotContribution()`, `addContribution()`, `getAccumulatorState()`, `overrideSection()`, `removeContribution()`
+- **`server/agents/session-context.ts`**: Extended with `accumulatedDocument` field
+- **`server/chat/pandora-agent.ts`**: Auto-adds extracted findings and charts as document contributions
+- **`server/routes/sessions.ts`** (new): `GET /api/workspaces/:id/sessions/:threadId/document` + `POST .../contribution/:id/move`
+- **`server/index.ts`**: Registered sessions routes
+- **`client/src/components/assistant/DocumentPill.tsx`** (new): Persistent floating pill at bottom of chat; expands to section outline with contribution counts; "Render →" button; per-contribution move/remove controls
+- **`client/src/pages/AssistantView.tsx`**: DocumentPill rendered when `threadId` is available
+
+### T012: Narrative Synthesis at Render Time
+- **`server/documents/synthesizer.ts`** (new): `synthesizeDocument(input: SynthesisInput)` — Claude call with compact context (<3K tokens); produces `executiveSummary`, `sectionBridges`, `documentThroughline`, `lowConfidenceFlags`
+- Token budget enforcement: summarizes to top 2 findings per section if over budget
+- Low-confidence detection: small record counts, contradiction-flagged values, stale brief values
+- **`server/routes/sessions.ts`**: Added `POST .../document/synthesize` endpoint
+- **`client/src/components/assistant/DocumentPill.tsx`**: Calls synthesize API before render; injects throughline into document header
+
+### T014: Cross-Signal Analysis Engine
+- **`server/skills/cross-signal-analyzer.ts`** (new): 4 pattern definitions (pricing_friction_to_conversion_drop, single_thread_to_deal_risk, icp_mismatch_to_churn_signal, data_quality_to_forecast_risk); `runCrossSignalAnalysis(input)` → `CrossSignalFinding[]`; entity overlap detection
+- **`server/chat/pandora-agent.ts`**: Cross-signal analysis runs post-tool-loop when ≥2 finding categories present; results appended to sessionContext with `category: 'cross_signal'`
+- **`server/routes/conversation-stream.ts`**: Emits `cross_signal_findings` SSE event
+- **`client/src/components/assistant/useConversationStream.ts`**: Handles `cross_signal_findings` event
+- **`client/src/components/assistant/ConversationView.tsx`**: Renders "🔗 Connected Intelligence" block with root cause + recommendation
+
+### T016: Action Judgment Layer
+- **`server/actions/judgment.ts`** (new): `judgeAction()` with 3 modes (autonomous/approval/escalate); full JUDGMENT_RULES matching spec — autonomous for low-risk tasks, approval for CRM writes and rep DMs, escalate for bulk updates/territory/quota/forecast-override
+- **`server/actions/executor.ts`**: System-triggered actions require `autonomous` mode; user-triggered actions bypass judgment check
+- **`server/chat/pandora-agent.ts`**: Extracts actions from response, judges each, emits `actions_judged` SSE event
+- **`client/src/components/assistant/useConversationStream.ts`**: Handles `actions_judged` event
+- **`client/src/components/assistant/ActionCard.tsx`**: Extended with 3 modes — autonomous notification chip, approval card (Approve/Edit/Skip), escalation card with "Show me the scenarios →"
+- **`client/src/components/assistant/ConversationView.tsx`**: Renders "Recommended Actions" section in chat feed
+
+### Remaining V2 Tasks (T013, T015, T017, T018, T020, T021)
+Not yet implemented: T013 (document distribution — Slack/Email/Drive), T015 (strategic reasoning layer), T017 (Slack draft queue), T018 (closed-loop recommendation tracking), T020 (prior document comparison), T021 (forecast accuracy memory)

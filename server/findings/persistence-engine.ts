@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { query } from '../db.js';
+import { writeMemoryFromSkillRun } from '../memory/workspace-memory.js';
 
 interface PersistenceFinding {
   id?: string;
@@ -145,5 +146,12 @@ export async function processFindingPersistence(
         err instanceof Error ? err.message : err,
       );
     }
+  }
+
+  // Write to workspace memory for recurring patterns
+  if (insertedFindings.length > 0) {
+    writeMemoryFromSkillRun(workspaceId, skillId, skillRunId, insertedFindings).catch(err => {
+      console.error('[Persistence] Failed to write to workspace memory:', err.message);
+    });
   }
 }

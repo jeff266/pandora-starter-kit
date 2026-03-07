@@ -17,6 +17,7 @@ import SendBriefDialog from '../components/assistant/SendBriefDialog';
 import BriefEmptyState from '../components/assistant/BriefEmptyState';
 import AnnotatedText from '../components/assistant/AnnotatedText';
 import QuickActionPills from '../components/assistant/QuickActionPills';
+import DocumentPill from '../components/assistant/DocumentPill';
 
 type ViewMode = 'home' | 'conversation';
 
@@ -87,6 +88,7 @@ export default function AssistantView() {
   // ── View mode ────────────────────────────────────────────────────────────────
   const [viewMode, setViewMode] = useState<ViewMode>('home');
   const [initialMessage, setInitialMessage] = useState<string | undefined>(undefined);
+  const [threadId, setThreadId] = useState<string | null>(null);
 
   // ── Data ─────────────────────────────────────────────────────────────────────
   const [greeting, setGreeting] = useState<GreetingPayload | null>(null);
@@ -369,7 +371,12 @@ export default function AssistantView() {
   if (viewMode === 'conversation') {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%', maxWidth: 760, margin: '0 auto', width: '100%' }}>
-        <ConversationView initialMessage={initialMessage} onBack={handleBack} />
+        <ConversationView 
+          initialMessage={initialMessage} 
+          onBack={handleBack} 
+          onThreadId={(tid) => setThreadId(tid)}
+        />
+        {threadId && <DocumentPill workspaceId={wsId} threadId={threadId} />}
       </div>
     );
   }

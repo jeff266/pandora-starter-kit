@@ -14,11 +14,14 @@ import { mapFieldsToSalesforce } from '../connectors/salesforce/field-map.js';
 import { getSlackAppClient } from '../connectors/slack/slack-app-client.js';
 import { query as dbQuery } from '../db.js';
 
+import { judgeAction } from './judgment.js';
+
 export interface ExecutionRequest {
   actionId: string;
   workspaceId: string;
   actor: string;         // user email or 'system'
   dryRun?: boolean;      // if true, validate but don't write
+  bypassJudgment?: boolean; // if true, skip judgment (used for user-triggered execution)
 }
 
 export interface ExecutionResult {
@@ -60,7 +63,26 @@ export async function executeAction(
 
   const action = actionResult.rows[0];
 
-  // 2. Verify action is executable
+  // 2. Judge the action if not bypassed
+  if (!request.bypassJudgment && actor === 'system') {
+    const judgment = judgeAction({
+      action_type: action.action_type,
+      severity: action.severity,
+      target: action.target_entity_name,
+      record_count: action.execution_payload?.record_count,
+    });
+
+    if (judgment.mode !== 'autonomous') {
+      return {
+        success: false,
+        dry_run: dryRun,
+        operations: [],
+        error: `Action requires ${judgment.mode}: ${judgment.reason}`,
+      };
+    }
+  }
+
+  // 3. Verify action is executable
   if (!['open', 'in_progress'].includes(action.execution_status)) {
     return {
       success: false,

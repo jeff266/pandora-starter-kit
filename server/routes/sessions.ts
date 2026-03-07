@@ -1,0 +1,79 @@
+import { Router } from 'express';
+import { getConversationState, updateContext } from '../chat/conversation-state.js';
+import { getOrCreateSessionContext } from '../agents/session-context.js';
+import { overrideSection } from '../documents/accumulator.js';
+import { synthesizeDocument } from '../documents/synthesizer.js';
+
+const router = Router();
+
+// GET current accumulator state
+router.get('/:workspaceId/sessions/:threadId/document', async (req, res) => {
+  const { workspaceId, threadId } = req.params;
+  try {
+    const state = await getConversationState(workspaceId, 'command_center', threadId);
+    if (!state) return res.status(404).json({ error: 'Session not found' });
+
+    const sessionContext = getOrCreateSessionContext(state.context);
+    res.json(sessionContext.accumulatedDocument || null);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST move contribution
+router.post('/:workspaceId/sessions/:threadId/document/contribution/:contributionId/move', async (req, res) => {
+  const { workspaceId, threadId, contributionId } = req.params;
+  const { targetSectionId } = req.body;
+
+  try {
+    const state = await getConversationState(workspaceId, 'command_center', threadId);
+    if (!state) return res.status(404).json({ error: 'Session not found' });
+
+    const sessionContext = getOrCreateSessionContext(state.context);
+    if (!sessionContext.accumulatedDocument) {
+      return res.status(400).json({ error: 'No document in session' });
+    }
+
+    overrideSection(sessionContext.accumulatedDocument, contributionId, targetSectionId);
+
+    // Save back to state.context
+    // Note: getConversationState returns the state, but we need to update it.
+    // In this codebase, updateContext is used.
+    const { updateContext } = await import('../chat/conversation-state.js');
+    await updateContext(workspaceId, 'command_center', threadId, { sessionContext });
+
+    res.json(sessionContext.accumulatedDocument);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST synthesize document
+router.post('/:workspaceId/sessions/:threadId/document/synthesize', async (req, res) => {
+  const { workspaceId, threadId } = req.params;
+  const { metrics } = req.body;
+
+  try {
+    const state = await getConversationState(workspaceId, 'command_center', threadId);
+    if (!state) return res.status(404).json({ error: 'Session not found' });
+
+    const sessionContext = getOrCreateSessionContext(state.context);
+    if (!sessionContext.accumulatedDocument) {
+      return res.status(400).json({ error: 'No document in session' });
+    }
+
+    const synthesis = await synthesizeDocument({
+      workspaceId,
+      sessionId: threadId,
+      document: sessionContext.accumulatedDocument,
+      workspaceMetrics: metrics
+    });
+
+    res.json(synthesis);
+  } catch (err: any) {
+    console.error('[Sessions Route] Synthesis error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+export default router;
