@@ -101,9 +101,31 @@ async function getStageOrdering(workspaceId: string): Promise<string[]> {
     [workspaceId]
   );
 
+  // Canonical pipeline order for standard normalized stage names.
+  // Empirical position-based ordering breaks when stages are frequently skipped
+  // (e.g. many deals go qualification→decision without evaluation, pulling decision's
+  // avg position below evaluation's even though eval is earlier in the pipeline).
+  // Stages in this map are always sorted by canonical position; unknown/custom stages
+  // append after using their empirical avg_first_position scaled above the max canonical value.
+  const CANONICAL_STAGE_ORDER: Record<string, number> = {
+    'awareness':     1,
+    'discovery':     2,
+    'qualification': 3,
+    'evaluation':    4,
+    'decision':      5,
+    'proposal':      6,
+    'negotiation':   7,
+  };
+  const CANONICAL_MAX = 7;
+
   return positionResult.rows
-    .map(r => r.norm_stage)
-    .filter(s => !TERMINAL.has(s));
+    .filter(r => !TERMINAL.has(r.norm_stage))
+    .sort((a, b) => {
+      const posA = CANONICAL_STAGE_ORDER[a.norm_stage] ?? (CANONICAL_MAX + a.avg_first_position);
+      const posB = CANONICAL_STAGE_ORDER[b.norm_stage] ?? (CANONICAL_MAX + b.avg_first_position);
+      return posA - posB;
+    })
+    .map(r => r.norm_stage);
 }
 
 /**

@@ -114,24 +114,21 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
   const svgW = SIDE_PAD * 2 + n * NODE_W + (n - 1) * GAP;
   const svgH = LABEL_TOP + MAX_H + BOTTOM_H;
 
-  // Helper: flow band path between stage i and i+1
-  // Bands taper to the narrower of the two connected stages to prevent butterfly shapes
+  // Helper: flow band path between stage i and i+1.
+  // True edge-to-edge Sankey path — top curve runs from the top of the source
+  // bar to the top of the dest bar; bottom curve runs from the bottom of the
+  // source flow-portion to the bottom of the dest flow-portion.
+  // Mathematically butterfly-free for bottom-aligned bars: the top Bezier
+  // always stays above the bottom Bezier because flowH ≥ 0 at every point.
   function flowBandPath(i: number): string {
     const x1 = nodeX[i] + NODE_W;
     const x2 = nodeX[i + 1];
     const midX = (x1 + x2) / 2;
 
-    // Cap band height at the smaller of source/dest to prevent expansion
-    const bandHeight = Math.min(flowH[i], flowH[i + 1]);
-
-    // Center the band vertically on each bar's flow segment
-    const y1Center = nodeY[i] + flowH[i] / 2;
-    const y2Center = nodeY[i + 1] + flowH[i + 1] / 2;
-
-    const y1t = y1Center - bandHeight / 2;
-    const y1b = y1Center + bandHeight / 2;
-    const y2t = y2Center - bandHeight / 2;
-    const y2b = y2Center + bandHeight / 2;
+    const y1t = nodeY[i];                  // top of source bar
+    const y1b = nodeY[i] + flowH[i];       // bottom of source flow portion
+    const y2t = nodeY[i + 1];              // top of dest bar
+    const y2b = nodeY[i + 1] + flowH[i + 1]; // bottom of dest flow portion
 
     return [
       `M ${x1} ${y1t}`,
