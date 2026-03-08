@@ -32,7 +32,7 @@ import {
   formatMemoryForPrompt,
 } from '../agents/agent-memory.js';
 import type { AgentDefinition } from '../agents/types.js';
-import type { EditorialInput, AudienceConfig, DataWindowConfig } from '../agents/editorial-types.js';
+import type { EditorialInput, AudienceConfig, DataWindowConfig, AgentBriefingOutput } from '../agents/editorial-types.js';
 
 const logger = createLogger('EditorialGenerator');
 
@@ -131,16 +131,35 @@ export async function generateEditorialReport(
   const focusQuestions: string[] = (agent as any).focus_questions ?? [];
   const dataWindow = (agent as any).data_window ?? { primary: 'current_week', comparison: 'previous_period' };
 
-  // 8. Load memory (Phase 3) — previous digest + rolling memory
-  const [previousDigest, agentMemory] = await Promise.all([
+  // 8. Load memory (Phase 3) — previous digest + rolling memory + previous generation for WoW
+  const [previousDigest, agentMemory, previousGenRow] = await Promise.all([
     getLatestDigest(agent.id, workspace_id),
     getAgentMemory(agent.id, workspace_id),
+    query(
+      `SELECT id, created_at, opening_narrative, sections_content, editorial_decisions
+       FROM report_generations
+       WHERE agent_id = $1 AND workspace_id = $2
+       ORDER BY created_at DESC LIMIT 1`,
+      [agent.id, workspace_id]
+    ).then(r => r.rows[0] || null).catch(() => null),
   ]);
   const memoryBlock = formatMemoryForPrompt(previousDigest, agentMemory);
+
+  let previousOutput: AgentBriefingOutput | undefined;
+  if (previousGenRow) {
+    previousOutput = {
+      generation_id: previousGenRow.id,
+      generated_at: previousGenRow.created_at,
+      opening_narrative: previousGenRow.opening_narrative || '',
+      sections: previousGenRow.sections_content || [],
+      editorial_decisions: previousGenRow.editorial_decisions || [],
+    };
+  }
 
   logger.info('[EditorialGenerator] Memory loaded', {
     has_previous_digest: !!previousDigest,
     has_rolling_memory: !!agentMemory,
+    has_previous_generation: !!previousOutput,
     memory_block_chars: memoryBlock.length,
   });
 
@@ -163,6 +182,7 @@ export async function generateEditorialReport(
     focusQuestions: focusQuestions.length > 0 ? focusQuestions : undefined,
     dataWindow: dataWindow,
     memoryContext: memoryBlock,
+    previousOutput,
   };
 
   const editorial = await editorialSynthesize(editorialInput);

@@ -156,6 +156,33 @@ function buildSystemPrompt(input: EditorialInput): string {
     parts.push('');
   }
 
+  // Previous run — week-over-week comparison
+  if (input.previousOutput) {
+    const prevDate = new Date(input.previousOutput.generated_at).toLocaleDateString('en-US', {
+      month: 'short', day: 'numeric', year: 'numeric',
+    });
+    const prevMetrics: string[] = [];
+    for (const section of input.previousOutput.sections) {
+      for (const metric of (section as any).metrics ?? []) {
+        if (metric.label && metric.value) {
+          prevMetrics.push(`${metric.label}: ${metric.value}`);
+        }
+      }
+    }
+    parts.push(`PREVIOUS RUN (${prevDate}):`);
+    if (input.previousOutput.opening_narrative) {
+      const truncated = input.previousOutput.opening_narrative.substring(0, 250);
+      parts.push(`Summary: ${truncated}${input.previousOutput.opening_narrative.length > 250 ? '...' : ''}`);
+    }
+    if (prevMetrics.length > 0) {
+      parts.push(`Key metrics: ${prevMetrics.join(' · ')}`);
+    }
+    parts.push('');
+    parts.push('Where metrics have changed since the previous run, note the delta inline in the narrative');
+    parts.push('(e.g. "Pipeline: $176,000 → $240,000 (+$64,000)"). If a value is unchanged, no need to note it.');
+    parts.push('');
+  }
+
   // Memory context (Phase 3)
   if (input.memoryContext) {
     parts.push(input.memoryContext);
@@ -202,6 +229,13 @@ function buildUserPrompt(input: EditorialInput): string {
   // Output format
   parts.push('OUTPUT FORMAT:');
   parts.push('Return a JSON object with this exact structure:');
+  parts.push('');
+  parts.push('NUMBER FORMATTING RULES (strictly enforced):');
+  parts.push('- Always use full dollar amounts: $1,003,750 NOT $1M or $1.0M');
+  parts.push('- Always use full dollar amounts: $176,000 NOT $176K');
+  parts.push('- Never include trailing punctuation in metric values (no commas or periods at end)');
+  parts.push('- Metric value examples: "$1,003,750" ✓  "$1.0M" ✗  "$1,003,750," ✗');
+  parts.push('');
   parts.push('{');
   parts.push('  "editorial_decisions": [');
   parts.push('    {');
@@ -216,8 +250,8 @@ function buildUserPrompt(input: EditorialInput): string {
   parts.push('      "section_id": "the-number",');
   parts.push('      "title": "The Number",');
   parts.push('      "narrative": "1-3 paragraph summary with specific data points",');
-  parts.push('      "metrics": [{"label": "Forecast", "value": "$1.33M", "delta": "+$200K", "delta_direction": "up", "severity": "good"}],');
-  parts.push('      "deal_cards": [{"name": "Acme Corp", "amount": "$450K", "owner": "Jane", "stage": "Proposal", "signal": "No activity 14 days", "signal_severity": "warning", "detail": "Last engagement was demo on 2/1", "action": "Schedule follow-up call this week"}],');
+  parts.push('      "metrics": [{"label": "Forecast", "value": "$1,330,000", "delta": "+$200,000", "delta_direction": "up", "severity": "good"}],');
+  parts.push('      "deal_cards": [{"name": "Acme Corp", "amount": "$450,000", "owner": "Jane", "stage": "Proposal", "signal": "No activity 14 days", "signal_severity": "warning", "detail": "Last engagement was demo on 2/1", "action": "Schedule follow-up call this week"}],');
   parts.push('      "source_skills": ["forecast-rollup"],');
   parts.push('      "data_freshness": "2026-02-21T10:00:00Z",');
   parts.push('      "confidence": 0.9');
@@ -307,6 +341,32 @@ function formatTuningForPrompt(pairs: TuningPair[]): string {
 }
 
 /**
+ * Post-synthesis QA pass — sanitizes metric values and flags suspicious data
+ */
+function sanitizeEditorialOutput(sections: SectionContent[]): SectionContent[] {
+  for (const section of sections) {
+    for (const metric of (section as any).metrics ?? []) {
+      // Strip trailing punctuation (belt-and-suspenders on top of prompt fix)
+      if (typeof metric.value === 'string') {
+        metric.value = metric.value.replace(/[.,;]+$/, '');
+      }
+      // Downgrade $0 with 'good' severity — almost certainly a data issue
+      if (typeof metric.value === 'string' && /^\$?0(\.00)?$/.test(metric.value.trim()) && metric.severity === 'good') {
+        metric.severity = 'warning';
+      }
+    }
+    // Flag narratives that explicitly admit no data
+    const noDataPatterns = /no data|unable to determine|insufficient data|no records found/i;
+    if (section.narrative && noDataPatterns.test(section.narrative)) {
+      if ((section.confidence ?? 1) > 0.4) {
+        section.confidence = 0.4;
+      }
+    }
+  }
+  return sections;
+}
+
+/**
  * Parse Claude's JSON response into EditorialOutput structure
  */
 function parseEditorialResponse(responseText: string): {
@@ -328,7 +388,7 @@ function parseEditorialResponse(responseText: string): {
     return {
       editorial_decisions: parsed.editorial_decisions || [],
       opening_narrative: parsed.opening_narrative || '',
-      sections: parsed.sections || [],
+      sections: sanitizeEditorialOutput(parsed.sections || []),
     };
   } catch (error) {
     logger.error('[EditorialSynthesize] Failed to parse Claude response as JSON', error as Error);
