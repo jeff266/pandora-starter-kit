@@ -12,7 +12,7 @@ const LOST_BAR_COLOR = '#991b1b';
 const NODE_W = 28;
 const MAX_H = 220;
 const MIN_H = 20;
-const LABEL_TOP = 48;   // space above chart area for name/count labels
+const LABEL_TOP = 60;   // space above chart area for name/count labels
 const BOTTOM_H = 56;    // space below baseline for lost/value labels
 const SIDE_PAD = 28;
 const GAP = 80;
@@ -393,14 +393,14 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
                   />
                 )}
 
-                {/* Stage name — fixed at top of label area */}
+                {/* Stage name — just above bar top */}
                 <text
                   x={cx}
-                  y={14}
+                  y={nodeY[i] - 26}
                   textAnchor="middle"
                   fontSize={11}
                   fontWeight="700"
-                  fill={colors.text as string}
+                  fill={color}
                   fontFamily={fonts.sans}
                 >
                   {truncate(stageName, 14)}
@@ -409,7 +409,7 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
                 {/* Deal count — one line below name */}
                 <text
                   x={cx}
-                  y={28}
+                  y={nodeY[i] - 12}
                   textAnchor="middle"
                   fontSize={10}
                   fill={colors.textMuted as string}

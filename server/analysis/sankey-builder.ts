@@ -43,10 +43,19 @@ export async function buildSankeyChartData(
     .map(s => {
       const formattedLabel = formatStageName(s.stage);
       const rawSet = rawByNormalized.get(s.stage);
-      // Only set rawLabel when it is readable and differs from the normalized label.
-      // Filter out purely numeric IDs (e.g. HubSpot stage IDs like 1027734847).
+      // Only set rawLabel when it is a human-readable value that differs from
+      // the normalized label. Filter out:
+      //   - Purely numeric IDs (e.g. HubSpot stage IDs like 1027734847)
+      //   - All-lowercase concatenated keys with no word boundaries
+      //     (e.g. 'contractsent', 'appointmentscheduled') — these are internal
+      //     CRM keys, not display labels. A readable raw value must contain at
+      //     least one underscore, space, or uppercase letter.
       const rawNames = rawSet
-        ? [...rawSet].filter(r => /[a-zA-Z]/.test(r))
+        ? [...rawSet].filter(r => {
+            if (!/[a-zA-Z]/.test(r)) return false;
+            if (!/[_\s]/.test(r) && !/[A-Z]/.test(r)) return false;
+            return true;
+          })
         : [];
       // Format the raw names the same way so the comparison is apples-to-apples
       const formattedRawNames = rawNames.map(r => formatStageName(r));

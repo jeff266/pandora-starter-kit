@@ -81,28 +81,39 @@ async function getStageOrdering(workspaceId: string): Promise<string[]> {
     'closed_lost', 'closedlost', 'closed lost',
   ]);
 
-  const positionResult = await query<{ norm_stage: string; avg_position: number }>(
-    `SELECT
-       norm_stage,
-       AVG(position) AS avg_position
-     FROM (
+  // Use first-occurrence-per-deal to compute avg position.
+  // Raw HubSpot data has many numeric IDs that all normalize to the same stage
+  // (e.g. 7 IDs → 'qualification'), so a naive AVG(ROW_NUMBER) over all rows
+  // inflates that stage's position. Using MIN(rn) per deal per normalized stage
+  // gives a clean "when does this stage first appear in this deal's journey".
+  const positionResult = await query<{ norm_stage: string; avg_first_position: number }>(
+    `WITH positioned AS (
        SELECT
          deal_id,
          COALESCE(stage_normalized, stage) AS norm_stage,
-         ROW_NUMBER() OVER (PARTITION BY deal_id ORDER BY entered_at) AS position
+         ROW_NUMBER() OVER (PARTITION BY deal_id ORDER BY entered_at) AS rn
        FROM deal_stage_history
        WHERE workspace_id = $1
-     ) sub
+     ),
+     first_per_deal AS (
+       SELECT deal_id, norm_stage, MIN(rn) AS first_position
+       FROM positioned
+       GROUP BY deal_id, norm_stage
+     )
+     SELECT
+       norm_stage,
+       AVG(first_position) AS avg_first_position,
+       COUNT(DISTINCT deal_id) AS deal_count
+     FROM first_per_deal
      WHERE norm_stage NOT IN (
        'closed_won','closed_lost','closedwon','closedlost','closed won','closed lost'
      )
      GROUP BY norm_stage
      HAVING COUNT(DISTINCT deal_id) >= 2
-     ORDER BY avg_position`,
+     ORDER BY avg_first_position`,
     [workspaceId]
   );
 
-  // Filter out terminal and numeric-only IDs, return ordered list
   return positionResult.rows
     .map(r => r.norm_stage)
     .filter(s => !TERMINAL.has(s));
