@@ -34,6 +34,12 @@ Write a unified briefing covering:
 Keep it under 500 words. This gets read on a phone over coffee.`,
     maxTokens: 2000,
   },
+  goal: 'Maintain a clean, fully-threaded pipeline with no deal sitting stale for more than 14 days — so the team always knows the true state of every open opportunity.',
+  standing_questions: [
+    'Which deals are most at risk of slipping this week and why?',
+    'Where are we single-threaded and who is the missing contact at each deal?',
+    'How many deals have had no activity in the last 14 days?',
+  ],
   trigger: { type: 'cron', cron: '0 7 * * 1' },
   delivery: { channel: 'slack', format: 'slack' },
   workspaceIds: 'all',

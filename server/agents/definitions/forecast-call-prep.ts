@@ -39,6 +39,13 @@ Structure the brief as:
 Keep it actionable. This is a cheat sheet, not a report.`,
     maxTokens: 3000,
   },
+  goal: 'Enter every forecast call with a complete picture of commit accuracy, upside deals, and rep-level accountability — so the leadership team asks better questions than the forecast system can answer.',
+  standing_questions: [
+    'Which commit deals are at highest risk of not closing and what\'s the specific blocker for each?',
+    'Which best-case deals have the strongest signals to pull into this period?',
+    'Which reps are over-committing and which are sandbagging based on their historical win rate?',
+    'What is the gap between commit and quota, and which specific deals need to close to bridge it?',
+  ],
   trigger: { type: 'manual' },
   delivery: { channel: 'slack', format: 'slack' },
   workspaceIds: 'all',

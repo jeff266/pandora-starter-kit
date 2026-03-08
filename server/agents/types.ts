@@ -17,6 +17,10 @@ export interface AgentDefinition {
   createdAt: Date;
   updatedAt: Date;
   enabled: boolean;
+  /** High-level mandate for goal-aware synthesis (STATUS / Q&A / ACTIONS briefings). */
+  goal?: string;
+  /** Recurring questions answered in every run briefing. */
+  standing_questions?: string[];
 }
 
 export interface AgentSkillStep {

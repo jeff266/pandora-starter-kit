@@ -44,6 +44,13 @@ What's the conventional wisdom that the data contradicts? Where is the team's in
 Keep it under 400 words. This is the "step back and think" moment.`,
     maxTokens: 2500,
   },
+  goal: 'Surface the one cross-cutting insight that the individual reports miss — the systemic pattern that explains why revenue is accelerating or decelerating, and what to do about it.',
+  standing_questions: [
+    'What is the single most important pattern across all reports this week that we are not discussing enough?',
+    'Where is our win rate improving, and where is it degrading — and what explains the difference?',
+    'Which segment or deal type is disproportionately driving or destroying pipeline, and are we over- or under-investing in it?',
+    'What does the data say we should stop doing that conventional wisdom says we should keep doing?',
+  ],
   trigger: { type: 'cron', cron: '0 9 * * 3' },
   delivery: { channel: 'slack', format: 'slack' },
   workspaceIds: 'all',

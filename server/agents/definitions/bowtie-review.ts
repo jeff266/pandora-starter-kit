@@ -35,6 +35,13 @@ Write a unified briefing covering:
 Keep it under 600 words. This is read standing up at the Monday meeting.`,
     maxTokens: 2500,
   },
+  goal: 'Ensure the full revenue funnel — from first touch to closed-won — converts at benchmarks for our stage, and that every bottleneck has a named owner and a due date for resolution.',
+  standing_questions: [
+    'Where in the funnel are we losing the most deals, and what is the conversion rate at that stage?',
+    'Are reps hitting their pipeline creation targets, and which reps are most below goal?',
+    'Which open deals in Commit or Best Case are most likely to slip based on risk signals?',
+    'What is the gap between current weighted pipeline and quota for the period?',
+  ],
   trigger: { type: 'cron', cron: '0 7 * * 1' },
   delivery: { channel: 'slack', format: 'slack' },
   workspaceIds: 'all',

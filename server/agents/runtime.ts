@@ -174,12 +174,14 @@ export class AgentRuntime {
 
       let synthesizedOutput: string | null = null;
       let synthesisTokens = { input: 0, output: 0 };
+      let synthesisMode: 'goal_aware' | 'findings_dump' = 'findings_dump';
 
       if (agent.synthesis.enabled && Object.keys(skillOutputs).length > 0) {
         console.log(`[Agent ${agentId}] Synthesizing ${Object.keys(skillOutputs).length} skill outputs`);
         const synthesisResult = await this.synthesize(agent, skillOutputs, workspaceId, runId);
         synthesizedOutput = synthesisResult.output;
         synthesisTokens = synthesisResult.tokens;
+        synthesisMode = synthesisResult.synthesisMode;
       }
 
       // Deliver results to channels (if not dry run)
@@ -228,7 +230,7 @@ export class AgentRuntime {
         skillEvidence: Object.keys(skillEvidence).length > 0 ? skillEvidence : undefined,
       };
 
-      await this.logAgentRun(runId, agentId, workspaceId, result.status, result);
+      await this.logAgentRun(runId, agentId, workspaceId, result.status, { ...result, synthesisMode });
 
       console.log(`[Agent ${agentId}] Completed in ${result.duration}ms, ${result.tokenUsage.total} tokens`);
       return result;
@@ -277,45 +279,26 @@ export class AgentRuntime {
     return result;
   }
 
+  // ── Goal-aware synthesis helpers (delegates to exported module functions) ─
+
+  private formatSkillName(skillId: string): string {
+    return formatSkillName(skillId);
+  }
+
+  private computeWordBudget(questionCount: number): number {
+    return computeWordBudget(questionCount);
+  }
+
+  private compressEvidenceForSynthesis(skillOutputs: Record<string, SkillOutput>): string {
+    return compressEvidenceForSynthesis(skillOutputs);
+  }
+
   private buildGoalAwareSynthesisPrompt(
     goal: string,
     standing_questions: string[],
-    allOutputs: string
+    skillOutputs: Record<string, SkillOutput>
   ): { systemPrompt: string; userPrompt: string } {
-    const questionsBlock = standing_questions
-      .map((q, i) => `Q${i + 1}: ${q}`)
-      .join('\n');
-
-    const systemPrompt = `You are a VP of Revenue Operations delivering a recurring briefing. Be direct, specific, and evidence-based. Every claim must reference actual deal names, rep names, or dollar amounts from the findings. If evidence is insufficient to answer a standing question, say so in one sentence — do not speculate.`;
-
-    const userPrompt = `YOUR MANDATE:
-${goal}
-
-SKILL FINDINGS:
-${allOutputs}
-
-Produce a briefing structured EXACTLY as follows:
-
-## STATUS AGAINST GOAL
-Are we on track to achieve: ${goal}?
-Lead with a direct YES / NO / AT-RISK answer, then 2-3 sentences of supporting evidence. Include one sentence on what changed since last week if the evidence shows it.
-
-## STANDING QUESTIONS
-${questionsBlock}
-Answer each question in 2-4 sentences using specific deal names, rep names, and dollar amounts. Format as:
-Q1: [question restated]
-A1: [answer from evidence]
-(repeat for each question)
-
-## THIS WEEK'S ACTIONS
-List 3-5 specific actions. Each must name a person, a deal or metric, and the exact action to take. Only include actions that directly affect the goal.
-
-Rules:
-- Lead with the goal status — never bury it
-- Every claim must be traceable to the skill evidence above
-- No more than 600 words total`;
-
-    return { systemPrompt, userPrompt };
+    return buildGoalAwareSynthesisPrompt(goal, standing_questions, skillOutputs);
   }
 
   private async synthesize(
@@ -348,19 +331,23 @@ Rules:
       .join('\n\n---\n\n');
     userPrompt = userPrompt.replace('{{skill_outputs}}', allOutputs);
 
-    // Check DB agent for goal-aware synthesis
+    // Check DB agent first, then fall back to registry definition for goal-aware synthesis
     let systemPrompt = agent.synthesis.systemPrompt;
+    let synthesisMode: 'goal_aware' | 'findings_dump' = 'findings_dump';
     try {
       const dbAgent = await getAgent(agent.id, workspaceId);
-      if (dbAgent?.goal && Array.isArray(dbAgent.standing_questions) && dbAgent.standing_questions.length > 0) {
-        const goalPrompts = this.buildGoalAwareSynthesisPrompt(
-          dbAgent.goal,
-          dbAgent.standing_questions,
-          allOutputs
-        );
+      // DB agent takes precedence; registry definition provides defaults for system agents
+      const goal = (dbAgent?.goal && dbAgent.goal.trim()) ? dbAgent.goal : agent.goal;
+      const standing_questions = (dbAgent?.standing_questions?.length)
+        ? dbAgent.standing_questions
+        : (agent.standing_questions ?? []);
+
+      if (goal && standing_questions.length > 0) {
+        const goalPrompts = this.buildGoalAwareSynthesisPrompt(goal, standing_questions, skillOutputs);
         systemPrompt = goalPrompts.systemPrompt;
         userPrompt = goalPrompts.userPrompt;
-        console.log(`[Agent ${agent.id}] Using goal-aware synthesis: "${dbAgent.goal}"`);
+        synthesisMode = 'goal_aware';
+        console.log(`[Agent ${agent.id}] Using goal-aware synthesis: "${goal}"`);
       }
     } catch (err) {
       // Non-fatal — fall through to default synthesis
@@ -397,6 +384,7 @@ Rules:
     return {
       output: response.content,
       tokens: { input: response.usage.input, output: response.usage.output },
+      synthesisMode,
     };
   }
 
@@ -539,7 +527,8 @@ Rules:
                synthesized_output = $4,
                token_usage = $5,
                error = $6,
-               skill_evidence = COALESCE($8::jsonb, skill_evidence)
+               skill_evidence = COALESCE($8::jsonb, skill_evidence),
+               synthesis_mode = COALESCE($9, synthesis_mode)
            WHERE id = $7`,
           [
             status,
@@ -550,6 +539,7 @@ Rules:
             data?.error || null,
             runId,
             evidenceJson,
+            data?.synthesisMode || null,
           ]
         );
       }
@@ -561,4 +551,127 @@ Rules:
 
 export function getAgentRuntime(): AgentRuntime {
   return AgentRuntime.getInstance();
+}
+
+// ── Exported helpers (for unit tests and external consumers) ─────────────────
+
+/**
+ * Convert skill IDs to title case: 'pipeline-hygiene' → 'Pipeline Hygiene'
+ */
+export function formatSkillName(skillId: string): string {
+  return skillId.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
+
+/**
+ * Dynamic word budget: 400 base + 80 per standing question.
+ * 3 questions → 640 words, 5 questions → 800 words.
+ */
+export function computeWordBudget(questionCount: number): number {
+  return 400 + questionCount * 80;
+}
+
+/**
+ * Compress multi-skill evidence into a structured summary for the synthesis prompt.
+ * Prioritises critical → warning → info, takes top 5 claims per skill,
+ * hard caps at 3,000 chars. Falls back to text output when no structured claims.
+ */
+export function compressEvidenceForSynthesis(skillOutputs: Record<string, SkillOutput>): string {
+  const sections: string[] = [];
+
+  for (const [, skillOutput] of Object.entries(skillOutputs)) {
+    const skillName = formatSkillName(skillOutput.skillId);
+    const claims = skillOutput.evidence?.claims ?? [];
+
+    if (claims.length > 0) {
+      const sorted = [...claims].sort((a, b) => {
+        const order: Record<string, number> = { critical: 0, warning: 1, info: 2 };
+        return (order[a.severity] ?? 3) - (order[b.severity] ?? 3);
+      });
+
+      const topClaims = sorted.slice(0, 5);
+      const claimLines = topClaims.map(c => {
+        const prefix = c.severity === 'critical' ? '⚠' : c.severity === 'warning' ? '•' : '–';
+        return `${prefix} ${c.claim_text}`;
+      });
+
+      sections.push(`### ${skillName}\n${claimLines.join('\n')}`);
+    } else {
+      const text = (typeof skillOutput.output === 'string'
+        ? skillOutput.output
+        : skillOutput.summary || ''
+      ).trim();
+      if (text) {
+        sections.push(`### ${skillName}\n${text.slice(0, 400)}${text.length > 400 ? '\n... [truncated]' : ''}`);
+      }
+    }
+  }
+
+  let result = sections.join('\n\n');
+
+  if (result.length > 3000) {
+    result = result.slice(0, 3000) + '\n... [additional findings truncated]';
+  }
+
+  return result || '(No findings from skill runs)';
+}
+
+/**
+ * Builds the goal-aware synthesis prompt (STATUS → Q&A → ACTIONS).
+ * Exported for testing. Used when the agent has a goal + standing questions.
+ */
+export function buildGoalAwareSynthesisPrompt(
+  goal: string,
+  standing_questions: string[],
+  skillOutputs: Record<string, SkillOutput>
+): { systemPrompt: string; userPrompt: string } {
+  const compressedEvidence = compressEvidenceForSynthesis(skillOutputs);
+  const wordBudget = computeWordBudget(standing_questions.length);
+
+  const questionsBlock = standing_questions
+    .map((q, i) => `**Q${i + 1}: ${q}**`)
+    .join('\n\n');
+
+  const systemPrompt = `You are a VP of Revenue Operations delivering a recurring briefing to your leadership team. Be direct, specific, and evidence-based. Every claim must reference actual deal names, rep names, or dollar amounts from the findings below. If evidence is insufficient to answer a standing question, say so in one sentence — do not speculate.`;
+
+  const userPrompt = `YOUR MANDATE:
+${goal}
+
+SKILL FINDINGS:
+${compressedEvidence}
+
+---
+
+Produce a briefing with exactly this structure. Do not add sections, do not reorder sections, do not combine sections.
+
+## STATUS AGAINST GOAL
+2–3 sentences. Answer directly: are we on track to achieve "${goal}"?
+- Start with a verdict: "On track.", "At risk.", or "Behind."
+- Follow with the single most important piece of supporting evidence.
+- End with one sentence on what changed since the last run. If no prior run data exists, omit this sentence entirely — do not mention that it's missing.
+
+## STANDING QUESTIONS
+Answer each question below using evidence from the skill findings. Use specific deal names, rep names, and dollar amounts. Do not generalize. If the evidence is insufficient to answer a specific question, write one sentence saying what data would be needed — do not speculate.
+
+${questionsBlock}
+
+Format: bold the question, then answer in 2–4 sentences directly below it.
+
+## THIS WEEK'S ACTIONS
+List 3–5 actions. Each action must:
+- Name the specific person, deal, or system involved
+- State the exact action to take (not "review" or "consider" — "close", "call", "require", "configure")
+- Connect directly to the goal: "${goal}"
+
+Format: numbered list. No sub-bullets.
+
+---
+
+RULES:
+- Every claim must be traceable to the skill findings above. No invented data.
+- Dollar amounts and percentages must come directly from the evidence.
+- If a standing question cannot be answered from the evidence, say so plainly.
+- Actions must be specific enough that a RevOps analyst could execute them tomorrow without asking a follow-up question.
+- Total word count: ${wordBudget} words maximum.`;
+
+  return { systemPrompt, userPrompt };
 }

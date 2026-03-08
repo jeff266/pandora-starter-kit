@@ -54,6 +54,13 @@ Quick table: revenue, pipeline, win rate, activity volume.
 Keep the whole email under 400 words. It should take 90 seconds to read on a phone. No fluff, no filler paragraphs.`,
     maxTokens: 2500,
   },
+  goal: 'Publish a Friday recap every week that celebrates wins, surfaces the honest pipeline story, and gives the team clear priorities heading into next week — in under 2 minutes to read.',
+  standing_questions: [
+    'How much new pipeline was created this week, and is it enough to stay on track for the quarter?',
+    'What deals moved forward, which closed, and which slipped this week?',
+    'What are the top 3 RevOps infrastructure improvements we shipped this week?',
+    'What are the 3 biggest risks or open questions going into next week?',
+  ],
   trigger: { type: 'cron', cron: '0 16 * * 5' },
   delivery: { channel: 'slack', format: 'slack' },
   workspaceIds: 'all',
