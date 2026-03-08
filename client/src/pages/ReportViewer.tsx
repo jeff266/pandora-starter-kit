@@ -4,6 +4,7 @@ import { Download, Share2, Settings, ChevronLeft, ChevronRight, Eye } from 'luci
 import type { SectionContent, MetricCard, DealCard, ActionItem } from '../components/reports/types';
 import { api } from '../lib/api';
 import { colors, fonts } from '../styles/theme';
+import { renderMarkdown } from '../lib/render-markdown';
 import SectionFeedback from '../components/reports/SectionFeedback';
 import OverallBriefingFeedback from '../components/reports/OverallBriefingFeedback';
 
@@ -466,7 +467,7 @@ export default function ReportViewer() {
                   fontFamily: fonts.sans,
                   margin: 0,
                 }}>
-                  {generation.opening_narrative}
+                  {renderMarkdown(generation.opening_narrative)}
                 </p>
               </div>
             )}
@@ -573,7 +574,7 @@ function ReportSection({ section, isCollapsed, onToggle, anonymizeMode, workspac
           {section.narrative && (
             <div style={{ maxWidth: 'none', color: colors.textSecondary, lineHeight: 1.6, fontFamily: fonts.sans }}>
               {section.narrative.split('\n\n').map((para, idx) => (
-                <p key={idx} style={{ marginBottom: 16 }}>{para}</p>
+                <p key={idx} style={{ marginBottom: 16 }}>{renderMarkdown(para)}</p>
               ))}
             </div>
           )}
@@ -660,6 +661,7 @@ function MetricCardComponent({ metric }: { metric: MetricCard }) {
 
   const defaultColors = { bg: colors.surfaceRaised, border: colors.border, accent: colors.border };
   const colorScheme = (metric.severity && severityColors[metric.severity]) || defaultColors;
+  const hasSeverity = !!metric.severity;
 
   return (
     <div style={{
@@ -669,11 +671,11 @@ function MetricCardComponent({ metric }: { metric: MetricCard }) {
       borderRadius: 8,
       padding: 16,
     }}>
-      <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em', color: colors.textSecondary, fontWeight: 600, fontFamily: fonts.sans }}>{metric.label}</div>
+      <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em', color: hasSeverity ? 'rgba(255,255,255,0.6)' : colors.textSecondary, fontWeight: 600, fontFamily: fonts.sans }}>{metric.label}</div>
       <div style={{ marginTop: 8, display: 'flex', alignItems: 'baseline', gap: 8 }}>
-        <span style={{ fontSize: 24, fontWeight: 700, color: colors.text, fontFamily: fonts.sans }}>{metric.value}</span>
+        <span style={{ fontSize: 24, fontWeight: 700, color: hasSeverity ? '#ffffff' : colors.text, fontFamily: fonts.sans }}>{metric.value}</span>
         {metric.delta && (
-          <span style={{ fontSize: 14, color: colors.textSecondary, fontFamily: fonts.sans }}>
+          <span style={{ fontSize: 14, color: hasSeverity ? 'rgba(255,255,255,0.6)' : colors.textSecondary, fontFamily: fonts.sans }}>
             {metric.delta_direction === 'up' ? '▲' : metric.delta_direction === 'down' ? '▼' : '—'} {metric.delta}
           </span>
         )}
@@ -691,6 +693,7 @@ function DealCardComponent({ deal, anonymizeMode }: { deal: DealCard; anonymizeM
 
   const defaultDealColors = { border: colors.border, bg: colors.surfaceRaised };
   const colorScheme = (deal.signal_severity && severityColors[deal.signal_severity]) || defaultDealColors;
+  const hasSeverity = !!deal.signal_severity;
   const displayName = anonymizeMode ? `Company ${deal.name?.charAt(0) || '?'}` : (deal.name || 'Unknown');
   const displayOwner = anonymizeMode ? `Rep ${deal.owner?.charAt(0) || '?'}` : (deal.owner || 'Unknown');
 
@@ -703,15 +706,15 @@ function DealCardComponent({ deal, anonymizeMode }: { deal: DealCard; anonymizeM
     }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
         <div>
-          <h4 style={{ fontWeight: 600, color: colors.text, fontFamily: fonts.sans, margin: 0 }}>{displayName}</h4>
-          <div style={{ fontSize: 14, color: colors.textSecondary, marginTop: 4, fontFamily: fonts.sans }}>
+          <h4 style={{ fontWeight: 600, color: hasSeverity ? '#ffffff' : colors.text, fontFamily: fonts.sans, margin: 0 }}>{displayName}</h4>
+          <div style={{ fontSize: 14, color: hasSeverity ? 'rgba(255,255,255,0.6)' : colors.textSecondary, marginTop: 4, fontFamily: fonts.sans }}>
             {displayOwner} • {deal.stage} • {deal.signal}
           </div>
         </div>
-        <div style={{ fontSize: 18, fontWeight: 700, color: colors.text, fontFamily: fonts.sans }}>{deal.amount}</div>
+        <div style={{ fontSize: 18, fontWeight: 700, color: hasSeverity ? '#ffffff' : colors.text, fontFamily: fonts.sans }}>{deal.amount}</div>
       </div>
       {deal.action && (
-        <div style={{ marginTop: 12, fontSize: 14, color: colors.accent, fontWeight: 500, fontFamily: fonts.sans }}>→ {deal.action}</div>
+        <div style={{ marginTop: 12, fontSize: 14, color: hasSeverity ? 'rgba(255,255,255,0.85)' : colors.accent, fontWeight: 500, fontFamily: fonts.sans }}>→ {deal.action}</div>
       )}
     </div>
   );
