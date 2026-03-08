@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import ChartRenderer from '../shared/ChartRenderer';
 
 function fmt(n: number): string {
@@ -21,6 +22,7 @@ interface WhatChangedCardProps {
 }
 
 export default function WhatChangedCard({ whatChanged: wc, briefType }: WhatChangedCardProps) {
+  const navigate = useNavigate();
   if (!wc) return null;
 
   const sinceLabel = wc.since_date ? `Since ${wc.since_date}` : briefType === 'pulse' ? 'Since Monday' : 'Week over week';
@@ -93,6 +95,26 @@ export default function WhatChangedCard({ whatChanged: wc, briefType }: WhatChan
           {wc.streak}
         </div>
       )}
+
+      <div style={{ marginTop: 10, display: 'flex', justifyContent: 'flex-end' }}>
+        <button
+          onClick={() => navigate('/pipeline')}
+          style={{
+            fontSize: 11,
+            color: '#6B7280',
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            padding: 0,
+            fontFamily: 'inherit',
+            textDecoration: 'underline',
+            textDecorationStyle: 'dotted',
+            textUnderlineOffset: 2,
+          }}
+        >
+          View full funnel →
+        </button>
+      </div>
     </div>
   );
 }

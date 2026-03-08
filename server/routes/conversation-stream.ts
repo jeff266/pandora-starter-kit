@@ -17,6 +17,9 @@ import { getOrAssembleBrief, renderBriefContext, BRIEF_SYSTEM_PROMPT } from '../
 import { detectQueryAmbiguity } from '../chat/ambiguity-detector.js';
 import { runPandoraAgent } from '../chat/pandora-agent.js';
 import { getOrCreateSessionContext } from '../agents/session-context.js';
+import { waterfallAnalysis } from '../analysis/waterfall-analysis.js';
+import { buildSankeyChartData } from '../analysis/sankey-builder.js';
+import { computeWinningPaths } from '../analysis/winning-paths.js';
 import axios from 'axios';
 import type { InvestigationStep } from '../goals/types.js';
 
@@ -277,6 +280,39 @@ router.post('/:workspaceId/conversation/stream', async (req: Request, res: Respo
     );
 
     let assistantResponse = '';
+
+    // ── Visual shortcut: rich chart pre-fetches ──────────────────────────────
+    const _msgLower = message.toLowerCase();
+    const _isSankeyRequest = /show.*funnel|pipeline.*funnel|funnel.*view|funnel.*chart|where.*deals.*stuck|where.*drop.*off|deals.*getting.*stuck|stage.*conversion.*flow|how.*deals.*move.*stage|deal.*flow.*stage|\bsankey\b|funnel.*stage|stage.*funnel|show.*pipeline.*flow|pipeline.*progression/.test(_msgLower);
+    const _isWinningPathsRequest = /winning.*path|what.*winning.*deals|what.*do.*wins.*look|most.*common.*path.*clos|path.*to.*clos|paths.*to.*won|how.*did.*wins.*get|how.*won.*deals.*progress|where.*deals.*win|which.*journey.*win|top.*winning.*sequence|winning.*sequence|skip.*demo.*win|deals.*skip.*stage/.test(_msgLower);
+
+    if (_isSankeyRequest) {
+      try {
+        const days = 7;
+        const periodEnd = new Date();
+        const periodStart = new Date(periodEnd.getTime() - days * 24 * 60 * 60 * 1000);
+        const prevEnd = new Date(periodStart.getTime());
+        const prevStart = new Date(prevEnd.getTime() - days * 24 * 60 * 60 * 1000);
+        const [current, previous] = await Promise.all([
+          waterfallAnalysis(workspaceId, periodStart, periodEnd),
+          waterfallAnalysis(workspaceId, prevStart, prevEnd),
+        ]);
+        const sankeyData = await buildSankeyChartData(workspaceId, current, previous, { type: 'all', label: 'All Deals' });
+        sse(res, { type: 'sankey_data', data: sankeyData });
+      } catch (sankeyErr) {
+        console.warn('[conversation-stream] Sankey pre-fetch failed (non-fatal):', sankeyErr);
+      }
+    }
+
+    // ── Visual shortcut: Winning Paths ────────────────────────────────────────
+    if (_isWinningPathsRequest) {
+      try {
+        const pathsData = await computeWinningPaths(workspaceId);
+        sse(res, { type: 'winning_paths_data', data: pathsData });
+      } catch (pathsErr) {
+        console.warn('[conversation-stream] Winning paths pre-fetch failed (non-fatal):', pathsErr);
+      }
+    }
 
     // ── Tier 0: Direct data query — SQL only, no AI synthesis ───────────────
     if (complexity.tier === 'data_query') {

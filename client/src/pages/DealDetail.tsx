@@ -13,6 +13,7 @@ import { buildDealCrmUrl, buildConversationUrl, useCrmInfo } from '../lib/deepli
 import { useWorkspace } from '../context/WorkspaceContext';
 import { useInlineActions } from '../hooks/useInlineActions';
 import StageRecCard from '../components/actions/StageRecCard';
+import type { SimilarPathsData } from '../components/reports/types';
 
 const SEVERITY_LABELS: Record<string, string> = {
   act: 'Critical', watch: 'Warning', notable: 'Notable', info: 'Info',
@@ -279,6 +280,157 @@ interface ActiveScore {
 interface MechanicalScore {
   score: number | null;
   grade: string;
+}
+
+function DealPathAccordion({ dealId }: { dealId: string }) {
+  const [opened, setOpened] = React.useState(false);
+  const [data, setData] = React.useState<SimilarPathsData | null>(null);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  function handleOpen() {
+    if (!opened && !data && !loading) {
+      setLoading(true);
+      api.get(`/analysis/deals/${dealId}/similar-paths`)
+        .then((d: SimilarPathsData) => { setData(d); setError(null); })
+        .catch((e: Error) => setError(e.message || 'Failed to load path data'))
+        .finally(() => setLoading(false));
+    }
+    setOpened((o) => !o);
+  }
+
+  const chipStyle = (text: string): React.CSSProperties => ({
+    fontSize: 10,
+    fontWeight: 500,
+    color: colors.text,
+    background: colors.surfaceHover,
+    border: `1px solid ${colors.border}`,
+    borderRadius: 4,
+    padding: '2px 7px',
+    whiteSpace: 'nowrap',
+  });
+
+  const wonChip: React.CSSProperties = {
+    fontSize: 10,
+    fontWeight: 600,
+    color: colors.green,
+    background: `${colors.green}18`,
+    border: `1px solid ${colors.green}40`,
+    borderRadius: 4,
+    padding: '2px 7px',
+    marginLeft: 2,
+  };
+
+  return (
+    <div style={{
+      background: colors.surface,
+      border: `1px solid ${colors.border}`,
+      borderRadius: 10,
+      overflow: 'hidden',
+    }}>
+      <button
+        onClick={handleOpen}
+        style={{
+          width: '100%', display: 'flex', alignItems: 'center',
+          justifyContent: 'space-between', padding: '12px 16px',
+          background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left',
+        }}
+      >
+        <span style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>Deal Path & Winning Patterns</span>
+        <ChevronDown
+          size={14}
+          color={colors.textMuted}
+          style={{ transition: 'transform 0.2s', transform: opened ? 'rotate(180deg)' : 'rotate(0deg)' }}
+        />
+      </button>
+      {opened && (
+        <div style={{ padding: '0 16px 16px', borderTop: `1px solid ${colors.border}` }}>
+          {loading && (
+            <div style={{ padding: '16px 0', textAlign: 'center', fontSize: 12, color: colors.textMuted }}>
+              Loading path data…
+            </div>
+          )}
+          {error && (
+            <div style={{ padding: '12px 0', fontSize: 12, color: colors.red }}>{error}</div>
+          )}
+          {data && !loading && (
+            <>
+              <div style={{ paddingTop: 12, marginBottom: 16 }}>
+                <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: colors.textMuted, marginBottom: 8 }}>
+                  This Deal's Journey
+                </div>
+                {data.dealPath.length === 0 ? (
+                  <p style={{ fontSize: 12, color: colors.textMuted, margin: 0 }}>No stage history recorded yet.</p>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+                    {data.dealPath.map((stage, i) => (
+                      <React.Fragment key={i}>
+                        <span style={chipStyle(stage)}>{stage}</span>
+                        {i < data.dealPath.length - 1 && (
+                          <span style={{ fontSize: 9, color: colors.textMuted }}>→</span>
+                        )}
+                      </React.Fragment>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: colors.textMuted, marginBottom: 8 }}>
+                  Closest Winning Patterns
+                </div>
+                {data.matchingPaths.length === 0 ? (
+                  <p style={{ fontSize: 12, color: colors.textMuted, margin: 0 }}>No matching winning paths found yet.</p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {data.matchingPaths.map((path, i) => (
+                      <div key={i} style={{
+                        background: colors.bg,
+                        border: `1px solid ${colors.border}`,
+                        borderRadius: 8,
+                        padding: '10px 12px',
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 3 }}>
+                            {path.sequence.map((stage, j) => (
+                              <React.Fragment key={j}>
+                                <span style={chipStyle(stage)}>{stage}</span>
+                                {j < path.sequence.length - 1 && (
+                                  <span style={{ fontSize: 9, color: colors.textMuted }}>→</span>
+                                )}
+                              </React.Fragment>
+                            ))}
+                            <span style={wonChip}>✓ Won</span>
+                          </div>
+                          <div style={{
+                            fontSize: 10,
+                            fontWeight: 700,
+                            color: path.overlapScore >= 70 ? colors.green : path.overlapScore >= 40 ? colors.yellow : colors.textMuted,
+                            background: colors.surfaceHover,
+                            borderRadius: 20,
+                            padding: '1px 8px',
+                            flexShrink: 0,
+                            marginLeft: 8,
+                          }}>
+                            {path.overlapScore}% match
+                          </div>
+                        </div>
+                        <div style={{ fontSize: 11, color: colors.textMuted }}>
+                          avg ARR {path.avgArrUsd >= 1_000 ? `$${Math.round(path.avgArrUsd / 1_000)}K` : `$${Math.round(path.avgArrUsd)}`}
+                          {' · '}avg cycle {Math.round(path.avgCycleDays)}d
+                          {' · '}{path.count} win{path.count !== 1 ? 's' : ''}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function DealDetail() {
@@ -1392,6 +1544,9 @@ export default function DealDetail() {
           )}
           </div>
         </Accordion>
+
+        {/* Deal Path & Winning Patterns accordion */}
+        <DealPathAccordion dealId={dealId ?? ''} />
 
         {/* MEDDIC Coverage accordion */}
         {(() => {

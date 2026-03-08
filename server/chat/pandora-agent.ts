@@ -1043,7 +1043,22 @@ function detectVisualizationHint(message: string): string | null {
   
   // Donut
   if (/distribution|what\s+percent|win.?loss\s+split|icp\s+grade|breakdown\s+of/.test(m)) return 'donut';
-  
+
+  // Sankey / Pipeline Funnel
+  if (/show.*funnel|pipeline.*funnel|funnel.*view|funnel.*chart/.test(m)) return 'sankey';
+  if (/where.*deals.*stuck|where.*drop.*off|deals.*getting.*stuck/.test(m)) return 'sankey';
+  if (/stage.*conversion.*flow|how.*deals.*move.*stage|deal.*flow.*stage/.test(m)) return 'sankey';
+  if (/\bsankey\b|funnel.*stage|stage.*funnel/.test(m)) return 'sankey';
+  if (/show.*pipeline.*flow|pipeline.*progression/.test(m)) return 'sankey';
+
+  // Winning Paths
+  if (/winning.*path|what.*winning.*deals|what.*do.*wins.*look/.test(m)) return 'winning_paths';
+  if (/most.*common.*path.*clos|path.*to.*clos|paths.*to.*won/.test(m)) return 'winning_paths';
+  if (/how.*did.*wins.*get|how.*won.*deals.*progress/.test(m)) return 'winning_paths';
+  if (/where.*deals.*win|which.*journey.*win/.test(m)) return 'winning_paths';
+  if (/top.*winning.*sequence|winning.*sequence/.test(m)) return 'winning_paths';
+  if (/skip.*demo.*win|deals.*skip.*stage/.test(m)) return 'winning_paths';
+
   return null;
 }
 

@@ -16,6 +16,8 @@ import StickyInput from './StickyInput';
 import MessageFeedback from './MessageFeedback';
 import AgentConversationFeed from './AgentConversationFeed';
 import ChartRenderer from '../shared/ChartRenderer';
+import SankeyChart from '../reports/SankeyChart';
+import WinningPathsChart from '../pipeline/WinningPathsChart';
 
 interface ConversationViewProps {
   initialMessage?: string;
@@ -256,6 +258,22 @@ export default function ConversationView({ initialMessage, onBack, onThreadId }:
                 if (route) navigate(route);
               }}
             />
+          </div>
+        )}
+
+        {state.sankeyData !== null && (state.phase === 'synthesis' || state.synthesisComplete) && (
+          <div style={{ display: 'flex', justifyContent: 'flex-start', width: '100%', marginBottom: 12 }}>
+            <div style={{ maxWidth: '90%', width: '100%' }}>
+              <SankeyChart chartData={state.sankeyData} />
+            </div>
+          </div>
+        )}
+
+        {state.winningPathsData !== null && (state.phase === 'synthesis' || state.synthesisComplete) && (
+          <div style={{ display: 'flex', justifyContent: 'flex-start', width: '100%', marginBottom: 12 }}>
+            <div style={{ maxWidth: '90%', width: '100%' }}>
+              <WinningPathsChart data={state.winningPathsData} embedded={true} />
+            </div>
           </div>
         )}
 

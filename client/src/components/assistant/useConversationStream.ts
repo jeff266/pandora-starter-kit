@@ -6,6 +6,7 @@ import type { RecommendedAction } from './ActionCard';
 import type { DeliverableOption } from './DeliverablePicker';
 import type { ToolCallEvent } from './AgentConversationFeed';
 import type { ChartSpec } from '../../types/chart-types';
+import type { SankeyChartData, WinningPathsData } from '../reports/types';
 
 export interface ConversationMessage {
   id: string;
@@ -51,6 +52,8 @@ export interface ConversationState {
   strategicAnalysis: any | null;
   deliverableOptions: DeliverableOption[];
   chartSpecs: ChartSpec[];
+  sankeyData: SankeyChartData | null;
+  winningPathsData: WinningPathsData | null;
   error: string | null;
   restored: boolean;
   clarifyingQuestion: { question: string; dimension: string; options: { label: string; value: string }[] } | null;
@@ -85,6 +88,8 @@ const initial: ConversationState = {
   strategicAnalysis: null,
   deliverableOptions: [],
   chartSpecs: [],
+  sankeyData: null,
+  winningPathsData: null,
   error: null,
   restored: false,
   clarifyingQuestion: null,
@@ -122,6 +127,8 @@ function reducer(state: ConversationState, action: Action): ConversationState {
       strategicAnalysis: null,
       deliverableOptions: [],
       chartSpecs: [],
+      sankeyData: null,
+      winningPathsData: null,
       error: null,
       restored: false,
       messages: [...state.messages, { id: makeId(), role: 'user', content: action.text, timestamp: Date.now() }],
@@ -214,6 +221,12 @@ function reducer(state: ConversationState, action: Action): ConversationState {
       }
       case 'chart_specs': {
         return { ...state, chartSpecs: ev.specs ?? [] };
+      }
+      case 'sankey_data': {
+        return { ...state, sankeyData: ev.data ?? null };
+      }
+      case 'winning_paths_data': {
+        return { ...state, winningPathsData: ev.data ?? null };
       }
       case 'clarifying_question': {
         return {

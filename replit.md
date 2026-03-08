@@ -573,6 +573,38 @@ Interactive SVG Sankey diagram for the report viewer showing stage-by-stage deal
 - **Scopes**: Confirmed `analysis_scopes` (the workspace segmentation system — Enterprise, SMB, Named Accounts, etc.)
 - Interactive: filter pills call `GET /analysis/sankey?pipeline=X` or `?scopeId=Y` live; no page reload or report regeneration needed.
 
+## Pipeline Page, Winning Paths & Assistant Chart Intelligence (March 2026)
+
+### `/pipeline` Page
+- **`client/src/pages/PipelinePage.tsx`** (new): Full-page view combining Sankey funnel (top) + Winning Paths (bottom). Both sections load independently, handle errors gracefully, show loading states. Uses `SectionErrorBoundary`.
+- **Routing**: `<Route path="/pipeline" element={<PipelinePage />} />` added to `App.tsx`. Page title `'Pipeline'` added to `pageTitles`.
+- **Sidebar**: `{ label: 'Pipeline', path: '/pipeline', icon: '⬡' }` added to OPERATIONS section (after Forecast, before Push).
+
+### Winning Paths Analysis
+- **`server/analysis/winning-paths.ts`** (new): `computeWinningPaths(workspaceId, filterParams?)` — joins `deal_stage_history` + `deals`, uses `array_agg(stage ORDER BY entered_at)` to reconstruct stage sequences for closed-won deals, groups by sequence, returns top 10 paths with count/avgARR/avgCycleDays. `WinningPathFilterParams`: `{ pipeline?, scopeId?, sizeBand? }`. `computeSimilarPaths(workspaceId, dealId)` — fetches deal's stage history, runs LCS (longest common subsequence) scoring against all winning paths, returns top 3 scored matches.
+- **API endpoints** in `server/routes/analysis.ts`:
+  - `GET /:workspaceId/analysis/winning-paths?pipeline=&scopeId=&sizeBand=` → `WinningPathsData`
+  - `GET /:workspaceId/analysis/deals/:dealId/similar-paths` → `SimilarPathsData`
+  - Both protected by `requirePermission('data.deals_view')`
+- **Types**: `WinningPath`, `WinningPathsData`, `SimilarPathsData` added to `server/reports/types.ts` and `client/src/components/reports/types.ts`
+- **`client/src/components/pipeline/WinningPathsChart.tsx`** (new): Stage chip sequence rows with → arrows + ✓ Won badge, count/ARR/cycle metadata, relative bar indicating volume share. Filter bar: pipeline pills, scope pills (◈), size band pills (< $50K / $50K–$250K / > $250K). Sort toggle: "By Volume" / "By ARR". Loading shimmer. `embedded` prop hides filter bar for assistant inline view.
+
+### Deal Detail — Deal Path & Winning Patterns
+- **`client/src/pages/DealDetail.tsx`**: New `DealPathAccordion` component added (above MEDDIC accordion). Lazy-loads `GET /analysis/deals/:dealId/similar-paths` on first open. Shows "This Deal's Journey" as stage chip sequence, then "Closest Winning Patterns" with top 3 winning paths each showing match % badge (color-coded: green ≥70%, yellow ≥40%, muted <40%) + ARR/cycle/win count.
+
+### Assistant Chart Intelligence
+- **`server/chat/pandora-agent.ts`**: `detectVisualizationHint()` extended with two new return values:
+  - `'sankey'`: triggers on "show pipeline funnel", "where are deals getting stuck", "sankey", "pipeline flow/progression", etc.
+  - `'winning_paths'`: triggers on "winning paths", "most common path to close", "how did winning deals progress", "winning sequences", etc.
+- **`server/routes/conversation-stream.ts`**: Pre-fetches rich chart data before tier routing (non-blocking, `try/catch`):
+  - `_isSankeyRequest` → calls `waterfallAnalysis` + `buildSankeyChartData` → emits `{ type: 'sankey_data', data }` SSE event
+  - `_isWinningPathsRequest` → calls `computeWinningPaths` → emits `{ type: 'winning_paths_data', data }` SSE event
+- **`client/src/components/assistant/useConversationStream.ts`**: Added `sankeyData: SankeyChartData | null` and `winningPathsData: WinningPathsData | null` to state; handles `'sankey_data'` and `'winning_paths_data'` SSE events; both reset to null on new user message.
+- **`client/src/components/assistant/ConversationView.tsx`**: Renders `<SankeyChart chartData={state.sankeyData} />` and `<WinningPathsChart data={state.winningPathsData} embedded={true} />` inline above synthesis text when non-null.
+
+### Morning Brief "View Full Funnel" Link
+- **`client/src/components/assistant/WhatChangedCard.tsx`**: Added "View full funnel →" dotted-underline button at bottom of card, `useNavigate('/pipeline')` on click.
+
 ## Pipeline Resolution System (March 2026)
 
 ### Architecture

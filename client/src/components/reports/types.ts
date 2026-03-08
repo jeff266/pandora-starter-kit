@@ -28,6 +28,28 @@ export interface TableRow {
   [key: string]: string | number | null;
 }
 
+export interface WinningPath {
+  sequence: string[];
+  count: number;
+  avgArrUsd: number;
+  avgCycleDays: number;
+}
+
+export interface WinningPathsData {
+  paths: WinningPath[];
+  totalWins: number;
+  availablePipelines: string[];
+  availableScopes: Array<{ id: string; name: string }>;
+  activeFilter?: { pipeline?: string; scopeId?: string; sizeBand?: string };
+}
+
+export interface SimilarPathsData {
+  dealId: string;
+  dealName: string;
+  dealPath: string[];
+  matchingPaths: Array<WinningPath & { overlapScore: number }>;
+}
+
 export interface SankeyStageNode {
   id: string;
   label: string;

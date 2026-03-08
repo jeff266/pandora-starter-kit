@@ -58,6 +58,7 @@ import FiltersPage from './pages/FiltersPage';
 import SQLWorkspace from './pages/SQLWorkspace';
 import DataDictionary from './pages/DataDictionary';
 import ForecastPage from './pages/ForecastPage';
+import PipelinePage from './pages/PipelinePage';
 import InvestigationHistoryPage from './pages/InvestigationHistoryPage';
 import { colors, fonts } from './styles/theme';
 import { useIsMobile } from './hooks/useIsMobile';
@@ -100,6 +101,7 @@ const pageTitles: Record<string, string> = {
   '/admin/voice': 'Voice Settings',
   '/admin/document-quality': 'Document Quality',
   '/forecast': 'Forecast',
+  '/pipeline': 'Pipeline',
 };
 
 function getPageTitle(pathname: string): string {
@@ -322,6 +324,7 @@ export default function App() {
             <Route path="/dictionary" element={<DataDictionary />} />
             <Route path="/sql-workspace" element={<SQLWorkspace />} />
             <Route path="/forecast" element={<ForecastPage />} />
+            <Route path="/pipeline" element={<PipelinePage />} />
             <Route path="/marketplace" element={<MarketplacePage />} />
             <Route path="/onboarding" element={<OnboardingFlow />} />
             <Route path="/settings" element={<SettingsPage />} />

@@ -12,6 +12,7 @@ import { getOrCreateSession, appendChatMessage, getEntityMessages } from '../cha
 import { randomUUID } from 'crypto';
 import { waterfallAnalysis } from '../analysis/waterfall-analysis.js';
 import { buildSankeyChartData } from '../analysis/sankey-builder.js';
+import { computeWinningPaths, computeSimilarPaths } from '../analysis/winning-paths.js';
 
 const router = Router();
 
@@ -242,7 +243,7 @@ router.post('/:workspaceId/analyze/legacy', async (req: Request, res: Response):
 //   periodDays? — look-back window in days (default: 7, max: 365)
 // ============================================================================
 
-router.get('/:workspaceId/analysis/sankey', requirePermission('pipeline.view'), async (req: Request, res: Response): Promise<void> => {
+router.get('/:workspaceId/analysis/sankey', requirePermission('data.deals_view'), async (req: Request, res: Response): Promise<void> => {
   const workspaceId = req.params.workspaceId as string;
   const { scopeId, pipeline, periodDays } = req.query as Record<string, string | undefined>;
 
@@ -277,6 +278,54 @@ router.get('/:workspaceId/analysis/sankey', requirePermission('pipeline.view'), 
   } catch (err) {
     console.error('[analysis/sankey] Error:', err instanceof Error ? err.message : err);
     res.status(500).json({ error: 'Failed to compute Sankey chart data' });
+  }
+});
+
+// ============================================================================
+// GET /:workspaceId/analysis/winning-paths
+// Returns top winning stage sequences across closed-won deals.
+// Query params:
+//   pipeline?  — CRM pipeline name to filter by
+//   scopeId?   — analysis_scopes.scope_id to filter by
+//   sizeBand?  — 'small' | 'mid' | 'enterprise'
+// ============================================================================
+
+router.get('/:workspaceId/analysis/winning-paths', requirePermission('data.deals_view'), async (req: Request, res: Response): Promise<void> => {
+  const workspaceId = req.params.workspaceId as string;
+  const { pipeline, scopeId, sizeBand } = req.query as Record<string, string | undefined>;
+
+  try {
+    const filterParams = (pipeline || scopeId || sizeBand)
+      ? {
+          pipeline: pipeline ?? undefined,
+          scopeId: scopeId ?? undefined,
+          sizeBand: sizeBand as 'small' | 'mid' | 'enterprise' | undefined,
+        }
+      : undefined;
+
+    const data = await computeWinningPaths(workspaceId, filterParams);
+    res.json(data);
+  } catch (err) {
+    console.error('[analysis/winning-paths] Error:', err instanceof Error ? err.message : err);
+    res.status(500).json({ error: 'Failed to compute winning paths' });
+  }
+});
+
+// ============================================================================
+// GET /:workspaceId/analysis/deals/:dealId/similar-paths
+// Returns this deal's stage journey + top 3 closest winning path matches.
+// ============================================================================
+
+router.get('/:workspaceId/analysis/deals/:dealId/similar-paths', requirePermission('data.deals_view'), async (req: Request, res: Response): Promise<void> => {
+  const workspaceId = req.params.workspaceId as string;
+  const dealId = req.params.dealId as string;
+
+  try {
+    const data = await computeSimilarPaths(workspaceId, dealId);
+    res.json(data);
+  } catch (err) {
+    console.error('[analysis/similar-paths] Error:', err instanceof Error ? err.message : err);
+    res.status(500).json({ error: 'Failed to compute similar paths' });
   }
 });
 
