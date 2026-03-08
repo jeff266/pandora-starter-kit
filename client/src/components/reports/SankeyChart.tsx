@@ -188,17 +188,10 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
           >
             Pipeline Funnel
           </h4>
-          {periodLabel && (
-            <span
-              style={{
-                fontSize: 12,
-                color: colors.textMuted,
-                fontFamily: fonts.sans,
-              }}
-            >
-              {periodLabel}
-            </span>
-          )}
+          <div style={{ fontSize: 12, color: colors.textMuted, fontFamily: fonts.sans, marginTop: 2 }}>
+            Showing deal flow across pipeline stages — width represents ARR value
+            {periodLabel && ` · ${periodLabel}`}
+          </div>
         </div>
         <span
           style={{
@@ -471,7 +464,7 @@ export default function SankeyChart({ data, chartData: chartDataProp, hideFilter
           </div>
           <div style={{ flex: 1, textAlign: 'right' }}>
             <span style={{ fontSize: 10, color: colors.textMuted }}>
-              Node width = ARR value · Hover flows for detail
+              Width represents ARR value · Hover flows for detail
             </span>
           </div>
         </div>

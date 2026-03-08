@@ -55,26 +55,13 @@ export interface WaterfallFilterParams {
 
 /**
  * Get ordered list of pipeline stages
+ *
+ * Always infers order from actual deal flow data instead of trusting potentially
+ * incorrect HubSpot metadata. Uses MIN position per deal to avoid inflation from
+ * duplicate stage IDs that normalize to the same value.
  */
 async function getStageOrdering(workspaceId: string): Promise<string[]> {
-  try {
-    const configResult = await query<{ metadata: any }>(
-      `SELECT metadata FROM connections
-       WHERE workspace_id = $1 AND connector_name = 'hubspot'
-       LIMIT 1`,
-      [workspaceId]
-    );
-
-    if (configResult.rows.length > 0 && configResult.rows[0].metadata?.stages) {
-      const stages = configResult.rows[0].metadata.stages as Array<{ name: string; display_order: number }>;
-      return stages
-        .sort((a, b) => a.display_order - b.display_order)
-        .map(s => s.name);
-    }
-  } catch {
-  }
-
-  // Fallback: infer order by computing average sequence position of each stage across all deals.
+  // Infer order by computing average sequence position of each stage across all deals.
   // Stages that appear earlier in deal timelines (lower avg position) sort first.
   const TERMINAL = new Set([
     'closed_won', 'closedwon', 'closed won',
@@ -426,9 +413,11 @@ export async function waterfallAnalysis(
     totalOpenEnd += flow.endOfPeriod;
   }
 
-  // 11. Return result
+  // 11. Return result - preserve stage order from orderedStages
   return {
-    stages: Array.from(stageFlows.values()),
+    stages: orderedStages
+      .map(stage => stageFlows.get(stage))
+      .filter((flow): flow is WaterfallStageFlow => flow !== undefined),
     flows: Array.from(pairwiseFlows.values()),
     summary: {
       newPipelineCreated: { count: newPipelineCount, value: newPipelineValue },
