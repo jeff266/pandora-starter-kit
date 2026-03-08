@@ -100,7 +100,7 @@ const SCHEDULE_PRESETS: { label: string; cron: string }[] = [
 ];
 
 type ViewState = 'gallery' | 'builder' | 'list' | 'copilot';
-type BuilderTab = 'audience' | 'goal' | 'focus' | 'skills' | 'data_window' | 'scope' | 'schedule' | 'formats';
+type BuilderTab = 'audience' | 'goals' | 'skills' | 'data_window' | 'scope' | 'schedule' | 'formats';
 
 interface NamedFilterOption {
   id: string;
@@ -685,9 +685,8 @@ export default function AgentBuilder() {
   // ─── Builder View ─────────────────────────────────────────────────
   const tabs: { key: BuilderTab; label: string }[] = [
     { key: 'audience', label: 'Audience' },
-    { key: 'focus', label: 'Focus Questions' },
+    { key: 'goals', label: 'Goals' },
     { key: 'skills', label: 'Skills' },
-    { key: 'goal', label: 'Goal & Questions' },
     { key: 'data_window', label: 'Data Window' },
     { key: 'scope', label: 'Scope Filters' },
     { key: 'schedule', label: 'Schedule' },
@@ -908,32 +907,112 @@ export default function AgentBuilder() {
         </div>
       )}
 
-      {/* ─── Focus Questions Tab ─────────────────────── */}
-      {activeTab === 'focus' && (
+      {/* ─── Goals Tab ───────────────────────────────── */}
+      {activeTab === 'goals' && (
         <div>
-          <SectionLabel>Questions this agent should answer ({focusQuestions.length}/8)</SectionLabel>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
-            {focusQuestions.map((q, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <GripVertical size={14} style={{ color: colors.textMuted, flexShrink: 0 }} />
-                <span style={{ font: `400 14px ${fonts.sans}`, color: colors.text, flex: 1 }}>{i + 1}. {q}</span>
-                <X size={14} style={{ color: colors.textMuted, cursor: 'pointer', flexShrink: 0 }} onClick={() => removeQuestion(i)} />
-              </div>
-            ))}
-          </div>
-          {focusQuestions.length < 8 && (
-            <div style={{ display: 'flex', gap: 8 }}>
-              <input value={newQuestion} onChange={e => setNewQuestion(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && addQuestion()}
-                placeholder="What should this briefing answer?"
-                style={{ ...input, flex: 1 }} />
-              <button onClick={addQuestion} style={btnSmall}><Plus size={14} /> Add</button>
+          <SectionLabel>Goal <span style={{ color: colors.textMuted, fontWeight: 400 }}>(optional but recommended)</span></SectionLabel>
+          <p style={{ margin: '0 0 8px', font: `400 12px ${fonts.sans}`, color: colors.textSecondary }}>
+            What business outcome is this Agent working toward?
+          </p>
+          <textarea
+            value={goal}
+            onChange={e => setGoal(e.target.value.slice(0, 200))}
+            placeholder="Ensure pipeline is healthy and on track to hit Q1 quota of $2.1M"
+            rows={3}
+            style={{ ...input, width: '100%', boxSizing: 'border-box', resize: 'vertical', marginBottom: 8 }}
+          />
+          <p style={{ margin: '0 0 24px', font: `400 11px ${fonts.sans}`, color: colors.textMuted }}>
+            Without a goal, you get a findings list. With a goal, you get a verdict + evidence.
+          </p>
+
+          <SectionLabel>Questions <span style={{ color: colors.textMuted, fontWeight: 400 }}>(optional, max 5)</span></SectionLabel>
+          <p style={{ margin: '0 0 8px', font: `400 12px ${fonts.sans}`, color: colors.textSecondary }}>
+            What specific questions should this Agent answer on every run?
+          </p>
+
+          {standingQuestions.map((q, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <GripVertical size={14} style={{ color: colors.textMuted, flexShrink: 0 }} />
+              <span style={{ flex: 1, font: `400 13px ${fonts.sans}`, color: colors.text, padding: '6px 0' }}>
+                {i + 1}. {q}
+              </span>
+              <button
+                onClick={() => {
+                  setStandingQuestions(prev => prev.filter((_, j) => j !== i));
+                  setFocusQuestions(prev => prev.filter((_, j) => j !== i));
+                }}
+                style={{ background: 'none', border: 'none', color: colors.textMuted, cursor: 'pointer', padding: '4px' }}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+
+          {standingQuestions.length < 5 && (
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16, marginTop: 8 }}>
+              <input
+                value={standingQInput}
+                onChange={e => setStandingQInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && standingQInput.trim() && standingQuestions.length < 5) {
+                    const q = standingQInput.trim();
+                    setStandingQuestions(prev => [...prev, q]);
+                    setFocusQuestions(prev => [...prev, q]);
+                    setStandingQInput('');
+                  }
+                }}
+                placeholder="e.g. Which deals moved out of commit since last week?"
+                style={{ ...input, flex: 1 }}
+              />
+              <button
+                onClick={() => {
+                  if (standingQInput.trim() && standingQuestions.length < 5) {
+                    const q = standingQInput.trim();
+                    setStandingQuestions(prev => [...prev, q]);
+                    setFocusQuestions(prev => [...prev, q]);
+                    setStandingQInput('');
+                  }
+                }}
+                style={btnSmall}
+              >
+                <Plus size={14} /> Add
+              </button>
             </div>
           )}
-          {focusQuestions.length === 0 && (
-            <p style={{ font: `400 13px ${fonts.sans}`, color: colors.textMuted, marginTop: 12 }}>
-              Focus questions guide the AI on what matters most. The editorial synthesizer will try to answer each one using the available evidence.
+
+          {standingQuestions.length === 0 && (
+            <p style={{ font: `400 13px ${fonts.sans}`, color: colors.textMuted, marginTop: 4, marginBottom: 16 }}>
+              Add recurring questions to focus the agent's analysis and synthesis on what matters most.
             </p>
+          )}
+
+          {suggestedQuestions.length > 0 && (
+            <div>
+              <p style={{ margin: '16px 0 8px', font: `500 11px ${fonts.sans}`, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Suggestions based on your skills
+              </p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {suggestedQuestions.map(q => (
+                  <button
+                    key={q}
+                    onClick={() => {
+                      if (standingQuestions.length < 5) {
+                        setStandingQuestions(prev => [...prev, q]);
+                        setFocusQuestions(prev => [...prev, q]);
+                      }
+                    }}
+                    disabled={standingQuestions.length >= 5}
+                    style={{
+                      background: colors.accentSoft, border: `1px solid ${colors.border}`,
+                      borderRadius: 20, padding: '4px 12px', cursor: standingQuestions.length >= 5 ? 'not-allowed' : 'pointer',
+                      font: `400 12px ${fonts.sans}`, color: colors.accent,
+                    }}
+                  >
+                    + {q}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
         </div>
       )}
@@ -999,97 +1078,6 @@ export default function AgentBuilder() {
               );
             })}
           </div>
-        </div>
-      )}
-
-      {/* ─── Goal & Questions Tab ────────────────────── */}
-      {activeTab === 'goal' && (
-        <div>
-          <SectionLabel>Goal <span style={{ color: colors.textMuted, fontWeight: 400 }}>(optional but recommended)</span></SectionLabel>
-          <p style={{ margin: '0 0 8px', font: `400 12px ${fonts.sans}`, color: colors.textSecondary }}>
-            What business outcome is this Agent working toward?
-          </p>
-          <textarea
-            value={goal}
-            onChange={e => setGoal(e.target.value.slice(0, 200))}
-            placeholder="Ensure pipeline is healthy and on track to hit Q1 quota of $2.1M"
-            rows={3}
-            style={{ ...input, width: '100%', boxSizing: 'border-box', resize: 'vertical', marginBottom: 8 }}
-          />
-          <p style={{ margin: '0 0 24px', font: `400 11px ${fonts.sans}`, color: colors.textMuted }}>
-            Without a goal, you get a findings list. With a goal, you get a verdict + evidence.
-          </p>
-
-          <SectionLabel>Standing Questions <span style={{ color: colors.textMuted, fontWeight: 400 }}>(optional, max 5)</span></SectionLabel>
-          <p style={{ margin: '0 0 8px', font: `400 12px ${fonts.sans}`, color: colors.textSecondary }}>
-            What specific questions should this Agent answer on every run?
-          </p>
-
-          {standingQuestions.map((q, i) => (
-            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-              <span style={{ flex: 1, font: `400 13px ${fonts.sans}`, color: colors.text, padding: '6px 0' }}>
-                {i + 1}. {q}
-              </span>
-              <button
-                onClick={() => setStandingQuestions(prev => prev.filter((_, j) => j !== i))}
-                style={{ background: 'none', border: 'none', color: colors.textMuted, cursor: 'pointer', padding: '4px' }}
-              >
-                ×
-              </button>
-            </div>
-          ))}
-
-          {standingQuestions.length < 5 && (
-            <div style={{ display: 'flex', gap: 8, marginBottom: 16, marginTop: 8 }}>
-              <input
-                value={standingQInput}
-                onChange={e => setStandingQInput(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' && standingQInput.trim() && standingQuestions.length < 5) {
-                    setStandingQuestions(prev => [...prev, standingQInput.trim()]);
-                    setStandingQInput('');
-                  }
-                }}
-                placeholder="e.g. Which deals moved out of commit since last week?"
-                style={{ ...input, flex: 1 }}
-              />
-              <button
-                onClick={() => {
-                  if (standingQInput.trim() && standingQuestions.length < 5) {
-                    setStandingQuestions(prev => [...prev, standingQInput.trim()]);
-                    setStandingQInput('');
-                  }
-                }}
-                style={btnSmall}
-              >
-                Add
-              </button>
-            </div>
-          )}
-
-          {suggestedQuestions.length > 0 && (
-            <div>
-              <p style={{ margin: '16px 0 8px', font: `500 11px ${fonts.sans}`, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                Suggestions based on your skills
-              </p>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {suggestedQuestions.map(q => (
-                  <button
-                    key={q}
-                    onClick={() => standingQuestions.length < 5 && setStandingQuestions(prev => [...prev, q])}
-                    disabled={standingQuestions.length >= 5}
-                    style={{
-                      background: colors.accentSoft, border: `1px solid ${colors.border}`,
-                      borderRadius: 20, padding: '4px 12px', cursor: standingQuestions.length >= 5 ? 'not-allowed' : 'pointer',
-                      font: `400 12px ${fonts.sans}`, color: colors.accent,
-                    }}
-                  >
-                    + {q}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       )}
 
