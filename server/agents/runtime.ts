@@ -119,14 +119,14 @@ export class AgentRuntime {
           if (cached.rows.length > 0) {
             // Reuse cached output
             const cachedRun = cached.rows[0];
-            const cachedOutput = cachedRun.output_text || JSON.stringify(cachedRun.result);
+            const cachedOutput = this.extractSkillText(cachedRun);
             const cachedEvidence = cachedRun.output?.evidence || null;
 
             skillOutputs[step.outputKey] = {
               skillId: step.skillId,
               output: cachedOutput,
               summary: this.summarizeOutput(cachedOutput),
-              tokenUsage: cachedRun.token_usage || null,
+              tokenUsage: null, // cached — don't double-count tokens from original run
               duration: 0,
               cached: true,
               evidence: cachedEvidence,
@@ -508,6 +508,28 @@ export class AgentRuntime {
     blocks.push(formatContext(`Pandora Agent | ${new Date().toISOString().slice(0, 16)} UTC`));
 
     return blocks;
+  }
+
+  private extractSkillText(skillRun: any): string | null {
+    // 1. Prefer dedicated text column
+    if (skillRun.output_text) return skillRun.output_text;
+
+    // 2. Fall back to result JSONB column (older schema)
+    if (skillRun.result != null) return JSON.stringify(skillRun.result);
+
+    // 3. Read narrative from output JSONB (e.g. conversation-intelligence)
+    if (skillRun.output?.narrative) return skillRun.output.narrative;
+
+    // 4. Extract claim_text values from evidence claims
+    const claims: any[] = skillRun.output?.evidence?.claims;
+    if (claims?.length) {
+      return claims
+        .map((c: any) => c.claim_text)
+        .filter(Boolean)
+        .join('\n');
+    }
+
+    return null;
   }
 
   private summarizeOutput(output: any): string {
